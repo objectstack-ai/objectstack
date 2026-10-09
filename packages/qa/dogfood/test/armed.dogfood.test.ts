@@ -37,9 +37,9 @@
 // Boots two stacks, uses custom boot options and mutates auth config, so it
 // stays out of `SHARED_SHOWCASE` (see `vitest.config.ts`).
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import {
   assertArmed,
   armedWhen,
@@ -77,8 +77,16 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
   let insideMember: string;
 
   beforeAll(async () => {
-    outside = await bootStack(showcaseStack, {});
-    inside = await bootStack(showcaseStack, { orgContext: true });
+    outside = await bootShowcase({});
+    // [#22301] The instance rule: one configuration supports one live kernel
+    // in a process, because the showcase's `plugins` array holds module-level
+    // plugin instances and two kernels must never mount the same ones. So the
+    // second stack, live beside the first, boots a FRESH MODULE INSTANCE of the
+    // showcase configuration — its plugin instances and every nested
+    // definition built again — and the two kernels share nothing.
+    vi.resetModules();
+    const { default: freshShowcase } = await import('@objectstack/example-showcase');
+    inside = await bootShowcase({ orgContext: true }, freshShowcase);
 
     // The first user is the seeded dev admin; a fresh sign-up is the plain
     // member #8023's fixture measures.

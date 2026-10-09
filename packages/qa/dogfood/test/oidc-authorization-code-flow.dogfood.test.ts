@@ -21,8 +21,8 @@
 
 import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 // Must be on before the AuthPlugin builds its plugin list (kernel.use during
 // bootStack) — this is the same switch cloud/objectstack dev deployments use.
@@ -49,7 +49,7 @@ describe('OIDC authorization-code flow (oauth-provider 1.7)', () => {
   let cookie: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
 
     // Seed the OAuth client the way cloud's seedPlatformSsoClient does.
     const ql = await stack.kernel.getServiceAsync<any>('objectql');

@@ -60,8 +60,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { celEngine } from '@objectstack/formula';
 
 const SYSTEM_CTX = { isSystem: true };
@@ -141,7 +141,7 @@ describe('org-admin affordances follow the membership grade (served metadata × 
   const standingOwner = {} as { token: string; userId: string; session: Record<string, unknown>; served: Map<string, ServedAction> };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     tokens.owner = await stack.signIn(); // the seeded dev admin
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 

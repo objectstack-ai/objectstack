@@ -332,8 +332,12 @@
  *
  *   > 修改代码量超过某个行数（比如5000）就应该人工审核
  *
+ * and on 2026-10-09 lowered the line, verbatim and untranslated:
+ *
+ *   > 这种大额改动就应该人工审核,我还是建议5000行的人工审核门槛降到 3000,立卡。
+ *
  * PR #19033 landed it seat-side: `testVerdict(paths, { size })` in the sibling
- * carries a `size` limb, `HUMAN_MERGE_LINE_THRESHOLD` (5,000) is declared
+ * carries a `size` limb, `HUMAN_MERGE_LINE_THRESHOLD` (3,000) is declared
  * there ONCE, the comparison is `additions + deletions` STRICTLY greater, and
  * generated files are INCLUDED — the case that prompted the ruling, PR #18971
  * (+238,310 / −119, 237,706 of them regenerated), touched no governed path and
@@ -1906,6 +1910,7 @@ export function renderSizeVerdict(verdict) {
       '',
       '        2026-09-18 「修改代码量超过某个行数（比如5000）就应该人工审核」',
       '        2026-09-27 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」 (objectstack#20153)',
+      '        2026-10-09 「这种大额改动就应该人工审核,我还是建议5000行的人工审核门槛降到 3000,立卡。」',
       '',
       '      landed as `HUMAN_MERGE_LINE_THRESHOLD` and the lift in scripts/pm/check-governed-merges.mjs, which',
       '      this leg IMPORTS — the number, the comparison, what counts and what lifts are that file\'s, never',
@@ -3455,9 +3460,10 @@ export async function selfTest() {
     text18971,
   );
   assert(
-    'and-names-the-TWO-landings-an-authorized-APPROVAL-or-a-HUMAN-MERGE-quoting-both-rulings-untranslated-and-never-advises-shrinking-the-diff',
+    'and-names-the-TWO-landings-an-authorized-APPROVAL-or-a-HUMAN-MERGE-quoting-all-three-rulings-untranslated-and-never-advises-shrinking-the-diff',
     text18971.includes('HUMAN MERGE') && text18971.includes('修改代码量超过某个行数（比如5000）就应该人工审核') &&
-      text18971.includes('所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。') && text18971.includes('DRAFT') && !/shrink|split the|smaller/i.test(text18971),
+      text18971.includes('所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。') &&
+      text18971.includes('这种大额改动就应该人工审核,我还是建议5000行的人工审核门槛降到 3000,立卡。') && text18971.includes('DRAFT') && !/shrink|split the|smaller/i.test(text18971),
     text18971,
   );
   assert(

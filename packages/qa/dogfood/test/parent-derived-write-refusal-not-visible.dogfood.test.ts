@@ -55,29 +55,36 @@ import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plug
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
-import {
-  AttSecret,
-  AttReadonly,
-  attFixtureBaselineSet,
-  attachmentManagerSet,
-} from './fixtures/attachments-fixture.js';
-import { CmtPrivate, CmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
+import { buildAttSecret, buildAttReadonly, attFixtureBaselineSet, attachmentManagerSet } from './fixtures/attachments-fixture.js';
+import { buildCmtPrivate, buildCmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
 import { armedWhen, assertArmed, leaveOrganization, principalArmed, resolveAuthzFor } from './armed.js';
 
 const SYS = { isSystem: true } as const;
 
-/** Both parent-derived join objects, private and read-only parents for each. */
-const stackDefinition = defineStack({
-  manifest: {
-    id: 'com.dogfood.parent-derived-write-refusal',
-    version: '0.0.0',
-    type: 'app',
-    name: 'Parent-derived write refusal fixture',
-    description:
-      'Private and read-only parents for sys_attachment and sys_comment: the write refusal a caller who cannot read the parent receives.',
-  },
-  objects: [AttSecret, AttReadonly, CmtPrivate, CmtReadonly],
-});
+/**
+ * Both parent-derived join objects, private and read-only parents for each.
+ *
+ * [#22301] A BUILDER, called once per boot: this file keeps two stacks live at
+ * once (outside and inside the organization), and `bootStack`'s instance rule
+ * refuses a second live boot of one configuration object. A shallow copy would
+ * not be a configuration of its own — a boot keeps live references into the
+ * nested definitions it registers (the registry stores each object as a shallow
+ * copy whose field definitions are the authored objects:
+ * `packages/objectql/src/registry.ts`, `definition: { ...schema, name: fqn }`) —
+ * so every nested definition is built again.
+ */
+const buildStackDefinition = () =>
+  defineStack({
+    manifest: {
+      id: 'com.dogfood.parent-derived-write-refusal',
+      version: '0.0.0',
+      type: 'app',
+      name: 'Parent-derived write refusal fixture',
+      description:
+        'Private and read-only parents for sys_attachment and sys_comment: the write refusal a caller who cannot read the parent receives.',
+    },
+    objects: [buildAttSecret(), buildAttReadonly(), buildCmtPrivate(), buildCmtReadonly()],
+  });
 
 function security(): SecurityPlugin {
   return new SecurityPlugin({
@@ -110,7 +117,7 @@ interface Booted {
  */
 async function boot(inside: boolean, email: string): Promise<Booted> {
   const rootDir = mkdtempSync(join(tmpdir(), 'parent-refusal-'));
-  const stack = await bootStack(stackDefinition as never, {
+  const stack = await bootStack(buildStackDefinition() as never, {
     orgContext: inside,
     security: security(),
     extraPlugins: [

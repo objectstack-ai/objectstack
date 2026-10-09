@@ -35,7 +35,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import type { IObjectQLEngine, ISecurityService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
 
@@ -77,7 +78,7 @@ describe('[#7835] federated objects and the plugin-security tenant wall', () => 
     // of its own, which is precisely right here: what is under test is the
     // PREDICATE plugin-security composes, not whether an org wall holds.
     await onEnable({ logger: { info() {}, warn() {} } } as never);
-    stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
+    stack = await bootShowcase({ multiTenant: 'posture-only' });
     // `ObjectKernel.getService` is already generic over the slot's contract, so
     // neither the kernel handle nor either result needs erasing: `objectql` is
     // `IObjectQLEngine` and `security` is `ISecurityService`, both declared in

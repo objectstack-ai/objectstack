@@ -11,8 +11,8 @@
 // is then exercised as a real member over HTTP.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema, RLS } from '@objectstack/spec/security';
 
@@ -44,7 +44,7 @@ describe('showcase: invoice-line controlled-by-parent (ADR-0055)', () => {
   let memberLineId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       security: new SecurityPlugin({
         defaultPermissionSets: [...securityDefaultPermissionSets, memberSet],
         fallbackPermissionSet: 'showcase_cbp_member',

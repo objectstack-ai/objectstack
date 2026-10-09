@@ -1435,7 +1435,7 @@
       "title": "The activation ledger's registration home: sys_metadata_activation is registered by PlatformObjectsPlugin under its OWN manifest, so packaged disable works with or without the automation service — one owner, datasource binding carried across the move",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1443,14 +1443,14 @@
         "app": "showcase",
         "requires": [
           "the with-automation composition is any stock boot: `objectstack dev`/`os serve` composes AutomationServicePlugin whenever the app requires the 'automation' capability token (packages/cli/src/commands/serve.ts CAPABILITY_PROVIDERS), and the showcase does — so the live-boot legs below need nothing beyond an isolated stock boot",
-          "the NO-automation composition — the one #12359 measured the 503 on — is `bootStack(showcaseStack)` from @objectstack/verify with the `automation` option omitted (packages/verify/src/harness.ts; the option is only honored), which is exactly how the pinned dogfood suite constructs it"
+          "the NO-automation composition — the one #12359 measured the 503 on — is a showcase-derived configuration that does not declare automation, booted with `bootStack` from @objectstack/verify: the showcase with the 'automation' token taken out of its `requires`, and with the plugins of its own `plugins` array that depend on com.objectstack.service-automation left out, which is exactly how the pinned dogfood suite constructs it (packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts#showcaseWithoutAutomation). `bootStack(showcaseStack)` with the `automation` option omitted is NOT that composition: since #22301 bootStack composes what `os serve` composes, so the showcase's own `requires` mounts the automation service (packages/verify/src/harness.ts; the option only adds the service, never removes it)"
         ],
         "knownGaps": [
           "NO stock CLI path boots the showcase WITHOUT the automation service: serve/dev compose it from the app's own `requires`, so a manual runner cannot stage the no-automation composition with `os dev` flags alone. The no-automation legs therefore ride the pinned dogfood suite (automated.ref — its first describe carries an anti-vacuity control asserting the automation service is genuinely absent) or an authored scratch stack config that drops the requirement; the run records WHICH of the two its verdict rests on. Scoring those legs off a stock boot measures the wrong composition"
         ]
       },
       "steps": [
-        "run the pinned suite: pnpm --filter @objectstack/dogfood exec vitest run test/packaged-activation-ledger-reach.dogfood.test.ts — BOTH describes: '#12359 — actions and NO automation service' (the 503-turnaround leg, bootStack with no automation) and '#12159 Part 1 — a composition WITH automation' (the move's second end); capture the full output",
+        "run the pinned suite: pnpm --filter @objectstack/dogfood exec vitest run test/packaged-activation-ledger-reach.dogfood.test.ts — BOTH describes: '#12359 — actions and NO automation service' (the 503-turnaround leg, booted on the showcase-derived configuration that does not declare automation) and '#12159 Part 1 — a composition WITH automation' (the move's second end); capture the full output",
         "live with-automation boot (stock `objectstack dev`, isolated port/DB), as admin: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\":false} → 200; GET /api/v1/data/sys_metadata_activation and capture the row (metadata_type 'action', name showcase_mark_done, active false/0) together with its KEY SET — organization_id is ABSENT from it, the ledger having no tenant column at all (#15024 / ADR-0131 D7). ⛔ Never capture the tenant half as a value: `row.organization_id ?? null` answers `null` for a column that does not exist, so a value read passes while measuring nothing (the sibling item platform-core.activation-ledger-row-contract owns the schema-side probe)",
         "same boot, the flow half: POST /api/v1/automation/showcase_task_completed/toggle {\"enabled\":false} → 200; re-read the ledger — a metadata_type 'flow' row for showcase_task_completed appears BESIDE the action row, and the flow-name and action-name lists never cross (the discriminator is load-bearing, not decorative)",
         "restore both switches ({\"enabled\":true} / toggle on) — both rows persist with active true (updated, not deleted); leave the boot as found",
@@ -1504,7 +1504,7 @@
         "packages/platform-objects/src/plugin.ts#ACTIVATION_LEDGER_MANIFEST (the registration-home rationale — the measured 503; MOVE-not-add), (why the ledger rides its OWN manifest — the datasource-routing measurement), (ACTIVATION_LEDGER_MANIFEST), (the two register calls), (lean-kernel degradation: no manifest service → the door refuses loudly with 503 rather than keeping a bit that reverts)",
         "packages/services/service-automation/src/plugin.ts#runObjectRegistered (the flow leg attaches by probe() of the real table — runObjectRegistered no longer vouches for it; not attached on a failed probe)",
         "packages/spec/src/system/constants/platform-object-names.ts#PLATFORM_OBJECTS_BY_PACKAGE (PLATFORM_OBJECTS_BY_PACKAGE receipt)",
-        "packages/verify/src/harness.ts#bootStack (bootStack's automation option — how the no-automation composition is constructed)",
+        "packages/verify/src/harness.ts#bootStack (bootStack composes what the configuration declares, as `os serve` does, so the no-automation composition is a configuration that does not declare automation — the `automation` option only adds the service, never removes it)",
         "docs/adr/0126-packaged-metadata-customization-model.md §4 (one generic activation ledger)",
         "docs/adr/0131-total-organization-ownership-no-null-organization-id.md D7 (deployment-level state has no organization column — sys_metadata_activation is named there as reverted before 17.3 and not returning, which is why the row reads here assert a key set rather than a NULL value)",
         "#12438 (the scoped sweep this item lands from), #12419 (the registration-home PR), #12359 (the 503 measurement + the 2026-08-26 「同意」 ruling: registration follows the declaration), #15024 (the column drop these read-backs are re-grounded against)"
@@ -1513,7 +1513,7 @@
         {
           "revision": 1,
           "date": "2026-08-26",
-          "change": "new — authored in the #12438 scoped sweep (ADR-0126 disable+clone). Grounding fixed the item's shape twice: (1) the no-automation composition has NO stock CLI path (serve/dev compose automation from the app's own requires), so that leg rides the pinned dogfood suite's bootStack(showcaseStack) with the automation option omitted, recorded as a knownGap rather than pretended manual; (2) the single-owner clause is proven by the boot succeeding plus a registry read, because a double registration is a boot FAILURE (registerObject throws), never an observable duplicate",
+          "change": "new — authored in the #12438 scoped sweep (ADR-0126 disable+clone). Grounding fixed the item's shape twice: (1) the no-automation composition has NO stock CLI path (serve/dev compose automation from the app's own requires), so that leg rides the pinned dogfood suite's bootStack(showcaseStack) with the automation option omitted [superseded at revision 4: the suite now boots a showcase-derived configuration that does not declare automation], recorded as a knownGap rather than pretended manual; (2) the single-owner clause is proven by the boot succeeding plus a registry read, because a double registration is a boot FAILURE (registerObject throws), never an observable duplicate",
           "ref": "#12438"
         },
         {
@@ -1527,6 +1527,12 @@
           "date": "2026-10-04",
           "change": "A5 / step 6 re-pointed: the literal array count is dropped — it read 41, the 'platform-objects' array holds 46 names at 316be321ef (platform-object-names.ts), and the count moves with every platform object added while the one-owner membership is the point. Per RUNNER.md's convention for counts that move (the discriminator is the fact, never its digits; a literal is pinned only where the validator enforces it, as enumSource does), the clause now asserts single-array membership and records the count as context only. Assertion defect",
           "ref": "#21735"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-09",
+          "change": "the no-automation composition is restated as the dogfood suite now builds it. #22301 made bootStack compose what `os serve` composes, the app's own `requires` included, so `bootStack(showcaseStack)` with the automation option omitted now mounts the automation service and no longer stages the #12359 composition. The suite boots a showcase-derived configuration that does not declare automation instead: the 'automation' token taken out of `requires`, and the app plugins that depend on the automation service left out. fixtures.requires, step 1, the harness source entry and revision 1's history note are re-said to match. Steps, legs, clauses and expected verdicts are otherwise unchanged, and the anti-vacuity control is still the suite's first test",
+          "ref": "#22301"
         }
       ]
     },

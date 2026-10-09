@@ -39,8 +39,8 @@
 // any of them is visible. Each case counts before and after its edit.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -119,7 +119,7 @@ describe('[#21861] a data-door edit of a permission set updates its own sys_meta
         prevCwd = process.cwd();
         process.chdir(SHOWCASE_DIR);
         dir = mkdtempSync(join(tmpdir(), 'dogfood-21861-'));
-        stack = await bootStack(showcaseStack, { databaseFile: join(dir, 'showcase.db') });
+        stack = await bootShowcase({ databaseFile: join(dir, 'showcase.db') });
         token = await stack.signIn();
         ql = await stack.kernel.getServiceAsync('objectql');
 

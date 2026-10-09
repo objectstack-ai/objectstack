@@ -32,8 +32,8 @@
 // the whole assertion, and the byte-identical read-backs prove it.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 // The showcase declares `connectors:` bound to these providers, and the
 // automation service refuses to start without their factories (ADR-0097) —
 // the same composition `packaged-activation-ledger-reach.dogfood.test.ts` boots.
@@ -101,7 +101,7 @@ describe('a packaged flow keeps its locked base at every write door (showcase)',
     beforeAll(async () => {
         prevCwd = process.cwd();
         process.chdir(SHOWCASE_DIR);
-        stack = await bootStack(showcaseStack, {
+        stack = await bootShowcase({
             automation: true,
             extraPlugins: [
                 new ConnectorRestPlugin(),

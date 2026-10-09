@@ -103,16 +103,16 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // projection every object-schema exit applies (`projectMetaObjectSchema`), the
 // `GET /meta/book/:name/tree` answer (`createMetaBookTreeAnswer`), the list's
 // unknown-type refusal (`refuseUnknownMetaListType`) and the organization a
-// caller's `/meta` request is scoped to — the VETTED one on its execution
-// context (`metaCallerOrganizationId`, and `metaReadOrganizationId` for a read
-// of one type).
+// caller's `/meta` request carries — the VETTED one on its execution context
+// (`metaCallerOrganizationId`). Since ADR-0131 D6 no `/meta` read or write
+// names it: the per-organization overlay axis is retired.
 //
 // [#20478] …and the layered view's, on both of its spellings: its post-read
 // chain (`createMetaLayeredAnswer` — the per-caller gate on every layer under
 // the stored-version doors' policy, the object mask and its cache posture), the
 // deprecated `?layers=` flag's parse (`wantsMetaItemLayers`) and the headers it
 // is served under (`metaItemLayersDeprecationHeaders`). The read itself is each
-// transport's, scoped by `metaReadOrganizationId`.
+// transport's, environment → code.
 //
 // [#21087] …and the type-level read admission both transports ask at their
 // `/meta` entry, before any store read (`metaTypeReadRefusal` over
@@ -135,7 +135,6 @@ export {
     META_TYPE_WRITE_CAPABILITIES,
     metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
-    metaReadOrganizationId,
     metaRequestLocale,
     metaTypeReadRefusal,
     metaTypeWriteRefusal,

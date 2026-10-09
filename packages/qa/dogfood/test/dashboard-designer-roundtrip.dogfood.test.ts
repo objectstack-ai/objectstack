@@ -17,8 +17,8 @@
 // dashboard surfaces it. This is the test that would have caught it before merge.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 // Designer-shaped: each widget binds a dataset + dimensions/values but carries
 // NO `layout` — exactly what the Studio designer writes. `columns` is set, as
@@ -42,7 +42,7 @@ describe('dogfood: a Studio-designer-shaped (layout-less) dashboard saves + publ
   let token: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     token = await stack.signIn();
   }, 90_000);
 

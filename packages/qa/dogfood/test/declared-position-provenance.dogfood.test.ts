@@ -42,7 +42,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -98,7 +99,7 @@ describe('[#22360] a package-declared position: definition locked at the data do
         call('PATCH', `/data/sys_position/${(await one(name)).id}`, body);
     const outcome = (r: { status: number; code: unknown }) => ({ status: r.status, code: r.code });
     const start = async () => {
-        stack = await bootStack(showcaseStack, { databaseFile: dbFile });
+        stack = await bootShowcase({ databaseFile: dbFile });
         token = await stack.signIn();
         ql = await stack.kernel.getServiceAsync('objectql');
     };
@@ -237,7 +238,13 @@ describe('[#22360] a package-declared position: definition locked at the data do
         expect(outcome(refused), JSON.stringify(refused.json)).toEqual(REFUSED);
 
         expect((await one(DRIFTED)).label).toBe(declaredLabel(DRIFTED));
-    });
+        // This case boots the showcase again (`start()`), so it carries the
+        // budget `beforeAll` gives that same `start()`, not vitest's 5000 ms
+        // default. Since #22301 the showcase boots with the providers its
+        // `requires` names and its own `plugins`, as `os serve` boots it: the
+        // reboot read 2809 ms on a quiet shard and timed out at 5225 ms on a
+        // loaded one.
+    }, 300_000);
 
     it('controls after the cold boot: administrator- and environment-authored positions keep unmanaged, editable rows', async () => {
         const admin = await one(ADMIN_AUTHORED);

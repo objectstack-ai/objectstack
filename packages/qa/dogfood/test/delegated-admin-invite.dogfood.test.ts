@@ -32,8 +32,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const SYSTEM_CTX = { isSystem: true };
 
@@ -62,7 +62,7 @@ describe('#3697: delegated_admin may invite — as `member` only', () => {
   let plainMemberToken: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     adminToken = await stack.signIn(); // the seeded dev admin
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 

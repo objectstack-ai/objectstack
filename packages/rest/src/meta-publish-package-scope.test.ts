@@ -261,7 +261,7 @@ describe('#10063 POST /meta/:type/:name/publish states the package it is promoti
     });
 
     describe('the rest of the publish request is untouched', () => {
-        it('still carries type, name, organization, actor and message', async () => {
+        it('still carries type, name, actor and message — and, since ADR-0131 D6, no organization', async () => {
             // A widened accept surface must not move anything already on the
             // request — this is the preservation half of the pin sweep.
             const b = boot(AUTHORIZED);
@@ -273,7 +273,8 @@ describe('#10063 POST /meta/:type/:name/publish states the package it is promoti
             const request = requestFrom(b.publishMetaItem);
             expect(request.type).toBe(TYPE);
             expect(request.name).toBe('shared_grid');
-            expect(request.organizationId).toBe(ORG);
+            // The caller has an active organization; the publish names none.
+            expect(request.organizationId).toBeUndefined();
             expect(request.actor).toBe('u1');
             expect(request.message).toBe('ship it');
             expect(request.packageId).toBe(PKG);

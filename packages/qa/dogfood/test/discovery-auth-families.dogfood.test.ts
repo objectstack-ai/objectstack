@@ -38,8 +38,8 @@
 // under a running stack.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 /** One deployment's three readings of "is the admin family mounted", plus the wire. */
 interface Readings {
@@ -91,7 +91,7 @@ describe('discovery reports the better-auth admin family — stock composition (
   beforeAll(async () => {
     priorScim = process.env.OS_SCIM_ENABLED;
     delete process.env.OS_SCIM_ENABLED;
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     readings = await measure(stack);
   }, 300_000);
 
@@ -126,7 +126,7 @@ describe('discovery reports the better-auth admin family — admin plugin on (OS
   beforeAll(async () => {
     priorScim = process.env.OS_SCIM_ENABLED;
     process.env.OS_SCIM_ENABLED = 'true';
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     readings = await measure(stack);
   }, 300_000);
 

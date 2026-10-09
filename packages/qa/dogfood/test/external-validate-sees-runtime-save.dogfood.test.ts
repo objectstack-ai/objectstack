@@ -35,7 +35,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
 import { ExternalDatasourceServicePlugin } from '@objectstack/service-datasource';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -91,7 +92,7 @@ describe('external validate lists a federated object saved at runtime, with no r
     // harness imports only the stack's default export, so `onEnable` never
     // runs on its own).
     await onEnable({ logger: { info() {}, warn() {} } } as never);
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       databaseFile: join(dir, 'showcase.db'),
       extraPlugins: [new ExternalDatasourceServicePlugin()],
     });
