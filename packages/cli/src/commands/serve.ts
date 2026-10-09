@@ -770,7 +770,7 @@ export interface BoundPortChannels {
  * into the terminal this process writes its banner to. Sent BEFORE the banner,
  * the two processes wrote that terminal at once: measured under a pty on the
  * Build-with-Claude-Code tutorial project, 6 of 7 boots printed the block
- * above or inside the banner, 2 of them with banner rows inside the block, and
+ * above or inside the banner, 2 of them with banner lines inside the block, and
  * one probe boot printed the whole credential and plugin section between
  * `Skill` and `Connect`.
  *
