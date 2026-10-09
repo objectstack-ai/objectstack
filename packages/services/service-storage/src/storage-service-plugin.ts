@@ -17,6 +17,7 @@ import type {
   IHttpServer,
   IDataEngine,
   II18nService,
+  ISecurityService,
   IStorageService,
   IFileAccessDelegate,
 } from '@objectstack/spec/contracts';
@@ -397,6 +398,17 @@ export class StorageServicePlugin implements Plugin {
             const t = i18n?.t;
             if (typeof t !== 'function') return undefined;
             return (key: string, loc: string, params?: Record<string, unknown>) => t.call(i18n, key, loc, params);
+          },
+          // [ADR-0055] The security service, for its master-detail write check:
+          // a `controlled_by_parent` parent is judged through its master, as its
+          // own update is. Resolved per check (the security plugin may start
+          // after this one); a kernel without it composes no master check.
+          () => {
+            try {
+              return ctx.getService<ISecurityService>('security');
+            } catch {
+              return null;
+            }
           },
         );
         // [#21729] The gate's parent-editor DELETE limb, made reachable: the
