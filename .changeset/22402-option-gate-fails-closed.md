@@ -10,7 +10,7 @@ Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing at the server's per-option gate: no key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What narrows is the set of writes the gate admits: a picked option whose predicate faults is refused instead of admitted. The refusal reuses the existing field-rule envelope, so no error code and no TypeScript export changes. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
 
-**BREAKING** accept-set narrowing on `@objectstack/objectql`, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D9).
+**BREAKING** accept-set narrowing on `@objectstack/objectql`, shipped as `minor` under the launch-window convention for breaking changes (recorded in `scripts/check-changeset-no-major.mjs`). The governing decision is ADR-0137 D2, which the maintainer's ruling on #22402 (letter A) extended to the option gate on the write path.
 
 A select, multiselect, radio or checkboxes option may gate itself with a `visibleWhen` predicate, and the server re-checks it for every value a write picks. ADR-0137 D2 says a field-rule predicate that cannot be evaluated refuses the submit. The option gate is the server's enforcement of who may pick the option (ADR-0124 D1), so D2 now reaches it on the write path too.
 

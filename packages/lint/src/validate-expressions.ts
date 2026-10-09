@@ -1210,9 +1210,10 @@ let optionVisibleWhenUserMembersMemo: readonly string[] | undefined;
  * are declared but never set at the option check (the engine passes neither),
  * so `current_user.email == '…'` faulted (`No such key: email`) and the value
  * was admitted; `roles` is bound nowhere and declared nowhere, and faulted the
- * same way. Bound-but-undeclared is empty today, and the test suite pins it
- * empty: a member the evaluator mounted without a declaration would be a
- * capability the contract never promised.
+ * same way. (Since #22402 such a fault refuses the write instead, ADR-0137 D2;
+ * the build verdict still names it first.) Bound-but-undeclared is empty today,
+ * and the test suite pins it empty: a member the evaluator mounted without a
+ * declaration would be a capability the contract never promised.
  *
  * `current_user.can(object, verb)` is not a member read at all — it is a
  * receiver call the evaluator's environment answers from the permission map
