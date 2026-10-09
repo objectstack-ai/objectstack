@@ -115,7 +115,7 @@ describe('ruled bullet 1 — relative paths only', () => {
     const msg = reject(redirectTo(url));
     expect(msg, 'names the rule').toContain('RELATIVE path only');
     expect(msg, 'names the reason the rule exists').toContain('open');
-    expect(msg, 'states the rule, not its ruling date (#22093)').not.toMatch(RULING_DATE);
+    expect(msg, 'states the rule, not its ruling date').not.toMatch(RULING_DATE);
     // Nor a tracker id a refused author cannot resolve (commit fd289be45's
     // strip): the provenance lives in the code comment above the checker.
     expect(msg).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
@@ -338,7 +338,7 @@ describe('the `submitBehavior` property help carries the rule and no ruling date
     expect(help, 'ends on the fact, with no parenthetical after it').toMatch(/URL-escaped\.$/);
   });
 
-  it('carries no ruling date and no tracker id (#22093)', () => {
+  it('carries no ruling date and no tracker id', () => {
     const help = publishedHelp();
     expect(help, 'the ruling date lives in the code comment above the describe').not.toMatch(RULING_DATE);
     expect(help).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
