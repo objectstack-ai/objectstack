@@ -23,6 +23,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
+- `node_modules/@objectstack/spec/src/shared/conditional-formatting.zod.ts` — The **single declaration** of a conditional formatting rule —
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)

@@ -391,6 +391,7 @@ For values that must be encrypted at rest (API keys, tokens, DB passwords), use 
 | `readonlyWhen` | `string \| Expression` | CEL predicate; field is read-only when `TRUE` |
 | `requiredWhen` | `string \| Expression` | CEL predicate; field is required when `TRUE` |
 | `settledWhen` | `string \| Expression` | CEL predicate on a `dueLike` date; the deadline is settled when `TRUE` — see [Deadlines](#deadlines-duelike-and-settledwhen) |
+| `conditionalFormatting` | `{ condition, style }[]` | Cell formatting rules; the first rule whose CEL `condition` is `TRUE` styles this field's cell — see [Cell formatting](#cell-formatting-conditionalformatting) |
 | `multiple` | `boolean` | Allow multiple values (for select, lookup, file) |
 
 ```typescript
@@ -489,6 +490,50 @@ Two rules make this predictable:
   read at write time, the field is treated as read-only rather than written. A
   lock the platform could not evaluate is never waived: that is what makes the
   declaration a guarantee instead of a hint.
+
+#### Cell formatting: `conditionalFormatting`
+
+`conditionalFormatting` styles a field's **cell** by a rule: an ordered list of
+`{ condition, style }`, the same rule a list view's `conditionalFormatting`
+declares for its rows. The first rule whose CEL `condition` is `TRUE` applies
+its CSS `style` map to this field's cell wherever the field renders — a grid, a
+kanban card, the record page, a related list or a report cell. A list view's
+row rules style the row, and both may apply to one record.
+
+The condition reads two roots: `value`, this field's value on the record, and
+`record`, the row.
+
+```typescript
+import { P } from '@objectstack/spec';
+import { Field } from '@objectstack/spec/data';
+
+amount: Field.currency({
+  label: 'Amount',
+  conditionalFormatting: [
+    { condition: P`value < 0`, style: { color: '#b91c1c' } },
+  ],
+}),
+```
+
+The rules are checked when the metadata is authored, like `visibleWhen`:
+
+- A rule is exactly `{ condition, style }`, the condition is not blank, and
+  `style` maps CSS property names to string values. Anything else is refused at
+  parse.
+- The condition must parse, read other fields as `record.<field>`, name fields
+  the object declares, and read no root but `value` and `record`.
+  `objectstack validate`, `objectstack build` and saving the object all refuse
+  anything else, naming the field and the rule.
+
+The rules are for presentation: an amount below zero in red, stock under its
+safety level in amber, a priority cell coloured by its value. A state with a
+meaning of its own belongs in a declaration instead — a deadline's overdue
+state is [`dueLike` with `settledWhen`](#deadlines-duelike-and-settledwhen),
+from which the wording and the colour both follow. Nothing on the write path
+reads the rules.
+
+The console's cell renderers read these rules in a later ObjectUI release.
+Until then a rule is validated when it is authored and styles no cell.
 
 ## Naming Conventions
 
