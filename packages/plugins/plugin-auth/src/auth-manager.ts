@@ -4073,11 +4073,22 @@ export class AuthManager {
         // on any lookup error; `activeOrgRoles` caught to `[]`). Warned rather
         // than swallowed — an empty `positions[]` hides UI, and this card is
         // about exactly that going unannounced.
+        //
+        // The seed email is the session's own, spelled as `resolveAuthzContext`
+        // spells it for this session (`String(user.email)` when present), so an
+        // in-process session read that `resolveAuthzContext` makes asks for
+        // EXACTLY the resolution its own step 2 asks for — and core's
+        // request-scoped memo serves that step this resolution instead of
+        // issuing every grant read twice per request. It shapes nothing read
+        // here: `grants.email` is the only output it reaches, and the
+        // platform-admin config anchor compares the STORED `sys_user.email`,
+        // never a seed (core §6b-config).
         let positions: string[] = [];
         let platformAdmin = false;
         try {
           const grants = await resolveUserAuthzGrants(dataEngine as any, user.id, {
             tenantId: (session as any)?.activeOrganizationId ?? undefined,
+            seedEmail: (user as any)?.email ? String((user as any).email) : undefined,
           });
           positions = grants.positions;
           platformAdmin = grants.posture === 'PLATFORM_ADMIN';

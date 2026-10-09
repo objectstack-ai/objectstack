@@ -66,6 +66,7 @@ import { resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyRefusalReason } from './api-key.js';
 import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
+import { openRequestGrantsMemo, withRequestGrantsMemo } from './request-grants-memo.js';
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from './platform-admin.js';
 import { derivePosture } from './posture-ladder.js';
 import { isRowActive } from './row-active.js';
@@ -348,8 +349,19 @@ async function tryFind(
  * never-provisioned one. A transport that fails closed on unexpected throws should re-raise this
  * one ({@link isAuthzStoreUnavailableError}) rather than degrade it to a
  * refusal — degrading it restores the disguise the ruling removed.
+ *
+ * The whole resolution — the `getSession` call included — runs inside one
+ * request-scoped grants memo (`request-grants-memo.ts`): when the session read
+ * itself resolved this principal's grants (plugin-auth's `customSession` hook
+ * does, for the payload's `positions[]`) with the arguments step 2 below uses,
+ * step 2 is served that resolution instead of issuing every grant read again.
+ * The scope closes when this call settles; nothing outlives the request.
  */
 export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
+  return withRequestGrantsMemo(() => resolveAuthzContextInScope(input));
+}
+
+async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
   const { ql, headers } = input;
   const ctx: ResolvedAuthzContext = {
     positions: [],
@@ -731,6 +743,17 @@ export async function resolveUserAuthzGrants(
   // ADR-0091 validity boundary, or the TTL — whichever comes first. The
   // attempt snapshots its generation and clock HERE, before any read is
   // issued, so a write landing mid-resolution kills the entry on arrival.
+  //
+  // Consulted first, the request-scoped memo (`request-grants-memo.ts`): inside
+  // one `resolveAuthzContext` call, a resolution with these exact arguments that
+  // already completed — with no write through this engine since it opened and
+  // no validity boundary since its clock — is served instead of re-read. The
+  // epoch is read HERE, before any read of this resolution is issued. Outside
+  // that scope (every direct caller of this function) it is `undefined` and
+  // nothing changes.
+  const requestMemo = openRequestGrantsMemo(ql, userId, opts, readWriteEpoch(ql));
+  if (requestMemo?.hit) return requestMemo.hit;
+
   const grantsCache = openUserGrantsCache(ql, userId, opts);
   if (grantsCache?.hit) return grantsCache.hit;
 
@@ -1156,11 +1179,14 @@ export async function resolveUserAuthzGrants(
   // position assignments, user-bound set grants — INCLUDING currently-inactive
   // rows, because a future `valid_from` is a flip the timer must catch too.
   // Peer rows (`orgMembersLeg`) feed `org_user_ids` with no validity check, so
-  // they contribute no boundary.
-  grantsCache?.commit(
-    grants,
-    nextGrantValidityBoundary([...members, ...userPositionRows, ...upsRowsAll], nowMs),
-  );
+  // they contribute no boundary. The request-scoped memo stores the same
+  // envelope under the same boundary, stamped with the clock the verdicts above
+  // were taken at; the scan runs only when at least one of the two is open.
+  if (grantsCache || requestMemo) {
+    const nextBoundaryMs = nextGrantValidityBoundary([...members, ...userPositionRows, ...upsRowsAll], nowMs);
+    grantsCache?.commit(grants, nextBoundaryMs);
+    requestMemo?.commit(grants, nowMs, nextBoundaryMs);
+  }
 
   return grants;
 }
