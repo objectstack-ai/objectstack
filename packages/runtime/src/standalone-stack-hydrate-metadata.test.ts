@@ -183,4 +183,39 @@ describe('[#20071] createStandaloneStack declares sys_metadata hydration instead
         const rows: Array<{ title?: unknown }> = await engine2.find(OBJECT, {});
         expect(rows.map((r) => r.title)).toEqual(['survives the restart']);
     }, BOOT_TIMEOUT);
+
+    // [#22371] The one way to turn it off, for the offline step that clears what
+    // the cold boot's catalog check refuses: that check judges what hydration
+    // wrote, so the step boots with hydration off. Declared on the plugin, and in
+    // effect on a real restart; the default boot over the same file is the
+    // control that the row is there to hydrate.
+    it('`hydrateMetadataFromDb: false` turns it off — declared on the plugin, and nothing stored comes back', async () => {
+        const off = await createStandaloneStack({ databaseUrl: ':memory:', hydrateMetadataFromDb: false });
+        expect(hydrationFlag(off.plugins)).toEqual({ environmentId: 'env_local', hydrateMetadataFromDb: false });
+
+        const dir = tempDir('off');
+        const databaseUrl = `file:${join(dir, 'hydrate-off.db')}`;
+        const stackConfig = { projectRoot: dir, databaseUrl, skipSeedData: true, runPlatformMigrations: false } as const;
+        const first = await boot((await createStandaloneStack(stackConfig)).plugins);
+        kernels.push(first);
+        await (first.getService('protocol') as any).saveMetaItem({ type: 'app', name: APP, item: { name: APP, label: 'Hydration Console' } });
+        await first.shutdown();
+        kernels.splice(kernels.indexOf(first), 1);
+
+        const unhydrated = await boot((await createStandaloneStack({ ...stackConfig, hydrateMetadataFromDb: false })).plugins);
+        kernels.push(unhydrated);
+        const engineOff = unhydrated.getService<ObjectQL>('objectql');
+        expect(engineOff.registry.getItem('app', APP), `app ${APP} is NOT hydrated with the option off`).toBeUndefined();
+        const stored: unknown[] = await engineOff.find('sys_metadata', { where: { type: 'app', name: APP } });
+        expect(stored, 'the row is still stored — only the read-back is off').toHaveLength(1);
+        await unhydrated.shutdown();
+        kernels.splice(kernels.indexOf(unhydrated), 1);
+
+        const control = await boot((await createStandaloneStack(stackConfig)).plugins);
+        kernels.push(control);
+        expect(
+            control.getService<ObjectQL>('objectql').registry.getItem<{ name?: string }>('app', APP)?.name,
+            'CONTROL — the default boot over the same file hydrates it',
+        ).toBe(APP);
+    }, BOOT_TIMEOUT);
 });

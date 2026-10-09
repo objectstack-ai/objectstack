@@ -246,6 +246,37 @@ describe('buildSchemaMigrationPlugins', () => {
     expect(out.notes.join(' ')).toContain('declarations only');
   });
 
+  it('[#22371] --dev composes the config\'s devPlugins, as `serve --dev` registers them — and its auth gate reads them', async () => {
+    const dir = tempProject();
+    writeFileSync(
+      join(dir, 'objectstack.config.ts'),
+      [
+        "class DemoPlugin { name = 'com.example.demo'; async init() {} }",
+        // A dev-only plugin under the name `serve`'s auth gate looks for: present,
+        // the stack supplies its own AuthPlugin and the platform composes none.
+        "class DevAuth { name = 'com.objectstack.auth'; async init() {} }",
+        'export default { plugins: [new DemoPlugin()], devPlugins: [new DevAuth()] };',
+        '',
+      ].join('\n'),
+    );
+
+    const plain = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir, authGatedSecurity: {} });
+    expect(plain.plugins.map((p: any) => p?.name)).not.toContain('com.objectstack.auth');
+    expect(plain.securityPlugin).not.toEqual({ composed: false, reason: 'stack-supplies-auth' });
+
+    const dev = await buildSchemaMigrationPlugins({
+      basePlugins: [], cwd: dir, authGatedSecurity: {}, serveFlags: { dev: true },
+    });
+    expect(dev.plugins.map((p: any) => p?.name)).toEqual([
+      WRITE_GUARD,
+      'com.example.demo',
+      'com.objectstack.auth',
+      'com.objectstack.platform-objects',
+    ]);
+    expect(dev.securityPlugin).toEqual({ composed: false, reason: 'stack-supplies-auth' });
+    expect(dev.notes.join(' ')).toContain('2 plugin(s) (1 of them its devPlugins, as under --dev)');
+  }, 60_000);
+
   it('reports a config it could not load rather than pretending it composed one', async () => {
     const dir = tempProject();
     writeFileSync(
