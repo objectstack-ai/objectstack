@@ -99,6 +99,19 @@ describe('#17219 withheldReadonlyHookFault', () => {
   it('declines on a non-object throw rather than fabricating a shape', () => {
     expect(withheldReadonlyHookFault('boom', HIDDEN, 'beforeUpdate')).toBeUndefined();
   });
+
+  it('[#22306] on beforeInsert: names the key and never sends the author to a stored row a create does not have', () => {
+    const out = withheldReadonlyHookFault(REAL_CRASH(), HIDDEN, 'beforeInsert');
+    expect(out).toBeInstanceOf(HookWithheldReadonlyFaultError);
+    expect(out!.status).toBe(400);
+    expect(out!.withheldKeys).toEqual(['locked_meta']);
+    expect(out!.message).toContain('`ctx.input.locked_meta`');
+    expect(out!.message).not.toContain('ctx.previous');
+    expect(out!.message).toContain("TypeError: cannot set property 'who' of undefined");
+    // The same three declines hold on the insert event.
+    expect(withheldReadonlyHookFault(REAL_CRASH(), undefined, 'beforeInsert')).toBeUndefined();
+    expect(withheldReadonlyHookFault(new Error('仍有未结清的发票'), HIDDEN, 'beforeInsert')).toBeUndefined();
+  });
 });
 
 describe('#17219 dispatchHooksExplainingWithheldReadonly', () => {
