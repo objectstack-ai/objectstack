@@ -109,8 +109,8 @@
     "pages": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupPageAttr (`pages.<name>.<attr>` — label/description/title/subtitle, title falling back to label); packages/spec/src/system/i18n-resolver.ts#lookupPageComponentCopy (`pages.<name>.components.<id>` — header copy keyed by page name because page:header instances carry no stable id)",
-      "note": "translatePage: label/description/title/subtitle (title falls back to label; header copy keyed by page name because page:header instances carry no stable id). 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:636` had rotted onto `function lookupAppAttr`, the APP group's reader, ~226 lines above the page ones. Re-closed by hand against 8cb96ec41."
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupPageAttr (`pages.<name>.<attr>` — label/description/title/subtitle; an omitted title keeps the authored header title, the label standing in only where the header authors none or restates the page label); packages/spec/src/system/i18n-resolver.ts#lookupPageComponentCopy (`pages.<name>.components.<id>` — header copy keyed by page name because page:header instances carry no stable id)",
+      "note": "translatePage: label/description/title/subtitle (an omitted title keeps the authored header title, the label standing in only where the header authors none or restates the page label; header copy keyed by page name because page:header instances carry no stable id). 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:636` had rotted onto `function lookupAppAttr`, the APP group's reader, ~226 lines above the page ones. Re-closed by hand against 8cb96ec41."
     },
     "flows": {
       "status": "live",
