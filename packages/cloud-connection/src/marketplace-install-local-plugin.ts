@@ -153,7 +153,7 @@ const ROUTE_BASE = '/api/v1/marketplace/install-local';
  */
 type UninstallCleanupRunner = {
     runUninstallCleanups?(
-        request: Pick<DeletePackageRequest, 'packageId' | 'organizationId' | 'actor'>,
+        request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
     ): Promise<UninstallCleanupOutcome[]>;
 };
 
