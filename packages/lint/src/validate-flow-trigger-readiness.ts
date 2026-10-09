@@ -494,10 +494,13 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
             `has a config.timeRelative descriptor the time-relative trigger REFUSES at bind time, so the ` +
             `sweep is never installed — the flow declares a time-relative trigger and then never runs ` +
             `(the only trace is one warn in the server log). ${problems}`,
+          // [#22161] `hint` is the CLI's `fix:` line: the instruction first, the
+          // reason it is sufficient after it.
           hint:
-            `Those messages are TimeRelativeTriggerSchema's own — the same schema the trigger safeParses at ` +
-            `bind time, so a descriptor that satisfies them binds. An unrecognized key names the declared key ` +
-            `it was probably meant to be; see content/docs/references/automation/time-relative-trigger.mdx.`,
+            `Correct config.timeRelative until it satisfies each message above: they are ` +
+            `TimeRelativeTriggerSchema's own, the same schema the trigger safeParses at bind time, so a ` +
+            `descriptor that satisfies them binds. An unrecognized key names the declared key it was ` +
+            `probably meant to be; see content/docs/references/automation/time-relative-trigger.mdx.`,
         });
       }
     }

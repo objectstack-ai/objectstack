@@ -1988,10 +1988,15 @@ describe('unknown keys are rejected, not stripped', () => {
         ...minimalFlow,
         errorHandling: { strategy: 'retry', maxAttempts: 3 },
       });
-      // Renaming alone would silently run one attempt FEWER than asked for:
-      // RetryConfig's `maxAttempts` counts the first try, `maxRetries` does not.
+      // Renaming alone would silently run one attempt MORE than asked for:
+      // RetryConfig's `maxAttempts` counts the first try, `maxRetries` does not,
+      // so `maxAttempts: 3` is 3 runs and a bare `maxRetries: 3` is 1 + 3 = 4.
+      // The consequence clause shipped inverted ("fewer") until the shared
+      // retry policy closed beside it with the right direction; pin both halves.
       expect(issue!.message).not.toContain('`maxAttempts` → `maxRetries`');
-      expect(issue!.message).toContain('maxAttempts - 1');
+      expect(issue!.message).toContain('`maxRetries: <maxAttempts - 1>`');
+      expect(issue!.message).toContain('one attempt more than you asked for');
+      expect(issue!.message).not.toMatch(/fewer/i);
     });
 
     it('errorHandling: the `strategy: retry` refinement still runs after the block is strict', () => {

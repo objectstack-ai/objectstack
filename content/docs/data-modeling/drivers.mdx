@@ -376,7 +376,7 @@ log because they are worth knowing *before* you choose MySQL, not after.
 | Caveat | What MySQL does not give you | Way out |
 | :--- | :--- | :--- |
 | [`upsert` cannot honour a conflict target](#upsert-conflict-targets-the-target-mysql-cannot-honour) | `ON DUPLICATE KEY UPDATE` carries no target, so a merge can land on a UNIQUE key you never named. The driver refuses the call rather than let it. | Keep one UNIQUE key per table, or run the object on SQLite/PostgreSQL. |
-| [Three runtime uniqueness indexes cannot be built](#uniqueness-indexes-mysql-cannot-build) | Database enforcement of three platform integrity guarantees. The weaker index stays in force and every boot logs an `error`. | None in-dialect. Run the platform on SQLite/PostgreSQL for the guarantee. |
+| [Two platform tables' runtime uniqueness indexes cannot be built](#uniqueness-indexes-mysql-cannot-build) | Database enforcement of two platform integrity guarantees. The weaker index stays in force and every boot logs an `error`. | None in-dialect. Run the platform on SQLite/PostgreSQL for the guarantee. |
 | [A unique violation does not name the column](#the-conflicting-column-is-not-named) | The conflicting **field** in import errors and form-field conflict messages. The `409 UNIQUE_VIOLATION` itself is unaffected. | None. The message falls back to generic copy. |
 
 ### `upsert` conflict targets: the target MySQL cannot honour
@@ -471,24 +471,23 @@ object on SQLite/PostgreSQL.
 
 ### Uniqueness indexes MySQL cannot build
 
-Three platform tables get their uniqueness from an index issued as raw SQL at
+Two platform tables get their uniqueness from an index issued as raw SQL at
 boot by a `metadata-protocol` runtime migration, because the shape each one needs
-cannot be expressed through the declaration surface. Two of the three are
-**partial** indexes (`CREATE UNIQUE INDEX … WHERE state = '…'`), and all three
+cannot be expressed through the declaration surface. `sys_metadata`'s are
+**partial** indexes (`CREATE UNIQUE INDEX … WHERE state = '…'`), and both tables'
 use **functional key parts** (`COALESCE(…)`) to fold a nullable column's NULLs
 into one bucket that is unique among itself.
 
 MySQL/MariaDB has no partial indexes at any version, and rejects the functional
-key parts as these statements spell them. So on MySQL none of the three is built,
-and the guarantee each one backs is not enforced by the database:
+key parts as these statements spell them. So on MySQL neither is built, and the
+guarantee each one backs is not enforced by the database:
 
 | Table | The guarantee that is not enforced on MySQL |
 | :--- | :--- |
 | `sys_metadata` | ADR-0005 overlay uniqueness. Package-less rows (`package_id` NULL) stay NULL-distinct and can duplicate, and `getMetaItem` then has no defined answer for which row wins. |
-| `sys_view_definition` | Active-row view-name uniqueness. An archived view keeps occupying its name slot, and two same-name **active** shared views (`owner` NULL) or environment-level views (`organization_id` NULL) can coexist even though the platform states they cannot. |
 | `sys_setting` | NULL-safe row identity. `user_id` is NULL on every row that is not `scope='user'`, so two tenant-scope rows for one `(namespace, key)` in one organization — or two platform defaults on the global layer — can coexist, and `SettingsService` has no defined answer for which one wins. |
 
-What happens instead is the same in all three cases, and it is deliberate. Each
+What happens instead is the same in both cases, and it is deliberate. Each
 migration proves the new index is possible under a throwaway probe name *before*
 dropping anything, so a dialect that cannot take it is left holding **exactly the
 index it already had** — never an unconstrained table, and never a failed boot.
@@ -497,7 +496,7 @@ lists any rows already violating the guarantee.
 
 <Callout type="warn">
 **There is no in-dialect fix**, and none is planned — the DDL these migrations
-need does not exist in MySQL/MariaDB. If you need these three guarantees enforced
+need does not exist in MySQL/MariaDB. If you need these guarantees enforced
 by the database, run the platform on SQLite or PostgreSQL. On MySQL, treat the
 boot's `[metadata-protocol] this database cannot build …` lines as expected
 rather than as a failure, and run the duplicate-listing query each one prints to

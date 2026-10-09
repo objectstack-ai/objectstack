@@ -2478,8 +2478,8 @@ export class AuthPlugin implements Plugin {
         // the write both carry the explicit system opt-in (`isSystem: true`).
         // The platform-admin judge above is this route's authorization; the
         // raw engine would have handed the security middleware a context with
-        // no principal and no opt-in — the principal-less hand-off (ADR-0096),
-        // which is not an authorization at all.
+        // no principal and no opt-in — the principal-less hand-off it no longer
+        // makes (ADR-0096 D5 refuses that context), and never an authorization.
         const rawEngine = this.authManager!.getDataEngine();
         if (!rawEngine) {
           return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Data engine unavailable' } }, 503);

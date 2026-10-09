@@ -60,8 +60,9 @@
  * previous index, name the key that is NOT enforced, ship the exact query that
  * lists the offending rows, point at `os migrate duplicates`, never block the
  * boot. `SqlDriver.createNullSafeUniqueIndex` is the in-repo precedent for that
- * disposition; the sibling `view-definition-active-index.ts` is the precedent
- * for the order.
+ * disposition; the order's precedent was #5839's `sys_view_definition`
+ * migration, retired with its table (ADR-0131 D13), and the order itself now
+ * lives in `partial-index-probe.ts`.
  *
  * ⚠️ The referral named `os migrate plan` until #8725, and it was FALSE for
  * this class: the differ never sees these indexes — `isRuntimeManagedIndex`
@@ -82,8 +83,7 @@
  * `(type, name, organization_id, package_id)` at the same time — that
  * coexistence is the entire reason
  * {@link OVERLAY_DRAFT_INDEX_NAME} exists as a separate index — and an
- * unrestricted UNIQUE would reject it. This is the key difference from
- * `sys_view_definition`, whose declared index IS a full UNIQUE.
+ * unrestricted UNIQUE would reject it.
  *
  * What #6418 changes about the fallback is not its shape but its honesty: it is
  * created with `IF NOT EXISTS` and **without** a preceding drop, so it can only

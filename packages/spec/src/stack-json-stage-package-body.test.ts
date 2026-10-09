@@ -111,7 +111,7 @@ const RECORD_BODY = {
   hooks: [{ name: 'on_insert', object: 'task', events: ['beforeInsert' as const] }],
 };
 
-describe('#17518 the two JSON stages CONVERT, which is the whole point of declaring them', () => {
+describe('the two JSON stages CONVERT, which is the whole point of declaring them', () => {
   it('both new bodies convert under `z.toJSONSchema` — over the WHOLE body, not two members', () => {
     // Stated over the whole body on purpose: the tax this closes is paid by
     // EMBEDDERS, and an embedder loses its JSON Schema to any one
@@ -144,7 +144,7 @@ describe('#17518 the two JSON stages CONVERT, which is the whole point of declar
   });
 });
 
-describe('#17518 the three stages have the SAME key set — they narrow, they do not drop', () => {
+describe('the three stages have the SAME key set — they narrow, they do not drop', () => {
   it('artifact and record carry every member the assembled body carries', () => {
     const assembled = shapeKeys(AssembledPackageBodySchema);
     expect(shapeKeys(ArtifactStagePackageBodySchema)).toEqual(assembled);
@@ -183,7 +183,7 @@ describe('#17518 the three stages have the SAME key set — they narrow, they do
   });
 });
 
-describe('#17518 each stage accepts ITS OWN payload and refuses the neighbouring ones', () => {
+describe('each stage accepts ITS OWN payload and refuses the neighbouring ones', () => {
   it('assembled accepts the live composed body; both JSON stages refuse it', () => {
     expect(AssembledPackageBodySchema.safeParse(IN_MEMORY_BODY).success).toBe(true);
     expect(ArtifactStagePackageBodySchema.safeParse(IN_MEMORY_BODY).success).toBe(false);
@@ -218,7 +218,7 @@ describe('#17518 each stage accepts ITS OWN payload and refuses the neighbouring
   });
 });
 
-describe('#17518 `effect` is READ off the declaration schema, never minted here', () => {
+describe('`effect` is READ off the declaration schema, never minted here', () => {
   it('a lowered entry with no `effect` materialises the declaration default', () => {
     // `FlowFunctionDeclarationSchema.effect` is
     // `FlowFunctionEffectSchema.default(DEFAULT_FLOW_FUNCTION_EFFECT)` — a

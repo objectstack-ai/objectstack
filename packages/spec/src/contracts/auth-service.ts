@@ -169,13 +169,36 @@ export interface IAuthService {
  * The slice of the session API the platform actually uses.
  *
  * [#4127 batch 4] Deliberately NOT a re-declaration of better-auth's handle,
- * which is far wider and belongs to that library. Every dispatcher-side reader
- * calls exactly `getSession({ headers })` and reads exactly the fields below,
- * so that is what is declared. Widening this is for whoever needs more, with
- * the call site to prove it.
+ * which is far wider and belongs to that library. What is declared is exactly
+ * the input the in-process readers send and exactly the fields below that they
+ * read. Widening this is for whoever needs more, with the call site to prove it.
+ *
+ * [#22384] `getSession`'s input has two read forms, decided by what the
+ * request carries:
+ *
+ * - a request carrying a better-auth session cookie (a browser) reads with
+ *   `{ headers, query: { disableRefresh: true } }` — the session then renews
+ *   only on the `get-session` route, which re-issues the cookie, so cookie
+ *   expiry and session expiry cannot split;
+ * - a bearer-only request (the SDK outside a browser, the CLI) reads with
+ *   `{ headers }` alone, renewal included.
+ *
+ * Their one source is `inProcessSessionReadInput(headers)` in
+ * `@objectstack/types` (`packages/types/src/in-process-session-read.ts`):
+ * read with `api.getSession(inProcessSessionReadInput(headers))`, not with a
+ * hand-built input — a hand-built `{ headers }` on a cookie-carrying request
+ * renews the session behind a cookie nobody re-issues. `query` is declared
+ * because readers send it (#22258): `rest-server.ts` in `@objectstack/rest`
+ * (twice); in `@objectstack/runtime`, `http-dispatcher.ts` (twice),
+ * `security/resolve-session-principal.ts` and
+ * `security/resolve-execution-context.ts`; `current-user-endpoints.ts` in
+ * `@objectstack/plugin-hono-server`; and in `@objectstack/cloud-connection`,
+ * `cloud-connection-plugin.ts` and `marketplace-install-local-plugin.ts`
+ * (twice). `packages/types/src/in-process-session-read.contract.test.ts`
+ * holds the helper's return inside this declaration, key for key.
  */
 export interface AuthSessionApi {
-    getSession?(input: { headers: unknown }): Promise<{
+    getSession?(input: { headers: unknown; query?: { disableRefresh?: boolean } }): Promise<{
         user?: { id?: string };
         session?: { userId?: string; activeOrganizationId?: string };
     } | undefined>;

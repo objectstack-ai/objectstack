@@ -1,16 +1,16 @@
 ## Linting & Generation Quality
 
-`os lint` checks the data model against the conventions in this skill —
-not just naming/labels but the relationship/master-detail/roll-up patterns. Run
-it after authoring or generating metadata. Severities: `error` (structural,
-fails the command), `warning` (likely-wrong choice), `suggestion` (nudge).
+`os lint` checks the data model against the conventions in this skill. Run it
+after authoring or generating metadata.
+Severities: `error` (structural, fails the command), `warning` (likely-wrong
+choice), `suggestion` (nudge).
 
 Data-model rules (in addition to naming/label/i18n):
 
 | Rule | Severity | Catches |
 |---|---|---|
 | `relationship/missing-reference` | error | lookup/master_detail without a `reference` target |
-| `relationship/master-detail-required` | warning | a `master_detail` that isn't `required` (a detail can't exist without its master) |
+| `relationship/master-detail-required` | warning; error under `controlled_by_parent` | a `master_detail` that isn't `required` — or, under `controlled_by_parent`, is `readonly`/`system` |
 | `relationship/delete-behavior` | suggestion | `master_detail` without an explicit `deleteBehavior` |
 | `relationship/line-items-inline-edit` | suggestion | a `*_line`/`*_item` master_detail child without `inlineEdit` |
 | `relationship/line-item-should-be-master-detail` | suggestion | a line-item-shaped child using `lookup` instead of `master_detail` |

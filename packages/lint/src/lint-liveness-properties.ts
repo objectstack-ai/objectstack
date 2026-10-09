@@ -244,7 +244,11 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
     return {
       kind: 'is experimental — declared but NOT enforced at runtime',
       rule: LIVENESS_EXPERIMENTAL_PROPERTY,
-      defaultHint: 'It is declared in the spec as an experimental guarantee — not yet enforced at runtime.',
+      // [#22161] The CLI prints `hint` as the `fix:` line, so it says what to
+      // do; the fact it used to state alone is the reason.
+      defaultHint:
+        'Do not rely on it as a guarantee: it is declared in the spec as an experimental guarantee and ' +
+        'not yet enforced at runtime.',
     };
   }
   if (entry.status === 'planned') {

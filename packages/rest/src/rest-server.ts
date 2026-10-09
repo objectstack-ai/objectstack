@@ -40,6 +40,8 @@ import {
     // [#20061] The thrown `VALIDATION_FAILED` + `fields[]` shape every catch in
     // this file already maps to `400` — see `readDeclaredQueryNumber` below.
     validationFailure,
+    // [#22258] The in-process session-read rule — see `computeExecCtx`.
+    inProcessSessionReadInput,
 } from '@objectstack/types';
 import {
     allowPerfDisclosure,
@@ -3023,8 +3025,16 @@ export class RestServer {
             // never drift on authorization. (This path previously kept its own copy that
             // silently omitted sys_user_position / sys_position_permission_set / platform_admin /
             // ai_seat — see the resolver's module doc.)
+            //
+            // [#22258] Read through the in-process session rule: this request
+            // answers with its OWN response, so a renewal here would move
+            // `sys_session.expires_at` while the renewed cookie is discarded —
+            // the browser's cookie then dies before its session. A request
+            // carrying a session cookie therefore reads without renewal (only
+            // `/get-session`, which re-issues the cookie, renews it); a
+            // bearer-only request renews as before.
             const getSession = async (h: any) => {
-                try { return await api.getSession({ headers: h }); } catch { return undefined; }
+                try { return await api.getSession(inProcessSessionReadInput(h)); } catch { return undefined; }
             };
             // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy`
             // service — the same source plugin-security reconciles for the Layer 0
@@ -3210,7 +3220,8 @@ export class RestServer {
                     // precisely the collapse being repaired. A session that
                     // RESOLVES carrying no gate is not a failure — that user is
                     // simply not gated, and still admits.
-                    gatedSession = await api.getSession({ headers });
+                    // [#22258] Same in-process read rule as the closure above.
+                    gatedSession = await api.getSession(inProcessSessionReadInput(headers));
                 } catch (err) {
                     throw new AuthzStoreUnavailableError('auth_gate', err);
                 }

@@ -45,6 +45,7 @@
  */
 import path from 'path';
 import fs from 'fs';
+import { createHash } from 'crypto';
 import { createRequire } from 'module';
 import { pathToFileURL, fileURLToPath } from 'url';
 
@@ -544,6 +545,88 @@ async function resolveHttpServer(ctx: any): Promise<any> {
   }
 }
 
+// ─── Console static-file caching ────────────────────────────────────
+
+/**
+ * `cache-control` for a console file whose NAME carries its content hash
+ * ({@link isContentHashedConsoleAsset}). Its bytes can never change under that
+ * name, so the browser keeps it for a year and never revalidates it. A rebuild
+ * that changes the bytes emits a new name, and the HTML shell, which is always
+ * revalidated, points at the new name.
+ */
+const HASHED_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
+/**
+ * `cache-control` for every other non-HTML console file. These names are copied
+ * into the build unchanged, so the next console release can ship different
+ * bytes under the same name. objectui copies maplibre's `maplibre-gl-worker.mjs`
+ * and `maplibre-gl-shared.mjs` into `assets/` this way, and `favicon.svg` and
+ * the root JSON files are `public/` copies. The short lifetime limits how long
+ * an upgraded deployment can leave a browser on the old bytes. The `etag` sent
+ * with it ({@link contentEtag}) turns each revalidation into a `304` instead of
+ * a full download.
+ */
+const STABLE_FILE_CACHE_CONTROL = 'public, max-age=300';
+
+/**
+ * Vite's name for an emitted file: `assets/[name]-[hash][extname]`, its default
+ * `chunkFileNames` and `assetFileNames`. The hash is 8 characters of rollup's
+ * base64url alphabet, so `-` and `_` can appear inside it
+ * (`vendor-icon-calendar-sync-Ccwp9IC-.js`).
+ */
+const CONTENT_HASHED_ASSET_NAME = /^[^/]+-([A-Za-z0-9_-]{8})\.[A-Za-z0-9]+$/;
+
+/**
+ * Whether a console dist file is a content-hashed build output. It is judged
+ * from the dist-relative path alone: the file sits directly under `assets/`, is
+ * named `<name>-<hash>.<ext>`, and the hash contains at least one uppercase
+ * letter, digit or `_`.
+ *
+ * The rule comes from a real build, not from memory. Measured over the
+ * published dist of `@objectstack/console@17.7.0` (2457 files under `assets/`),
+ * it matches all 2455 hashed chunks and neither stable-named file
+ * (`maplibre-gl-worker.mjs`, `maplibre-gl-shared.mjs`).
+ *
+ * The character condition narrows the match. Going by shape alone, an
+ * eight-letter lowercase word after a dash (`-renderer.js`) looks like a hash,
+ * and a stable file mistaken for a hashed one stays pinned in browsers for a
+ * year. Every measured hash contains such a character. A real hash that
+ * happens not to is only revalidated like a stable file; it is never served
+ * stale.
+ */
+function isContentHashedConsoleAsset(distRelativePath: string): boolean {
+  const segments = distRelativePath.split('/').filter(Boolean);
+  if (segments.length !== 2 || segments[0] !== 'assets') return false;
+  const match = CONTENT_HASHED_ASSET_NAME.exec(segments[1]);
+  return match !== null && /[A-Z0-9_]/.test(match[1]);
+}
+
+/**
+ * A strong `etag` computed from the file's BYTES. ⛔ It is not computed from
+ * the file's stat, because the stat records how the dist was laid down, not
+ * what it contains. Measured on `@objectstack/console@17.7.0`: `npm install`
+ * stamps every file with the install time, but plain `tar` extraction of the
+ * same tarball keeps npm's fixed pack mtime (1985-10-26T08:15:00Z, on every
+ * file). Under `tar`, two releases' different `maplibre-gl-worker.mjs` would
+ * carry the same `last-modified`, and a validator built from the stat would
+ * answer `304` for bytes the browser has never seen.
+ */
+function contentEtag(content: Buffer): string {
+  return `"${createHash('sha256').update(content).digest('base64url')}"`;
+}
+
+/**
+ * RFC 9110 §13.1.2: `If-None-Match` hits on `*` or on any listed tag, using
+ * weak comparison.
+ */
+function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
+  if (!header) return false;
+  return header.split(',').some((candidate) => {
+    const tag = candidate.trim();
+    return tag === '*' || tag.replace(/^W\//, '') === etag;
+  });
+}
+
 /**
  * Create a lightweight kernel plugin that serves the pre-built Console
  * portal static files at `/_console/*`.
@@ -555,6 +638,11 @@ async function resolveHttpServer(ctx: any): Promise<any> {
  *   - Hashed asset paths under `/_console/assets/*` never SPA-fallback —
  *     a real 404 surfaces a rebuild/deploy mismatch instead of the
  *     dreaded "asset returns text/html" silent failure.
+ *
+ * Caching, per file: a content-hashed build output is `immutable` for a
+ * year; every other non-HTML file gets a short lifetime and a content `etag`
+ * answered with `304`; HTML (the shell and the SPA fallback) carries neither,
+ * so the browser fetches it again every time.
  *
  * It also answers the path an author writes as a public form's
  * `sharing.publicLink`: `GET /forms/<slug>` redirects (302) to the Console's
@@ -672,8 +760,18 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
             });
           }
           const content = fs.readFileSync(filePath);
+          if (isContentHashedConsoleAsset(reqPath)) {
+            return new Response(content, {
+              headers: { 'content-type': mimeType(filePath), 'cache-control': HASHED_ASSET_CACHE_CONTROL },
+            });
+          }
+          const etag = contentEtag(content);
+          const validated = { 'cache-control': STABLE_FILE_CACHE_CONTROL, etag };
+          if (ifNoneMatchHits(c.req.header('if-none-match'), etag)) {
+            return new Response(null, { status: 304, headers: validated });
+          }
           return new Response(content, {
-            headers: { 'content-type': mimeType(filePath) },
+            headers: { 'content-type': mimeType(filePath), ...validated },
           });
         }
 

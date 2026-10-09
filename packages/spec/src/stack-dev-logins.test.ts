@@ -68,7 +68,7 @@ const issuesOf = (verdict: ReturnType<typeof parse>): string[] =>
 
 // ─── GREEN — what is writable now, and was not before ───────────────
 
-describe('#17556 accept — an application may declare its own first-run credentials', () => {
+describe('accept — an application may declare its own first-run credentials', () => {
   it('accepts a full `devLogins` entry and carries every field through the parse', () => {
     const verdict = parse({
       ...base(),
@@ -113,7 +113,7 @@ describe('#17556 accept — an application may declare its own first-run credent
 
 // ─── RED — the entry is strict from birth, and says so usefully ─────
 
-describe('#17556 refuse — a `devLogins` entry is closed against unknown keys', () => {
+describe('refuse — a `devLogins` entry is closed against unknown keys', () => {
   it('refuses an undeclared key inside an entry, at the entry`s path', () => {
     const verdict = parse({ ...base(), devLogins: [{ email: 'a@b.example', totallyBogus: 1 }] });
     expect(verdict.success).toBe(false);
@@ -150,7 +150,7 @@ describe('#17556 refuse — a `devLogins` entry is closed against unknown keys',
 
 // ─── DARK CONTROL — the door did not open, two keys were declared ───
 
-describe('#17556 control — the top-level door is still strict everywhere else', () => {
+describe('control — the top-level door is still strict everywhere else', () => {
   it('a neighbouring undeclared key still refuses, so the accept above is about these two keys', () => {
     // If this went green the reading "devHint/devLogins are now writable" would
     // be indistinguishable from "the strict close regressed".
@@ -171,7 +171,7 @@ describe('#17556 control — the top-level door is still strict everywhere else'
 
 // ─── COMPOSITION — both publishers' personas survive; hints refuse ──
 
-describe('#17556 compose — personas concatenate, a contradicting hint is named', () => {
+describe('compose — personas concatenate, a contradicting hint is named', () => {
   const hiring = () => defineStack({
     manifest,
     devHint: 'seed first',

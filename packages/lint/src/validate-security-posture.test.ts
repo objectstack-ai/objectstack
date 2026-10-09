@@ -32,6 +32,7 @@ import {
   SECURITY_CBP_AMBIGUOUS_RELATION,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
+import { explainRule } from './rule-explanations.js';
 
 const rulesOf = (stack: Record<string, unknown>) =>
   validateSecurityPosture(stack).map((f) => f.rule);
@@ -82,6 +83,33 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
       where: 'object "leave_request"',
     });
     expect(findings[0].hint).toContain("'private'");
+  });
+
+  // [#22161] One verdict line, one fix line; the reasoning (fail-closed is the
+  // runtime's half, declaring is the author's, and the incident shape) is the
+  // rule's explanation, which `os explain security-owd-unset` prints and the
+  // CLI's `rule:` line names (pinned in packages/cli, where the line is drawn).
+  it('prints as a verdict line and a fix line; the reasoning is the explanation', () => {
+    const [finding] = validateSecurityPosture({ objects: [{ name: 'leave_request', label: 'Leave Request' }] });
+    expect(finding.message).toBe(
+      "custom object declares no sharingModel (OWD); the runtime falls back to 'private', " +
+        'but the baseline must be an authored decision',
+    );
+    expect(finding.hint).toBe(
+      "declare sharingModel: 'private' (owner + shares; recommended), 'public_read', " +
+        "'public_read_write', or 'controlled_by_parent' (master-detail children)",
+    );
+    for (const line of [finding.message, finding.hint]) expect(line).not.toContain('\n');
+    // The location is the finding's `where`, never restated in the verdict.
+    expect(finding.message).not.toContain('leave_request');
+
+    const explanation = explainRule(SECURITY_OWD_UNSET);
+    expect(explanation?.rule).toBe(SECURITY_OWD_UNSET);
+    expect(explanation?.covers).toBe('why the baseline must be declared');
+    const text = explanation!.paragraphs.join('\n');
+    expect(text).toContain('ADR-0090 D1');
+    expect(text).toContain("read and edit every other user's records");
+    expect(finding.message).not.toContain('incident');
   });
 
   it('does not flag system objects for unset OWD', () => {

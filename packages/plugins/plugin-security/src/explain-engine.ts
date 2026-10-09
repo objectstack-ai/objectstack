@@ -60,6 +60,7 @@ import {
   unresolvedPostureExplainDetail,
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
+import { grantSetNameOf, readGrantSetRows } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -508,30 +509,28 @@ async function collectGrantProvenance(
 
   try {
     const rows = await ql.find('sys_user_permission_set', { where: { user_id: userId }, limit: 500, context: SYSTEM_CTX });
-    const grantRows = Array.isArray(rows) ? rows : [];
-    const idOf = (g: any) => g?.permission_set_id ?? g?.permissionSetId;
+    // [ADR-0131 D4] A grant names its set (`permission_set`); one that names
+    // nothing ({@link grantSetNameOf}) reports nothing — it resolves no set.
+    const grantRows = (Array.isArray(rows) ? rows : []).filter((g: any) => grantSetNameOf(g) !== undefined);
     const expiredRows = grantRows.filter((g: any) => !isGrantActive(g, nowMs) && isGrantExpired(g, nowMs));
     // Window-ACTIVE direct grants: resolvable unless the SET's catalogue row is
     // deactivated — the one remaining reason the resolver drops them (step 6b).
     const activeRows = grantRows.filter((g: any) => isGrantActive(g, nowMs));
-    const ids = Array.from(new Set([...expiredRows, ...activeRows].map(idOf).filter(Boolean)));
-    if (ids.length > 0) {
-      // [commit 42b05af89] The existing by-id `sys_permission_set` read now serves both
-      // reasons: names for the expired rows, and the ADR-0049 `active` flag for
-      // the held ones — one read, no second query shape.
-      const sets = await ql.find('sys_permission_set', { where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX });
-      const rowById = new Map<string, any>();
-      for (const s of Array.isArray(sets) ? sets : []) {
-        if ((s as any)?.id) rowById.set(String((s as any).id), s);
-      }
+    if (expiredRows.length > 0 || activeRows.length > 0) {
+      // [commit 42b05af89] One `sys_permission_set` read serves both reasons:
+      // the set row an expired grant names, and the ADR-0049 `active` flag of
+      // the one a held grant names. [ADR-0131 D4] Read by the grant's NAME —
+      // its own organization's row, else the organization-less one
+      // ({@link readGrantSetRows}); deactivation is still the row's flag.
+      const setRowOf = await readGrantSetRows(ql, [...expiredRows, ...activeRows]);
       for (const g of expiredRows) {
-        const s = rowById.get(String(idOf(g) ?? ''));
+        const s = setRowOf(g);
         const n = (s as any)?.name;
         if (n) droppedGrants.push({ kind: 'permission_set', name: String(n), state: 'expired', until: untilOfGrantRow(g) });
       }
       const deactivatedNames = new Set<string>();
       for (const g of activeRows) {
-        const s = rowById.get(String(idOf(g) ?? ''));
+        const s = setRowOf(g);
         const n = (s as any)?.name;
         // Dedupe: several grant rows can point at one deactivated set; the
         // catalogue-row fact is reported once.

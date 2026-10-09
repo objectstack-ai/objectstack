@@ -88,7 +88,7 @@ const stackWith = (extra: Record<string, unknown>) =>
  */
 const rows: Array<{ label: string; config: Record<string, unknown>; message: string }> = [
   {
-    label: 'hooks[].object (#14122 §4 rule R4)',
+    label: 'hooks[].object (the hook-ownership rule)',
     config: {
       hooks: [{ name: 'probe_hook', object: MISSING, events: ['afterInsert'], handler: 'noop' }],
     },
@@ -135,7 +135,7 @@ const rows: Array<{ label: string; config: Record<string, unknown>; message: str
   },
 ];
 
-describe('#14552 — defineStack cross-reference refusals carry an ADR-0112 envelope', () => {
+describe('defineStack cross-reference refusals carry an ADR-0112 envelope', () => {
   for (const row of rows) {
     describe(row.label, () => {
       it('refuses with code STACK_CROSS_REFERENCE_INVALID and status 422', () => {

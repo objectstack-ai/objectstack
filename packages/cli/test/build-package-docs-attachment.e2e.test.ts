@@ -24,6 +24,16 @@
  * exactly one file on disk, and the assertions read the marker out of the
  * artifact — a count of 1 is satisfiable by an echo of the flat `src/docs/`
  * doc, which is the failure shape this package measured twice this month.
+ *
+ * ## #22190 — the stack's own flat `src/docs/` on a multi-package artifact
+ *
+ * It rides the body of the package that owns the artifact's manifest, ⛔ not
+ * the top level: a multi-package artifact's top level is no package's body,
+ * and the metadata door warned on every boot about the docs it found there.
+ * The unit twin, with the real metadata door booted on the placed artifact,
+ * is `src/utils/collect-docs.flat-docs-owner.test.ts`; this file holds the
+ * command half — what `os build` writes — including the case it cannot
+ * decide (a manifest id no package carries), which keeps the top level.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -96,6 +106,15 @@ export default defineStack({
 }, { strict: false });
 `;
 
+/**
+ * The same project, except that the artifact's own manifest names NO package
+ * entry — so nothing owns the flat `src/docs/`, and ⛔ the build does not guess.
+ */
+const CONFIG_NO_OWNER = CONFIG_MULTI.replace(
+  'manifest: coreManifest,',
+  "manifest: { ...coreManifest, id: 'com.example.pkgdocs.release' },",
+);
+
 /** A single-package project with a flat `src/docs/` — the shape that must not move. */
 const CONFIG_FLAT = `
 import { defineStack } from '@objectstack/spec';
@@ -119,7 +138,7 @@ interface Artifact {
 const readArtifact = (dir: string): Artifact =>
   JSON.parse(readFileSync(join(dir, 'dist', 'objectstack.json'), 'utf8')) as Artifact;
 
-const dirs = { multi: '', flat: '' };
+const dirs = { multi: '', noOwner: '', flat: '' };
 let root = '';
 
 beforeAll(() => {
@@ -139,6 +158,12 @@ beforeAll(() => {
   );
   // The stack's own flat doc, which keeps `stack.manifest.namespace`.
   writeFileSync(join(dirs.multi, 'src', 'docs', 'pkgdocs_index.md'), `# Index\n\n${MARKER_FLAT}\n`);
+
+  dirs.noOwner = join(root, 'no-owner');
+  mkdirSync(join(dirs.noOwner, 'src', 'docs'), { recursive: true });
+  writeFileSync(join(dirs.noOwner, 'objectstack.config.ts'), CONFIG_NO_OWNER);
+  linkSpec(dirs.noOwner);
+  writeFileSync(join(dirs.noOwner, 'src', 'docs', 'pkgdocs_index.md'), `# Index\n\n${MARKER_FLAT}\n`);
 
   dirs.flat = join(root, 'flat');
   mkdirSync(join(dirs.flat, 'src', 'docs'), { recursive: true });
@@ -166,12 +191,30 @@ describe('[#18431] per-package docs reach the owning package body', () => {
     // Pedigree: the bytes came out of that one file, not out of the flat doc.
     expect(orders!.manifest.docs?.[0].content).toContain(MARKER_PKG);
 
-    // The core package was never given docs, and the top level carries only the
-    // stack's own flat doc — the ruling's clause 1, read off the emitted JSON.
+    // [#22190] The stack's own flat doc rides the body of the package that owns
+    // the artifact's manifest — `core` — and the top level carries no `docs` at
+    // all. Before, it sat on the top level, where the metadata door registered
+    // it under the same `core` id and warned on every boot.
     const core = artifact.packages?.find((p) => p.manifest.id === 'com.example.pkgdocs.core');
-    expect(core!.manifest.docs).toBeUndefined();
+    expect(core!.manifest.docs?.map((d) => d.name)).toEqual(['pkgdocs_index']);
+    expect(core!.manifest.docs?.[0].content).toContain(MARKER_FLAT);
+    expect(JSON.stringify(core!.manifest.docs)).not.toContain(MARKER_PKG);
+    expect(artifact).not.toHaveProperty('docs');
+  }, 120_000);
+
+  it('[#22190] keeps the flat doc on the top level when the manifest id names no package — no guess', async () => {
+    // The fixture differs from the one above in the manifest id ALONE — proved,
+    // not assumed: a replace whose anchor moved would build the owned shape.
+    expect(CONFIG_NO_OWNER).not.toBe(CONFIG_MULTI);
+    const run = await runCli(['build'], dirs.noOwner);
+    expect(run.code, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`).toBe(0);
+
+    const artifact = readArtifact(dirs.noOwner);
     expect(artifact.docs?.map((d) => d.name)).toEqual(['pkgdocs_index']);
-    expect(JSON.stringify(artifact.docs)).not.toContain(MARKER_PKG);
+    expect(artifact.docs?.[0].content).toContain(MARKER_FLAT);
+    for (const entry of artifact.packages ?? []) {
+      expect(JSON.stringify(entry.manifest.docs ?? [])).not.toContain(MARKER_FLAT);
+    }
   }, 120_000);
 
   it('reports the whole collection on the step line, package directories named', async () => {

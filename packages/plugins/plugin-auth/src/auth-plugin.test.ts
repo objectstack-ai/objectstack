@@ -1319,7 +1319,7 @@ describe('AuthPlugin', () => {
       const tables: Record<string, any[]> = {
         sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
         sys_user_permission_set: [
-          { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', organization_id: null },
+          { id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
         ],
         sys_member: [],
         sys_organization: [],
@@ -1572,7 +1572,7 @@ describe('AuthPlugin', () => {
       const tables: Record<string, any[]> = {
         sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
         sys_user_permission_set: [
-          { id: 'ups1', user_id: 'admin', permission_set_id: 'ps_admin', organization_id: null },
+          { id: 'ups1', user_id: 'admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
         ],
         // The platform admin already exists; the default-org bootstrap binds it
         // as `owner` on kernel:ready. A member-less seeded user is added later.
@@ -1714,7 +1714,7 @@ describe('AuthPlugin', () => {
 
       // The admin's grant lands: the bootstrap creates the organization, and
       // that moment runs the pass — no restart, no app:seeded.
-      ql.tables.sys_user_permission_set.push({ id: 'ups1', user_id: 'admin', permission_set_id: 'ps_admin', organization_id: null });
+      ql.tables.sys_user_permission_set.push({ id: 'ups1', user_id: 'admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null });
       await fireBootstrapWrite({ object: 'sys_user_permission_set', operation: 'insert' });
       await vi.waitFor(() => {
         expect(ql.tables.sys_member.find((m: any) => m.user_id === 'early_u5')).toMatchObject({ role: 'member' });

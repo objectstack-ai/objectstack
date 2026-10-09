@@ -26,6 +26,14 @@
 //
 // Before the fix the user-mode flows wrongly succeed (security skipped) → RED.
 // After the fix they are correctly denied while system-mode still succeeds → GREEN.
+//
+// The two system flows are `autolaunched`, and since the maintainer's ruling on
+// the trigger door (letter B) a caller that is not the system principal may not
+// start a `runAs: 'system'` flow of a self-triggered type through that door. So
+// the member reaches them the way the platform keeps open for an elevated write:
+// through a `runAs: 'user'` PARENT whose `subflow` node calls the elevated child
+// (`runas_system_touch_via_parent` / `runas_system_read_via_parent`). The
+// elevation the proof is about still belongs to the child; the parent adds none.
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -114,6 +122,47 @@ export const runasUserTouch = touchFlow('runas_user_touch', 'user', 'touched-use
 export const runasSystemRead = readFlow('runas_system_read', 'system');
 export const runasUserRead = readFlow('runas_user_read', 'user');
 
+/**
+ * `<child>_via_parent` — start → subflow(child) → end, under `runAs: 'user'`:
+ * the non-elevated parent a member may start at the trigger door, which hands
+ * `noteId` to the elevated child. With `outputVariable`, the child's outputs
+ * land on the parent's `found` output (so a read child's own `found` arrives as
+ * `output.found.found` on the trigger response).
+ */
+function viaParent(child: Flow, withOutput: boolean): Flow {
+  return {
+    name: `${child.name}_via_parent`,
+    label: `${child.label} (via a user-mode parent)`,
+    type: 'autolaunched',
+    runAs: 'user',
+    variables: [
+      { name: 'noteId', type: 'text', isInput: true },
+      ...(withOutput ? [{ name: 'found', type: 'object', isOutput: true }] : []),
+    ],
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'call',
+        type: 'subflow',
+        label: 'Call the elevated child',
+        config: {
+          flowName: child.name,
+          input: { noteId: '{noteId}' },
+          ...(withOutput ? { outputVariable: 'found' } : {}),
+        },
+      },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'call' },
+      { id: 'e2', source: 'call', target: 'end' },
+    ],
+  };
+}
+
+export const runasSystemTouchViaParent = viaParent(runasSystemTouch, false);
+export const runasSystemReadViaParent = viaParent(runasSystemRead, true);
+
 /** A minimal, self-contained app config the dogfood harness can boot. */
 export const runasFixtureStack = defineStack({
   manifest: {
@@ -125,7 +174,14 @@ export const runasFixtureStack = defineStack({
     description: 'Owner-isolated single-object app exercising flow.runAs identity enforcement.',
   },
   objects: [RunAsNote],
-  flows: [runasSystemTouch, runasUserTouch, runasSystemRead, runasUserRead],
+  flows: [
+    runasSystemTouch,
+    runasUserTouch,
+    runasSystemRead,
+    runasUserRead,
+    runasSystemTouchViaParent,
+    runasSystemReadViaParent,
+  ],
 });
 
 /**
