@@ -1277,21 +1277,6 @@
         "filter.element"
       ]
     },
-    "ui/ElementNumberProps": {
-      "sites": [
-        "filter.element"
-      ]
-    },
-    "ui/ElementRecordPickerProps": {
-      "sites": [
-        "filter.element"
-      ]
-    },
-    "ui/ElementRepeaterProps": {
-      "sites": [
-        "filter.element"
-      ]
-    },
     "ui/FormSection": {
       "sites": [
         "in"

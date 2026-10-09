@@ -341,24 +341,14 @@ const result = ActionButtonPropsSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **object** | `string` | ✅ | Source object |
+| **object** | `never` | optional | [REMOVED] `element:number` property `object` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was a flat second spelling of the node-level `dataSource.object`, and the element now reads its query from `dataSource` only, so a value written here reaches no query. Use `dataSource.object` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (an object name) is unchanged, and where `dataSource` already sets it, delete this one, since the binding's value always won. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **field** | `string` | optional | Field to aggregate |
 | **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation function |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter rules narrowing the aggregate — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-number-filter-rule-array` |
+| **filter** | `never` | optional | [REMOVED] `element:number` property `filter` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was a flat second spelling of the node-level `dataSource.filter`, and the element now reads its query from `dataSource` only, so a value written here reaches no query. Use `dataSource.filter` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (a ViewFilterRule array) is unchanged, and where `dataSource.filter` already has rules, append these to it, since the two always AND-combined. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **format** | `Enum<'number' \| 'currency' \| 'percent'>` | optional | Number display format |
 | **prefix** | `string` | optional | Prefix text (e.g. "$") |
 | **suffix** | `string` | optional | Suffix text (e.g. "%") |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
-
-### Nested Shape: `ElementNumberProps.filter[number]`
-
-View filter rule
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to filter on |
-| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
 
 ### Nested Shape: `ElementNumberProps.aria`
 
@@ -377,39 +367,20 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **object** | `string` | ✅ | Object to pick records from |
+| **object** | `never` | optional | [REMOVED] `element:record_picker` property `object` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was a flat second spelling of the node-level `dataSource.object`, and the picker now reads its query from `dataSource` only, so a value written here reaches no query. Use `dataSource.object` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (an object name) is unchanged, and where `dataSource` already sets it, delete this one, since the binding's value always won. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **labelField** | `string` | optional | Field rendered as each row's text (default `name`) |
 | **valueField** | `string` | optional | Field whose value is written into the bound page variable (default `id`) |
 | **label** | `string \| Record<string, string>` | optional | Control label rendered above the select |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set |
-| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set |
-| **limit** | `integer` | optional | Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50) |
+| **filter** | `never` | optional | [REMOVED] `element:record_picker` property `filter` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was a flat second spelling of the node-level `dataSource.filter`, and the picker now reads its query from `dataSource` only, so a value written here reaches no query. Use `dataSource.filter` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (a ViewFilterRule array) is unchanged, and where `dataSource` already sets it, delete this one, since the binding's value always won. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **sort** | `never` | optional | [REMOVED] `element:record_picker` property `sort` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was a flat second spelling of the node-level `dataSource.sort`, and the picker now reads its query from `dataSource` only, so a value written here reaches no query. Use `dataSource.sort` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (a `[{ field, order }]` array) is unchanged, and where `dataSource` already sets it, delete this one, since the binding's value always won. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **limit** | `never` | optional | [REMOVED] `element:record_picker` property `limit` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was a flat second spelling of the node-level `dataSource.limit`, and the picker now reads its query from `dataSource` only, so a value written here reaches no query. Use `dataSource.limit` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (a positive integer) is unchanged, and where `dataSource` already sets it, delete this one, since the binding's value always won. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **targetVariable** | `never` | optional | [REMOVED] `element:record_picker` property `targetVariable` was removed in @objectstack/spec 17 (ADR-0049) — it was a declarative hint no renderer ever read: the live binding runs the other direction, resolved from the page variable whose `source` names this component's `id`, so authoring only `targetVariable` bound nothing while reporting success. Delete the key; to bind the picked record id, declare it on the variable — `variables: [{ name: '<var>', type: 'record_id', source: '<this component id>' }]`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
 | **emptyText** | `string \| Record<string, string>` | optional | Text shown when the query returns no records (default "No records") |
 | **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use `filter` (or the component-level `dataSource.filter`), which the query path does apply. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use the component-level `dataSource.filter`, which the query path does apply. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
-
-### Nested Shape: `ElementRecordPickerProps.filter[number]`
-
-View filter rule
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to filter on |
-| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
-
-### Nested Shape: `ElementRecordPickerProps.sort[number]`
-
-Sort field and direction pair
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to sort by |
-| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
 
 ### Nested Shape: `ElementRecordPickerProps.aria`
 
@@ -428,12 +399,12 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **object** | `string` | ✅ | Object whose records the list repeats over — required: without it the list never queries |
+| **object** | `never` | optional | [REMOVED] `element:repeater` property `object` was removed in @objectstack/spec 18 (ADR-0087 D2) — the list now reads its query from the node-level `dataSource` binding only, so a value written here reaches no query. Use `dataSource.object` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (an object name) is unchanged, and where `dataSource` already sets it too, keep the value written here, which is the one the list honoured. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **titleField** | `string` | optional | Field shown first on each line, emphasized |
 | **fields** | `(string \| { field: string })[]` | optional | Fields shown after the title on each line, in order — a bare field name, or `{ field }` |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter rules narrowing the records — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` in this map shares |
-| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order — `[{ field, order }]` |
-| **limit** | `integer` | optional | Maximum records fetched and shown |
+| **filter** | `never` | optional | [REMOVED] `element:repeater` property `filter` was removed in @objectstack/spec 18 (ADR-0087 D2) — the list now reads its query from the node-level `dataSource` binding only, so a value written here reaches no query. Use `dataSource.filter` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (a ViewFilterRule array) is unchanged, and where `dataSource` already sets it too, keep the value written here, which is the one the list honoured. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **sort** | `never` | optional | [REMOVED] `element:repeater` property `sort` was removed in @objectstack/spec 18 (ADR-0087 D2) — the list now reads its query from the node-level `dataSource` binding only, so a value written here reaches no query. Use `dataSource.sort` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (a `[{ field, order }]` array) is unchanged, and where `dataSource` already sets it too, keep the value written here, which is the one the list honoured. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **limit** | `never` | optional | [REMOVED] `element:repeater` property `limit` was removed in @objectstack/spec 18 (ADR-0087 D2) — the list now reads its query from the node-level `dataSource` binding only, so a value written here reaches no query. Use `dataSource.limit` on the component node, a sibling of `type` rather than a key inside `properties`. Move the key; the value (a positive integer) is unchanged, and where `dataSource` already sets it too, keep the value written here, which is the one the list honoured. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **emptyText** | `string` | optional | Copy shown when the query returns no records (renderer default: "No records"). A literal string — localize through the translation bundle entry for this component id |
 | **divided** | `boolean` | optional | Draw a separator between lines (renderer default: true) |
 
@@ -442,25 +413,6 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name |
-
-### Nested Shape: `ElementRepeaterProps.filter[number]`
-
-View filter rule
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to filter on |
-| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
-
-### Nested Shape: `ElementRepeaterProps.sort[number]`
-
-Sort field and direction pair
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to sort by |
-| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
 
 
 ---
@@ -845,7 +797,7 @@ Sort field and direction pair
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Columns — all field-name strings, or all column entries `{ field, label?, width?, align?, hidden?, sortable?, … }`, the same union a list view's `columns` declares. One spelling per list: an array mixing strings and column objects is refused |
 | **fields** | `string[]` | optional | Field-name fallback the grid reads when `columns` is absent — bare field names (`['name', 'amount']`); write column decoration such as `label` or `width` on `columns` |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
-| **defaultFilters** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Legacy base-filter fallback, read only when `filter` is absent — the SAME ViewFilterRule array form `[{ field, operator, value }, ...]` as `filter`, lowered through the same sink. Prefer `filter`. The MongoDB-style record form, a bare string and an ObjectQL AST tuple array are refused — see migration `object-grid-default-filters-rule-array` |
+| **defaultFilters** | `never` | optional | [REMOVED] `object-grid` property `defaultFilters` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the legacy second spelling of `filter`: the same rules, read only when `filter` lowered to nothing, so one intent had two spellings and a grid authoring both silently ignored this one. Use `filter`. Rename the key where `filter` is empty; the value (a ViewFilterRule array, `[{ field, operator, value }, ...]`) is unchanged. Where `filter` already has rules, delete this key: the grid never read it there. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **defaultSort** | `never` | optional | [REMOVED] `object-grid` property `defaultSort` was removed in @objectstack/spec 17 (ADR-0049) — it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when `sort` was absent, so one intent had two spellings and a grid authoring both silently ignored this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` becomes `sort: [{ field, order }]`); the pair itself is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] } & Record<string, any>` | optional | Pagination config (`{ pageSize, pageSizeOptions, … }`); its presence enables paging. `pageSize` and every `pageSizeOptions` entry is a positive integer — the accept set the view arm's `PaginationConfigSchema` already rules; the bag stays open, so other keys pass through unvalidated |
@@ -906,16 +858,6 @@ Sort field and direction pair
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
 ### Nested Shape: `ObjectGridProps.filter[number]`
-
-View filter rule
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to filter on |
-| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
-
-### Nested Shape: `ObjectGridProps.defaultFilters[number]`
 
 View filter rule
 
