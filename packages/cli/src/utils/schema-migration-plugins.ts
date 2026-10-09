@@ -2,8 +2,15 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
+import {
+  resolveAuthSecret,
+  resolvePlatformAuthComposition,
+  resolveStackTiers,
+  type PlatformAuthSkipReason,
+} from '@objectstack/core';
 import { isAppPluginLike } from './graft-runtime-hooks.js';
-import { stackDeclaredCapabilities, stackDeclaresMetadata } from './stack-collections.js';
+import { isHostConfig } from './plugin-detection.js';
+import { resolveStackCollection, stackDeclaredCapabilities, stackDeclaresMetadata } from './stack-collections.js';
 
 /**
  * The object set a SCHEMA migration is planned against (#12938).
@@ -61,6 +68,14 @@ import { stackDeclaredCapabilities, stackDeclaresMetadata } from './stack-collec
  *    posture ({@link resolveRequiredProviders}). Without it every config that
  *    lists a connector in `plugins` and `automation` in `requires` — the blank
  *    template and the showcase among them — could not boot this command.
+ *  - **The security plugin behind `serve`'s auth gate — only when the caller
+ *    asks** (`authGatedSecurity`, #22371). `os migrate
+ *    security-catalog-overlays` needs the permission-set names the deployment's
+ *    boot holds, and the security plugin declares its shipped sets only where
+ *    `serve`'s auth gate composes it. The gate is the one rule `serve` asks
+ *    (`resolvePlatformAuthComposition`, `@objectstack/core`), so this is not an
+ *    invented object set: it is the one this deployment's boot has. `plan` and
+ *    `apply` do not ask, and compose nothing tier-gated, as before.
  *
  * ## Phase 1 only for host plugins — and why that is the contract, not a dodge
  *
@@ -1241,6 +1256,16 @@ export interface SchemaMigrationComposition {
    * kernel bootstrap returns.
    */
   lifecycle?: DeclarationBootLifecycle;
+  /**
+   * [#22371] What the auth gate answered when the caller asked for the
+   * security plugin `os serve` composes behind it (`authGatedSecurity`) —
+   * `undefined` when it did not ask. `composed: false` names the gate's reason,
+   * or `config-unloadable` when the host config exists and could not be read,
+   * so the gate had nothing to read.
+   */
+  securityPlugin?:
+    | { readonly composed: true }
+    | { readonly composed: false; readonly reason: PlatformAuthSkipReason | 'config-unloadable' };
 }
 
 const NOTHING_COMPOSED: SchemaMigrationComposition = Object.freeze({
@@ -1415,6 +1440,14 @@ export async function buildSchemaMigrationPlugins(opts: {
   basePlugins: readonly unknown[];
   cwd?: string;
   skipSeedData?: boolean;
+  /**
+   * [#22371] Also compose the security plugin `os serve` composes behind its
+   * auth gate, for its declarations only — see {@link composeAuthGatedSecurity}.
+   * `artifactRequires` is the compiled artifact's `requires` as the standalone
+   * stack surfaced it. Unset (every caller but `os migrate
+   * security-catalog-overlays`): nothing tier-gated is composed, as before.
+   */
+  authGatedSecurity?: { artifactRequires?: readonly string[] };
 }): Promise<SchemaMigrationComposition> {
   const cwd = opts.cwd ?? process.cwd();
   const hostConfigPath = findHostConfig(cwd);
@@ -1424,7 +1457,10 @@ export async function buildSchemaMigrationPlugins(opts: {
   // to mirror, and the five-table data stack is the honest answer. Returning
   // early — rather than composing the platform floor anyway — is what keeps an
   // artifact-less, config-less run byte-identical to the one before this card.
-  if (!hostConfigPath && !hasArtifactApp) return NOTHING_COMPOSED;
+  // [#22371] Unless the caller asked for the auth-gated security plugin: a
+  // bare `os serve` composes it on such a project too, and its shipped sets
+  // are package-held names there as anywhere.
+  if (!hostConfigPath && !hasArtifactApp && !opts.authGatedSecurity) return NOTHING_COMPOSED;
 
   // #13332 — armed FIRST, so its `init()` is ordered ahead of every host
   // plugin's: `resolvePluginOrder` is a DFS in registration order, and a host
@@ -1441,6 +1477,9 @@ export async function buildSchemaMigrationPlugins(opts: {
   // #21732 — the config's capability declarations, read off the same loaded
   // config the plugins came from. See {@link resolveRequiredProviders}.
   let loadedRequires: unknown;
+  // [#22371] The loaded config and its own plugins, for the auth gate below.
+  let loadedConfig: unknown;
+  let loadedHostPlugins: readonly unknown[] = [];
 
   if (hostConfigPath) {
     try {
@@ -1457,6 +1496,8 @@ export async function buildSchemaMigrationPlugins(opts: {
       // unordered and the plan exited 1.
       loadedRequires = stackDeclaredCapabilities(config);
       const hostPlugins: unknown[] = Array.isArray(config?.plugins) ? config.plugins : [];
+      loadedConfig = config;
+      loadedHostPlugins = hostPlugins;
       for (const plugin of hostPlugins) {
         if (plugin && typeof plugin === 'object') plugins.push(composeForDeclarations(plugin, lifecycle));
       }
@@ -1550,9 +1591,108 @@ export async function buildSchemaMigrationPlugins(opts: {
     notes.push(...resolved.notes);
   }
 
+  // [#22371] The security plugin `serve` pairs with AuthPlugin, behind the
+  // same gate — composed ahead of the host plugins, where `serve` registers it,
+  // so a config's own instance of the same name supersedes it here as there.
+  let securityPlugin: SchemaMigrationComposition['securityPlugin'];
+  if (opts.authGatedSecurity) {
+    if (hostConfigPath && !hostConfigLoaded) {
+      securityPlugin = { composed: false, reason: 'config-unloadable' };
+    } else {
+      const gated = await composeAuthGatedSecurity({
+        config: loadedConfig,
+        hostPlugins: loadedHostPlugins,
+        basePlugins: opts.basePlugins,
+        artifactRequires: opts.authGatedSecurity.artifactRequires,
+        lifecycle,
+      });
+      securityPlugin = gated.status;
+      if (gated.plugin) plugins.splice(1, 0, gated.plugin);
+      notes.push(gated.note);
+    }
+  }
+
   return {
     plugins, hostConfigPath, hostConfigLoaded, hostConfigError, notes, coverage: null, writeGuard, lifecycle,
+    ...(securityPlugin ? { securityPlugin } : {}),
   };
+}
+
+/**
+ * [#22371] The security plugin `os serve` composes for this deployment, for its
+ * declarations only — or why it composes none.
+ *
+ * `serve` composes it in its auth step, paired with `AuthPlugin`, behind the
+ * gate `resolvePlatformAuthComposition` (`@objectstack/core`) states: the stack
+ * mounts no `AuthPlugin` of its own, the `auth` tier is on, the composition is
+ * not a host kernel, and an auth secret resolves. Its `init()` declares the
+ * platform's shipped permission sets on its own manifest, so behind the gate
+ * they are package-held names, and the cold boot's catalog check refuses an
+ * environment row over one of them; outside it they are not. Measured on
+ * #22371: one database and config were refused on 3 names with
+ * `OS_AUTH_SECRET` set and on 2 without it. So the gate is read from what
+ * `serve` reads, in `serve`'s own spelling:
+ *
+ *  - the plugins: the host config's and the standalone stack's (`serve`'s
+ *    `plugins` is one or the other — a host config's own, or the stack merged
+ *    over an app config — and the gate asks only for two names among them);
+ *  - the tiers: the config's declared `tiers` (no boot carries an artifact's),
+ *    and the `requires` `serve` reads — a host config's own; otherwise the
+ *    compiled artifact's when it declares any, which `serve`'s merge lays over
+ *    the config's, else the config's. No `--preset` here: the default preset;
+ *  - the secret and the development fallback: `NODE_ENV=development` is this
+ *    command's development posture (it has no `--dev`).
+ *
+ * `AuthPlugin` itself is not composed: it holds no catalog name, and its
+ * `init()` is not this boot's to run. The security plugin is wrapped by
+ * {@link composeForDeclarations}, like a host plugin: its `start()` seeds the
+ * shipped sets into `sys_permission_set`, which this boot must not do.
+ */
+async function composeAuthGatedSecurity(input: {
+  config: unknown;
+  hostPlugins: readonly unknown[];
+  basePlugins: readonly unknown[];
+  artifactRequires?: readonly string[];
+  lifecycle: DeclarationBootLifecycle;
+}): Promise<{
+  plugin?: unknown;
+  status: NonNullable<SchemaMigrationComposition['securityPlugin']>;
+  note: string;
+}> {
+  const config = input.config ?? {};
+  const requires = !isHostConfig(config) && Array.isArray(input.artifactRequires)
+    ? input.artifactRequires.filter((t): t is string => typeof t === 'string')
+    : stackDeclaredCapabilities(config);
+  const declaredTiers = resolveStackCollection(config, 'tiers').filter((t): t is string => typeof t === 'string');
+  const decision = resolvePlatformAuthComposition({
+    plugins: [...input.basePlugins, ...input.hostPlugins],
+    tiers: resolveStackTiers({ declaredTiers, requires }),
+    secret: resolveAuthSecret({ isDev: process.env.NODE_ENV === 'development' }),
+  });
+  if (!decision.composes) {
+    return {
+      status: { composed: false, reason: decision.reason },
+      note: `Did not compose the security plugin: \`os serve\` composes none here (${describeAuthSkip(decision.reason)}), `
+        + 'so its shipped permission sets are not package-held names on this deployment\'s boot.',
+    };
+  }
+  const { SecurityPlugin, appSecurityPluginOptions } = await import('@objectstack/plugin-security');
+  return {
+    plugin: composeForDeclarations(new SecurityPlugin(appSecurityPluginOptions(config)), input.lifecycle),
+    status: { composed: true },
+    note: 'Composed the security plugin as `os serve` composes it behind its auth gate (an auth secret resolves), '
+      + 'for its declarations only: its shipped permission sets are package-held names on this deployment\'s boot.',
+  };
+}
+
+/** The gate's reason, as an operator reads it. */
+function describeAuthSkip(reason: PlatformAuthSkipReason): string {
+  switch (reason) {
+    case 'stack-supplies-auth': return 'the stack mounts its own AuthPlugin';
+    case 'auth-tier-off': return 'the `auth` tier is off';
+    case 'host-kernel': return 'a host kernel, whose auth is per project';
+    case 'no-secret': return 'no OS_AUTH_SECRET, and NODE_ENV is not development';
+  }
 }
 
 /**

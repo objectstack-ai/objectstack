@@ -429,6 +429,32 @@ export async function bootSchemaStack(
      * whatever directory the test runner happens to be standing in (#4065).
      */
     projectRoot?: string;
+    /**
+     * [#22371] Boot WITHOUT reading `sys_metadata` back into the registry.
+     * Default `true` — every caller before this one diffs and scans the object
+     * set the serving boot registers, and that includes what it hydrates.
+     *
+     * `false` is the boot `os migrate security-catalog-overlays` takes: it
+     * lists the environment-wide rows the cold boot's catalog check refuses
+     * (ADR-0048 N.3), and that check judges what hydration wrote, so a boot of
+     * such a deployment that hydrates is refused before the command can run.
+     * Hydration off, the check meets an empty environment half and the boot
+     * comes up; the command reads the rows itself (maintainer ruling letter B
+     * on #22371, record 6074838935).
+     */
+    hydrateMetadata?: boolean;
+    /**
+     * [#22371] With {@link composeHostStack}, also compose the security plugin
+     * when `os serve` would — behind its auth gate (`resolvePlatformAuthComposition`
+     * in `@objectstack/core`, the one rule both answer) — for its declarations
+     * only. Its `init()` declares the platform's shipped permission sets on its
+     * own manifest, which is what makes them package-held names at boot.
+     *
+     * Off by default and opted into at the call site, like `composeHostStack`:
+     * `os migrate plan` / `apply` compose no tier-gated plugin, and this does
+     * not change that. See `buildSchemaMigrationPlugins`'s `authGatedSecurity`.
+     */
+    composeAuthGatedSecurity?: boolean;
   },
 ): Promise<SchemaStack> {
   // Taken BEFORE the first line the boot can print. `createStandaloneStack`
@@ -486,6 +512,8 @@ export async function bootSchemaStack(
     // repaired. `duplicates.integration.test.ts` pins this end of it: boot
     // included, the run must leave the database byte-identical.
     runPlatformMigrations: false,
+    // [#22371] Off only when the caller asks; see the option.
+    ...(opts.hydrateMetadata === false ? { hydrateMetadataFromDb: false } : {}),
   });
 
   // No HTTP, no cluster — this is a one-shot schema operation.
@@ -508,6 +536,11 @@ export async function bootSchemaStack(
         cwd: opts.projectRoot ?? process.cwd(),
         // The same answer the standalone stack got above: never on this boot.
         skipSeedData: true,
+        // [#22371] The compiled artifact's `requires`, as `serve`'s merge lays
+        // them over the config's, for the auth gate's tier reading.
+        ...(opts.composeAuthGatedSecurity === true
+          ? { authGatedSecurity: { artifactRequires: stack.requires } }
+          : {}),
       })
     : {
         plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,

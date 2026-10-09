@@ -28,6 +28,10 @@ export * from './capability-providers.js';
 // [#22301] And the rule for the app's own `plugins` array, which both boots
 // mount: what a string, bundle or instance entry becomes. Same reason.
 export * from './stack-plugins.js';
+// [#22371] And the rule that decides whether a boot composes the platform auth
+// family (and the security plugin paired with it): `os serve` and
+// `os migrate security-catalog-overlays` answer it alike. Same reason.
+export * from './stack-auth.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';

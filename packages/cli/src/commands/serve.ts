@@ -30,7 +30,18 @@ import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTena
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 // [#22301] The `requires` token → provider table and its exact identity match,
 // shared with `@objectstack/verify`'s `bootStack` — see `Serve.CAPABILITY_PROVIDERS`.
-import { CAPABILITY_PROVIDERS, providesCapability, materializeStackPlugin, type CapabilitySpec } from '@objectstack/core';
+import {
+  CAPABILITY_PROVIDERS,
+  providesCapability,
+  materializeStackPlugin,
+  STACK_TIER_PRESETS,
+  CAPABILITY_TO_TIER as SHARED_CAPABILITY_TO_TIER,
+  resolveStackTiers,
+  resolveAuthSecret,
+  resolvePlatformAuthComposition,
+  stackSuppliesAuthPlugin,
+  type CapabilitySpec,
+} from '@objectstack/core';
 // The posture vocabulary, read from the package that DEFINES it (#5359) — the
 // boot gate's fix list enumerates the accepted values, and a second literal
 // list would be free to drift the day a posture is added.
@@ -1323,12 +1334,13 @@ export default class Serve extends Command {
    * Auto-registered plugin tiers. Plugins explicitly listed in
    * `config.plugins` are always loaded — tiers only gate the optional
    * auto-registration blocks below (AIService, I18n, UI portals, etc.).
+   *
+   * [#22371] A handle over `STACK_TIER_PRESETS` (`@objectstack/core`), where the
+   * tier rule now lives beside the auth gate it feeds: `os migrate
+   * security-catalog-overlays` answers that gate as this command does. One
+   * declaration, several readers — ⛔ never a second copy here.
    */
-  static readonly TIER_PRESETS: Record<string, string[]> = {
-    minimal: ['core'],
-    default: ['core', 'i18n', 'ui', 'ai', 'auth'],
-    full: ['core', 'i18n', 'ui', 'ai', 'auth'],
-  };
+  static readonly TIER_PRESETS: Readonly<Record<string, readonly string[]>> = STACK_TIER_PRESETS;
 
   /**
    * True when a dynamic `import()` / `require.resolve()` failed because the
@@ -1566,16 +1578,11 @@ export default class Serve extends Command {
    * `requires`. These have no CAPABILITY_PROVIDERS entry — their loading is
    * resolved by dedicated blocks in run() (`ai`/`ai-studio` by the intent-driven
    * AI block (#1597), `i18n`/`ui`/`auth` by their tier blocks).
+   *
+   * [#22371] A handle over `CAPABILITY_TO_TIER` (`@objectstack/core`), for the
+   * reason `TIER_PRESETS` gives.
    */
-  static readonly CAPABILITY_TO_TIER: Record<string, string> = {
-    ai: 'ai',
-    // `ai-studio` (AI-driven authoring) rides on the base AI service, so
-    // requiring it opens the same `ai` tier (#1597).
-    'ai-studio': 'ai',
-    i18n: 'i18n',
-    ui: 'ui',
-    auth: 'auth',
-  };
+  static readonly CAPABILITY_TO_TIER: Readonly<Record<string, string>> = SHARED_CAPABILITY_TO_TIER;
 
   /**
    * Is one of `identities` ALREADY loaded — i.e. did the app supply this
@@ -2641,7 +2648,6 @@ export default class Serve extends Command {
       // and shadow any capability resolution (i.e. an explicit
       // instance wins over the auto-loader).
       const presetName = flags.preset ?? (isDev ? 'default' : 'default');
-      const presetTiers = Serve.TIER_PRESETS[presetName] ?? Serve.TIER_PRESETS.default;
       // Dedupe `requires` (Set keeps first-seen order). The deprecated
       // `aiStudio`/`aiSeat` alias canonicalization was removed in framework#3308
       // — legacy spellings are now unknown tokens (warned below, rejected at
@@ -2719,17 +2725,17 @@ export default class Serve extends Command {
       // in `requires`. Capabilities NOT in that map (e.g. `automation`,
       // `analytics`, `audit`) bypass tier gating and are loaded directly by
       // the capability-resolver block further down.
-      const CAPABILITY_TO_TIER = Serve.CAPABILITY_TO_TIER;
-      const requiredTiers = requires
-        .map((c) => CAPABILITY_TO_TIER[c])
-        .filter((t): t is string => typeof t === 'string');
+      //
       // [#22288] `tiers` is package-owned like `requires`, and no boot path
       // lays it over the top level (`createStandaloneStack` does not carry it),
       // so a package's own `tiers` were ignored on `os serve`, `os dev` and
       // `os start` alike. Same rule as `requires` above.
       const declaredTiers = resolveStackCollection(config, 'tiers') as string[];
-      const baseTiers = declaredTiers.length > 0 ? declaredTiers : presetTiers;
-      const tiers: Set<string> = new Set([...baseTiers, ...requiredTiers]);
+      // [#22371] The precedence itself — declared tiers, else the preset's, plus
+      // the tier each `requires` token opens — is `resolveStackTiers`
+      // (`@objectstack/core`), the rule the auth gate below is fed by in this
+      // command and in `os migrate security-catalog-overlays` alike.
+      const tiers: Set<string> = resolveStackTiers({ declaredTiers, requires, preset: presetName });
       const tierEnabled = (t: string) => tiers.has(t);
       const requiresCapability = (c: string) => requires.includes(c);
 
@@ -3781,18 +3787,30 @@ export default class Serve extends Command {
       // @objectstack/plugin-auth. Without this block, running
       // `objectstack dev` on a vanilla user stack would 404 on
       // login/register flows.
-      const hasAuthPlugin = plugins.some(
-        (p: any) => p?.name === 'com.objectstack.auth' || p?.constructor?.name === 'AuthPlugin'
-      );
+      //
+      // [#22371] WHETHER this block composes is ONE rule,
+      // `resolvePlatformAuthComposition` (`@objectstack/core`), which
+      // `os migrate security-catalog-overlays` asks too: the security plugin
+      // paired below declares its shipped permission sets on its manifest, so
+      // this gate decides which names the cold boot's catalog check holds
+      // against the environment. The gate, in order: the stack mounts no
+      // AuthPlugin of its own, the `auth` tier is on, the composition is not a
+      // host kernel, and an auth secret resolves. The first two skip this block
+      // silently — the `if` below asks them through the rule's own predicate
+      // and tier set — and the last two are reported inside it, as before; HOW
+      // the plugins are constructed stays this command's.
+      const hasAuthPlugin = stackSuppliesAuthPlugin(plugins);
+      const authComposition = resolvePlatformAuthComposition({
+        plugins,
+        tiers,
+        // In dev, the rule falls back to a stable local secret so users don't
+        // have to set OS_AUTH_SECRET just to try the login/register flow.
+        secret: resolveAuthSecret({ isDev }),
+      });
       if (!hasAuthPlugin && tierEnabled('auth')) {
         try {
           const authPkg = '@objectstack/plugin-auth';
           const { AuthPlugin } = await import(/* webpackIgnore: true */ authPkg);
-
-          // In dev, fall back to a stable local secret so users don't have
-          // to set OS_AUTH_SECRET just to try the login/register flow.
-          const secret = readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true })
-            ?? (isDev ? 'dev-only-insecure-secret-change-me-in-production' : undefined);
 
           // Guard: in cloud-connected runtime mode (e.g. objectos worker)
           // the host kernel is a pure routing shell. Auth is owned by each
@@ -3808,18 +3826,15 @@ export default class Serve extends Command {
           // reliable signal — a regular `objectstack dev` app may set it
           // just to enable the marketplace proxy yet still want its own
           // local AuthPlugin.
-          const isHostKernel = plugins.some(
-            (p: any) => p?.name === 'com.objectstack.runtime.objectos-environment'
-              || p?.constructor?.name === 'ObjectOSEnvironmentPlugin'
-          );
-          if (isHostKernel) {
+          if (!authComposition.composes && authComposition.reason === 'host-kernel') {
             console.warn(chalk.yellow(
               '  ⚠ AuthPlugin skipped on host kernel — runtime mode (ObjectOSEnvironmentPlugin detected).\n' +
               '    Auth is owned per-project by ArtifactKernelFactory in the cloud distribution.'
             ));
-          } else if (!secret) {
+          } else if (!authComposition.composes) {
             console.warn(chalk.yellow('  ⚠ AuthPlugin skipped — set OS_AUTH_SECRET to enable authentication in production'));
           } else {
+            const secret = authComposition.secret;
             // Resolution is UNCHANGED (same chain, same precedence) — the seam
             // additionally reports where the value came from and whether it
             // parses, so an unusable one can be said out loud instead of
