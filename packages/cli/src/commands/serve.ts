@@ -40,6 +40,7 @@ import {
   resolveAuthSecret,
   resolvePlatformAuthComposition,
   stackSuppliesAuthPlugin,
+  isDevelopmentBoot,
   type CapabilitySpec,
 } from '@objectstack/core';
 // The posture vocabulary, read from the package that DEFINES it (#5359) — the
@@ -121,6 +122,7 @@ import {
   bundleDeclaresTranslations,
   resolveStackCollection,
   stackDeclaredCapabilities,
+  stackBootPlugins,
 } from '../utils/stack-collections.js';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
 import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
@@ -1204,7 +1206,9 @@ export default class Serve extends Command {
     prebuilt: Flags.boolean({ description: 'Skip esbuild/bundle-require — load config as native ESM (production mode)', default: false }),
     preset: Flags.string({
       description: 'Plugin tier preset: minimal | default | full (overridden by config.tiers if set)',
-      options: ['minimal', 'default', 'full'],
+      // [#22371] The keys of the table `resolveStackTiers` reads — the same
+      // options `os migrate security-catalog-overlays --preset` offers.
+      options: Object.keys(STACK_TIER_PRESETS),
     }),
     'log-level': Flags.string({
       description: 'Kernel logger level. Defaults to $OS_LOG_LEVEL / $LOG_LEVEL, else `warn` so flow/hook execution failures surface (ADR-0032). Boot-phase warnings are replayed under the startup banner; `debug`/`info` stream the whole boot live instead. Use `silent` to fully quiet the runtime.',
@@ -2165,7 +2169,10 @@ export default class Serve extends Command {
     }
     const tenancyPosture = postureGate.posture;
 
-    const isDev = flags.dev || process.env.NODE_ENV === 'development';
+    // [#22371] `--dev`, or NODE_ENV exactly `development` — `isDevelopmentBoot`
+    // (`@objectstack/core`), the reading the auth secret's development fallback
+    // is decided by here and in `os migrate security-catalog-overlays --dev`.
+    const isDev = isDevelopmentBoot(flags.dev);
 
     // Resolves the config path AND anchors every host-anchored load in this
     // file at the app that owns it (#11185) — one call, so the anchor cannot be
@@ -3002,13 +3009,10 @@ export default class Serve extends Command {
         if (sduiManifestLine) console.warn(chalk.yellow(`  ⚠ ${sduiManifestLine}`));
       }
 
-      // Load plugins from configuration
-      let plugins = config.plugins || [];
-
-      // Merge devPlugins if in dev mode
-      if (flags.dev && config.devPlugins) {
-        plugins = [...plugins, ...config.devPlugins];
-      }
+      // Load plugins from configuration, and merge devPlugins if in dev mode —
+      // `stackBootPlugins` [#22371], the list `os migrate
+      // security-catalog-overlays --dev` composes too.
+      let plugins: any[] = stackBootPlugins(config, flags.dev);
 
       // 1. Auto-register ObjectQL Plugin if objects define but plugins missing
       // [#15006] The whole gate — the `objects` read AND the already-composed

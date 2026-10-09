@@ -8,7 +8,7 @@ import { readEnvWithDeprecation } from '@objectstack/types';
  * does not mount `AuthPlugin` itself. Read by `os serve` (`@objectstack/cli`,
  * its "5d. Auto-register AuthPlugin (and paired Security/Audit)" step) and by
  * `os migrate security-catalog-overlays`, which composes what `serve` composes
- * for the first phase.
+ * for the first phase, under the same `--preset` and `--dev`.
  *
  * ## Why this lives in `@objectstack/core`
  *
@@ -39,7 +39,8 @@ import { readEnvWithDeprecation } from '@objectstack/types';
  *  3. the composition is a host kernel (`ObjectOSEnvironmentPlugin`, the cloud
  *     runtime: auth belongs to each per-project kernel there) → none;
  *  4. no auth secret ({@link resolveAuthSecret}: `OS_AUTH_SECRET`, its two legacy
- *     spellings, or the development fallback) → none;
+ *     spellings, or — on a development boot ({@link isDevelopmentBoot}) — the
+ *     development fallback) → none;
  *  5. otherwise the platform composes `AuthPlugin`, and the security plugin
  *     beside it.
  *
@@ -47,11 +48,16 @@ import { readEnvWithDeprecation } from '@objectstack/types';
  * `AuthPlugin` with its origins, providers and cookies, and warns on 3 and 4;
  * the offline step composes the security plugin for its declarations alone.
  *
- * Pure apart from {@link resolveAuthSecret}'s environment read: importing this
- * module loads nothing.
+ * Pure apart from the environment reads of {@link resolveAuthSecret} and
+ * {@link isDevelopmentBoot}: importing this module loads nothing.
  */
 
-/** The tier presets `os serve --preset` names. `default` is the fallback for an unknown name. */
+/**
+ * The tier presets `os serve --preset` names — and `os migrate
+ * security-catalog-overlays --preset`, the same flag over the same table. Each
+ * command's flag lists these keys as its options. `default` is the fallback
+ * for an unknown or absent name.
+ */
 export const STACK_TIER_PRESETS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   minimal: Object.freeze(['core']),
   default: Object.freeze(['core', 'i18n', 'ui', 'ai', 'auth']),
@@ -119,9 +125,22 @@ export function isHostKernelComposition(plugins: readonly unknown[]): boolean {
 export const DEV_AUTH_SECRET_FALLBACK = 'dev-only-insecure-secret-change-me-in-production';
 
 /**
+ * Is this a development boot? `--dev` was passed, or `NODE_ENV` is exactly
+ * `development` — `os serve`'s `isDev`, read where the flag is parsed. An
+ * unset `NODE_ENV` is not development (`serve` defaults it to `production`).
+ * It decides the auth secret's development fallback ({@link resolveAuthSecret}),
+ * which is why `os migrate security-catalog-overlays --dev` reads it here
+ * rather than spelling it again.
+ */
+export function isDevelopmentBoot(devFlag: boolean | undefined): boolean {
+  return devFlag === true || process.env.NODE_ENV === 'development';
+}
+
+/**
  * The auth secret this boot runs with: `OS_AUTH_SECRET`, else its legacy
- * spellings `AUTH_SECRET` / `BETTER_AUTH_SECRET` (read silently), else — in
- * development only — {@link DEV_AUTH_SECRET_FALLBACK}; `undefined` when none.
+ * spellings `AUTH_SECRET` / `BETTER_AUTH_SECRET` (read silently), else — on a
+ * development boot only ({@link isDevelopmentBoot}) —
+ * {@link DEV_AUTH_SECRET_FALLBACK}; `undefined` when none.
  */
 export function resolveAuthSecret(input: { readonly isDev: boolean }): string | undefined {
   return readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true })

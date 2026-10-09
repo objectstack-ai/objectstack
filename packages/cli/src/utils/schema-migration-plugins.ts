@@ -3,6 +3,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import {
+  isDevelopmentBoot,
   resolveAuthSecret,
   resolvePlatformAuthComposition,
   resolveStackTiers,
@@ -10,7 +11,12 @@ import {
 } from '@objectstack/core';
 import { isAppPluginLike } from './graft-runtime-hooks.js';
 import { isHostConfig } from './plugin-detection.js';
-import { resolveStackCollection, stackDeclaredCapabilities, stackDeclaresMetadata } from './stack-collections.js';
+import {
+  resolveStackCollection,
+  stackBootPlugins,
+  stackDeclaredCapabilities,
+  stackDeclaresMetadata,
+} from './stack-collections.js';
 
 /**
  * The object set a SCHEMA migration is planned against (#12938).
@@ -1448,6 +1454,20 @@ export async function buildSchemaMigrationPlugins(opts: {
    * security-catalog-overlays`): nothing tier-gated is composed, as before.
    */
   authGatedSecurity?: { artifactRequires?: readonly string[] };
+  /**
+   * [#22371] The `os serve` flags this composition answers for, with `serve`'s
+   * meaning — `os migrate security-catalog-overlays`' `--dev` and `--preset`:
+   *
+   *  - `dev`: the host config's `devPlugins` are composed after its `plugins`
+   *    (`stackBootPlugins`, the merge `serve` registers), and the boot is a
+   *    development one for the auth gate's secret fallback
+   *    (`isDevelopmentBoot`, `@objectstack/core`);
+   *  - `preset`: the tier preset the auth gate's tiers fall back to when the
+   *    stack declares none (`resolveStackTiers`).
+   *
+   * Unset: `serve` with neither flag. Every other caller passes none.
+   */
+  serveFlags?: { readonly dev?: boolean; readonly preset?: string };
 }): Promise<SchemaMigrationComposition> {
   const cwd = opts.cwd ?? process.cwd();
   const hostConfigPath = findHostConfig(cwd);
@@ -1495,7 +1515,9 @@ export async function buildSchemaMigrationPlugins(opts: {
       // top-level read left a plugin's hard dependency on that provider
       // unordered and the plan exited 1.
       loadedRequires = stackDeclaredCapabilities(config);
-      const hostPlugins: unknown[] = Array.isArray(config?.plugins) ? config.plugins : [];
+      // [#22371] `serve`'s list — the config's `plugins`, and its `devPlugins`
+      // under `--dev` — by `serve`'s own merge.
+      const hostPlugins: unknown[] = stackBootPlugins(config, opts.serveFlags?.dev);
       loadedConfig = config;
       loadedHostPlugins = hostPlugins;
       for (const plugin of hostPlugins) {
@@ -1531,9 +1553,12 @@ export async function buildSchemaMigrationPlugins(opts: {
       // is only known once the boot is over, so that sentence belongs to the
       // guard's disarm() note — which drops it if a raw execute() went
       // through (#14053 review, R1) — and must not be pre-claimed here.
+      const devPluginCount = hostPlugins.length - stackBootPlugins(config, false).length;
       notes.push(
         `Composed the host stack from ${path.relative(cwd, hostConfigPath) || hostConfigPath}: `
-        + `${hostPlugins.length} plugin(s), registered for their declarations only `
+        + `${hostPlugins.length} plugin(s)`
+        + `${devPluginCount > 0 ? ` (${devPluginCount} of them its devPlugins, as under --dev)` : ''}, `
+        + 'registered for their declarations only '
         + '(init runs, start does not), with the contract\'s row writes refused at the '
         + 'driver for the whole boot.',
       );
@@ -1604,6 +1629,7 @@ export async function buildSchemaMigrationPlugins(opts: {
         hostPlugins: loadedHostPlugins,
         basePlugins: opts.basePlugins,
         artifactRequires: opts.authGatedSecurity.artifactRequires,
+        ...(opts.serveFlags ? { serveFlags: opts.serveFlags } : {}),
         lifecycle,
       });
       securityPlugin = gated.status;
@@ -1636,12 +1662,18 @@ export async function buildSchemaMigrationPlugins(opts: {
  *  - the plugins: the host config's and the standalone stack's (`serve`'s
  *    `plugins` is one or the other — a host config's own, or the stack merged
  *    over an app config — and the gate asks only for two names among them);
+ *  - the plugins under `--dev`: the config's `devPlugins` too, merged by
+ *    `serve`'s own rule (`stackBootPlugins`) before they reach this gate;
  *  - the tiers: the config's declared `tiers` (no boot carries an artifact's),
  *    and the `requires` `serve` reads — a host config's own; otherwise the
  *    compiled artifact's when it declares any, which `serve`'s merge lays over
- *    the config's, else the config's. No `--preset` here: the default preset;
- *  - the secret and the development fallback: `NODE_ENV=development` is this
- *    command's development posture (it has no `--dev`).
+ *    the config's, else the config's — over the `--preset` the caller passed
+ *    (`resolveStackTiers`, `serve`'s own precedence; the default preset when
+ *    none). Of `serve`'s `requires` additions (`email`, `mcp`, the always-on
+ *    slate, `queue` / `job`) none maps to the `auth` tier, so the gate's
+ *    answer does not move with them;
+ *  - the secret and the development fallback: `isDevelopmentBoot`, `serve`'s
+ *    `isDev` — `--dev`, or `NODE_ENV=development`.
  *
  * `AuthPlugin` itself is not composed: it holds no catalog name, and its
  * `init()` is not this boot's to run. The security plugin is wrapped by
@@ -1653,6 +1685,7 @@ async function composeAuthGatedSecurity(input: {
   hostPlugins: readonly unknown[];
   basePlugins: readonly unknown[];
   artifactRequires?: readonly string[];
+  serveFlags?: { readonly dev?: boolean; readonly preset?: string };
   lifecycle: DeclarationBootLifecycle;
 }): Promise<{
   plugin?: unknown;
@@ -1666,8 +1699,12 @@ async function composeAuthGatedSecurity(input: {
   const declaredTiers = resolveStackCollection(config, 'tiers').filter((t): t is string => typeof t === 'string');
   const decision = resolvePlatformAuthComposition({
     plugins: [...input.basePlugins, ...input.hostPlugins],
-    tiers: resolveStackTiers({ declaredTiers, requires }),
-    secret: resolveAuthSecret({ isDev: process.env.NODE_ENV === 'development' }),
+    tiers: resolveStackTiers({
+      declaredTiers,
+      requires,
+      ...(input.serveFlags?.preset !== undefined ? { preset: input.serveFlags.preset } : {}),
+    }),
+    secret: resolveAuthSecret({ isDev: isDevelopmentBoot(input.serveFlags?.dev) }),
   });
   if (!decision.composes) {
     const status = { composed: false, reason: decision.reason } as const;
@@ -1697,9 +1734,10 @@ export function describeSecurityPluginComposition(
   }
   const why: Record<PlatformAuthSkipReason | 'config-unloadable', string> = {
     'stack-supplies-auth': 'the stack mounts its own AuthPlugin',
-    'auth-tier-off': 'the `auth` tier is off',
+    'auth-tier-off': 'the `auth` tier is off: the declared `tiers`, else the preset\'s, carry none, and no '
+      + '`requires` token opens it',
     'host-kernel': 'a host kernel, whose auth is per project',
-    'no-secret': 'no OS_AUTH_SECRET, and NODE_ENV is not development',
+    'no-secret': 'no OS_AUTH_SECRET, and not a development boot: no --dev, and NODE_ENV is not development',
     'config-unloadable': 'the host config could not be loaded, so the gate had nothing to read',
   };
   return `Did not compose the security plugin: \`os serve\` composes none here (${why[status.reason]}), so its `

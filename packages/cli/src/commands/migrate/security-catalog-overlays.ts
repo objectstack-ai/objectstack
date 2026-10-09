@@ -3,6 +3,7 @@
 import { Command, Flags } from '@oclif/core';
 import { createInterface } from 'node:readline';
 import chalk from 'chalk';
+import { STACK_TIER_PRESETS } from '@objectstack/core';
 import {
   printHeader,
   printSuccess,
@@ -92,6 +93,16 @@ function jsonRow(row: SecurityCatalogOverlayRow, outcome?: SecurityCatalogOverla
  * so the step reads the environment `serve` reads — `OS_AUTH_SECRET` above all
  * — and says which way the gate went.
  *
+ * `--preset` and `--dev` are `serve`'s two flags that move that composition,
+ * with `serve`'s meaning, read through the rules `serve` reads them by:
+ * `--preset` names the tier preset the auth gate's tiers fall back to
+ * (`resolveStackTiers`), and `--dev` merges the config's `devPlugins`
+ * (`stackBootPlugins`) and makes the boot a development one for the auth
+ * secret's fallback (`isDevelopmentBoot`). Pass the flags the deployment boots
+ * with. They move the composition only: this boot stays a one-shot boot (no
+ * dev schema self-heal, `NODE_ENV` untouched, no `.env*` file loaded), so the
+ * environment is the operator's to export as the deployment's.
+ *
  * ## The family's conventions
  *
  * Preview by default; `--apply` is the only writing mode, confirmed with
@@ -113,6 +124,8 @@ export default class MigrateSecurityCatalogOverlays extends Command {
   static override examples = [
     '$ os migrate security-catalog-overlays',
     '$ os migrate security-catalog-overlays --json',
+    '$ os migrate security-catalog-overlays --preset minimal',
+    '$ os migrate security-catalog-overlays --dev',
     '$ os migrate security-catalog-overlays --apply',
     '$ os migrate security-catalog-overlays --apply --yes --json',
   ];
@@ -136,6 +149,16 @@ export default class MigrateSecurityCatalogOverlays extends Command {
       default: false,
     }),
     json: Flags.boolean({ description: 'Output the machine-readable result as JSON.' }),
+    // [#22371] `os serve`'s two flags that move the composition, with its meaning.
+    preset: Flags.string({
+      description: 'Compose as `os serve --preset` does: the tier preset the auth tier falls back to when the stack '
+        + 'declares no tiers. Pass what the deployment boots with.',
+      options: Object.keys(STACK_TIER_PRESETS),
+    }),
+    dev: Flags.boolean({
+      description: 'Compose as `os serve --dev` does: the config\'s devPlugins, and a development boot for the auth '
+        + 'secret\'s fallback. Pass it when the deployment boots with --dev (`os dev`).',
+    }),
   };
 
   async run(): Promise<void> {
@@ -211,6 +234,7 @@ export default class MigrateSecurityCatalogOverlays extends Command {
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
         composeHostStack: true,
         composeAuthGatedSecurity: true,
+        serveFlags: { dev: flags.dev === true, ...(flags.preset ? { preset: flags.preset } : {}) },
         hydrateMetadata: false,
         ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
@@ -225,7 +249,11 @@ export default class MigrateSecurityCatalogOverlays extends Command {
     // Decide the code here, exit after the stack is down.
     let exitCode = 0;
     try {
-      exitCode = await this.report(stack, { apply, json: flags.json === true }, timer);
+      exitCode = await this.report(stack, {
+        apply,
+        json: flags.json === true,
+        serveFlags: { preset: flags.preset ?? 'default', dev: flags.dev === true },
+      }, timer);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       exitCode = 1;
@@ -240,10 +268,10 @@ export default class MigrateSecurityCatalogOverlays extends Command {
   /** List, delete under `--apply`, and report on the booted stack; answers the exit status. */
   private async report(
     stack: Awaited<ReturnType<typeof bootSchemaStack>>,
-    opts: { apply: boolean; json: boolean },
+    opts: { apply: boolean; json: boolean; serveFlags: { preset: string; dev: boolean } },
     timer: { elapsed: () => number; display: () => string },
   ): Promise<number> {
-    const { apply, json } = opts;
+    const { apply, json, serveFlags } = opts;
     const composition = stack.composition;
     // A host config that exists and could not be read leaves the held set
     // incomplete: listing would miss names and the boot would still refuse.
@@ -270,6 +298,7 @@ export default class MigrateSecurityCatalogOverlays extends Command {
         database: stack.dbLabel,
         apply,
         hostConfig: composition.hostConfigPath,
+        serveFlags,
         securityPlugin: composition.securityPlugin ?? null,
         listed: rows.length,
         deleted,
@@ -282,6 +311,7 @@ export default class MigrateSecurityCatalogOverlays extends Command {
 
     printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
     if (composition.hostConfigPath) printInfo(`Host config: ${chalk.white(composition.hostConfigPath)}`);
+    printInfo(`Composed as: ${chalk.white(`os serve --preset ${serveFlags.preset}${serveFlags.dev ? ' --dev' : ''}`)}`);
     reads.notice(false);
     // What decided whether the platform security plugin's sets are held — the
     // one composition fact that moves this list with the boot environment.

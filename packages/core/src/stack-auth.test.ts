@@ -4,7 +4,7 @@
  * #22371 — the ONE rule for whether a boot composes the platform auth family
  * (and the security plugin paired with it), read by `os serve` and by
  * `os migrate security-catalog-overlays`. One case per clause of the rule, in
- * its order; the secret's environment read is driven through `process.env`
+ * its order; the environment reads (the secret, NODE_ENV) are driven through `process.env`
  * and restored.
  */
 
@@ -13,6 +13,7 @@ import {
   CAPABILITY_TO_TIER,
   DEV_AUTH_SECRET_FALLBACK,
   STACK_TIER_PRESETS,
+  isDevelopmentBoot,
   isHostKernelComposition,
   resolveAuthSecret,
   resolvePlatformAuthComposition,
@@ -20,15 +21,15 @@ import {
   stackSuppliesAuthPlugin,
 } from './stack-auth.js';
 
-const SECRET_VARS = ['OS_AUTH_SECRET', 'AUTH_SECRET', 'BETTER_AUTH_SECRET'] as const;
-const saved = Object.fromEntries(SECRET_VARS.map((k) => [k, process.env[k]]));
+const ENV_VARS = ['OS_AUTH_SECRET', 'AUTH_SECRET', 'BETTER_AUTH_SECRET', 'NODE_ENV'] as const;
+const saved = Object.fromEntries(ENV_VARS.map((k) => [k, process.env[k]]));
 afterEach(() => {
-  for (const k of SECRET_VARS) {
+  for (const k of ENV_VARS) {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
 });
-const clearSecrets = () => { for (const k of SECRET_VARS) delete process.env[k]; };
+const clearSecrets = () => { for (const k of ENV_VARS) delete process.env[k]; };
 
 describe('resolveStackTiers — declared tiers, else the preset, plus the tiers `requires` opens', () => {
   it('no declared tiers: the default preset, which carries `auth`', () => {
@@ -64,6 +65,20 @@ describe('resolveAuthSecret — OS_AUTH_SECRET, its legacy spellings, else the d
     clearSecrets();
     expect(resolveAuthSecret({ isDev: true })).toBe(DEV_AUTH_SECRET_FALLBACK);
     expect(resolveAuthSecret({ isDev: false })).toBeUndefined();
+  });
+});
+
+describe('isDevelopmentBoot — `--dev`, or NODE_ENV exactly `development`', () => {
+  it('the flag answers alone; without it only NODE_ENV=development is a development boot', () => {
+    delete process.env.NODE_ENV;
+    expect(isDevelopmentBoot(true)).toBe(true);
+    expect(isDevelopmentBoot(false)).toBe(false);
+    expect(isDevelopmentBoot(undefined)).toBe(false);
+    process.env.NODE_ENV = 'production';
+    expect(isDevelopmentBoot(true)).toBe(true);
+    expect(isDevelopmentBoot(undefined)).toBe(false);
+    process.env.NODE_ENV = 'development';
+    expect(isDevelopmentBoot(undefined)).toBe(true);
   });
 });
 

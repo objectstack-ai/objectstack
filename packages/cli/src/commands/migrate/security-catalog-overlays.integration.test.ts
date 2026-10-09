@@ -30,6 +30,12 @@
  * once without, because the security plugin's names join only behind the gate
  * (measured on #22371: 3 names against 2). After `--apply` the same cold boot
  * comes up, and the step lists nothing.
+ *
+ * `os serve`'s `--preset` and `--dev` move that gate, and the step takes them
+ * with `serve`'s meaning: `--preset minimal` with a secret set composes no
+ * security plugin (no `auth` tier), and `--dev` with no secret composes it (the
+ * development fallback). Each is compared with the cold boot of the same
+ * composition — the same flags — so the list stays that boot's refusal.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -152,7 +158,10 @@ async function trail(dbFile: string): Promise<{ history: string[]; audit: string
  * its refusal's `conflicts[]` as `catalogType/name holder` lines, or `[]` when
  * the boot came up.
  */
-async function coldBootConflicts(dbFile: string): Promise<string[]> {
+async function coldBootConflicts(
+  dbFile: string,
+  serveFlags?: { dev?: boolean; preset?: string },
+): Promise<string[]> {
   let stack;
   try {
     stack = await bootSchemaStack({
@@ -161,6 +170,7 @@ async function coldBootConflicts(dbFile: string): Promise<string[]> {
       projectRoot: dir,
       composeHostStack: true,
       composeAuthGatedSecurity: true,
+      ...(serveFlags ? { serveFlags } : {}),
       deferSchemaDdl: true,
       readOnlyProbe: true,
     });
@@ -258,21 +268,36 @@ afterEach(() => { process.chdir(savedCwd); setAuth(false); });
 
 describe('os migrate security-catalog-overlays — the preview lists exactly what the cold boot refuses', () => {
   it.each([
-    { auth: false, listed: LISTED_AUTH_OFF, securityPlugin: { composed: false, reason: 'no-secret' } },
-    { auth: true, listed: LISTED_AUTH_ON, securityPlugin: { composed: true } },
-  ])('auth $auth: the held rows are listed, the controls are not, and the list is the cold boot\'s conflicts', async ({ auth, listed, securityPlugin }) => {
+    { auth: false, flags: [], listed: LISTED_AUTH_OFF, securityPlugin: { composed: false, reason: 'no-secret' } },
+    { auth: true, flags: [], listed: LISTED_AUTH_ON, securityPlugin: { composed: true } },
+    // `serve --preset minimal` has no `auth` tier: with a secret set it composes
+    // no security plugin, so its sets are not held and their row is not listed.
+    {
+      auth: true, flags: ['--preset', 'minimal'], listed: LISTED_AUTH_OFF,
+      securityPlugin: { composed: false, reason: 'auth-tier-off' },
+    },
+    // `serve --dev` with no secret falls back to the development one and
+    // composes it (NODE_ENV is `production` throughout this file).
+    { auth: false, flags: ['--dev'], listed: LISTED_AUTH_ON, securityPlugin: { composed: true } },
+  ])('auth $auth, flags $flags: the held rows are listed, the controls are not, and the list is the cold boot\'s conflicts', async ({ auth, flags, listed, securityPlugin }) => {
     setAuth(auth);
     const db = caseDb();
     const before = await storedRows(db);
+    const serveFlags = {
+      dev: flags.includes('--dev'),
+      ...(flags.includes('--preset') ? { preset: flags[flags.indexOf('--preset') + 1] } : {}),
+    };
 
     // Over the compiled artifact that declares the held names, the cold boot
-    // refuses — and the step, which hydrates nothing, runs.
-    const refused = await coldBootConflicts(db);
+    // of the same composition — the same flags — refuses; and the step, which
+    // hydrates nothing, runs.
+    const refused = await coldBootConflicts(db, serveFlags);
     expect(refused.length, 'the cold boot is refused over these rows').toBeGreaterThan(0);
 
-    const { payload, exitCode } = await runJson(['--database-url', `file:${db}`, '--json']);
+    const { payload, exitCode } = await runJson(['--database-url', `file:${db}`, '--json', ...flags]);
     expect(payload.error, JSON.stringify(payload).slice(0, 600)).toBeUndefined();
     expect(payload.apply).toBe(false);
+    expect(payload.serveFlags).toEqual({ preset: serveFlags.preset ?? 'default', dev: serveFlags.dev });
     expect(payload.securityPlugin).toEqual(securityPlugin);
     expect(listedOf(payload)).toEqual(listed);
     expect(payload.rows.every((r: any) => r.outcome === 'listed')).toBe(true);

@@ -455,6 +455,15 @@ export async function bootSchemaStack(
      * not change that. See `buildSchemaMigrationPlugins`'s `authGatedSecurity`.
      */
     composeAuthGatedSecurity?: boolean;
+    /**
+     * [#22371] With {@link composeHostStack}: the `os serve` flags the
+     * composition answers for — `--dev` (the config's `devPlugins`, and a
+     * development boot for the auth gate) and `--preset` (the tiers the gate
+     * falls back to), with `serve`'s meaning. See `buildSchemaMigrationPlugins`'s
+     * `serveFlags`. Only for the composition: the data stack itself is booted as
+     * every one-shot command boots it — no `dev` key, so no dev schema self-heal.
+     */
+    serveFlags?: { readonly dev?: boolean; readonly preset?: string };
   },
 ): Promise<SchemaStack> {
   // Taken BEFORE the first line the boot can print. `createStandaloneStack`
@@ -541,6 +550,7 @@ export async function bootSchemaStack(
         ...(opts.composeAuthGatedSecurity === true
           ? { authGatedSecurity: { artifactRequires: stack.requires } }
           : {}),
+        ...(opts.serveFlags ? { serveFlags: opts.serveFlags } : {}),
       })
     : {
         plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,

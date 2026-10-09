@@ -19,7 +19,8 @@ export const entry: SemanticMigration = {
     + 'shipped sets included',
   replacement:
     'before the first boot on this major, run `os migrate security-catalog-overlays` with the '
-    + 'environment the deployment boots with: it lists exactly those rows, each with the package '
+    + 'flags and environment the deployment boots with (`--preset` and `--dev` mean what they mean '
+    + 'to `os serve`): it lists exactly those rows, each with the package '
     + 'that holds its name. Then run `os migrate security-catalog-overlays --apply` to delete them '
     + 'through the metadata write path (a history tombstone per row). Or rename the item in the '
     + 'package. Nothing is adopted: an item the environment needs under its own name is re-created '
@@ -37,7 +38,7 @@ export const entry: SemanticMigration = {
     + 'applies: the rows are the environment\'s own work, and whether to drop or rename one is the '
     + 'operator\'s call, which the step\'s preview puts in front of them. ADR-0048, ADR-0087.',
   acceptanceCriteria:
-    'On the deployment\'s database and configuration, with its boot environment, '
+    'On the deployment\'s database and configuration, with its boot flags and environment, '
     + '`os migrate security-catalog-overlays` lists no row (exit 0). The listing covers permission '
     + 'sets and positions and the legacy plural spellings, and never an organization-scoped or a '
     + 'draft row. After `--apply`, the next boot of the same database and configuration comes up, '
