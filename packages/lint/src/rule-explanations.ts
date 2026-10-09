@@ -447,10 +447,9 @@ const CHART_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'names an entry of the widget\'s selection is not reported, and a selection entry that does not ' +
       'resolve is `widget-dimension-unknown` or `widget-measure-unknown`\'s error.',
     'To fix it, delete the key: `chartConfig.xAxis`, `chartConfig.yAxis` and `chartConfig.series` are ' +
-      'refused on a dataset-bound widget (ADR-0021). `os migrate meta --from 17` lists the mechanical ' +
-      'edits for existing sources. Post-cutover data is keyed by the dataset\'s measure NAME, not the ' +
-      'base column. Suppress with `suppressWarnings: [\'chart-field-unknown\']` if the inert key is ' +
-      'intentional.',
+      'refused on a dataset-bound widget (ADR-0021). Post-cutover data is keyed by the dataset\'s ' +
+      'measure NAME, not the base column. Suppress with `suppressWarnings: [\'chart-field-unknown\']` ' +
+      'if the inert key is intentional.',
   ],
 };
 

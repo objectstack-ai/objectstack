@@ -1985,7 +1985,7 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     [WIDGET_FILTER_FIELD_UNKNOWN]: ['`runtimeFilter`', 'widens the scope', 'nothing reports the miss', 'filter-token-unknown'],
     [WIDGET_FILTER_FIELD_NOT_INCLUDED]: ['`assertDeclared`', '`runtimeFilter`', 'joins ONLY'],
     [WIDGET_SORTBY_UNSELECTED]: ['`resolveOrdering`', 'DATASET_INVALID', 'query RESULT', 'DashboardWidgetOptionsSchema.sortBy'],
-    [CHART_FIELD_UNKNOWN]: ['`axisPresentation`', 'BY NAME', 'silent no-op', 'os migrate meta --from 17'],
+    [CHART_FIELD_UNKNOWN]: ['`axisPresentation`', 'BY NAME', 'silent no-op', 'refused on a dataset-bound widget'],
     [CHART_MEASURES_MISSING]: ['DatasetWidget.tsx', 'widget-measures-missing', 'chart-dimensions-missing'],
     [WIDGET_MEASURES_MISSING]: ['`solid-gauge`', '`pivot`', 'one KPI number the tile exists to show'],
     [CHART_DIMENSIONS_MISSING]: ['METRIC_TYPES.has(widgetType) || dimensions.length === 0', 'declared chart family is simply gone', '`metric` or `kpi`'],
