@@ -2199,8 +2199,8 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
 /**
  * [#22306] The insert side of the #16344 invariant — a hook is never handed a
  * value that will not be stored. Takes out of ONE caller row every value the
- * create-side strips will take, before the defaults and before `beforeInsert`,
- * and says what it took.
+ * create-side static-`readonly` strip will take, before the defaults and
+ * before `beforeInsert`, and says what it took.
  *
  * ## What was measured broken
  *
@@ -2214,16 +2214,23 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
  * update path has hidden these values from its hooks since #16344; insert
  * did not.
  *
- * ## The SAME functions as the strips, so the two cannot disagree
+ * ## The SAME function as the strip, so the two cannot disagree
  *
- * `stripRuntimeOwnedFields` with the caller's `preserveAudit`, then
  * `stripReadonlyFields` over {@link staticReadonlyInsertSubject} with no
- * `preserveAudit` — the exact pair, order and options the post-hook strips
- * run. Before any hook has run there is no hook write to spare, so what they
- * would take here is what they WILL take after the hooks unless a hook assigns
- * the key. A key they would keep — middleware-filled (not in `supplied`), on a
- * `sys_` or platform-internal object, a runtime-owned value under
- * `preserveAudit` — is still shown to the hook.
+ * `preserveAudit` — the function, subject and options the post-hook
+ * static-`readonly` strip (`staticReadonlyCreateStrip`) runs. Before any hook
+ * has run there is no hook write to spare, so what it would take here is what
+ * it WILL take after the hooks unless a hook assigns the key. A key it would
+ * keep — middleware-filled (not in `supplied`), or on a `sys_` or
+ * platform-internal object — is still shown to the hook.
+ *
+ * ⛔ Runtime-owned values (`autonumber`) are NOT withheld, though the
+ * runtime-owned strip takes them after the hooks too. #6339 keeps the caller's
+ * record number visible to `beforeInsert` on purpose, so a guard can report
+ * what the caller submitted — pinned as "the hook can still SEE the
+ * caller-submitted record number" (`engine-insert-runtime-owned-strip.test.ts`)
+ * and by #14259's provenance seam. Moving that is a decision of its own, not a
+ * rider on this one.
  *
  * ⚠️ One narrowing, and it is the create side's own declared channel rather
  * than a second opinion: under `preserveAudit` the audit timeline
@@ -2261,22 +2268,18 @@ function withholdInsertReadonlyFromHooks(
   supplied: Readonly<Record<string, unknown>>,
   preserveAudit: boolean,
 ): { row: Record<string, unknown>; withheld: Record<string, unknown> | undefined } {
-  // No logger and no `strictReadonlyWrites`, deliberately: this pass is SILENT
-  // by construction. The strips after the hooks own every word said about
-  // these keys — the WARN, `onFieldsDropped`, the strict refusal — and say it
-  // over the handed-back payload exactly as they did before this pass existed.
-  const afterRuntimeOwned = stripRuntimeOwnedFields(
-    schema as any, row, supplied, undefined, { preserveAudit },
-  ) as Record<string, unknown>;
   let subject = staticReadonlyInsertSubject(schema as any);
   if (subject && preserveAudit) {
     const fields = { ...subject.fields };
     for (const name of AUDIT_PROVENANCE_FIELDS) delete fields[name];
     subject = Object.keys(fields).length > 0 ? { name: subject.name, fields } : null;
   }
-  const shown = subject
-    ? stripReadonlyFields(subject as any, afterRuntimeOwned, supplied, undefined) as Record<string, unknown>
-    : afterRuntimeOwned;
+  if (!subject) return { row, withheld: undefined };
+  // No logger and no `strictReadonlyWrites`, deliberately: this pass is SILENT
+  // by construction. The strip after the hooks owns every word said about
+  // these keys — the WARN, `onFieldsDropped`, the strict refusal — and says it
+  // over the handed-back payload exactly as it did before this pass existed.
+  const shown = stripReadonlyFields(subject as any, row, supplied, undefined) as Record<string, unknown>;
   if (shown === row) return { row, withheld: undefined };
   const withheld: Record<string, unknown> = {};
   for (const key of Object.keys(row)) {
@@ -13443,7 +13446,7 @@ export class ObjectQL implements IObjectQLEngine {
       // The insert side of #16344's invariant, in the ruling's words:「交给生命
       // 周期钩子的记录,就是它打算持久化的那条记录。」— see
       // `withholdInsertReadonlyFromHooks` for the measured defect and for WHICH
-      // keys (the post-hook strips' own pair, under their own options).
+      // keys (the post-hook static strip's own function, subject and options).
       //
       // ⭐ WITHHOLD, not strip, exactly as on update. The ENFORCEMENT stays
       // where ruling C (#14147) put it — after the hooks, the only point that

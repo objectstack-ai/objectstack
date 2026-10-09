@@ -197,11 +197,10 @@ describe('#22306 — caller-supplied readonly values are withheld from beforeIns
     expect(rows.map((r) => r.approval_status)).toEqual(['draft', 'draft']);
   });
 
-  it('a caller-supplied runtime-owned value (autonumber) is withheld too, and the sequence still issues the number', async () => {
+  it('CONTROL — a runtime-owned value (autonumber) stays visible, as #6339 pins, and is still stripped after the hooks', async () => {
     const rec: any = await engine.insert('crm_opp', { name: 'A', note: 'w', code: 'OPP-FORGED' }, USER);
 
-    expect(sightings[0]!.note.present).toBe(true);
-    expect(sightings[0]!.code).toEqual({ present: false, value: undefined });
+    expect(sightings[0]!.code).toEqual({ present: true, value: 'OPP-FORGED' });
     expect(stored(rec.id).code).not.toBe('OPP-FORGED');
     expect(stored(rec.id).code).toBeTruthy();
   });
