@@ -122,6 +122,37 @@ const INCOMPLETE_UPLOAD_STATUS = 409;
 const INCOMPLETE_UPLOAD_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 
 /**
+ * [#22443] The answer both upload-starting doors (presigned, chunked) give a
+ * request naming `scope: 'public'` — before the size check, before any row is
+ * written and before any URL or backend upload is started.
+ *
+ * The scope never made a file public. Since #22431 the download doors judge a
+ * file by `acl: 'public_read'`, the attachments scope and field ownership
+ * alone, so a `public`-scoped upload was stored as a private file, with no
+ * word to its caller, under a name promising what the runtime does not do.
+ * ADR-0104 makes `acl: 'public_read'` the one opt-in for anonymous download;
+ * the scope is refused rather than enforced, because enforcing it would hand
+ * every uploader a second door to anonymity (the triage ruling on #22443).
+ * The spec retires the same member from `StorageScopeSchema`.
+ *
+ * `400` / `INVALID_REQUEST`: the code these doors already answer a request
+ * they cannot take with, registered under this package in the ADR-0112
+ * ledger. The message carries the remedy and where it lives — on the stored
+ * file record, because the upload request carries no `acl` (every upload is
+ * stored `acl: 'private'`), so a caller adding one to this request would get
+ * a private file again.
+ */
+const RETIRED_UPLOAD_SCOPE = 'public';
+const RETIRED_UPLOAD_SCOPE_STATUS = 400;
+const RETIRED_UPLOAD_SCOPE_CODE: RegisteredErrorCode = 'INVALID_REQUEST';
+const RETIRED_UPLOAD_SCOPE_MESSAGE =
+  "scope 'public' is not accepted: a storage scope never made a file publicly readable. " +
+  "A file is served without sign-in only when its stored file record carries acl 'public_read' (ADR-0104). " +
+  "Upload with another scope, or omit scope for the default 'user', then set acl 'public_read' on the stored " +
+  'file record of each file that must be readable before sign-in. The upload request carries no acl: every ' +
+  'upload is stored private.';
+
+/**
  * [#22332] How many times the chunk door tries to record a stored chunk in the
  * upload's progress before it refuses.
  *
@@ -348,6 +379,14 @@ export function registerStorageRoutes(
   ): boolean => {
     if (maxUploadBytes === undefined || !Number.isFinite(bytes) || bytes <= maxUploadBytes) return true;
     sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, uploadTooLargeMessage(measured(bytes), maxUploadBytes));
+    return false;
+  };
+
+  // [#22443] The scope gate the two upload-starting doors ask before the size
+  // gate. `false` ⇒ the 400 was already sent and the handler must stop.
+  const requireAcceptedUploadScope = (scope: unknown, res: IHttpResponse): boolean => {
+    if (scope !== RETIRED_UPLOAD_SCOPE) return true;
+    sendError(res, RETIRED_UPLOAD_SCOPE_STATUS, RETIRED_UPLOAD_SCOPE_CODE, RETIRED_UPLOAD_SCOPE_MESSAGE);
     return false;
   };
 
@@ -723,6 +762,8 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
         return;
       }
+      // [#22443] A retired scope is refused before anything is stored or minted.
+      if (!requireAcceptedUploadScope(scope, res)) return;
       // [#22283] The declared size against the saved limit — before the
       // pending row and before any URL is minted. On the local adapter the
       // bytes are judged again at `_local/raw`; an S3 URL takes them straight
@@ -853,6 +894,9 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and totalSize are required');
         return;
       }
+      // [#22443] Same scope gate as the presigned door — before the file row,
+      // the backend multipart and the session row.
+      if (!requireAcceptedUploadScope(scope, res)) return;
       // [#22283] The declared total against the saved limit — before the file
       // row, the backend multipart and the session row. The chunk door judges
       // the bytes as they arrive.
