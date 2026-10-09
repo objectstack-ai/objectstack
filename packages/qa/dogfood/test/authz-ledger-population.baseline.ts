@@ -70,7 +70,9 @@
 export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   // ── REST families (`packages/rest/src/rest-route-ledger.ts`) ────────────
   // `metadata` is absent because it IS classified — `anonymous-deny-meta`
-  // covers it through the guarded registrar. The other 18 families are here.
+  // covers it through the guarded registrar — and so is `openapi`, classified
+  // by `anonymous-deny-api-description` since #22430. The other 16 families
+  // are here.
   'rest-family:rest-route-ledger.ts:analytics',
   'rest-family:rest-route-ledger.ts:approvals',
   'rest-family:rest-route-ledger.ts:batch',
@@ -80,7 +82,6 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   'rest-family:rest-route-ledger.ts:email',
   'rest-family:rest-route-ledger.ts:external-datasource',
   'rest-family:rest-route-ledger.ts:forms',
-  'rest-family:rest-route-ledger.ts:openapi',
   // ⚠️ NOT the same surface as `dispatcher-domain:route-ledger.ts:/packages`,
   // which IS classified: that key names the dispatcher domain whose single
   // handler body carries the domain-wide gate. This one names the four routes
@@ -126,6 +127,8 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
  * 2026-09-25 (#20102): `rest-family:rest-route-ledger.ts:reports` left with the
  * retired saved-report family — deleted, not classified. 32 at 2026-10-01
  * (#21061): `dispatcher-domain:route-ledger.ts:/analytics` left classified, by
- * the `anonymous-deny-analytics` row and its domain gate pin.
+ * the `anonymous-deny-analytics` row and its domain gate pin. 31 at 2026-10-09
+ * (#22430): `rest-family:rest-route-ledger.ts:openapi` left classified, by the
+ * `anonymous-deny-api-description` row and its booted-showcase proof.
  */
-export const LEDGER_POPULATION_BASELINE_MAX = 32;
+export const LEDGER_POPULATION_BASELINE_MAX = 31;
