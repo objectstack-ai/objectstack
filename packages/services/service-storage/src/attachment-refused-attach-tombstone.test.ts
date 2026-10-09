@@ -115,7 +115,7 @@ async function boot(opts: { verdict?: Verdict; master?: MasterOutcome; sharing?:
   };
   installAttachmentAccessHooks(ql as any, () => sharing, logger, undefined, () => security);
 
-  await ql.insert('att_parent', { id: 'p1', name: 'parent' } as any, SYS as any);
+  await ql.insert('att_parent', { id: 'p1', name: 'parent' }, SYS);
   beginTransaction.mockClear();
   return { ql, gate, logger, beginTransaction };
 }
@@ -125,18 +125,18 @@ async function seedFile(ql: ObjectQL, id: string, extra: Record<string, unknown>
   await ql.insert('sys_file', {
     id, key: `attachments/${id}.bin`, name: `${id}.txt`, scope: 'attachments',
     status: 'committed', owner_id: UPLOADER, ...extra,
-  } as any, SYS as any);
+  }, SYS);
 }
 
-const file = (ql: ObjectQL, id: string) => ql.findOne('sys_file', { where: { id }, ...SYS } as any) as Promise<any>;
-const joinRows = (ql: ObjectQL, id: string) => ql.find('sys_attachment', { where: { file_id: id }, ...SYS } as any);
+const file = (ql: ObjectQL, id: string) => ql.findOne('sys_file', { where: { id }, ...SYS }) as Promise<any>;
+const joinRows = (ql: ObjectQL, id: string) => ql.find('sys_attachment', { where: { file_id: id }, ...SYS });
 
 /** The generic insert the `/data` create door issues for the console's attach. */
 const attach = (ql: ObjectQL, fileId: string, userId = UPLOADER, parentId = 'p1') =>
   ql.insert(
     'sys_attachment',
-    { parent_object: 'att_parent', parent_id: parentId, file_id: fileId } as any,
-    { context: { userId } } as any,
+    { parent_object: 'att_parent', parent_id: parentId, file_id: fileId },
+    { context: { userId } },
   );
 
 const rejection = (p: Promise<unknown>) => p.then(() => { throw new Error('expected a refusal'); }, (e: any) => e);
@@ -245,11 +245,11 @@ describe('the tombstone is written outside the refused write\'s unit of work', (
       ql.transaction(async (trx: any) => {
         // A write the caller made in the same unit of work — the control that
         // the rollback is real.
-        await ql.insert('att_parent', { id: 'p_in_tx', name: 'rolled back' } as any, { context: { ...trx, isSystem: true } } as any);
+        await ql.insert('att_parent', { id: 'p_in_tx', name: 'rolled back' }, { context: { ...trx, isSystem: true } });
         return ql.insert(
           'sys_attachment',
-          { parent_object: 'att_parent', parent_id: 'p1', file_id: 'f1' } as any,
-          { context: { ...trx, userId: UPLOADER } } as any,
+          { parent_object: 'att_parent', parent_id: 'p1', file_id: 'f1' },
+          { context: { ...trx, userId: UPLOADER } },
         );
       }),
     );
@@ -257,7 +257,7 @@ describe('the tombstone is written outside the refused write\'s unit of work', (
     expect(beginTransaction, 'the caller really opened a transaction').toHaveBeenCalledTimes(1);
 
     expect(await runVerdict(logger, 'f1')).toBe('tombstoned');
-    expect(await ql.findOne('att_parent', { where: { id: 'p_in_tx' }, ...SYS } as any), 'the caller\'s unit of work rolled back').toBeNull();
+    expect(await ql.findOne('att_parent', { where: { id: 'p_in_tx' }, ...SYS }), 'the caller\'s unit of work rolled back').toBeNull();
     expect(await file(ql, 'f1'), 'the tombstone was not in it').toMatchObject({ status: 'deleted' });
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -312,7 +312,7 @@ describe('controls — what this path never tombstones', () => {
   it('a file still attached elsewhere is not tombstoned when another attach of it is refused', async () => {
     const { ql, logger } = await boot({ verdict: 'deny' });
     await seedFile(ql, 'f1');
-    await ql.insert('sys_attachment', { parent_object: 'att_parent', parent_id: 'p1', file_id: 'f1' } as any, SYS as any);
+    await ql.insert('sys_attachment', { parent_object: 'att_parent', parent_id: 'p1', file_id: 'f1' }, SYS);
 
     await rejection(attach(ql, 'f1'));
 
