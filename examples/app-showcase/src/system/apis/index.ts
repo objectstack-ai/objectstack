@@ -95,7 +95,14 @@ export const TaskFeedEndpoint: ApiEndpoint = {
   cacheTtlSeconds: 30,
 };
 
-/** Flow-typed endpoint: POST triggers the janitor flow (get+delete demo). */
+/**
+ * Flow-typed endpoint: POST triggers the janitor flow (get+delete demo).
+ *
+ * The target runs `runAs: 'system'`, so it is declared `type: 'screen'` — an
+ * entry. A `type: 'flow'` endpoint refuses a signed-in caller an elevated flow
+ * of a self-triggered type (`autolaunched`, `record_change`, `schedule`) with
+ * `403 PERMISSION_DENIED`, exactly as the trigger route and a flow action do.
+ */
 export const InquiryPurgeEndpoint: ApiEndpoint = {
   name: 'showcase_inquiry_purge_api',
   path: '/api/v1/apps/showcase/inquiries/purge',

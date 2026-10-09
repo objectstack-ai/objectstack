@@ -313,9 +313,10 @@ export interface ISecurityService {
    * **The deny baseline (ADR-0056 D2).** A non-system caller that carries a
    * principal (a position, a named permission set or a user id) and resolves
    * NO permission set gets the same DENY filter: an empty set list grants no
-   * row, as it grants no object ({@link canReadObject}). Only a context that
-   * carries no principal at all keeps the scope the other layers compose for
-   * it (ADR-0096 stages that context separately).
+   * row, as it grants no object ({@link canReadObject}). So does a non-system
+   * context that carries no principal at all (ADR-0096 D5 strict mode): the
+   * DENY filter, before any layer composes a scope, as the engine middleware's
+   * principal-less refusal (`403 PERMISSION_DENIED`) answers the same context.
    *
    * **⚠️ Request-scoped: call it per request, and never memoise what it
    * returns.** The documented use — `engine.find(object, { where: await
@@ -627,8 +628,10 @@ export interface ISecurityService {
    * "allowed". A system context bypasses and returns `true`. A caller that
    * carries a principal and resolves no permission set gets `false` — the
    * ADR-0056 D2 deny baseline, mirroring the middleware, whose CRUD gate
-   * refuses that caller's read; only a context that carries no principal at
-   * all is admitted, as the middleware hands it through (ADR-0096).
+   * refuses that caller's read. So does a non-system context that carries no
+   * principal at all (ADR-0096 D5 strict mode): `false` before anything
+   * resolves, the answer the middleware's principal-less refusal
+   * (`403 PERMISSION_DENIED`) gives it.
    */
   canExport(object: string, context?: SecurityContext): Promise<boolean>;
 
@@ -647,13 +650,13 @@ export interface ISecurityService {
    * deployment. Any door that bypasses the engine middleware MUST ask both.
    *
    * The verdict is the middleware's own read gate, arm for arm and in its order:
-   * the `isSystem` bypass, the ADR-0056 D2 deny baseline for a caller that
-   * carries a principal and resolves no permission set (only a context that
-   * carries no principal at all is handed through), the
-   * fail-closed refusal on an unresolvable object posture, the ADR-0066 D3
-   * `requiredPermissions` capability AND-gate, the `allowRead` CRUD grant, and
-   * the ADR-0090 D10 delegator intersection for an on-behalf-of caller. It is
-   * computed from the SAME resolution the enforcement path uses — never
+   * the `isSystem` bypass, the ADR-0096 D5 refusal of a context that carries no
+   * principal at all (`false`, before anything resolves), the ADR-0056 D2 deny
+   * baseline for a caller that carries a principal and resolves no permission
+   * set, the fail-closed refusal on an unresolvable object posture, the
+   * ADR-0066 D3 `requiredPermissions` capability AND-gate, the `allowRead` CRUD
+   * grant, and the ADR-0090 D10 delegator intersection for an on-behalf-of
+   * caller. It is computed from the SAME resolution the enforcement path uses — never
    * re-derived from permission sets by the caller — so a door that asks reaches
    * the same admission verdict `/data` reaches, by construction.
    *
@@ -667,8 +670,10 @@ export interface ISecurityService {
    * "allowed". A system context bypasses and returns `true`. A caller that
    * carries a principal and resolves no permission set gets `false` — the
    * ADR-0056 D2 deny baseline, mirroring the middleware, whose CRUD gate
-   * refuses that caller; only a context that carries no principal at all is
-   * admitted, as the middleware hands it through (ADR-0096).
+   * refuses that caller. So does a non-system context that carries no
+   * principal at all (ADR-0096 D5 strict mode): `false` before anything
+   * resolves, the answer the middleware's principal-less refusal
+   * (`403 PERMISSION_DENIED`) gives it.
    *
    * **OPTIONAL, and absence is a defined state — not a bug.** A security service
    * that predates this method omits it, and a consumer resolving the service as

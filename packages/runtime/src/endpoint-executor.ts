@@ -60,6 +60,9 @@ import {
     flowNotFoundMessage,
     FLOW_NOT_FOUND_STATUS,
 } from './flow-dispatch-status.js';
+// Who may START a flow by name — the one rule the trigger door, the action door
+// and this door share (the maintainer's ruling, letters B and A).
+import { ELEVATED_START_REFUSAL, refusesElevatedSelfTriggeredStart } from './flow-start-admission.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
 // ============================================================================
@@ -542,6 +545,27 @@ async function executeFlow(
         return apiErrorResponse({
             message: sanitizeMessage(flowNotFoundMessage(plan.flow), FLOW_NOT_FOUND_STATUS),
             httpStatus: FLOW_NOT_FOUND_STATUS,
+        });
+    }
+
+    // The caller × flow check (the maintainer's ruling, letter A: the trigger
+    // door's type × caller rule binds every door that starts a flow by name).
+    // A caller that is not the system principal may not start a flow declared
+    // `runAs: 'system'` whose type is self-triggered (`autolaunched`,
+    // `record_change`, `schedule`) — those run on their own trigger or as a
+    // sub-flow, so an endpoint that names one is wiring, not an entry. AFTER
+    // existence (an unknown target keeps its 404) and BEFORE dispatch (a refused
+    // start runs nothing). The policy chain has already run upstream: an
+    // anonymous caller at an `authRequired: true` endpoint is 401 before this
+    // line, and the guest principal an `authRequired: false` endpoint admits is
+    // not the system one. The same code, status and words the trigger door
+    // answers (`flow-start-admission.ts`), so #5040 §4's "same operation, same
+    // answer" holds for this refusal too.
+    if (await refusesElevatedSelfTriggeredStart(service, plan.flow, ctx.executionContext)) {
+        return apiErrorResponse({
+            message: ELEVATED_START_REFUSAL.message,
+            httpStatus: ELEVATED_START_REFUSAL.status,
+            code: ELEVATED_START_REFUSAL.code,
         });
     }
 
