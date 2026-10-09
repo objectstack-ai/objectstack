@@ -1521,9 +1521,15 @@ jobs:
     permissions:
       contents: read
 
+    # Both service images are pulled from mirror.gcr.io, Google's cache of
+    # Docker Hub: the same official image, tag and index digest. Pulled from
+    # Docker Hub directly they ride its anonymous per-IP quota, which shared
+    # runner IPs exhaust, and `Initialize containers` then fails before any
+    # step runs. A Docker Hub login is no fix: secrets never reach fork PRs
+    # (#22541).
     services:
       postgres:
-        image: postgres:16
+        image: mirror.gcr.io/library/postgres:16
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -1539,7 +1545,7 @@ jobs:
         # the other half of the compatibility claim. `-h 127.0.0.1` forces the
         # ping over TCP: the image's init phase runs mysqld with networking
         # disabled, so a socket ping would report healthy before init finishes.
-        image: mysql:8.0
+        image: mirror.gcr.io/library/mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: conformance
