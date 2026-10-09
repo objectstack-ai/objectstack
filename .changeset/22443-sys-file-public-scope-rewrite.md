@@ -6,7 +6,7 @@ feat(service-storage)!: the `sys_file` scope option `public` is retired, and row
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: already-registered storage-scope-public-retired -->
+<!-- adr-0087: not-required (already-registered storage-scope-public-retired) the retirement of the storage scope public is that step-18 entry; this changeset retires the same value from the stored sys_file vocabulary and rewrites its stored rows through an operator sweep -->
 
 **BREAKING** — an accept-set narrowing on the `sys_file` object's `scope` select, shipped as `minor` under the launch-window convention for accept-set narrowings. It completes the retirement registered as `storage-scope-public-retired`: `StorageScopeSchema` and both upload doors already refuse `public`, and now the stored vocabulary does too.
 
