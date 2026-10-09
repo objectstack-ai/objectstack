@@ -34,7 +34,9 @@
 //    an older release left it, and the restart is refused;
 //  - CONTROL: stored definitions under two built-in position names — the
 //    platform's own declaration sits beside them (ADR-0005), and the restart
-//    boots;
+//    boots. The save door refuses that write now, with the hatch set too
+//    (ADR-0131 D6: managed content is sealed), so the rows are written at the
+//    driver the way an older release left them;
 //  - CONTROL: a package whose names the environment does not hold boots on a
 //    database whose environment holds others, and restarts.
 //
@@ -115,7 +117,9 @@ describe('ADR-0048 N.3: a package-held position or permission-set name the envir
   });
 
   // The built-in control saves under two built-in position names, which the
-  // platform's package registers, so the save needs the documented hatch. The
+  // platform's package registers. Before ADR-0131 D6 that save needed the
+  // documented hatch; the hatch no longer opens an item a managed package
+  // ships, and the control pins that it stays shut with the hatch set. The
   // protocol reads `OS_METADATA_WRITABLE` ONCE per process and memoises it, so
   // it is set for the whole file, before the first boot: set inside the one
   // case, a save in an earlier case would already have memoised it closed. No
@@ -204,9 +208,22 @@ describe('ADR-0048 N.3: a package-held position or permission-set name the envir
     const db = databaseFile();
     stack = await bootStack(baseApp, { databaseFile: db });
     const saveToken = await stack.signIn();
+    // [ADR-0131 D6] The save door refuses the write, with the hatch set too...
     for (const name of ['org_admin', 'everyone']) {
-      const saved = await stack.apiAs(saveToken, 'PUT', `/meta/position/${name}`, { name, label: `Repurposed ${name}` });
-      expect(saved.status, JSON.stringify(await saved.clone().json().catch(() => ({})))).toBe(200);
+      const refused = await stack.apiAs(saveToken, 'PUT', `/meta/position/${name}`, { name, label: `Repurposed ${name}` });
+      const envelope: any = await refused.clone().json().catch(() => ({}));
+      expect(refused.status, JSON.stringify(envelope)).toBe(403);
+      expect(envelope?.code ?? envelope?.error?.code).toBe('NOT_OVERRIDABLE');
+    }
+    // ...so the rows are written the way an older release left them: active,
+    // environment-wide, bound to no package.
+    const ql: any = await stack.kernel.getServiceAsync('objectql');
+    const now = new Date().toISOString();
+    for (const name of ['org_admin', 'everyone']) {
+      await ql.insert('sys_metadata', {
+        type: 'position', name, organization_id: null, package_id: null, state: 'active', version: 1, checksum: null,
+        created_at: now, updated_at: now, metadata: JSON.stringify({ name, label: `Repurposed ${name}` }),
+      }, SYS);
     }
     await stack.stop();
     stack = undefined;
