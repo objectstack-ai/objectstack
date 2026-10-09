@@ -120,7 +120,7 @@ describe('./ui notification tombstone — corrected evidence, no false FROM → 
    */
   const tombstone = (() => {
     const source = fs.readFileSync(SOURCE, 'utf8');
-    const start = source.indexOf('// [#4610]');
+    const start = source.indexOf('// [dual-source removal]');
     return source
       .slice(start)
       .split('\n')
@@ -131,7 +131,7 @@ describe('./ui notification tombstone — corrected evidence, no false FROM → 
   })();
 
   it('finds the tombstone note at all (anti-vacuity)', () => {
-    expect(tombstone).toMatch(/^\[#4610\]/);
+    expect(tombstone).toMatch(/^\[dual-source removal\]/);
     expect(tombstone).toMatch(/NotificationConfigSchema/);
     expect(tombstone.length).toBeGreaterThan(800);
   });
