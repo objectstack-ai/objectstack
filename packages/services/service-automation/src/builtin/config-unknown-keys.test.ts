@@ -18,9 +18,10 @@
  * (`validateNodeConfigKeys`) stands aside for those types. The walk's pins are
  * re-pointed here, not dropped: the key, its location, the prescription for a
  * known slip and a rename-or-remove remedy all reach the author from the spec
- * refusal. The walk keeps `try_catch` (its contract's `retry` strips an unknown
- * key where its descriptor closes it) and every PLUGIN node type, and its own
- * prescriptions are pinned on those. The deliberate exemptions still register:
+ * refusal. [#22343] `try_catch` joined once its contract's `retry` closed to
+ * the five keys its descriptor declares, so the walk keeps every PLUGIN node
+ * type and no builtin, and its own prescriptions are pinned on those. The
+ * deliberate exemptions still register:
  * `assignment` (author-named keys), keyValue-map keys (author data),
  * `decision` (no executor contract).
  */
@@ -165,31 +166,63 @@ describe('a builtin\'s undeclared key is the spec\'s, met at registration (#4277
       ['screen', { fields: [{ name: 'a', visibleIf: 'x' }] }],
       ['notify', { recipients: 'u1', title: 'T', bogusKey: 1 }],
       ['loop', { collection: 'rows', bogusKey: 1 }],
+      ['try_catch', { try: { nodes: [], edges: [] }, bogusKey: 1, retry: { maxRetry: 2 } }],
     ] as const) {
       expect(builtinNodeConfigKeysJudged(type), type).toBe(true);
       expect(walk(type, config), type).not.toThrow();
     }
-    // The walk keeps try_catch and plugin types.
-    expect(builtinNodeConfigKeysJudged('try_catch')).toBe(false);
-    expect(walk('try_catch', { try: { nodes: [], edges: [] }, bogusKey: 1 })).toThrow(/undeclared config key/);
+    // The walk keeps plugin types.
     expect(builtinNodeConfigKeysJudged(STAMP)).toBe(false);
     expect(walk(STAMP, { count: 1, bogusKey: 1 })).toThrow(/undeclared config key/);
   });
 });
 
-describe('the descriptor walk keeps try_catch and plugin node types, with its own prescriptions', () => {
-  it('try_catch: a key its descriptor closes on `retry` — one the contract would strip — is refused, located', async () => {
+describe('try_catch: its retry closed, so its undeclared key is the spec\'s, refused once at registration', () => {
+  const tryRegion = { nodes: [{ id: 'a', type: 'assignment', label: 'A', config: { assignments: { x: 1 } } }], edges: [] };
+
+  it('a near miss under retry is refused by the parse, at the key, with the did-you-mean — and never by the walk', async () => {
     const engine = engineWith(recordingLogger().logger);
-    const tryRegion = { nodes: [{ id: 'a', type: 'assignment', label: 'A', config: { assignments: { x: 1 } } }], edges: [] };
-    const err = rejectionOf(engine, 'try_catch', { try: tryRegion, retry: { maxRetries: 1, bogusKey: 1 } });
-    expect(err.issues).toBeUndefined();
-    expect(err.message).toContain("node 'n1' (try_catch)");
-    expect(err.message).toContain('unknown config key `bogusKey` at config.retry.bogusKey');
-    expect(err.message).toContain('Declared here: maxRetries, backoffMs, backoffMultiplier, maxRetryDelayMs, jitter.');
-    expect(err.message).toContain('(rename or remove the key)');
+    const config = { try: tryRegion, retry: { maxRetry: 2 } };
+    const refusals = specRefusalsOf(engine, 'try_catch', config);
+    // ONE refusal, from the spec arm: the descriptor walk's rejection never joins it.
+    expect(refusals.map(({ path, code }) => ({ path, code }))).toEqual([
+      { path: 'nodes.1.config.retry.maxRetry', code: 'node-config-refused-by-contract' },
+    ]);
+    expect(refusals[0]!.message).toBe(refusals[0]!.judgedMessage);
+    expect(refusals[0]!.message).toContain('`maxRetry` → `maxRetries`');
+    const err = rejectionOf(engineWith(recordingLogger().logger), 'try_catch', config);
+    expect(err.message).not.toContain('undeclared config key(s)');
     await expect(engine.getFlow('f')).resolves.toBeNull();
   });
 
+  it('every variant the walk refused is still refused at registration — registerFlow widens nowhere', () => {
+    // The walk's verdicts on these, measured before the move: each was refused
+    // as an undeclared key. A `retryDelayMs` the conversion leaves (a differing
+    // `backoffMs` beside it, or a `null`) now meets the tombstone instead.
+    for (const [config, path] of [
+      [{ try: tryRegion, retry: { maxRetries: 1, bogusKey: 1 } }, 'nodes.1.config.retry.bogusKey'],
+      [{ try: tryRegion, bogusKey: 1 }, 'nodes.1.config.bogusKey'],
+      [{ try: tryRegion, retry: { maxRetries: 1, backoffMs: 500, retryDelayMs: 700 } }, 'nodes.1.config.retry.retryDelayMs'],
+      [{ try: tryRegion, retry: { maxRetries: 1, retryDelayMs: null } }, 'nodes.1.config.retry.retryDelayMs'],
+    ] as const) {
+      const engine = engineWith(recordingLogger().logger);
+      expect(specRefusalsOf(engine, 'try_catch', config).map((r) => r.path), JSON.stringify(config)).toEqual([path]);
+    }
+  });
+
+  it('CONTROL: a declared retry block registers, and a pre-17 retryDelayMs alone is converted first', async () => {
+    for (const retry of [
+      { maxRetries: 3, backoffMs: 500, backoffMultiplier: 2, maxRetryDelayMs: 10000, jitter: true },
+      { maxRetries: 1, retryDelayMs: 0 },
+    ]) {
+      const engine = engineWith(recordingLogger().logger);
+      expect(() => engine.registerFlow('f', flowWith('try_catch', { try: tryRegion, retry })), JSON.stringify(retry)).not.toThrow();
+      await expect(engine.getFlow('f')).resolves.not.toBeNull();
+    }
+  });
+});
+
+describe('the descriptor walk keeps plugin node types, with its own prescriptions', () => {
   it('a plugin node type: did-you-mean, the declared set, and the declare-it prescription', () => {
     const engine = engineWith(recordingLogger().logger);
     const err = rejectionOf(engine, STAMP, { coutn: 1 });
