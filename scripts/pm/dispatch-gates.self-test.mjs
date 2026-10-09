@@ -56,6 +56,9 @@ import {
   ANCHOR_CENSUS_EXTENSIONS,
   CHANGESET_PROBE_PATH,
   CHANGE_KIND_GATES,
+  bindChangeKindRows,
+  bindMandatoryTierRows,
+  bindSuspectTierRows,
   COMPOUND_ANCHOR_KEYS,
   CONTRACT_REVIEW_TIER,
   CONTRACT_REVIEW_TIER_NAME,
@@ -13455,6 +13458,45 @@ export function selfTest({ tier = 'full' } = {}) {
       && tierCases.fast > 0
       && (tiers.slow ? tierCases.slow > 0 && deferred.length === 0 : tierCases.slow === 0 && deferred.length > 0),
   );
+
+  // ── The paths the second coverage reading still showed at zero ───────────
+  //
+  // Taken after the split with the merge read the way V8 means it (a block is
+  // listed only when its count differs from the enclosing range), these are
+  // the branches no case had driven: the three data-row refusals the split
+  // introduced, the suspect row with no exception, and the fallback fragments
+  // a caller reaches only by handing in nothing.
+  {
+    const throwsWith = (fn, needle) => {
+      try {
+        fn();
+        return false;
+      } catch (error) {
+        return String(error.message).includes(needle);
+      }
+    };
+    t('bindChangeKindRows: a row naming a predicate the engine does not define REFUSES at load, listing the known keys', throwsWith(() => bindChangeKindRows([{ kind: 'k', matches: 'bogus', gates: [] }]), "names the predicate 'bogus', which this engine does not define — known: test-file"));
+    t('bindMandatoryTierRows: a row naming a tier the engine does not serve REFUSES at load', throwsWith(() => bindMandatoryTierRows([{ glob: 'g', tier: 'BOGUS_TIER' }]), "names the tier 'BOGUS_TIER'"));
+    t('bindSuspectTierRows: a row naming an exception the engine does not define REFUSES at load', throwsWith(() => bindSuspectTierRows([{ glob: 'g', except: 'bogus' }]), "names the exception 'bogus'"));
+    t('bindSuspectTierRows: a row with no exception binds as it is', bindSuspectTierRows([{ glob: 'g', why: 'w' }])[0].except === undefined && bindSuspectTierRows([{ glob: 'g', why: 'w' }])[0].glob === 'g');
+    t('CONTROL: the live tables are the bound rows — same globs, same kinds, resolved to functions and the model id', MANDATORY_TIER_GLOBS.every((g) => typeof g.tier === 'string') && SUSPECT_TIER_GLOBS.every((g) => g.except === undefined || typeof g.except === 'function') && CHANGE_KIND_GATES.every((k) => typeof k.matches === 'function'));
+    t('markerReasonCutRefusal: a cut with no file names the declaring file', String(markerReasonCutRefusal('local-env', { kind: 'line', line: 4, text: 'more' })).includes('the declaring file:4'));
+    t('refuseCutMarkerReason: a cut with no file throws naming the declaring file', throwsWith(() => refuseCutMarkerReason({ cut: { kind: 'line', line: 4, text: 'more' } }, 'local-env'), 'the declaring file declares local-env'));
+    const bareLookalike = unparsedPopulationMarkers('dispatch-gates: no-path-population\n');
+    t('unparsedPopulationMarkers: a lookalike with no comment opener is read, and says so', bareLookalike.length === 1 && bareLookalike[0].form === '(no comment opener)' && bareLookalike[0].file === null);
+    t('readContainerModelLine: nothing is absent; a key line with an empty value declares no tier', readContainerModelLine(null).present === false && readContainerModelLine('Container & model:').present === true && (readContainerModelLine('Container & model:').tier ?? null) === null);
+    t('parseRunRecord: nothing parses to no entries', parseRunRecord(null).length === 0 && parseRunRecord(undefined).length === 0);
+    const bareEntries = [
+      { command: 'a', claim: 'ran', reason: null, exitCode: null, line: 1, raw: 'a :: exit x', malformed: 'a bad tail' },
+      { command: 'b', claim: 'not-measured', reason: null, exitCode: null, line: 2, raw: 'NOT-MEASURED b', malformed: 'no reason' },
+    ];
+    const bareRecon = runReconciliation({ derived: ['a', 'b'], record: bareEntries });
+    t('runReconciliation: an entry with no malformedKind defaults to exit for a run line and claim for a claim line', bareRecon.malformed.find((m) => m.line === 1)?.kind === 'exit' && bareRecon.malformed.find((m) => m.line === 2)?.kind === 'claim');
+    const noIdentity = repoAssertionVerdict({ asserted: null, identity: null });
+    t('repoAssertionVerdict: nothing asserted against no identity is refused as usage, with no repo named and an unknown tree', noIdentity.ok === false && noIdentity.lines[0].includes("got ''") && noIdentity.lines[2].endsWith('runs in and from no other.'));
+    t('repoAssertionVerdict: a slug asserted against an identity with no slug and no root names an unknown tree', repoAssertionVerdict({ asserted: 'o/r', identity: {} }).lines.join('\n').includes('Tree: unknown'));
+    t('absentPathVerdict: with no identity at all the tree reads unknown and the copy line is UNVERIFIABLE', absentPathVerdict({ asserted: null, identity: null, paths: ['docs/no-such-file-for-this-pin.md'] }).lines.join('\n').includes('Tree: unknown'));
+  }
 
   // The non-vacuity half of #15539, read at the tail because that is where
   // every call site passing a reading has already run. The card named six; the

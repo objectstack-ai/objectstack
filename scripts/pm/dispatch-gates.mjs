@@ -10785,16 +10785,20 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'http-status-emit': emitsAnHttpStatus,
 });
 
-export const CHANGE_KIND_GATES = CHANGE_KIND_ROWS.map((row) => {
-  const matches = CHANGE_KIND_PREDICATES[row.matches];
-  if (typeof matches !== 'function') {
-    throw new Error(
-      `dispatch-gates: change-kind row '${row.kind}' names the predicate '${row.matches}', which this engine does not define — ` +
-        `known: ${Object.keys(CHANGE_KIND_PREDICATES).join(', ')}`,
-    );
-  }
-  return { ...row, matches };
-});
+export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {
+  return rows.map((row) => {
+    const matches = predicates[row.matches];
+    if (typeof matches !== 'function') {
+      throw new Error(
+        `dispatch-gates: change-kind row '${row.kind}' names the predicate '${row.matches}', which this engine does not define — ` +
+          `known: ${Object.keys(predicates).join(', ')}`,
+      );
+    }
+    return { ...row, matches };
+  });
+}
+
+export const CHANGE_KIND_GATES = bindChangeKindRows(CHANGE_KIND_ROWS);
 
 /**
  * Render the convention-triggered section. Pure over its inputs so the
@@ -11628,16 +11632,20 @@ export const CONTRACT_REVIEW_TIER_NAME = 'CONTRACT_REVIEW_TIER';
  */
 const TIER_BY_NAME = Object.freeze({ [CONTRACT_REVIEW_TIER_NAME]: CONTRACT_REVIEW_TIER });
 
-export const MANDATORY_TIER_GLOBS = MANDATORY_TIER_GLOB_ROWS.map((row) => {
-  const tier = TIER_BY_NAME[row.tier];
-  if (typeof tier !== 'string') {
-    throw new Error(
-      `dispatch-gates: mandate row '${row.glob}' names the tier '${row.tier}', which this engine does not define — ` +
-        `known: ${Object.keys(TIER_BY_NAME).join(', ')}`,
-    );
-  }
-  return { ...row, tier };
-});
+export function bindMandatoryTierRows(rows, tiers = TIER_BY_NAME) {
+  return rows.map((row) => {
+    const tier = tiers[row.tier];
+    if (typeof tier !== 'string') {
+      throw new Error(
+        `dispatch-gates: mandate row '${row.glob}' names the tier '${row.tier}', which this engine does not define — ` +
+          `known: ${Object.keys(tiers).join(', ')}`,
+      );
+    }
+    return { ...row, tier };
+  });
+}
+
+export const MANDATORY_TIER_GLOBS = bindMandatoryTierRows(MANDATORY_TIER_GLOB_ROWS);
 
 /**
  * The clause-② suspect rows are data: `SUSPECT_TIER_GLOB_ROWS` in `dispatch-gates.data.mjs` carries each
@@ -11647,17 +11655,21 @@ export const MANDATORY_TIER_GLOBS = MANDATORY_TIER_GLOB_ROWS.map((row) => {
  */
 const SUSPECT_EXCEPTIONS = Object.freeze({ 'test-path': isTestPath });
 
-export const SUSPECT_TIER_GLOBS = SUSPECT_TIER_GLOB_ROWS.map((row) => {
-  if (row.except === undefined) return { ...row };
-  const except = SUSPECT_EXCEPTIONS[row.except];
-  if (typeof except !== 'function') {
-    throw new Error(
-      `dispatch-gates: suspect row '${row.glob}' names the exception '${row.except}', which this engine does not define — ` +
-        `known: ${Object.keys(SUSPECT_EXCEPTIONS).join(', ')}`,
-    );
-  }
-  return { ...row, except };
-});
+export function bindSuspectTierRows(rows, exceptions = SUSPECT_EXCEPTIONS) {
+  return rows.map((row) => {
+    if (row.except === undefined) return { ...row };
+    const except = exceptions[row.except];
+    if (typeof except !== 'function') {
+      throw new Error(
+        `dispatch-gates: suspect row '${row.glob}' names the exception '${row.except}', which this engine does not define — ` +
+          `known: ${Object.keys(exceptions).join(', ')}`,
+      );
+    }
+    return { ...row, except };
+  });
+}
+
+export const SUSPECT_TIER_GLOBS = bindSuspectTierRows(SUSPECT_TIER_GLOB_ROWS);
 
 // `TIER_FLOOR` is data: it lives in `dispatch-gates.data.mjs` beside this file, imported and re-exported above.
 
