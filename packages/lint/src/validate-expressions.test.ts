@@ -1215,7 +1215,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
      * stay accepted.
      */
     describe('`user` / `ctx.user` aliases at field level (#6585)', () => {
-      const slots = ['visibleWhen', 'readonlyWhen', 'requiredWhen'] as const;
+      // #22227: a deadline's `settledWhen` is the fourth field-rule slot and
+      // binds the same roots, so the alias verdict covers it too.
+      const slots = ['visibleWhen', 'readonlyWhen', 'requiredWhen', 'settledWhen'] as const;
 
       it.each(slots)('rejects `user` on %s — same object as `current_user`, same unbound surface', (slot) => {
         const issues = validateStackExpressions({

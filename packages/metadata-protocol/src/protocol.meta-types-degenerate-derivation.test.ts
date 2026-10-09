@@ -307,10 +307,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * record's picture, beside `nameField`). `page` moved 24 → 25 the same way
      * when it gained `print` (#22158, the print-page declaration). `object`
      * moved 44 → 45 the same way when it gained `attachedOnRead` (#22386, the
-     * blocks a service attaches per caller on read).
+     * blocks a service attaches per caller on read). `field` moved 75 → 77 the
+     * same way when it gained `dueLike` and `settledWhen` (#22227, a date's
+     * deadline and when it is settled).
      */
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 26, app: 30, dashboard: 21, dataset: 16, field: 75, flow: 23,
+        agent: 26, app: 30, dashboard: 21, dataset: 16, field: 77, flow: 23,
         hook: 22, object: 45, page: 25, position: 12, report: 21, skill: 17, tool: 14,
     };
 
