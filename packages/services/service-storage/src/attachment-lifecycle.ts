@@ -486,14 +486,16 @@ type RefusedAttachOutcome =
  * ## Outside the refused write's unit of work — and why that needs a snapshot
  *
  * Measured on a real engine over sqlite: `engine.insert` opens NO transaction
- * of its own, and neither does the generic `/data` create door, so on that
- * door a system write made while the refusal unwinds lands and survives. But
- * a caller may wrap the attach in a transaction of its own — an `atomic`
- * batch, an explicit `transaction()` — and every engine call issued inside it,
- * hook and middleware writes included, joins that transaction through the
- * engine's ambient store (ADR-0034) and is rolled back with it: measured, the
- * same write did not survive. A tombstone written from the gate in-line would
- * therefore vanish exactly when the refusal aborts the caller's unit of work.
+ * of its own (the refusal throws from `beforeInsert` with none open), and the
+ * generic `/data` create door calls it without one (`createData` in the
+ * protocol), so on that door a system write made while the refusal unwinds
+ * lands and survives. But a caller may wrap the attach in a transaction of its
+ * own — an `atomic` batch, an explicit `transaction()` — and every engine call
+ * issued inside it, hook and middleware writes included, joins that
+ * transaction through the engine's ambient store (ADR-0034) and is rolled back
+ * with it: measured, the same write did not survive. A tombstone written from
+ * the gate in-line would therefore vanish exactly when the refusal aborts the
+ * caller's unit of work.
  *
  * The run is therefore DETACHED from the refusal's async context: it starts
  * on a later turn of the event loop, inside a snapshot of the context this
