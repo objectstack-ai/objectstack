@@ -3264,7 +3264,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   {
     receiver: 'obj',
     // `validationRules` is absent — one of the five #5017 removed.
-    expected: ['actions', 'fields', 'name', 'validations'],
+    // `attachedOnRead` joined with #22386 (#22211 ruling A): the declared read
+    // attachments, whose block names join the field index.
+    expected: ['actions', 'attachedOnRead', 'fields', 'name', 'validations'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -3478,6 +3480,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // Every one is a `string[]` of member NAMES whose keys are Array methods,
       // never metadata keys — each named so no metadata receiver hides behind it.
       'declaredUserMembers', 'boundUserMembers', 'listedNames', 'tickedNames', 'membersRead',
+      // [#22386] The per-object read-attachment index (block name → leaf keys).
+      // Its one "key" is `Map.prototype.get`; the metadata key it is built
+      // from is read off the tabled `obj` receiver (`obj.attachedOnRead`).
+      'attachedOnReadIndex',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
