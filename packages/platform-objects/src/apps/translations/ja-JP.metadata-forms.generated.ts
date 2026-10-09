@@ -629,12 +629,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "このテキスト項目をポリモーフィック参照の id 側にします。ここには、対象オブジェクト名を行ごとに保持する同一オブジェクト上の別項目名を指定します（ADR-0052 §5）。snake_case で記述し、テキスト項目のみ、`reference` とは併用できません。"
       },
       dueLike: {
-        label: "Deadline",
-        helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name."
+        label: "期限",
+        helpText: "この日付を期限としてマークします。日付を過ぎると、ビューで期限切れとして表示されることがあります（相対的な表現と期限切れの色）。オフまたは未設定の場合は期限ではなく、項目名から推測されることもありません。"
       },
       settledWhen: {
-        label: "Settled When",
-        helpText: "CEL predicate over the record (e.g. record.status == 'done') — while it is TRUE the deadline is settled, and no overdue wording or colour applies to that record. Display only."
+        label: "期限解消条件",
+        helpText: "レコードに対する CEL 述語（例：record.status == 'done'）。TRUE の間は期限が解消済みとなり、そのレコードには期限切れの表現や色が適用されません。表示専用です。"
       },
       options: {
         label: "選択肢",

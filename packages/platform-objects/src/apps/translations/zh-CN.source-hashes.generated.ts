@@ -18,10 +18,6 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.field.fields.dueLike.helpText": "cf1359aa166decfa",
-  "metadataForms.field.fields.dueLike.label": "a1e407ff686c2857",
-  "metadataForms.field.fields.settledWhen.helpText": "9356ce9d907a7f90",
-  "metadataForms.field.fields.settledWhen.label": "09cd9b3560d7756e",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata.fields.id.label": "00b0385c9c152888",
