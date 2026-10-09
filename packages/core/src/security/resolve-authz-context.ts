@@ -358,7 +358,11 @@ async function tryFind(
  * The scope closes when this call settles; nothing outlives the request.
  */
 export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
-  return withRequestGrantsMemo(input.ql, () => resolveAuthzContextInScope(input));
+  // The engine is handed to the scope only when it carries the write-epoch seam:
+  // without it the memo can never serve, so its write observer is never
+  // registered there — no footprint on such an engine at all.
+  const memoEngine = readWriteEpoch(input.ql) === undefined ? undefined : input.ql;
+  return withRequestGrantsMemo(memoEngine, () => resolveAuthzContextInScope(input));
 }
 
 async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {

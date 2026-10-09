@@ -212,7 +212,8 @@ const scopeStorage = new AsyncLocalStorage<RequestGrantsMemoScope>();
 /**
  * Run `fn` — one `resolveAuthzContext` body — inside a fresh memo scope, and
  * close the scope when it settles. Nested calls each get their own scope.
- * `ql` is the engine the body resolves against; its write observer is
+ * `ql` is the engine the body resolves against (`undefined` when it carries no
+ * write epoch, so the memo can never serve there); its write observer is
  * registered here, before any read, when this is the first call to name it.
  */
 export async function withRequestGrantsMemo<T>(ql: unknown, fn: () => Promise<T>): Promise<T> {
