@@ -34,8 +34,11 @@
  * can be applied wholesale to a node's `config.filter` block and its other
  * value-like positions. The value slots (`fields.*`, `assignments.*`) no
  * longer read this dialect (#19939): a `{…}` token there is refused before it
- * gets here, except the date macros and `$User` paths, which CEL cannot spell
- * yet (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`). Nor do
+ * gets here, except the date macros, which CEL cannot spell yet
+ * (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`); the run
+ * user there is the CEL scope's `current_user`. The `{$User.*}` branch below
+ * still answers the positions that keep this dialect (a `filter`, a `notify`
+ * `recipients` entry). Nor do
  * the TEXT slots — a notify `title` / `message`, a screen `title` /
  * `description`, a refusing `end` node's `message` (#22110, ADR-0032 D3):
  * they render ADR-0032 §3's `{{ }}` holes through the formula template engine,
