@@ -612,9 +612,11 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
       nowMs: T0,
       tenancyPosture: 'isolated',
     });
-    expect(ql.calls.length).toBe(16);
+    // The decision first: the request is authorised WITHOUT the revoked row…
     expect(ctx.positions).not.toContain('auditor');
     expect(ctx).toEqual(await postWriteBaseline());
+    // …because step 2 read afresh after the landing.
+    expect(ql.calls.length).toBe(16);
   });
 
   it('a write that bumped before the first resolution and is still in flight at step 2', async () => {
