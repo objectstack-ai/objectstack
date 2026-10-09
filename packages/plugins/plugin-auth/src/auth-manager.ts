@@ -4088,7 +4088,7 @@ export class AuthManager {
         try {
           const grants = await resolveUserAuthzGrants(dataEngine as any, user.id, {
             tenantId: (session as any)?.activeOrganizationId ?? undefined,
-            seedEmail: (user as any)?.email ? String((user as any).email) : undefined,
+            seedEmail: user.email ? String(user.email) : undefined,
           });
           positions = grants.positions;
           platformAdmin = grants.posture === 'PLATFORM_ADMIN';
