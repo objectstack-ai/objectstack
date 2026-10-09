@@ -492,6 +492,7 @@
     "checkDashboardWidgetStageOrder (function)",
     "checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization (function)",
+    "checkListViewChartBinding (function)",
     "checkPagePrintComposition (function)",
     "checkPageRequiresKind (function)",
     "checkPageSourceCompleteness (function)",
