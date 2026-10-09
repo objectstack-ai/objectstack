@@ -265,8 +265,8 @@ describe('[ADR-0131 D4] the upgrade boot — no request reaches the resolver bef
     try {
       await kernel.bootstrap();
       expect(seen.ready).not.toContain('cap_review');
-      expect((await grant(engine, 'g_up'))?.permission_set).toBe('upgrade_reviewer');
       expect(seen.listening).toContain('cap_review');
+      expect((await grant(engine, 'g_up'))?.permission_set).toBe('upgrade_reviewer');
     } finally {
       await kernel.shutdown();
     }
