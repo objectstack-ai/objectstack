@@ -359,13 +359,22 @@ const OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = new Set(
 /**
  * Phase 3a-env-writable: parse `OS_METADATA_WRITABLE` (comma-
  * separated singular type names). Memoised; tests can reset via
- * {@link resetEnvWritableMetadataTypes}. Mirrors the same helper in
- * ObjectStackProtocolImplementation — both gates must consult the same
- * elevated set so the env-var escape hatch is applied consistently
- * regardless of which write path a caller takes.
+ * {@link resetEnvWritableMetadataTypes}.
+ *
+ * [#22411] The ONE reader of the setting. The repository's write gate and
+ * every protocol consumer of the hatch — `getMetaTypes()`'s listing,
+ * `isOverlayAllowed()` — ask this function, so the listing cannot advertise a
+ * hatch the save door then refuses. There used to be a second, hand-copied
+ * reader in `ObjectStackProtocolImplementation`. The 11.0 removal of
+ * ObjectStack's own legacy env names (`OBJECTSTACK_METADATA_WRITABLE` →
+ * `OS_METADATA_WRITABLE`, published as a breaking change) edited this copy and
+ * missed that one, which went on honouring the removed spelling: the listing
+ * said "writable", the save answered `403 NOT_CREATABLE`. ⛔ Do not add a
+ * second reader, and do not give this one a legacy alias back — the spelling
+ * is removed, and `[]` is that decision.
  */
 let _envWritableMetadataTypes: Set<string> | null = null;
-function envWritableMetadataTypes(): ReadonlySet<string> {
+export function envWritableMetadataTypes(): ReadonlySet<string> {
   if (_envWritableMetadataTypes !== null) return _envWritableMetadataTypes;
   const raw = readEnvWithDeprecation('OS_METADATA_WRITABLE', []) || '';
   const set = new Set<string>();
@@ -381,7 +390,11 @@ function envWritableMetadataTypes(): ReadonlySet<string> {
   return set;
 }
 
-/** Test hook — clear the memoised env-writable cache. */
+/**
+ * Test hook — clear the memoised env-writable cache. The one cache
+ * {@link envWritableMetadataTypes} keeps, so this and
+ * `ObjectStackProtocolImplementation.resetEnvWritableCache()` clear the same set.
+ */
 export function resetEnvWritableMetadataTypes(): void {
   _envWritableMetadataTypes = null;
 }

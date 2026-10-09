@@ -66,6 +66,32 @@
  * apply on the runner too (the runner's own home holds the log; nothing is
  * shared with a seat container, and the twenty-action cap bounds the run).
  *
+ * ## The base sync — `pr_update_branch`, confirmed by MEASURE
+ *
+ * `PUT /repos/{repo}/pulls/{n}/update-branch` answers 202 "Updating pull
+ * request branch." and merges asynchronously, so the answer is an acceptance,
+ * not a landing. `confirmUpdateBranch` therefore polls `GET /pulls/{n}` every
+ * `UPDATE_BRANCH_POLL_MS` for up to `UPDATE_BRANCH_WINDOW_MS` until the head
+ * is no longer `expected_head_sha`, then reads `GET /repos/{repo}/commits/{sha}`
+ * and prints old → new head with the merge commit's author as the platform
+ * names it — the fleet-identity reading this op exists for, in the row and the
+ * summary, so every real sync measures it. A window that expires is a FAILED
+ * action whose sentence says UNCONFIRMED (the merge may still land; read the
+ * pull, ⛔ never re-send), and the stroke stops there: a `pr_ready` queued
+ * behind the sync never runs on an unconfirmed head.
+ *
+ * A 422 is two different things, and its sentence is never the judge — the
+ * executor MEASURES: it re-reads the pull (a head that is no longer the
+ * expected sha is a FAILED action naming both — the platform's "expected head
+ * sha didn't match"), then `GET /repos/{repo}/compare/{base}...{head}`:
+ * `behind_by` 0 means there was nothing to merge and the action LANDED as a
+ * no-op, the row saying so and quoting the platform; anything else — a head
+ * still behind its base, so the platform refused (an enqueued pull's "cannot
+ * update" answer is read here, as a FAILED row), or a measure that could not
+ * be read — is FAILED with the platform's sentence, never a no-op by default.
+ * Any other status is FAILED as every REST 4xx is. The PUT is paced like
+ * every other write verb.
+ *
  * ## The step summary — what a person reads back
  *
  * `$GITHUB_STEP_SUMMARY` gets one table per run: request id · sender and its
@@ -206,6 +232,60 @@ export function pullStateText(pr) {
   if (typeof pr.isInMergeQueue === 'boolean') bits.push(pr.isInMergeQueue ? 'in the merge queue' : 'not in the merge queue');
   if (typeof pr.isMergeQueueEnabled === 'boolean') bits.push(pr.isMergeQueueEnabled ? 'its base has a merge queue' : 'its base has no merge queue');
   return bits.join(' · ');
+}
+
+/** The base sync's answer of acceptance, its confirmation window and its poll interval (header). */
+export const UPDATE_BRANCH_ACCEPTED = 202;
+export const UPDATE_BRANCH_WINDOW_MS = 60_000;
+export const UPDATE_BRANCH_POLL_MS = 3_000;
+
+const shortSha = (sha) => String(sha ?? '').slice(0, 7);
+/** A compare ref (`owner:branch`) as a path segment — the branch's own slashes stay slashes. */
+const refSegment = (label) => encodeURIComponent(label).replace(/%2F/g, '/');
+
+/**
+ * Did the base sync LAND? Judged by measure, never by the answer's sentence
+ * (header): a 202 is confirmed by polling the pull's head off the expected sha
+ * inside the window, then reading the merge commit's author; a 422 is a no-op
+ * only when the head is still the expected sha AND the compare measures it not
+ * behind its base. Returns `{ ok, why, result }` — `result` the row's text on
+ * a landing. Never throws on a status.
+ */
+export async function confirmUpdateBranch(req, answer, payload, api, t, { sleep, now, windowMs = UPDATE_BRANCH_WINDOW_MS, pollMs = UPDATE_BRANCH_POLL_MS } = {}) {
+  const { pull, expectedHeadSha } = req.updateBranch;
+  const pullPath = `/repos/${payload.repo}/pulls/${pull}`;
+  const said = (r) => `${r.call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`;
+  const platform = `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}`;
+  if (answer.status === 422) {
+    const pr = await rest(api, pullPath, {}, t);
+    if (pr.status !== 200 || typeof pr.json?.head?.sha !== 'string') return { ok: false, why: `${platform}; the pull could not be re-read to tell a no-op from a refusal (${said(pr)})` };
+    if (pr.json.head.sha !== expectedHeadSha) return { ok: false, why: `${platform}; the head is ${shortSha(pr.json.head.sha)}, not the expected ${shortSha(expectedHeadSha)} — re-read the pull and send its current head` };
+    const baseLabel = pr.json.base?.label;
+    const headLabel = pr.json.head?.label;
+    if (typeof baseLabel !== 'string' || typeof headLabel !== 'string') return { ok: false, why: `${platform}; the pull's base and head labels could not be read, so the compare that tells a no-op from a refusal was not taken` };
+    const baseRef = typeof pr.json.base?.ref === 'string' ? pr.json.base.ref : baseLabel;
+    const cmp = await rest(api, `/repos/${payload.repo}/compare/${refSegment(baseLabel)}...${refSegment(headLabel)}`, {}, t);
+    if (cmp.status !== 200 || !Number.isInteger(cmp.json?.behind_by)) return { ok: false, why: `${platform}; the compare could not be read to tell a no-op from a refusal (${said(cmp)})` };
+    if (cmp.json.behind_by === 0) return { ok: true, why: '', result: `no-op: head ${shortSha(expectedHeadSha)} is not behind ${baseRef} (behind_by 0), nothing to merge; the platform said "${answer.detail}"` };
+    return { ok: false, why: `${platform}; the head is behind ${baseRef} by ${cmp.json.behind_by} commit(s), so the platform refused the sync — not a no-op` };
+  }
+  if (answer.status !== UPDATE_BRANCH_ACCEPTED) return { ok: false, why: platform };
+  const started = now();
+  let head = null;
+  for (;;) {
+    const pr = await rest(api, pullPath, {}, t);
+    if (pr.status === 200 && typeof pr.json?.head?.sha === 'string') {
+      head = pr.json.head.sha;
+      if (head !== expectedHeadSha) {
+        const commit = await rest(api, `/repos/${payload.repo}/commits/${head}`, {}, t);
+        const author = commit.status === 200 && commit.json ? `${commit.json.author?.login ?? 'no login'} (${commit.json.commit?.author?.name ?? '?'})` : `unread (${said(commit)})`;
+        return { ok: true, why: '', result: `head ${shortSha(expectedHeadSha)} → ${shortSha(head)} · merge commit author ${author}` };
+      }
+    }
+    if (now() - started >= windowMs) break;
+    await sleep(pollMs);
+  }
+  return { ok: false, why: `HTTP ${UPDATE_BRANCH_ACCEPTED} accepted, but the head ${head === null ? 'could not be read' : `is still ${shortSha(head)}`} ${windowMs} ms later — UNCONFIRMED: the merge may still land; read the pull before anything else, ⛔ do not re-send` };
 }
 
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
@@ -377,6 +457,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
     (deps.log ?? ((l) => console.log(l)))(line);
   };
   const t = { fetch: deps.fetch, token, pace: deps.pace };
+  const ub = { sleep: deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))), now: deps.now ?? (() => Date.now()), ...(deps.updateBranch ?? {}) };
 
   const judged = validatePayload(raw);
   if (!judged.ok) {
@@ -435,9 +516,10 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       }
       // The GraphQL leg is spelled with its literal verb: every mutation is a POST to one path.
       const r = req.graphql ? await rest(api, '/graphql', { method: 'POST', body }, t) : await rest(api, req.path, { method: req.verb, body }, t);
-      const landed = requestLanded(req, r);
+      // The base sync is confirmed by MEASURE (header): the head polled off the expected sha, or a 422 judged by the compare.
+      const landed = req.updateBranch ? await confirmUpdateBranch(req, r, payload, api, t, ub) : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
-      rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : resultOf(req, r.json, r.status)) : `FAILED: ${scrub(landed.why, [token])}` });
+      rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
         stoppedAt = { action: i + 1, op: action.op, why: scrub(landed.why, [token]) };
         log(`  ✗ action ${i + 1} ${action.op}: ${call} -> ${stoppedAt.why}`);
@@ -475,6 +557,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the idempotent removal: a 404 on a directed label DELETE is success': 2,
   'the GraphQL ops: the node id first, then the mutation; an errors array is a failure': 5,
   'the PR-state landing: a 200 lands only when the answer SHOWS the state the op asked for — armed or queued for auto-merge, off for its disable, ready and draft for the flips': 12,
+  "the base sync: the PUT carries the expected head; a 202 is confirmed by polling the head off that sha inside the window and reading the merge commit's author; a 422 is a no-op only when the compare measures the head not behind its base; a moved head, a head still behind, an unreadable measure or an expired window is FAILED with nothing after it attempted": 10,
   'the summary: request, sender and role, session, target, one row per request': 5,
   'redaction: the token reaches no summary line, log line or error': 3,
   'the wiring: both halves around every write verb, on the roster': 4,
@@ -483,7 +566,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
   'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
 });
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -523,21 +606,28 @@ export async function selfTest() {
         throw Object.assign(new Error(`throttle refused with exit ${code}`), { throttleExit: code });
       },
     });
-    const platform = (answers, seen) => async (url, init) => {
-      const u = new URL(url);
-      const call = `${init?.method ?? 'GET'} ${u.pathname}`;
-      seen.push({ call, body: init?.body ? JSON.parse(init.body) : null, auth: init?.headers?.authorization ?? '' });
-      const a = answers[call] ?? { status: 404, json: { message: 'Not Found' } };
-      if (a.throws) throw new Error(a.throws);
-      return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999', ...(a.headers ?? {}) }), json: async () => a.json };
+    // An answer may be a LIST, served in order with the last entry repeating, so a poll can watch the platform change between reads.
+    const platform = (answers, seen) => {
+      const served = new Map();
+      return async (url, init) => {
+        const u = new URL(url);
+        const call = `${init?.method ?? 'GET'} ${u.pathname}`;
+        seen.push({ call, body: init?.body ? JSON.parse(init.body) : null, auth: init?.headers?.authorization ?? '' });
+        const declared = answers[call];
+        const nth = served.get(call) ?? 0;
+        served.set(call, nth + 1);
+        const a = (Array.isArray(declared) ? declared[Math.min(nth, declared.length - 1)] : declared) ?? { status: 404, json: { message: 'Not Found' } };
+        if (a.throws) throw new Error(a.throws);
+        return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999', ...(a.headers ?? {}) }), json: async () => a.json };
+      };
     };
     const paceFile = join(dir, 'pace-shared.jsonl');
-    const run = async (payload, answers, { sender = 'os-support-ai', token = TOKEN, file } = {}) => {
+    const run = async (payload, answers, { sender = 'os-support-ai', token = TOKEN, file, ...extra } = {}) => {
       const seen = [];
       const logs = [];
       const pace = paceFor(file ?? join(dir, `pace-${paceCase++}.jsonl`));
       try {
-        const r = await executeFleetWrite({ payload, sender, token }, { fetch: platform(answers, seen), pace, log: (l) => logs.push(l) });
+        const r = await executeFleetWrite({ payload, sender, token }, { fetch: platform(answers, seen), pace, log: (l) => logs.push(l), ...extra });
         return { ...r, seen, logs, pace };
       } catch (e) {
         if (e?.throttleExit === undefined) throw e;
@@ -688,6 +778,49 @@ export async function selfTest() {
       t('every pull mutation in the op table carries its PR_LANDED_STATE entry, and its query selects every field that entry reads', [pullRows.map(([op]) => op).sort(), pullRows.every(([op, g]) => g.landed === PR_LANDED_STATE[op] && g.landed.fields.every((f) => selects(g.query, f)))], [Object.keys(PR_LANDED_STATE).sort(), true]);
     }
 
+    // ── the base sync ───────────────────────────────────────────────────────
+    battery("the base sync: the PUT carries the expected head; a 202 is confirmed by polling the head off that sha inside the window and reading the merge commit's author; a 422 is a no-op only when the compare measures the head not behind its base; a moved head, a head still behind, an unreadable measure or an expired window is FAILED with nothing after it attempted");
+    {
+      const OLD = '1111111111111111111111111111111111111111';
+      const NEW = '2222222222222222222222222222222222222222';
+      const UB = `PUT /repos/${REPO}/pulls/22002/update-branch`;
+      const PULL = `GET /repos/${REPO}/pulls/22002`;
+      const COMMIT = `GET /repos/${REPO}/commits/${NEW}`;
+      const CMP = `GET /repos/${REPO}/compare/objectstack-ai%3Amain...objectstack-ai%3Aclaude/issue-1-x`;
+      const pullAt = (sha) => ({ status: 200, json: { number: 22002, head: { sha, label: 'objectstack-ai:claude/issue-1-x' }, base: { ref: 'main', label: 'objectstack-ai:main' } } });
+      const accepted = { status: 202, json: { message: 'Updating pull request branch.' } };
+      const noNew = { status: 422, json: { message: 'There are no new commits on the base branch.' } };
+      let clock = 0;
+      const timing = { sleep: async (ms) => { clock += ms; }, now: () => clock };
+      const sync = base([{ op: 'pr_update_branch', pull: 22002, expected_head_sha: OLD }]);
+      const polls = (r) => r.seen.filter((s) => s.call === PULL).length;
+
+      const req = OPS.pr_update_branch.requests({ op: 'pr_update_branch', pull: 22002, expected_head_sha: OLD }, REPO)[0];
+      t('the table half: pr_update_branch spends pull-requests, requires pull and expected_head_sha, and its one request is the PUT carrying the sha with an updateBranch descriptor', [OPS.pr_update_branch.permission, OPS.pr_update_branch.required, req.verb, req.path, req.body, req.updateBranch], ['pull-requests', ['pull', 'expected_head_sha'], 'PUT', `/repos/${REPO}/pulls/22002/update-branch`, { expected_head_sha: OLD }, { pull: 22002, expectedHeadSha: OLD }]);
+      t('the window and the interval: about a minute, polled every few seconds, behind a 202', [UPDATE_BRANCH_WINDOW_MS, UPDATE_BRANCH_POLL_MS, UPDATE_BRANCH_ACCEPTED], [60_000, 3_000, 202]);
+
+      clock = 0;
+      const moved = await run(sync, { ...allowed, [UB]: accepted, [PULL]: [pullAt(OLD), pullAt(OLD), pullAt(NEW)], [COMMIT]: { status: 200, json: { sha: NEW, author: { login: 'objectstack-fleet[bot]' }, commit: { author: { name: 'objectstack-fleet[bot]' } } } } }, { file: paceFile, ...timing });
+      t("202: the pull is polled until its head leaves the expected sha — exit 0, the row prints old → new head and the merge commit's author as the platform names it", [moved.exit, moved.rows[0]?.status, moved.rows[0]?.result, polls(moved)], [EXIT_OK, 202, 'head 1111111 → 2222222 · merge commit author objectstack-fleet[bot] (objectstack-fleet[bot])', 3], moved.logs.join(' | '));
+      t("…the polls were spaced by the interval, the author read from the platform's commit, and the PUT carrying the expected sha is the ONE write", [clock, moved.seen.some((s) => s.call === COMMIT), writes(moved.seen).map((s) => [s.call, s.body])], [6_000, true, [[UB, { expected_head_sha: OLD }]]]);
+
+      const noop = await run(sync, { ...allowed, [UB]: noNew, [PULL]: pullAt(OLD), [CMP]: { status: 200, json: { behind_by: 0, ahead_by: 3 } } }, { file: paceFile, ...timing });
+      t('422 with the head still the expected sha and the compare measuring behind_by 0 is a NO-OP landing: exit 0, the row says nothing to merge and quotes the platform', [noop.exit, noop.rows[0]?.status, noop.rows[0]?.result], [EXIT_OK, 422, 'no-op: head 1111111 is not behind main (behind_by 0), nothing to merge; the platform said "There are no new commits on the base branch."'], noop.logs.join(' | '));
+      const queued = await run(sync, { ...allowed, [UB]: { status: 422, json: { message: 'Pull request is in the merge queue and cannot be updated' } }, [PULL]: pullAt(OLD), [CMP]: { status: 200, json: { behind_by: 2 } } }, timing);
+      t("⛔ measured, never spelled: a 422 whose head IS behind its base is a FAILED action naming the count and the platform's sentence — an enqueued pull's \"cannot update\" is read here, through the row", [queued.exit, queued.rows[0]?.result.includes('behind main by 2 commit(s)'), queued.rows[0]?.result.includes('cannot be updated')], [EXIT_ACTION_FAILED, true, true], queued.rows[0]?.result);
+      const stale = await run(sync, { ...allowed, [UB]: { status: 422, json: { message: 'expected head sha didn’t match current head ref.' } }, [PULL]: pullAt(NEW) }, timing);
+      t('422 with the head no longer the expected sha is FAILED naming both shas, and the compare is never taken', [stale.exit, stale.rows[0]?.result.includes('the head is 2222222, not the expected 1111111'), stale.seen.some((s) => s.call === CMP)], [EXIT_ACTION_FAILED, true, false], stale.rows[0]?.result);
+      const unread = await run(sync, { ...allowed, [UB]: noNew, [PULL]: { status: 503, json: { message: 'down' } } }, timing);
+      const noCmp = await run(sync, { ...allowed, [UB]: noNew, [PULL]: pullAt(OLD), [CMP]: { status: 404, json: { message: 'Not Found' } } }, timing);
+      t('a 422 whose measure cannot be read — the pull or the compare — is FAILED naming the read, never a no-op by default', [unread.exit, unread.rows[0]?.result.includes('could not be re-read'), noCmp.exit, noCmp.rows[0]?.result.includes('the compare could not be read')], [EXIT_ACTION_FAILED, true, EXIT_ACTION_FAILED, true]);
+
+      clock = 0;
+      const stuck = await run(base([{ op: 'pr_update_branch', pull: 22002, expected_head_sha: OLD }, { op: 'pr_ready', pull: 22002 }]), { ...allowed, [UB]: accepted, [PULL]: pullAt(OLD) }, timing);
+      t('202 whose head never leaves the expected sha inside the window is FAILED, UNCONFIRMED in its sentence, after the whole window — and the pr_ready behind it is never attempted', [stuck.exit, stuck.rows[0]?.result.includes('UNCONFIRMED') && stuck.rows[0]?.result.includes('do not re-send'), clock, writes(stuck.seen).length, stuck.summary.includes('1 later action(s) NOT attempted')], [EXIT_ACTION_FAILED, true, 60_000, 1, true], stuck.rows[0]?.result);
+      const denied = await run(sync, { ...allowed, [UB]: { status: 403, json: { message: 'Resource not accessible by integration' } } }, timing);
+      t("any other answer is FAILED with the platform's sentence, nothing polled", [denied.exit, denied.rows[0]?.result.includes('Resource not accessible by integration'), polls(denied)], [EXIT_ACTION_FAILED, true, 0]);
+    }
+
     // ── the transfer ────────────────────────────────────────────────────────
     battery('the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure');
     {
@@ -781,7 +914,7 @@ export async function selfTest() {
       t('write-pace lists this file among the wired write tools', WIRED_WRITE_TOOLS.includes('scripts/pm/fleet-write/execute.mjs'));
       t('this file calls both halves, guarded by the write-verb predicate', own.includes('paceWrite(') && own.includes('noteResponse(') && own.includes('isWriteMethod('));
       const records = readReal(paceFile, 'utf8');
-      t('the writes above were paced under their verbs; the reads were not', [records.includes('fleet-write POST'), records.includes('fleet-write DELETE'), records.includes('fleet-write PATCH'), records.includes('fleet-write GET')], [true, true, true, false]);
+      t("the writes above were paced under their verbs — the base sync's PUT among them; the reads were not", [records.includes('fleet-write POST'), records.includes('fleet-write DELETE'), records.includes('fleet-write PATCH'), records.includes('fleet-write PUT'), records.includes('fleet-write GET')], [true, true, true, true, false]);
       t('⛔ and the token never reached the throttle\'s log', records.includes(TOKEN), false);
     }
 
@@ -920,7 +1053,7 @@ export async function selfTest() {
   console.log(
     `✓ fleet-write/execute self-test: ${cases.length} cases pass across ${declared.length} batteries — the sender gate from the target repo's answer, ` +
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
-      'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a transfer gated on both repositories and landing only on its target, one summary row per request, ' +
+      'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, a transfer gated on both repositories and landing only on its target, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, and a known " +
       'token that came back out of NO summary, log or error.',
   );

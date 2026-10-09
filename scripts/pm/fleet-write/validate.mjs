@@ -29,7 +29,9 @@
  *   - each action is exactly `op` + that op's required keys + a subset of its
  *     optional keys; an unknown per-action key is a refusal; a number is an
  *     integer (`"17"` is refused); a string is capped in BYTES; a list is
- *     capped in length and per item; an enum is one of its values;
+ *     capped in length and per item; an enum is one of its values; a sha is
+ *     exactly 40 lowercase hex characters — a short one is refused HERE,
+ *     before the dispatch, never left to the platform's 422;
  *   - the whole payload respects the platform's own `client_payload` limits
  *     (ten top-level properties, under 64KB — the header of `ops.mjs` quotes
  *     the source), so what this file accepts the platform accepts;
@@ -92,6 +94,7 @@ import {
   RELAY_FILES,
   REQUEST_ID_SHAPE,
   SESSION_SHAPE,
+  SHA_SHAPE,
   STROKE_SCOPED_PERMISSIONS,
   TARGET_OWNER,
   TARGET_REPO_SHAPE,
@@ -141,6 +144,10 @@ export function validateField(name, value, spec, where) {
   }
   if (spec.kind === 'enum') {
     if (!spec.values.includes(value)) return `${at} must be one of ${spec.values.map(quote).join(', ')}, got ${quote(value)}`;
+    return null;
+  }
+  if (spec.kind === 'sha') {
+    if (typeof value !== 'string' || !SHA_SHAPE.test(value)) return `${at} must be the full 40-hex commit sha (lowercase), got ${quote(value)} — a short or hand-typed sha is refused here, before the dispatch, not by the platform's 422`;
     return null;
   }
   return `${at}: unknown field kind ${quote(spec.kind)} — a bug in ops.mjs, not in the payload`;
@@ -439,9 +446,9 @@ export async function main(argv, deps = {}) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the envelope: four keys, every one required, nothing else admitted': 9,
   'the fields: request_id shape and cap, the one organization, the session id': 8,
-  'the actions: count, the closed op list, closed keys per op, typed values': 22,
+  'the actions: count, the closed op list, closed keys per op, typed values': 26,
   'the platform ceilings: ten top-level properties and under 64KB, pinned with their source': 6,
-  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 14,
+  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 15,
   'the normalised payload: only judged keys travel': 3,
   'the CLI: a file, the environment, GitHub outputs, and the exit ladder': 10,
   'the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created': 12,
@@ -490,6 +497,8 @@ export async function selfTest() {
     const v = validatePayload(payload);
     return !v.ok && v.errors.some((e) => e.includes(needle));
   };
+  /** A full sha, as a seat reads one off `GET /pulls/{n}` — the only spelling `expected_head_sha` takes. */
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
 
   // ── the envelope ──────────────────────────────────────────────────────────
   battery('the envelope: four keys, every one required, nothing else admitted');
@@ -544,6 +553,11 @@ export async function selfTest() {
     t('an unknown state is refused', refuses(one({ op: 'issue_patch', issue: 1, state: 'archived' }), 'must be one of "open", "closed"'));
     t('issue_patch with nothing to change is refused', refuses(one({ op: 'issue_patch', issue: 1 }), 'at least one of title, body, state, state_reason'));
     t('pr_request_reviewers with neither list is refused', refuses(one({ op: 'pr_request_reviewers', pull: 1 }), 'at least one of reviewers, team_reviewers'));
+    // pr_update_branch: the sha is judged HERE, before the dispatch — a short one never reaches the platform's 422.
+    t('pr_update_branch: a short sha is refused before the dispatch, naming the full shape', refuses(one({ op: 'pr_update_branch', pull: 1, expected_head_sha: SHA.slice(0, 7) }), 'full 40-hex commit sha'));
+    t('…and so are an uppercase, a non-hex and a 41-character spelling', [SHA.toUpperCase(), 'g'.repeat(40), `${SHA}0`].map((sha) => refuses(one({ op: 'pr_update_branch', pull: 1, expected_head_sha: sha }), 'full 40-hex commit sha')), [true, true, true]);
+    t('…a missing expected_head_sha is refused — required, never defaulted to the current head', refuses(one({ op: 'pr_update_branch', pull: 1 }), 'actions[0].expected_head_sha is required'));
+    t('…and the accepted shape is pull plus the full sha and nothing else', [validatePayload(one({ op: 'pr_update_branch', pull: 22002, expected_head_sha: SHA })).ok, refuses(one({ op: 'pr_update_branch', pull: 1, expected_head_sha: SHA, body: 'x' }), 'actions[0].body is not a key `pr_update_branch` takes')], [true, true]);
     // Every op's minimal valid shape is accepted — the table and the validator agree.
     const minimal = {
       comment: { issue: 1, body: 'b' },
@@ -556,6 +570,7 @@ export async function selfTest() {
       issue_create: { title: 't', body: 'b', labels: ['l'], assignees: ['u'] },
       pr_create: { title: 't', head: 'h', base: 'main', body: 'b' },
       pr_request_reviewers: { pull: 1, reviewers: ['u'] },
+      pr_update_branch: { pull: 1, expected_head_sha: SHA },
       pr_ready: { pull: 1 },
       pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 },
@@ -585,7 +600,7 @@ export async function selfTest() {
   battery('refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint');
   {
     const sample = {
-      issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', target_repo: `${TARGET_OWNER}/objectui`,
+      issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`,
       workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF,
     };
     const everyRequest = OP_NAMES.flatMap((op) => {
@@ -596,8 +611,9 @@ export async function selfTest() {
     });
     t('every op produces at least one request', everyRequest.length >= OP_NAMES.length);
     t('⛔ no request path reaches a refused family', everyRequest.filter((r) => REFUSED_PATH_FAMILIES.some((re) => re.test(r.path))).map((r) => `${r.op} ${r.path}`), []);
-    t('⛔ no row issues PUT — the whole-set verbs are absent by construction', everyRequest.filter((r) => r.verb === 'PUT').map((r) => r.op), []);
-    t('every verb is one of POST, PATCH, DELETE', everyRequest.every((r) => ['POST', 'PATCH', 'DELETE'].includes(r.verb)));
+    t('⛔ the table\'s one PUT is pr_update_branch\'s update-branch, an action endpoint — no PUT reaches /labels or /assignees, the whole-set replaces', [everyRequest.filter((r) => r.verb === 'PUT').map((r) => `${r.op} ${r.path}`), everyRequest.some((r) => r.verb === 'PUT' && /\/(labels|assignees)$/.test(r.path))], [[`pr_update_branch /repos/${TARGET_OWNER}/objectstack/pulls/7/update-branch`], false]);
+    t('every verb is one of POST, PATCH, PUT, DELETE', everyRequest.every((r) => ['POST', 'PATCH', 'PUT', 'DELETE'].includes(r.verb)));
+    t('pr_update_branch spends pull-requests — where GitHub\'s ledger lists update-branch, server-to-server, no additional permission — and carries the sha in its body', [OPS.pr_update_branch.permission, OPS.pr_update_branch.requests({ op: 'pr_update_branch', pull: 7, expected_head_sha: SHA }, 'o/r')[0].body], ['pull-requests', { expected_head_sha: SHA }]);
     t('every GraphQL descriptor names an allowed mutation and its query spells that name', everyRequest.filter((r) => r.graphql).every((r) => ALLOWED_MUTATIONS.includes(r.graphql.mutation) && r.graphql.query.includes(r.graphql.mutation)));
     t('pr_create forces draft: true whatever the action said', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r')[0].body.draft, true);
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);
@@ -700,7 +716,7 @@ export async function selfTest() {
     const minimal = {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
-      pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
+      pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
     };
     const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
@@ -752,7 +768,7 @@ export async function selfTest() {
     t('…and the GitHub output spells that as permission_actions=write for the run stroke, EMPTY for every other — the mint action skips an empty input', [githubOutputLines(run).split('\n').at(-2), githubOutputLines(plain).split('\n').at(-2), [...STROKE_SCOPED_PERMISSIONS]], ['permission_actions=write', 'permission_actions=', ['actions']]);
     // The fence on the grant: every path every row can spell, against the actions families — the dispatch call is the ONE
     // actions path reached; and a POSITIVE CONTROL that the families would catch what actions: write otherwise reaches.
-    const filled = { issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', target_repo: `${TARGET_OWNER}/objectui`, workflow: FILE, ref: WORKFLOW_DISPATCH_REF };
+    const filled = { issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`, workflow: FILE, ref: WORKFLOW_DISPATCH_REF };
     const everyPath = OP_NAMES.flatMap((op) => {
       const a = { op };
       for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = filled[k];
