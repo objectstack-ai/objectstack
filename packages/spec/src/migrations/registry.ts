@@ -19290,7 +19290,9 @@ const step18: MigrationStep = {
     // `400 INVALID_REQUEST`. Semantic only: no metadata type carries either
     // surface, so there is no authored source for a D2 conversion to rewrite —
     // what moves is caller code and the intent behind it, which only the caller
-    // can judge.
+    // can judge. The `sys_file.scope` select retires the option too, and the rows
+    // already stored with it are rewritten to `user` by the operator sweep
+    // `@objectstack/service-storage` exports (`backfill-sys-file-public-scope.ts`).
     {
       id: 'storage-scope-public-retired',
       // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
@@ -19311,13 +19313,21 @@ const step18: MigrationStep = {
         + 'anonymous download. Whether a given file must be readable before sign-in is the caller\'s '
         + 'call, so no rewrite can make it: an upload that meant public needs its stored file record '
         + 'marked, and one that did not needs only another scope. The upload request itself carries no '
-        + 'acl, and every upload is stored private. Files already stored with scope public are not '
-        + 'touched and download exactly as before. ADR-0049',
+        + 'acl, and every upload is stored private. The stored file record retires the value too: the '
+        + 'scope select of sys_file no longer lists public, so a deployment that stored files with it runs '
+        + 'the one-time operator sweep that @objectstack/service-storage exports '
+        + '(`planSysFilePublicScopeBackfill` for the dry run, then `applySysFilePublicScopeBackfill`), '
+        + 'which rewrites each of those records to scope user. No access changes: no reader tells user '
+        + 'apart from public, the storage key and the file bytes are not touched, and those files '
+        + 'download exactly as before. Until the sweep has run, a record write that names such a file '
+        + 'while another field already owns it is refused, because the copy it makes carries scope '
+        + 'public. ADR-0049',
       acceptanceCriteria:
         'No upload call names scope public and no ObjectStorageConfig declares it; each upload that did '
         + 'now names another scope or none and is answered 200. Each file that must render before '
         + "sign-in has acl 'public_read' on its stored file record, and fetching it with no session "
-        + 'serves it; fetching any other uploaded file with no session is answered 401.',
+        + 'serves it; fetching any other uploaded file with no session is answered 401. On each '
+        + 'deployment, a dry run of the sweep scans zero sys_file records with scope public.',
     },
     {
       id: 'strategy-context-aggregation-method-narrowed',
