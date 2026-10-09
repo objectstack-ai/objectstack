@@ -14,10 +14,16 @@
 //
 // Driven end-to-end through the real engine and a real (in-memory) driver, so
 // "nothing is persisted" is read off the store rather than inferred from a
-// throw (PD #10: check the CALL SITE, bulk path included). The two CONTROL
-// blocks pin what must NOT move: a predicate that evaluates behaves exactly as
-// before in both directions, and option `visibleWhen` — which D2 does not
-// reach — stays fail-open.
+// throw (PD #10: check the CALL SITE, bulk path included). The CONTROL block
+// pins what must NOT move: a predicate that evaluates behaves exactly as
+// before in both directions.
+//
+// Block (d) is the option gate. #22402 (ruling A) settled that D2 reaches it on
+// the WRITE path — the gate is the server's enforcement of who may pick the
+// option (ADR-0124 D1) — so a faulting option `visibleWhen` refuses the write
+// through the same envelope, `constraint.rule: 'visibleWhen'`, with the option
+// as `value`. Only a system write with no acting user whose predicate reads
+// one stays admitted.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { validationFailureDetails } from '@objectstack/types';
@@ -195,9 +201,18 @@ describe('ADR-0137 D2 — a faulting field-rule predicate refuses the submit (se
     engine.registry.registerObject({
       name: 'fp_option',
       fields: {
+        status: { type: 'text' },
         tier: {
           type: 'select',
-          options: [{ value: 'basic' }, { value: 'gold', visibleWhen: "record.statsu == 'vip'" }],
+          options: [
+            { value: 'basic' },
+            // The typo, on an option gate.
+            { value: 'gold', visibleWhen: "record.statsu == 'vip'" },
+            // Evaluates: the control both ways.
+            { value: 'silver', visibleWhen: "record.status == 'vip'" },
+            // Reads the acting user: a system write has nobody to ask about.
+            { value: 'staff', visibleWhen: "'org_admin' in current_user.positions" },
+          ],
         },
       },
     } as any, 'test-package');
@@ -320,12 +335,75 @@ describe('ADR-0137 D2 — a faulting field-rule predicate refuses the submit (se
     });
   });
 
-  // ── (d) CONTROL: option `visibleWhen` is outside D2 ───────────────────────
+  // ── (d) option `visibleWhen`: D2 reaches the gate on the write path ───────
 
-  describe('(d) CONTROL — option `visibleWhen` is not a field-rule predicate, and stays fail-open', () => {
-    it('a faulting option predicate still lets the choice through', async () => {
-      const row = await engine.insert('fp_option', { tier: 'gold' });
-      expect(row).toMatchObject({ tier: 'gold' });
+  describe('(d) an option `visibleWhen` whose predicate faults (#22402)', () => {
+    const ACTING = { context: { userId: 'u1', positions: ['org_member'] } } as any;
+
+    /** The option-gate refusal, asserted as a whole: the D2 envelope, naming the option, the field and the fault. */
+    function expectOptionGateRefusal(err: any, field: string, option: string) {
+      expect(err.name).toBe('ValidationError');
+      expect(err.code).toBe('VALIDATION_FAILED');
+      expect(validationFailureDetails(err)).toMatchObject({ code: 'VALIDATION_FAILED' });
+      const entry = (err.fields as any[]).find((f) => f.field === field);
+      expect(entry).toMatchObject({
+        field,
+        code: 'rule_violation',
+        value: option,
+        constraint: expect.objectContaining({ rule: 'visibleWhen', reason: 'unevaluable', missingKey: 'statsu' }),
+      });
+      expect(entry.message.startsWith(`Option '${option}' of field '${field}' visibleWhen could not be evaluated (runtime: No such key: statsu)`))
+        .toBe(true);
+      return entry;
+    }
+
+    it('refuses an authenticated INSERT — and nothing is stored', async () => {
+      const err = await refusalOf(() => engine.insert('fp_option', { tier: 'gold' }, ACTING));
+      expectOptionGateRefusal(err, 'tier', 'gold');
+      expect(rows('fp_option')).toHaveLength(0);
+    });
+
+    it('refuses a system INSERT too: the predicate names no user, so the gate is broken, not unasked', async () => {
+      const err = await refusalOf(() => engine.insert('fp_option', { tier: 'gold' }));
+      expectOptionGateRefusal(err, 'tier', 'gold');
+      expect(rows('fp_option')).toHaveLength(0);
+    });
+
+    it('refuses a by-id UPDATE — and the stored row is untouched', async () => {
+      storeFor('fp_option').set('o1', { id: 'o1', status: 'open', tier: 'basic' });
+      const err = await refusalOf(() => engine.update('fp_option', { id: 'o1', tier: 'gold' }, ACTING));
+      expectOptionGateRefusal(err, 'tier', 'gold');
+      expect(storeFor('fp_option').get('o1')).toEqual({ id: 'o1', status: 'open', tier: 'basic' });
+    });
+
+    it('refuses on the BULK path, before any matched row is written', async () => {
+      storeFor('fp_option').set('b1', { id: 'b1', status: 'open', tier: 'basic' });
+      storeFor('fp_option').set('b2', { id: 'b2', status: 'open', tier: 'basic' });
+      const err = await refusalOf(() =>
+        engine.update('fp_option', { tier: 'gold' }, { where: { status: 'open' }, multi: true, ...ACTING } as any));
+      expectOptionGateRefusal(err, 'tier', 'gold');
+      expect(rows('fp_option').map((r) => r.tier)).toEqual(['basic', 'basic']);
+    });
+
+    it('validate() previews the same refusal', async () => {
+      const preview = await engine.validate('fp_option', { tier: 'gold' }, { mode: 'insert', ...ACTING } as any);
+      expect(preview.results?.[0]?.valid).toBe(false);
+      expect(preview.results?.[0]?.errors).toEqual([
+        expect.objectContaining({ field: 'tier', code: 'rule_violation', value: 'gold' }),
+      ]);
+    });
+
+    it('CONTROL — an evaluable gate is judged exactly as before: FALSE refuses `invalid_option`, TRUE writes', async () => {
+      const err = await refusalOf(() => engine.insert('fp_option', { status: 'open', tier: 'silver' }, ACTING));
+      expect(err.fields).toEqual([expect.objectContaining({ field: 'tier', code: 'invalid_option' })]);
+      const row = await engine.insert('fp_option', { status: 'vip', tier: 'silver' }, ACTING);
+      expect(row).toMatchObject({ tier: 'silver' });
+      expect(rows('fp_option')).toHaveLength(1);
+    });
+
+    it('CONTROL — a system write of a user-gated option stays ADMITTED (`no-acting-user`)', async () => {
+      const row = await engine.insert('fp_option', { tier: 'staff' });
+      expect(row).toMatchObject({ tier: 'staff' });
       expect(rows('fp_option')).toHaveLength(1);
     });
   });

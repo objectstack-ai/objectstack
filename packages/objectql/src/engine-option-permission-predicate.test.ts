@@ -15,9 +15,11 @@
  *    kept across writes (a revoked grant is seen on the very next write);
  *  - a write whose gates never call `can` never asks — so it cannot be refused
  *    by a resolution it did not depend on (the ruling's control);
- *  - no resolver ⇒ NO permission data: the gate stays loudly unevaluable and
- *    the value is admitted with the warn naming the missing input — ⛔ not a
- *    denial;
+ *  - no resolver ⇒ NO permission data: the gate cannot be evaluated, so the
+ *    write is REFUSED through the unevaluable envelope naming the missing
+ *    input (ADR-0137 D2, which #22402 ruled reaches the option gate on the
+ *    write path) — ⛔ never `invalid_option`, which would read as a measured
+ *    denial, and ⛔ never an admission;
  *  - a resolver that THROWS fails the write CLOSED with its own error, and a
  *    map that is not the published shape is refused the same way.
  */
@@ -205,14 +207,27 @@ describe('#18783 — the engine answers `can` in option visibleWhen from the sec
     expect(r.asks).toHaveLength(0);
   });
 
-  it('NO resolver ⇒ no permission data: loudly unevaluable and ADMITTED, never a silent denial', async () => {
-    await expect(
-      engine.insert('crm_case', { subject: 's', stage: 'escalated' }, { context: ACTING } as any),
-    ).resolves.toBeTruthy();
+  it('NO resolver ⇒ no permission data: REFUSED as unevaluable naming the missing input — never a silent denial, never an admission', async () => {
+    const err = await refusal(engine.insert('crm_case', { subject: 's', stage: 'escalated' }, { context: ACTING } as any));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({
+      field: 'stage',
+      code: 'rule_violation',
+      value: 'escalated',
+      constraint: { rule: 'visibleWhen', reason: 'unevaluable' },
+    });
+    expect(err.fields[0].constraint.fault).toContain('carries no permission data');
+    // Nothing is persisted.
+    expect(created()).toHaveLength(0);
     const gate = log.warns.filter((w) => w.meta?.field === 'stage');
     expect(gate).toHaveLength(1);
     expect(gate[0].meta).toMatchObject({ value: 'escalated', reason: 'predicate-fault' });
     expect(gate[0].meta.error.message).toContain('carries no permission data');
+    // Control on the same engine: an ungated pick still writes.
+    await expect(engine.insert('crm_case', { subject: 's', stage: 'open' }, { context: ACTING } as any)).resolves.toBeTruthy();
+    expect(created()).toHaveLength(1);
   });
 
   it('a resolver that THROWS fails the write CLOSED with its own error, untouched', async () => {

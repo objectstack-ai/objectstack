@@ -94,9 +94,9 @@
  * thrown exception is an engine fault the author has no remedy for (rejecting
  * on it would brick every write with nothing to fix). Step 1 makes the
  * field-level predicates evaluate far more often anyway, since their fault mode
- * was the same missing key. (ADR-0137 D2 has since moved `requiredWhen` and
- * `readonlyWhen` off that list — see the section of that name below. Option
- * `visibleWhen`, `format` and `json_schema` stay on it.)
+ * was the same missing key. (ADR-0137 D2 has since moved `requiredWhen`,
+ * `readonlyWhen` and the option `visibleWhen` write gate off that list — see
+ * the section of that name below. `format` and `json_schema` stay on it.)
  *
  * ## `readonlyWhen`: the UNBOUND-ROOT case is fail-CLOSED (#4889)
  *
@@ -181,10 +181,22 @@
  *
  * Both refusals are {@link unevaluableRuleError}'s envelope, the one a broken
  * validation rule has carried since #4649, with the field as `field` and the
- * slot as `constraint.rule`. What D2 does NOT reach: option `visibleWhen`
- * ({@link evaluateOptionVisibility}) — D2 names a FIELD-rule predicate, an
- * option's visibility is not one, and it stays fail-open; and the RENDER side,
- * which D3 keeps fail-open for display. The consequence ADR-0137 names is
+ * slot as `constraint.rule`.
+ *
+ * D2 reaches the option gate on the WRITE path too ({@link
+ * evaluateOptionVisibility}, ruled on #22402, letter A). That gate is the
+ * server's enforcement of who may pick an option (ADR-0124 D1), so an option
+ * `visibleWhen` that faults while the write is judged refuses the write through
+ * the SAME envelope — `constraint.rule: 'visibleWhen'`, the picked option as
+ * `value` — naming the option, the field and the fault. The earlier reading
+ * that an option's visibility is not a field rule, and so stays fail-open, is
+ * superseded on the write path. One case is still admitted, loudly: a system
+ * write with no acting user whose predicate reads the acting user, where the
+ * gate has nobody to ask about (reason `no-acting-user`).
+ *
+ * What D2 does NOT reach is the RENDER side, which D3 keeps fail-open for
+ * display — a faulting field `visibleWhen` shows the field, a faulting option
+ * predicate leaves the option offered. The consequence ADR-0137 names is
  * deliberate: a stored predicate that silently did nothing now refuses writes,
  * and that loud state is what reveals it.
  *
@@ -378,7 +390,8 @@ export interface EvaluateRulesOptions {
    * `visibleWhen` predicates as `current_user` so role/context-gated options can
    * be enforced server-side (objectui#2284). Absent on system/unauthenticated
    * writes — role predicates then reference an unbound `current_user`, fault,
-   * and fail-open (see {@link evaluateOptionVisibility}).
+   * and are admitted with the `no-acting-user` warn: the gate has nobody to ask
+   * about (see {@link evaluateOptionVisibility}). Every other fault refuses.
    */
   currentUser?: { id?: string; roles?: string[]; organizationId?: string | null; [k: string]: unknown } | null;
   /**
@@ -390,9 +403,10 @@ export interface EvaluateRulesOptions {
    * the division of labour `parent` and `related` follow.
    *
    * ⛔ `undefined` is NOT an empty map. It means "no permission data": a `can`
-   * predicate then stays loudly unevaluable (the fail-open branch of
-   * {@link evaluateOptionVisibility}, naming the missing input). An empty map is
-   * a REAL answer — this subject holds nothing, every `can()` is `false`.
+   * predicate then cannot be evaluated, and {@link evaluateOptionVisibility}
+   * REFUSES the write with the fault naming the missing input (ADR-0137 D2) —
+   * never a quiet denial, never an admission. An empty map is a REAL answer —
+   * this subject holds nothing, every `can()` is `false`.
    * The engine passes one only for a write that picks an option whose predicate
    * calls `can` ({@link optionVisibilityReadsPermissions}).
    */
@@ -2895,11 +2909,12 @@ const userRootCache = new Map<string, boolean>();
  * question: with no acting user, `'admin' in current_user.positions` reports
  * `Unknown variable: current_user`, but `'admin' in current_user.positions &&
  * record.typo == 1` reports `No such key: typo` instead. A message-matching key
- * would file that second predicate as a live gate failure on every system
- * write — the exact noise this branch exists to end.
+ * would file that second predicate as a broken gate on every system write —
+ * and, since a broken gate refuses the write (ADR-0137 D2), refuse every
+ * seeded row that carries the gated value.
  *
  * A non-CEL dialect, an AST-only expression, or source that does not parse
- * answers `false`, i.e. the loud branch. That is the safe direction and it is
+ * answers `false`, i.e. the refusal. That is the safe direction and it is
  * not a lost case: `celEngine.evaluate` itself refuses an expression with no
  * `source` (`AST-only evaluation not yet supported; persist \`source\``), so
  * anything this reader cannot see is a predicate the evaluator could not have
@@ -2931,33 +2946,48 @@ function readsUserRoot(cond: string | Expression): boolean {
  * 'cn'`), server-side.
  *
  * Only WRITTEN fields are checked — an unchanged persisted value is left alone.
- * A predicate that can't be evaluated (missing referenced field, unbound
- * `current_user` on a system write) is **fail-open** (logged, allowed), matching
- * every other field rule here: a broken cascade predicate must never brick a
- * write. Authorization gating therefore depends on the engine binding
- * `current_user` on authenticated writes.
+ *
+ * ## A predicate that cannot be evaluated REFUSES the write (ADR-0137 D2)
+ *
+ * Ruled on #22402 (letter A): D2's submit-time refusal reaches this gate on the
+ * write path, because it is the server's enforcement of who may pick the option
+ * (ADR-0124 D1). A faulting predicate — an undeclared key, an unbound root or
+ * member, a read through a reference, a computed key or receiver no build-time
+ * verdict can judge, a `can` with no permission data — has produced no verdict,
+ * and reading "no verdict" as "may pick it" is a role gate that is no gate. So
+ * the write is refused through the field-rule envelope
+ * ({@link unevaluableOptionGateError}: `rule_violation`,
+ * `constraint.reason: 'unevaluable'`, `constraint.rule: 'visibleWhen'`, the
+ * option as `value`), naming the option, the field and the fault. Nothing is
+ * persisted: the refusal joins this call's `ValidationError`. The RENDER side is
+ * untouched — ADR-0137 D3 keeps a faulting option offered in the form.
+ *
+ * Until that ruling this arm was fail-open (logged, allowed through), on the
+ * reading that an option's visibility is not a field rule. That reading is
+ * superseded here, and only here: the render direction stands.
+ *
+ * ## The one admitted fault: no acting user to ask about
+ *
+ * A system write — a declarative seed, an in-process job, anything with no
+ * acting user — can never bind `current_user`, so a predicate that READS the
+ * acting user faults on it by construction, on the correct path. That fault is
+ * not a broken gate: there is no user for the gate to judge, and refusing it
+ * would refuse every seeded row carrying a role-gated value. It stays admitted,
+ * logged at `warn` with `meta.reason: 'no-acting-user'` (measured before that
+ * line was split out: 27 identical lines on one ordinary boot of a seeded app,
+ * one per seeded row). It needs BOTH facts — no user on the write AND a
+ * predicate that reads one ({@link readsUserRoot}, off the AST). A system write
+ * whose predicate names no user root and faults on a typo'd field is a broken
+ * gate like any other, and is refused — exactly as a faulting `requiredWhen` or
+ * `readonlyWhen` refuses a system write.
  *
  * [#18783] A grant-gated option — `current_user.can('crm_account', 'edit')` —
  * additionally needs the subject's effective object permissions, which the
  * engine resolves once per write and passes as `permissions`. With the map the
  * predicate evaluates and a clean FALSE refuses like any other; without it
- * `can` refuses loudly inside the evaluator and the value takes the fail-open
- * branch below with that refusal as its `error`. A resolution FAILURE never
- * reaches here: the engine fails the write closed before evaluating.
- *
- * The admission is deliberate and unchanged. What the fail-open branch does NOT
- * do any more is describe two different facts with one sentence. A system write
- * — a declarative seed, an in-process job, anything with no acting user — can
- * never bind `current_user`, so every gated option it carries took that branch
- * and logged `failed to evaluate — allowed through`: measured at 27 identical
- * lines on one ordinary boot of a seeded app, one per seeded row, on the
- * correct path. An authenticated caller whose predicate genuinely faults (a
- * typo'd field, a missing root) produced the *identical* line, and that one is
- * a gate that is not being enforced. A signal that fires this often on the
- * expected path stops being read, and takes the real case with it. The branch
- * below states which of the two happened, in the message and in structured
- * `meta.reason`; both stay at `warn` — the authenticated fault must not get
- * quieter, and the sink offers no other level.
+ * `can` refuses loudly inside the evaluator, and that refusal is the fault the
+ * write is refused with. A resolution FAILURE never reaches here: the engine
+ * fails the write closed before evaluating.
  */
 function evaluateOptionVisibility(
   fields: Record<string, ConditionalFieldDef> | undefined,
@@ -2979,31 +3009,35 @@ function evaluateOptionVisibility(
       user,
       // [#18783] What `current_user.can(object, verb)` is answered from. Passed
       // through as the engine resolved it: `undefined` leaves `can` loudly
-      // unevaluable (the fault lands in the fail-open branch below, naming the
-      // missing input), never a quiet `false` — see `EvaluateRulesOptions`.
+      // unevaluable (the write is refused below, the fault naming the missing
+      // input), never a quiet `false` — see `EvaluateRulesOptions`.
       permissions,
     });
     if (!res.ok) {
-      // Which of the two fail-open cases is this? "No acting user to bind"
-      // needs BOTH facts — the write carries no user AND the predicate asks
-      // for one. Either alone misfiles: a system write whose predicate names
-      // no user root and faults on a typo'd field is a real broken gate, and
-      // an authenticated caller's fault is the case this log exists for.
+      // "No acting user to bind" needs BOTH facts — the write carries no user
+      // AND the predicate asks for one. Either alone misfiles: a system write
+      // whose predicate names no user root and faults on a typo'd field is a
+      // real broken gate, and an authenticated caller's fault is the gate this
+      // refusal exists for.
       const noActingUser = user === undefined;
       if (noActingUser && readsUserRoot(opt.visibleWhen!)) {
         logger?.warn?.(
           `option visibleWhen for '${name}=${String(value)}' not evaluated: no acting user to bind current_user (system write) — allowed through`,
           { field: name, value: String(value), reason: 'no-acting-user', error: res.error },
         );
-      } else {
-        logger?.warn?.(
-          `option visibleWhen for '${name}=${String(value)}' failed to evaluate `
-            + `(${noActingUser ? 'system write' : 'authenticated caller'}) — allowed through; `
-            + `the option's gate was NOT enforced on this write. Check the predicate.`,
-          { field: name, value: String(value), reason: 'predicate-fault', error: res.error },
-        );
+        continue;
       }
-      continue; // fail-open
+      // [ADR-0137 D2, #22402 ruling A] Every other fault REFUSES the write,
+      // naming the option, the field and the fault. Said in the log too: the
+      // operator needs the broken gate there even though the caller is told.
+      const refusal = unevaluableOptionGateError(name, value, res.error, opt.visibleWhen!, fields);
+      logger?.warn?.(
+        `option visibleWhen for '${name}=${String(value)}' failed to evaluate `
+          + `(${noActingUser ? 'system write' : 'authenticated caller'}: ${String(refusal.constraint?.fault)}) — write rejected`,
+        { field: name, value: String(value), reason: 'predicate-fault', error: res.error },
+      );
+      errors.push(refusal);
+      continue;
     }
     if (res.value === false) {
       errors.push(buildFieldError({
@@ -3594,7 +3628,8 @@ function checkStateMachine(
  * refuse through this SAME builder — {@link unevaluableFieldRuleError} passes
  * the `subject` that names the field and the slot instead of a rule name, and
  * nothing else about the envelope moves: one refusal shape for every predicate
- * the server could not run.
+ * the server could not run. The option gate's write-path refusal is the third
+ * caller ({@link unevaluableOptionGateError}), which adds the option as `value`.
  */
 function unevaluableRuleError(
   ruleName: string,
@@ -3662,22 +3697,17 @@ function unevaluableFieldRuleError(
   pred: string | Expression,
   fields: Record<string, ConditionalFieldDef> | undefined,
 ): FieldValidationError {
-  const expr = toExpression(pred);
-  const source = expr.dialect === 'cel' && typeof expr.source === 'string' ? expr.source : '';
+  const source = celSourceOfPredicate(pred);
   let detail: string | undefined;
   const missing = missingKeyOf(error);
-  if (missing && source && fields) {
-    for (const [ref, related] of analysisFor(source)?.traversals ?? []) {
-      const target = referenceTargetOf(fields[ref]);
-      if (!target || !related.has(missing)) continue;
-      detail =
-        ` The predicate reads '${missing}' through '${ref}', a reference to '${target}'. A field-level`
-        + ` \`${slot}\` is evaluated against this record alone and never reads the related record`
-        + ' (only a `validations[]` rule\'s condition reads one hop through a reference), so the'
-        + ` reference holds a bare id there. Express the check as a \`validations[]\` \`script\` rule,`
-        + ' or read a column this object declares.';
-      break;
-    }
+  const through = missing && source ? referenceReadThrough(missing, source, fields) : undefined;
+  if (through) {
+    detail =
+      ` The predicate reads '${missing}' through '${through.ref}', a reference to '${through.target}'. A field-level`
+      + ` \`${slot}\` is evaluated against this record alone and never reads the related record`
+      + ' (only a `validations[]` rule\'s condition reads one hop through a reference), so the'
+      + ` reference holds a bare id there. Express the check as a \`validations[]\` \`script\` rule,`
+      + ' or read a column this object declares.';
   }
   if (detail === undefined && unknownVariableOf(error) === PARENT_ROOT) {
     detail =
@@ -3689,6 +3719,109 @@ function unevaluableFieldRuleError(
     prose: `Field '${name}' ${slot}`,
     ...(detail !== undefined ? { detail } : {}),
   });
+}
+
+/** The CEL source of a predicate, or `''` for a non-CEL dialect or an AST-only envelope. */
+function celSourceOfPredicate(pred: string | Expression): string {
+  const expr = toExpression(pred);
+  return expr.dialect === 'cel' && typeof expr.source === 'string' ? expr.source : '';
+}
+
+/**
+ * The reference field a `No such key: <missing>` fault was read THROUGH
+ * (`record.account.tier` → `account`, a reference to its target), or
+ * `undefined`. The field level is never hydrated, so such a read faults on
+ * every row and the generic "declare the field" would send the author to the
+ * wrong object. Shared by the field-rule and option-gate refusals, which word
+ * the repair for their own slot.
+ */
+function referenceReadThrough(
+  missing: string,
+  source: string,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): { ref: string; target: string } | undefined {
+  if (!fields) return undefined;
+  for (const [ref, related] of analysisFor(source)?.traversals ?? []) {
+    const target = referenceTargetOf(fields[ref]);
+    if (target && related.has(missing)) return { ref, target };
+  }
+  return undefined;
+}
+
+/**
+ * Does this source read `key` directly as a member of `record` or `previous` —
+ * i.e. is a `No such key: <key>` fault about a column of THIS record? False for
+ * a key reached through a computed key (`os['o' + 'rg']`), a computed receiver
+ * (a comprehension variable, a ternary) or a root the option gate fills only
+ * partly (`os.org`, `ctx.locale`), where "declare the field" is the wrong repair.
+ */
+function readsRecordColumn(source: string, key: string): boolean {
+  for (const analysis of [analysisFor(source), analyzeRelationshipTraversals(source, 'previous')]) {
+    if (!analysis) continue;
+    if (analysis.bareFields.has(key) || analysis.traversals.has(key) || analysis.multiHopFields.has(key)) return true;
+  }
+  return false;
+}
+
+/**
+ * [ADR-0137 D2, #22402 ruling A] The refusal an option `visibleWhen` that
+ * CANNOT BE EVALUATED on the write path produces: it names the option, the
+ * field and the fault, and the write is rejected with nothing persisted.
+ *
+ * The field-rule envelope, unchanged — built by {@link unevaluableRuleError}:
+ * `code: 'rule_violation'`, `constraint.reason: 'unevaluable'`,
+ * `constraint.fault` — with `constraint.rule: 'visibleWhen'` and the picked
+ * option as `value`, the slot the clean-FALSE `invalid_option` refusal of the
+ * same gate carries it in. No new refusal code: a client that already reads
+ * `reason: 'unevaluable'` reads this one. `'visibleWhen'` cannot collide with a
+ * validation rule's snake_case name, and the server evaluates no other
+ * `visibleWhen` on a write.
+ *
+ * The trailing sentence says what is true for THIS gate, because two generic
+ * ones would mislead:
+ *
+ *  - **A column read through a reference** gets the traversal sentence, worded
+ *    for an option (the same repair as the field-rule slots).
+ *  - **A key that is not a column of this record** — a computed key, a
+ *    computed receiver, an unbound member of `ctx` / `os` — gets no trailing
+ *    sentence and no `missingKey`: "declare the field" would be the wrong
+ *    repair. The fault itself still travels in the message and `constraint`.
+ *  - **An unbound root** (`parent`, `input`, …) names what the gate binds; the
+ *    generic sentence lists only `record` / `previous`.
+ */
+function unevaluableOptionGateError(
+  name: string,
+  value: unknown,
+  error: { kind: string; message: string },
+  pred: string | Expression,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): FieldValidationError {
+  const source = celSourceOfPredicate(pred);
+  let detail: string | undefined;
+  const missing = missingKeyOf(error);
+  const unbound = missing ? undefined : unknownVariableOf(error);
+  const through = missing && source ? referenceReadThrough(missing, source, fields) : undefined;
+  if (through) {
+    detail =
+      ` The predicate reads '${missing}' through '${through.ref}', a reference to '${through.target}'. An option's`
+      + ' `visibleWhen` is evaluated against this record alone and never reads the related record'
+      + ' (only a `validations[]` rule\'s condition reads one hop through a reference), so the'
+      + ' reference holds a bare id there. Express the check as a `validations[]` `script` rule,'
+      + ' or read a column this object declares.';
+  } else if (missing && source && !readsRecordColumn(source, missing)) {
+    detail = '';
+  } else if (unbound) {
+    detail =
+      ` The predicate reads '${unbound}', which the option gate does not bind: it binds \`record\`,`
+      + ' `previous` and the acting user (`current_user`, and its ADR-0068 aliases), and nothing else.';
+  }
+  return {
+    ...unevaluableRuleError('visibleWhen', name, error, 'predicate', {
+      prose: `Option '${String(value)}' of field '${name}' visibleWhen`,
+      ...(detail !== undefined ? { detail } : {}),
+    }),
+    value: String(value),
+  };
 }
 
 /**
