@@ -232,7 +232,7 @@ describe('actionTranslationSchema.description', () => {
   });
 });
 
-describe('the action `description` describe — form help an author reads in Studio (#22093)', () => {
+describe('the action `description` describe — form help an author reads in Studio', () => {
   // Studio's action inspector renders this describe from the `/meta/types`
   // schema, which derives `action` in the authoring (`io: 'input'`) shape.
   const help = (() => {

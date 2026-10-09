@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 // a copy of it: "a future `SCOPE_ROOTS` member is covered for free" is the whole
 // argument for the allowlist, and a hand-copied list would go green on exactly
 // the root the rule never saw.
-import { SCOPE_ROOTS } from '@objectstack/formula';
+import { SCOPE_ROOTS, buildScope, ExpressionEngine } from '@objectstack/formula';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
@@ -2085,6 +2085,143 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
 
       it('gives one finding when the predicate reads two unbound roots', () => {
         expect(validateStackExpressions(detail(`${PARENT} && input.k == 1`))).toHaveLength(1);
+      });
+    });
+
+    /**
+     * ── The members of `ctx` / `os` the option check never fills (#22274) ───
+     *
+     * `ctx` and `os` pass the root verdict above, but the option check fills
+     * each with its `user` member only: `evaluateOptionVisibility` hands the
+     * evaluator `{ record, previous, user, permissions }`, and `buildScope`
+     * mounts `os.org` / `os.env` only from an `org` / `env` in that context.
+     * Measured through the built `evaluateValidationRules` with an
+     * authenticated caller, `os.org.id`, `os.env` and `ctx.locale` each fault
+     * (`No such key`) and the value is admitted, so the build refuses them.
+     */
+    describe('a per-option `visibleWhen` member of `ctx` / `os` the option check does not bind is refused (#22274)', () => {
+      const detail = (visibleWhen: unknown, extra: Record<string, unknown> = {}) => ({
+        objects: [
+          {
+            name: 'fx_line',
+            fields: {
+              x: { type: 'text' },
+              locale: { type: 'text' },
+              tier: {
+                type: 'select',
+                options: [{ label: 'Standard', value: 'standard' }, { label: 'Gold', value: 'gold', visibleWhen }],
+              },
+              ...extra,
+            },
+          },
+        ],
+      });
+      const WHERE = "object 'fx_line' · field 'tier' option 'gold' visibleWhen";
+      /**
+       * The context the option check hands the evaluator, mirrored from its one
+       * call (`evaluateOptionVisibility` in ObjectQL's `rule-validator.ts`): the
+       * merged record, `previous`, the acting user as the engine builds it (with
+       * the caller's organization id) and the permission map. Nothing else.
+       */
+      const OPTION_CHECK_CONTEXT = {
+        record: { x: 'a' },
+        previous: { x: 'a' },
+        user: { id: 'u1', positions: ['member'], organizationId: 'org_1' },
+        permissions: {},
+      };
+
+      it.each([
+        ["os.org.id != ''", '`os.org`'],
+        ["os.env == 'prod'", '`os.env`'],
+        ["ctx.locale == 'en'", '`ctx.locale`'],
+      ])('⭐ refuses %s at error, located at the option, naming the member and what is bound', (body, path) => {
+        const issues = validateStackExpressions(detail(body));
+        expect(issues, JSON.stringify(issues, null, 2)).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ where: WHERE, severity: 'error', source: body });
+        expect(issues[0]!.message).toContain(`option 'gold' on field 'tier' reads ${path}`);
+        expect(issues[0]!.message).toContain('the `user` member and nothing else');
+      });
+
+      it('⭐ the `os.org` refusal names the bound replacement, and that replacement passes and evaluates', () => {
+        expect(validateStackExpressions(detail("os.org.id != ''"))[0]!.message).toContain('`current_user.organizationId`');
+        const body = "current_user.organizationId == 'org_1'";
+        expect(validateStackExpressions(detail(body))).toEqual([]);
+        expect(ExpressionEngine.evaluate({ dialect: 'cel', source: body }, OPTION_CHECK_CONTEXT)).toEqual({ ok: true, value: true });
+      });
+
+      it('⭐ CONTROL — the acting user under every ADR-0068 spelling, `record`, `previous` and `can` pass', () => {
+        for (const body of [
+          "current_user.id != ''",
+          "os.user.id != ''",
+          "'org_admin' in ctx.user.positions",
+          "user.id != ''",
+          "record.x == 'a'",
+          "previous.x == 'a'",
+          "current_user.can('fx_line', 'edit')",
+          // A `record` member merely spelled like a refused one.
+          "record.locale == 'en'",
+        ]) {
+          expect(validateStackExpressions(detail(body)), body).toEqual([]);
+        }
+      });
+
+      it('⭐ POSITIVE CONTROL — the same `os.org.id` on a `formula` field, which binds `os.org`, is not refused', () => {
+        const atFormula = detail("record.x == 'a'", { in_org: { type: 'formula', expression: "os.org.id != ''" } });
+        expect(validateStackExpressions(atFormula)).toEqual([]);
+      });
+
+      it('judges every member spelling as one read: optional, indexed and `has()`', () => {
+        for (const body of ['has(os.org)', 'os.?org.orValue({}) == {}', "os['org'].id != ''", "has(ctx.locale)"]) {
+          const issues = validateStackExpressions(detail(body));
+          expect(issues, body).toHaveLength(1);
+          expect(issues[0]!.where, body).toBe(WHERE);
+        }
+      });
+
+      it('one finding per option: an unbound root before a member, then members in `SCOPE_ROOTS` order', () => {
+        const withRoot = validateStackExpressions(detail("ctx.locale == 'en' && input.k == 1"));
+        expect(withRoot).toHaveLength(1);
+        expect(withRoot[0]!.message).toContain('reads `input`');
+        const twoMembers = validateStackExpressions(detail("ctx.locale == 'en' && os.env == 'prod'"));
+        expect(twoMembers).toHaveLength(1);
+        expect(twoMembers[0]!.message).toContain('reads `os.env`');
+      });
+
+      /**
+       * The allowlist is derived from the code, both ways. The real
+       * `buildScope` and evaluator, given the option check's context: every
+       * member they mount under `ctx` / `os` is accepted and evaluates, and
+       * every member they mount there only when ALSO given an organization and
+       * an environment is refused and faults. A member `buildScope` starts
+       * mounting from the option check's context, or one the verdict accepts
+       * that it no longer mounts, turns this red.
+       */
+      it('the accepted members are exactly the ones `buildScope` mounts for the option check', () => {
+        const optionScope = buildScope(OPTION_CHECK_CONTEXT);
+        const fullScope = buildScope({ ...OPTION_CHECK_CONTEXT, org: { id: 'org_1' }, env: 'prod' });
+        const accepted: string[] = [];
+        const refused: string[] = [];
+        for (const root of ['ctx', 'os']) {
+          const mounted = Object.keys(optionScope[root] as Record<string, unknown>);
+          for (const member of Object.keys(fullScope[root] as Record<string, unknown>)) {
+            const body = `${root}.${member} != null`;
+            const issues = validateStackExpressions(detail(body));
+            const evaluated = ExpressionEngine.evaluate({ dialect: 'cel', source: body }, OPTION_CHECK_CONTEXT);
+            if (mounted.includes(member)) {
+              expect(issues, body).toEqual([]);
+              expect(evaluated.ok, body).toBe(true);
+              accepted.push(body);
+            } else {
+              expect(issues, body).toHaveLength(1);
+              expect(evaluated.ok, body).toBe(false);
+              refused.push(body);
+            }
+          }
+        }
+        expect({ accepted, refused }).toEqual({
+          accepted: ['ctx.user != null', 'os.user != null'],
+          refused: ['os.org != null', 'os.env != null'],
+        });
       });
     });
 

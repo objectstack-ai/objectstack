@@ -80,10 +80,29 @@ export interface ObjectKernelConfig {
     defaultStartupTimeout?: number;
     
     /**
-     * Whether to enable graceful shutdown. When true (the default) the kernel
-     * listens for SIGINT, SIGTERM and SIGQUIT from construction until it stops:
-     * a signal drains it and then exits the process. Its listeners are removed
-     * when it reaches `stopped`, so a stopped kernel never handles a signal.
+     * Whether this kernel owns the process. It decides two things, always
+     * together:
+     *
+     * - **Who installs the signal listeners.** When true (the default) the
+     *   kernel listens for SIGINT, SIGTERM and SIGQUIT from construction until
+     *   it stops: a signal drains it and then exits the process. Its listeners
+     *   are removed when it reaches `stopped`, so a stopped kernel never
+     *   handles a signal. When false the kernel installs none, and the host
+     *   handles signals itself.
+     * - **Who exits the process when a teardown times out.** When `shutdown()`
+     *   overruns `shutdownTimeout`, a kernel with this option true logs the
+     *   timeout and calls `process.exit(1)`. A kernel with it false does NOT
+     *   exit the process: it logs the timeout at `error`, marks itself
+     *   `stopped`, and `shutdown()` returns to the host, which decides whether
+     *   the process exits. The hung teardown is not cancelled — it keeps
+     *   running in the background and holds whatever it has not released yet,
+     *   until it finishes or the host ends the process.
+     *
+     * Set it false when something else owns the process: a server framework
+     * that installs its own signal handlers, or a host that runs several
+     * kernels in one process and must not lose all of them when one teardown
+     * hangs. Such a host exits the process itself when it decides to.
+     * `shutdown()` never rejects under either setting.
      */
     gracefulShutdown?: boolean;
     
@@ -688,13 +707,34 @@ export class ObjectKernel {
 
             if (error === shutdownTimeoutError) {
                 // GENUINE timeout: `performShutdown()` is still running and has
-                // stopped making progress, so the process would otherwise hang
-                // holding whatever it failed to release. Hard-exit stays — it
-                // is the only branch it was ever right for.
-                this.logger.error('Shutdown timed out — forcing exit', error as Error);
-                // Flush logger then hard-exit; the process would otherwise hang
-                await this.logger.destroy();
-                process.exit(1);
+                // stopped making progress. Whether that ends the process
+                // depends on who owns it, and the test is the one the
+                // constructor uses to install the signal listeners, so a kernel
+                // exits on a timeout exactly when it took the signals itself
+                // (`ObjectKernelConfig.gracefulShutdown`).
+                if (this.config.gracefulShutdown) {
+                    // The kernel owns the process, which would otherwise hang
+                    // holding whatever the teardown failed to release.
+                    // Hard-exit stays — it is the only branch it was ever
+                    // right for.
+                    this.logger.error('Shutdown timed out — forcing exit', error as Error);
+                    // Flush logger then hard-exit; the process would otherwise hang
+                    await this.logger.destroy();
+                    process.exit(1);
+                } else {
+                    // The host owns the process. Exiting here would end every
+                    // other kernel and workload it runs over one hung
+                    // teardown, so the kernel reports, stays `stopped` and
+                    // returns. Nothing here acts on the abandoned teardown
+                    // again: `performShutdown()` changes no state when it
+                    // finishes, and the kernel's own later log lines from it
+                    // reach the console only, the file stream having been
+                    // closed in `finally`.
+                    this.logger.error(
+                        `Shutdown timed out after ${this.config.shutdownTimeout}ms — the kernel is stopped but its teardown is still running in the background and may still hold what it has not released; gracefulShutdown is false, so the host owns the process and it is NOT being exited — the host decides whether it exits`,
+                        error as Error,
+                    );
+                }
             } else {
                 // NOT a timeout. `performShutdown()` isolates every teardown
                 // step it owns (hook dispatch, each destroy(), each shutdown

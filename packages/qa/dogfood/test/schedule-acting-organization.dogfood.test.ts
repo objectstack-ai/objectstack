@@ -20,13 +20,20 @@
 // ⚠️ Every assertion in this file passes vacuously if the run never happens at
 // all, which is why each pin also asserts a POSITIVE fact about the run
 // (the flow bound, the tick fired, the notification carries the declared id) and
-// why the DIFFERENTIAL CONTROL below is in the same file: the same flow, on the
-// same stack, through `POST /api/v1/automation/:name/trigger` under a session.
-// That run reaches the identical `notify` node through the identical messaging
-// chain, and its organization comes from the SESSION rather than from the
-// declaration — so if the schedule pin ever goes green for a reason that has
-// nothing to do with the fix, the control goes green the same way and the
-// contrast that carries the proof is gone.
+// why the DIFFERENTIAL CONTROL below is in the same file: the same nodes and the
+// same declaration, on the same stack, through `POST /api/v1/automation/:name/trigger`
+// under a session. That run reaches the identical `notify` node through the
+// identical messaging chain, and its organization comes from the SESSION rather
+// than from the declaration — so if the schedule pin ever goes green for a
+// reason that has nothing to do with the fix, the control goes green the same
+// way and the contrast that carries the proof is gone.
+//
+// Since the maintainer's ruling on the trigger door (letter B), no caller but
+// the system principal may start the declared flow itself there — it is a
+// `schedule` flow declared `runAs: 'system'` — so the session drives its DOOR
+// TWIN (`sched_org_declared_door`: the same nodes and the same declaration,
+// `type: 'screen'`, no cadence), and control B pins the refusal of the
+// declared flow beside it.
 //
 // ## The multi-organization condition
 //
@@ -53,6 +60,32 @@ import {
 const RUN_HISTORY_OBJECT = 'sys_automation_run';
 const DECLARED_FLOW = 'sched_org_declared';
 const UNDECLARED_FLOW = 'sched_org_undeclared';
+const DOOR_FLOW = 'sched_org_declared_door';
+
+/**
+ * Control B's DOOR TWIN of the declaring flow: its nodes and its start node's
+ * `organization` declaration exactly, under its own name, as `type: 'screen'`
+ * and with the cadence removed — so nothing schedules it and the only way it
+ * runs is the trigger door. Derived from the same builder, never re-spelled,
+ * so the twin cannot drift into a different flow that merely looks alike.
+ *
+ * Why a twin: the declaring flow is a `schedule` flow declared
+ * `runAs: 'system'`, and since the maintainer's ruling on the trigger door
+ * (letter B) the door starts one only for the system principal — which a
+ * session never is. A `screen` flow is a door its author designed, so the
+ * session still starts the twin, and its run still reads which organization
+ * the DOOR hands the engine.
+ */
+function doorTwin(declaring: unknown): unknown {
+  const flow = declaring as { nodes: Array<{ id: string; config?: Record<string, unknown> }> } & Record<string, unknown>;
+  const nodes = flow.nodes.map((n) => {
+    if (n.id !== 'start') return n;
+    const config = { ...(n.config ?? {}) };
+    delete config.schedule;
+    return { ...n, config };
+  });
+  return { ...flow, name: DOOR_FLOW, label: 'Digest (organization declared) — door twin', type: 'screen', nodes };
+}
 
 /**
  * A job service the test fires by hand. The platform's own adapter owns cron
@@ -188,6 +221,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
 
       automation.registerFlow(DECLARED_FLOW, declaringScheduleFlow(orgA, recipientId));
       automation.registerFlow(UNDECLARED_FLOW, organizationLessScheduleFlow(recipientId));
+      automation.registerFlow(DOOR_FLOW, doorTwin(declaringScheduleFlow(orgA, recipientId)));
 
       // ── [#17396] The DEPLOYMENT the pins below are about ───────────────
       //
@@ -514,8 +548,13 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     });
 
     /**
-     * Control B — the card's own control: the same flow through
-     * `POST /api/v1/automation/:name/trigger` under a session.
+     * Control B — the card's own control: the same nodes and the same
+     * declaration through `POST /api/v1/automation/:name/trigger` under a
+     * session. The session drives the declaring flow's DOOR TWIN (see
+     * {@link doorTwin}); the declaring flow itself is refused to the session
+     * at that door (`403 PERMISSION_DENIED`, nothing delivered, no run), and
+     * that refusal is pinned here first, so the twin's run is the only run
+     * this control can observe.
      *
      * Driver-split, because the drivers genuinely differ here and the split is
      * pinned rather than papered over:
@@ -547,7 +586,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
      *    day the driver gains isolation that goes red and whoever fixes it
      *    enables the real control here.
      */
-    it('control B: the same flow via POST /automation/:name/trigger under a session', async () => {
+    it('control B: the same nodes and declaration via POST /automation/:name/trigger under a session', async () => {
       if (databaseDriver === 'memory') {
         // Not the control — the control cannot run here. This pins the reason,
         // so the exemption expires by itself.
@@ -575,7 +614,24 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       }
 
       const before = new Set((await rows(INBOX_OBJECT)).map((r) => String(r.id)));
-      const res = await stack.apiAs(memberToken, 'POST', `/automation/${DECLARED_FLOW}/trigger`, {});
+
+      // The declaring flow itself: refused to the session at the door, before
+      // dispatch — nothing delivered, no run recorded.
+      const runsBefore = (await automation.listRuns(DECLARED_FLOW)).length;
+      const refused = await stack.apiAs(memberToken, 'POST', `/automation/${DECLARED_FLOW}/trigger`, {});
+      const refusedText = await refused.clone().text();
+      expect(
+        refused.status,
+        `a session started the runAs-system schedule flow at the trigger door: ${refused.status} ${refusedText}`,
+      ).toBe(403);
+      expect(((await refused.json()) as { error?: { code?: string } }).error?.code, refusedText).toBe('PERMISSION_DENIED');
+      expect((await automation.listRuns(DECLARED_FLOW)).length, 'the refused start still recorded a run').toBe(runsBefore);
+      expect(
+        (await rows(INBOX_OBJECT)).filter((r) => !before.has(String(r.id))),
+        'the refused start still delivered — the door refused after dispatch',
+      ).toHaveLength(0);
+
+      const res = await stack.apiAs(memberToken, 'POST', `/automation/${DOOR_FLOW}/trigger`, {});
       expect(
         res.status,
         `the session-triggered run did not start (${res.status}) — the control cannot certify the pins above`,

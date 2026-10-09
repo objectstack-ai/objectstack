@@ -207,7 +207,7 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       expect(thrown.hook).toBe('stamp_grade');
       // The remedy the author can act on, and the reason.
       expect(thrown.message).toContain("runAs: 'system'");
-      expect(thrown.message).toContain('UNSCOPED');
+      expect(thrown.message).toContain('refused by the security plugin where one is composed, unscoped where none is');
       // The decisive half: refusing means the operation did NOT run unscoped.
       expect(engine.seen).toEqual([]);
     });
