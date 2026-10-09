@@ -38,8 +38,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { z } from 'zod';
 
 import { FormViewSchema } from './view.zod';
+import { projectPublishedJsonSchema } from '../../scripts/lib/refinement-projection';
 
 /** Reject `value` through `schema` and return its issues as a searchable string. */
 function reject(value: unknown): string {
@@ -303,5 +305,45 @@ describe('the ruled redirect `url` shape — the neighbours the refine must not 
     const msg = reject({ ...FORM_BASE, submitBehavior: { kind: 'redirect', url: 'https://example.com', delay: 1 } });
     expect(msg).toContain('RELATIVE path only');
     expect(msg).toContain('`delay` → `delayMs`');
+  });
+});
+
+// ===========================================================================
+// 6. The property help — the `submitBehavior` describe an author reads
+// ===========================================================================
+describe('the `submitBehavior` property help carries the rule and no ruling date', () => {
+  // The top-level describe is the ONE row the reference table and the published
+  // react-blocks skill render for this key (a union member's inner key gets no
+  // row of its own), so Studio, the docs and the installed skill all show this
+  // sentence as the property help. Read it the way the generators do — from the
+  // published JSON Schema projection — not from the source string.
+  const publishedHelp = (): string => {
+    const json = projectPublishedJsonSchema(FormViewSchema as unknown as z.ZodType, { io: 'input', unrepresentable: 'any' }) as {
+      $ref?: string;
+      $defs?: Record<string, { properties?: Record<string, { description?: string }> }>;
+      properties?: Record<string, { description?: string }>;
+    };
+    const root = json.$ref && json.$defs ? json.$defs[json.$ref.split('/').pop() ?? ''] : json;
+    const help = root?.properties?.submitBehavior?.description;
+    expect(help, 'the projection still carries a `submitBehavior` row with help text').toBeTypeOf('string');
+    return help as string;
+  };
+
+  it('states the rule an author acts on (the positive control)', () => {
+    const help = publishedHelp();
+    expect(help).toContain('Post-submit behavior');
+    expect(help).toContain('`redirect`');
+    expect(help).toContain('relative-only');
+    expect(help).toContain('{{record.field_name}}');
+    expect(help, 'ends on the fact, with no parenthetical after it').toMatch(/URL-escaped\.$/);
+  });
+
+  it('carries no ruling date and no tracker id (#22093)', () => {
+    const help = publishedHelp();
+    expect(help, 'the ruling date lives in the code comment above the describe').not.toMatch(RULING_DATE);
+    expect(help).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
+    // The source string agrees with the projection: the describe sits on the
+    // `.optional()` wrapper, which is the node the projection reads.
+    expect(FormViewSchema.shape.submitBehavior.description).toBe(help);
   });
 });

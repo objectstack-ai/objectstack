@@ -11,7 +11,7 @@ import {
     // when its own read cannot answer.
     AuthzStoreUnavailableError,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -1359,7 +1359,10 @@ export class HttpDispatcher {
             } else {
                 return null;
             }
-            const session: any = await api.getSession({ headers }).catch(() => undefined);
+            // [#22258] The in-process session-read rule (`@objectstack/types`):
+            // a cookie request reads without renewal, because this door's
+            // response never carries a renewed cookie.
+            const session: any = await api.getSession(inProcessSessionReadInput(headers)).catch(() => undefined);
             const gate = evaluateAuthGate(session?.user, cleanPath);
             if (!gate) return null;
             return this.error(gate.message, 403, { code: gate.code });
@@ -1438,9 +1441,8 @@ export class HttpDispatcher {
             // this was specifically the signed-in non-member case.
             const authService = await this.resolveService(this.requestKernel(context), CoreServiceName.enum.auth);
             const api = authService?.api ?? (typeof authService?.getApi === 'function' ? await authService.getApi() : undefined);
-            const sessionData = await api?.getSession?.({
-                headers: context.request?.headers,
-            });
+            // [#22258] The in-process session-read rule, as in `enforceAuthGate`.
+            const sessionData = await api?.getSession?.(inProcessSessionReadInput(context.request?.headers));
             userId = sessionData?.user?.id ?? sessionData?.session?.userId;
             activeOrganizationId = sessionData?.session?.activeOrganizationId;
         } catch {

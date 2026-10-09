@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import { F } from '@objectstack/spec';
+import { F, P } from '@objectstack/spec';
 
 /**
  * sys_user_permission_set — User ↔ PermissionSet assignment.
@@ -219,6 +219,45 @@ export const SysUserPermissionSet = ObjectSchema.create({
       readonly: true,
     }),
   },
+
+  // [ADR-0091 D1/D2] The validity window is half-open, `[valid_from,
+  // valid_until)`, so a window whose end is not after its start is EMPTY: the
+  // resolver drops the assignment at every evaluation and it grants nothing,
+  // ever. Stored without a word, a mistyped date became a grant that silently
+  // granted nothing; refusing it at the write tells the administrator.
+  //
+  // Declared, not a hook: the engine evaluates an object's validation rules on
+  // every write path — insert (single and batch) and update (by id, and per
+  // matched row of a multi-row update), for system and non-system writers
+  // alike — against the stored row overlaid with the patch.
+  //
+  // ⛔ A declared rule is an INVARIANT by default: it would refuse ANY edit to a
+  // row that already violates. The `previous` clause narrows it to the writes
+  // that make the window: an insert (`previous` is null there), or an update
+  // that moves a bound. An assignment stored before this rule existed with an
+  // inverted window keeps taking unrelated edits; the write that repairs it is
+  // the only one that has to state a valid window.
+  //
+  // `datetime()` compares instants, not spellings: two ISO strings for one
+  // instant (`…:00Z`, `…:00.000Z`) compare equal, which a string comparison
+  // would not. `cross_field` so the violation attaches to `valid_until`, where
+  // a form shows it.
+  validations: [
+    {
+      type: 'cross_field',
+      name: 'validity_window_order',
+      label: 'Validity window ends after it starts',
+      description:
+        '[ADR-0091 D1/D2] A grant is active in the half-open window [valid_from, valid_until), so a window that '
+        + 'ends at or before it starts grants nothing. Judged on insert, and on an update that moves a bound.',
+      fields: ['valid_until', 'valid_from'],
+      condition: P`(previous == null || record.valid_from != previous.valid_from || record.valid_until != previous.valid_until) && record.valid_from != null && record.valid_until != null && datetime(record.valid_until) <= datetime(record.valid_from)`,
+      severity: 'error',
+      message:
+        'Valid Until must be later than Valid From. The grant is active from Valid From up to, but not including, '
+        + 'Valid Until, so a window that ends at or before it starts grants nothing. Leave either one empty for an open-ended window.',
+    },
+  ],
 
   indexes: [
     { fields: ['user_id', 'permission_set_id', 'organization_id'], unique: 'global' },

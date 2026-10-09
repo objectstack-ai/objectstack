@@ -181,3 +181,69 @@ describe('#22032 pass 3 — the object door gives the build\'s option `visibleWh
     expect(expressionFindings(result.errors), dump(result)).toEqual([]);
   });
 });
+
+/**
+ * #22157 — the option's root verdict, at the object door.
+ *
+ * The server's option check (`evaluateOptionVisibility`) binds `record`,
+ * `previous` and the acting user. An option `visibleWhen` reading `parent` (on
+ * a detail with exactly one `master_detail`, where the field-rule slots DO
+ * bind it) published clean through this door and then faulted open on every
+ * write that picked the option. The verdict lives in the build's option pass,
+ * which this door runs since #22032's pass 3, so the door's finding is the
+ * build's. The protocol-level half, through the real `saveMetaItem`, is the
+ * #22157 block of `packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts`.
+ */
+describe('#22157 — the object door refuses an option `visibleWhen` reading `parent`, as the build does', () => {
+  const header = {
+    name: 'fx_header',
+    label: 'Header',
+    sharingModel: 'private',
+    fields: { name: { type: 'text', label: 'Name' }, status: { type: 'text', label: 'Status' } },
+  };
+  const line = (visibleWhen: unknown) => ({
+    name: 'fx_line',
+    label: 'Line',
+    sharingModel: 'private',
+    fields: {
+      hdr: { type: 'master_detail', label: 'Header', reference: 'fx_header' },
+      x: { type: 'text', label: 'X' },
+      tier: {
+        type: 'select',
+        label: 'Tier',
+        options: [{ label: 'Standard', value: 'standard' }, { label: 'Gold', value: 'gold', visibleWhen }],
+      },
+    },
+  });
+  const LINE_WHERE = "object 'fx_line' · field 'tier' option 'gold' visibleWhen";
+  const PARENT = "parent.status == 'closed'";
+
+  it('⭐ LIT — the measured body is REFUSED at the door, located at the option, naming the root', () => {
+    const result = gateObject(line(PARENT), [header]);
+
+    expect(result.rulesRun).toContain('validateStackExpressions');
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    expect(errs[0]).toMatchObject({ severity: 'error', where: LINE_WHERE, path: LINE_WHERE });
+    expect(errs[0]!.message).toContain("option 'gold' on field 'tier' reads `parent`");
+  });
+
+  it('⭐ PARITY — the door finding IS the build finding', () => {
+    const atBuild = buildFindings(header, line(PARENT));
+    const atDoor = expressionFindings(gateObject(line(PARENT), [header]).errors);
+
+    // Non-vacuous: the build refuses it.
+    expect(atBuild, dump(atBuild)).toHaveLength(1);
+    expect(atDoor, dump(atDoor)).toEqual(atBuild);
+  });
+
+  for (const body of ["record.x == 'a'", "'org_admin' in current_user.positions"]) {
+    it(`⭐ CONTROL — \`${body}\` on the same option publishes clean, and the build agrees`, () => {
+      const result = gateObject(line(body), [header]);
+
+      expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+      expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
+      expect(buildFindings(header, line(body))).toEqual([]);
+    });
+  }
+});
