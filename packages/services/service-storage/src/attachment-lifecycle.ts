@@ -1,6 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { IStorageService } from '@objectstack/spec/contracts';
+import type { FileRecord } from './metadata-store.js';
+import { isFileUploader } from './upload-ownership.js';
 
 /**
  * sys_file orphan lifecycle (#2755, ADR-0057).
@@ -15,8 +18,10 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  *     LAST join row referencing an attachments-scope file goes away, the
  *     `sys_file` row is marked `status='deleted'` + `deleted_at=now`. A join
  *     row goes away two ways, and both are covered: it is DELETED, or an
- *     UPDATE re-points its `file_id` at some other file (#10171).
- *     Re-attaching before the grace window expires un-tombstones it.
+ *     UPDATE re-points its `file_id` at some other file (#10171). A file that
+ *     never GAINED a join row because its attach was refused takes the same
+ *     tombstone, from the attach gate ({@link createRefusedAttachTombstoner},
+ *     #22466). Re-attaching before the grace window expires un-tombstones it.
  *  2. The `lifecycle` declaration on `sys_file` (system-file.object.ts):
  *     the platform LifecycleService reaps tombstones `30d` after
  *     `deleted_at`, and never-completed `pending` uploads after `7d`.
@@ -88,6 +93,32 @@ const PACKAGE_ID = 'com.objectstack.service.storage';
 const SYSTEM_CTX = { isSystem: true } as const;
 
 /**
+ * May this module tombstone this `sys_file` row at all? Only a live
+ * (`committed`) file of the `attachments` scope — the one answer every trigger
+ * asks, whatever made it look orphaned. Field-file scopes have their own seam
+ * (see the module header), and a row that is `pending` or already `deleted`
+ * has nothing to move.
+ */
+function isLiveAttachmentsFile(file: Record<string, unknown> | null | undefined): file is Record<string, unknown> {
+  return !!file && file.scope === 'attachments' && file.status === 'committed';
+}
+
+/**
+ * THE tombstone — `status='deleted'` + `deleted_at=now`, written under system
+ * context. One shape for every trigger, because the declared lifecycle reads
+ * exactly these two columns: `ttl { field: 'deleted_at' }` nominates the row
+ * and the reap guard below confirms it on `status === 'deleted'`. A second
+ * spelling of it would be a second thing for the sweep to miss.
+ */
+async function writeTombstone(engine: Pick<AttachmentLifecycleEngine, 'update'>, fileId: string): Promise<void> {
+  await engine.update(
+    'sys_file',
+    { id: fileId, status: 'deleted', deleted_at: new Date().toISOString() },
+    { context: { ...SYSTEM_CTX } },
+  );
+}
+
+/**
  * Tombstone every id in `fileIds` that no longer has a join row — the orphan
  * rule, in ONE place because two write verbs now ask it (`afterDelete`, and
  * `afterUpdate` for a `file_id` re-point). Two copies of "is this file an
@@ -110,12 +141,8 @@ async function tombstoneOrphanedFiles(
       });
       if (remaining?.length) continue;
       const file = await engine.findOne('sys_file', { where: { id: fileId }, context: { ...SYSTEM_CTX } });
-      if (!file || file.scope !== 'attachments' || file.status !== 'committed') continue;
-      await engine.update(
-        'sys_file',
-        { id: fileId, status: 'deleted', deleted_at: new Date().toISOString() },
-        { context: { ...SYSTEM_CTX } },
-      );
+      if (!isLiveAttachmentsFile(file)) continue;
+      await writeTombstone(engine, fileId);
       logger.debug?.(`[storage] attachment lifecycle: tombstoned orphan sys_file ${fileId}`);
     } catch (err) {
       logger.warn(
@@ -411,6 +438,138 @@ export async function findHeldFiles(
     if (ref?.file_id != null) held.add(String(ref.file_id));
   }
   return held;
+}
+
+/**
+ * Why a refused attach did nothing about its file, or that it tombstoned it —
+ * the one debug line each scheduled run ends on, whichever way it went.
+ */
+type RefusedAttachOutcome =
+  | 'tombstoned'
+  | 'kept: no such file'
+  | 'kept: not a committed attachments-scope file'
+  | 'kept: the refused caller is not its uploader'
+  | `kept: still held (${Exclude<FileHolder, null>})`;
+
+/**
+ * [#22466] A REFUSED attach tombstones the caller's own never-attached file.
+ *
+ * The console's upload is two writes: the presigned upload commits a
+ * `sys_file` (scope `attachments`, `owner_id` = the uploader), and only then
+ * does a `sys_attachment` insert attach it. When the attach gate refuses that
+ * insert, the file is left `committed` with zero join rows, and nothing above
+ * ever reaches it: the hooks tombstone only a file that LOSES its last join
+ * row, and the declared lifecycle nominates only `deleted_at` (ttl) or
+ * `pending` (retention) rows. Measured on `main` before this change, on every
+ * refusal leg of the gate: refused 403, file `committed`, `deleted_at` null,
+ * zero join rows — kept forever.
+ *
+ * So the gate hands the refused `file_id` here, and the file takes the SAME
+ * tombstone a last-join-row removal writes ({@link writeTombstone}). From
+ * there it follows the existing path and nothing new: `deleted_at` → the 30d
+ * `ttl` → {@link createSysFileReapGuard}, which re-checks {@link
+ * findFileHolder} at sweep time. A retry that attaches the same `file_id`
+ * inside the window is admitted or refused exactly as any attach is; an
+ * admitted one is revived by the `afterInsert` leg above, as a re-attach of a
+ * detached file always was.
+ *
+ * Tombstoned only when ALL of these hold, read AFTER the refusal:
+ *  - the file is `attachments`-scope and `committed` ({@link isLiveAttachmentsFile});
+ *  - nothing holds it — {@link findFileHolder}, the ONE definition: zero join
+ *    rows AND no `ref_*` owner, so a file in field-file lineage is never
+ *    tombstoned by this path, whatever its scope says;
+ *  - the refused caller is its uploader — {@link isFileUploader}, the upload
+ *    ownership rule, which reads `sys_file.owner_id` (the uploader the upload
+ *    doors stamp; the file row carries no `uploaded_by`). A caller who names
+ *    someone else's file id in a refused attach moves nothing.
+ *
+ * ## Outside the refused write's unit of work — and why that needs a snapshot
+ *
+ * Measured on a real engine over sqlite: `engine.insert` opens NO transaction
+ * of its own, and neither does the generic `/data` create door, so on that
+ * door a system write made while the refusal unwinds lands and survives. But
+ * a caller may wrap the attach in a transaction of its own — an `atomic`
+ * batch, an explicit `transaction()` — and every engine call issued inside it,
+ * hook and middleware writes included, joins that transaction through the
+ * engine's ambient store (ADR-0034) and is rolled back with it: measured, the
+ * same write did not survive. A tombstone written from the gate in-line would
+ * therefore vanish exactly when the refusal aborts the caller's unit of work.
+ *
+ * The run is therefore DETACHED from the refusal's async context: it starts
+ * on a later turn of the event loop, inside a snapshot of the context this
+ * tombstoner was CREATED in — the hook installation, outside every engine
+ * operation — where the engine's ambient transaction store holds nothing. It
+ * reads and writes on its own connection, after the refusal has left the
+ * operation, and outlives a rollback. Two properties make detaching safe:
+ *  - it is never awaited by the refused write. Awaiting an out-of-transaction
+ *    query from inside an open transaction is the single-connection deadlock
+ *    ADR-0034 was written about; a detached one simply queues for the
+ *    connection until the transaction lets go of it;
+ *  - the tombstone is reconcilable by design. If something attaches the file
+ *    between the refusal and this run, the sweep's `findFileHolder` re-check
+ *    un-tombstones it instead of reaping it, and the download and hydration
+ *    paths already ask the same question of a tombstone (#10246, c3c72a4bc).
+ *
+ * Best-effort, like every leg here: a failure is logged and never reaches the
+ * refused caller, whose refusal is byte-identical whether this ran or not.
+ * Nothing it reads is returned to the caller, and the refusal does not wait on
+ * it, so the refusal discloses nothing about the file — not even through its
+ * timing.
+ *
+ * ⚠️ Create it where the gate is INSTALLED (outside any engine operation).
+ * Created inside a transaction, the snapshot would capture that transaction
+ * and every later run would ride a closed handle.
+ */
+export function createRefusedAttachTombstoner(
+  engine: Pick<AttachmentLifecycleEngine, 'find' | 'findOne' | 'update'>,
+  logger: AttachmentLifecycleLogger,
+): (fileId: unknown, callerUserId: string | undefined) => void {
+  const outsideAnyOperation = AsyncLocalStorage.snapshot();
+  return (fileId, callerUserId) => {
+    // No file named, or no caller to be its uploader: nothing could pass the
+    // conditions below, so nothing is scheduled.
+    if (!((typeof fileId === 'string' && fileId !== '') || typeof fileId === 'number')) return;
+    if (typeof callerUserId !== 'string' || callerUserId === '') return;
+    const id = String(fileId);
+    outsideAnyOperation(() => {
+      setImmediate(() => {
+        void tombstoneRefusedAttachFile(engine, logger, id, callerUserId);
+      });
+    });
+  };
+}
+
+async function tombstoneRefusedAttachFile(
+  engine: Pick<AttachmentLifecycleEngine, 'find' | 'findOne' | 'update'>,
+  logger: AttachmentLifecycleLogger,
+  fileId: string,
+  callerUserId: string,
+): Promise<void> {
+  let outcome: RefusedAttachOutcome;
+  try {
+    const file = await engine.findOne('sys_file', { where: { id: fileId }, context: { ...SYSTEM_CTX } });
+    if (!file) {
+      outcome = 'kept: no such file';
+    } else if (!isLiveAttachmentsFile(file)) {
+      outcome = 'kept: not a committed attachments-scope file';
+    } else if (!isFileUploader(callerUserId, file as Pick<FileRecord, 'owner_id'>)) {
+      outcome = 'kept: the refused caller is not its uploader';
+    } else {
+      const holder = await findFileHolder(engine, fileId, file);
+      if (holder) {
+        outcome = `kept: still held (${holder})`;
+      } else {
+        await writeTombstone(engine, fileId);
+        outcome = 'tombstoned';
+      }
+    }
+  } catch (err) {
+    logger.warn(
+      `[storage] attachment lifecycle: failed to tombstone sys_file ${fileId} after a refused attach (${(err as Error)?.message ?? err})`,
+    );
+    return;
+  }
+  logger.debug?.(`[storage] attachment lifecycle: refused attach of sys_file ${fileId} — ${outcome}`);
 }
 
 /**
