@@ -54,9 +54,16 @@ function makeTenantKernel(
         getObjects: vi.fn(() => ({})),
         registry: { getObject: vi.fn(() => null), getRegisteredTypes: vi.fn(() => []) },
     };
-    // The `i18n` slot is the probe: `/i18n/locales` is anonymous-reachable
-    // (no `shouldDenyAnonymous` gate) and reads the slot straight off the
-    // request's kernel via `deps.getService('i18n')`.
+    // The `i18n` slot is the probe: `/i18n/locales` reads the slot straight off
+    // the request's kernel via `deps.getService('i18n')`. [#22432] The domain
+    // stands on the anonymous-deny floor now, so each tenant's `auth` slot
+    // signs the request in (tagged, like every other slot here); the probe is
+    // still the i18n read behind the floor, and the floor itself is pinned in
+    // `domains/i18n-anonymous-deny.test.ts`.
+    const auth = {
+        __tag: tag,
+        api: { getSession: async () => ({ user: { id: `usr_${tag}` }, session: { id: `ses_${tag}` } }) },
+    };
     const i18n = {
         __tag: tag,
         getLocales: () => [`${tag}-locale`],
@@ -69,7 +76,7 @@ function makeTenantKernel(
         getObject: async () => undefined,
         getRegisteredTypes: async () => [tag],
     };
-    const services: Record<string, any> = { objectql, i18n, metadata };
+    const services: Record<string, any> = { objectql, i18n, metadata, auth };
     const kernel: any = {
         __tag: tag,
         getServiceAsync: async (name: string) => {

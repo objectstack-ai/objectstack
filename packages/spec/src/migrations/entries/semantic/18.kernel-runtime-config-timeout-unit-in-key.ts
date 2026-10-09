@@ -46,10 +46,10 @@ export const entry: SemanticMigration = {
     + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
     + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
     + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-    + '`.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186`, re-read from this tree — '
+    + '`.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a`, re-read from this tree — '
     + 'spells resourceLimits.timeout 0 times across '
-    + '8234 tracked files, against lit controls timeout 1658, RuntimeConfig 337 and resourceLimits '
-    + '2 on the same corpus (0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+    + '8281 tracked files, against lit controls timeout 1674, RuntimeConfig 337 and resourceLimits '
+    + '2 on the same corpus (0 across 8234, and 1658 / 337 / 2, at f0268ad78; 0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
     + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
     + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
     + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
