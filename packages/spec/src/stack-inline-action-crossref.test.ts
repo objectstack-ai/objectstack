@@ -122,7 +122,7 @@ function refusals(config: unknown): string[] {
   }
 }
 
-describe('defineStack — inline action cross-references: modal targets (#6889)', () => {
+describe('defineStack — inline action cross-references: modal targets', () => {
   it('rejects a dangling inline modal target (probe row E) with the registered rule\'s wording', () => {
     expect(refusals(inlineStack({ name: 'probe_new_task', type: 'modal', target: 'probe_nowhere' }))).toEqual([
       "Inline action 'probe_new_task' on page 'probe_home' (regions.0.components.0) "
@@ -130,7 +130,7 @@ describe('defineStack — inline action cross-references: modal targets (#6889)'
     ]);
   });
 
-  it('rejects an inline modal target naming an OBJECT — #6739 ruling A, a modal target names a page (probe row D)', () => {
+  it('rejects an inline modal target naming an OBJECT — a modal target names a page, only (probe row D)', () => {
     expect(refusals(inlineStack({ name: 'probe_new_task', type: 'modal', target: 'probe_task' }))).toEqual([
       "Inline action 'probe_new_task' on page 'probe_home' (regions.0.components.0) "
       + "references page 'probe_task' (via modal target) which is not defined in pages.",
@@ -159,7 +159,7 @@ describe('defineStack — inline action cross-references: modal targets (#6889)'
   });
 });
 
-describe('defineStack — inline action cross-references: flow targets (#6889)', () => {
+describe('defineStack — inline action cross-references: flow targets', () => {
   it('rejects an inline flow target that names no declared flow', () => {
     expect(refusals(inlineStack({ name: 'probe_run', type: 'flow', target: 'probe_nowhere' }, { flows }))).toEqual([
       "Inline action 'probe_run' on page 'probe_home' (regions.0.components.0) "
@@ -179,7 +179,7 @@ describe('defineStack — inline action cross-references: flow targets (#6889)',
   });
 });
 
-describe('defineStack — inline action cross-references: the traversal itself (#6889)', () => {
+describe('defineStack — inline action cross-references: the traversal itself', () => {
   it('reaches a button nested inside a container\'s children and reports its path', () => {
     const config = {
       manifest: baseManifest,
@@ -261,7 +261,7 @@ describe('defineStack — inline action cross-references: the traversal itself (
   });
 });
 
-describe('defineStack — inline action cross-references: what the walk must NOT refuse (#6889)', () => {
+describe('defineStack — inline action cross-references: what the walk must NOT refuse', () => {
   it.each([
     ['form', { name: 'probe_form', type: 'form', target: 'probe_task.edit' }],
     ['url', { name: 'probe_url', type: 'url', target: '/environments' }],
@@ -319,7 +319,7 @@ const registeredStack = (action: unknown, extra: Record<string, unknown> = {}) =
 const modalAction = (target: string) => ({ name: 'probe_new_task', label: 'New', type: 'modal' as const, target });
 const flowAction = (target: string) => ({ name: 'probe_run', label: 'Run', type: 'flow' as const, target });
 
-describe('defineStack — object-embedded action cross-references: modal targets (#7397)', () => {
+describe('defineStack — object-embedded action cross-references: modal targets', () => {
   it('rejects a dangling embedded modal target (probe row b) with the registered rule\'s wording', () => {
     expect(refusals(embeddedStack(modalAction('probe_nowhere')))).toEqual([
       "Action 'probe_new_task' on object 'probe_task' "
@@ -327,7 +327,7 @@ describe('defineStack — object-embedded action cross-references: modal targets
     ]);
   });
 
-  it('rejects an embedded modal target naming an OBJECT — #6739 ruling A, a modal target names a page (probe row d)', () => {
+  it('rejects an embedded modal target naming an OBJECT — a modal target names a page, only (probe row d)', () => {
     expect(refusals(embeddedStack(modalAction('probe_task')))).toEqual([
       "Action 'probe_new_task' on object 'probe_task' "
       + "references page 'probe_task' (via modal target) which is not defined in pages.",
@@ -348,7 +348,7 @@ describe('defineStack — object-embedded action cross-references: modal targets
   });
 });
 
-describe('defineStack — object-embedded action cross-references: flow targets (#7397)', () => {
+describe('defineStack — object-embedded action cross-references: flow targets', () => {
   it('rejects an embedded flow target that names no declared flow (probe row c)', () => {
     expect(refusals(embeddedStack(flowAction('probe_nowhere'), { flows }))).toEqual([
       "Action 'probe_run' on object 'probe_task' "
@@ -365,7 +365,7 @@ describe('defineStack — object-embedded action cross-references: flow targets 
   });
 });
 
-describe('defineStack — object-embedded action cross-references: objectName → object (#7456)', () => {
+describe('defineStack — object-embedded action cross-references: objectName → object', () => {
   const dangling = { name: 'probe_on', label: 'On', type: 'script' as const, target: 'doThing', objectName: 'probe_missing' };
 
   it('rejects a dangling embedded objectName (probe row k) with the registered rule\'s wording, subject adjusted to the owning object', () => {
@@ -396,12 +396,12 @@ describe('defineStack — object-embedded action cross-references: objectName �
     expect(refusals(config)).toEqual([]);
   });
 
-  it('leaves an embedded action with no objectName alone — unchanged from before #7456', () => {
+  it('leaves an embedded action with no objectName alone — unchanged from before the dangling-`objectName` refusal', () => {
     expect(refusals(embeddedStack({ name: 'probe_on', label: 'On', type: 'script' as const, target: 'doThing' }))).toEqual([]);
   });
 });
 
-describe('defineStack — object-embedded action cross-references: the b/f, c/g, d/i splits (#7397)', () => {
+describe('defineStack — object-embedded action cross-references: the b/f, c/g, d/i splits', () => {
   it.each([
     ['modal → nothing (rows b/f)', modalAction('probe_nowhere')],
     ['modal → object  (rows d/i)', modalAction('probe_task')],
@@ -420,7 +420,7 @@ describe('defineStack — object-embedded action cross-references: the b/f, c/g,
   });
 });
 
-describe('defineStack — object-embedded action cross-references: the traversal itself (#7397)', () => {
+describe('defineStack — object-embedded action cross-references: the traversal itself', () => {
   it('labels each offender with ITS OWN object, not a fixed subject', () => {
     const config = {
       manifest: baseManifest,
@@ -497,7 +497,7 @@ describe('defineStack — object-embedded action cross-references: the traversal
   });
 });
 
-describe('defineStack — object-embedded action cross-references: what the walk must NOT refuse (#7397)', () => {
+describe('defineStack — object-embedded action cross-references: what the walk must NOT refuse', () => {
   it.each([
     ['form', { name: 'probe_form', label: 'Form', type: 'form', target: 'probe_task.edit' }],
     ['url', { name: 'probe_url', label: 'Url', type: 'url', target: '/environments' }],

@@ -142,7 +142,7 @@ const SEED_ON_CASE = "Seed data references object 'crm_case' which is not define
 const GRANT_ON_NOWHERE = `Permission 'sales_rep' grants on object '${NOWHERE}' which is not defined in objects.`;
 const SEED_ON_NOWHERE = `Seed data references object '${NOWHERE}' which is not defined in objects.`;
 
-describe('#18202 — the per-stack pass, without the opt-in', () => {
+describe('the per-stack pass, without the opt-in', () => {
   it('REFUSES an app-owned grant and seed on a module-owned object — the reported defect', () => {
     const refused = refusalOf(() => defineStack(appConfig('crm_case', 'crm_case')));
     expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
@@ -159,7 +159,7 @@ describe('#18202 — the per-stack pass, without the opt-in', () => {
   });
 });
 
-describe('#18202 — `artifactObjects` widens exactly the two ARTIFACT-SCOPED classes', () => {
+describe('`artifactObjects` widens exactly the two ARTIFACT-SCOPED classes', () => {
   it('ACCEPTS the app package once the artifact’s other objects are declared', () => {
     const service = serviceStack();
     const accepted = refusalOf(() =>
@@ -227,7 +227,7 @@ describe('#18202 — `artifactObjects` widens exactly the two ARTIFACT-SCOPED cl
   });
 });
 
-describe('#18202 — the ARTIFACT pass: the refusal MOVED, it did not disappear', () => {
+describe('the ARTIFACT pass: the refusal MOVED, it did not disappear', () => {
   /** The opt-in is a promise about a composition; this is the composition calling it in. */
   const composeClaiming = (name: string) => {
     const service = serviceStack();
@@ -267,7 +267,7 @@ describe('#18202 — the ARTIFACT pass: the refusal MOVED, it did not disappear'
   });
 });
 
-describe('#18202 — #14122 §6 compatibility: a stack that does not opt in is untouched', () => {
+describe('compatibility with the multi-package artifact: a stack that does not opt in is untouched', () => {
   it('a single-package stack still refuses its own dangling grant', () => {
     const refused = refusalOf(() =>
       defineStack(anyStack({
@@ -303,7 +303,7 @@ describe('#18202 — #14122 §6 compatibility: a stack that does not opt in is u
   });
 });
 
-describe('#18202 — the object-less leniency the ARTIFACT pass inherits verbatim', () => {
+describe('the object-less leniency the ARTIFACT pass inherits verbatim', () => {
   /**
    * hotcrm#1449's shape: the app package declares NO objects, so
    * `validateCrossReferences` early-returns and the ARTIFACT pass skips it for
@@ -340,7 +340,7 @@ describe('#18202 — the object-less leniency the ARTIFACT pass inherits verbati
  * it, `collectArtifactCrossReferenceErrors`'s docstring says it, and these
  * fixtures hold it.
  */
-describe('#18202 — an input that bypassed the strict parse IS checked at composition', () => {
+describe('an input that bypassed the strict parse IS checked at composition', () => {
   /** The app package as an unparsed stack: `strict: false` skips every validation. */
   const unparsedApp = (grantObject: string, seedObject: string) =>
     defineStack(appConfig(grantObject, seedObject), { strict: false });
@@ -377,7 +377,7 @@ describe('#18202 — an input that bypassed the strict parse IS checked at compo
     expect(refused?.issues).toContain(SEED_ON_NOWHERE);
   });
 
-  it('REFUSES a hand-built stack object before either rule runs — it was never built (#20367 ruling B)', () => {
+  it('REFUSES a hand-built stack object before either rule runs — it was never built by a stack producer', () => {
     // Since ruling B a hand-built object no longer reaches the artifact pass:
     // `composeStacks` refuses an input no stack producer built at its step 0,
     // naming the input, so the two rules above never get to run on it. The
@@ -423,7 +423,7 @@ describe('#18202 — an input that bypassed the strict parse IS checked at compo
  * before this pass runs — skipping it composed an artifact without that
  * stack's grants or seed rows — so those two cases assert the refusal.
  */
-describe('#18202 — a malformed collection on an unparsed input is skipped or refused, never a bare TypeError', () => {
+describe('a malformed collection on an unparsed input is skipped or refused, never a bare TypeError', () => {
   /** Collect `console.warn` for one call, restoring the real one afterwards. */
   function warningsDuring(run: () => unknown): { warnings: string[]; thrown: Envelope | null } {
     const warnings: string[] = [];
@@ -454,7 +454,7 @@ describe('#18202 — a malformed collection on an unparsed input is skipped or r
   const composeWith = (stack: ReturnType<typeof defineStack>) => () =>
     composeStacks([serviceStack(), stack], { manifest: 'preserve' });
 
-  it('a non-array `permissions` is refused by the concat pass, never a bare TypeError (#19784)', () => {
+  it('a non-array `permissions` is refused by the concat pass, never a bare TypeError', () => {
     // Map format written onto a built stack (only `defineStack` normalizes it). It
     // is NOT iterable, which is what makes this the case that distinguishes a
     // guard from a bare `TypeError`: a string value would iterate its
@@ -465,7 +465,7 @@ describe('#18202 — a malformed collection on an unparsed input is skipped or r
     expect(thrown?.status).toBe(422);
   });
 
-  it('a non-array `data` is refused by the concat pass, never a bare TypeError (#19784)', () => {
+  it('a non-array `data` is refused by the concat pass, never a bare TypeError', () => {
     const { thrown } = warningsDuring(composeWith(malformed({ data: 42 })));
     expect(thrown?.code).toBe('STACK_SCHEMA_INVALID');
     expect(thrown?.status).toBe(422);
@@ -511,7 +511,7 @@ describe('#18202 — a malformed collection on an unparsed input is skipped or r
  * This block is the fence on that qualifier: if the early return is ever
  * removed, the qualifier becomes wrong and these tests say so.
  */
-describe('#18202 — a composition of ONE package never reaches the artifact pass', () => {
+describe('a composition of ONE package never reaches the artifact pass', () => {
   const claiming = () => defineStack(appConfig(NOWHERE, NOWHERE), { artifactObjects: [NOWHERE] });
 
   it('accepts a one-input composition whose claim names an object nothing defines', () => {

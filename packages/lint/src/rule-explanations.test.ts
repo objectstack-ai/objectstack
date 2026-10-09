@@ -10,15 +10,21 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { FUNCTIONAL_COMPLETENESS_RULES } from '@objectstack/spec/kernel';
+
 import * as indexBarrel from './index.js';
 import { RULE_EXPLANATIONS, explainRule } from './rule-explanations.js';
 import { CARRIER_ROOTS, CONSUMER_ROOTS, FIELD_NO_CONSUMERS } from './validate-field-consumers.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Every rule id constant the root barrel exports, by value. */
+/**
+ * Every rule id constant the root barrel exports, by value, plus the ids of the
+ * functional-completeness predicate: those rules live in `@objectstack/spec/kernel`
+ * and `validate-functional-completeness.ts` forwards their findings unchanged.
+ */
 function exportedRuleIds(): Set<string> {
-  const ids = new Set<string>();
+  const ids = new Set<string>(FUNCTIONAL_COMPLETENESS_RULES);
   for (const [name, value] of Object.entries(indexBarrel)) {
     if (/^[A-Z][A-Z0-9_]*$/.test(name) && typeof value === 'string') ids.add(value);
   }

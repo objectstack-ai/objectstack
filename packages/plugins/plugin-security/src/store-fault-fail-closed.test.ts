@@ -66,15 +66,19 @@ function datasourceOutage(object: string): Error {
   return e;
 }
 
+const ASSET_FIELDS = Object.fromEntries(
+  ['id', 'name', 'label', 'description', 'active', 'is_default', 'delegatable', 'managed_by'].map((n) => [n, { name: n }]),
+);
+
 const SCHEMAS: Record<string, unknown> = {
   sys_permission_set: {
     name: 'sys_permission_set',
     fields: { id: { name: 'id' }, name: { name: 'name' }, managed_by: { name: 'managed_by' } },
   },
-  sys_position: {
-    name: 'sys_position',
-    fields: { id: { name: 'id' }, name: { name: 'name' }, managed_by: { name: 'managed_by' } },
-  },
+  // [#22360] The row-state and definition columns the package-position cases
+  // below write; the #7505 cases only ever name `id` / `name` / `managed_by`.
+  sys_position: { name: 'sys_position', fields: ASSET_FIELDS },
+  sys_capability: { name: 'sys_capability', fields: ASSET_FIELDS },
   crm_task: {
     name: 'crm_task',
     sharingModel: 'private',
@@ -93,6 +97,7 @@ const ADMIN_SET: PermissionSet = {
   objects: {
     sys_permission_set: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     sys_position: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    sys_capability: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     crm_task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
   },
 } as unknown as PermissionSet;
@@ -302,6 +307,146 @@ describe('[#7505] assertSystemRowWriteGate — ADR-0066 asset ownership under a 
   it('FAULT (bulk filter): the outage propagates there too', async () => {
     const h = await boot({ rows: rows(), faultOn: 'sys_position' });
     expectPropagatedOutage(await refusalOf(h.write(del({ name: 'CEO' }))));
+  });
+});
+
+/**
+ * [#22360] The same gate, in steady state, on a PACKAGE-provided `sys_position`
+ * row: its definition is locked, its row state is not.
+ *
+ * The declared-position seeder stamps `managed_by: 'package'` on the row of a
+ * position a code package holds, so this gate now protects that row. A package
+ * position row is locked the way a packaged permission set is
+ * (`permission-set-projection.ts`, #4669): a patch touching ONLY row state
+ * (`active`, `is_default`) passes, because switching a package's position off,
+ * or making it the default for new users, is not an edit of its definition.
+ * Everything else stays refused with the gate's own code: a definition column
+ * (`name`, `label`, `description`, `delegatable`), any other column, a delete
+ * and the other lifecycle verbs. Platform (built-in) rows and `sys_capability`
+ * get no carve-out. Housed here, beside the #7505 cases of the same gate, so the
+ * suite's one store double serves both (no second double to ledger).
+ */
+describe('[#22360] assertSystemRowWriteGate — a package position row: row state switches, the definition stays locked', () => {
+  const rows = () => ({
+    sys_position: [
+      { id: 'pos_pkg_a', name: 'field_rep', label: 'Field Rep', managed_by: 'package', active: true },
+      { id: 'pos_pkg_b', name: 'auditor', label: 'Auditor', managed_by: 'package', active: true },
+      { id: 'pos_legacy', name: 'legacy_lead', label: 'Legacy Lead', managed_by: 'config', active: true },
+      { id: 'pos_platform', name: 'everyone', label: 'Everyone', managed_by: 'platform', active: true },
+      { id: 'pos_admin', name: 'regional_lead', label: 'Regional Lead', managed_by: 'admin', active: true },
+    ],
+    sys_capability: [
+      { id: 'cap_pkg', name: 'pkg_cap', label: 'Package Capability', managed_by: 'package', active: true },
+    ],
+  });
+  const update = (object: string, data: unknown, where: Row = {}) => ({ object, operation: 'update', data, options: { where } });
+  const byId = (id: string, patch: Row) => update('sys_position', { id, ...patch }, { id });
+  const PKG_NAMES = { name: { $in: ['field_rep', 'auditor'] } };
+  /** The refusal's code and status — the gate's existing envelope, unchanged by the carve-out. */
+  const refused = async (run: Promise<unknown>) => {
+    const err = await refusalOf(run);
+    return { code: err.code, status: err.status ?? err.statusCode, message: String(err.message) };
+  };
+  const REFUSED = { code: 'PERMISSION_DENIED', status: 403 };
+
+  it('a row-state-only patch passes: deactivate, activate, Set as Default, both together', async () => {
+    const h = await boot({ rows: rows() });
+    await expect(h.write(byId('pos_pkg_a', { active: false }))).resolves.toBe('admitted');
+    await expect(h.write(byId('pos_pkg_a', { active: true }))).resolves.toBe('admitted');
+    await expect(h.write(byId('pos_pkg_a', { is_default: true }))).resolves.toBe('admitted');
+    await expect(h.write(byId('pos_pkg_a', { active: false, is_default: false }))).resolves.toBe('admitted');
+    // The id carried only by the filter, as the engine's by-id update spells it.
+    await expect(h.write(update('sys_position', { active: false }, { id: 'pos_pkg_a' }))).resolves.toBe('admitted');
+  });
+
+  it('a definition column, any other column, or a mixed patch is refused with the gate\'s code', async () => {
+    const h = await boot({ rows: rows() });
+    for (const patch of [
+      { label: 'Field Rep (edited)' },
+      { description: 'edited' },
+      { delegatable: true },
+      { name: 'field_rep_two' },
+      { active: false, label: 'Field Rep (edited)' },
+      { is_default: true, delegatable: true },
+      { active: false, notes: 'not a row-state column' },
+    ]) {
+      const r = await refused(h.write(byId('pos_pkg_a', patch)));
+      expect(r, JSON.stringify(patch)).toMatchObject(REFUSED);
+      expect(r.message).toContain('provided by an application package');
+    }
+  });
+
+  it('an empty patch admits nothing new: it is refused as before', async () => {
+    const h = await boot({ rows: rows() });
+    expect(await refused(h.write(byId('pos_pkg_a', {})))).toMatchObject(REFUSED);
+  });
+
+  it('delete and the other lifecycle verbs stay refused', async () => {
+    const h = await boot({ rows: rows() });
+    for (const operation of ['delete', 'transfer', 'restore', 'purge']) {
+      const r = await refused(h.write({ object: 'sys_position', operation, options: { where: { id: 'pos_pkg_a' } } }));
+      expect(r, operation).toMatchObject(REFUSED);
+    }
+  });
+
+  it('the legacy `config` spelling of package provenance answers as its canonical twin', async () => {
+    const h = await boot({ rows: rows() });
+    await expect(h.write(byId('pos_legacy', { active: false }))).resolves.toBe('admitted');
+    expect(await refused(h.write(byId('pos_legacy', { label: 'edited' })))).toMatchObject(REFUSED);
+  });
+
+  it('control: a built-in\'s bare { active } patch stays refused', async () => {
+    const h = await boot({ rows: rows() });
+    const r = await refused(h.write(byId('pos_platform', { active: false })));
+    expect(r).toMatchObject(REFUSED);
+    expect(r.message).toContain('provided by the platform');
+    expect(await refused(h.write(byId('pos_platform', { is_default: true })))).toMatchObject(REFUSED);
+  });
+
+  it('control: sys_capability gets no carve-out', async () => {
+    const h = await boot({ rows: rows() });
+    expect(await refused(h.write(update('sys_capability', { id: 'cap_pkg', active: false }, { id: 'cap_pkg' }))))
+      .toMatchObject(REFUSED);
+  });
+
+  it('control: an administrator-authored position stays fully editable', async () => {
+    const h = await boot({ rows: rows() });
+    await expect(h.write(byId('pos_admin', { label: 'Regional Lead (edited)', delegatable: true }))).resolves.toBe('admitted');
+  });
+
+  it('control: forging provenance in a row-state patch is still refused (a)', async () => {
+    const h = await boot({ rows: rows() });
+    const r = await refused(h.write(byId('pos_admin', { active: false, managed_by: 'package' })));
+    expect(r).toMatchObject(REFUSED);
+    expect(r.message).toContain('cannot stamp');
+  });
+
+  it('filtered: a row-state-only patch over package rows passes', async () => {
+    const h = await boot({ rows: rows() });
+    await expect(h.write(update('sys_position', { active: false }, PKG_NAMES))).resolves.toBe('admitted');
+    await expect(h.write(update('sys_position', { is_default: false }, PKG_NAMES))).resolves.toBe('admitted');
+  });
+
+  it('filtered: a label patch over a package row is refused', async () => {
+    const h = await boot({ rows: rows() });
+    const r = await refused(h.write(update('sys_position', { label: 'Renamed' }, PKG_NAMES)));
+    expect(r).toMatchObject(REFUSED);
+    expect(r.message).toContain('provided by the platform or an application package');
+  });
+
+  it('filtered: a row-state-only patch whose filter also reaches a built-in is refused', async () => {
+    const h = await boot({ rows: rows() });
+    expect(await refused(h.write(update('sys_position', { active: false }, { name: { $in: ['field_rep', 'everyone'] } }))))
+      .toMatchObject(REFUSED);
+    // A whole-table write matches every built-in.
+    expect(await refused(h.write({ object: 'sys_position', operation: 'update', data: { active: false }, options: {} })))
+      .toMatchObject(REFUSED);
+  });
+
+  it('control (filtered): a delete over package rows stays refused', async () => {
+    const h = await boot({ rows: rows() });
+    expect(await refused(h.write({ object: 'sys_position', operation: 'delete', options: { where: PKG_NAMES } })))
+      .toMatchObject(REFUSED);
   });
 });
 

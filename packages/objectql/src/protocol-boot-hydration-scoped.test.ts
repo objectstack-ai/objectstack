@@ -19,13 +19,15 @@
  * and the write-through.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { MetadataManager } from '@objectstack/metadata';
-import { createSecurityCatalogReader } from '@objectstack/core';
+import { createSecurityCatalogReader, ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { SchemaRegistry, NAMESPACE_CONFLICT_CODE } from './registry.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
+import { ObjectQLPlugin } from './plugin.js';
+import type { ObjectQL } from './engine.js';
 
 const PKG_A = 'com.acme.a';
 const PKG_B = 'com.acme.b';
@@ -323,5 +325,138 @@ describe('security catalog read — a name two packages ship (ADR-0131 D4, ruled
         expect(entry).toMatchObject({ name: 'regional_manager', source: 'metadata' });
         expect(entry?.definition.label).toBe('first stack');
         expect(await reader.list('position')).toEqual([entry]);
+    });
+});
+
+/**
+ * ADR-0048 addendum N.3 — the cold boot (maintainer ruling letter A on #22307,
+ * record 6063176077). Every package registers in the kernel's first phase,
+ * BEFORE `sys_metadata` hydrates into the registry's bare slot in
+ * `ObjectQLPlugin.start`, so the package door cannot see an environment-held
+ * name at a cold boot. The hydration write stays unjudged; right after it, the
+ * engine plugin judges every package-held position and permission-set name
+ * against what it wrote, and refuses the boot with the package door's envelope.
+ *
+ * These cases boot a real kernel: `ObjectQLPlugin`, a package registered
+ * through the real `manifest` service in Phase 1 (what `AppPlugin.init` does),
+ * and the real protocol hydrating the stored rows in Phase 2 — over this
+ * file's engine double, so the rows are this file's `Row` shape. The refusal
+ * leaves `start()`, so the kernel wraps it and the envelope is the wrapper's
+ * `cause`. The real composition, restarted on one database, is pinned in
+ * `packages/qa/dogfood` and the artifact boot in `packages/runtime`.
+ */
+describe('cold boot — a package-held catalog name the environment catalog holds refuses the boot (ADR-0048 N.3)', () => {
+    type CatalogType = 'permission' | 'position';
+    type Envelope = Error & {
+        code?: string;
+        status?: number;
+        conflicts?: Array<{ catalogType: string; name: string; incomingPackageId: string; existingHolder: unknown }>;
+    };
+    const PKG = 'com.acme.coldboot';
+    const catalogBody = (type: CatalogType, name: string, label: string) =>
+        type === 'permission' ? { name, label, objects: {} } : { name, label };
+    const storedRow = (type: CatalogType, name: string, packageId: string | null = null) =>
+        overlayRow({ type, name, package_id: packageId, metadata: JSON.stringify(catalogBody(type, name, 'saved in the environment')) });
+    /** A package declaring `decl` — the flat shape `AppPlugin.init` hands the `manifest` service. */
+    const pkgOf = (decl: Partial<Record<CatalogType, string[]>>) => ({
+        id: PKG,
+        name: 'coldboot',
+        version: '1.0.0',
+        type: 'app',
+        ...(decl.position ? { positions: decl.position.map((n) => catalogBody('position', n, 'shipped')) } : {}),
+        ...(decl.permission ? { permissions: decl.permission.map((n) => catalogBody('permission', n, 'shipped')) } : {}),
+    });
+
+    const kernels: ObjectKernel[] = [];
+    afterEach(async () => {
+        while (kernels.length) {
+            const kernel = kernels.pop()!;
+            try { await kernel.shutdown(); } catch { /* a refused boot is already stopped */ }
+        }
+    });
+
+    /**
+     * Boot with `pkg` registered in Phase 1 and `rows` in `sys_metadata`. The
+     * second hook lets a case register into the registry in Phase 1 the way a
+     * plugin's own `init()` would.
+     */
+    async function boot(
+        pkg: unknown,
+        rows: Row[],
+        beforeHydration?: (ql: ObjectQL) => void,
+    ): Promise<{ refusal?: Envelope; ql: ObjectQL }> {
+        const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+        kernels.push(kernel);
+        let ql!: ObjectQL;
+        await kernel.use(new ObjectQLPlugin({ registerProtocol: false }));
+        const storedRowsAndPackage: Plugin = {
+            name: 'test.stored-rows-and-package',
+            version: '1.0.0',
+            dependencies: ['com.objectstack.engine.objectql'],
+            init: async (ctx: PluginContext) => {
+                ql = ctx.getService<ObjectQL>('objectql');
+                ql.registry.logLevel = 'silent';
+                ctx.registerService('protocol', new ObjectStackProtocolImplementation(makeEngine(ql.registry, rows)));
+                await ctx.getService<{ register(m: unknown): Promise<void> | void }>('manifest').register(pkg);
+                beforeHydration?.(ql);
+            },
+        };
+        await kernel.use(storedRowsAndPackage);
+        try {
+            await kernel.bootstrap();
+            return { ql };
+        } catch (e) {
+            return { refusal: ((e as { cause?: unknown }).cause ?? e) as Envelope, ql };
+        }
+    }
+
+    const environmentConflict = (type: CatalogType, name: string) =>
+        ({ catalogType: type, name, incomingPackageId: PKG, existingHolder: { kind: 'environment' } });
+
+    describe.each(['permission', 'position'] as const)('%s', (type) => {
+        const name = `coldboot_${type}`;
+
+        it('a package-held name the environment catalog already holds refuses the boot, naming both holders', async () => {
+            const { refusal } = await boot(pkgOf({ [type]: [name] }), [storedRow(type, name)]);
+            expect(refusal?.code).toBe(NAMESPACE_CONFLICT_CODE);
+            expect(refusal?.status).toBe(422);
+            expect(refusal?.conflicts).toEqual([environmentConflict(type, name)]);
+        });
+
+        it('a stored row bound to the package itself is the environment\'s too (a hot install refuses it alike)', async () => {
+            const { refusal } = await boot(pkgOf({ [type]: [name] }), [storedRow(type, name, PKG)]);
+            expect(refusal?.code).toBe(NAMESPACE_CONFLICT_CODE);
+            expect(refusal?.conflicts).toEqual([environmentConflict(type, name)]);
+        });
+
+        it('CONTROL — the environment\'s own names and the package\'s distinct names: the boot comes up, each answers its own', async () => {
+            const { refusal, ql } = await boot(pkgOf({ [type]: [`${name}_shipped`] }), [storedRow(type, `${name}_saved`)]);
+            expect(refusal).toBeUndefined();
+            expect(ql.registry.getItem<{ _packageId?: string }>(type, `${name}_shipped`)?._packageId).toBe(PKG);
+            expect(ql.registry.getItem<{ label?: string }>(type, `${name}_saved`)?.label).toBe('saved in the environment');
+        });
+    });
+
+    it('every conflict is listed in one refusal, positions first, each name once', async () => {
+        const { refusal } = await boot(
+            pkgOf({ position: ['coldboot_both_position'], permission: ['coldboot_both_set', 'coldboot_free_set'] }),
+            [storedRow('permission', 'coldboot_both_set'), storedRow('position', 'coldboot_both_position')],
+        );
+        expect(refusal?.conflicts).toEqual([
+            environmentConflict('position', 'coldboot_both_position'),
+            environmentConflict('permission', 'coldboot_both_set'),
+        ]);
+    });
+
+    it('CONTROL — a built-in name the platform declares beside a stored definition boots (the item seam\'s carve-out)', async () => {
+        // The platform's own declaration of a built-in position, made at the
+        // item seam under its own package id, here in Phase 1 so it is
+        // package-held when the check runs; and a stored definition under the
+        // same name, which shadows it at read (ADR-0005).
+        const { refusal, ql } = await boot(pkgOf({}), [storedRow('position', 'org_admin')], (engine) => {
+            engine.registry.registerItem('position', { name: 'org_admin', label: 'Organization Admin' }, 'name', 'com.objectstack.plugin-security');
+        });
+        expect(refusal).toBeUndefined();
+        expect(ql.registry.getItem<{ label?: string }>('position', 'org_admin')?.label).toBe('saved in the environment');
     });
 });

@@ -140,7 +140,7 @@ function valueGraph(entry: string): Set<string> {
   return new Set([...seen].map((f) => relative(SRC, f).split('\\').join('/')));
 }
 
-describe('the migration chain is `@objectstack/spec/migrations`, not the root (#20646)', () => {
+describe('the migration chain is `@objectstack/spec/migrations`, not the root', () => {
   it('the root module exports none of the moved values', () => {
     expect(MOVED_VALUES.filter((name) => name in root)).toEqual([]);
   });
