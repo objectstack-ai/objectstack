@@ -2118,6 +2118,99 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
   });
 });
 
+describe('validateTranslationReferences — flow refusals (#22450)', () => {
+  /**
+   * hotcrm's measured shape: a refusal on the START leg (`get_held →
+   * refuse_held`), ahead of the first screen, beside a completing `end` and a
+   * `decision` — so each orphan diagnosis below is judged against the same
+   * metadata as the clean run, and differs only in the bundle.
+   */
+  const quoteStack = {
+    flows: [
+      {
+        name: 'quote_generation',
+        type: 'screen',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'get_held', type: 'decision', label: 'Held?' },
+          {
+            id: 'refuse_held',
+            type: 'end',
+            label: 'Quote Refused',
+            config: { outcome: 'refused', message: 'Qualification approval comes first: {{ record.name }}.' },
+          },
+          { id: 'screen_1', type: 'screen', label: 'Quote', config: { fields: [{ name: 'quoteName' }] } },
+          { id: 'done', type: 'end', label: 'Done', config: { outcome: 'completed' } },
+        ],
+      },
+    ],
+  };
+  const bundle = (flows: unknown) => ({ ...quoteStack, translations: [{ 'zh-CN': { flows } }] });
+  const firstSentence = (message: string) => message.slice(0, message.indexOf('. ') + 1);
+
+  it('reports nothing for the message of an `end` declaring `outcome: \'refused\'`', () => {
+    expect(
+      validateTranslationReferences(
+        bundle({ quote_generation: { refusals: { refuse_held: { message: '须先完成资格审批:{{ record.name }}。' } } } }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuses a refusal key on a COMPLETED `end` node', () => {
+    const findings = validateTranslationReferences(
+      bundle({ quote_generation: { refusals: { done: { message: '完成' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.quote_generation.refusals.done');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Translations are keyed to refusal "done", which flow "quote_generation" declares as an `end` node that completes.',
+    );
+    expect(findings[0].hint).toContain('Declared refusing end node ids: refuse_held.');
+  });
+
+  it('refuses a refusal key over an UNKNOWN node, with the nearest refusing node offered', () => {
+    const findings = validateTranslationReferences(
+      bundle({ quote_generation: { refusals: { refuse_hold: { message: 'x' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.quote_generation.refusals.refuse_hold');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Translations are keyed to refusal "refuse_hold", a node id flow "quote_generation" does not declare.',
+    );
+    expect(findings[0].message).toContain('Did you mean "refuse_held"?');
+  });
+
+  it('refuses a refusal key over an UNKNOWN flow, at the flow level', () => {
+    const findings = validateTranslationReferences(
+      bundle({ quote_generations: { refusals: { refuse_held: { message: 'x' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.quote_generations');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Translations are keyed to flow "quote_generations", which this stack does not define.',
+    );
+  });
+
+  it('diagnoses a refusal key on a node of another type as such', () => {
+    for (const [nodeId, type] of [['get_held', 'decision'], ['screen_1', 'screen']] as const) {
+      const findings = validateTranslationReferences(
+        bundle({ quote_generation: { refusals: { [nodeId]: { message: 'x' } } } }),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe(`translations[0]["zh-CN"].flows.quote_generation.refusals.${nodeId}`);
+      expect(firstSentence(findings[0].message)).toBe(
+        `Translations are keyed to refusal "${nodeId}", which flow "quote_generation" declares as a \`${type}\` node, not a refusing \`end\`.`,
+      );
+    }
+  });
+});
+
 describe('validateTranslationReferences — namespaces deliberately not judged', () => {
   it('ignores messages, validationMessages, settings, metadataForms and settingsCommon', () => {
     const findings = validateTranslationReferences({

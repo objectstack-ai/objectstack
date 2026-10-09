@@ -103,6 +103,13 @@
  * resolved, so they need no check of their own — the schema closes the leaf
  * vocabulary (`.strict()`), which is a shape concern, not a reference.
  *
+ * `flows.<name>.refusals.<node_id>.message` (#22450) is judged the same way one
+ * level down: the node id must name an `end` node declaring
+ * `outcome: 'refused'`, at any depth (the same `walkFlowNodes` universe). A
+ * completed `end`, a node of another type and an id the flow does not declare
+ * are each an orphan, with its own diagnosis. The message's `{{ }}` holes are
+ * the schema's to judge (`TranslationDataSchema`, the one text-slot judge).
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -182,6 +189,15 @@ import { viewObjectName } from './view-walk.js';
  * by name to import.
  */
 const SCREEN_NODE_TYPE = 'screen';
+
+/**
+ * [#22450] The node a `flows.<name>.refusals.*` key addresses: an `end` node
+ * declaring `outcome: 'refused'` (`EndConfigSchema`). Local consts for
+ * {@link SCREEN_NODE_TYPE}'s reason — `end` is a structural node type and
+ * `'refused'` a member of the schema's `outcome` enum, neither exported by name.
+ */
+const END_NODE_TYPE = 'end';
+const REFUSED_OUTCOME = 'refused';
 
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
 export const TRANSLATION_OPTION_KEY_UNKNOWN = 'translation-option-key-unknown';
@@ -327,6 +343,12 @@ interface ScreenFacts {
 interface FlowFacts {
   /** Screen node id → that screen's facts. Keyed by `FlowNode.id`. */
   screens: Map<string, ScreenFacts>;
+  /**
+   * The ids of the `end` nodes declaring `outcome: 'refused'` (#22450) — the
+   * nodes a `flows.<name>.refusals.<node_id>` key addresses. A completed `end`
+   * renders no message, so a key over one is an orphan.
+   */
+  refusals: Set<string>;
   /**
    * Every NON-screen node id → its `type`. The `screens` group addresses screen
    * nodes only, so a key naming a real `decision` node is still an orphan — but
@@ -1309,6 +1331,7 @@ function buildUniverse(stack: AnyRec): Universe {
     if (!flowName) return;
     if (!ownDeclaration && flows.has(flowName)) return;
     const screens = new Map<string, ScreenFacts>();
+    const refusals = new Set<string>();
     const otherNodes = new Map<string, string>();
     for (const { node } of walkFlowNodes(flow, '')) {
       const nodeId = strName(node.id);
@@ -1316,6 +1339,11 @@ function buildUniverse(stack: AnyRec): Universe {
       const nodeType = strName(node.type);
       if (nodeType !== SCREEN_NODE_TYPE) {
         if (nodeType && !otherNodes.has(nodeId)) otherNodes.set(nodeId, nodeType);
+        // [#22450] A refusing `end`, at any depth: the engine reads the
+        // translated message of whichever `end` the run reaches.
+        if (nodeType === END_NODE_TYPE && isRec(node.config) && node.config.outcome === REFUSED_OUTCOME) {
+          refusals.add(nodeId);
+        }
         continue;
       }
       const config = isRec(node.config) ? node.config : undefined;
@@ -1326,7 +1354,7 @@ function buildUniverse(stack: AnyRec): Universe {
       }
       screens.set(nodeId, { fields, objectName: strName(config?.objectName) });
     }
-    flows.set(flowName, { screens, otherNodes });
+    flows.set(flowName, { screens, refusals, otherNodes });
   };
   for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
   for (const flow of artifactProvidedRecords(stack, 'flows')) {
@@ -1758,6 +1786,31 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                     : ` Screen "${nodeId}" declares no \`config.fields\` at all.`),
             );
           }
+        }
+        // ── flows.<name>.refusals.<node_id> (#22450) ──────────────────────
+        for (const nodeId of Object.keys(asRecord(rawFlow.refusals))) {
+          if (flow.refusals.has(nodeId)) continue;
+          const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+          orphan(
+            `${inLocale} · flow "${flowName}" · refusal "${nodeId}"`,
+            `${flowPath}.refusals.${nodeId}`,
+            nodeType === END_NODE_TYPE
+              ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as an ` +
+                `\`end\` node that completes. Only an \`end\` declaring \`outcome: 'refused'\` shows a ` +
+                `message, so nothing resolves this key.`
+              : nodeType
+                ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as a ` +
+                  `\`${nodeType}\` node, not a refusing \`end\`. Only an \`end\` declaring ` +
+                  `\`outcome: 'refused'\` shows a message, so nothing resolves this key.`
+                : `Translations are keyed to refusal "${nodeId}", a node id flow "${flowName}" does not ` +
+                  `declare. The refusal keeps its source-locale message.` +
+                  suggest(nodeId, flow.refusals),
+            `Refusal translations are keyed by the \`id\` of an \`end\` node declaring ` +
+              `\`outcome: 'refused'\`.` +
+              (flow.refusals.size > 0
+                ? ` Declared refusing end node ids: ${listNames(flow.refusals)}.`
+                : ` Flow "${flowName}" declares no refusing \`end\` node at all.`),
+          );
         }
       }
     }

@@ -70,6 +70,8 @@
 
 import { isExpressionEnvelopeShaped, resolveFlowNodeValueSlots } from './flow-node-expression-paths';
 import {
+  CEL_CLAIMED_IDENTIFIERS,
+  CEL_KEYWORDS,
   TEMPLATE_TOKEN,
   celExpression,
   celPath,
@@ -104,12 +106,18 @@ function envelopeOf(source: string): string {
   return `{ dialect: 'cel', source: ${quoted} }`;
 }
 
-/** A `has()` guard for a path whose last segment is a key — the absent-key remedy. */
+/**
+ * A `has()` guard for a path of keys — the absent-key remedy. `has()` takes a
+ * field selection over names alone: an index anywhere in its argument
+ * (`has(a[0].b)`, `has(vars["$x"].y)`) is refused when it runs, so a path with
+ * a numeric segment, a `$`-named head or a keyword segment gets no guard. A
+ * bare variable, and a path whose head CEL claims ({@link CEL_CLAIMED_IDENTIFIERS}),
+ * is selected off `vars` (`has(vars.list.tags)`).
+ */
 function guardOf(path: string): string | undefined {
   const segments = path.split('.');
-  const last = segments[segments.length - 1]!;
-  if (segments[0]!.startsWith('$') || /^\d+$/.test(last)) return undefined;
-  const read = segments.length === 1 ? `vars.${path}` : celPath(path);
+  if (segments[0]!.startsWith('$') || segments.some((s) => /^\d+$/.test(s) || CEL_KEYWORDS.has(s))) return undefined;
+  const read = segments.length === 1 || CEL_CLAIMED_IDENTIFIERS.has(segments[0]!) ? `vars.${path}` : path;
   return `has(${read}) ? ${read} : null`;
 }
 

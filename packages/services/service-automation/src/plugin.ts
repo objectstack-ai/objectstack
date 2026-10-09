@@ -14,7 +14,7 @@ import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { MetadataMutationEvent } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
-import type { AutomationEngineOptions, RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
 import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
@@ -550,6 +550,30 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
 }
 
 /**
+ * [#22450] The engine's reader of the `i18n` service, through which a refusing
+ * `end` node picks its translated message in the run's locale — objectql's
+ * validation-message bridge (`ObjectQLPlugin`, `setI18nService`), made lazy.
+ *
+ * Resolved at QUESTION time, never at boot, for {@link packagedFlowReader}'s
+ * reason: the `i18n` provider may register after this plugin's `init()`, and a
+ * registry read turned into a recorded "not there" would be the
+ * startup-registry verdict AGENTS.md forbids. A composition with no `i18n`
+ * service, or one whose service has no `t()`, answers `undefined`, and every
+ * refusal renders its authored message.
+ */
+export function i18nServiceReader(ctx: Pick<PluginContext, 'getService'>): () => RefusalI18nService | undefined {
+    return () => {
+        let service: RefusalI18nService | undefined;
+        try {
+            service = ctx.getService<RefusalI18nService>('i18n');
+        } catch {
+            return undefined;
+        }
+        return typeof service?.t === 'function' ? service : undefined;
+    };
+}
+
+/**
  * AutomationServicePlugin — Core engine plugin
  *
  * Responsibilities:
@@ -941,6 +965,11 @@ export class AutomationServicePlugin implements Plugin {
         // job's `pull` run form binds through. Attached before the service is
         // registered, so no caller can resolve the service without it.
         this.engine.setConnectorPullSource((request) => this.pullConnectorSource(request));
+
+        // [#22450] A refused run's message in the run's language: the engine
+        // reads the `i18n` service through this reader when a refusing `end`
+        // node renders, never at boot (see `i18nServiceReader`).
+        this.engine.setI18nServiceSource(i18nServiceReader(ctx));
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);

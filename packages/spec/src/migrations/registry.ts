@@ -14280,7 +14280,7 @@ const step18: MigrationStep = {
         + 'string anywhere inside an array or object value, carrying a single-brace template token',
       replacement:
         'a CEL value envelope, { dialect: "cel", source: "…" }, evaluated to the value: a path is the same path '
-        + '(record.owner; a numeric segment becomes an index, list[0]; a variable whose name starts with $ is read '
+        + '(record.owner; a numeric segment becomes an index, items[0]; a variable whose name starts with $ is read '
         + 'through vars, vars["$error"].message), arithmetic is the same arithmetic with every integer divisor written '
         + 'as a double (round(x * 100) / 100.0), and text with holes is one concatenation (\'Hello \' + o.name). A '
         + 'string with no token is the literal text it spells, and braces meant literally are a CEL string literal',
