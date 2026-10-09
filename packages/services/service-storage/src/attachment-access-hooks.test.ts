@@ -3,7 +3,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { renderOperationMessage } from '@objectstack/spec/system';
-import { installAttachmentAccessHooks, type AttachmentSharingLike } from './attachment-access-hooks.js';
+import {
+  installAttachmentAccessHooks,
+  type AttachmentSecurityLike,
+  type AttachmentSharingLike,
+} from './attachment-access-hooks.js';
 import type { AttachmentLifecycleEngine } from './attachment-lifecycle.js';
 
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
@@ -31,10 +35,33 @@ function readableParentFind(readable: string[], reads: Array<{ object: string; o
   };
 }
 
+/**
+ * A two-state sharing double, as the suites below were written against: `true`
+ * (may edit) or `false`. The gate reads the TRI-STATE `checkEdit` since the
+ * `controlled_by_parent` fix, and these doubles stand for its two verdicts
+ * whose meaning did not move — `true` is `allow` (admits), `false` is `deny`
+ * (refuses). `abstain` never comes out of one; the suite that pins it (end of
+ * file) hands the gate a tri-state double directly.
+ */
+type TwoStateSharingDouble = {
+  canEdit: (object: string, recordId: string, context: any) => Promise<boolean>;
+};
+
+function asTriState(sharing: AttachmentSharingLike | TwoStateSharingDouble | null | undefined) {
+  if (!sharing || !('canEdit' in sharing)) return sharing;
+  const { canEdit } = sharing;
+  return {
+    checkEdit: async (object: string, recordId: string, context: any) =>
+      (await canEdit(object, recordId, context)) ? ('allow' as const) : ('deny' as const),
+  } satisfies AttachmentSharingLike;
+}
+
 /** Capture the three registered hooks so tests can drive them directly. */
 function install(opts: {
   attachments?: Array<Record<string, unknown>>;
-  sharing?: AttachmentSharingLike | null;
+  sharing?: AttachmentSharingLike | TwoStateSharingDouble | null;
+  /** The security service, for its master-detail write check (#22455). */
+  security?: AttachmentSecurityLike | null;
   /** Parents the CALLER can read through the engine, keyed `object/id`. */
   readable?: string[];
   messageTranslator?: () => ((key: string, locale: string, params?: Record<string, unknown>) => string) | undefined;
@@ -59,7 +86,8 @@ function install(opts: {
       ) ?? null; },
     update: async () => ({}),
   };
-  installAttachmentAccessHooks(engine, () => opts.sharing, silentLogger(), opts.messageTranslator);
+  const sharing = asTriState(opts.sharing);
+  installAttachmentAccessHooks(engine, () => sharing, silentLogger(), opts.messageTranslator, () => opts.security);
   return {
     beforeInsert: hooks.get('beforeInsert')!,
     beforeUpdate: hooks.get('beforeUpdate')!,
@@ -544,7 +572,7 @@ function makeWiredDriver() {
 
 async function bootWired(opts: {
   attachments?: Array<Record<string, unknown>>;
-  sharing?: AttachmentSharingLike | null;
+  sharing?: AttachmentSharingLike | TwoStateSharingDouble | null;
   /** `att_secret` rows that EXIST — and, with no security middleware on this
    * rig, are therefore readable by every caller. Absent ⇒ no parent is. */
   parents?: string[];
@@ -556,7 +584,8 @@ async function bootWired(opts: {
   ql.registry.registerObject(sysAttachmentObject as any, 'app:test');
   ql.registry.registerObject(attSecretObject as any, 'app:test');
   // `engine as any` mirrors the production wiring in storage-service-plugin.ts.
-  installAttachmentAccessHooks(ql as any, () => opts.sharing ?? null, silentLogger());
+  const sharing = asTriState(opts.sharing) ?? null;
+  installAttachmentAccessHooks(ql as any, () => sharing, silentLogger());
   if (!driver.stores.get('sys_attachment')) driver.stores.set('sys_attachment', new Map());
   for (const row of opts.attachments ?? []) {
     driver.stores.get('sys_attachment')!.set(String(row.id), { ...row });
@@ -1373,5 +1402,130 @@ describe('a refusal on a parent the caller cannot read names nothing', () => {
       seen.ql.delete('sys_attachment', { where: { id: 'a1' }, context: { userId: 'reader' } } as any),
     ).rejects.toMatchObject({ code: 'ATTACHMENT_DELETE_DENIED', status: 403, object: 'att_secret' });
     expect(seen.remaining()).toBe(1);
+  });
+});
+
+// ── [ADR-0055] a controlled_by_parent parent is judged through its master ──
+//
+// `checkEdit` ABSTAINS on every `controlled_by_parent` parent (plugin-sharing
+// maps the model to `public`), and the gate used to read `canEdit`, which folds
+// that abstention into `true`. These pin the composition the gate now runs on
+// all four limbs: `allow` admits and `deny` refuses without asking anything
+// else; an abstention asks the security service's master-detail write check,
+// whose `allow` and `not_applicable` admit and whose `deny` and `unresolvable`
+// refuse; a rejection propagates unchanged; and a kernel without that member
+// keeps the abstention's admit.
+describe('[ADR-0055] parent EDIT on a controlled_by_parent parent — checkEdit, then the master-detail write check', () => {
+  type Verdict = 'allow' | 'abstain' | 'deny';
+  type Outcome = Awaited<ReturnType<NonNullable<AttachmentSecurityLike['checkControlledByParentWrite']>>>;
+
+  const triState = (verdict: Verdict) => {
+    const checkEdit = vi.fn(async (_o: string, _r: string, _c: any) => verdict);
+    return { checkEdit, sharing: { checkEdit } satisfies AttachmentSharingLike };
+  };
+  const masterCheck = (answer: Outcome | Error) => {
+    const checkControlledByParentWrite = vi.fn(async (_o: string, _r: string, _c?: any): Promise<Outcome> => {
+      if (answer instanceof Error) throw answer;
+      return answer;
+    });
+    return { checkControlledByParentWrite, security: { checkControlledByParentWrite } satisfies AttachmentSecurityLike };
+  };
+  const attachCtx = () => insertCtx({ parent_object: 'cbp_contract', parent_id: 'k1', file_id: 'f1' }, { userId: 'member' });
+
+  // The truth table, on the attach limb. `null` for the member column = never asked.
+  const TABLE: Array<{ verdict: Verdict; member: Outcome | null; admits: boolean }> = [
+    { verdict: 'allow', member: null, admits: true },
+    { verdict: 'deny', member: null, admits: false },
+    { verdict: 'abstain', member: { outcome: 'allow' }, admits: true },
+    { verdict: 'abstain', member: { outcome: 'not_applicable' }, admits: true },
+    { verdict: 'abstain', member: { outcome: 'deny', leg: 'record_sharing' }, admits: false },
+    { verdict: 'abstain', member: { outcome: 'deny', leg: 'object_permission' }, admits: false },
+    { verdict: 'abstain', member: { outcome: 'unresolvable', reason: 'master_detail_relation_missing' }, admits: false },
+    { verdict: 'abstain', member: { outcome: 'unresolvable', reason: 'record_not_found' }, admits: false },
+    { verdict: 'abstain', member: { outcome: 'unresolvable', reason: 'master_reference_missing' }, admits: false },
+  ];
+  for (const row of TABLE) {
+    const label = `checkEdit ${row.verdict}${row.member ? ` × member ${JSON.stringify(row.member)}` : ''}`;
+    it(`attach: ${label} → ${row.admits ? 'admits' : 'refuses 403 ATTACHMENT_PARENT_ACCESS'}`, async () => {
+      const { sharing } = triState(row.verdict);
+      const { security, checkControlledByParentWrite } = masterCheck(row.member ?? { outcome: 'deny', leg: 'record_sharing' });
+      const { beforeInsert } = install({ sharing, security });
+      const run = beforeInsert(attachCtx());
+      if (row.admits) await expect(run).resolves.toBeUndefined();
+      else await expect(run).rejects.toMatchObject({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403, object: 'cbp_contract' });
+      // The master check is asked on an abstention, and only then.
+      expect(checkControlledByParentWrite).toHaveBeenCalledTimes(row.member ? 1 : 0);
+    });
+  }
+
+  it('the member is asked about the parent, with the caller envelope the sharing gate gets', async () => {
+    const { sharing, checkEdit } = triState('abstain');
+    const { security, checkControlledByParentWrite } = masterCheck({ outcome: 'allow' });
+    const { beforeInsert } = install({ sharing, security });
+    await beforeInsert(attachCtx());
+    expect(checkControlledByParentWrite).toHaveBeenCalledWith('cbp_contract', 'k1', checkEdit.mock.calls[0]![2]);
+    expect(checkControlledByParentWrite.mock.calls[0]![2]).toMatchObject({ userId: 'member' });
+  });
+
+  it('a store fault from the master check propagates unchanged — its 503 is never an admit or a 403', async () => {
+    const outage = Object.assign(new Error('datasource unavailable'), { code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503 });
+    const { sharing } = triState('abstain');
+    const { security } = masterCheck(outage);
+    const { beforeInsert } = install({ sharing, security });
+    await expect(beforeInsert(attachCtx())).rejects.toBe(outage);
+  });
+
+  it('a kernel without the member keeps the abstention\'s admit — no security service, or one that does not serve it', async () => {
+    const { sharing } = triState('abstain');
+    await expect(install({ sharing, security: null }).beforeInsert(attachCtx())).resolves.toBeUndefined();
+    await expect(
+      install({ sharing, security: {} as AttachmentSecurityLike }).beforeInsert(attachCtx()),
+    ).resolves.toBeUndefined();
+  });
+
+  it("delete: another user's file on a child whose master the caller cannot edit is refused; the uploader's own is not asked", async () => {
+    const row = { id: 'a1', file_id: 'f1', parent_object: 'cbp_contract', parent_id: 'k1', uploaded_by: 'owner' };
+    const { sharing } = triState('abstain');
+    const { security, checkControlledByParentWrite } = masterCheck({ outcome: 'deny', leg: 'record_sharing' });
+    const refused = install({ attachments: [row], sharing, security, readable: ['cbp_contract/k1'] });
+    await expect(refused.beforeDelete(deleteCtx({ id: 'a1' }, { userId: 'member' }))).rejects.toMatchObject({
+      code: 'ATTACHMENT_DELETE_DENIED',
+      status: 403,
+      object: 'cbp_contract',
+    });
+    expect(checkControlledByParentWrite).toHaveBeenCalledTimes(1);
+
+    const own = install({ attachments: [{ ...row, uploaded_by: 'member' }], sharing, security });
+    await expect(own.beforeDelete(deleteCtx({ id: 'a1' }, { userId: 'member' }))).resolves.toBeUndefined();
+    expect(checkControlledByParentWrite).toHaveBeenCalledTimes(1); // not asked again
+  });
+
+  it('delete: a caller who cannot read the parent gets the not-visible refusal, as on any other parent (#21755)', async () => {
+    const row = { id: 'a1', file_id: 'f1', parent_object: 'cbp_contract', parent_id: 'k1', uploaded_by: 'owner' };
+    const { sharing } = triState('abstain');
+    const { security } = masterCheck({ outcome: 'deny', leg: 'record_sharing' });
+    const { beforeDelete } = install({ attachments: [row], sharing, security, readable: [] });
+    await expect(beforeDelete(deleteCtx({ id: 'a1' }, { userId: 'member' }))).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+    });
+  });
+
+  it('update and re-point: the same composition refuses the row rule and the attach rule on the new parent', async () => {
+    const row = { id: 'a1', file_id: 'f1', parent_object: 'cbp_contract', parent_id: 'k1', uploaded_by: 'owner' };
+    const { sharing } = triState('abstain');
+    const denied = masterCheck({ outcome: 'deny', leg: 'record_sharing' });
+    const rowRule = install({ attachments: [row], sharing, security: denied.security, readable: ['cbp_contract/k1'] });
+    await expect(
+      rowRule.beforeUpdate(updateCtx({ id: 'a1' }, { description: 'x' }, { userId: 'member' })),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+
+    // The uploader may edit their own row, but moving it onto a child whose
+    // master they cannot edit is an attach there — refused.
+    const repoint = install({ attachments: [{ ...row, uploaded_by: 'member' }], sharing, security: denied.security });
+    await expect(
+      repoint.beforeUpdate(updateCtx({ id: 'a1' }, { parent_id: 'k2' }, { userId: 'member' })),
+    ).rejects.toMatchObject({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403, object: 'cbp_contract' });
+    expect(denied.checkControlledByParentWrite).toHaveBeenLastCalledWith('cbp_contract', 'k2', expect.objectContaining({ userId: 'member' }));
   });
 });

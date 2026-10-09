@@ -962,27 +962,29 @@
     },
     {
       "id": "platform-core.shell-nav-personalization",
-      "title": "Shell nav personalization: sidebar collapse, pin/reorder, favorites, recents and header breadcrumbs each persist and stay navigable across reload",
+      "title": "Shell nav personalization: sidebar collapse, pins and the user's pinned order, favorites, recents and header breadcrumbs each persist and stay navigable across reload; the authored menu keeps the app's order",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "stock showcase nav (multiple objects/dashboards/reports so there is something to pin, reorder, favorite, and visit as recents)"
+          "stock showcase nav (multiple objects/dashboards/reports so there is something to pin — at least three entries, so the pinned order can change — favorite, and visit as recents)",
+          "a desktop viewport, at least 768px wide, for the Pinned section: below it useIsMobile is true and UnifiedSidebar passes enablePinning={!isMobile}, so a phone draws no Pinned section and has no pinned order to judge"
         ]
       },
       "steps": [
         "sidebar collapse: toggle the sidebar to icon (collapsed) mode; confirm nav items still NAVIGATE in icon mode; reload — the collapsed state persists (cookie sidebar_state, packages/components/src/ui/sidebar.tsx SIDEBAR_COOKIE_NAME)",
         "nav pin/unpin: pin a nav item (UnifiedSidebar → useNavPins.togglePin → favorite id nav:<navId>, backed by FavoritesProvider/UserDataAdapter); it appears in the Pinned section; reload — the pin persists (syncs via UserDataAdapter; migrates the legacy objectui-nav-pins key); unpin removes it",
-        "drag-reorder: reorder nav items by drag (UnifiedSidebar useNavOrder, enableReorder / onReorder=handleReorder); reload — the order persists (localStorage per-app key)",
+        "pinned order (desktop only): with at least three entries pinned, reorder them inside the Pinned section — the group NavigationRenderer draws above the menu, headed console.nav.favorites ('Favorites' in en, 「收藏」 in zh, a star icon), not the content-favorites group UnifiedSidebar draws below Recent. By pointer: drag a pinned row by the row itself (no grip at rest; the row's link carries cursor-grab; a press becomes a drag only after 5px of travel; a 2px insertion line, data-drop-indicator, marks where it lands). By keyboard: focus a pinned row's link, Space picks it up, the arrow keys move it, Space drops it, Escape cancels; Enter is not a drag key, it follows the link. Reload — the pinned order persists: NavigationRenderer onPinnedReorder → useNavPins.reorderPins → FavoritesProvider reorderNavPins stores it as the order of the type 'nav' favorites (nav:<navId>) in the UserDataAdapter-backed favorites list. A new pin joins the end; an unpin leaves the others in order",
         "favorites star/unstar: star an object/record as a favorite (useFavorites / FavoritesProvider); it appears in favorites; reload — persists; unstar removes it",
         "recents rail: visit several records/objects/dashboards; the sidebar Recent section (collapsed by default, top 5 — useTrackRouteAsRecent → RecentItemsProvider, localStorage objectui-recent-items scoped by userId, hydrates UserDataAdapter) lists them; reload — recents survive",
         "header record-trail breadcrumbs: on a record detail the AppHeader breadcrumb shows the app/section/record trail; click a crumb to navigate back to its level; reload — the trail rebuilds from the route",
-        "record which persistence each feature uses: pins/favorites/recents are UserDataAdapter-backed (cross-device sync), reorder + collapse are local (localStorage / cookie)"
+        "authored menu (any viewport): the app's own menu — every row outside the Pinned section — offers no reorder: no drag grip, no aria-roledescription=\"sortable\", no aria-describedby=\"nav-pinned\" (the pinned list's DndContext id, which names dnd-kit's drag instructions) and no cursor-grab on its links, and dragging a menu row moves nothing (a browser's native link-drag ghost is not a reorder). Its order is the app's authored navigation order: each level sorted by order, lower first, ties in authored array order (objectui packages/layout/src/navOrder.ts byNavOrder). Then plant the retired per-user key — localStorage objectui-nav-order-<app name> holding a JSON map of __root__ and each group id to that level's ids reversed, the shape the retired useNavOrder read — and reload: the menu order does not change, because UnifiedSidebar no longer reads the key",
+        "record which persistence each feature uses: pins and their order, favorites and recents are UserDataAdapter-backed (cross-device sync; pins, their order and favorites are one sys_user_preference row, key ui.favorites), collapse is local (cookie sidebar_state)"
       ],
       "acceptance": [
         {
@@ -998,10 +1000,10 @@
           "evidence": "pre/post-reload DOM"
         },
         {
-          "clause": "drag-reorder persists: the reordered nav order is restored after reload (useNavOrder localStorage)",
+          "clause": "pinned order (desktop): a pinned entry is reordered by dragging its row and by keyboard (Space, arrows, Space), and the Pinned section's order is restored after reload (the order of the nav:<navId> favorites — useNavPins.reorderPins → FavoritesProvider reorderNavPins, UserDataAdapter-backed)",
           "oracle": "dom",
-          "verify": "the nav item order before reload equals the order after reload",
-          "evidence": "order before/after reload"
+          "verify": "after a screenshot confirms render, at a viewport at least 768px wide: read the Pinned section's link order; move one row by a pointer drag on the row itself (with intermediate pointer moves — a press must travel 5px before it is a drag) and another by keyboard (focus its link, Space, ArrowUp/ArrowDown, Space) — each drop leaves the section in the dropped order; pick a row up and press Escape — the order is unchanged; reload — the order read after reload equals the order read before it. Control that the probe sees a sortable row: each pinned link carries aria-describedby=\"nav-pinned\" and cursor-grab, and no grip element is drawn",
+          "evidence": "the Pinned section's order before the drags, after each drop, after the Escape, and after reload"
         },
         {
           "clause": "favorites star/unstar persists across reload",
@@ -1020,25 +1022,39 @@
           "oracle": "screenshot",
           "verify": "breadcrumb screenshot + a crumb navigation that routes back + the trail present after reload",
           "evidence": "breadcrumb screenshot + the crumb navigation"
+        },
+        {
+          "clause": "the authored menu is not user-reorderable (any viewport): no row outside the Pinned section draws a drag grip or carries aria-roledescription=\"sortable\", aria-describedby=\"nav-pinned\" or cursor-grab, and the menu renders in the app's authored order even with a stored objectui-nav-order-<app name> key",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms render: the sidebar holds zero [aria-roledescription=\"sortable\"] elements; every menu link outside the Pinned section has no aria-describedby=\"nav-pinned\" and no cursor-grab class (control, on desktop with a pin: the Pinned section's links DO carry both, so the probe can see them); the rendered order of each menu level equals the app's authored navigation order (by order, ties in array order); plant objectui-nav-order-<app name> with every level reversed, reload, and read the menu order again — unchanged. Repeat the attribute probe at a phone viewport (under 768px) with the mobile sidebar open",
+          "evidence": "the attribute-probe counts with the pinned-row control; authored vs rendered menu order, before and after planting the stored key"
         }
       ],
       "negative": [
         "a collapsed sidebar whose icon items no longer navigate (dead icon mode) is a FAIL",
-        "a pin / favorite / reorder / recent that does NOT survive reload is a FAIL of its persistence contract",
+        "a pin, the pinned order, a favorite or a recent that does NOT survive reload is a FAIL of its persistence contract",
+        "on the authored menu (every row outside the Pinned section, any viewport) a drag grip, an aria-roledescription=\"sortable\" element, dnd-kit's drag-instructions aria-describedby, a grab cursor, a drag that moves a row, or an order other than the app's authored order (with or without a stored objectui-nav-order-<app name> key) is a FAIL: arranging the menu is Studio's work, not the end user's",
+        "a phone viewport (under 768px) draws no Pinned section (UnifiedSidebar enablePinning={!isMobile}): its absence there is expected, not a FAIL of the pinned order",
         "a breadcrumb crumb that is inert (does not navigate) is a FAIL",
         "transitional emptiness right after navigation (empty nav/recents) must be ruled out by the screenshot-first protocol before any persistence FAIL is recorded"
       ],
-      "traps": ["hydration-race", "shared-browser-tab"],
+      "traps": ["hydration-race", "shared-browser-tab", "stale-console-bundle", "automation-input"],
       "source": [
-        "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx (useNavOrder drag-reorder localStorage; Recent section; applyPins)",
-        "objectui packages/app-shell/src/hooks/useNavPins.ts (togglePin → nav:<navId> favorite, MAX_PINS 20, UserDataAdapter-backed, legacy objectui-nav-pins migration)",
-        "objectui packages/app-shell/src/hooks/useFavorites.ts + context/FavoritesProvider.tsx (favorites state)",
+        "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx (no menu reorder: useNavOrder is gone and a stored objectui-nav-order-<app> key is not read; the app arm passes NavigationRenderer enablePinning={!isMobile}, pinnedOrder={pinnedIds}, onPinnedReorder={reorderPins}; Recent section; applyPins)",
+        "objectui packages/layout/src/NavigationRenderer.tsx (enableReorder / onReorder RETIRED; the Pinned section, headed console.nav.favorites, is PinnedNavigationList: its own DndContext id nav-pinned, PointerSensor after 5px, KeyboardSensor start and end Space and cancel Escape, the row's link as the drag activator with cursor-grab and aria-describedby, DropIndicator data-drop-indicator; orderPinnedItems by pinnedOrder; menu levels sorted by byNavOrder only)",
+        "objectui packages/layout/src/navOrder.ts (byNavOrder — the authored order: order ascending, ties in array order)",
+        "objectui packages/app-shell/src/hooks/useNavPins.ts (togglePin → nav:<navId> favorite, MAX_PINS 20, UserDataAdapter-backed, legacy objectui-nav-pins migration; pinnedIds in the user's order; reorderPins)",
+        "objectui packages/app-shell/src/hooks/useFavorites.ts + context/FavoritesProvider.tsx (favorites state; reorderNavPins and withNavPinOrder — the pinned order is the order of the type 'nav' favorites; withAddedFavorite appends a new nav pin)",
+        "objectui packages/components/src/hooks/use-mobile.tsx (useIsMobile, MOBILE_BREAKPOINT 768 — the phone/desktop line for the Pinned section)",
+        "objectui packages/app-shell/src/console/ConsoleShell.tsx (createObjectStackUserStateAdapter key ui.favorites — the favorites list, nav pins and their order included, is one per-user row)",
+        "packages/platform-objects/src/identity/sys-user-preference.object.ts#sys_user_preference (the per-user row that favorites list is stored in)",
         "objectui packages/app-shell/src/context/RecentItemsProvider.tsx + hooks/useTrackRouteAsRecent.ts (recents — objectui-recent-items localStorage + UserDataAdapter hydrate)",
         "objectui packages/app-shell/src/layout/AppHeader.tsx (breadcrumb record-trail)",
         "objectui packages/components/src/ui/sidebar.tsx (SIDEBAR_COOKIE_NAME sidebar_state — collapse persistence)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — sidebar collapse/icon-mode, nav pin+reorder, favorites, recents rail, header breadcrumbs, each with its real persistence layer (cookie/localStorage/UserDataAdapter)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — sidebar collapse/icon-mode, nav pin+reorder, favorites, recents rail, header breadcrumbs, each with its real persistence layer (cookie/localStorage/UserDataAdapter)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-09", "change": "end users no longer reorder the runtime sidebar's menu. Maintainer ruling (#22487): 「右侧浏览器，左侧菜单在用户界面不应该显示拖动按钮，拖动设计是studio的工作。」 Scope note: personal ordering survives only in the Pinned section. Landed in objectui 8a55f0ccda (objectui PR #12066, objectui#12059), and every new text cites that code. Step 3 and acceptance[2], which drag-reordered the menu (useNavOrder, localStorage objectui-nav-order-<app>), are REPLACED, not only removed: they now judge the Pinned section's order (desktop only, since a phone draws no Pinned section), dragged by the row or reordered by keyboard (Space, arrows, Space), and persisting across reload as the order of the nav favorites in the UserDataAdapter-backed favorites list. A new step and acceptance[6] judge the negative: no grip, sortable role, drag instructions or grab cursor on the authored menu, and the authored order whatever objectui-nav-order key is stored. Title, fixtures.requires, the persistence step (now 'collapse is local'), the reload negative and source are re-pointed to the landed code. Traps gain stale-console-bundle (the console pin f0268ad784 predates 8a55f0ccda, so a console built at it still draws the menu grip) and automation-input (a one-jump synthetic pointer move never crosses dnd-kit's 5px activation distance and reads as a dead drag)", "ref": "#22487" }
       ]
     },
     {

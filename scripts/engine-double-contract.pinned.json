@@ -3147,6 +3147,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/controlled-by-parent-write-member.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/declared-permission-reload-projection.test.ts",
       "verb": "findOne",
       "pinned": 1

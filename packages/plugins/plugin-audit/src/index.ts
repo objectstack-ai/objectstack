@@ -56,6 +56,7 @@ export type {
   CommentAccessEngine,
   CommentAccessLogger,
   CommentReadMiddlewareCtx,
+  CommentSecurityLike,
   CommentSharingLike,
   CommentThreadTarget,
 } from './comment-access-hooks.js';

@@ -628,6 +628,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "多态指针伴随字段",
         helpText: "把该文本字段声明为多态指针的 id 半边：此处填写同一对象上保存目标对象名的另一个字段，目标逐行决定（ADR-0052 §5）。使用 snake_case；仅限文本字段，且与 `reference` 互斥。"
       },
+      dueLike: {
+        label: "截止日期",
+        helpText: "将此日期标记为截止日期：过了这个日期后，视图可将其显示为逾期（相对时间措辞与逾期颜色）。关闭或未设置：不是截止日期，也不会根据字段名推测。"
+      },
+      settledWhen: {
+        label: "了结条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status == 'done'）——为 TRUE 时该截止日期视为已了结，该记录不再显示逾期措辞或颜色。仅用于显示。"
+      },
       options: {
         label: "选项",
         helpText: "可选项（label/value 对）"
