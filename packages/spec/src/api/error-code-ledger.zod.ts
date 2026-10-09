@@ -1103,6 +1103,13 @@ export const ERROR_CODE_LEDGER = {
     'MAPPING_NOT_FOUND',
     'NODE_FAILURE',
     'NO_EXECUTOR',
+    // [ADR-0131 D6] The stored-flow credential move (`flow-credential-migration.ts`)
+    // records a legacy organization-scoped flow row it cannot re-save on its
+    // report's `failed[]` with the code the metadata protocol refuses such a
+    // write with. Report data in the `sys_migration` receipt and an `error` log
+    // line — no HTTP door; registered under `@objectstack/metadata-protocol`
+    // too, so this row is provenance, not identity.
+    'NOT_OVERRIDABLE',
     'RESUME_IN_PROGRESS',         // duplicate resume refused while the first is running
     'RUN_NOT_FOUND',              // no suspension for this run id — unresumable for good
     'STORE_UNAVAILABLE',          // durable suspended-run store unreadable — existence unknown

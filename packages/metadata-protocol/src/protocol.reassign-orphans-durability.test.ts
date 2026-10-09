@@ -93,15 +93,16 @@ function makeEngine(rows: MetaRow[]) {
             // (#4434) — and the reason to refuse rather than approximate is
             // that the approximation is invisible on the day the producer
             // starts using the shape.
+            if (opts?.limit !== undefined) {
+                throw new Error('fake engine: unsupported `limit` — this double holds no bound');
+            }
             const where = opts?.where ?? {};
             const keys = Object.keys(where);
             if (keys.length !== 1 || keys[0] !== 'organization_id' || where.organization_id !== null) {
                 throw new Error(`fake engine: unsupported where ${JSON.stringify(where)}`);
             }
-            if (opts?.limit !== undefined) {
-                throw new Error('fake engine: unsupported `limit` — this double holds no bound');
-            }
-            return [...store.values()].filter((r) => r.organization_id == null);
+            // Every fixture row is env-wide, so the store IS the env-wide answer.
+            return [...store.values()];
         },
         async update(_table: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
             assertEngineUpdateDispatch(data, opts);
