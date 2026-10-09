@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema, type FieldType } from './field.zod';
+import { FieldSchema, FieldType } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema, type ActionParam } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -1693,6 +1693,88 @@ function refuseNonPictureImageField(
   });
 }
 
+/**
+ * The machine-name grammar an attached block and its leaves share with field
+ * names — they are keys on the same served row (`record.<block>.<leaf>`).
+ */
+const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * [#22211 ruling A] `ObjectSchema.attachedOnRead` — the blocks a service
+ * attaches to the rows it serves, computed per caller on read and never stored.
+ *
+ * The worked case is plugin-approvals: `ApprovalService.attachViewers` sets
+ * `viewer: { can_act, is_submitter, can_override }` on every `sys_approval_request`
+ * row it reads, from the CALLER's identity, and the object's own action
+ * predicates gate on `record.viewer.can_act`. Before this key nothing could
+ * declare such a block in a shape the expression validator reads, so those
+ * predicates were refused as naming an undeclared field.
+ *
+ * ## Shape — a strict record of strict records
+ *
+ * Block name → (leaf key → value type). Both key levels take the field-name
+ * grammar, and a leaf's type is one of the four value types a row value can
+ * carry when it is computed rather than stored — the same four
+ * `Field.returnType` declares for a formula, taken from {@link FieldType} so
+ * the vocabulary cannot drift from the field types the validator already knows.
+ * Anything else — a nested block, a field definition, a type outside the four —
+ * is refused at parse, located at the offending key.
+ *
+ * ## What it is NOT
+ *
+ * Not a field. It provisions no column, and no driver, form, list view, export,
+ * write path or translation bundle reads it — a block exists only on a row a
+ * service has served, never on the row a write carries. For the same reason a
+ * block may not reuse a declared field name (refused in this schema's
+ * `superRefine`): one name cannot be both a stored column and a per-caller block.
+ *
+ * ## Its reader (ADR-0049 enforce-or-remove)
+ *
+ * The shared expression validator. `@objectstack/lint`'s field index adds every
+ * declared block name to the names `record.<x>` may resolve to, and
+ * `@objectstack/formula`'s field-existence pass judges the SECOND segment of
+ * `record.<block>.<leaf>` against the block's declared leaves, under its
+ * existing `unknown-field` refusal — so `record.viewer.can_actt` is refused and
+ * the refusal names the leaves `viewer` declares. An object without this key
+ * keeps exactly the verdicts it had.
+ */
+const AttachedOnReadSchema = z.record(
+  z.string().regex(ATTACHED_ON_READ_NAME, {
+    message: 'Attached block names must be lowercase snake_case (e.g. "viewer"), like field names.',
+  }),
+  z.record(
+    z.string().regex(ATTACHED_ON_READ_NAME, {
+      message: 'Attached leaf keys must be lowercase snake_case (e.g. "can_act"), like field names.',
+    }),
+    FieldType.extract(['number', 'text', 'boolean', 'date']),
+  ),
+);
+
+/**
+ * [#22211 ruling A] A block of `attachedOnRead` may not reuse the name of a
+ * field this object declares — see {@link AttachedOnReadSchema}. One located
+ * issue per colliding block, at `['attachedOnRead', <block>]`.
+ *
+ * Judged against the AUTHORED field map, in the object's `superRefine` beside
+ * {@link refuseNonPictureImageField}, for the same reason: only the object holds
+ * both maps.
+ */
+function refuseAttachedBlockFieldCollision(attachedOnRead: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+  if (attachedOnRead === null || typeof attachedOnRead !== 'object') return;
+  if (fields === null || typeof fields !== 'object') return;
+  for (const block of Object.keys(attachedOnRead)) {
+    if (!Object.prototype.hasOwnProperty.call(fields, block)) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['attachedOnRead', block],
+      message:
+        `\`attachedOnRead\` declares a block \`${block}\`, but \`${block}\` is also a declared field of this object. `
+        + 'A read attachment is computed per caller and never stored, so it cannot share a name with a stored '
+        + 'column — rename the block, or remove it if the field is what the expression should read.',
+    });
+  }
+}
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -2121,6 +2203,19 @@ const ObjectSchemaBase = strictObject(
     ),
     'fields',
   ).describe('Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused.'),
+
+  /**
+   * Read attachments — the blocks a service attaches to the rows it serves,
+   * computed per caller and never stored (#22211, ruling A). See
+   * {@link AttachedOnReadSchema} for the shape, the reader and what it is not.
+   */
+  attachedOnRead: AttachedOnReadSchema.optional().describe(
+    'Blocks a service attaches to each row it serves, computed per caller on read and never stored: '
+    + 'block name → { leaf key → value type (number | text | boolean | date) }. NOT a field — no column, '
+    + 'form, list view, export, write path or translation bundle reads it, and a block name may not repeat '
+    + 'a declared field name. Its reader is the expression validator: `record.<block>` resolves, and '
+    + '`record.<block>.<leaf>` resolves only to a leaf the block declares.',
+  ),
   indexes: z.array(IndexSchema).optional().describe('Database performance indexes'),
 
   /**
@@ -2573,6 +2668,9 @@ const ObjectSchemaBase = strictObject(
   // object — the same door, for the same reason: only the object holds the
   // field map the pointer resolves against.
   refuseNonPictureImageField(object.name, object.imageField, object.fields, ctx);
+  // [#22211 ruling A] A read attachment is not a field: its block names may not
+  // repeat a declared field name.
+  refuseAttachedBlockFieldCollision(object.attachedOnRead, object.fields, ctx);
 });
 
 /**
