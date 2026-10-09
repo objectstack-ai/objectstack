@@ -92,6 +92,18 @@
 // reads AGREE and that they do not serve the catalog string, both of which
 // remain true — what changed is the value they agree ON, which it deliberately
 // never named. Its prose is updated where the fix falsified it.
+//
+// ══════════════════════════════════════════════════════════════════════════
+// [ADR-0131 D6] MANAGED CONTENT IS SEALED — WHERE THE RENAME NOW COMES FROM
+// ══════════════════════════════════════════════════════════════════════════
+//
+// The rename used to be the Studio round-trip itself, behind the
+// `OS_METADATA_WRITABLE=object` hatch. The hatch opens no write onto an object
+// a managed package ships any more, so that round-trip is now pinned REFUSED
+// (403 `NOT_OVERRIDABLE`, nothing stored). The rename the two read cases need
+// is the one a deployment still carries: a row stored before the seal, read by
+// a COLD boot over the same database. The read path is unchanged by the seal,
+// so those two cases still measure what they always measured.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -112,41 +124,90 @@ const CATALOG_LABEL = 'Account';
 const labelOf = (item: unknown): unknown =>
     (item as { label?: unknown } | null | undefined)?.label;
 
+/** The platform's own write context, for the one row this file stores by hand. */
+const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+
+/** The tenant's rename, as a row stored before the seal carries it. */
+const RENAMED_LABEL = 'Customer';
+
 describe('dogfood: the object-extension fold and the i18n catalog disagree on scalars (#8037)', () => {
     let stack: VerifyStack;
     let token: string;
     let tempDir: string;
     let priorWritable: string | undefined;
+    let artifactPath: string;
+    let databaseFile: string;
+
+    /**
+     * Boots from a COMPILED ARTIFACT, whose `objects` and `objectExtensions`
+     * are separate collections — the deployment shape, and the only one on
+     * which this family of defects is observable at all. Over a database FILE,
+     * so a second boot is a real cold start on the rows the first one left.
+     */
+    const boot = () => bootShowcase({
+        databaseFile,
+        extraPlugins: [
+            new MetadataPlugin({
+                rootDir: tempDir,
+                watch: false,
+                artifactWatch: false,
+                registerSystemObjects: false,
+                artifactSource: { mode: 'local-file', path: artifactPath },
+            }),
+        ],
+    });
 
     beforeAll(async () => {
-        // The last case performs a tenant customisation of an `object`, which is
-        // not overlay-writable by default (`NOT_OVERRIDABLE`). This is the same
-        // switch a deployment flips to let Studio customise object metadata.
+        // [ADR-0131 D6] Open, so the refusal case below measures the seal with
+        // the switch a deployment used to flip to let Studio customise object
+        // metadata — the switch no longer reaches an object a package ships.
         priorWritable = process.env.OS_METADATA_WRITABLE;
         process.env.OS_METADATA_WRITABLE = 'object';
 
         tempDir = mkdtempSync(join(tmpdir(), 'os-8037-scalar-'));
-        const artifactPath = join(tempDir, 'objectstack.json');
+        artifactPath = join(tempDir, 'objectstack.json');
+        databaseFile = join(tempDir, 'showcase.db');
         // The real `objectstack build` lowering, for the same reason #7556's
         // dogfood file uses it: `JSON.stringify(stack)` drops callables silently.
         writeBuildShapedArtifact(showcaseStack as unknown as Record<string, unknown>, artifactPath);
 
-        // Boots from a COMPILED ARTIFACT, whose `objects` and `objectExtensions`
-        // are separate collections — the deployment shape, and the only one on
-        // which this family of defects is observable at all.
-        stack = await bootShowcase({
-            extraPlugins: [
-                new MetadataPlugin({
-                    rootDir: tempDir,
-                    watch: false,
-                    artifactWatch: false,
-                    registerSystemObjects: false,
-                    artifactSource: { mode: 'local-file', path: artifactPath },
-                }),
-            ],
-        });
+        stack = await boot();
         token = await stack.signIn();
     }, 180_000);
+
+    /**
+     * The tenant's rename as a deployment carries it after the seal: a row a
+     * Studio save stored BEFORE it (the authored document, renamed), read by a
+     * cold boot over the same file. Done once; both read cases ask for it, so
+     * neither depends on running after the other.
+     */
+    let renamed: Promise<void> | undefined;
+    const withPreSealRename = (): Promise<void> => (renamed ??= (async () => {
+        const declared = ((showcaseStack as any).objects as Array<Record<string, unknown>>)
+            .find((o) => o?.name === 'showcase_account');
+        expect(declared, 'the showcase still declares showcase_account').toBeDefined();
+        const body = JSON.parse(JSON.stringify({ ...declared, label: RENAMED_LABEL }));
+        for (const key of Object.keys(body)) if (key.startsWith('_')) delete body[key];
+        const now = new Date().toISOString();
+        const ql = (await stack.kernel.getServiceAsync('objectql')) as unknown as {
+            insert(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
+        };
+        await ql.insert('sys_metadata', {
+            type: 'object',
+            name: 'showcase_account',
+            organization_id: null,
+            package_id: null,
+            state: 'active',
+            version: 1,
+            checksum: null,
+            created_at: now,
+            updated_at: now,
+            metadata: JSON.stringify(body),
+        }, { context: SYSTEM_CTX });
+        await stack.stop();
+        stack = await boot();
+        token = await stack.signIn();
+    })());
 
     afterAll(async () => {
         await stack?.stop();
@@ -220,25 +281,39 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
         expect(labelOf(singleBody?.item)).toBe(EXTENSION_LABEL);
     });
 
-    it('SHOULD: a tenant\'s own rename reaches the reads its forms derive from', async () => {
-        // The ordinary Studio round-trip: GET the served document, rename it,
-        // PUT it back. The write path persists the request body verbatim
-        // (ADR-0005 §Validation), so this is exactly what an admin's save stores.
+    it('[ADR-0131 D6] the Studio rename round-trip of a PACKAGED object is refused, hatch open — nothing is stored', async () => {
+        // The round-trip the rename cases below used to perform: GET the served
+        // document, rename it, PUT it back. Managed content is sealed, so the
+        // package door refuses it with the hatch open, and the reads keep
+        // serving the folded (extension) label.
         const before: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account')).json();
         const put = await stack.apiAs(token, 'PUT', '/meta/object/showcase_account', {
-            ...(before?.item ?? {}), label: 'Customer',
+            ...(before?.item ?? {}), label: RENAMED_LABEL,
         });
-        expect(put.status).toBeLessThan(400);
+        const putBody: any = await put.json().catch(() => ({}));
+        expect(put.status, JSON.stringify(putBody)).toBe(403);
+        expect(putBody?.code ?? putBody?.error?.code).toBe('NOT_OVERRIDABLE');
+
+        const layered: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account?layers=true')).json();
+        expect(layered?.overlay ?? null).toBeNull();
+        expect(labelOf(layered?.effective)).toBe(EXTENSION_LABEL);
+        expect(await listedLabel()).toBe(EXTENSION_LABEL);
+    });
+
+    it('SHOULD: a tenant\'s own rename reaches the reads its forms derive from', async () => {
+        // [ADR-0131 D6] The rename is the row a pre-seal Studio save stored —
+        // see `withPreSealRename` — read by a cold boot.
+        await withPreSealRename();
 
         const layered: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account?layers=true')).json();
         // The row stored the rename — the customisation is real and readable…
-        expect(labelOf(layered?.overlay)).toBe('Customer');
+        expect(labelOf(layered?.overlay)).toBe(RENAMED_LABEL);
 
         // …and neither read that a writable form derives from ever shows it.
         const after: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account')).json();
-        expect(labelOf(after?.item)).toBe('Customer');
-        expect(await listedLabel()).toBe('Customer');
-    });
+        expect(labelOf(after?.item)).toBe(RENAMED_LABEL);
+        expect(await listedLabel()).toBe(RENAMED_LABEL);
+    }, 180_000);
 
     it('[#8284] after the rename the three reads still AGREE — on the extension, not the catalog', async () => {
         // What the ruling bought in the renamed state, pinned so the case above
@@ -252,23 +327,18 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
         // precedence ADR-0029 D9.2a then settled, so a regression in either is visible
         // here without this case having to be rewritten when the other moves.
         //
-        // Performs its own PUT rather than leaning on the case above: that case
-        // was written as an `it.fails`, which stops at its first failing
-        // assertion, so depending on its side effects would have made this
-        // case's meaning depend on where that happened to be.
-        const before: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account')).json();
-        const put = await stack.apiAs(token, 'PUT', '/meta/object/showcase_account', {
-            ...(before?.item ?? {}), label: 'Customer',
-        });
-        expect(put.status).toBeLessThan(400);
+        // Asks for the renamed state itself rather than leaning on the case
+        // above, so its meaning does not depend on that case's order or outcome.
+        // [ADR-0131 D6] The rename is the pre-seal row (see `withPreSealRename`).
+        await withPreSealRename();
 
         const layered: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account?layers=true')).json();
-        expect(labelOf(layered?.overlay)).toBe('Customer');
+        expect(labelOf(layered?.overlay)).toBe(RENAMED_LABEL);
 
         const after: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account')).json();
         expect(labelOf(after?.item)).toBe(labelOf(layered?.effective));
         expect(await listedLabel()).toBe(labelOf(layered?.effective));
         // ⛔ And NOT the catalog string, which is what all three used to serve.
         expect(labelOf(after?.item)).not.toBe(CATALOG_LABEL);
-    });
+    }, 180_000);
 });

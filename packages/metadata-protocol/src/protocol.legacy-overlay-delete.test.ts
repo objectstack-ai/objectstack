@@ -425,7 +425,8 @@ describe('#6960 — the boundary holds: the `object` tier does NOT move', () => 
         // The prose still has to SAY something — the envelope assertion above
         // is about the machine axis, and a refusal that lost its sentence would
         // pass it while telling the operator nothing.
-        expect(String(err.message), ctx).toMatch(/code package|allowOrgOverride/);
+        // [ADR-0131 D6] It names the managed package the item ships in.
+        expect(String(err.message), ctx).toMatch(/managed package/);
         expect(String(err.message).startsWith('['), ctx).toBe(false);
     };
 
@@ -483,7 +484,11 @@ describe('#6960 — the boundary holds: the `object` tier does NOT move', () => 
                 }
             });
 
-            it('the operator hatch still opens the `object` tier — the ONE door is unchanged', async () => {
+            it('[ADR-0131 D6] the operator hatch no longer opens the `object` tier — a managed object is sealed', async () => {
+                // Was `the operator hatch still opens the object tier`: with
+                // `OS_METADATA_WRITABLE=object` the delete removed the row. The
+                // hatch opens no removal of an item a managed package ships
+                // now, so the answer is the shut hatch's: refused, row kept.
                 process.env.OS_METADATA_WRITABLE = 'object';
                 ObjectStackProtocolImplementation.resetEnvWritableCache();
                 resetEnvWritableMetadataTypes();
@@ -494,10 +499,12 @@ describe('#6960 — the boundary holds: the `object` tier does NOT move', () => 
                     seed: [seedRow('object', 'myapp_invoice')],
                 });
 
-                const res = await protocol.deleteMetaItem({ type: 'object', name: 'myapp_invoice' });
+                const err = await protocol
+                    .deleteMetaItem({ type: 'object', name: 'myapp_invoice' })
+                    .then(() => null, (e: any) => e);
 
-                expect(res.success).toBe(true);
-                expect(rows.size).toBe(0);
+                expectRefused(err, environmentId, 'object (hatch open)');
+                expect(rows.size).toBe(1);
             });
         });
     }

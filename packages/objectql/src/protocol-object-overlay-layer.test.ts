@@ -49,6 +49,15 @@ import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
  * of a PACKAGED object can no longer be re-saved or reset without the
  * documented operator hatch either. That is not softened here — it is pinned,
  * because a fixture encoding the old leniency would be encoding the defect.
+ *
+ * ## [ADR-0131 D6] …and not WITH the hatch either, any more
+ *
+ * D9.6 named `OS_METADATA_WRITABLE=object` the one door "for the life of the
+ * customization". Managed content is sealed now: the hatch opens no write onto,
+ * and no removal of, an object a managed package ships. The D9.7 subtraction
+ * cases below that drove the delete under the hatch are pinned REFUSED, the
+ * layer and the data plane intact; the subtraction itself stays reachable where
+ * the row leaves by another route (a replica converging on a removal).
  */
 
 const APP_PKG = 'app.myapp';
@@ -210,7 +219,11 @@ const fieldNames = (registry: SchemaRegistry, name: string) =>
 const storedRows = (rows: Map<string, any>, name: string) =>
     Array.from(rows.values()).filter((r) => r.name === name);
 
-/** [ADR-0005 / D9.6] The documented operator hatch — the ONE door, for the LIFE of the customization. */
+/**
+ * [ADR-0005 / D9.6] The documented operator hatch — D9.6's "one door, for the
+ * LIFE of the customization". [ADR-0131 D6] It opens no door onto a managed
+ * object now; the cases that open it pin exactly that.
+ */
 function withObjectWritable<T>(run: () => T): T {
     const previous = process.env.OS_METADATA_WRITABLE;
     process.env.OS_METADATA_WRITABLE = 'object';
@@ -356,46 +369,31 @@ describe('ADR-0029 D9.6 — the declared contract, enforced consistently', () =>
 
 describe('ADR-0029 D9.7 — the delete is a SUBTRACTION, and #7012\'s guard is retired', () => {
     /**
-     * THE RESTORATION THAT IS NOT A RE-REGISTRATION. Under the hatch — the one
-     * door D9.6 names, which now has to stay open for the life of the
-     * customization — the delete removes the tenant's LAYER and the packaged
-     * owner, which was never destroyed, is served again. Pre-D9 the same delete
-     * emptied `objectContributors` and 404'd the data plane.
+     * [ADR-0131 D6] Was THE RESTORATION THAT IS NOT A RE-REGISTRATION, driven
+     * under the hatch — "the one door D9.6 names, which now has to stay open
+     * for the life of the customization". Managed content is sealed: the hatch
+     * no longer opens the removal, so the delete is refused, the row and the
+     * layer stay, and the data plane keeps dispatching through the refusal.
      */
-    it('removes the overlay layer and serves the packaged owner again, data plane up throughout', async () => {
+    it('[ADR-0131 D6] the hatch no longer opens the subtraction: refused, the layer stays, data plane up throughout', async () => {
         const seed = await persistOverlayRow('myapp_invoice', APP_PKG);
         const { protocol, registry, rows, dataRows } = await bootWithPackage(seed);
 
-        // The data plane works before the delete, so "works after" cannot be
-        // green for the empty reason.
         expect((await protocol.createData({ object: 'myapp_invoice', data: { name: 'INV-1' } })).id).toBeTruthy();
 
-        const res = await withObjectWritable(() =>
-            protocol.deleteMetaItem({ type: 'object', name: 'myapp_invoice' }));
+        for (const type of ['object', 'objects']) {
+            const err = await withObjectWritable(() =>
+                protocol.deleteMetaItem({ type, name: 'myapp_invoice' }).then(() => null, (e: any) => e));
+            expect(err, type).toBeInstanceOf(Error);
+            expect(err.code, type).toBe('NOT_OVERRIDABLE');
+            expect(err.status, type).toBe(403);
+        }
 
-        expect(res.success).toBe(true);
-        expect(storedRows(rows, 'myapp_invoice')).toHaveLength(0);
-
-        // The layer is gone; the package's own definition is back, in full.
-        expect(kinds(registry, 'myapp_invoice')).toEqual(['own']);
+        expect(storedRows(rows, 'myapp_invoice')).toHaveLength(1);
+        expect(kinds(registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
         expect(ownerPackageId(registry, 'myapp_invoice')).toBe(APP_PKG);
-        expect(fieldNames(registry, 'myapp_invoice')).toContain('packaged_only');
-        expect(fieldNames(registry, 'myapp_invoice')).not.toContain('overlay_only');
-        expect((registry.getObject('myapp_invoice') as any)._provenance).toBe('package');
-
-        // …and CRUD never stopped dispatching.
         expect((await protocol.createData({ object: 'myapp_invoice', data: { name: 'INV-2' } })).id).toBeTruthy();
         expect(dataRows).toHaveLength(2);
-    });
-
-    it('the plural `objects` spelling reaches the same subtraction', async () => {
-        const seed = await persistOverlayRow('myapp_invoice', APP_PKG);
-        const { protocol, registry } = await bootWithPackage(seed);
-
-        await withObjectWritable(() => protocol.deleteMetaItem({ type: 'objects', name: 'myapp_invoice' }));
-
-        expect(kinds(registry, 'myapp_invoice')).toEqual(['own']);
-        expect(fieldNames(registry, 'myapp_invoice')).toContain('packaged_only');
     });
 
     /**
@@ -404,8 +402,10 @@ describe('ADR-0029 D9.7 — the delete is a SUBTRACTION, and #7012\'s guard is r
      * `assertAllowed`, which is topology-independent and refuses an
      * `override-artifact` delete of a type without `allowOrgOverride`. Pinned
      * so "the tenant gate is skipped" is never mistaken for "ungated".
+     * [ADR-0131 D6] With the hatch open too: the repository no longer lets the
+     * hatch reach an `override-artifact` delete (it used to subtract here).
      */
-    it('a control-plane kernel refuses at the repository, and subtracts under the hatch', async () => {
+    it('a control-plane kernel refuses at the repository, with the hatch shut and open', async () => {
         const seed = await persistOverlayRow('myapp_invoice', APP_PKG);
         const a = await bootWithPackage(seed, { controlPlane: true });
         const refused = await a.protocol
@@ -416,8 +416,13 @@ describe('ADR-0029 D9.7 — the delete is a SUBTRACTION, and #7012\'s guard is r
         expect(refused.status).toBe(403);
 
         const b = await bootWithPackage(seed, { controlPlane: true });
-        await withObjectWritable(() => b.protocol.deleteMetaItem({ type: 'object', name: 'myapp_invoice' }));
-        expect(kinds(b.registry, 'myapp_invoice')).toEqual(['own']);
+        const refusedOpen = await withObjectWritable(() => b.protocol
+            .deleteMetaItem({ type: 'object', name: 'myapp_invoice' })
+            .then(() => null, (e: any) => e));
+        expect(refusedOpen).toBeInstanceOf(Error);
+        expect(refusedOpen.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOpen.status).toBe(403);
+        expect(kinds(b.registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
     });
 
     /**
@@ -535,15 +540,17 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
         const seed = await persistOverlayRow('myapp_invoice', APP_PKG);
         const { protocol, registry, rows } = await bootWithPackage(seed);
 
+        // [ADR-0131 D6] Under the hatch this write used to reach the D9.9
+        // package check (`OBJECT_OVERLAY_PACKAGE_MISMATCH` / 422). Managed
+        // content is sealed now, so the package door answers first, hatch open
+        // or not; the boot-side half of D9.9 is the next case.
         const err = await withObjectWritable(() => protocol.saveMetaItem({
             type: 'object', name: 'myapp_invoice', packageId: OTHER_PKG, item: overlayBody('myapp_invoice'),
         }).then(() => null, (e: any) => e));
 
         expect(err).toBeInstanceOf(Error);
-        expect(err.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
-        expect(err.status).toBe(422);
-        expect(String(err.message)).toContain(OTHER_PKG);
-        expect(String(err.message)).toContain(APP_PKG);
+        expect(err.code).toBe('NOT_OVERRIDABLE');
+        expect(err.status).toBe(403);
 
         // No success receipt, and no row for the mis-bound package.
         expect(storedRows(rows, 'myapp_invoice').filter((r) => r.package_id === OTHER_PKG)).toHaveLength(0);

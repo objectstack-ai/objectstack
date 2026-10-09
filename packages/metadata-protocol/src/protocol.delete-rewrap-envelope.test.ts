@@ -333,15 +333,14 @@ describe('#7426 — the repository refusal reaches the caller with its code', ()
             // `error` is human language, `code` is the machine token.
             // [#20910, ADR-0126 §2] A type with a Regime C row (`flow`,
             // `action`) is refused with its row's removal sentence, naming its
-            // sanctioned path; every other type keeps the type-door sentence.
-            if (packagedBaseRegimeRow(type)) {
-                expect(String(err.message), type).toContain(
-                    `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked against removal.`,
-                );
-                expect(String(err.message), type).toContain('docs/adr/0126-packaged-metadata-customization-model.md');
-            } else {
-                expect(String(err.message), type).toContain('is not allowOrgOverride in the registry');
-            }
+            // sanctioned path. [ADR-0131 D6] Every other type reads the managed
+            // seal; both name the managed package first.
+            expect(String(err.message), type).toContain(
+                `Metadata item '${type}/${name}' is provided by a managed package and is sealed against removal`,
+            );
+            expect(String(err.message), type).toContain(packagedBaseRegimeRow(type)
+                ? 'docs/adr/0126-packaged-metadata-customization-model.md'
+                : 'docs/adr/0131-total-organization-ownership-no-null-organization-id.md');
             expect(String(err.message), type).not.toContain('[NOT_OVERRIDABLE]');
             // A refusal that already deleted the row is a log line.
             expect(rows.size, type).toBe(1);

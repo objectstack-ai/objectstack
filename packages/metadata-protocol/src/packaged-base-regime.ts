@@ -89,13 +89,26 @@
  * persists it, so a stored row under its name is never a layer of it — it is
  * residue a runtime write left — and removing it restores the code definition.
  *
- * ⛔ No sentence built here names the `OS_METADATA_WRITABLE` hatch. The hatch
- * still opens these locks exactly as before, so which writes are refused does
- * not move — only what the refusal prescribes. ⛔ Nor does a Regime C sentence
- * prescribe editing the source and redeploying: the administrator of an
- * installed package cannot do that, and a Regime C type has a runtime route
- * instead. The origin-gated row has none, so the source is the only remedy
- * there is to name.
+ * ⛔ No sentence built here prescribes the `OS_METADATA_WRITABLE` hatch. [ADR-0131
+ * D6] Managed content is sealed: the hatch opens no write onto, and no removal
+ * of, an item a managed package ships, on any door, so a sentence that named it
+ * as a remedy would send the operator to a door that does not open. The one
+ * sentence that names it at all is {@link managedItemSealedSentence}'s, for a
+ * type with no regime row, and it names it to say it does not apply: an operator
+ * who set it and read a refusal that never mentioned it would conclude it was
+ * ignored and set it again. ⛔ Nor does a Regime C sentence prescribe editing the
+ * source and redeploying: the administrator of an installed package cannot do
+ * that, and a Regime C type has a runtime route instead. The origin-gated row
+ * has none, so the source is the only remedy there is to name.
+ *
+ * ## "A managed package"
+ *
+ * [ADR-0131 D6] A package reaches a deployment in one of two install modes, and
+ * only the managed one registers its content as code. The install mode is not
+ * modelled yet (the manifest declaration of permitted modes is later work), so
+ * every package whose items the artifact loader registered is managed, and every
+ * sentence here names it so: the install mode is what the refusal is about, not
+ * the fact that the item happens to be code.
  */
 
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
@@ -262,20 +275,20 @@ export function isOriginGatedType(type: string): boolean {
  * `undefined` when the type declares no regime and the emitter keeps its own
  * sentence. Read on the canonical type, and spoken with it.
  *
- * The lock is the regime's: a Regime C item "is provided by a code package, and
- * its packaged base is locked"; an origin-gated item "is code-defined and cannot
- * be edited (removed) at runtime: it is read-only" — the datasource-admin
- * service's own verdict on the same item, so the two doors onto one code-defined
- * datasource state one verdict and one remedy.
+ * The lock is the regime's: a Regime C item "is provided by a managed package and
+ * is sealed" ([ADR-0131 D6] — the install mode, see the module header); an
+ * origin-gated item "is code-defined and cannot be edited (removed) at runtime:
+ * it is read-only" — the datasource-admin service's own verdict on the same item,
+ * so the two doors onto one code-defined datasource state one verdict and one
+ * remedy.
  *
  * Kept under the REST door's 500-character client-message bound
  * (`truncateClientMessage`, `packages/rest/src/error-response.ts`), past which
- * the tail is truncated. Characters before the item's name, save / removal:
- * `flow` 411 / 404, `action` 365 / 358, `permission` 317 / 310, `datasource`
- * 192 / 193 — so a name of up to 88 characters arrives whole for every row
- * (pinned). A `flow`'s sentence is byte-identical to the one the row table
- * replaced (pinned literally). [#21944] A row's `hostOwned` name is a fixed,
- * short name with its own remedy (`default`: under 300 characters whole).
+ * the tail is truncated. Characters outside the item's name, save / removal:
+ * `flow` 395 / 388, `action` 349 / 342, `permission` 301 / 294,
+ * `datasource` 192 / 193 — so a name of up to 88 characters arrives whole for
+ * every row (pinned). [#21944] A row's `hostOwned` name is a fixed, short name
+ * with its own remedy (`default`: under 300 characters whole).
  */
 export function packagedBaseRegimeSentence(
     type: string, name: string, operation: 'save' | 'delete',
@@ -286,7 +299,43 @@ export function packagedBaseRegimeSentence(
     const lock = row.regime === 'origin-gated'
         ? `${row.noun} '${name}' is code-defined and cannot be `
             + (operation === 'delete' ? 'removed' : 'edited') + ' at runtime: it is read-only. '
-        : `Metadata item '${singular}/${name}' is provided by a code package, and its packaged base is locked `
+        : `Metadata item '${singular}/${name}' is provided by a managed package and is sealed `
             + (operation === 'delete' ? `against removal. ` : `against in-place edits. `);
     return lock + rowPrescription(row, name);
+}
+
+/** [ADR-0131 D6] The decision record every sealed-item sentence without a regime row cites. */
+const MANAGED_SEAL_ADR = 'docs/adr/0131-total-organization-ownership-no-null-organization-id.md';
+
+/**
+ * [ADR-0131 D6] THE refusal sentence for a write onto, or a removal of, an item a
+ * managed package ships, on a type with no environment overlay — every door that
+ * refuses one builds it here, and nowhere else: the metadata protocol's package
+ * doors (`refusePackagedBaseOverride` / `refusePackagedBaseRemoval`) and the
+ * repository's type door (`SysMetadataRepository.assertAllowed`), which answers
+ * the same condition one layer down for the writes that reach it without passing
+ * a package door (draft promotion, restore, revert).
+ *
+ * A type with a regime row speaks for its regime ({@link packagedBaseRegimeSentence}:
+ * the sanctioned path, never the hatch). Every other type reads the managed seal
+ * itself: the item is sealed, its type takes no environment overlay, the
+ * `OS_METADATA_WRITABLE` hatch does not open it, and the one remedy that exists —
+ * changing the definition where it is declared. The hatch is named to say it
+ * does not apply (see the module header for why it is named at all), and the
+ * registry flag that produced the verdict is named so the reader can tell this
+ * refusal from the regime-O overlay it is not.
+ *
+ * Kept under the REST door's 500-character client-message bound: the sentence
+ * outside the item's type and name is 321 / 275 characters, save / removal (measured).
+ */
+export function managedItemSealedSentence(type: string, name: string, operation: 'save' | 'delete'): string {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    const regime = packagedBaseRegimeSentence(singular, name, operation);
+    if (regime !== undefined) return regime;
+    return `Metadata item '${singular}/${name}' is provided by a managed package and is sealed `
+        + (operation === 'delete' ? 'against removal' : 'against in-place edits')
+        + `: its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not `
+        + `open a managed item. `
+        + (operation === 'delete' ? '' : 'Edit the source artifact and redeploy. ')
+        + `See ${MANAGED_SEAL_ADR}.`;
 }
