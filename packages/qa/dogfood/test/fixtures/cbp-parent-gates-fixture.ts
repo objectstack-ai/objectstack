@@ -11,7 +11,7 @@
 // it. The objects below put that check on both sides of the gates:
 //
 //   cpg_account   — the MASTER. `public_read` with an `owner_id`: every member
-//                   READS it, only its owner EDITS it (record sharing).
+//                   READS it, only its owner EDITS it.
 //   cpg_contract  — a `controlled_by_parent` DETAIL of `cpg_account`, with files
 //                   and feeds on. A member reads it (its master is readable) and
 //                   may edit it only where they may edit its master.

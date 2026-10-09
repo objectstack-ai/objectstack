@@ -206,7 +206,16 @@ describe('controlled_by_parent parent gates: sys_attachment and sys_comment judg
   });
 
   it('PATCH parity: the security service answers the child as its PATCH does, for the member and for the owner', async () => {
-    expect(await memberAnswer(memberTok, 'cpg_contract', contractId)).toEqual({ outcome: 'deny', leg: 'record_sharing' });
+    // The member's PATCH of the child is refused by the master check, on the
+    // leg the security service names: the platform's ownership floor on the
+    // master (`created_by`, org_member) stands, because record sharing gives
+    // the member no basis to lift it, so the master's write row-level security
+    // excludes the row.
+    const patchChild = await answer(await stack.apiAs(memberTok, 'PATCH', `/data/cpg_contract/${contractId}`, { name: 'x' }));
+    expect(patchChild.status, `member PATCH of the child: ${patchChild.body}`).toBe(403);
+    expect(patchChild.body).toContain('requires edit access to its master record');
+    expect(patchChild.body).toContain('(row-level security)');
+    expect(await memberAnswer(memberTok, 'cpg_contract', contractId)).toEqual({ outcome: 'deny', leg: 'row_level_security' });
     expect(await memberAnswer(adminTok, 'cpg_contract', contractId)).toEqual({ outcome: 'allow' });
     expect(await memberAnswer(memberTok, 'cpg_contract', memberContractId)).toEqual({ outcome: 'allow' });
     expect(await memberAnswer(memberTok, 'cpg_board', boardId)).toEqual({ outcome: 'not_applicable' });
