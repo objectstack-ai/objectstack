@@ -50,6 +50,7 @@ import { SysAttachment } from '@objectstack/platform-objects/audit';
 // collection (#3459 PR-5b).
 import { mayActIrreversibly } from '@objectstack/platform-objects/system';
 import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
+import { inProcessSessionReadInput } from '@objectstack/types';
 import { SwappableStorageService } from './swappable-storage-service.js';
 import {
   resolveStorageTarget,
@@ -840,7 +841,7 @@ function buildGetSession(registry: StorageGateRegistry): ((headers: any) => Prom
     let api: any = authService.api;
     if (!api && typeof authService.getApi === 'function') api = await authService.getApi();
     if (!api?.getSession) return undefined;
-    return api.getSession({ headers });
+    return api.getSession(inProcessSessionReadInput(headers));
   };
 }
 
