@@ -49,7 +49,7 @@ import { RestServer } from './rest-server.js';
 const PACKAGE_ID = 'com.example.pkg';
 const PACKAGED_ACTION = 'pkg_approve';
 const PACKAGED_PERMISSION = 'pkg_perm';
-/** 88 characters — the longest name the flow row (411 before the name) still delivers whole. */
+/** 88 characters — a name the flow row (395 characters outside the name) still delivers whole. */
 const LONG_ACTION = `pkg_${'x'.repeat(84)}`;
 
 function createMockServer() {
@@ -99,7 +99,7 @@ function boot(environmentId: string | undefined = 'env_1') {
 const expectRegimeC = (message: unknown, type: string, name: string, operation: 'save' | 'delete') => {
     const text = String(message);
     expect(text.startsWith(
-        `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked `
+        `Metadata item '${type}/${name}' is provided by a managed package and is sealed `
         + (operation === 'delete' ? 'against removal. ' : 'against in-place edits. '),
     )).toBe(true);
     expect(text).not.toContain('OS_METADATA_WRITABLE');

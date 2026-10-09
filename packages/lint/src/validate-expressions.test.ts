@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { SCOPE_ROOTS, buildScope, ExpressionEngine } from '@objectstack/formula';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
+import { EvalUserSchema } from '@objectstack/spec/identity';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 // [#15137] The published refusal sentence a `value`-slot finding must lead
 // with — asserted from the spec's own export, never re-spelled in a test.
@@ -2225,6 +2226,219 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       });
     });
 
+    /**
+     * ── The acting user's own members (#22394) — the family's closing card ───
+     *
+     * The option check binds the acting user under four spellings
+     * (`current_user`, `user`, `ctx.user`, `os.user`), one `EvalUser` object.
+     * Its members are held to what is BOTH declared by `EvalUserSchema`
+     * (`@objectstack/spec`) AND bound by the option check: ObjectQL builds the
+     * acting user from the caller's id, positions and organization id, and
+     * `buildScope` normalises it (deriving `isPlatformAdmin`). `roles` —
+     * renamed `positions` by ADR-0090 D3 — is declared nowhere; `name` and
+     * `email` are declared but never set there. Measured through the built
+     * `evaluateValidationRules` with an authenticated caller before this
+     * verdict existed, each faulted (`No such key`) and the value was admitted,
+     * with 0 findings at the build; so the build refuses them.
+     */
+    describe('a per-option `visibleWhen` member of the acting user the option check does not bind is refused (#22394)', () => {
+      const detail = (visibleWhen: unknown) => ({
+        objects: [
+          {
+            name: 'fx_line',
+            fields: {
+              x: { type: 'text' },
+              // A `record` field spelled like a refused member of the acting user.
+              roles: { type: 'text' },
+              tier: {
+                type: 'select',
+                options: [{ label: 'Standard', value: 'standard' }, { label: 'Gold', value: 'gold', visibleWhen }],
+              },
+            },
+          },
+        ],
+      });
+      const WHERE = "object 'fx_line' · field 'tier' option 'gold' visibleWhen";
+      /**
+       * The context the option check hands the evaluator, mirrored from its one
+       * call (`evaluateOptionVisibility` in ObjectQL's `rule-validator.ts`): the
+       * merged record, `previous`, the acting user exactly as ObjectQL's
+       * `buildEvalUser` builds it (`{ id, positions, organizationId }`) and the
+       * permission map. Nothing else.
+       */
+      const OPTION_CHECK_CONTEXT = {
+        record: { x: 'a', roles: 'r' },
+        previous: { x: 'a', roles: 'r' },
+        user: { id: 'u1', positions: ['member'], organizationId: 'org_1' },
+        permissions: {},
+      };
+      const cel = (source: string) => ({ dialect: 'cel' as const, source });
+      /** The four spellings of the acting user (ADR-0068 D1). */
+      const USER_RECEIVERS = ['current_user', 'user', 'ctx.user', 'os.user'];
+      /** What the acting user carries at the option check — the members the refusal names as bound. */
+      const BOUND = ['id', 'positions', 'isPlatformAdmin', 'organizationId'];
+
+      it.each([
+        ["'admin' in current_user.roles", '`current_user.roles`'],
+        ["ctx.user.roles == ['a']", '`ctx.user.roles`'],
+        ["'admin' in user.roles", '`user.roles`'],
+        ["'admin' in os.user.roles", '`os.user.roles`'],
+        ["current_user.role == 'admin'", '`current_user.role`'],
+        ["current_user.email == 'a@b.c'", '`current_user.email`'],
+        ["ctx.user.name != ''", '`ctx.user.name`'],
+      ])('⭐ refuses %s at error, located at the option, naming the member and the members that are bound', (body, path) => {
+        const issues = validateStackExpressions(detail(body));
+        expect(issues, JSON.stringify(issues, null, 2)).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ where: WHERE, severity: 'error', source: body });
+        expect(issues[0]!.message).toContain(`option 'gold' on field 'tier' reads ${path}`);
+        for (const m of BOUND) expect(issues[0]!.message, m).toContain('`' + m + '`');
+        // …and the server's option check really cannot evaluate it.
+        expect(ExpressionEngine.evaluate(cel(body), OPTION_CHECK_CONTEXT).ok, body).toBe(false);
+      });
+
+      it('⭐ the `roles` refusal names `positions` in the spelling the author wrote, and that replacement passes and evaluates', () => {
+        for (const receiver of USER_RECEIVERS) {
+          const body = `'member' in ${receiver}.roles`;
+          expect(validateStackExpressions(detail(body))[0]!.message, body).toContain('`' + receiver + '.positions`');
+          const fixed = `'member' in ${receiver}.positions`;
+          expect(validateStackExpressions(detail(fixed)), fixed).toEqual([]);
+          expect(ExpressionEngine.evaluate(cel(fixed), OPTION_CHECK_CONTEXT), fixed).toEqual({ ok: true, value: true });
+        }
+      });
+
+      it('⭐ CONTROL — every bound member under every spelling, a grant check, and a `record` field named like a refused member pass', () => {
+        for (const receiver of USER_RECEIVERS) {
+          for (const body of [
+            `${receiver}.id != ''`,
+            `'member' in ${receiver}.positions`,
+            `${receiver}.isPlatformAdmin == false`,
+            `${receiver}.organizationId == 'org_1'`,
+            `${receiver}.can('fx_line', 'edit') || true`,
+          ]) {
+            expect(validateStackExpressions(detail(body)), body).toEqual([]);
+            expect(ExpressionEngine.evaluate(cel(body), OPTION_CHECK_CONTEXT), body).toEqual({ ok: true, value: true });
+          }
+        }
+        expect(validateStackExpressions(detail("record.roles == 'r' && previous.roles == 'r'"))).toEqual([]);
+      });
+
+      it('⭐ POSITIVE CONTROL — the same `current_user.email` read in an object action predicate, a surface the refusal does not judge, is not refused', () => {
+        const stack = detail("record.x == 'a'");
+        (stack.objects[0] as Record<string, unknown>).actions = [
+          { name: 'mark', label: 'Mark', type: 'script', visible: "current_user.email == 'a@b.c'" },
+        ];
+        expect(validateStackExpressions(stack)).toEqual([]);
+      });
+
+      it('judges every member spelling as one read: optional, indexed and `has()`', () => {
+        for (const body of [
+          'has(current_user.roles)',
+          'current_user.?roles.orValue([]) == []',
+          "current_user['roles'] == []",
+          "ctx.user['roles'] == []",
+          "ctx['user'].roles == []",
+          'has(os.user.email)',
+        ]) {
+          const issues = validateStackExpressions(detail(body));
+          expect(issues, body).toHaveLength(1);
+          expect(issues[0]!.where, body).toBe(WHERE);
+        }
+      });
+
+      it('one finding per option: an unbound root, then a namespace member, then members in `SCOPE_ROOTS` and name order', () => {
+        const withRoot = validateStackExpressions(detail("'a' in current_user.roles && input.k == 1"));
+        expect(withRoot).toHaveLength(1);
+        expect(withRoot[0]!.message).toContain('reads `input`');
+        const namespaceFirst = validateStackExpressions(detail("ctx.locale == 'en' && ctx.user.roles == []"));
+        expect(namespaceFirst).toHaveLength(1);
+        expect(namespaceFirst[0]!.message).toContain('reads `ctx.locale`');
+        // `os` precedes `current_user` in `SCOPE_ROOTS`.
+        const byRoot = validateStackExpressions(detail("'a' in current_user.roles && os.user.email == ''"));
+        expect(byRoot).toHaveLength(1);
+        expect(byRoot[0]!.message).toContain('reads `os.user.email`');
+        const byName = validateStackExpressions(detail("current_user.roles == [] && current_user.email == ''"));
+        expect(byName).toHaveLength(1);
+        expect(byName[0]!.message).toContain('reads `current_user.email`');
+      });
+
+      /**
+       * ⭐ THE ENUMERATION PIN — this card closes the #22157 → #22274 family.
+       *
+       * Every receiver the option check binds, read off the REAL `buildScope`
+       * given the option check's context, with the source its members are
+       * judged against:
+       *
+       *   receiver                          member source
+       *   record, previous                  the object's declared fields (`unknown field`)
+       *   ctx, os                           `buildScope`: the `user` member only (#22274)
+       *   current_user, user,               `EvalUserSchema`, as far as the option
+       *   ctx.user, os.user                 check binds it (#22394)
+       *
+       * `permissions` mounts no receiver: it answers `can()` through the
+       * environment. Red when `buildScope` mounts a receiver for the option
+       * check that has no row here; when any receiver's undeclared member
+       * passes the build or evaluates; when the acting user carries a member
+       * `EvalUserSchema` does not declare; or when a declared member's verdict
+       * disagrees with whether the option check binds it.
+       */
+      it('every receiver the option check binds judges its members against a declared source', () => {
+        const SOURCES: Record<string, 'object fields' | 'buildScope namespace' | 'EvalUserSchema'> = {
+          record: 'object fields',
+          previous: 'object fields',
+          ctx: 'buildScope namespace',
+          os: 'buildScope namespace',
+          current_user: 'EvalUserSchema',
+          user: 'EvalUserSchema',
+          'ctx.user': 'EvalUserSchema',
+          'os.user': 'EvalUserSchema',
+        };
+        const optionScope = buildScope(OPTION_CHECK_CONTEXT);
+        const receivers = new Map<string, Record<string, unknown>>();
+        const walk = (prefix: string, value: Record<string, unknown>): void => {
+          for (const [key, child] of Object.entries(value)) {
+            if (child === null || typeof child !== 'object' || Array.isArray(child)) continue;
+            const path = prefix ? `${prefix}.${key}` : key;
+            receivers.set(path, child as Record<string, unknown>);
+            walk(path, child as Record<string, unknown>);
+          }
+        };
+        walk('', optionScope);
+        expect([...receivers.keys()].sort()).toEqual(Object.keys(SOURCES).sort());
+
+        const declaredUser = Object.keys(EvalUserSchema.shape);
+        const accepted: string[] = [];
+        for (const [path, value] of receivers) {
+          const probe = `${path}.zz_undeclared != null`;
+          expect(validateStackExpressions(detail(probe)), probe).toHaveLength(1);
+          expect(ExpressionEngine.evaluate(cel(probe), OPTION_CHECK_CONTEXT).ok, probe).toBe(false);
+          const mounted = Object.keys(value);
+          if (SOURCES[path] !== 'EvalUserSchema') {
+            for (const m of mounted) expect(validateStackExpressions(detail(`${path}.${m} != null`)), `${path}.${m}`).toEqual([]);
+            continue;
+          }
+          // No member is mounted on the acting user without a declaration.
+          expect(mounted.filter((m) => !declaredUser.includes(m)), path).toEqual([]);
+          for (const m of declaredUser) {
+            const body = `${path}.${m} != null`;
+            const issues = validateStackExpressions(detail(body));
+            const evaluated = ExpressionEngine.evaluate(cel(body), OPTION_CHECK_CONTEXT);
+            if (mounted.includes(m)) {
+              expect(issues, body).toEqual([]);
+              expect(evaluated.ok, body).toBe(true);
+              accepted.push(body);
+            } else {
+              expect(issues, body).toHaveLength(1);
+              expect(evaluated.ok, body).toBe(false);
+            }
+          }
+        }
+        // The readings, pinned: what the acting user is declared to carry, and
+        // what it carries at the option check.
+        expect(declaredUser).toEqual(['id', 'name', 'email', 'positions', 'isPlatformAdmin', 'organizationId']);
+        expect(accepted.filter((b) => b.startsWith('current_user.'))).toEqual(BOUND.map((m) => `current_user.${m} != null`));
+      });
+    });
+
     it('flags a bare-field sharing-rule condition', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'crm_account', fields: { region: { type: 'text' } } }],
@@ -3258,6 +3472,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // metadata keys it reads (`title`, `message`, `description`) are named in
       // the spec's `FLOW_NODE_TEXT_SLOTS`, not by name here.
       'slot',
+      // [#22394] The acting user's member allowlist, derived in this file from
+      // `EvalUserSchema` and `buildScope`, and the message helpers around it.
+      // Every one is a `string[]` of member NAMES whose keys are Array methods,
+      // never metadata keys — each named so no metadata receiver hides behind it.
+      'declaredUserMembers', 'boundUserMembers', 'listedNames', 'tickedNames', 'membersRead',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

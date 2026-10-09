@@ -2115,18 +2115,20 @@ curl -b cookies.txt -X POST \
 | `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — and, for a nested run, every ancestor whose pause that strand's cascade consumed, deepest first, from whichever member you name. Same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
 
 **Failures answer real HTTP status codes.** A flow that does not run is not a
-`200`. The route classifies five outcomes, and it reads the engine's own verdict
-to do it — never the message text:
+`200`. The route classifies six outcomes. Five of them it reads off the engine's
+own verdict — never the message text; the `403` is the door's own admission
+check, made before anything is dispatched:
 
 | Status | `error.code` | What happened | What to do |
 |:---|:---|:---|:---|
 | `404` | — | No flow by that name in this deployment | Check the name; nothing was dispatched |
+| `403` | `PERMISSION_DENIED` | The caller is not the system principal, and the flow is declared `runAs: 'system'` with a self-triggered `type` (`autolaunched`, `record_change`, `schedule`). The same answer at every door that starts a flow by name: this route, a `type: 'flow'` action (REST and MCP `run_action`) and a declared `type: 'flow'` endpoint | Let it run on its own trigger, or call it from a parent flow's `subflow` node. If members are meant to start it, declare it `type: 'screen'` (or `'api'` for a signed inbound hook) |
 | `409` | `FLOW_DISABLED` | The flow exists but is switched off | Enable it — the identical request then succeeds |
 | `422` | `FLOW_NO_START_NODE` | The stored definition has no `start` node | Fix the flow; retrying cannot help |
 | `422` | `FLOW_INPUT_SCHEMA_INVALID` | A node's `config` violates the `inputSchema` its own definition declares | Fix the flow; the refusal is non-retryable — even under `errorHandling.strategy: 'retry'` the engine refuses once and never enters the retry loop |
 | `400` | `FLOW_FAILED` | The flow **ran** and was rejected | Read `error.details.summary` for the failing node |
 
-The first four never dispatched anything: no node executed, no record was
+The first five never dispatched anything: no node executed, no record was
 written, and there is no run to look up. Only `400` describes a run. The
 `FLOW_INPUT_SCHEMA_INVALID` verdict is a pure function of the flow definition —
 re-running the guard cannot change the answer — so a `retry` strategy does not
@@ -2137,8 +2139,8 @@ burn its budget on it: the run log holds exactly one refusal row.
 `POST /api/v1/actions/:object/:action`, and calling a declared `type: 'flow'`
 [endpoint](/docs/protocol/kernel/http-protocol) under `/api/v1/apps/`, both
 dispatch the same flow through the same service call and classify the outcome
-the same way — the table above has one definition that all three doors read, so
-they cannot answer one engine outcome differently. Branch on the status and
+the same way — each row of the table above has one definition that all three
+doors read, so they cannot answer one request differently. Branch on the status and
 `error.code` at any of them.
 
 ```

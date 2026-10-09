@@ -27,8 +27,9 @@
  *  2. controls, unchanged: an environment-local object with a gate-refused or
  *     a spec-refused body still answers `422 INVALID_METADATA` on both
  *     kernels; a packaged item of a type that allows overlays
- *     (`allowOrgOverride: true`) and a packaged object with the
- *     `OS_METADATA_WRITABLE` hatch open are still judged by the gates;
+ *     (`allowOrgOverride: true`) is still judged by the gates; [ADR-0131 D6]
+ *     a packaged object with the `OS_METADATA_WRITABLE` hatch open is not —
+ *     managed content is sealed, so it answers the package door like row 1;
  *  3. every type in `DEFAULT_METADATA_TYPE_REGISTRY`: the same packaged
  *     publish gives the same envelope on both kernels, and every type the
  *     door governs answers it.
@@ -284,13 +285,16 @@ describe('[#22220] controls: the gates still judge what the door does not refuse
         }
     });
 
-    it('a packaged object with the OS_METADATA_WRITABLE hatch open and a body the spec parse refuses → 422 INVALID_METADATA (both kernels)', async () => {
+    it('[ADR-0131 D6] a packaged object with the OS_METADATA_WRITABLE hatch open and a body the spec parse refuses → 403 NOT_OVERRIDABLE (both kernels)', async () => {
+        // Was a control (422 INVALID_METADATA): the hatch carried the write past
+        // the package door to the gates. Managed content is sealed now, so the
+        // package door answers first, with the hatch open as with it shut.
         process.env.OS_METADATA_WRITABLE = 'object';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
         for (const [kernel, environmentId] of KERNELS) {
             const result = await probe(environmentId, { type: 'object', name: 'pkg_object', item: specRefused(servedObject('pkg_object')) });
-            expect(result.envelope, kernel).toEqual(INVALID_METADATA);
+            expect(result.envelope, kernel).toEqual(NOT_OVERRIDABLE);
             expect(result.persistedRows, kernel).toBe(0);
         }
     });

@@ -26,7 +26,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -2194,6 +2194,163 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
     }
   }
   return copy;
+}
+
+/**
+ * [#22306] The insert side of the #16344 invariant — a hook is never handed a
+ * value that will not be stored. Takes out of ONE caller row every value the
+ * create-side static-`readonly` strip will take, before the defaults and
+ * before `beforeInsert`, and says what it took.
+ *
+ * ## What was measured broken
+ *
+ * `insert()` dispatched `beforeInsert` on the caller's payload and ran the
+ * runtime-owned and static-`readonly` strips after it. A hook that stamps a
+ * read-only column only when it is absent — `if (!data.stage_entry_date)` —
+ * saw the caller's value, stood down, and the strip then took that value: the
+ * row stored NULL where the hook would have stamped today. Real engine over
+ * `driver-sql` (better-sqlite3), non-system context: caller value present ⇒
+ * stored `stage_entry_date` NULL; key absent ⇒ stored the hook's stamp. The
+ * update path has hidden these values from its hooks since #16344; insert
+ * did not.
+ *
+ * ## The SAME function as the strip, so the two cannot disagree
+ *
+ * `stripReadonlyFields` over {@link staticReadonlyInsertSubject} with no
+ * `preserveAudit` — the function, subject and options the post-hook
+ * static-`readonly` strip (`staticReadonlyCreateStrip`) runs. Before any hook
+ * has run there is no hook write to spare, so what it would take here is what
+ * it WILL take after the hooks unless a hook assigns the key. A key it would
+ * keep — middleware-filled (not in `supplied`), or on a `sys_` or
+ * platform-internal object — is still shown to the hook.
+ *
+ * ⛔ Runtime-owned values (`autonumber`) are NOT withheld, though the
+ * runtime-owned strip takes them after the hooks too. #6339 keeps the caller's
+ * record number visible to `beforeInsert` on purpose, so a guard can report
+ * what the caller submitted — pinned as "the hook can still SEE the
+ * caller-submitted record number" (`engine-insert-runtime-owned-strip.test.ts`)
+ * and by #14259's provenance seam. Moving that is a decision of its own, not a
+ * rider on this one.
+ *
+ * ⚠️ One narrowing, and it is the create side's own declared channel rather
+ * than a second opinion: under `preserveAudit` the audit timeline
+ * (`AUDIT_PROVENANCE_FIELDS`) stays visible. The static strip takes those keys
+ * on a create whatever the flag says (the 2026-08-08 ruling made its
+ * `preserveAudit` exemption UPDATE-only), but the historical-import channel the
+ * 2026-09-06 ruling (#15964) kept working reinstates them THROUGH the audit
+ * binder's `preserveAudit` branch (`record.created_at ?? now`, `plugin.ts`) —
+ * a `beforeInsert` hook reading the caller's value and assigning it back, which
+ * the strip then keeps as a hook write. Those values ARE stored, so they are
+ * not withheld; withholding them would erase every historical `created_at` an
+ * import carries. A business `readonly` column under `preserveAudit` is still
+ * withheld: the create side strips it (and says so in the WARN).
+ *
+ * ## Why before the DEFAULTS
+ *
+ * So the hook is shown exactly the row a caller who never sent the key would
+ * have produced: `applyFieldDefaults` then fills a withheld key from its
+ * `defaultValue`, just as it fills any absent key, and that default IS what
+ * the create stores for it (`staticReadonlyCreateStrip` re-derives it after
+ * the strip). A forged `approval_status: 'approved'` is shown as `'draft'`,
+ * never as a hole — the hook cannot tell the two callers apart, which is the
+ * point. A key with no default reads absent, which is what the row will hold.
+ *
+ * Pure: neither the caller's row nor `supplied` is touched. The row keeps its
+ * reference when nothing was taken, else it is a shallow copy without the keys.
+ *
+ * @returns the row the hook view is built from, and the withheld keys with the
+ *   caller's values (`undefined` when nothing was withheld) — handed back after
+ *   the hooks by {@link handBackWithheldInsertReadonly}.
+ */
+function withholdInsertReadonlyFromHooks(
+  schema: unknown,
+  row: Record<string, unknown>,
+  supplied: Readonly<Record<string, unknown>>,
+  preserveAudit: boolean,
+): { row: Record<string, unknown>; withheld: Record<string, unknown> | undefined } {
+  let subject = staticReadonlyInsertSubject(schema as any);
+  if (subject && preserveAudit) {
+    const fields = { ...subject.fields };
+    for (const name of AUDIT_PROVENANCE_FIELDS) delete fields[name];
+    subject = Object.keys(fields).length > 0 ? { name: subject.name, fields } : null;
+  }
+  if (!subject) return { row, withheld: undefined };
+  // No logger and no `strictReadonlyWrites`, deliberately: this pass is SILENT
+  // by construction. The strip after the hooks owns every word said about
+  // these keys — the WARN, `onFieldsDropped`, the strict refusal — and says it
+  // over the handed-back payload exactly as it did before this pass existed.
+  const shown = stripReadonlyFields(subject as any, row, supplied, undefined) as Record<string, unknown>;
+  if (shown === row) return { row, withheld: undefined };
+  const withheld: Record<string, unknown> = {};
+  for (const key of Object.keys(row)) {
+    if (!(key in shown)) withheld[key] = row[key];
+  }
+  return { row: shown, withheld };
+}
+
+/**
+ * [#22306] The other end of {@link withholdInsertReadonlyFromHooks}: put the
+ * caller's withheld values back on a row after its `beforeInsert` dispatch is
+ * SEALED, wherever the hook did not write the key — so the strips below judge,
+ * take, re-default, WARN, report and (under `strictReadonlyWrites`) refuse
+ * exactly the payload they judged before the hide existed.
+ *
+ * The update path's hand-back (#16344), carried over with one addition the
+ * insert view needs: a withheld key may have been SHOWN holding its
+ * `defaultValue` (`shown`), so "the hook left it alone" is not always "the key
+ * is absent". Per key:
+ *
+ *  - present and `undefined` ⇒ the `data.x = data.x` self-assignment of a key
+ *    the hook was shown absent. Undone (deleted, dropped from the record) and
+ *    handed back, as on update: no driver can store `undefined`, and the write
+ *    must read exactly as it would with no hook at all.
+ *  - absent ⇒ handed back unless the hook was shown a value there, in which
+ *    case the hook REMOVED it, and the removal stands — the row a caller who
+ *    never sent the key would have stored.
+ *  - present, record available ⇒ handed back unless a hook assigned the key
+ *    (`hookWrittenKeys`): an untouched default is replaced by the caller's
+ *    value, which the static strip then takes and re-defaults to the same
+ *    value it showed.
+ *  - present, no record (a hook replaced the payload object) ⇒ the #5591 value
+ *    test: handed back only while it still holds exactly what was shown.
+ *
+ * ⛔ Never over a hook's write, and placed AFTER the seal: a hand-back inside
+ * the recording window would enter the record as a hook write, and the strip
+ * would then keep the caller's forgery as the hook's — the laundering #14088
+ * exists to prevent. Every key handed back is dropped from the returned record
+ * for the same reason.
+ *
+ * @returns the row's `hookWrittenKeys`, narrowed by every key handed back
+ *   (`undefined` stays `undefined`).
+ */
+function handBackWithheldInsertReadonly(
+  target: Record<string, unknown>,
+  withheld: Readonly<Record<string, unknown>>,
+  shown: ReadonlyMap<string, unknown>,
+  hookWrittenKeys: ReadonlySet<string> | undefined,
+): ReadonlySet<string> | undefined {
+  let narrowed: Set<string> | undefined;
+  for (const [key, callerValue] of Object.entries(withheld)) {
+    const present = Object.prototype.hasOwnProperty.call(target, key);
+    let handBack: boolean;
+    if (present && target[key] === undefined) {
+      delete target[key];
+      handBack = true;
+    } else if (!present) {
+      handBack = !shown.has(key);
+    } else if (hookWrittenKeys !== undefined) {
+      handBack = !hookWrittenKeys.has(key);
+    } else {
+      handBack = shown.has(key) && Object.is(target[key], shown.get(key));
+    }
+    if (!handBack) continue;
+    target[key] = callerValue;
+    if (hookWrittenKeys?.has(key)) {
+      narrowed ??= new Set(hookWrittenKeys);
+      narrowed.delete(key);
+    }
+  }
+  return narrowed ?? hookWrittenKeys;
 }
 
 /**
@@ -13284,6 +13441,43 @@ export class ObjectQL implements IObjectQLEngine {
         (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
           (row, i) => callerSuppliedRow(row, callerKeysPerRow[i]),
         );
+      // ── [#22306] WITHHOLD caller-supplied read-only values from beforeInsert ──
+      //
+      // The insert side of #16344's invariant, in the ruling's words:「交给生命
+      // 周期钩子的记录,就是它打算持久化的那条记录。」— see
+      // `withholdInsertReadonlyFromHooks` for the measured defect and for WHICH
+      // keys (the post-hook static strip's own function, subject and options).
+      //
+      // ⭐ WITHHOLD, not strip, exactly as on update. The ENFORCEMENT stays
+      // where ruling C (#14147) put it — after the hooks, the only point that
+      // can tell a hook's stamp from a caller's forgery (`rowHookWrittenKeys`)
+      // — and the caller's values are handed straight back after the seal, so
+      // the strips, their re-default, the WARN, `onFieldsDropped` and
+      // `strictReadonlyWrites` all judge the payload they judged before.
+      //
+      // Placed HERE, after `suppliedPerRow` took the caller's values (the
+      // strips' evidence) and BEFORE the defaults, the summary seed and the
+      // recording: the defaults then fill a withheld key exactly as they fill
+      // an absent one, and nothing this pass does can be recorded as a hook
+      // write. `opCtx.data` keeps the caller's payload; only the hook view is
+      // built from the withheld rows. ⛔ `isSystem` withholds nothing — the
+      // strips do not run for it, so every value it sends is stored.
+      const insertWithheld: Array<Record<string, unknown> | undefined> = [];
+      const hookViewSource: unknown[] = (isBatch ? (opCtx.data as unknown[]) : [opCtx.data]).slice();
+      if (!opCtx.context?.isSystem) {
+        const preserveAuditForHide = opCtx.context?.preserveAudit === true;
+        const hideSchema = this._registry.getObject(object);
+        for (let i = 0; i < hookViewSource.length; i++) {
+          const row = hookViewSource[i];
+          if (undeclaredPerRow[i] !== undefined) continue;
+          if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+          const hidden = withholdInsertReadonlyFromHooks(
+            hideSchema, row as Record<string, unknown>, suppliedPerRow[i] ?? {}, preserveAuditForHide,
+          );
+          insertWithheld[i] = hidden.withheld;
+          hookViewSource[i] = hidden.row;
+        }
+      }
       // [#20082] The write's ONE permission resolution, shared by every consumer
       // below that needs the map: the CEL defaults here, the re-default after
       // the static-`readonly` strip, the option gates at validation, and the
@@ -13297,7 +13491,9 @@ export class ObjectQL implements IObjectQLEngine {
       // door's per-row refusals — the array every later pass already reads as
       // "this row is dead on arrival" (no hook, seeded into `rowErrors`).
       const permissionResolution = this.permissionResolution(opCtx.context);
-      const payloadRows: unknown[] = isBatch ? (opCtx.data as unknown[]) : [opCtx.data];
+      // [#22306] The hook view's rows: a withheld key is absent here, so a
+      // `can` default on it is resolved for this row as for any absent key.
+      const payloadRows: unknown[] = hookViewSource;
       const defaultPermissionsFor = await this.resolveDefaultPermissions(
         object, payloadRows.filter((_, i) => undeclaredPerRow[i] === undefined), opCtx.context, permissionResolution,
       );
@@ -13312,7 +13508,7 @@ export class ObjectQL implements IObjectQLEngine {
         }
       });
       const defaultedData = isBatch
-        ? (opCtx.data as any[]).map((row, i) =>
+        ? payloadRows.map((row, i) =>
             this.initializeSummaryFields(
               object,
               this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[i]),
@@ -13320,8 +13516,22 @@ export class ObjectQL implements IObjectQLEngine {
           )
         : this.initializeSummaryFields(
             object,
-            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[0]),
+            this.applyFieldDefaults(object, payloadRows[0] as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[0]),
           );
+      // [#22306] What each withheld key was SHOWN holding — its default, or
+      // nothing — read before any hook runs, because the hooks mutate these
+      // row objects in place. `handBackWithheldInsertReadonly` reads it to tell
+      // "the hook left the default alone" from "the hook removed it".
+      const insertShown: Array<ReadonlyMap<string, unknown> | undefined> =
+        (isBatch ? (defaultedData as any[]) : [defaultedData]).map((row, i) => {
+          const withheld = insertWithheld[i];
+          if (!withheld || !row || typeof row !== 'object') return undefined;
+          const shown = new Map<string, unknown>();
+          for (const key of Object.keys(withheld)) {
+            if (Object.prototype.hasOwnProperty.call(row, key)) shown.set(key, (row as Record<string, unknown>)[key]);
+          }
+          return shown;
+        });
 
       // Batch inserts trigger beforeInsert/afterInsert PER ROW, each with the
       // exact single-record context shape (`input.data` = one row, `result` =
@@ -13400,7 +13610,12 @@ export class ObjectQL implements IObjectQLEngine {
       // ledger or calls out must not fire for a row that will never be written.
       for (let i = 0; i < rowHookContexts.length; i++) {
         if (undeclaredPerRow[i] !== undefined) continue;
-        await this.triggerHooks('beforeInsert', rowHookContexts[i]);
+        // [#22306] The update path's wrapper (commit 706ad0fcc), so a hook that
+        // faults reaching THROUGH a key this row's hide withheld names that key
+        // instead of surfacing as an anonymous crash. Byte-identical to a bare
+        // dispatch whenever nothing was withheld or the hook refused on purpose.
+        await dispatchHooksExplainingWithheldReadonly(insertWithheld[i], 'beforeInsert',
+          () => this.triggerHooks('beforeInsert', rowHookContexts[i]));
       }
       // ── [#14259] SEAL, before anything engine-owned reads or writes a row ──
       //
@@ -13425,6 +13640,26 @@ export class ObjectQL implements IObjectQLEngine {
         const sealed = rowHookWrites[i]?.seal(rowHookContexts[i]!.input.data);
         if (sealed) rowHookContexts[i]!.input.data = sealed.data as any;
         rowHookWrittenKeys[i] = sealed?.hookWrittenKeys;
+      }
+
+      // ── [#22306] HAND BACK what was withheld from beforeInsert ─────────────
+      //
+      // The other end of the pre-defaults pass, at the line where each row has
+      // stopped being its hooks' (sealed above) and nothing engine-owned has
+      // read it yet — the update path's confluence, row by row. AFTER the seal
+      // so no hand-back can enter the record as a hook write, and BEFORE the
+      // post-hook declared-field door so every pass from here down sees the
+      // payload it saw before the hide existed, wherever no hook wrote the key.
+      // The per-key rule is `handBackWithheldInsertReadonly`'s. A culled row is
+      // handed back too: it ran no hook, so it gets its caller's row back whole.
+      for (let i = 0; i < rowHookContexts.length; i++) {
+        const withheld = insertWithheld[i];
+        if (!withheld) continue;
+        const target = rowHookContexts[i]!.input.data as Record<string, unknown> | null | undefined;
+        if (!target || typeof target !== 'object' || Array.isArray(target)) continue;
+        rowHookWrittenKeys[i] = handBackWithheldInsertReadonly(
+          target, withheld, insertShown[i] ?? new Map(), rowHookWrittenKeys[i],
+        );
       }
 
       // ── [commit b003cf2e8] The POST-hook half of the declared-field door ───────────
