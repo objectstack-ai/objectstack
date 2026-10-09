@@ -273,8 +273,6 @@ const viewBody = (label: string) => ({
     name: 'case_grid', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list',
 });
 
-const ORG = 'org_x';
-
 // ═══════════════════════════════════════════════════════════════════════════
 // A — a MANIFEST-ABSENT type: the plural URL spelling resolves the same row
 // ═══════════════════════════════════════════════════════════════════════════
@@ -288,12 +286,12 @@ describe('#8769 · publish addressed with a manifest-absent plural resolves the 
     it('`translations` promotes the draft written under `translation`', async () => {
         const { protocol, rows } = await makeProtocol();
         await (protocol as any).saveMetaItem({
-            type: 'translation', name: 'zh_cn', organizationId: ORG,
+            type: 'translation', name: 'zh_cn',
             item: translationBody('A'), mode: 'draft',
         });
 
         const receipt: any = await (protocol as any).publishMetaItem({
-            type: 'translations', name: 'zh_cn', organizationId: ORG,
+            type: 'translations', name: 'zh_cn',
         });
 
         expect(receipt.success).toBe(true);
@@ -310,12 +308,12 @@ describe('#8769 · publish addressed with a manifest-absent plural resolves the 
     it('CONTROL — the canonical spelling still publishes (a fold was added, not a lookup loosened)', async () => {
         const { protocol, rows } = await makeProtocol();
         await (protocol as any).saveMetaItem({
-            type: 'translation', name: 'zh_cn', organizationId: ORG,
+            type: 'translation', name: 'zh_cn',
             item: translationBody('A'), mode: 'draft',
         });
 
         const receipt: any = await (protocol as any).publishMetaItem({
-            type: 'translation', name: 'zh_cn', organizationId: ORG,
+            type: 'translation', name: 'zh_cn',
         });
 
         expect(receipt.success).toBe(true);
@@ -330,12 +328,12 @@ describe('#8769 · publish addressed with a manifest-absent plural resolves the 
         // `metaUrlSpellingRefusal` documents) and must still miss.
         const { protocol } = await makeProtocol();
         await (protocol as any).saveMetaItem({
-            type: 'translation', name: 'zh_cn', organizationId: ORG,
+            type: 'translation', name: 'zh_cn',
             item: translationBody('A'), mode: 'draft',
         });
 
         const refusal = await refusalOf(() => (protocol as any).publishMetaItem({
-            type: 'translationz', name: 'zh_cn', organizationId: ORG,
+            type: 'translationz', name: 'zh_cn',
         }));
         expect(refusal.code).toBe('NO_DRAFT');
         expect(refusal.status).toBe(404);
@@ -359,7 +357,7 @@ describe('#8769 · the draftability gate judges the real registry entry, not the
         const { protocol } = await makeProtocol();
 
         const refusal = await refusalOf(() => (protocol as any).publishMetaItem({
-            type: 'fields', name: 'showcase_task.title', organizationId: ORG,
+            type: 'fields', name: 'showcase_task.title',
         }));
 
         expect(refusal.code).toBe('NOT_OVERRIDABLE');
@@ -374,7 +372,7 @@ describe('#8769 · the draftability gate judges the real registry entry, not the
         const { protocol } = await makeProtocol();
 
         const refusal = await refusalOf(() => (protocol as any).publishMetaItem({
-            type: 'field', name: 'showcase_task.title', organizationId: ORG,
+            type: 'field', name: 'showcase_task.title',
         }));
 
         expect(refusal.code).toBe('NOT_OVERRIDABLE');
@@ -405,11 +403,11 @@ describe('#8769 · a plural-addressed publish cannot address around the overlay 
     async function stageLockedActiveWithPendingDraft() {
         const { protocol, rows } = await makeProtocol();
         await (protocol as any).saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG, item: viewBody('v1'), mode: 'draft',
+            type: 'view', name: 'case_grid', item: viewBody('v1'), mode: 'draft',
         });
-        await (protocol as any).publishMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        await (protocol as any).publishMetaItem({ type: 'view', name: 'case_grid' });
         await (protocol as any).saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG, item: viewBody('v2'),
+            type: 'view', name: 'case_grid', item: viewBody('v2'),
             mode: 'draft', force: true,
         });
 
@@ -426,7 +424,7 @@ describe('#8769 · a plural-addressed publish cannot address around the overlay 
         const { protocol } = await stageLockedActiveWithPendingDraft();
 
         const refusal = await refusalOf(() => (protocol as any).publishMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
         }));
 
         expect(refusal.code).toBe('ITEM_LOCKED');
@@ -437,7 +435,7 @@ describe('#8769 · a plural-addressed publish cannot address around the overlay 
         const { protocol, rows } = await stageLockedActiveWithPendingDraft();
 
         const refusal = await refusalOf(() => (protocol as any).publishMetaItem({
-            type: 'views', name: 'case_grid', organizationId: ORG,
+            type: 'views', name: 'case_grid',
         }));
 
         expect(refusal.code).toBe('ITEM_LOCKED');
@@ -482,14 +480,14 @@ describe('#8819 · a plural-addressed rollback cannot address around the overlay
     async function stageLockedActiveOverRestorableHistory(opts: { locked: boolean }) {
         const { protocol, rows, historyRows } = await makeProtocol();
         await (protocol as any).saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG, item: viewBody('v1'), mode: 'draft',
+            type: 'view', name: 'case_grid', item: viewBody('v1'), mode: 'draft',
         });
-        await (protocol as any).publishMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        await (protocol as any).publishMetaItem({ type: 'view', name: 'case_grid' });
         await (protocol as any).saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG, item: viewBody('v2'),
+            type: 'view', name: 'case_grid', item: viewBody('v2'),
             mode: 'draft', force: true,
         });
-        await (protocol as any).publishMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        await (protocol as any).publishMetaItem({ type: 'view', name: 'case_grid' });
 
         const activeRow = rows().find((r) => r.type === 'view' && r.state === 'active');
         expect(activeRow, 'fixture: an active row must exist to carry the lock').toBeTruthy();
@@ -520,7 +518,7 @@ describe('#8819 · a plural-addressed rollback cannot address around the overlay
         const { protocol, toVersion } = await stageLockedActiveOverRestorableHistory({ locked: true });
 
         const refusal = await refusalOf(() => (protocol as any).rollbackMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG, toVersion,
+            type: 'view', name: 'case_grid', toVersion,
         }));
 
         expect(refusal.code).toBe('ITEM_LOCKED');
@@ -532,7 +530,7 @@ describe('#8819 · a plural-addressed rollback cannot address around the overlay
             await stageLockedActiveOverRestorableHistory({ locked: true });
 
         const refusal = await refusalOf(() => (protocol as any).rollbackMetaItem({
-            type: 'views', name: 'case_grid', organizationId: ORG, toVersion,
+            type: 'views', name: 'case_grid', toVersion,
         }));
 
         expect(refusal.code).toBe('ITEM_LOCKED');
@@ -556,7 +554,7 @@ describe('#8819 · a plural-addressed rollback cannot address around the overlay
             await stageLockedActiveOverRestorableHistory({ locked: false });
 
         const receipt: any = await (protocol as any).rollbackMetaItem({
-            type: 'views', name: 'case_grid', organizationId: ORG, toVersion,
+            type: 'views', name: 'case_grid', toVersion,
         });
 
         expect(receipt.success).toBe(true);
