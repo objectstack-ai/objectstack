@@ -12994,15 +12994,16 @@ export class ObjectQL implements IObjectQLEngine {
    * names, as the by-id update judges it: the stored row is the rules'
    * `previous`, and their record is that row merged with the patch.
    *
-   * ⛔ The stored row is read through the READ DOOR, under the caller's own
-   * context (`findOne`), never through the driver. A row the caller cannot
-   * read is a row that does not exist (the by-id write answers 404 for it
-   * before it reads anything), so the preview reads no row for it and gives
-   * no verdict about its columns; a column the caller may not read is absent
-   * from the image the read door serves, and is judged as empty. A refused
-   * read propagates as the refusal it is. A row with no address, or whose id
-   * names no row this caller can read, is judged on the patch alone, as
-   * before.
+   * ⛔ The READ DOOR decides whether there is a row to judge: it is asked
+   * first, under the caller's own context (`findOne`). A row the caller
+   * cannot read is a row that does not exist (the by-id write answers 404 for
+   * it before it reads anything), so the preview judges no row for it and
+   * gives no verdict about its columns. The image itself is the write's own
+   * prior-row read ({@link readUpdatePriorRow}), the row as STORED, kept to
+   * the columns the read door returned, so a column the caller may not read
+   * is judged as empty. A refused read propagates as the refusal it is. A row
+   * with no address, or whose id names no row this caller can read, is judged
+   * on the patch alone, as before.
    *
    * Nothing is written and no sequence is consumed. Reads do happen: the
    * stored row above, and the related rows a traversing rule names (see the
@@ -13046,9 +13047,11 @@ export class ObjectQL implements IObjectQLEngine {
     // restated as if it were: a traversing validation rule needs its related
     // rows, so this operation issues a READ per reference field the rules name
     // (see the `previewRelatedForRow` block below), and [#22445] an
-    // `update`-mode row that carries its address issues one READ of the stored
-    // row, through the read door under the caller's own context (the
-    // `storedRows` block below). Nothing is written, no hook runs, and the
+    // `update`-mode row that carries its address issues two READS of the
+    // stored row — the read door under the caller's own context, then the
+    // write's own prior-row read (the `storedRows` block below). Nothing is
+    // written, no write hook runs (a read through the read door fires its read
+    // hooks, as the related read always has), and the
     // RELATED read happens only for a caller who passes the arms the
     // write-gate probe RUNS — ⛔ never a category of the write decision, and
     // ⛔ not a promise the write would succeed (`registerWriteGateProbe` names
@@ -13203,25 +13206,43 @@ export class ObjectQL implements IObjectQLEngine {
     //
     // The address is the write's own: `resolveEngineUpdateDispatch`, the
     // ladder `update()` resolves its by-id branch with, asked of the row as
-    // submitted. ⛔ Read through the READ DOOR under the caller's context,
-    // never through the driver: the by-id write reads its row raw only after
-    // the write gates answered 404 for a row this caller cannot read, and the
-    // preview runs none of those gates. So a hidden row is a missing row here
-    // too — no image, no verdict about its columns — and a column the caller
-    // may not read is absent from the image and judged as empty. A refused
-    // read propagates as raised. `undefined` = no stored row: the row is
-    // judged on the patch alone, as it was before this read existed.
+    // submitted. Two reads, each answering one question:
+    //
+    //  1. ⛔ MAY THIS CALLER SEE THE ROW — the READ DOOR, under the caller's
+    //     own context (`findOne`). The by-id write reads its row raw only after
+    //     its middleware's write gates, which answer 404 for a row the caller
+    //     cannot read; the preview runs none of them. So a row the read door
+    //     does not return is a missing row here too: no image, no verdict about
+    //     its columns. A refused read propagates as raised.
+    //  2. WHAT IS STORED — the write's own prior-row read
+    //     ({@link readUpdatePriorRow}), so the rules judge the row as STORED,
+    //     exactly as the write does, and not the read door's served image (a
+    //     formula the read door evaluates has no stored column, and the write
+    //     judges it absent). Kept to the columns the read door returned, so a
+    //     column this caller may not read is absent and judged as empty: the
+    //     verdict never depends on a value the caller could not have read.
+    //
+    // `undefined` = no stored row: the row is judged on the patch alone, as
+    // it was before these reads existed.
     const storedRows: Array<Record<string, unknown> | undefined> = [];
     for (const submitted of submittedRows) {
       let stored: Record<string, unknown> | undefined;
       if (mode === 'update' && submitted && typeof submitted === 'object') {
         const dispatch = resolveEngineUpdateDispatch(submitted as EngineUpdateDispatchData, undefined);
         if (dispatch.kind === 'by-id') {
-          const row = await this.findOne(object, {
+          const visible = await this.findOne(object, {
             where: { id: dispatch.id },
             context: options?.context,
           } as EngineQueryOptions);
-          if (row && typeof row === 'object') stored = row as Record<string, unknown>;
+          const prior = visible && typeof visible === 'object'
+            ? await this.readUpdatePriorRow(object, dispatch.id, options?.context)
+            : null;
+          if (visible && prior) {
+            stored = {};
+            for (const [key, value] of Object.entries(prior)) {
+              if (Object.prototype.hasOwnProperty.call(visible, key)) stored[key] = value;
+            }
+          }
         }
       }
       storedRows.push(stored);
@@ -13350,6 +13371,41 @@ export class ObjectQL implements IObjectQLEngine {
         mediaValueShapeStrict: mediaStrictEffective(mediaValueShapeStrict),
       },
     };
+  }
+
+  /**
+   * [#22445] The by-id update's prior-row read: the STORED row an update of
+   * `id` judges, or `null` when the store holds none. One spelling, read by
+   * `update()`'s by-id branch and by the `update`-mode preview
+   * ({@link ObjectQL.validate}), so the preview judges the image the write
+   * judges rather than a second reading of it.
+   *
+   * A raw driver read, not the read door: the rules judge the row as STORED,
+   * so no formula is evaluated, no file reference resolved, no read hook run.
+   * ⛔ It answers no access question — `update()` reaches it only after the
+   * write gates in its middleware chain, and the preview asks the read door
+   * first (see `storedRows` in `validate()`).
+   *
+   * `buildDriverOptions` carries the open transaction and the tenant scope onto
+   * the raw read, as on every engine read. [#21613] The row is shaped like
+   * every other row this engine reads off a driver: the declared field set, so
+   * the update's `previous` (bound for its hooks, and the audit ledger's side
+   * of every update diff) and its returned row are ONE view. Shaping only the
+   * returned row would make every update of a row carrying a retired column
+   * record that column as changed, its stored value included.
+   */
+  private async readUpdatePriorRow(
+    object: string,
+    id: unknown,
+    context: ExecutionContext | undefined,
+    base?: unknown,
+  ): Promise<Record<string, unknown> | null> {
+    const priorAst: QueryAST = { object, where: { id }, limit: 1 } as QueryAST;
+    const preOpts = this.buildDriverOptions(object, context, base as any);
+    return withDeclaredColumnsOnly(
+      await this.getDriver(object).findOne(object, priorAst, preOpts) as Record<string, unknown> | null,
+      declaredColumnSet(this._registry.getObject(object)),
+    );
   }
 
   /**
@@ -15140,18 +15196,10 @@ export class ObjectQL implements IObjectQLEngine {
            // post-phase write uses, built here because the write's own
            // merge has not happened yet. `delete()`'s pre-image read does
            // the same for the same reason.
-           const priorAst: QueryAST = { object, where: { id }, limit: 1 };
-           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
-           // [#21613] The pre-image is shaped like every other row this engine
-           // reads off a driver: the declared field set, so `previous` (bound
-           // for the hooks below, and the audit ledger's side of every update
-           // diff) and the write's returned row are ONE view. Shaping only the
-           // returned row would make every update of a row carrying a retired
-           // column record that column as changed, its stored value included.
-           priorRecord = withDeclaredColumnsOnly(
-             await driver.findOne(object, priorAst, preOpts) as Record<string, unknown> | null,
-             declaredColumnSet(updateSchema),
-           );
+           // [#22445] Through {@link readUpdatePriorRow}, the ONE spelling of
+           // this read, which the `update`-mode preview reads its stored row
+           // with too — so the preview and this write judge one image.
+           priorRecord = await this.readUpdatePriorRow(object, id, opCtx.context, hookContext.input.options);
            // ── [#7867] The not-found gate ──────────────────────────────────
            //
            // A by-id update whose id names no row was a SILENT NO-OP that

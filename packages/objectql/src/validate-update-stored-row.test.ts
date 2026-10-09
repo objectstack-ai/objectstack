@@ -191,6 +191,27 @@ describe('#22445 — an update-mode preview judges the stored row merged with th
     });
   });
 
+  describe('(a) the image is the row as STORED, the one the write judges', () => {
+    it('a formula column the read door evaluates is judged as the write judges it', async () => {
+      const { engine: e2, rows: r2 } = makeEngine([{
+        name: OBJECT, label: 'Preview Amount',
+        fields: {
+          amount: { name: 'amount', label: 'Amount', type: 'number' },
+          doubled: { name: 'doubled', label: 'Doubled', type: 'formula', expression: 'record.amount * 2', returnType: 'number' },
+          memo: { name: 'memo', label: 'Memo', type: 'text', requiredWhen: 'record.doubled > 100' },
+          title: { name: 'title', label: 'Title', type: 'text' },
+        },
+      }]);
+      r2.set('a1', { id: 'a1', amount: 80 });
+      // Precondition: the read door SERVES the formula, the store holds no column for it.
+      expect((await e2.findOne(OBJECT, { where: { id: 'a1' } } as any))?.doubled).toBe(160);
+
+      const preview = await verdictOf(e2, { title: 't', id: 'a1' });
+      const write = await writeRefusal(() => e2.update(OBJECT, { title: 't', id: 'a1' }));
+      expect(preview.errors.map((e) => ({ field: e.field, code: e.code }))).toEqual(write ?? []);
+    });
+  });
+
   describe('(c) with no stored row the refusal says the value was not supplied', () => {
     it.each([
       ['no address', {}],
