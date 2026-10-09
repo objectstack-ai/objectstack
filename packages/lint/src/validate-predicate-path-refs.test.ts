@@ -638,7 +638,18 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `action :: outcomeMessages` and `action :: onSuccess`, both
     // `data.type == 'api' || data.type == 'script'`, and removes none. The two
     // `onSuccess` sub-rows carry no predicate.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(85);
+    // It is 87 today, an ADDITION of TWO: #22227 offered the field form's
+    // `dueLike` and `settledWhen` rows, the deadline semantic. These two are
+    // PARSE gates, not meaningfulness gates: `FieldSchema` refuses both keys off
+    // `date` / `datetime`, and `settledWhen` without `dueLike: true`. Measured,
+    // not inferred: the shipped `*.form.ts` corpus differenced against the
+    // merge base `dee7692f0b` by `<form>::<field>::<source>`, 85 → 87, adds
+    // exactly `field :: dueLike :: data.type in ['date','datetime']` and
+    // `field :: settledWhen :: data.type in ['date','datetime'] && data.dueLike
+    // == true`, and removes none. Neither reaches the literal-comparison census
+    // below: one is an `in`-list gate, and the other compares against the bare
+    // `true`, which is not a quoted literal.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(87);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);

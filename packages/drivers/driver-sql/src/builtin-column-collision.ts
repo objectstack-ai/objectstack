@@ -120,6 +120,8 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   readonlyWhen: 'presentation',
   requiredWhen: 'presentation',
   conditionalRequired: 'presentation',
+  dueLike: 'presentation',     // declares a date a deadline (#22227) — read by the renderer's date cells, never by `createColumn`: the column is the date the type already sizes
+  settledWhen: 'presentation', // the deadline's settle predicate (#22227), display only like `visibleWhen` — no DDL reads it
   requiredPermissions: 'presentation',
   maskingRule: 'presentation',
   ackPlaintextMasking: 'presentation',

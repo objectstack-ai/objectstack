@@ -628,6 +628,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Referencia mediante",
         helpText: "Convierte este campo de texto en la mitad de id de un puntero polimórfico: nombra el campo HERMANO del mismo objeto que guarda, fila a fila, el nombre del objeto destino (ADR-0052 §5). En snake_case; solo campos de texto y excluyente con `reference`."
       },
+      dueLike: {
+        label: "Fecha límite",
+        helpText: "Marca esta fecha como fecha límite: una vez pasada, las vistas pueden mostrarla como vencida (texto relativo y un color de vencimiento). Desactivado o sin definir: no es una fecha límite, y no se deduce nada del nombre del campo."
+      },
+      settledWhen: {
+        label: "Condición de resolución",
+        helpText: "Predicado CEL sobre el registro (p. ej., record.status == 'done'): mientras sea TRUE, la fecha límite se considera resuelta y no se aplica a ese registro ningún texto ni color de vencimiento. Solo de visualización."
+      },
       options: {
         label: "Opciones",
         helpText: "Opciones disponibles (pares label/value)"

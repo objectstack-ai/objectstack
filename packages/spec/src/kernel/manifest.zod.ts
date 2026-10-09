@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
+import { PROTOCOL_MAJOR } from './protocol-version';
 import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
 import { retiredKey } from '../shared/retired-key';
 import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
@@ -407,9 +408,12 @@ export const ManifestSchema = strictObject({
     + 'exiting 0. The declared keys are enumerated by `ManifestSchema` (@objectstack/spec, '
     + 'kernel/manifest.zod.ts) and in the package-manifest reference docs.',
   guidance: {
+    // The prescribed range is spelled from PROTOCOL_MAJOR, the value the load-time
+    // handshake compares and `os init` stamps, so it moves with the protocol instead
+    // of naming a major the handshake already refuses.
     specVersion:
       '`specVersion` is not a package-manifest key. The protocol axis the runtime checks at '
-      + 'load is `engines.protocol` — declare `engines: { protocol: \'^17\' }` (the range the '
+      + `load is \`engines.protocol\` — declare \`engines: { protocol: '^${PROTOCOL_MAJOR}' }\` (the range the `
       + 'scaffold stamps); `specVersion` keeps its meaning only on the marketplace TEMPLATE '
       + 'manifest (`cloud/template-manifest.zod.ts`), which is a different surface.',
   },

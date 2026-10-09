@@ -10,7 +10,7 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **122
+because the flag is not one concept: it is a single boolean read at **123
 distinct sites across 20 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
@@ -106,6 +106,7 @@ that silently does not happen.
 | 7 | Write bypass = `true`, effective write scope = `org` | plugin-security | Get: widest write scope without holding any capability | `packages/plugins/plugin-security/src/security-plugin.ts#start` |
 | 8 | Metadata-plane schema masking exempt (ADR-0106 D4) | metadata-core | Get: unmasked object schema. Note: the exemption is a **caller** property — it short-circuits before the security service is consulted | `packages/metadata-core/src/object-schema-fls.ts#isObjectSchemaMaskExempt` |
 | 9 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `packages/plugins/plugin-security/src/security-plugin.ts#explainAccessForCaller` |
+| 9b | The master-detail write check the `security` service serves (`checkControlledByParentWrite`, ADR-0055) answers `allow` | plugin-security | Get: `allow` for any record, with no master judged — the write path's own first exit, so a gate composing it admits exactly what the record's own system-context update would. Lose: nothing a caller reaches today: its two consumers, the `sys_attachment` and `sys_comment` parent gates, return before they ask for a system session | `packages/plugins/plugin-security/src/security-plugin.ts#checkControlledByParentWrite` |
 | 10 | Anonymous-deny treats the caller as authenticated | core | Get: passes the 401 seam with no `userId` | `packages/core/src/security/anonymous-deny.ts#shouldDenyAnonymous` |
 | 11 | Permission-set projection middleware skipped | plugin-security | Lose: projection of permission-set-derived columns | `packages/plugins/plugin-security/src/permission-set-projection.ts#createPermissionSetWriteThrough` |
 | 11b | Position write-through skipped — a `sys_position` write is not mirrored into the environment ledger | plugin-security | Get: the seeders and the package door write rows for definitions that already have their home, untouched. Lose: a system-written row has no environment definition, so the security catalog read does not resolve it until a data-door edit, or the one-time row-only position backfill, gives it one | `packages/plugins/plugin-security/src/position-write-through.ts#createPositionWriteThrough` |
@@ -142,7 +143,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 122 sites**.
+The largest single consumer — **17 of the 123 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -285,7 +286,7 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 122 read sites
+- **Shipped semantics.** `isSystem` is a published contract with 123 read sites
   in 20 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
@@ -359,16 +360,16 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 28 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 128 | ✅ |
+| — parsed as a property **read** | 129 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **122** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 119 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **123** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 120 | ✅ |
 | — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
 | Packages containing at least one elevation read | **20** | ✅ |
 | Files containing at least one elevation read | 58 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 104 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 105 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were

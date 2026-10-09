@@ -900,6 +900,14 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
   // there is no fourth runtime to measure — the honest clause is the generic
   // one, not a fabricated fourth cell (#6716).
   conditionalRequired: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
+  // [#22227] The deadline's settle predicate (objectui#11815 ruling D) joins
+  // the family on the `visibleWhen` side: display only, nothing on the write
+  // path reads it. Its one consumer — objectui's date cells, the host
+  // evaluating it per row — lands after the spec publishes, so there is no
+  // runtime here to measure a fault direction against. The generic clause is
+  // the honest cell until it does; re-measure and write the slot's own cell
+  // then, as #6716 did for the other three.
+  settledWhen: FIELD_RULE_SLOT_CONSEQUENCE_GENERIC,
 };
 
 /**
@@ -907,9 +915,10 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
  * every surface that judges a field-level `*When` stands on the same verdict
  * AND the same message (Prime Directive #12). Two consumers today: the
  * metadata walk in {@link validateStackExpressions} below, and the docs-corpus
- * gate `scripts/check-doc-formula-expressions.mjs`, which judges the same three
- * slots where a fenced example's enclosing structure identifies the field layer
- * (#11407). Before that gate existed this lived as a closure inside the walk —
+ * gate `scripts/check-doc-formula-expressions.mjs`, which judges the same
+ * field-rule slots (the three siblings, and since #22227 a deadline's
+ * `settledWhen`) where a fenced example's enclosing structure identifies the
+ * field layer (#11407). Before that gate existed this lived as a closure inside the walk —
  * fine while there was one caller, and exactly how a second caller comes to own
  * a DIALECT of the rule instead of the rule.
  *
@@ -1630,6 +1639,7 @@ export interface StackExpressionOptions {
    *    then faulted on every write the rule judged;
    *  - [#22032, pass 2] the field-rule-slot pass over `fields[]` — each of
    *    `requiredWhen` / `readonlyWhen` / `conditionalRequired` / `visibleWhen`
+   *    (and, since #22227, a deadline's `settledWhen`)
    *    as a `record`-scoped predicate with its root verdict, plus the `parent`
    *    gate (a `readonlyWhen` / `requiredWhen` reading `parent` on an object
    *    without exactly one `master_detail`), the #4811 null-guard gate over
@@ -2513,7 +2523,15 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // Field-level conditional rules are server-enforced (rule-validator) and
       // record-scoped — a bare ref silently fails the rule (required/readonly
       // not enforced = data-integrity hole). #1928 class, same as actions.
-      for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen'] as const) {
+      //
+      // [#22227] `settledWhen` — a `date` / `datetime` deadline's settle
+      // predicate (objectui#11815 ruling D) — is the fifth slot, judged exactly
+      // as `visibleWhen` is: the `record`-scoped `check` (it parses, it reads
+      // `record.<field>` and never a bare field, the field exists) and the
+      // root verdict over FIELD_RULE_BOUND_ROOTS. Like `visibleWhen` it is
+      // display only, so the server-side gates further down (the `parent`
+      // gate, the null guard, the traversal refusal) do not apply to it.
+      for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen', 'settledWhen'] as const) {
         const where = `object '${objectName}' · field '${fname}' ${key}`;
         const raw = (f as AnyRec)[key];
         // [#13935] Verdict FIRST, emitted second. `check` needs to know which

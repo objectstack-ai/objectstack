@@ -271,7 +271,7 @@ describe('continueRestoredRun — the approvals operator repair verb, declared',
         const doc = source.slice(source.lastIndexOf('/**', at), at);
 
         // The sibling this was ruled to copy, named where a later author reads it.
-        expect(doc).toContain('#16495');
+        expect(doc).toContain('the automation-service contract');
         // What the engine verb leaves undone, which is the whole reason this exists.
         expect(doc).toMatch(/the[\s*]+continuation[\s*]+must[\s*]+be[\s*]+re-issued/);
         // ⛔ It replays a recorded outcome; it does not re-decide.

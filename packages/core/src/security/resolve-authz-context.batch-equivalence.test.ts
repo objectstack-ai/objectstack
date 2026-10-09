@@ -35,6 +35,18 @@
  * ⛔ These goldens are a record of what the sequential code DID. Never "fix" a
  * red one by re-capturing it: the whole value of the file is that it cannot be
  * satisfied by agreeing with the new implementation.
+ *
+ * ⚠️ One recorded move, written down here as the rule above requires
+ * ([ADR-0131] D4, C2 stage S5a): a user grant's permission set is read BY NAME
+ * — the organization-less rows for every name a grant carries, plus the active
+ * organization's own rows for the names its grants carry — where the
+ * sequential code read it by `permission_set_id`. In the three fixtures that
+ * hold a user grant, only the `sys_permission_set` entries of `queries` moved
+ * (the position-bound sets are still read by the junction's id); every other
+ * recorded read, and every `grants` envelope, is byte-identical to the
+ * sequential capture. The fixtures' grants carry the name the platform writers
+ * store beside the id. The by-name read joins the `sys_position` read's leg, so
+ * a principal whose sets are all held directly resolves in two legs, not three.
  */
 
 import { readFileSync } from 'node:fs';
@@ -75,20 +87,21 @@ const GOLDEN: Record<string, Golden> = JSON.parse(
  * Four is the floor, not three: wave 1 (every independent read) → wave 2
  * (`sys_position`, needs the position NAMES wave 1 produced) → wave 3
  * (`sys_position_permission_set`, needs the position IDS wave 2 produced) →
- * wave 4 (`sys_permission_set`, needs the union of directly- and
- * position-granted ids). A principal with no `sys_position` row backing any of
- * its position names skips wave 3 and lands in 3.
+ * wave 4 (`sys_permission_set` by the junction's ids). The directly granted
+ * sets are read by NAME in wave 2, beside `sys_position` ([ADR-0131] D4), so a
+ * principal with no `sys_position` row backing any of its position names skips
+ * waves 3 and 4 and lands in 2.
  */
 const BATCHED_LEGS: Record<string, number> = {
   'empty-principal': 2,
   'multi-org-membership': 2,
   'lapsed-own-membership-among-active-peers': 2,
   'position-derived-grants': 4,
-  'permission-set-derived-grants': 3,
+  'permission-set-derived-grants': 2,
   'tenant-admin-via-position': 4,
   'ai-seat-and-email-from-sys-user': 2,
   'ai-seat-denied': 2,
-  'seeded-permissions-and-email': 3,
+  'seeded-permissions-and-email': 2,
   'read-limits-truncate': 2,
   'no-active-org': 2,
 };

@@ -48,7 +48,7 @@ const stackOf = (retry: Retry, retryPolicy: Retry) => ({
     name: 'Retry key door probe',
     version: '1.0.0',
     type: 'app',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
   objects: [
     {

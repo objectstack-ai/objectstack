@@ -141,7 +141,7 @@ function stack(body: string | null): string {
 import { defineStack } from '@objectstack/spec';
 
 export default defineStack({
-  manifest: { id: 'com.example.jxg', name: 'jxg', version: '1.0.0', type: 'app', namespace: 'jxg', engines: { protocol: '^17' } },
+  manifest: { id: 'com.example.jxg', name: 'jxg', version: '1.0.0', type: 'app', namespace: 'jxg', engines: { protocol: '^18' } },
   ${pages}
   apps: [{ name: 'jxg_app', label: 'JXG', navigation: [${nav}] }],
   objects: [
@@ -161,7 +161,7 @@ function packageCarried(top: string): string {
 import { defineStack } from '@objectstack/spec';
 
 export default defineStack({
-  manifest: { id: 'com.example.jxg', name: 'jxg', version: '1.0.0', type: 'app', namespace: 'jxg', engines: { protocol: '^17' } },
+  manifest: { id: 'com.example.jxg', name: 'jxg', version: '1.0.0', type: 'app', namespace: 'jxg', engines: { protocol: '^18' } },
   pages: ${top},
   packages: [
     {

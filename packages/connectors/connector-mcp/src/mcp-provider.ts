@@ -162,6 +162,18 @@ function assertDeclarativeStdioAllowed(
  * Stdio transports on declarative instances are policy-gated (default deny) —
  * see {@link McpDeclarativeStdioPolicy} (#3055).
  *
+ * A declarative stdio transport runs **in the declaring app's root** (#22423):
+ * when the host hands `ConnectorProviderContext.resolvePackagePath`, the
+ * child's working directory is `resolvePackagePath('.')`, so the app's relative
+ * `command` and `args` resolve against the same anchor as its other relative
+ * refs (the `openapi` provider's `providerConfig.spec`, read through
+ * `loadPackageFile`), not against the directory the server was started from.
+ * The anchor is the host's: `providerConfig.transport` carries no working
+ * directory, and an author cannot write one. A host without the member keeps
+ * the previous behaviour — no `cwd`, so the child inherits the host's current
+ * directory. The policy check runs first and is unchanged: it judges the
+ * `command` string exactly as written.
+ *
  * The connection is opened at materialization. Faults are classified (#3017):
  * an invalid transport shape is a *configuration* fault and throws plain —
  * fatal at boot per the ADR-0097 fail-loud contract — while a connect /
@@ -173,9 +185,15 @@ function assertDeclarativeStdioAllowed(
 export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorProviderFactory {
   return async (ctx) => {
     const cfg = (ctx.providerConfig ?? {}) as McpProviderConfig;
-    const transport = normalizeTransport(cfg.transport, ctx.name, ctx.auth);
+    let transport = normalizeTransport(cfg.transport, ctx.name, ctx.auth);
     if (transport.kind === 'stdio') {
       assertDeclarativeStdioAllowed(deps.declarativeStdio, transport.command, ctx.name);
+      // One anchor for the app's relative paths (#22423). A resolver that
+      // throws is a host fault: it propagates plain, a configuration error
+      // (fatal at boot), never upstream-unavailable.
+      if (ctx.resolvePackagePath) {
+        transport = { ...transport, cwd: await ctx.resolvePackagePath('.') };
+      }
     }
     const includeList = Array.isArray(cfg.include)
       ? cfg.include.filter((x): x is string => typeof x === 'string')

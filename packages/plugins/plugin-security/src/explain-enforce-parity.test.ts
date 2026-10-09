@@ -414,14 +414,15 @@ async function bootPrincipal(source: PostureSource) {
   await catalogue(`ps_user_admin_${n}`, 'qa_user_admin', null, {});
   await catalogue(`ps_reader_${n}`, READER_SET, null, {});
   await catalogue(`ps_alpha_notes_${n}`, ALPHA_ONLY_SET, ALPHA, { [NOTES]: { allowRead: true } });
-  const grant = (user: string, set: string) =>
+  // Each grant carries the set's name beside its id, as every platform writer stores it.
+  const grant = (user: string, set: string, name: string) =>
     e.insert('sys_user_permission_set', {
-      id: `ups_${user}_${set}_${n}`, user_id: user, permission_set_id: set, organization_id: ALPHA,
+      id: `ups_${user}_${set}_${n}`, user_id: user, permission_set_id: set, permission_set: name, organization_id: ALPHA,
     }, SYS);
-  await grant(USER_ADMIN, `ps_user_admin_${n}`);
+  await grant(USER_ADMIN, `ps_user_admin_${n}`, 'qa_user_admin');
   for (const u of [USER_MEMBER, USER_REMOVED]) {
-    await grant(u, `ps_reader_${n}`);
-    await grant(u, `ps_alpha_notes_${n}`);
+    await grant(u, `ps_reader_${n}`, READER_SET);
+    await grant(u, `ps_alpha_notes_${n}`, ALPHA_ONLY_SET);
   }
   await e.insert(LEDGER, { id: 'l_alpha', name: 'alpha row', organization_id: ALPHA }, SYS);
   await e.insert(LEDGER, { id: 'l_beta', name: 'beta row', organization_id: BETA }, SYS);
