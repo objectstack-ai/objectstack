@@ -1460,7 +1460,9 @@ jobs:
       # held by every later refresh; it rises only by a ruled entry in the
       # script's RULED_CEILING_RAISES. A `provisional` package prints "no
       # ceiling: provisional" and is not red; a package absent from the dataset
-      # is red (the new-package shape). See the script header for the ruling.
+      # prints "no ceiling: new package" and is not red until the first refresh
+      # after it lands gives it a ceiling, while a package the dataset knows
+      # that lost its row is refused, red. See the script header for the ruling.
       #
       # HERE, in the aggregator, rather than in each shard, because the CLI's
       # file-level slices land on three shards: the three windows are SUMMED
