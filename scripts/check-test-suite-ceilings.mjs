@@ -61,7 +61,7 @@
  *
  * A file-sharded package (the CLI, cut into 3 slices on 3 shards whenever a
  * run's own list makes it the serial floor) arrives as three partial windows
- * on three shards. They are SUMMED across shards (mergeCaptures, which marks a
+ * on three shards. They are SUMMED across shards (foldCaptures, which marks a
  * set missing a part as incomplete) and the sum is graded against the whole
  * package's ceiling, because that is the quantity the ceiling was measured in:
  * the generator records a sliced package as the per-run SUM of its slices, and
@@ -101,7 +101,6 @@ import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
 import { escapeWorkflowCommandMessage } from './partition-test-shards.mjs';
-import { mergeCaptures } from './report-test-timings.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATASET_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
@@ -214,7 +213,7 @@ export function readCeilingTable(dataset) {
 // ── Grading ───────────────────────────────────────────────────────────────
 
 /**
- * Grade one run. `merged` is mergeCaptures()' result: every executed package's
+ * Grade one run. `merged` is foldCaptures()' result: every executed package's
  * window, a sliced package already summed across shards with `complete` saying
  * whether every part turned up, and every file line.
  *
@@ -421,6 +420,52 @@ export function renderCeilingVerdict(report, label) {
 
 // ── Reading the shard captures ────────────────────────────────────────────
 
+/** The capture schema `report-test-timings.mjs --capture` writes; any other is refused. */
+export const CAPTURE_SCHEMA = 'test-timing-capture/1';
+
+/**
+ * Fold the per-shard captures into one run: every executed package's window,
+ * a file-sliced package SUMMED across the shards that ran its parts and marked
+ * `complete` only when every part turned up, and every file line.
+ *
+ * The same fold `report-test-timings.mjs` makes for its table, kept here rather
+ * than imported: that module is a gate file only through its own self-test, and
+ * a gate family importing it would silently stop inheriting its declared
+ * populations in the dispatch-gates derivation (its promotion invariant reds on
+ * exactly that). The windows themselves are not re-read here -- each capture's
+ * package rows are `samplesFromSummary`'s, taken on the shard.
+ */
+export function foldCaptures(captures) {
+  const files = [];
+  const byName = new Map();
+  const problems = [];
+  const shards = [];
+  for (const capture of captures) {
+    if (capture?.schema !== CAPTURE_SCHEMA) {
+      problems.push(`a capture declares schema ${JSON.stringify(capture?.schema ?? null)}, not ${CAPTURE_SCHEMA}`);
+      continue;
+    }
+    if (capture.shard) shards.push(capture.shard);
+    files.push(...(capture.files ?? []));
+    for (const p of capture.problems ?? []) problems.push(p);
+    for (const row of capture.packages ?? []) {
+      const acc = byName.get(row.pkg) ?? { pkg: row.pkg, seconds: 0, sliceCount: null, parts: [] };
+      acc.seconds += row.seconds;
+      if (row.sliceCount) {
+        acc.sliceCount = row.sliceCount;
+        acc.parts.push(...(row.parts ?? []));
+      }
+      byName.set(row.pkg, acc);
+    }
+  }
+  const packages = [...byName.values()].map((row) => {
+    const parts = [...new Set(row.parts)].sort((a, b) => a - b);
+    return { ...row, parts, complete: row.sliceCount === null || parts.length === row.sliceCount };
+  });
+  return { files, packages, problems, shards: shards.sort() };
+}
+
+
 /** Every capture JSON under `dir`, recursively; unreadable files become problems. */
 export function readCaptures(dir) {
   const captures = [];
@@ -472,7 +517,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'provisional prints "no ceiling: provisional" and is not red': 3,
   'a package absent from the dataset is red; an uncapped one is not': 4,
   'no ceiling table yet is NOT MEASURED, never red': 5,
-  'file-sliced packages are summed across shards': 5,
+  'file-sliced packages are summed across shards': 6,
   'a ruled raise lifts a ceiling, and only a well-formed one does': 7,
   'a malformed ceiling table is refused, never read as a pass': 4,
 });
@@ -529,7 +574,7 @@ function selfTest() {
     ...extra,
   });
   const run = (captures, ds = dataset(), raises = {}) => {
-    const report = gradeCeilings({ merged: mergeCaptures(captures), dataset: ds, raises });
+    const report = gradeCeilings({ merged: foldCaptures(captures), dataset: ds, raises });
     return { report, ...renderCeilingVerdict(report, 'Test Core') };
   };
   const status = (r, name) => r.report.rows.find((row) => row.name === name)?.status;
@@ -661,6 +706,14 @@ function selfTest() {
     const r = run([capture('2/6', [['cli', 10, [1, 3]]]), capture('3/6', [['a', 1]])]);
     if (!r.err[0].includes('cli: NOT MEASURED') || !r.err[0].includes('slices 1 of 3')) throw new Error(`slices: the partial line is wrong:\n${r.err[0]}`);
   });
+  check(() => {
+    // A capture in a shape this fold does not know contributes nothing and is
+    // named, never read as a set of windows.
+    const folded = foldCaptures([{ ...capture('2/6', [['cli', 600, [1, 3]]]), schema: 'test-timing-capture/2' }, capture('3/6', [['a', 1]])]);
+    if (folded.packages.some((p) => p.pkg === 'cli') || !folded.problems.some((p) => p.includes('test-timing-capture/2'))) {
+      throw new Error(`slices: an unknown capture schema was folded in: ${JSON.stringify(folded)}`);
+    }
+  });
 
   battery('a ruled raise lifts a ceiling, and only a well-formed one does');
   check(() => {
@@ -777,7 +830,7 @@ function main() {
   }
 
   const { captures, problems: readProblems } = readCaptures(capturesDir);
-  const merged = mergeCaptures(captures);
+  const merged = foldCaptures(captures);
   const dataset = JSON.parse(readFileSync(DATASET_PATH, 'utf8'));
   const report = gradeCeilings({ merged, dataset });
   const rendered = renderCeilingVerdict(report, label);
