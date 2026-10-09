@@ -91,16 +91,14 @@ const PLAIN_LINE_OBJECT = {
   },
 };
 
-/** A store-backed driver over several objects, counting the reads of each. */
+/** A store-backed driver over several objects: what is stored is what a later read answers. */
 function makeStoreDriver() {
   const stores = new Map<string, Map<string, Record<string, any>>>();
-  const reads = new Map<string, number>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
     if (!s) { s = new Map(); stores.set(o, s); }
     return s;
   };
-  const read = (o: string) => { reads.set(o, (reads.get(o) ?? 0) + 1); };
   const matches = (row: any, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]: [string, any]) => {
@@ -122,12 +120,10 @@ function makeStoreDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async syncSchema() {},
     async find(o: string, ast: any) {
-      read(o);
       const hits = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
       return (typeof ast?.limit === 'number' ? hits.slice(0, ast.limit) : hits).map((r) => ({ ...r }));
     },
     async findOne(o: string, ast: any) {
-      read(o);
       for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return { ...r };
       return null;
     },
@@ -148,7 +144,7 @@ function makeStoreDriver() {
       return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)).length;
     },
   };
-  return { driver, storeFor, reads };
+  return { driver, storeFor };
 }
 
 function makeEngine() {
@@ -198,10 +194,9 @@ const REQUIRED: Verdict = { valid: false, errors: [{ field: 'description', code:
 describe('#22474 — the preview binds the master-detail header the write binds', () => {
   let engine: ObjectQL;
   let storeFor: (o: string) => Map<string, Record<string, any>>;
-  let reads: Map<string, number>;
 
   beforeEach(() => {
-    ({ engine, storeFor, reads } = makeEngine());
+    ({ engine, storeFor } = makeEngine());
   });
 
   describe('(a) insert: admitted under a draft header, refused under a sent one, as the insert', () => {
@@ -256,18 +251,28 @@ describe('#22474 — the preview binds the master-detail header the write binds'
   });
 
   describe('(c) control: an object with no parent-scoped rule reads no header', () => {
+    /** Counts every read of the header object, through the read door, under any context. */
+    function countHeaderReads(ql: ObjectQL) {
+      const count = { reads: 0 };
+      ql.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+        if (ctx.object === HEADER && ['find', 'findOne'].includes(ctx.operation)) count.reads += 1;
+        await next();
+      });
+      return count;
+    }
+
     it('insert and update previews of a plain line issue no read of the header object', async () => {
       storeFor(PLAIN_LINE).set('p1', { id: 'p1', invoice: 'h_sent', quantity: 1 });
-      reads.clear();
+      const count = countHeaderReads(engine);
       expect(await preview(engine, PLAIN_LINE, { invoice: 'h_sent', quantity: 1 }, 'insert')).toEqual(ADMITTED);
       expect(await preview(engine, PLAIN_LINE, { quantity: 2, id: 'p1' }, 'update')).toEqual(ADMITTED);
-      expect(reads.get(HEADER) ?? 0).toBe(0);
+      expect(count.reads).toBe(0);
     });
 
     it('positive control: the parent-scoped line does read it', async () => {
-      reads.clear();
+      const count = countHeaderReads(engine);
       await preview(engine, LINE, { invoice: 'h_draft', quantity: 1 }, 'insert');
-      expect(reads.get(HEADER) ?? 0).toBeGreaterThan(0);
+      expect(count.reads).toBeGreaterThan(0);
     });
   });
 
