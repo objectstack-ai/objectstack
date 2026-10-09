@@ -1311,6 +1311,14 @@ const SHARED_BOOTS = new WeakMap<object, Map<unknown, Promise<VerifyStack>>>();
  * even one spelled identically, is a different stack: the memo never guesses
  * that two `SecurityPlugin` instances mean the same thing.
  *
+ * A different stack over the SAME `config` is still a second boot of that
+ * configuration, so the instance rule `bootStack` enforces applies to it: while
+ * the first key's boot is live, a second `opts` key on that `config` is refused
+ * (`RESOURCE_CONFLICT`, status 409), the returned promise rejects, and the memo
+ * drops that key so a later caller boots again. To keep two stacks live at
+ * once, pass the second a configuration BUILT AGAIN (its builder called once
+ * more, or a fresh module instance), never a `{ ...config }` copy.
+ *
  * Sharing only makes sense under `isolate: false` (files in one worker share
  * one module registry); under vitest's default isolation every file still
  * boots its own. The eligibility rules dogfood wrote for its shared stack
