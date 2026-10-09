@@ -726,6 +726,12 @@ export const GRANT_STANDING_KEYS = [
  * entirely. What now pays for an enumeration is the write that actually
  * toggles the switch — which is the write this list exists to judge.
  *
+ * [ADR-0131 D4] `organization_id`, because the resolver finds an unscoped
+ * grant's `admin_full_access` on the ORGANIZATION-LESS row only: moving that
+ * row into an organization un-makes every grant-anchored platform admin, the
+ * same end state as renaming or deleting it, reached by a payload that touches
+ * neither `name` nor `active`. Both spellings, as the grant list carries them.
+ *
  * `id` is deliberately NOT here even though the enumeration reads it. On this
  * engine `data.id` on an update ADDRESSES the row (it is what
  * `resolveTargetIds` resolves the target from) rather than proposing a new
@@ -741,7 +747,7 @@ export const GRANT_STANDING_KEYS = [
  * org-administrator standing is read from `sys_member.role`. Deactivating a
  * position cannot empty any of them.
  */
-export const PERMISSION_SET_STANDING_KEYS = ['name', 'active'] as const;
+export const PERMISSION_SET_STANDING_KEYS = ['name', 'active', 'organization_id', 'organizationId'] as const;
 
 /**
  * [#11663 L2] Same, for `sys_user` — the FIFTH write shape, and the first one
@@ -986,12 +992,19 @@ export function registerLastAdminGuard(
     // name off — an under-count, the direction this guard may round in. A
     // grant that names nothing is not counted at all: it holds no set by name,
     // and `refuseIfEmptiedRatherThanFresh` reads it as evidence instead.
+    //
+    // [ADR-0131 D4] Only an ORGANIZATION-LESS row puts the name in effect: the
+    // resolver finds an unscoped grant's set on the organization-less row alone,
+    // never on an organization's copy, so a pending write that moves that row
+    // into an organization (`organization_id`) takes the standing away exactly
+    // as deleting it does. A copy switched off still reads as the name switched
+    // off — the under-count above, unchanged.
     const legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture());
     const sets = legacyGrantAnchorRetired
       ? []
       : await scan(op, SystemObjectName.PERMISSION_SET, {
         where: { name: ADMIN_FULL_ACCESS },
-        fields: ['id', 'name', 'active'],
+        fields: ['id', 'name', 'active', 'organization_id'],
       });
     let adminSetNamed = false;
     let adminSetSwitchedOff = false;
@@ -1005,6 +1018,8 @@ export function registerLastAdminGuard(
         adminSetSwitchedOff = true;
         continue;
       }
+      // An organization's copy — no unscoped grant resolves to it.
+      if (set.organization_id ?? set.organizationId) continue;
       adminSetNamed = true;
     }
     if (adminSetNamed && !adminSetSwitchedOff) {

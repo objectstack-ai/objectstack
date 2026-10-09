@@ -99,7 +99,7 @@ export function createGrantsEngine() {
           ? [{
               id: 'ups_datasource_operator',
               user_id: ENTITLED_USER,
-              permission_set_id: GRANT_SET_ID,
+              permission_set_id: GRANT_SET_ID, permission_set: GRANT_SET_NAME,
               // Unscoped (null org) — the grant is platform-scoped, matching
               // `manage_platform_settings`'s own `scope: 'platform'`.
               organization_id: null,
@@ -107,8 +107,10 @@ export function createGrantsEngine() {
           : [];
       }
       if (object === 'sys_permission_set') {
+        // By id (a position binding) or by name (a user grant, ADR-0131 D4).
         const ids: unknown = opts?.where?.id?.$in;
-        return Array.isArray(ids) && ids.includes(GRANT_SET_ID)
+        const names: unknown = opts?.where?.name?.$in;
+        return (Array.isArray(ids) && ids.includes(GRANT_SET_ID)) || (Array.isArray(names) && names.includes(GRANT_SET_NAME))
           ? [{
               id: GRANT_SET_ID,
               name: GRANT_SET_NAME,

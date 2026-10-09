@@ -43,7 +43,7 @@ const qlEmpty = () => ({ find: async () => [] });
 /** A store that actually grants something, so "resolves" is read against a real grant. */
 const qlHealthy = () => ({
   find: async (object: string) => {
-    if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps' }];
+    if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps', permission_set: 'pkg_admin' }];
     if (object === 'sys_permission_set') {
       return [{ id: 'ps', name: 'pkg_admin', system_permissions: ['studio.access'] }];
     }

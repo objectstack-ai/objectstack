@@ -225,7 +225,7 @@ describe('position-bound permission sets reach /auth/me/permissions (#6334)', ()
         const app = mount({
             tables: baseTables({
                 sys_user_permission_set: [
-                    { id: 'ups1', user_id: USER, permission_set_id: 'ps_direct', organization_id: null },
+                    { id: 'ups1', user_id: USER, permission_set_id: 'ps_direct', permission_set: 'showcase_direct', organization_id: null },
                 ],
             }),
         });
