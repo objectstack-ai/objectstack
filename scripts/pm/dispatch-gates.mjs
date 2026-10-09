@@ -11554,9 +11554,11 @@ export function residueLines(
  * The single source of truth for the model tier the PM lane's governance
  * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
  * at, both halves of it — the spec and skills lanes' review of every round
- * they deliver (a card that changes contract accept/reject behaviour or
- * widens the public surface is spec-lane work, whichever seat found it) and
- * the `Served-tier:` line every `## Contract review` record carries. The
+ * they deliver (a card that WIDENS a published accept set or the public
+ * surface is spec-lane work, whichever seat found it; a card that only
+ * NARROWS one is not, and owes one contract-review-tier review before the
+ * queue while staying in its lane) and the `Served-tier:` line every
+ * `## Contract review` record carries. The
  * BUILD of such a card is at the default judgment tier, so
  * this constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
@@ -11745,9 +11747,10 @@ export function tierLines(result) {
     );
   }
   const clause2 =
-    '  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public' +
-    ' surface owes a contract-review-tier REVIEW too (owed in the spec and skills lanes, in-seat at tier or by the' +
-    ' at-tier subagent; default-tier build; a hit outside those lanes is spec-lane work and moves there), judged from' +
+    '  Clause ② is NOT reachable from paths: a card that WIDENS a published accept set or the public surface owes a' +
+    ' contract-review-tier REVIEW too (owed in the spec and skills lanes, in-seat at tier or by the at-tier subagent;' +
+    ' default-tier build; a hit outside those lanes is spec-lane work and moves there); a card that only NARROWS one is' +
+    ' `Clause-②: no`, stays in its lane, and owes one contract-review-tier review before the queue — judged from' +
     ' the card CONTENT. This line is a FLOOR, never a clearance.';
   // The suspicion tail prints only on a hit — unlike the clause-② note above,
   // which prints always: "no suspicion" and "no suspect table" must not share a
@@ -11756,8 +11759,9 @@ export function tierLines(result) {
     ? []
     : [
         `  Clause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you can` +
-          ` (a card changing contract accept/reject behaviour or widening the public surface is reviewed at ${CONTRACT_REVIEW_TIER}` +
-          ' in the spec lane — a contract-surface hit is spec-lane work whichever seat found it — built at the default tier);' +
+          ` (a card widening a published accept set or the public surface is reviewed at ${CONTRACT_REVIEW_TIER}` +
+          ' in the spec lane — a contract-surface hit is spec-lane work whichever seat found it — built at the default tier;' +
+          ' a card that only narrows one stays in its lane and owes the same review before the queue);' +
           ` whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue gate before the card may enqueue.`,
         ...suspects.map((s) => `    - ${s.path} ⇢ '${s.glob}' — ${s.why}`),
       ];
