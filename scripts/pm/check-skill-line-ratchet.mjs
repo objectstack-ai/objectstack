@@ -322,9 +322,10 @@ export const CEILINGS = new Map([
   // 2026-09-18, live chat beside ruling C on the regenerated-artefact landing,
   // verbatim and untranslated: 「还有应该完善skills，修改代码量超过某个行数
   // （比如5000）就应该人工审核。」 The content is ONE rule line beside the
-  // four-piece-terminal trigger: a PR over 5,000 changed lines (additions +
-  // deletions, generated files included) takes the same terminal, with no
-  // fact-layer exception; the mechanical face is `check-governed-merges.mjs`.
+  // four-piece-terminal trigger: a PR over the human-merge line (3,000 changed
+  // lines since the maintainer's 2026-10-09 word; additions + deletions,
+  // generated files included) takes the same terminal, with no fact-layer
+  // exception; the mechanical face is `check-governed-merges.mjs`.
   // It could not be paid in place — measured, not assumed: the trigger line it
   // belongs beside stands at 118 B against the 120-byte cap and the shortest
   // self-contained form of the rule is 111 B; of the file's 598 adjacent bullet
