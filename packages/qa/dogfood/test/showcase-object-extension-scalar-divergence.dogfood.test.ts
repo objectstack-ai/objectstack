@@ -99,7 +99,8 @@ import { join } from 'node:path';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { writeBuildShapedArtifact } from './build-shaped-artifact.js';
 
@@ -133,7 +134,7 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
         // Boots from a COMPILED ARTIFACT, whose `objects` and `objectExtensions`
         // are separate collections — the deployment shape, and the only one on
         // which this family of defects is observable at all.
-        stack = await bootStack(showcaseStack, {
+        stack = await bootShowcase({
             extraPlugins: [
                 new MetadataPlugin({
                     rootDir: tempDir,

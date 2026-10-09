@@ -136,6 +136,15 @@ describe('the instance rule: one live kernel per configuration, per process', ()
     await expect(bootStack({ ...config })).rejects.toMatchObject(refusal);
   }, BOOT_TIMEOUT);
 
+  it('the third remedy: a configuration BUILT AGAIN boots beside a live one', async () => {
+    // Same app, same options, each configuration built by its own builder call
+    // (fresh nested definitions, fresh plugin instance) — what the refusal's
+    // remedy names for a suite that needs two stacks live at once.
+    const first = keep(await bootStack(app({ plugins: [new ProbePlugin('first')] })));
+    const second = keep(await bootStack(app({ plugins: [new ProbePlugin('second')] })));
+    expect([probeTag(first), probeTag(second)]).toEqual(['first', 'second']);
+  }, BOOT_TIMEOUT);
+
   it('a sequential re-boot works: boot, stop, boot', async () => {
     const own = new ProbePlugin('app');
     const config = app({ plugins: [own] });

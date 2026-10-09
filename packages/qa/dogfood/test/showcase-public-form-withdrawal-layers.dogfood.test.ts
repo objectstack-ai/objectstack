@@ -21,8 +21,8 @@
 //   - open at both layers (control): both doors accept.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 const VIEW = '/meta/view/showcase_inquiry.contact';
@@ -76,7 +76,7 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       orgContext: true,
       security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }),
     });

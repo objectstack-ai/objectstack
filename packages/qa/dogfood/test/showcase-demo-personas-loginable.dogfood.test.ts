@@ -57,7 +57,7 @@
 // ## Why this boot passes `onEnable`
 //
 // The persona bootstrap is an `onEnable` → `kernel:bootstrapped` hook, and
-// `bootStack(showcaseStack)` passes only the DEFAULT export, so the hook never
+// `bootShowcase()` passes only the DEFAULT export, so the hook never
 // runs in the ordinary dogfood boot. Spreading the stack and re-attaching
 // `onEnable` is what makes this boot the one a `pnpm dev:showcase` operator
 // actually gets (`AppPlugin` resolves the hook owner off the bundle).
@@ -70,7 +70,9 @@ import {
   AUDITOR_DEMO_USER,
   DEMO_PERSONA_PASSWORD,
 } from '@objectstack/example-showcase/security-personas';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 const SYS = { isSystem: true } as const;
@@ -99,7 +101,7 @@ describe('showcase demo personas are real logins (#9308 fixture 1)', () => {
     )[0];
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseBundleWithHook, { security: showcaseAppDefaultSecurity() });
+    stack = await bootShowcase({ security: showcaseAppDefaultSecurity() }, showcaseBundleWithHook);
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
     adminId = String((await userByEmail(ADMIN_EMAIL))?.id ?? '');

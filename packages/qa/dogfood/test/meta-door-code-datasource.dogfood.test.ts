@@ -42,7 +42,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
 import { registerDatasourceAdminRoutes } from '@objectstack/service-datasource';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -102,7 +103,7 @@ describe('[#21899] the metadata door answers a code-defined datasource as read-o
     },
   });
   const boot = async () => {
-    stack = await bootStack(showcaseStack, { databaseFile: join(dir, 'showcase.db'), extraPlugins: [routes()] });
+    stack = await bootShowcase({ databaseFile: join(dir, 'showcase.db'), extraPlugins: [routes()] });
     token = await stack.signIn();
   };
   const restart = async () => {

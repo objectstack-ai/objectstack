@@ -49,8 +49,8 @@
 //     re-arming every artifact an administrator had switched off.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 // The showcase declares `connectors:` bound to these providers, and the
 // automation service REFUSES TO START without their factories (ADR-0097) —
 // exactly as `objectstack dev` would. Only the automation-carrying boot needs
@@ -105,7 +105,7 @@ describe('#12359 — actions and NO automation service: the ledger is there', ()
     beforeAll(async () => {
         // The exact boot #12359 measured: no `automation` option, so
         // `@objectstack/service-automation` is not composed at all.
-        stack = await bootStack(showcaseStack);
+        stack = await bootShowcase();
         token = await stack.signIn();
     }, 120_000);
 
@@ -211,7 +211,7 @@ describe('#12159 Part 1 — a composition WITH automation: flows and actions bot
     beforeAll(async () => {
         prevCwd = process.cwd();
         process.chdir(SHOWCASE_DIR);
-        stack = await bootStack(showcaseStack, {
+        stack = await bootShowcase({
             automation: true,
             extraPlugins: [
                 new ConnectorRestPlugin(),

@@ -495,13 +495,15 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   // ── /automation (dispatcher-mounted; runtime domains/automation.ts) ─────
   //
   // The gate is DOMAIN-WIDE and sits ahead of the `isServiceServeable` probe on
-  // purpose: this stack installs no `@objectstack/service-automation`, so the
-  // domain's own answer here is 501. If the gate ran after the probe, anonymous
-  // and authenticated callers would both get 501 and the 401/501 difference
-  // would fingerprint whether a deployment mounts automation at all. The
-  // authenticated 501 case below is what gives these three cases their teeth:
-  // in this one process, the same route answers 401 to anonymous and 501 to a
-  // member, so the 401 can only be the gate's answer.
+  // purpose: if the gate ran after the probe, a deployment without
+  // `@objectstack/service-automation` would answer 501 to anonymous and
+  // authenticated callers alike, and the 401/501 difference would fingerprint
+  // whether it mounts automation at all. [#22301] This stack is the SERVED
+  // composition — `bootStack` mounts what `objectstack serve` mounts, and the
+  // showcase's `requires` names `automation` — so the domain's own answer to a
+  // member is 200. The authenticated case below is what gives these three cases
+  // their teeth: in this one process, the same route answers 401 to anonymous
+  // and 200 to a member, so the 401 can only be the gate's answer.
   it('anonymous POST /automation/:name/trigger is denied (401)', async () => {
     const r = await anon('POST', `/automation/${FLOW}/trigger`, { recordId: 'anon-probe-id' });
     expect(r.status, 'anonymous flow trigger must be 401').toBe(401);
@@ -521,14 +523,20 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'anonymous flow deregistration must be 401').toBe(401);
   });
 
-  it('an authenticated caller reaches the domain, which answers 501 — not 401', async () => {
+  it('an authenticated caller reaches the domain, which answers 200 — not 401', async () => {
+    // [#22301] The served composition: the showcase's `requires: ['automation']`
+    // mounts the service, as `objectstack serve` does.
+    expect(
+      stack.kernel.hasPlugin('com.objectstack.service-automation'),
+      'the showcase requires automation, so the served composition mounts it',
+    ).toBe(true);
     const r = await stack.apiAs(memberToken, 'GET', '/automation/_status');
     expect(r.status, 'authenticated flow-inventory read must clear the auth gate').not.toBe(401);
-    // The domain's OWN answer on a stack with no automation service. Asserting
-    // it (rather than only `.not.toBe(401)`) is what proves the anonymous 401
-    // above is produced by the gate and not by the domain: drop the gate and
-    // the anonymous cases collapse onto THIS status.
-    expect(r.status, 'no @objectstack/service-automation is installed on this boot').toBe(501);
+    // The domain's OWN answer on a stack with the automation service mounted.
+    // Asserting it (rather than only `.not.toBe(401)`) is what proves the
+    // anonymous 401 above is produced by the gate and not by the domain: drop
+    // the gate and the anonymous cases collapse onto THIS status.
+    expect(r.status, 'the mounted automation domain answers the member').toBe(200);
   });
 
   // ── /packages (dispatcher-mounted; runtime domains/packages.ts) — #7033/#7023 ─

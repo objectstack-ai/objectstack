@@ -58,7 +58,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 
 /** The datasource the showcase federates from; also the driver's registered name. */
@@ -133,7 +134,7 @@ describe('[#8414] background sweeps do not project phantom columns off a federat
     // Provision the "remote" fixture database (the separate SQLite file the
     // declared external datasource auto-connects to at boot).
     await onEnable({ logger: { info() {}, warn() {} } } as never);
-    stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
+    stack = await bootShowcase({ multiTenant: 'posture-only' });
     ql = stack.kernel.getService<IObjectQLEngine>('objectql');
     engine = ql as unknown as EngineTestSurface;
 

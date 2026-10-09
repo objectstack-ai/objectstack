@@ -41,8 +41,8 @@
 // prove nothing.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { securityObjects, computePermissionSetDriftDiagnostics } from '@objectstack/plugin-security';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -126,7 +126,7 @@ describe('[#21860] Discard Overlay refuses every set no code package ships, with
         process.chdir(SHOWCASE_DIR);
         dir = mkdtempSync(join(tmpdir(), 'dogfood-21860-'));
         dbFile = join(dir, 'showcase.db');
-        stack = await bootStack(showcaseStack, { databaseFile: dbFile });
+        stack = await bootShowcase({ databaseFile: dbFile });
         token = await stack.signIn();
         ql = await stack.kernel.getServiceAsync('objectql');
 
@@ -187,7 +187,7 @@ describe('[#21860] Discard Overlay refuses every set no code package ships, with
 
         // The cold boot that makes the legacy row a real overlay.
         stack = undefined;
-        stack = await bootStack(showcaseStack, { databaseFile: dbFile });
+        stack = await bootShowcase({ databaseFile: dbFile });
         token = await stack.signIn();
         ql = await stack.kernel.getServiceAsync('objectql');
 

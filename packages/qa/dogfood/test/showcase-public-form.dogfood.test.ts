@@ -17,15 +17,15 @@
 // authz-row: public-form-managed-anchors
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 describe('showcase: web-to-lead public form (ADR-0056 Option A)', () => {
   let stack: VerifyStack;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       security: new SecurityPlugin({
         defaultPermissionSets: [...securityDefaultPermissionSets],
       }),

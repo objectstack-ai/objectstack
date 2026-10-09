@@ -51,7 +51,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { resolveInjectedColumnProvenance } from '@objectstack/metadata-core';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -83,7 +84,7 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
     // harness imports only the stack's default export, so `onEnable` never
     // runs on its own).
     await onEnable({ logger: { info() {}, warn() {} } } as never);
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       orgContext: true,
       databaseFile: join(dir, 'showcase.db'),
     });

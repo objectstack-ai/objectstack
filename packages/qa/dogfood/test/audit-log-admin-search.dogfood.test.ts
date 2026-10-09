@@ -26,8 +26,8 @@
 // change to it is a verdict on its last build. ⚠️ No test title states a value.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
 import { assertArmed, armedWhen } from './armed.js';
@@ -56,7 +56,7 @@ describe('[#21154] the stock admin searches the ledger and the activity stream w
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack as unknown as Parameters<typeof bootStack>[0], {
+    stack = await bootShowcase({
       extraPlugins: [new AuditPlugin(), new ApprovalsServicePlugin()],
     });
     adminToken = await stack.signIn();

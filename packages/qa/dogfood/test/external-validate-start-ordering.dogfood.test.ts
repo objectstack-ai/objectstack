@@ -41,7 +41,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
 import { ExternalDatasourceServicePlugin, resolveSqliteDriver } from '@objectstack/service-datasource';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -96,7 +97,7 @@ describe('federation on a composition with no metadata plugin (the objectstack s
     // runs on its own), then drift one column away.
     await onEnable({ logger: { info() {}, warn() {} } } as never);
     await driftRemoteCustomers();
-    stack = await bootStack(showcaseStack, { extraPlugins: [new ExternalDatasourceServicePlugin()] });
+    stack = await bootShowcase({ extraPlugins: [new ExternalDatasourceServicePlugin()] });
     token = await stack.signIn();
   }, 180_000);
 

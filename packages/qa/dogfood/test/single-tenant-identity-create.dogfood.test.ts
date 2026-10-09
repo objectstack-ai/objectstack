@@ -23,15 +23,15 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 describe('ADR-0057: org-scoped identity creatable single-tenant', () => {
   let stack: VerifyStack;
   let token: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {}); // single-tenant: no org-scoping; the Default Organization exists from the boot
+    stack = await bootShowcase({}); // single-tenant: no org-scoping; the Default Organization exists from the boot
     token = await stack.signIn();
   }, 120_000);
 

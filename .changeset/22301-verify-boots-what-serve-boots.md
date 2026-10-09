@@ -22,7 +22,7 @@ Clause-②: yes (narrowing)
 
 **What now fails that booted before (the narrowing).**
 
-- **A second live boot of the same configuration object is refused** with `code: 'RESOURCE_CONFLICT'`, `status: 409`, and so is a copy (`{ ...config }`) that carries an app-plugin instance a live boot mounted: the instances in a `plugins` array are module-level, and two kernels must not share them. Live means until `stop()` resolves. Remedy: `stop()` the first stack before booting again, or share one boot with `bootStackOnce(config, opts)`.
+- **A second live boot of the same configuration object is refused** with `code: 'RESOURCE_CONFLICT'`, `status: 409`, and so is a copy (`{ ...config }`) that carries an app-plugin instance a live boot mounted: the instances in a `plugins` array are module-level, and two kernels must not share them. Live means until `stop()` resolves. Remedy: `stop()` the first stack before booting again; or share one boot with `bootStackOnce(config, opts)`; or, to keep two stacks of one app live at once, boot the second on a configuration built again (call its builder once more, or import a fresh module instance of it). A `{ ...config }` spread is not a configuration of its own: a live boot keeps references into the configuration's nested definitions.
 - **An app `plugins` entry that cannot be loaded or registered fails the boot**, naming the entry (`plugins[i]`) and its remedy. `serve` logs such an entry and boots on; a test boot does not, so a plugin the app declares is never silently absent from its tests.
 - **A provider or app plugin that refuses to start fails the boot** where the fixed plugin set never mounted it — for example a declarative connector whose package-relative file ref does not resolve from `hostRoot`.
 

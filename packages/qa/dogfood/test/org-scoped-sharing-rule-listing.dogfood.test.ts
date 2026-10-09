@@ -38,8 +38,8 @@
 // @proof: org-scoped-sharing-rule-listing
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
@@ -71,7 +71,7 @@ describe('#7676 — package-seeded (org-less) sharing rules stay visible to an O
   let admin: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { orgContext: true });
+    stack = await bootShowcase({ orgContext: true });
     admin = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
   }, 120_000);

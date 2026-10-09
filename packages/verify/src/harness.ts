@@ -572,9 +572,20 @@ function instanceRuleRefusal(message: string): Error {
   return Object.assign(new Error(message), { code: 'RESOURCE_CONFLICT', status: 409 });
 }
 
+// [#22301] Three remedies, and the third is spelled by a measurement: a boot
+// keeps live references into the configuration's nested definitions (the
+// registry stores each object as a shallow copy whose field definitions are
+// the authored objects — `@objectstack/objectql` `registry.ts`,
+// `definition: { ...schema, name: fqn }`; and the engine's `registerApp` writes
+// `objDef.name` into a map-form `objects` entry in place). So a `{ ...config }`
+// spread is NOT a configuration of its own, and the remedy names building it
+// again instead.
 const INSTANCE_RULE_REMEDY =
-  'stop() the live stack before booting this configuration again, or share it: bootStackOnce(config, opts) ' +
-  'hands every caller with the same config and options object the one boot.';
+  'stop() the live stack before booting this configuration again; or share it: bootStackOnce(config, opts) ' +
+  'hands every caller with the same config and options object the one boot; or, to keep two stacks live at ' +
+  'once, boot the second on a configuration of its own, BUILT AGAIN (call its builder once more, or import a ' +
+  'fresh module instance of it), never a `{ ...config }` copy, which shares the nested definitions and plugin ' +
+  'instances a live boot holds.';
 
 /** One boot's hold on its configuration and on the app-plugin instances it mounts. */
 interface ConfigurationClaim {
@@ -594,7 +605,8 @@ function claimConfiguration(config: unknown): ConfigurationClaim {
     throw instanceRuleRefusal(
       `verify: configuration ${configurationLabel(config)} already has a live bootStack kernel in this process. ` +
         'One configuration supports one live kernel at a time: the plugins in its own `plugins` array are ' +
-        'module-level instances, and a second kernel would mount the same instances. ' +
+        'module-level instances, and a live kernel holds references into its nested definitions, so a second ' +
+        'kernel would share both. ' +
         INSTANCE_RULE_REMEDY,
     );
   }
@@ -669,6 +681,12 @@ function claimConfiguration(config: unknown): ConfigurationClaim {
  * mounted. Live means from the call until `stop()` resolves, or until the boot
  * fails. Booting again after `stop()` is fine, and {@link bootStackOnce}
  * shares one boot among callers instead of starting a second.
+ *
+ * A suite that needs two stacks of one app live at once (two postures, two
+ * option sets) boots the second on a configuration of its own, BUILT AGAIN —
+ * its builder called once more, or a fresh module instance of the module that
+ * exports it. A `{ ...config }` spread is not one: a live boot holds references
+ * into the configuration's nested definitions as well as its plugin instances.
  */
 export async function bootStack(
   config: any,

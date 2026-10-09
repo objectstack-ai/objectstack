@@ -45,8 +45,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 
 const SYSTEM_CTX = { isSystem: true };
@@ -78,7 +78,7 @@ describe('#8145: a settings write reaches sys_audit_log as config_change', () =>
   const WORKSPACE_NAME = 'ObjectStack 8145';
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { extraPlugins: [new AuditPlugin()] });
+    stack = await bootShowcase({ extraPlugins: [new AuditPlugin()] });
     token = await stack.signIn(); // the seeded dev admin (platform admin)
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 

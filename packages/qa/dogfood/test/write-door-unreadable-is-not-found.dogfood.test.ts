@@ -44,29 +44,40 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import {
-  AttCase,
-  AttSecret,
-  AttReadonly,
+  buildAttCase,
+  buildAttSecret,
+  buildAttReadonly,
   attFixtureBaselineSet,
   attachmentManagerSet,
 } from './fixtures/attachments-fixture.js';
-import { CmtOpen, CmtPrivate, CmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
+import { buildCmtOpen, buildCmtPrivate, buildCmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
 import { armedWhen, assertArmed, leaveOrganization, principalArmed, resolveAuthzFor } from './armed.js';
 
 const SYS = { isSystem: true } as const;
 const RECORD_SENTENCE = BUILTIN_OPERATION_MESSAGES.en.record_access_denied!;
 
-const stackDefinition = defineStack({
-  manifest: {
-    id: 'com.dogfood.write-door-unreadable-is-not-found',
-    version: '0.0.0',
-    type: 'app',
-    name: 'Write door: an unreadable row is a missing row',
-    description:
-      'Open, private and read-only parents for sys_attachment and sys_comment: the by-id write answer for a row the caller cannot read, beside the answer for a missing id.',
-  },
-  objects: [AttCase, AttSecret, AttReadonly, CmtOpen, CmtPrivate, CmtReadonly],
-});
+/**
+ * [#22301] A BUILDER, called once per boot: this file keeps two stacks live at
+ * once (outside and inside the organization), and `bootStack`'s instance rule
+ * refuses a second live boot of one configuration object. A shallow copy would
+ * not be a configuration of its own — a boot keeps live references into the
+ * nested definitions it registers (the registry stores each object as a shallow
+ * copy whose field definitions are the authored objects:
+ * `packages/objectql/src/registry.ts`, `definition: { ...schema, name: fqn }`) —
+ * so every nested definition is built again.
+ */
+const buildStackDefinition = () =>
+  defineStack({
+    manifest: {
+      id: 'com.dogfood.write-door-unreadable-is-not-found',
+      version: '0.0.0',
+      type: 'app',
+      name: 'Write door: an unreadable row is a missing row',
+      description:
+        'Open, private and read-only parents for sys_attachment and sys_comment: the by-id write answer for a row the caller cannot read, beside the answer for a missing id.',
+    },
+    objects: [buildAttCase(), buildAttSecret(), buildAttReadonly(), buildCmtOpen(), buildCmtPrivate(), buildCmtReadonly()],
+  });
 
 function security(): SecurityPlugin {
   return new SecurityPlugin({
@@ -98,7 +109,7 @@ interface Booted {
  */
 async function boot(inside: boolean, email: string): Promise<Booted> {
   const rootDir = mkdtempSync(join(tmpdir(), 'write-door-nf-'));
-  const stack = await bootStack(stackDefinition as never, {
+  const stack = await bootStack(buildStackDefinition() as never, {
     orgContext: inside,
     security: security(),
     extraPlugins: [

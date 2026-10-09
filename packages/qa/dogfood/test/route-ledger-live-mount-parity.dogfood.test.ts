@@ -57,8 +57,8 @@
 // {@link UNEXERCISED_BY_THIS_BOOT}.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 
 // `.js` on the relative source imports: without it `moduleResolution: nodenext`
@@ -170,7 +170,7 @@ describe('route ledger ↔ live mount parity (#7526)', () => {
   let ledgerRows: LedgerRow[];
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       // Boot as WIDE as this gate can, so as few rows as possible have to be
       // pinned: every plugin added here converts a pin into a measurement.
       // `StorageServicePlugin` alone converts ten — the whole storage ledger,
