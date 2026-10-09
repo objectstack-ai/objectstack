@@ -159,8 +159,8 @@ export function declaringTimeRelativeFlow(organizationId: string, recipientId: s
         config: {
           topic: 'sched.due',
           recipients: [recipientId],
-          title: 'Due soon: {record.name}',
-          message: '{record.name} is due.',
+          title: 'Due soon: {{ record.name }}',
+          message: '{{ record.name }} is due.',
           channels: ['inbox'],
           sourceObject: 'sched_org_target',
           sourceId: '{record.id}',
