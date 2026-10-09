@@ -75,12 +75,80 @@ describe('detectFreeIdentifiers (#1876 — body self-containment)', () => {
     }
   });
 
+  // A renamed destructuring key — `const { previous: prev } = ctx` — reads
+  // `previous` OFF `ctx`; the only name it introduces is `prev`. The key is a
+  // property name exactly like the `key` of `{ key: value }`, so counting it as
+  // a free identifier refused a self-contained handler (and bundled it), with
+  // advice — "reach them through `ctx`" — describing what it already did.
+  describe('a destructuring KEY is not a reference; its alias is the binding', () => {
+    const lowerable: Array<[string, string]> = [
+      [
+        'a renamed key off ctx, beside shorthand keys',
+        "(ctx) => { const { event, input, previous: prev } = ctx; if (event === 'beforeUpdate' && prev) input.n = prev.n; }",
+      ],
+      ['a nested renamed pattern', '(ctx) => { const { a: { b: c } } = ctx; return c; }'],
+      [
+        'a defaulted alias whose default is in scope',
+        '(ctx) => { const d = ctx.fallback; const { key: alias = d } = ctx; return alias; }',
+      ],
+      [
+        'a computed key and a default, both in scope',
+        '(ctx) => { const k = ctx.k; const d = 0; const { [k]: v = d } = ctx; return v; }',
+      ],
+      // The same element shape reached two other ways.
+      ['an object pattern inside an array pattern', '(ctx) => { const [{ previous: prev }] = ctx.items; return prev; }'],
+      ['a nested callback parameter', '(ctx) => ctx.items.map(({ previous: prev }) => prev.n)'],
+      ['a catch-clause pattern', '(ctx) => { try { ctx.run(); } catch ({ message: msg }) { ctx.log = msg; } }'],
+      // No key at all: elements are bound by position, so nothing to mistake.
+      ['an array pattern', '(ctx) => { const [first, second] = ctx.items; return first + second; }'],
+    ];
+    for (const [label, source] of lowerable) {
+      it(label, () => {
+        const r = detectFreeIdentifiers(source);
+        expect(r.unparsed).toBe(false);
+        expect(r.free).toEqual([]);
+      });
+    }
+
+    // The controls: what the element still READS is still judged. Only the key
+    // stopped counting — a default or a computed key that names something out
+    // of scope is as free as it ever was.
+    it('a defaulted alias whose default is free is still reported', () => {
+      const r = detectFreeIdentifiers('(ctx) => { const { key: alias = FALLBACK } = ctx; return alias; }');
+      expect(r.free).toEqual(['FALLBACK']);
+    });
+
+    it('a shorthand element whose default is free is still reported', () => {
+      const r = detectFreeIdentifiers('(ctx) => { const { previous = FALLBACK } = ctx; return previous; }');
+      expect(r.free).toEqual(['FALLBACK']);
+    });
+
+    it('a computed key that is free is still reported', () => {
+      const r = detectFreeIdentifiers('(ctx) => { const { [KEY]: v } = ctx; return v; }');
+      expect(r.free).toEqual(['KEY']);
+    });
+
+    it('a genuinely free `previous` (no ctx source) is still reported', () => {
+      const r = detectFreeIdentifiers('(ctx) => { const prev = previous; ctx.input.n = prev.n; }');
+      expect(r.free).toEqual(['previous']);
+    });
+  });
+
   describe('real compiled `.toString()` shapes', () => {
     it('does not flag a self-contained closure', () => {
       const handler = (ctx: any) => {
         const name = String(ctx.record.name ?? '').trim();
         ctx.record.slug = name.toLowerCase().replace(/\s+/g, '-');
       };
+      expect(detectFreeIdentifiers(src(handler)).free).toEqual([]);
+    });
+
+    it('does not flag a renamed destructuring key after the compiler has had it', () => {
+      const handler = (ctx: any) => {
+        const { event, input, previous: prev } = ctx;
+        if (event === 'beforeUpdate' && prev) input.n = prev.n;
+      };
+      expect(src(handler)).toContain('previous: prev');
       expect(detectFreeIdentifiers(src(handler)).free).toEqual([]);
     });
   });
