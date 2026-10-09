@@ -33,8 +33,8 @@ import {
   STRING_ARM_REGISTERED_TYPES,
 } from './component-type-vocabulary';
 
-const TYPE = 'record:approval_decision';
-const ROW = () => (ComponentPropsMap as Record<string, (typeof ComponentPropsMap)['nav:menu']>)[TYPE];
+const TYPE = 'record:approval_decision' as const;
+const ROW = () => ComponentPropsMap[TYPE];
 
 const requestPage = (component: Record<string, unknown>) => ({
   name: 'approval_request_detail',
@@ -73,8 +73,7 @@ describe('the type is declared, spec first', () => {
 
 describe('the row is an empty strict object', () => {
   it('declares no key', () => {
-    const shape = (ROW() as unknown as { shape: Record<string, unknown> }).shape;
-    expect(Object.keys(shape)).toEqual([]);
+    expect(Object.keys(ROW().shape)).toEqual([]);
   });
 
   it('accepts the empty bag at every door: the row, the node, the page', () => {
