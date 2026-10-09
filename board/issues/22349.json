@@ -2,8 +2,8 @@
   "number": 22349,
   "kind": "issue",
   "title": "finding(service-storage): parallel chunk PUTs to one upload can each pass the upload-size limit against the same stale total, so the backend can briefly hold more bytes than the limit",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:files",
     "bug",
     "domain:services",
-    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T19:53:25Z",
-  "updated_at": "2026-10-08T20:12:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T00:29:08Z",
+  "closed_at": "2026-10-09T00:28:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22349",
   "body": "Filing gate: **① a product defect, class (b): a configured limit that is not honoured under concurrency.** reach: read from source on PR #22348's head `006344eb50` (the chunk door after objectstack-ai/objectstack#22332's fix). It is not measured at runtime; the claimant measures first.\n\nRaised by objectstack-ai/objectstack#22332's dev in its report on PR #22348 (out of scope there, noted in the PR's Acceptance notes). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`, which read the source. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Read from source\n\n- **The check:** `service-storage`'s chunk door (`PUT /storage/upload/chunked/:uploadId/chunk/:chunkIndex`, `storage-routes.ts`) judges `maxUploadBytes` (objectstack-ai/objectstack#22283) against `bytesHeldByOtherChunks(parts, chunkIndex, uploaded_size)`, computed from the session row **as the door read it**. It checks before the backend stores the chunk and before the progress write.\n- **Under concurrency:** two or more chunk PUTs to one upload that read the same record each pass the check against the same total. Each stores its bytes in the backend. Together they can take the upload past the limit by up to the chunks in flight at once.\n- **What still holds:** the completion door (PR #22330) refuses any upload whose held bytes differ from its declared size, and the declared size is bounded by the limit at init. So no assembled file exceeds the limit; the overshoot is transient backend bytes on an upload that cannot complete.\n- PR #22348 makes the progress write a compare-and-set with a re-read-and-merge retry. That retry does not re-judge the limit against the fresh record, and neither did the unconditional write it replaces.\n\n## Direction (for triage)\n\n- Measure first: with a limit set, N parallel chunk PUTs whose sum crosses it. Count how many are admitted and what the backend holds before the completion.\n- Then decide whether the transient overshoot needs a fix, given the completion refusal. If it does, the re-read in PR #22348's retry loop already holds the fresh record, but a refusal there comes after the bytes are stored, so the fix shape is the claimant's to measure.\n- Grade it on measured reach. Serial behind PR #22348 (same function) and objectstack-ai/objectstack#22314 (the same doors' size-refusal code).\n\nDedupe: MCP `search_issues` 「chunk upload maxUploadBytes concurrent parallel chunk PUT stale total limit overshoot」 gave 2 hits: objectstack-ai/objectstack#22332 (the lost part record, fixed by PR #22348) and objectstack-ai/objectstack#22313 (closed, the resumed-upload completion). Neither is this.\n\nDedupe words: chunk door upload limit concurrent stale total · maxUploadBytes parallel chunk PUT overshoot · bytesHeldByOtherChunks race"

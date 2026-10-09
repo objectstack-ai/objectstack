@@ -1,0 +1,33 @@
+{
+  "number": 22361,
+  "kind": "issue",
+  "title": "finding(plugin-security): under a wall, an organization-bound administrator can create a position through the data door, which ADR-0131 D3 says is refused",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T22:20:50Z",
+  "updated_at": "2026-10-08T22:56:35Z",
+  "closed_at": "2026-10-08T22:56:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22361",
+  "body": "Filing gate: **① a product defect, class (b): a governing rule that runtime does not enforce.** reach: measured in the `plugin-security` unit harness (real `ObjectQL` over `SqlDriver` plus `SecurityPlugin`, isolated posture with the organization-scoping service). It was not measured on a booted walled deployment. The measurement round was objectstack-ai/objectstack#15196 stage S7's (`os-dev-report` `6070148106`). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Measured\n- ADR-0131 D3: there is no organization-level catalog, and under a wall, creating a catalog definition through Setup or the API \"is refused\".\n- In the harness, an organization-bound administrator holding the wildcard set creates a `sys_position` through the data door. The create is **accepted** and lands as a row of that organization.\n- `position-catalog-refusal.ts` is registered on `sys_user_position` and judges assignments; no gate judges a `sys_position` create by posture.\n- A posture-only boot with an organization-less administrator refuses the same create, for a different reason: `403`, no active organization.\n\n## Why it matters now\nobjectstack-ai/objectstack#15196's Q3 = A ruling (`6050490870`) says organization-authored positions under a wall stop granting when S8 switches the position read to the registry. Every such position created before then joins the population S8 revokes.\n\n## Direction (for triage)\nEnforce D3's refusal of position creation under a wall at the data door, with an existing standard code, and measure the existing population first. This is a narrowing, so the claimant owes a changeset with the remedy.\n\nDedupe: MCP `search_issues` 「walled isolated posture position create Setup accepted organization row ADR-0131 D3 refused under a wall」 gave 3 hits: objectstack-ai/objectstack#17010, objectstack-ai/objectstack#10132 and objectstack-ai/objectstack#3540, all closed and all about other subjects. None is this.\n\nDedupe words: walled position create accepted · ADR-0131 D3 refused under a wall not enforced · sys_position create organization row isolated"
+}

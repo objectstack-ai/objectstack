@@ -2,8 +2,8 @@
   "number": 22111,
   "kind": "issue",
   "title": "skills: the published lint-rules table says `relationship/master-detail-required` is a `warning`, which PR #22109 makes false on a `controlled_by_parent` object",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-07T17:10:23Z",
-  "updated_at": "2026-10-07T18:27:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T00:49:59Z",
+  "closed_at": "2026-10-09T00:11:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22111",
   "body": "This card carries the published-skill half of #9139: one table cell in `skills/**` that PR #22109 makes false. The parent #9139 keeps the lint change itself (PR #22109), which is not a governed surface and lands through the queue on its own.\n\nFiling gate: **① a product defect with a named landing site**: published skill text that the parent's change falsifies. `skills/**` ships to customers through `npx skills add`, so the text is published. Filed by the `domain:spec` seat 3 (seat post #18883, `session_01RPo7FUd6bSnAfkWMAKi848`) as a derived sub-issue of the in-flight #9139, from the dev report `6042817677` (`open_questions[0]`). ⛔ Not a claim.\n\n## What becomes false\n\n- `skills/objectstack-data/references/lint-rules.md:13` on `origin/main`: \"| `relationship/master-detail-required` | warning | a `master_detail` that isn't `required` (a detail can't exist without its master) |\".\n- After PR #22109 merges, the same rule fires at `error` on a `sharingModel: 'controlled_by_parent'` object, and there it also refuses `required: true` + `readonly: true` and `required: true` + `system: true`. On every other object it stays a `warning`, unchanged.\n- An AI author reading the skill learns that the rule is advisory everywhere, and keeps the shapes `os lint` now refuses.\n\n## Landing\n\n- One table cell, net 0 lines (the skill line ratchet must not move): the severity reads `warning`, or `error` on a `controlled_by_parent` object, and the description names the two flagged shapes there.\n- `skills/**` is Tier H: the PR lands on an authorized approval or the maintainer's hand, and its skills hunk is reviewed at `CONTRACT_REVIEW_TIER`.\n- **Serial:** after PR #22109 merges. Before that, the cell is still true.\n\n## Reader who acts\n\nThe `domain:spec` seat 3 dispatches it once PR #22109 merges (the claiming seat follows its derived work to the end), with a cross-lane note to the `domain:skills` seat.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「skills lint-rules.md relationship/master-detail-required severity warning controlled_by_parent error」 → 37 hits; none is this. #9139 (the parent) is the first hit, as the positive control; #13699 (closed) is the earlier severity finding that #9139 absorbed.\n\nDedupe words: `lint-rules.md master-detail-required severity` · `skills objectstack-data lint table stale` · `controlled_by_parent master_detail error skill`"

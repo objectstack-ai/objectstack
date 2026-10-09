@@ -1,0 +1,36 @@
+{
+  "number": 22370,
+  "kind": "pull_request",
+  "title": "docs(skills): lint-rules table states both tiers of relationship/master-detail-required",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T23:16:11Z",
+  "updated_at": "2026-10-09T00:51:11Z",
+  "closed_at": "2026-10-09T00:11:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-09T00:11:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22370",
+  "body": "Fixes #22111\n\nClause-②: no\n\nThe published `objectstack-data` skill's lint-rules table said `relationship/master-detail-required` is a `warning` everywhere. Since the lint change that landed with the parent card (#9139, PR #22109), that is false on one class of object. This PR changes that one table row so both cells are true in both cases, in the table's own terse style.\n\n## The row\n\nBefore (`skills/objectstack-data/references/lint-rules.md:13`):\n\n```\n| `relationship/master-detail-required` | warning | a `master_detail` that isn't `required` (a detail can't exist without its master) |\n```\n\nAfter:\n\n```\n| `relationship/master-detail-required` | warning; error under `controlled_by_parent` | a `master_detail` that isn't `required` — or, under `controlled_by_parent`, is `readonly`/`system` |\n```\n\n## What the rule does on `main` (verified in code, each fact at its line)\n\n- `packages/lint/src/data-model-rules.ts:256` — one rule id, `relationship/master-detail-required`, on both tiers.\n- `:863` — the tier is chosen by `obj.sharingModel === 'controlled_by_parent'`.\n- `:324-325`, `:344` — on a `controlled_by_parent` object the finding is `severity: 'error'` whenever `required !== true`, or `readonly: true`, or `system: true` (so `required: true` + `readonly: true` and `required: true` + `system: true` are refused there).\n- `:866-868` — on every other object only `required !== true` fires, at `severity: 'warning'`, unchanged.\n- Pinned by `packages/lint/src/data-model-rules.master-detail-required.test.ts:52-57` (the three unsafe shapes at `error`) and `:111-131` (`private` / `public_read` / `public_read_write` / unset: still a `warning`; `readonly`/`system` draw nothing there).\n\n## Budget — the file sat at its token ceiling\n\n`scripts/check-skills-token-ratchet.mjs` holds this file at 970 tokens and it was at 970/970 (headroom 0), so a longer row cannot land without deleting content in the same file. The payment is the intro clause \"not just naming/labels but the relationship/master-detail/roll-up patterns\", which duplicated the table's own heading \"Data-model rules (in addition to naming/label/i18n)\"; the row also drops its parenthetical rationale. Re-wrapped so the file keeps its line count.\n\n| reading | before | after |\n|---|---|---|\n| lines | 53 | 53 (net 0) |\n| bytes | 3880 | 3856 |\n| tokens (`ceil(bytes/4)`, ceiling 970) | 970 (headroom 0) | 964 (headroom 6) |\n| the row, bytes | 136 | 191 |\n\n`scripts/pm/check-skill-line-ratchet.mjs` does not cover the published `skills/` root (its header says so by design), so the token ratchet is the only ratchet on this file; it stays green and its ceiling row is untouched.\n\n## Scope check inside the skill\n\nThe only other sentence in `skills/objectstack-data/**` that speaks to this rule's severity is `rules/relationships.md:16` — \"Forced only under `controlled_by_parent`; else lint-warned\". That is true as written (the builder forces `required` under `controlled_by_parent`; the lint warning is the other case), so it is left alone.\n\n## Changeset\n\n`skills/**` is in no released package's `files[]` (no `package.json` under `packages/` names it; the catalog ships through `npx skills add` from this repo), so this diff publishes nothing from any released package: no `.changeset/*.md`, and the `skip-changeset` label is the repo's skip form.\n\n## Gates\n\nDerived from the merge base at `6dc260aae` with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (24 families), each run with its exit code captured before any pipe, then reconciled with `--ran`: `24 derived, 24 run, 0 NOT-MEASURED, 0 UNRUN`.\n\n- 23 of 24 exit 0 on the first pass. `pnpm --filter @objectstack/lint run check:doc-formula-expressions` exited 3 (PREREQUISITE NOT MET: `@objectstack/formula` and `@objectstack/lint` not built); after the gate's own fix line, `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint`, under the verify lock (`VERDICT command-exit 0`, held 161s, waited 0s), it exits 0 — \"22 record-scoped formula example(s) across 471 files / 1384 TS blocks judged clean\".\n- `node scripts/check-skills-token-ratchet.mjs` exit 0 — \"skills/objectstack-data/references/lint-rules.md is 964 tokens (ceiling 970; headroom 6)\"; its `--self-test` exit 0.\n- `pnpm --filter @objectstack/spec run check:skill-refs` exit 0 (it generates `references/_index.md` from the Zod map, not from this file, so nothing to regenerate).\n- `pnpm check:nul-bytes` exit 0; a control-byte scan over the edited file finds none.\n- Artifact-roster block (the 52 families the derivation scores silent for every card): 47 exit 0. Three are PR-context guards that refuse without `PR_NUMBER`/`PR_BODY` — `check:partof-closing-keyword` re-run with this body exits 0; `check-closing-target-claim` and `check-single-claim-paths` are run against the PR once it exists, result in the report comment on the card. Two need a whole-tree `dist` (`check:dts-closure`, `check:published-readme-exports`: exit 3, PREREQUISITE NOT MET) — NOT MEASURED locally; a skills-only diff cannot move either roster and CI runs both.\n- `pnpm lint` (repo-level eslint) was not run locally; the diff is one `.md` file. CI owns that run.\n\n## Acceptance notes\n\n- The card's landing text assumed a line ratchet on `skills/**`; there is none — the binding gate was the token ratchet at zero headroom, which is why a one-cell change carries an intro-clause deletion.\n- Governed surface, Tier H (`skills/**`): this PR stays draft; landing waits for an authorized approval and the seat's contract-tier review of the skills hunk.\n\n## 维护者速读(草稿)\n\n- **改了什么:** 已发布的 `objectstack-data` 技能里,lint 规则表中 `relationship/master-detail-required` 这一行。原来只写 `warning`;现在写明:默认 `warning`,在 `controlled_by_parent` 对象上是 `error`,且在那里 `readonly`/`system` 的主从引用也会被拒。\n- **为什么改:** `os lint` 已经按两档执行(PR #22109 落地)。技能文本还在教\"到处都只是建议\",按它写出的 `controlled_by_parent` 明细对象会被 `os lint` 拒绝。文件已顶到 token 上限(970/970),所以多出来的字用删掉一句与表头重复的引言来付,行数不变。\n- **风险与代价(含回滚):** 纯文本改动,不碰代码、不发包、无 changeset。回滚即还原这一个文件的一次提交。\n- **席位意见:**\n- **你要做的:** 看一眼第 13 行这一行表述是否认可,认可就给一个批准。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RPo7FUd6bSnAfkWMAKi848)_\n"
+}

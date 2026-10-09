@@ -1,0 +1,34 @@
+{
+  "number": 22362,
+  "kind": "issue",
+  "title": "finding(service-automation): the unscoped-run refusal message and the run-setup warning say a user-less run \"would execute UNSCOPED\"; on a kernel with plugin-security that counterfactual is a 403 since ADR-0096 D5",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T22:23:40Z",
+  "updated_at": "2026-10-09T01:45:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22362",
+  "body": "Filing gate: **① a product defect with a named landing site: an author-facing runtime string that states something false on the common kernel.** reach: read from source at PR #22357's head `f3a9675f4b`. It was found by objectstack-ai/objectstack#22345's dev and escalated by that PR's contract review (`6070198297`). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Read from source\n- `service-automation`'s `UnscopedRunDataAccessError` message (`runtime-identity.ts`, the constructor near `:109`-`:113` on `main`) tells the flow author that a `runAs: 'user'` run with no trigger user \"would execute UNSCOPED (elevated, RLS-bypassing)\".\n- The run-setup warning (`engine.ts` near `:6133`-`:6135`) says the same.\n- Since ADR-0096 D5 (PR #22297), a kernel with `plugin-security` refuses such a context itself (`403 PERMISSION_DENIED`, every verb). The counterfactual is true only on a kernel with no security plugin.\n- The prescription in both strings is still right: declare `runAs: 'system'`, or arrange a trigger user. The refusal itself is right too: it runs first and names the run and the remedy.\n- Pins match the word: `crud-runas.test.ts` near `:238` and `schedule-runas-e2e.test.ts` near `:122` (`toMatch(/UNSCOPED/)`).\n\n## Direction (for triage)\nReword both strings so the counterfactual holds on both kernels: refused by the security plugin where one is composed, unscoped where none is. Keep the remedy. Move the two pins with the wording. Strings and tests only; no behaviour change.\n\nDedupe: MCP `search_issues` 「UnscopedRunDataAccessError message would execute UNSCOPED elevated RLS-bypassing D5 refuses」 gave 4 hits, objectstack-ai/objectstack#20275, objectstack-ai/objectstack#19874, objectstack-ai/objectstack#20158 and objectstack-ai/objectstack#2981. All are closed, and none is this.\n\nDedupe words: UnscopedRunDataAccessError message UNSCOPED counterfactual D5 · runAs warn would execute UNSCOPED · run-setup warning unscoped run refused"
+}

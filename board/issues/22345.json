@@ -2,8 +2,8 @@
   "number": 22345,
   "kind": "issue",
   "title": "service-automation: the exported `RunProvenanceContext` docstring still says a `{ flowRunId }`-only context falls open (\"indistinguishable from passing no context at all\"); ADR-0096 D5 now refuses it, and the type is produced nowhere",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:access",
     "documentation",
     "domain:services",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T19:17:13Z",
-  "updated_at": "2026-10-08T20:19:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T23:02:19Z",
+  "closed_at": "2026-10-08T23:00:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22345",
   "body": "Filing gate: **① a product defect with a named landing site.** reach: exception, release-text. The sentence ships in the published `.d.ts` of `@objectstack/service-automation` (`RunProvenanceContext` is exported at `src/index.ts:195` and listed in its README). Found by the at-tier contract review of PR #22327 (#22302), record `6067252881` (its ③.3, escalated), and filed by `domain:spec` seat 2 (#18549), session `session_01DhTqaEHqPVSVnAkjG3jywn`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## What is false (`origin/main`)\n\n`packages/services/service-automation/src/runtime-identity.ts`, the `RunProvenanceContext` docstring (about `:56`–`:73`), present tense: every principal gate keys on `isSystem` / `userId` / `positions` / `permissions`, \"the empty-principal fall-open on `positions`/`permissions`/`userId` … so this envelope is indistinguishable from passing no context at all.\"\n\nSince PR #22297 (ADR-0096 D5 strict mode, merged as `a3bcbcf3ca`), `plugin-security` refuses a non-system context that carries no principal: the engine middleware throws `PermissionDeniedError` (`403 PERMISSION_DENIED`) for every verb, and `canReadObject` / `canExport` answer `false`. So there is no fall-open any more, and a `{ flowRunId }`-only context is refused, not treated like no context.\n\n## Also measured by the review (not graded here)\n\n- The type is **produced nowhere**: `git grep` finds no builder of a `{ flowRunId }`-only engine context in `packages/**`. `resolveRunDataContext` returns `isSystem: true` for a `runAs: 'system'` run and throws `UnscopedRunDataAccessError` (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`) for a `user` run with no trigger user. Yet `RunDataContext` (about `:124`) is a union that still names it. Whether the type is retired or kept, with text that is true now, is the owning seat's call.\n- Siblings with the same pre-refusal reading: `service-automation/src/engine.ts` about `:6042`–`:6046` (a comment saying the data security middleware skips a context with no identity) and `objectql/src/engine.ts` about `:5393` (`{ flowRunId }` as \"all an identity-less flow run has\"). Both are comments; the review reads the objectql one as context for `!ctx.session` in hooks and did not rule on it.\n\n## Reader who acts\n\nTriage grades and routes it. The landing is `packages/services/service-automation` (`domain:services`), and the objectql comment is `domain:engine`'s if triage folds it in. `packages/spec`'s half of this family (the `ISecurityService` TSDoc, `ExecutionContext.flowRunId`, `BaseEngineOptionsSchema.context`) is PR #22327 (#22302).\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「RunProvenanceContext docstring fall-open flowRunId」 → 1 hit, #3712 (closed), the card that introduced the envelope. None is this card. The parent family is #22302. Dedupe words: `RunProvenanceContext fall-open docstring` · `flowRunId-only context refused D5 service-automation` · `RunDataContext union provenance`"

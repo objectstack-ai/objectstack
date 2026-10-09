@@ -2,9 +2,9 @@
   "number": 22322,
   "kind": "pull_request",
   "title": "fix(spec): the submitBehavior property help carries no ruling date",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "protocol:ui",
     "size/s",
     "tests",
@@ -24,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T16:08:59Z",
-  "updated_at": "2026-10-08T16:51:06Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-09T00:50:33Z",
+  "closed_at": "2026-10-09T00:35:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-09T00:35:39Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22322",

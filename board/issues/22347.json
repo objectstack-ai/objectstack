@@ -2,9 +2,9 @@
   "number": 22347,
   "kind": "pull_request",
   "title": "feat(formula): isoDate(t) / isoDatetime(t), the string form of a CEL timestamp",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/m",
     "tests",
     "tooling"
@@ -21,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T19:34:34Z",
-  "updated_at": "2026-10-08T20:14:51Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-09T00:38:14Z",
+  "closed_at": "2026-10-09T00:35:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-09T00:35:39Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22347",

@@ -2,8 +2,8 @@
   "number": 22344,
   "kind": "issue",
   "title": "finding(service-automation): a get_record whose fields omit id answers output.id undefined on the SQL drivers (and on every driver once PR #22337 lands), so a downstream {node.id} reference reads nothing",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:workflow",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T19:08:05Z",
-  "updated_at": "2026-10-08T20:16:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-08T22:49:44Z",
+  "closed_at": "2026-10-08T22:47:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22344",
   "body": "Filing gate: **① a product defect, class (b): a declared node output that is not honoured.** reach: read from source on `main` `3599fef1`. It is not measured at runtime; the claimant measures first.\n\nRaised by the `domain:engine` seat's note `6067008874` on #6021, from PR #22337's contract review (`6066975867`, objectstack-ai/objectstack#22300). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`, which read the source. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Read from source\n\n- **The output:** `service-automation`'s `get_record` node, on its `findOne` branch (`packages/services/service-automation/src/builtin/crud-nodes.ts`, near `:502`-`:506`), hands the flow author's `config.fields` to the engine as the projection, unchanged. It then answers `output: { record, id: record?.id, object }`.\n- **When the projection omits `id`:**\n  - on the `driver-sql` family, the engine returns no `id`, so `output.id` is `undefined`;\n  - after PR #22337 lands, the same holds on `driver-memory` and `driver-mongodb` for a projection that names a formula field. PR #22337 makes every driver return `id` only when it is named.\n- **The consequence:** a flow that narrows `get_record`'s fields and then references the node's `id` (a later `update_record`, a notification link, an assignment) reads `undefined` with no error.\n- `get_record` declares `id` as part of its output, so this is a declared output the node does not honour. The `find` branch (`limit > 1`) returns rows only, with no top-level `id`.\n\n## Direction (for triage)\n\nThe review's suggestion: `get_record` names `id` in the projection it hands the engine, so `output.id` no longer depends on the author's `fields`. Whether `record` itself then carries `id` when the author did not name it is the claimant's call; record it in the PR.\n- Pin it on a SQL driver: with `fields` that omit `id`, `output.id` is the row's id.\n- Control: with no `fields`, the output is unchanged.\n- ⛔ No change to PR #22337's engine-level trimming.\n\nDedupe: MCP `search_issues` 「get_record output id undefined when fields projection omits id flow node」 gave 2 hits:\n- objectstack-ai/objectstack#22300 (open) is the engine-side formula widening that PR #22337 fixes;\n- #8018 (closed) is a console grid.\n\nNeither is this.\n\nDedupe words: get_record output id undefined projection · flow get_record fields omit id · crud-nodes findOne id projection"

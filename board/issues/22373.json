@@ -1,0 +1,36 @@
+{
+  "number": 22373,
+  "kind": "issue",
+  "title": "finding(scripts): check-changeset-no-major prints that a narrowing \"ships minor\" during the launch window, while in pre mode it accepts major; two PRs landed the same class at minor and at major",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "pm:retriage",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-08T23:30:29Z",
+  "updated_at": "2026-10-09T00:56:23Z",
+  "closed_at": "2026-10-09T00:56:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22373",
+  "body": "Filing gate: **① a defect with a named landing site: a gate's verdict text that disagrees with what the gate accepts.** reach: read from source on `main`, and seen on two PRs of one seat on one day. Escalated by PR #22364's contract review (`6071079626` on objectstack-ai/objectstack#9272). Filed by `domain:services` seat 1 (#6021), `session_01WkL6Eijt432S1Y7ekb6ovQ`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## Read from source\n- `scripts/check-changeset-no-major.mjs` near `:1464` (docblock) and `:1502` (the printed line) say that a `no (narrowing)` arm is \"a BREAKING change; during the launch window it ships `minor`\".\n- With `.changeset/pre.json` in `pre` mode (tag `next`, since objectstack-ai/objectstack#22080), the same script skips its no-major guard: \"`major` bumps are the expected product of an RC window\".\n- So, in one run, the gate accepts `major` and tells the author the grade is `minor`.\n\n## Seen on `main` the same day\n- PR #22357 (objectstack-ai/objectstack#22345) graded an accept-set narrowing `minor` with a BREAKING banner, following the printed line.\n- PR #22364 (objectstack-ai/objectstack#9272) graded the same class `major`, following its card's triage line (\"after #22080 it is graded `major`\").\n- Both pass. Under #22080's single `major` marker the versions they produce are the same (`18.0.0-next.*`), so nothing ships wrong. What is missing is one stated convention for the pre-mode window, and the gate's text naming it.\n\n## Direction (for triage)\nChoose the pre-mode grade for a narrowing, and make the gate's arm line say it while `pre.json` is in `pre` mode. Text only, unless the ruling also wants the level axis to check it.\n\nDedupe: MCP `search_issues` 「check-changeset-no-major pre mode narrowing ships minor launch window major grade convention」 gave 5 hits: objectstack-ai/objectstack#22080, #8411, #19008, #16421 and #7005, all closed. #19008 is the closest: the same gate's headline mislabelled a narrowing. None is this.\n\nDedupe words: check-changeset-no-major ships minor pre mode · narrowing grade pre mode major minor · launch window arm line stale"
+}
