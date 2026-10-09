@@ -66,7 +66,7 @@ function fakeObjectQL() {
             if (object === 'sys_user_permission_set') {
                 const uid = where.user_id;
                 return uid === 'admin1'
-                    ? [{ user_id: uid, permission_set_id: 'ps-admin', organization_id: null }]
+                    ? [{ user_id: uid, permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: null }]
                     : [];
             }
             if (object === 'sys_permission_set') {

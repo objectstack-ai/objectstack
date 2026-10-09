@@ -3782,6 +3782,8 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
       Object.entries(where ?? {}).every(([k, v]) => {
         if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
+        // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+        if (v === null) return (row[k] ?? null) === null;
         return row[k] === v;
       });
     const baseSchema: any = { name: 'task', fields: { id: { name: 'id' }, owner_id: { name: 'owner_id' }, name: { name: 'name' } } };
@@ -3864,7 +3866,7 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     const scopedTarget = async () => {
       const b = await boot();
       b.h.tables.sys_user_permission_set.push(
-        { user_id: 'u_west_1', permission_set_id: 'ps_sub', organization_id: 'org_alpha' },
+        { user_id: 'u_west_1', permission_set_id: 'ps_sub', permission_set: 'sub_admin', organization_id: 'org_alpha' },
       );
       b.h.tables.sys_permission_set.push({ id: 'ps_sub', name: 'sub_admin' });
       return b;

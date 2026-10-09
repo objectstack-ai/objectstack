@@ -279,9 +279,10 @@ after DNS propagates.
 <Callout type="info">
 **The mounts are unconditional; the switch controls the endpoint behind them.**
 Both routes exist whether or not `OS_SSO_DOMAIN_VERIFICATION` is set — and with
-it unset the two halves report that differently, so match on the code rather than
-the status: step 1 answers **400 `DOMAIN_VERIFICATION_DISABLED`**, step 2 passes
-the inner **404** through with an explanatory message. Either way an anonymous
+it unset there is no endpoint behind them, so both steps answer **400
+`DOMAIN_VERIFICATION_DISABLED`**. With it on, either step answers an unknown
+`providerId` with **404 `RESOURCE_NOT_FOUND`**; step 2's `NO_PENDING_VERIFICATION`
+is a 404 too, so match on the code rather than the status. Either way an anonymous
 caller gets **401 `UNAUTHENTICATED`** and a signed-in non-platform-admin **403
 `PERMISSION_DENIED`** — identity is answered before capability, so a stranger
 cannot use these routes to probe which features an environment has enabled.

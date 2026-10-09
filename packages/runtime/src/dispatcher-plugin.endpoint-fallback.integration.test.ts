@@ -407,7 +407,7 @@ function executionServicesPlugin(): Plugin {
                     engineFinds.push({ object, options });
                     if (object === 'sys_user_permission_set') {
                         return options?.where?.user_id === 'admin1'
-                            ? [{ user_id: 'admin1', permission_set_id: 'ps-admin', organization_id: null }]
+                            ? [{ user_id: 'admin1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: null }]
                             : [];
                     }
                     if (object === 'sys_permission_set') {

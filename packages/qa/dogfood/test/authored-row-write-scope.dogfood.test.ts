@@ -154,7 +154,7 @@ const probeApp = defineStack({
     version: '0.0.1',
     type: 'app',
     name: 'Authored Row-Write Scope Probe',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
   objects: [OpenNote, SecretNote],
   permissions: [WidenerSet, PlainSet],

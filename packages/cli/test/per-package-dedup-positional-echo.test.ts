@@ -78,7 +78,7 @@ const CORE_MANIFEST = {
   namespace: 'pp',
   version: '1.0.0',
   type: 'app',
-  engines: { protocol: '^17' },
+  engines: { protocol: '^18' },
 };
 
 const CORE_OBJECTS = [
@@ -115,7 +115,7 @@ const ORDERS_MANIFEST = {
   namespace: 'pp',
   version: '1.0.0',
   type: 'module',
-  engines: { protocol: '^17' },
+  engines: { protocol: '^18' },
   dependencies: { 'com.example.echo.core': '^1.0.0' },
 };
 

@@ -116,11 +116,17 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + "`ADMIN_FULL_ACCESS_CAPABILITIES` in `@objectstack/spec` and matches the caller's own "
       + 'stored `sys_user` row, so it touches an identity table and never reads this one. With '
       + '`OS_PLATFORM_OWNER_EMAIL` unset the first sentence is the whole truth; with it declared, '
-      + 'this row stops being the single point that un-makes every administrator.',
+      + 'this row stops being the single point that un-makes every administrator. [ADR-0131 D4] '
+      + "Its organization decides which row a grant's name resolves to — the grant's own "
+      + "organization's row, else the organization-less one — so an UNSCOPED grant reaches only "
+      + 'the organization-less `admin_full_access`: moving that row into an organization un-makes '
+      + 'every grant-derived platform admin exactly as deleting it does.',
     columns: [
       'id',
       'name',
       'active',
+      'organization_id',
+      'organizationId',
       'system_permissions',
       'systemPermissions',
       'tab_permissions',
@@ -138,11 +144,12 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + 'of this legacy anchor is retired, so standing there comes from `OS_PLATFORM_OWNER_EMAIL` '
       + '(§6b-config) and from nothing else, and this row is read only for the permission set it '
       + 'names. Under `single` — the default — the row is unchanged and still the anchor that '
-      + "rig's zero-config first-user promotion mints.",
+      + "rig's zero-config first-user promotion mints. [ADR-0131 D4] The grant holds its set BY "
+      + 'NAME (`permission_set`): a grant that names nothing confers nothing, and its '
+      + '`permission_set_id` is not read here.',
     columns: [
       'user_id',
-      'permission_set_id',
-      'permissionSetId',
+      'permission_set',
       'organization_id',
       'organizationId',
       'valid_from',

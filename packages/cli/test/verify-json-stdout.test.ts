@@ -57,7 +57,7 @@ const STACK = {
     version: '1.0.0',
     name: 'Verify JSON Stdout',
     type: 'app',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
   objects: [
     {
