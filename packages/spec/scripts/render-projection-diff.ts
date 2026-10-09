@@ -109,6 +109,9 @@ function git(args: string[], cwd: string): { status: number; stdout: string; std
 export type MaterializeBase = (repoRoot: string, sha: string, dest: string) => string;
 
 function realMaterializeBase(repoRoot: string, sha: string, dest: string): string {
+  // Only the generators' inputs, and deliberately NOT the committed copies: a
+  // pre-`--out` base then writes its committed path into an empty slot, so what
+  // `generateSide` reads there can only be what that generator just produced.
   const tar = join(dest, 'base.tar');
   const archived = git(
     [
