@@ -27,6 +27,10 @@
  * flow per type, each creating a ledger row named after itself, each named by
  * one flow action.
  *
+ * The table was MEASURED FIRST, before the door asked anything of the caller
+ * (this branch's first commit carries it as the assertion); each row's
+ * `before` comment is that reading.
+ *
  * ⚠️ This suite resolves `@objectstack/runtime` and
  * `@objectstack/service-automation` through their BUILT `dist/`. Rebuild both
  * before trusting a run of this file — and especially an ablated one.
@@ -40,6 +44,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import type { Flow } from '@objectstack/spec/automation';
 
 import { bootStack, type VerifyStack } from './harness.js';
+import { isVerifyRefusal } from './handle.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
@@ -258,33 +263,76 @@ describe('control: the member cannot write the ledger directly', () => {
   });
 });
 
+const REFUSED = { answer: 403, code: 'PERMISSION_DENIED', rows: 0, runs: 0 } as const;
 const RAN = { answer: 200, rows: 1, runs: 1 } as const;
 
 /**
- * Caller × flow → what the action door answers and what the request caused,
- * MEASURED BEFORE the door asked anything of the caller (this branch's first
- * commit carries these readings as the assertions).
+ * Caller × flow → what the action door answers and what the request caused.
+ * `before` is the reading this branch's first commit took before the door
+ * asked anything of the caller, so the change the check makes is visible row
+ * by row.
  */
-const TABLE: Array<{ caller: Caller; flow: Target; rowsOf?: string; outcome: Outcome }> = [
-  { caller: 'member', flow: AUTO_SYS, outcome: RAN },
-  { caller: 'member', flow: CHANGE_SYS, outcome: RAN },
-  { caller: 'member', flow: SCHED_SYS, outcome: RAN },
-  { caller: 'admin', flow: AUTO_SYS, outcome: RAN },
-  { caller: 'admin', flow: CHANGE_SYS, outcome: RAN },
-  { caller: 'admin', flow: SCHED_SYS, outcome: RAN },
-  { caller: 'system', flow: AUTO_SYS, outcome: RAN },
-  { caller: 'system', flow: CHANGE_SYS, outcome: RAN },
-  { caller: 'system', flow: SCHED_SYS, outcome: RAN },
-  { caller: 'member', flow: SCREEN_SYS, outcome: RAN },
-  { caller: 'member', flow: API_SYS, outcome: RAN },
-  { caller: 'member', flow: AUTO_USER, outcome: { answer: 400, code: 'FLOW_FAILED', rows: 0, runs: 1 } },
-  { caller: 'member', flow: PARENT_SCREEN, rowsOf: AUTO_SYS, outcome: RAN },
+const TABLE: Array<{ caller: Caller; flow: Target; rowsOf?: string; outcome: Outcome; before: string }> = [
+  // REFUSED — a signed-in member, the three self-triggered types.
+  { caller: 'member', flow: AUTO_SYS, outcome: REFUSED, before: '200, elevated row written' },
+  { caller: 'member', flow: CHANGE_SYS, outcome: REFUSED, before: '200, elevated row written' },
+  { caller: 'member', flow: SCHED_SYS, outcome: REFUSED, before: '200, elevated row written' },
+  // REFUSED — the platform admin is a signed-in user too, not the system principal.
+  { caller: 'admin', flow: AUTO_SYS, outcome: REFUSED, before: '200, row written' },
+  { caller: 'admin', flow: CHANGE_SYS, outcome: REFUSED, before: '200, row written' },
+  { caller: 'admin', flow: SCHED_SYS, outcome: REFUSED, before: '200, row written' },
+  // UNCHANGED — the system principal starts each refused type through the action.
+  { caller: 'system', flow: AUTO_SYS, outcome: RAN, before: '200, row written' },
+  { caller: 'system', flow: CHANGE_SYS, outcome: RAN, before: '200, row written' },
+  { caller: 'system', flow: SCHED_SYS, outcome: RAN, before: '200, row written' },
+  // UNCHANGED — `screen` and `api`: entries the author designed.
+  { caller: 'member', flow: SCREEN_SYS, outcome: RAN, before: '200, elevated row written' },
+  { caller: 'member', flow: API_SYS, outcome: RAN, before: '200, elevated row written' },
+  // UNCHANGED — a non-elevated flow: the member's own identity is refused the write.
+  {
+    caller: 'member',
+    flow: AUTO_USER,
+    outcome: { answer: 400, code: 'FLOW_FAILED', rows: 0, runs: 1 },
+    before: '400 FLOW_FAILED, nothing written',
+  },
+  // UNCHANGED — the route the ruling names: a `screen` entry that is not
+  // elevated, whose `subflow` node runs the elevated child the action door now
+  // refuses to start directly. The child writes its own name.
+  { caller: 'member', flow: PARENT_SCREEN, rowsOf: AUTO_SYS, outcome: RAN, before: '200, elevated child row written' },
 ];
 
 describe('the action door × runAs: system, per type and caller', () => {
   for (const row of TABLE) {
-    it(`${row.caller} starts ${row.flow} through its action → ${row.outcome.answer}`, async () => {
+    const verdict = row.outcome.answer === 403 ? 'refused 403 PERMISSION_DENIED, nothing ran' : `answers ${row.outcome.answer}`;
+    it(`${row.caller} starts ${row.flow} through its action: ${verdict} (before: ${row.before})`, async () => {
       expect(await startAs(row.caller, row.flow, row.rowsOf)).toEqual(row.outcome);
     });
   }
+});
+
+describe('the refusal envelope at the wire', () => {
+  it('carries the ADR-0112 code and status, nothing of the flow, and the trigger door\'s own words', async () => {
+    let atAction: unknown;
+    try {
+      await stack.actions.run(WATCH, actionOf(SCHED_SYS), { as: member });
+    } catch (e) {
+      atAction = e;
+    }
+    let atTrigger: unknown;
+    try {
+      await stack.flows.run(SCHED_SYS, {}, { as: member });
+    } catch (e) {
+      atTrigger = e;
+    }
+    expect(isVerifyRefusal(atAction)).toBe(true);
+    expect(codeOf(atAction)).toBe('PERMISSION_DENIED');
+    expect(statusOf(atAction)).toBe(403);
+    const message = (atAction as Error).message;
+    expect(message).not.toContain(SCHED_SYS);
+    expect(message).not.toMatch(/schedule|runAs|'system'/);
+    // One rule at every door: the trigger door answers the same refusal.
+    expect(codeOf(atTrigger)).toBe(codeOf(atAction));
+    expect(statusOf(atTrigger)).toBe(statusOf(atAction));
+    expect((atTrigger as Error).message).toBe(message);
+  });
 });

@@ -26,6 +26,10 @@
 // flow per type, each creating a ledger row named after itself. A row
 // appearing is the elevated run's side effect; the run log is the other
 // witness.
+//
+// The table was MEASURED FIRST, before either door asked anything of the
+// caller (this branch's first commit carries it as the assertion); each row's
+// `before` comment is that reading.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -317,33 +321,66 @@ describe('control: the member cannot write the ledger directly', () => {
   });
 });
 
+const REFUSED = { answer: 403, code: 'PERMISSION_DENIED', rows: 0, runs: 0 } as const;
 const RAN = { answer: 200, rows: 1, runs: 1 } as const;
 /** A non-elevated writer: the member's own identity is refused the write, so the run fails. */
 const USER_FLOW_FAILED = { answer: 400, code: 'FLOW_FAILED', rows: 0, runs: 1 } as const;
 
 /**
  * Door × caller × flow → what the door answers and what the request caused.
- * MEASURED BEFORE the doors asked anything of the caller (this branch's first
- * commit carries these readings as the assertions).
+ * `before` is the reading this branch's first commit took before either door
+ * asked anything of the caller (the same for all three doors), so the change
+ * the check makes is visible row by row.
  */
-const TABLE: Array<{ door: Door; caller: Caller; flow: Target; rowsOf?: string; outcome: Outcome }> = [];
+const TABLE: Array<{ door: Door; caller: Caller; flow: Target; rowsOf?: string; outcome: Outcome; before: string }> = [];
 for (const door of ['action', 'run_action', 'endpoint'] as const) {
   TABLE.push(
-    { door, caller: 'member', flow: AUTO_SYS, outcome: RAN },
-    { door, caller: 'member', flow: CHANGE_SYS, outcome: RAN },
-    { door, caller: 'member', flow: SCHED_SYS, outcome: RAN },
-    { door, caller: 'admin', flow: AUTO_SYS, outcome: RAN },
-    { door, caller: 'member', flow: SCREEN_SYS, outcome: RAN },
-    { door, caller: 'member', flow: API_SYS, outcome: RAN },
-    { door, caller: 'member', flow: AUTO_USER, outcome: USER_FLOW_FAILED },
-    { door, caller: 'member', flow: PARENT_SCREEN, rowsOf: AUTO_SYS, outcome: RAN },
+    // REFUSED — a signed-in member, the three self-triggered types.
+    { door, caller: 'member', flow: AUTO_SYS, outcome: REFUSED, before: '200, elevated row written' },
+    { door, caller: 'member', flow: CHANGE_SYS, outcome: REFUSED, before: '200, elevated row written' },
+    { door, caller: 'member', flow: SCHED_SYS, outcome: REFUSED, before: '200, elevated row written' },
+    // REFUSED — the platform admin is a signed-in user too, not the system principal.
+    { door, caller: 'admin', flow: AUTO_SYS, outcome: REFUSED, before: '200, row written' },
+    // UNCHANGED — `screen` and `api`: entries the author designed.
+    { door, caller: 'member', flow: SCREEN_SYS, outcome: RAN, before: '200, elevated row written' },
+    { door, caller: 'member', flow: API_SYS, outcome: RAN, before: '200, elevated row written' },
+    // UNCHANGED — a non-elevated flow.
+    { door, caller: 'member', flow: AUTO_USER, outcome: USER_FLOW_FAILED, before: '400 FLOW_FAILED, nothing written' },
+    // UNCHANGED — the route the ruling names: a `screen` entry that is not
+    // elevated, whose `subflow` node runs the elevated child the door now
+    // refuses to start directly. The child writes its own name.
+    { door, caller: 'member', flow: PARENT_SCREEN, rowsOf: AUTO_SYS, outcome: RAN, before: '200, elevated child row written' },
   );
 }
 
 describe('the action door, run_action and the declared endpoint × runAs: system, per type and caller', () => {
   for (const row of TABLE) {
-    it(`${row.door}: ${row.caller} starts ${row.flow} → ${row.outcome.answer}`, async () => {
+    const verdict = row.outcome.answer === 403 ? 'refused 403 PERMISSION_DENIED, nothing ran' : `answers ${row.outcome.answer}`;
+    it(`${row.door}: ${row.caller} starts ${row.flow}: ${verdict} (before: ${row.before})`, async () => {
       expect(await startAs(row.door, row.caller, row.flow, row.rowsOf)).toEqual(row.outcome);
     });
   }
+});
+
+describe('one rule at every door that starts a flow by name', () => {
+  it('the action door, run_action and the declared endpoint answer the trigger door\'s refusal, word for word', async () => {
+    const trigger = await stack.apiAs(member, 'POST', `/automation/${SCHED_SYS}/trigger`, { params: {} });
+    const triggerBody = (await trigger.json()) as { error?: { code?: string; message?: string } };
+    expect(trigger.status).toBe(403);
+    expect(triggerBody.error?.code).toBe('PERMISSION_DENIED');
+
+    const action = await stack.apiAs(member, 'POST', `/actions/${WATCH}/${actionOf(SCHED_SYS)}`, { params: {} });
+    const endpoint = await stack.apiAs(member, 'POST', endpointPathOf(SCHED_SYS), {});
+    for (const res of [action, endpoint]) {
+      const body = (await res.json()) as { success?: boolean; data?: unknown; error?: { code?: string; message?: string } };
+      expect(res.status).toBe(403);
+      expect(body.success).toBe(false);
+      expect(body).not.toHaveProperty('data');
+      expect(body.error?.code).toBe('PERMISSION_DENIED');
+      expect(body.error?.message).toBe(triggerBody.error?.message);
+      // Nothing of the flow: not its name, its type or its run-as declaration.
+      expect(body.error?.message).not.toContain(SCHED_SYS);
+      expect(body.error?.message).not.toMatch(/schedule|runAs|'system'/);
+    }
+  });
 });
