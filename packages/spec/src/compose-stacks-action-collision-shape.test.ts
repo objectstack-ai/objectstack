@@ -101,7 +101,7 @@ const topEntries: Array<{ label: string; value: unknown }> = [
   { label: 'an array', value: [] },
 ];
 
-describe('#19816 — a non-object top-level `actions` entry is refused with the envelope, not a TypeError', () => {
+describe('a non-object top-level `actions` entry is refused with the envelope, not a TypeError', () => {
   for (const row of topEntries) {
     it(`entry ${row.label} is refused at ['actions', 1]`, () => {
       const refused = refusal(() => compose([valid(), withTop([row.value])]));
@@ -123,7 +123,7 @@ describe('#19816 — a non-object top-level `actions` entry is refused with the 
   });
 });
 
-describe("#19816 — a malformed object's own `actions` is refused with the envelope, not a TypeError", () => {
+describe("a malformed object's own `actions` is refused with the envelope, not a TypeError", () => {
   const nonArrays: Array<{ label: string; value: unknown }> = [
     { label: 'a number', value: 5 },
     { label: 'a string', value: 'abc' },
@@ -165,7 +165,7 @@ describe("#19816 — a malformed object's own `actions` is refused with the enve
   });
 });
 
-describe('#19816 — the controls: well-formed stacks compose, and a real collision is still refused', () => {
+describe('the controls: well-formed stacks compose, and a real collision is still refused', () => {
   it('a valid pair composes, every action carried', () => {
     const composed = compose([valid(), withTop([act('b_home')])]);
     expect(composed.actions?.map((a) => a.name)).toEqual(['a_home', 'b_home']);

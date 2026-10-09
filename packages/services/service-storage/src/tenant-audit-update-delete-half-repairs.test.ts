@@ -130,6 +130,28 @@ function createRecordingEngine(seed: Array<{ object: string; data: any }> = []) 
     async update(object: string, data: any, options?: any) {
       assertEngineUpdateDispatch(data, options);
       updates.push({ object, data: { ...data }, options });
+      // [#22332] A declared predicate update — the chunk door's conditional
+      // progress write — lands on the rows that hold every `where` term (an
+      // absent column holds `null`) and answers the matched-row count, as the
+      // real engine's does.
+      if (options?.multi) {
+        const matched = rows.filter(
+          (r) =>
+            r.object === object &&
+            Object.entries(options.where ?? {}).every(([k, v]) =>
+              k === 'id' ? String(r.data.id) === String(v) : (r.data[k] ?? null) === (v ?? null),
+            ),
+        );
+        for (const r of matched) Object.assign(r.data, data);
+        return matched.length;
+      }
+      // [#22313] A by-id update lands on the row, as it does in the real
+      // engine: the chunked completion reads back the record the chunk door
+      // wrote, and assembles only an upload that holds its declared bytes.
+      const hit = rows.find(
+        (r) => r.object === object && String(r.data.id) === String(options?.where?.id),
+      );
+      if (hit) Object.assign(hit.data, data);
       return { ...data };
     },
     async delete(object: string, options?: any) {
@@ -394,6 +416,19 @@ describe('[#13178] the routes: the upload doors pass the session organization on
         const uploadId = initRes._json?.data?.uploadId ?? initRes._json?.uploadId;
         expect(uploadId).toBeTruthy();
 
+        // The declared 10 bytes: a completion assembles only an upload that
+        // holds them (#22313).
+        const chunkRes = createMockRes();
+        await server._getHandler('PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`)!(
+          createMockReq({
+            params: { uploadId, chunkIndex: '0' },
+            headers: { 'x-resume-token': initRes._json.data.resumeToken },
+            rawBody: async () => Buffer.from('0123456789'),
+          } as any),
+          chunkRes,
+        );
+        expect(chunkRes._status).toBe(200);
+
         const res = createMockRes();
         await server._getHandler('POST', `${BASE}/upload/chunked/:uploadId/complete`)!(
           createMockReq({ params: { uploadId }, body: { parts: [] } }),
@@ -407,7 +442,9 @@ describe('[#13178] the routes: the upload doors pass the session organization on
     // cannot drift apart again: the file row and the session row are updated
     // from ONE resolved organization.
     const file = engine._updates.find((u: any) => u.object === 'sys_file');
-    const session = engine._updates.find((u: any) => u.object === 'sys_upload_session');
+    // The completion's own session write — the chunk door's progress write
+    // precedes it.
+    const session = engine._updates.find((u: any) => u.object === 'sys_upload_session' && u.data.status === 'completed');
     expect(file.options.context).toEqual({ tenantId: 'org_A', isSystem: true });
     expect(session.options.context).toEqual({ tenantId: 'org_A', isSystem: true });
     expect(engine._updates.every((u: any) => u.options.context?.tenantId === 'org_A')).toBe(true);
@@ -433,7 +470,13 @@ describe('[#13178] the routes: the upload doors pass the session organization on
 
     const update = engine._updates.find((u: any) => u.object === 'sys_upload_session');
     expect(update).toBeTruthy();
-    expect(update.options).toEqual({ where: { id: 's1' }, context: { tenantId: 'org_A', isSystem: true } });
+    // [#22332] The progress write is conditional on the progress the door
+    // read — here a seeded row carrying none — and scoped exactly as before.
+    expect(update.options).toEqual({
+      where: { parts: null, uploaded_chunks: null, uploaded_size: null, id: 's1' },
+      multi: true,
+      context: { tenantId: 'org_A', isSystem: true },
+    });
   });
 
   it('the progress door — which WRITES when it expires a row — scopes that write too', async () => {

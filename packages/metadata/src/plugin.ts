@@ -22,7 +22,6 @@ import {
     SysMetadataHistoryObject,
     SysMetadataCommitObject,
     SysMetadataAuditObject,
-    SysViewDefinitionObject,
     applyArtifactForwardConversions,
     detectUnboundFormViewPredicateRoots,
     BOUND_FORM_VIEW_PREDICATE_ROOTS,
@@ -100,10 +99,10 @@ const queryableMetadataObjects = [
     // ADR-0067 commit log — sibling of sys_metadata_history (see note above).
     SysMetadataCommitObject,
     SysMetadataAuditObject,
-    // Runtime view storage (shared / personal). Must always be provisioned so
-    // end-user view creation via the generic data API has a place to write —
-    // mirroring why sys_metadata is always provisioned for PUT /meta.
-    SysViewDefinitionObject,
+    // ⛔ No `sys_view_definition`: it retired as inert under ADR-0131 D13 — no
+    // framework writer or reader of its rows ever existed, and runtime-authored
+    // views are `view` items written through `PUT /api/v1/meta/view/...` into
+    // `sys_metadata` like every other overlay.
 ];
 
 // Subdirectory under `rootDir` reserved for the ADR-0008 repository's

@@ -4,9 +4,10 @@
  * [#21911, ADR-0096] The metadata protocol's platform-store calls carry the
  * EXPLICIT system opt-in, never a principal-less context.
  *
- * plugin-security hands an engine operation whose context carries no user, no
- * position, no permission set and no `isSystem` straight to `next()` (the
- * ADR-0096 E1 hand-off). The protocol's own reads and writes of the
+ * plugin-security used to hand an engine operation whose context carries no
+ * user, no position, no permission set and no `isSystem` straight to `next()`
+ * (the ADR-0096 E1 hand-off); since ADR-0096 D5 it refuses one. The protocol's
+ * own reads and writes of the
  * `sys_metadata` family reached the engine exactly that way — a `{ where }`
  * with no `context`, or a repository transaction context with only its
  * handle — so they worked only because the hand-off let them through. They

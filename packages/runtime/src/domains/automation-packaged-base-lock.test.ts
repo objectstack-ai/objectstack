@@ -368,22 +368,35 @@ describe('what the lock leaves open', () => {
         expect(h.toggleFlow).toHaveBeenCalledWith(PACKAGED, false);
     });
 
-    it('the operator hatch (OS_METADATA_WRITABLE) opens this door exactly as it opens /meta', async () => {
-        // The verdict reads the same `isOverlayAllowed` the metadata door
-        // reads, hatch included — never a copy that forgets it. [#20819] The
-        // Regime C refusal no longer NAMES the hatch (it names clone and the
-        // switch); which writes the lock refuses did not move, so the hatch
-        // still opens both doors alike.
+    it('[ADR-0131 D6] the operator hatch (OS_METADATA_WRITABLE) opens this door exactly as it opens /meta: not at all', async () => {
+        // The verdict reads the same predicate the metadata door reads — never
+        // a copy. Managed content is sealed: the hatch opens no write onto,
+        // and no removal of, a managed flow, so both definition doors answer
+        // with the hatch open what they answer with it shut, and nothing is
+        // registered or unregistered. The sanctioned primitives stay open with
+        // it set too: the switch (§7.2) and the clone under a new name (§7.1).
         process.env.OS_METADATA_WRITABLE = 'flow';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         const h = boot();
         h.standInStore();
 
-        const { response } = await h.dispatcher.handleAutomation(
+        const put = await h.dispatcher.handleAutomation(
             `/${PACKAGED}`, 'PUT', definitionOf(PACKAGED, 'Operator edit'), AUTHOR(), undefined,
         );
-        expect(statusOf(response)).toBe(200);
-        expect(h.registerFlow).toHaveBeenCalledTimes(1);
+        expect(statusOf(put.response)).toBe(403);
+        expect(errorOf(put.response).code).toBe('NOT_OVERRIDABLE');
+        const del = await h.dispatcher.handleAutomation(`/${PACKAGED}`, 'DELETE', undefined, AUTHOR(), undefined);
+        expect(statusOf(del.response)).toBe(403);
+        expect(errorOf(del.response).code).toBe('NOT_OVERRIDABLE');
+        expect(h.registerFlow).not.toHaveBeenCalled();
+        expect(h.unregisterFlow).not.toHaveBeenCalled();
+        expect(h.held(PACKAGED)).toBeDefined();
+
+        const toggle = await h.dispatcher.handleAutomation(
+            `/${PACKAGED}/toggle`, 'POST', { enabled: false }, AUTHOR(), undefined,
+        );
+        expect(statusOf(toggle.response)).toBe(200);
+        expect(h.toggleFlow).toHaveBeenCalledWith(PACKAGED, false);
     });
 });
 

@@ -838,6 +838,13 @@ rename, or uninstall the other holder.
 - **No downgrade.** `OS_METADATA_COLLISION=warn` softens the §3.2 namespace gate
   only; no ruling extends it to this refusal.
 
+> **Amended (2026-10-08) — the cold boot.** The hydration write stays unjudged as
+> a write, and the post-hydration check judges the package's claim against it:
+> after `sys_metadata` hydration and before `kernel:ready`, every package-held
+> permission set and position name is checked against the environment catalog,
+> and a name the environment already holds fails the boot with the N.2 envelope,
+> naming both holders (ruling record 6063176077 on #22307, letter A).
+
 ### N.4 Where it is implemented
 
 `@objectstack/objectql`: the rule and its holders in `security-catalog-namespace.ts`;

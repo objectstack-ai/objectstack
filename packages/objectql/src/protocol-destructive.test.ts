@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 
 /**
@@ -19,9 +19,14 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
 
     beforeEach(() => {
         registry = new SchemaRegistry({ multiTenant: false });
+        // [ADR-0131 D6] A TENANT-AUTHORED object (`_provenance: 'org'`, the
+        // stamp the server writes on every object authored in this
+        // environment): its in-place write is an ordinary environment edit,
+        // which is the population this detector guards.
         registry.registerObject({
             name: 'account',
             label: 'Account',
+            _provenance: 'org',
             fields: {
                 name: { name: 'name', type: 'text' },
                 amount: { name: 'amount', type: 'number' },
@@ -39,9 +44,21 @@ describe('ObjectStackProtocolImplementation - destructive change detection', () 
             count: vi.fn().mockResolvedValue(0),
             aggregate: vi.fn().mockResolvedValue([]),
         };
-        // No environmentId — bypass the overlay opt-in gate so we test
-        // only the destructive check.
+        // This suite used to register `account` as a PACKAGED object and open
+        // the `OS_METADATA_WRITABLE=object` hatch, the one route by which a
+        // packaged object's in-place write reached this check. [ADR-0131 D6]
+        // Managed content is sealed now — no door writes a packaged object in
+        // place, hatch or not — so the object above is tenant-authored, the
+        // one population whose in-place write still reaches the detector.
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
         protocol = new ObjectStackProtocolImplementation(mockEngine);
+    });
+
+    afterEach(() => {
+        delete process.env.OS_METADATA_WRITABLE;
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
     });
 
     it('blocks save when a field is removed', async () => {

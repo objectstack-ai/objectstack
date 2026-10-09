@@ -37,15 +37,28 @@
  * `injected-system-column-provenance.ts` by #8116, the WHAT-half move #3786
  * anticipated, so author-time tools can ask the storage question too.)
  *
- * ## Why it is a pure derivation, and total
+ * ## Why it is a pure derivation, and where it is not author-time-total
  *
- * Every input is a key the object itself declares — `systemFields`, `managedBy`,
- * `ownership`, `tenancy.enabled`, `name`. Nothing here depends on runtime state:
- * measured against `applySystemFields`, the `multiTenant` option changes only
- * whether `organization_id` is INDEXED, never whether it exists. That is what
- * makes an author-time verdict trustworthy — the linter and the registry cannot
- * disagree about a column's existence, because there is nothing left for them
- * to disagree about.
+ * Every OBJECT input is a key the object itself declares — `systemFields`,
+ * `managedBy`, `ownership`, `tenancy.enabled`, `name`. Measured against
+ * `applySystemFields`, the `multiTenant` option changes only whether
+ * `organization_id` is INDEXED, never whether it exists.
+ *
+ * There is exactly ONE deployment input, and it is explicit: the objects a
+ * deployment declares platform-global (the second argument, the validated
+ * reading of the mounted `org-scoping` service's
+ * `OrgScopingEntitlement.platformGlobalObjects`). ADR-0131 D7: "an object a
+ * deployment declares platform-global gets no organization column on that
+ * deployment (the injected-columns plan reads the declaration), so Layer 0 and
+ * the driver agree by having nothing to scope". The runtime registry passes it;
+ * an author-time caller (the linter, the import mapper, the tenancy census)
+ * has no deployment and passes nothing, so it reads the AUTHORED plan — the
+ * one every deployment that declares nothing provisions. On the declaring
+ * deployment alone, an author-time
+ * verdict can therefore name an `organization_id` that deployment does not
+ * have; the runtime refuses it there as an unknown field. Absent, empty or
+ * refused (junk is refused at the reading seam, never coerced), the input
+ * changes nothing: the plan is byte-identical to the one-argument call.
  *
  * Tolerant of bare / un-parsed metadata records (same contract as
  * {@link deriveFieldGroupLayout} / {@link deriveRecordSurface}) so every
@@ -71,6 +84,15 @@ const OWNER_COLUMN = 'owner_id';
 const OWNING_BUSINESS_UNIT_COLUMN = 'owning_business_unit_id';
 /** THE tenant isolation key. */
 const TENANT_SCOPE_COLUMN = 'organization_id';
+
+/** Does the deployment's declaration name the object `name` platform-global? */
+function deploymentDeclaresPlatformGlobal(
+  declared: ReadonlySet<string> | readonly string[] | undefined,
+  name: string,
+): boolean {
+  if (declared === undefined) return false;
+  return declared instanceof Set ? declared.has(name) : (declared as readonly string[]).includes(name);
+}
 
 /**
  * Every name {@link resolveInjectedSystemColumns} can put in a plan's `names`,
@@ -131,6 +153,7 @@ export interface InjectedSystemColumnPlan {
  * | `systemFields: false`                  | nothing (hard opt-out; seed/migration tables) |
  * | `managedBy: 'better-auth'`             | nothing (better-auth owns the columns)      |
  * | `systemFields.tenant: false` / `tenancy.enabled: false` | no `organization_id`        |
+ * | its `name` in the deployment's `platformGlobalObjects` (2nd argument) | no `organization_id` |
  * | `systemFields.audit: false`            | no audit family                             |
  * | `managedBy: <any>` or a `sys_*` name   | no ownership anchors (either tier)          |
  * | `ownership: 'org' \| 'none'`           | no ownership anchors (either tier)          |
@@ -153,8 +176,17 @@ export interface InjectedSystemColumnPlan {
  * so it must not presume a Zod-narrowed value.
  *
  * @param def An object definition, or any bare record shaped like one.
+ * @param deployment [ADR-0131 D7] The deployment's own input, when the caller
+ *   has a deployment. `platformGlobalObjects` is the VALIDATED reading of the
+ *   mounted `org-scoping` service's `OrgScopingEntitlement.platformGlobalObjects`
+ *   (exact object machine names; a junk declaration is refused at the reading
+ *   seam and arrives here as nothing). The registry is its one runtime caller;
+ *   an author-time caller has no deployment and omits the whole argument.
  */
-export function resolveInjectedSystemColumns(def: unknown): InjectedSystemColumnPlan {
+export function resolveInjectedSystemColumns(
+  def: unknown,
+  deployment?: { readonly platformGlobalObjects?: ReadonlySet<string> | readonly string[] },
+): InjectedSystemColumnPlan {
   const obj: AnyRec = def && typeof def === 'object' && !Array.isArray(def) ? (def as AnyRec) : {};
   const systemFields = obj.systemFields;
   const managedBy = obj.managedBy;
@@ -178,7 +210,13 @@ export function resolveInjectedSystemColumns(def: unknown): InjectedSystemColumn
       ? (systemFields as { tenant?: boolean; audit?: boolean })
       : undefined;
 
-  const tenant = sf?.tenant !== false && !isTenancyDisabled(obj);
+  // [ADR-0131 D7] The deployment's platform-global declaration withholds the
+  // tenant column exactly where the object's own two opt-outs do: an object
+  // THIS deployment declares platform-global has no organization column here.
+  const tenant =
+    sf?.tenant !== false &&
+    !isTenancyDisabled(obj) &&
+    !(name !== '' && deploymentDeclaresPlatformGlobal(deployment?.platformGlobalObjects, name));
   const audit = sf?.audit !== false;
 
   // Platform-managed tables and the `sys_*` namespace never carry a per-record

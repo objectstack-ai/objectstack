@@ -448,7 +448,7 @@ Types: `AutomationEngineOptions`, `AutomationServicePluginOptions`, `RunSummaryL
 `FlowTrigger`, `FlowTriggerBinding`, `RegisteredConnector`, `SuspendedRun`,
 `SuspendedRunStore`, `SuspendedRunStoreEngine`, `ObjectStoreSuspendedRunStoreOptions`,
 `RunRecord`, `StepLogEntry`, `UnknownNodeTypeAuditEntry`, `RunDataContext`,
-`RunIdentityContext`, `RunProvenanceContext`, `ConnectorProviderFactory`,
+`RunIdentityContext`, `ConnectorProviderFactory`,
 `ConnectorProviderContext`, `ConnectorMaterialization`, `ConnectorMaterializationHandler`,
 `ConnectorOrigin`, `ConnectorState`, `ConnectorDescriptor`, `ConnectorActionDescriptor`,
 `ConnectorActionHandler`, `ConnectorActionContext`.

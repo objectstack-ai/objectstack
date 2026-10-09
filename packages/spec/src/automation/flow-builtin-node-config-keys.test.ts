@@ -2,22 +2,28 @@
 
 /**
  * [#21982] The build doors refuse a KEY a builtin node's executor contract does
- * not declare, where no other door before the run judges it — the key half of
- * the executor-contract arm of `flowNodeConfigRefusals`, beside the value half
- * (#21898) and the presence half (#20316).
+ * not declare — the key half of the executor-contract arm of
+ * `flowNodeConfigRefusals`, beside the value half (#21898) and the presence
+ * half (#20316) — and that arm is the ONE judge of a builtin's undeclared key.
  *
- * `script` and `subflow` publish no descriptor `configSchema`, so
- * `registerFlow`'s undeclared-key walk skips them, while their executors parse
- * the strict contract and refuse the node on an undeclared key at every run. A
- * `script` node carrying `bogusKey` passed `FlowSchema`, `objectstack validate`,
- * `objectstack compile` and `registerFlow`, and then failed every run. The pins
- * below hold the refusal at every door that parses a flow; the controls hold
- * what stays as it was:
+ * Pass 1 covered `script` and `subflow`, which publish no descriptor
+ * `configSchema`, so no door before the run judged their keys. The remainder
+ * covered every other builtin but `try_catch`: a `notify` node carrying
+ * `bogusKey` passed `FlowSchema`, `objectstack validate` and `objectstack
+ * compile`, and `registerFlow`'s descriptor walk then refused the whole flow at
+ * boot. [#22343] `try_catch` followed once its contract's `retry` (the shared
+ * `RetryPolicySchema`) closed to the five keys its descriptor declares: a
+ * `retry.maxRetry` typo passed both build doors and was refused only when the
+ * flow registered. The spec now refuses each at every door, and the walk stands
+ * aside for every type `builtinNodeConfigKeysJudged` names (pinned in
+ * `service-automation` `builtin/config-unknown-keys.test.ts`). The controls
+ * hold what stays as it was:
  *
- *  - a valid `script` / `subflow` node, and the measured node without its extra key;
- *  - a builtin WITH a descriptor `configSchema`: its undeclared key stays
- *    registration's, judged against the descriptor;
- *  - `decision`, schemaless but with no executor contract;
+ *  - a valid node of each type, and the measured node without its extra key;
+ *  - a declared `retry` block, every key of it;
+ *  - a key at or under a region slot, which is `validateControlFlow`'s;
+ *  - a key inside a free-form map (author data);
+ *  - `decision`, schemaless with no executor contract;
  *  - a tombstoned retired `script` key, which keeps the path it had.
  */
 
@@ -26,17 +32,40 @@ import { describe, expect, it } from 'vitest';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 import { ArtifactStagePackageBodySchema, ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
-import { flowNodeConfigRefusals, getBuiltinNodeConfigContracts } from './flow-node-config-refusals';
+import { builtinNodeConfigKeysJudged, flowNodeConfigRefusals, getBuiltinNodeConfigContracts } from './flow-node-config-refusals';
 import { FlowSchema } from './flow.zod';
-import { SCHEMALESS_NODE_CONFIG_SCHEMAS } from './schemaless-node-config.zod';
 
 const ENTRY_ID = 'flow-script-subflow-config-undeclared-keys-refused';
+const REMAINDER_ENTRY_ID = 'flow-builtin-node-config-undeclared-keys-refused';
+const TRY_CATCH_ENTRY_ID = 'try-catch-and-retry-policy-undeclared-keys-refused';
 
 type Config = Record<string, unknown>;
 
 /** The measured node: `summarize` in the showcase's `showcase_task_completed`. */
 const MEASURED: Config = { function: 'summarizeCompletedTask', inputs: { taskId: '{record.id}' }, outputVariable: 'summary' };
 const SUBFLOW: Config = { flowName: 'child_flow', input: { id: '{record.id}' }, outputVariable: 'out' };
+/** The remainder's measured node: a `notify` with `bogusKey` (#21982's pass-1 report). */
+const NOTIFY: Config = { recipients: '{record.owner}', title: 'Done', message: '{summary}' };
+
+/** A valid config of every builtin the key arm judges — the controls each type is probed against. */
+const VALID: Readonly<Record<string, Config>> = {
+  get_record: { objectName: 'task', filter: { status: 'open' }, limit: 5, outputVariable: 'rows' },
+  create_record: { objectName: 'task', fields: { title: 'X' }, outputVariable: 'created' },
+  update_record: { objectName: 'task', filter: { id: '{recordId}' }, fields: { title: 'X' } },
+  delete_record: { objectName: 'task', filter: { id: '{recordId}' } },
+  notify: NOTIFY,
+  http: { url: 'https://example.test/hook', method: 'POST', headers: { 'X-Any': 'y' } },
+  screen: { title: 'T', fields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a' }] }] },
+  script: MEASURED,
+  subflow: SUBFLOW,
+  map: { collection: '{rows}', flowName: 'child_flow', input: { id: '{item.id}' } },
+  loop: { collection: '{rows}', body: { nodes: [], edges: [] } },
+  parallel: { branches: [{ name: 'a', nodes: [], edges: [] }, { name: 'b', nodes: [], edges: [] }] },
+  try_catch: { try: { nodes: [], edges: [] }, retry: { maxRetries: 1, backoffMs: 10 } },
+};
+
+/** A `try` region with one node in it — the measured `try_catch`'s protected region. */
+const TRY_REGION = { nodes: [{ id: 'inner', type: 'assignment', label: 'A', config: { assignments: { a: 1 } } }], edges: [] };
 
 /** start → one node of `type` → end. */
 function flowWith(type: string, config: unknown, name = 'key_probe') {
@@ -120,6 +149,78 @@ describe('the measured node: refused at save, with its location', () => {
   });
 });
 
+describe('the remainder: every other builtin, refused at save', () => {
+  it('a notify node with bogusKey is refused at nodes.1.config.bogusKey, with the rename-or-remove remedy', () => {
+    const config = { ...NOTIFY, bogusKey: 1 };
+    const issues = issuesOf(flowWith('notify', config));
+    expect(issues.map(({ code, path }) => ({ code, path }))).toEqual([{ code: 'custom', path: 'nodes.1.config.bogusKey' }]);
+    const [refusal] = flowNodeConfigRefusals('notify', config);
+    expect({ code: refusal!.code, params: refusal!.params, path: refusal!.path }).toEqual({
+      code: 'node-config-refused-by-contract', params: { nodeType: 'notify', key: 'bogusKey' }, path: 'bogusKey',
+    });
+    expect(issues[0]!.message).toBe(refusal!.message);
+    expect(refusal!.message).toContain(contractSentence('notify', config));
+    // The remedy the descriptor walk's rejection carried, kept: rename or remove.
+    expect(refusal!.message).toMatch(/Rename the key .* or remove it/);
+  });
+
+  it('CONTROL: the measured notify node without its extra key parses clean', () => {
+    expect(issuesOf(flowWith('notify', NOTIFY))).toEqual([]);
+  });
+
+  it('every judged type refuses a top-level bogusKey on an otherwise valid config, anchored at the key', () => {
+    for (const [type, config] of Object.entries(VALID)) {
+      expect(flowNodeConfigRefusals(type, { ...config, bogusKey: 1 }).map(({ code, path }) => ({ code, path })), type)
+        .toEqual([{ code: 'node-config-refused-by-contract', path: 'bogusKey' }]);
+    }
+  });
+
+  it('the walk\'s per-key prescriptions live on in the contracts\' own sentences', () => {
+    for (const [type, config, path, prescription] of [
+      ['create_record', { objectName: 'task', fieldValues: { a: 1 } }, 'fieldValues', /The write map is `fields`/],
+      ['update_record', { objectName: 'task', filter: { id: 'x' }, bulk: true }, 'bulk', /`multi: true`/],
+      ['delete_record', { objectName: 'task', filter: { id: 'x' }, options: { multi: true } }, 'options', /`multi: true`/],
+      ['screen', { fields: [{ name: 'qty', visibleIf: 'x' }] }, 'fields[0].visibleIf', /`visibleWhen`/],
+    ] as const) {
+      const refusals = flowNodeConfigRefusals(type, config);
+      expect(refusals.map((r) => r.path), type).toEqual([path]);
+      expect(refusals[0]!.message, type).toMatch(prescription);
+    }
+  });
+
+  it('a key on a screen field or one of its options is refused where the author wrote it', () => {
+    const config = { fields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a', bogusKey: 1 }], other: 2 }] };
+    expect(flowNodeConfigRefusals('screen', config).map((r) => r.path).sort())
+      .toEqual(['fields[0].options[0].bogusKey', 'fields[0].other']);
+    expect(issuesOf(flowWith('screen', config)).map((i) => i.path).sort())
+      .toEqual(['nodes.1.config.fields.0.options.0.bogusKey', 'nodes.1.config.fields.0.other']);
+  });
+
+  it('a body-less legacy loop is judged on key membership alone, as registration judged it', () => {
+    // Keys: refused, whatever `parsedWhen` says.
+    const [refusal] = flowNodeConfigRefusals('loop', { collection: 'rows', bogusKey: 1 });
+    expect({ code: refusal!.code, path: refusal!.path }).toEqual({ code: 'node-config-refused-by-contract', path: 'bogusKey' });
+    // The run does not parse this form, so the sentence names registration, not a failing run.
+    expect(refusal!.message).toContain('registration refuses the whole flow');
+    expect(issuesOf(flowWith('loop', { flowName: 'x' })).map((i) => i.path)).toEqual(['nodes.1.config.flowName']);
+    // Presence and values keep `parsedWhen`: a marker loop with no collection, or a value the
+    // contract would refuse, is not judged.
+    expect(flowNodeConfigRefusals('loop', {})).toEqual([]);
+    expect(flowNodeConfigRefusals('loop', { collection: 5 })).toEqual([]);
+  });
+
+  it('a pre-conversion alias is converted first where the door converts, and refused at a direct parse', () => {
+    const config = { objectName: 'task', filters: { id: '{recordId}' }, fields: { title: 'X' } };
+    expect(issuesOf(flowWith('update_record', config)).map((i) => i.path)).toEqual(['nodes.1.config.filters']);
+    const stack = {
+      manifest: { id: 'com.example.alias', name: 'alias', version: '1.0.0', type: 'app', namespace: 'als' },
+      objects: [{ name: 'als_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } }],
+      flows: [flowWith('update_record', { ...config, objectName: 'als_task' }, 'alias_flow')],
+    };
+    expect(() => defineStack(stack as never)).not.toThrow();
+  });
+});
+
 describe('what stays as it was (lit controls)', () => {
   it('CONTROL: the measured node without its extra key, and a valid subflow, parse clean', () => {
     for (const [type, config] of [['script', MEASURED], ['subflow', SUBFLOW]] as const) {
@@ -129,23 +230,51 @@ describe('what stays as it was (lit controls)', () => {
     }
   });
 
-  it('CONTROL: the key-judged builtins are exactly the schemaless ones with an executor contract', () => {
+  it('the key-judged builtins are every executor contract, try_catch included, and the predicate says so', () => {
     const judged = [...getBuiltinNodeConfigContracts().keys()]
       .filter((type) => flowNodeConfigRefusals(type, { bogusKey: 1 }).some((r) => r.path === 'bogusKey'));
-    expect(judged.sort()).toEqual(['script', 'subflow']);
-    expect(judged.every((type) => Object.prototype.hasOwnProperty.call(SCHEMALESS_NODE_CONFIG_SCHEMAS, type))).toBe(true);
+    expect(judged.sort()).toEqual([
+      'create_record', 'delete_record', 'get_record', 'http', 'loop', 'map', 'notify', 'parallel', 'screen',
+      'script', 'subflow', 'try_catch', 'update_record',
+    ]);
+    // The predicate the descriptor walk reads names exactly the types the judge judges — one judge per type.
+    for (const type of getBuiltinNodeConfigContracts().keys()) {
+      expect(builtinNodeConfigKeysJudged(type), type).toBe(judged.includes(type));
+    }
+    for (const type of ['approval', 'decision', 'assignment', 'wait', 'some_plugin_node']) {
+      expect(builtinNodeConfigKeysJudged(type), type).toBe(false);
+    }
   });
 
-  it('CONTROL: a builtin with a descriptor configSchema keeps its undeclared key at registration', () => {
+  it('CONTROL: each judged type\'s valid config draws no refusal', () => {
+    for (const [type, config] of Object.entries(VALID)) {
+      expect(builtinNodeConfigKeysJudged(type), type).toBe(true);
+      expect(flowNodeConfigRefusals(type, config), type).toEqual([]);
+    }
+  });
+
+  it('CONTROL: a key at or under a region slot is the region\'s, never the container\'s', () => {
+    const node = { id: 'inner', type: 'assignment', label: 'A', config: { assignments: { a: 1 } } };
     for (const [type, config] of [
-      ['http', { url: 'https://example.test/hook', method: 'POST', bogusKey: 1 }],
-      ['create_record', { objectName: 'task', fields: { title: 'X' }, bogusKey: 1 }],
-      ['screen', { fields: [{ name: 'qty', visibleIf: 'x' }] }],
+      ['loop', { collection: '{rows}', body: { nodes: [node], edges: [], bogusKey: 1 } }],
+      ['loop', { collection: '{rows}', body: { nodes: [{ ...node, bogusKey: 1 }], edges: [] } }],
+      ['parallel', { branches: [{ name: 'a', nodes: [node], edges: [], bogusKey: 1 }, { name: 'b', nodes: [node], edges: [] }] }],
     ] as const) {
-      // The contract refuses it — the build arm holds back, registration judges it.
+      // The region contract refuses it — `validateControlFlow` names it at registration.
       expect(getBuiltinNodeConfigContracts().get(type)!.schema.safeParse(config).success, type).toBe(false);
       expect(flowNodeConfigRefusals(type, config), type).toEqual([]);
-      expect(issuesOf(flowWith(type, config)), type).toEqual([]);
+    }
+  });
+
+  it('CONTROL: a key inside a free-form map is author data', () => {
+    for (const [type, config] of [
+      ['get_record', { objectName: 'task', filter: { status: 'stale', anythingAtAll: true } }],
+      ['create_record', { objectName: 'task', fields: { title: 'X', any_field: 1 } }],
+      ['http', { url: 'https://example.test/hook', headers: { 'X-Anything': 'y' } }],
+      ['screen', { objectName: 'task', defaults: { anything: 1 } }],
+      ['map', { collection: '{rows}', flowName: 'child_flow', input: { anything: 1 } }],
+    ] as const) {
+      expect(flowNodeConfigRefusals(type, config), type).toEqual([]);
     }
   });
 
@@ -165,6 +294,101 @@ describe('what stays as it was (lit controls)', () => {
   });
 });
 
+describe('try_catch: its retry is closed, so the spec judges its keys like every other builtin', () => {
+  // The measured slip: a near miss of `maxRetries` under `retry`. Before the
+  // contract closed, the contract stripped it and only registration's
+  // descriptor walk refused it; the build doors passed it.
+  const NEAR_MISS = { try: TRY_REGION, retry: { maxRetry: 2 } };
+
+  it('a near miss under retry is refused at nodes.1.config.retry.maxRetry, with a did-you-mean to the declared key', () => {
+    const issues = issuesOf(flowWith('try_catch', NEAR_MISS));
+    expect(issues.map(({ code, path }) => ({ code, path }))).toEqual([{ code: 'custom', path: 'nodes.1.config.retry.maxRetry' }]);
+    const refusals = flowNodeConfigRefusals('try_catch', NEAR_MISS);
+    expect(refusals.map(({ code, params, path, source }) => ({ code, params, path, source }))).toEqual([
+      { code: 'node-config-refused-by-contract', params: { nodeType: 'try_catch', key: 'retry.maxRetry' }, path: 'retry.maxRetry', source: '' },
+    ]);
+    expect(issues[0]!.message).toBe(refusals[0]!.message);
+    // The contract's own sentence, carrying the did-you-mean's subject: the declared key.
+    expect(refusals[0]!.message).toContain(contractSentence('try_catch', NEAR_MISS));
+    // The did-you-mean's subject is the rename pair — a curated alias, since `maxRetry` is three edits from
+    // `maxRetries`, past the distance fallback's budget of two.
+    expect(contractSentence('try_catch', NEAR_MISS)).toContain('`maxRetry` → `maxRetries`');
+    expect(refusals[0]!.message).toMatch(/Rename the key .* or remove it/);
+  });
+
+  it('a key beside try / catch / errorVariable / retry is refused too, and every undeclared key once', () => {
+    expect(flowNodeConfigRefusals('try_catch', { try: TRY_REGION, bogusKey: 1, retry: { maxRetries: 1, other: 2 } })
+      .map(({ path }) => path).sort()).toEqual(['bogusKey', 'retry.other']);
+  });
+
+  it('a retryDelayMs the conversion leaves behind is refused at its own path, in the tombstone\'s words', () => {
+    // `retry-policy-converged` keeps both spellings when the values differ, and
+    // leaves a `null`: registration's walk refused both as undeclared keys.
+    for (const retry of [{ backoffMs: 500, retryDelayMs: 700 }, { retryDelayMs: null }]) {
+      const config = { try: TRY_REGION, retry };
+      const refusals = flowNodeConfigRefusals('try_catch', config);
+      expect(refusals.map(({ code, path }) => ({ code, path })), JSON.stringify(retry)).toEqual([
+        { code: 'node-config-refused-by-contract', path: 'retry.retryDelayMs' },
+      ]);
+      // The tombstone's upgrade is the remedy; no "undeclared key" closing on a key the contract declares retired.
+      expect(refusals[0]!.message).toContain('Rename the key to `backoffMs`');
+      expect(refusals[0]!.message).not.toMatch(/Rename the key to one/);
+      expect(issuesOf(flowWith('try_catch', config)).map(({ path }) => path)).toEqual(['nodes.1.config.retry.retryDelayMs']);
+    }
+  });
+
+  it('CONTROL: a declared retry block parses clean, every one of its keys', () => {
+    const config = {
+      try: TRY_REGION,
+      catch: { nodes: [{ id: 'handler', type: 'assignment', label: 'H', config: { assignments: { b: 1 } } }], edges: [] },
+      errorVariable: '$err',
+      retry: { maxRetries: 3, backoffMs: 500, backoffMultiplier: 2, maxRetryDelayMs: 10000, jitter: true },
+    };
+    expect(getBuiltinNodeConfigContracts().get('try_catch')!.schema.safeParse(config).success).toBe(true);
+    expect(flowNodeConfigRefusals('try_catch', config)).toEqual([]);
+    expect(issuesOf(flowWith('try_catch', config))).toEqual([]);
+  });
+
+  it('CONTROL: a key on the try region object stays the region check\'s', () => {
+    const config = { try: { ...TRY_REGION, bogusKey: 1 } };
+    expect(getBuiltinNodeConfigContracts().get('try_catch')!.schema.safeParse(config).success).toBe(false);
+    expect(flowNodeConfigRefusals('try_catch', config)).toEqual([]);
+  });
+
+  it('the stack parse validate and compile run, defineStack and the save door refuse it at the key', () => {
+    const stack = {
+      manifest: { id: 'com.example.retry', name: 'retry', version: '1.0.0', type: 'app', namespace: 'rty' },
+      objects: [{ name: 'rty_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } }],
+      flows: [flowWith('try_catch', NEAR_MISS, 'retry_probe')],
+    };
+    const parsed = ObjectStackDefinitionSchema.safeParse(stack);
+    expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.retry.maxRetry']);
+
+    let refusal: { code?: unknown; status?: unknown; issues?: Array<{ path: unknown[] }> } | undefined;
+    try {
+      defineStack(stack as never);
+    } catch (e) {
+      refusal = e as typeof refusal;
+    }
+    expect(refusal, 'defineStack must refuse the flow').toBeDefined();
+    expect({ code: refusal!.code, status: refusal!.status }).toEqual({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+    expect(refusal!.issues!.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.retry.maxRetry']);
+
+    const schema = getMetadataTypeSchema('flow') as unknown as typeof FlowSchema;
+    const saved = schema.safeParse(flowWith('try_catch', NEAR_MISS));
+    expect(saved.success ? [] : saved.error.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.retry.maxRetry']);
+  });
+
+  it('CONTROL: a pre-17 retryDelayMs alone is converted first where the door converts', () => {
+    const stack = {
+      manifest: { id: 'com.example.retry', name: 'retry', version: '1.0.0', type: 'app', namespace: 'rty' },
+      objects: [{ name: 'rty_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } }],
+      flows: [flowWith('try_catch', { try: TRY_REGION, retry: { maxRetries: 1, retryDelayMs: 500 } }, 'retry_legacy')],
+    };
+    expect(() => defineStack(stack as never)).not.toThrow();
+  });
+});
+
 describe('every door that parses a flow refuses it', () => {
   const stackWith = (flows: unknown[]) => ({
     manifest: { id: 'com.example.keys', name: 'keys', version: '1.0.0', type: 'app', namespace: 'key' },
@@ -174,6 +398,7 @@ describe('every door that parses a flow refuses it', () => {
   const refused = flowWith('script', { ...MEASURED, bogusKey: 1 }, 'key_refused');
   const subflowRefused = flowWith('subflow', { ...SUBFLOW, bogusKey: 1 }, 'key_subflow');
   const accepted = flowWith('script', MEASURED, 'key_ok');
+  const notifyRefused = flowWith('notify', { ...NOTIFY, bogusKey: 1 }, 'key_notify');
 
   it('defineStack wraps the refusal in its ADR-0112 envelope, at flows.1.nodes.1.config.bogusKey', () => {
     let refusal: { code?: unknown; status?: unknown; issues?: Array<{ path: unknown[]; code: string }> } | undefined;
@@ -220,6 +445,14 @@ describe('every door that parses a flow refuses it', () => {
     const ok = ArtifactStagePackageBodySchema.safeParse({ ...body, flows: [accepted] });
     expect(ok.success, JSON.stringify(ok.error?.issues ?? [])).toBe(true);
   });
+  it('ObjectStackDefinitionSchema and the save door\'s flow type schema refuse the remainder\'s notify node', () => {
+    const r = ObjectStackDefinitionSchema.safeParse(stackWith([accepted, notifyRefused]));
+    expect(r.success).toBe(false);
+    expect(r.success ? [] : r.error.issues.map((i) => i.path.join('.'))).toEqual(['flows.1.nodes.1.config.bogusKey']);
+    const schema = getMetadataTypeSchema('flow') as unknown as typeof FlowSchema;
+    const saved = schema.safeParse(notifyRefused);
+    expect(saved.success ? [] : saved.error.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.bogusKey']);
+  });
 });
 
 describe('the ADR-0087 ledger', () => {
@@ -233,5 +466,19 @@ describe('the ADR-0087 ledger', () => {
 
   it('names the step-18 rationale fragment for it', () => {
     expect(MIGRATIONS_BY_MAJOR[18]!.rationale).toContain(ENTRY_ID);
+  });
+
+  it('registers the remainder\'s D3 entry at protocol 18, with no D2 conversion, and its rationale fragment', () => {
+    const entries = MIGRATIONS_BY_MAJOR[18]!.semantic.filter((e) => e.id === REMAINDER_ENTRY_ID);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.conversionIds ?? []).toEqual([]);
+    expect(MIGRATIONS_BY_MAJOR[18]!.rationale).toContain(REMAINDER_ENTRY_ID);
+  });
+
+  it('registers try_catch\'s D3 entry at protocol 18, with no D2 conversion, and its rationale fragment', () => {
+    const entries = MIGRATIONS_BY_MAJOR[18]!.semantic.filter((e) => e.id === TRY_CATCH_ENTRY_ID);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.conversionIds ?? []).toEqual([]);
+    expect(MIGRATIONS_BY_MAJOR[18]!.rationale).toContain(TRY_CATCH_ENTRY_ID);
   });
 });

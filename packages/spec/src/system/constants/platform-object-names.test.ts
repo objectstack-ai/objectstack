@@ -149,6 +149,20 @@ describe('platform-object predicates', () => {
     expect(hasPlatformObjectPrefix('sys_approval_process')).toBe(true);
   });
 
+  it('no longer resolves the retired sys_view_definition (ADR-0131 D13)', () => {
+    // Retired as inert: no framework writer or reader of its rows existed. A
+    // stack still naming it is now flagged as a probable typo rather than
+    // resolved — the registry stays a list of objects something registers.
+    expect(PLATFORM_OBJECTS_BY_PACKAGE['metadata-core']).toEqual([
+      'sys_metadata',
+      'sys_metadata_audit',
+      'sys_metadata_commit',
+      'sys_metadata_history',
+    ]);
+    expect(isPlatformProvidedObjectName('sys_view_definition')).toBe(false);
+    expect(hasPlatformObjectPrefix('sys_view_definition')).toBe(true);
+  });
+
   it('treats an unprefixed name as neither', () => {
     expect(hasPlatformObjectPrefix('crm_lead')).toBe(false);
     expect(isPlatformProvidedObjectName('user')).toBe(false);

@@ -44,7 +44,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import { DraftConflictError, SysMetadataRepository, packageScopedRowWhere, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { isOriginGatedType, packagedBaseRegimeSentence } from './packaged-base-regime.js';
+import { isOriginGatedType, managedItemSealedSentence } from './packaged-base-regime.js';
 import {
     resolveArtifactLockLayer,
     resolveItemLock,
@@ -150,7 +150,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
-import { applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -11230,11 +11230,13 @@ export class ObjectStackProtocolImplementation implements
         // were eliminated by measurement, not by reading:
         //  - the driver's tenant wall never engages — `buildDriverOptions`
         //    sets `DriverOptions.tenantId` only from `execCtx.tenantId`
-        //    (`objectql/engine.ts`), and this read passes no context;
-        //  - plugin-security's Layer 0 never engages — the middleware takes
-        //    its principal-less `return next()` thousands of lines before the
-        //    `objectFields.has('organization_id')` gate that would have
-        //    carried it;
+        //    (`objectql/engine.ts`), and this read's context carries no
+        //    `tenantId` (only the system opt-in below);
+        //  - plugin-security's Layer 0 never engages — the middleware
+        //    short-circuits on that `isSystem` opt-in (it used to take its
+        //    principal-less `return next()`, refused since ADR-0096 D5)
+        //    thousands of lines before the `objectFields.has('organization_id')`
+        //    gate that would have carried it;
         //  - no posture would save it anyway: `computeTenantLayer0Filter`
         //    yields `null` under `single` and the deny sentinel under
         //    `isolated` with no tenantId.
@@ -15972,13 +15974,34 @@ export class ObjectStackProtocolImplementation implements
             || this.OVERLAY_CAPABLE_TYPES.has(type);
     }
 
-    /** Normalize plural→singular before consulting the allow-list. */
-    private static isOverlayAllowed(type: string): boolean {
+    /**
+     * Does the type's REGISTRY entry open an overlay channel (`allowOrgOverride`)?
+     * The registry arm of {@link isOverlayAllowed}, without the hatch.
+     * Normalizes plural→singular before consulting the allow-list.
+     *
+     * [ADR-0131 D6] Read alone by {@link isSealedManagedItem}: whether an item a
+     * managed package ships may be overlaid is the registry's answer, and the
+     * `OS_METADATA_WRITABLE` hatch has no say in it.
+     */
+    private static registryAllowsOverlay(type: string): boolean {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (this.OVERLAY_ALLOWED_TYPES.has(singular)
-            || this.OVERLAY_ALLOWED_TYPES.has(type)) {
-            return true;
-        }
+        return this.OVERLAY_ALLOWED_TYPES.has(singular)
+            || this.OVERLAY_ALLOWED_TYPES.has(type);
+    }
+
+    /**
+     * The TYPE-level write channel: the registry's overlay opt-in, or the
+     * `OS_METADATA_WRITABLE` hatch naming the type. Normalize plural→singular
+     * before consulting the allow-list.
+     *
+     * [ADR-0131 D6] A type-level answer, so ⛔ never the answer for an item a
+     * managed package ships — that one is {@link isSealedManagedItem}'s, and the
+     * hatch does not reach it. What the hatch still opens through this predicate
+     * is the type's writes of items no managed package ships.
+     */
+    private static isOverlayAllowed(type: string): boolean {
+        if (this.registryAllowsOverlay(type)) return true;
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
         const env = this.envWritableTypes();
         return env.has(singular) || env.has(type);
     }
@@ -16111,15 +16134,20 @@ export class ObjectStackProtocolImplementation implements
      * #5086 — the artifact-backed half of the same refusal: the name IS
      * shipped by a code package, so the honest verdict is "you may not
      * overlay it" rather than "you may not create it".
+     *
+     * [ADR-0131 D6] The package is a managed one and its item is sealed, so the
+     * sentence names the managed package and says the hatch does not open it —
+     * the prescription this sentence used to end with ("an operator may set
+     * OS_METADATA_WRITABLE") would send the operator to a door that no longer
+     * opens. The source remedy stays: it is where a code-only item is declared.
      */
     private static codeOnlyOverrideError(type: string, name: string): Error {
         const err = new Error(
-            `Metadata item '${type}/${name}' is provided by a code package and its type is `
-            + `code-only (allowRuntimeCreate=false, allowOrgOverride=false), so it cannot be overlaid through `
-            + `the runtime metadata API on any kernel.`
+            `Metadata item '${type}/${name}' is provided by a managed package and its type is `
+            + `code-only (allowRuntimeCreate=false, allowOrgOverride=false), so it is sealed against `
+            + `runtime edits on any kernel, and OS_METADATA_WRITABLE does not open a managed item.`
             + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
-            + ` An operator may set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} to grant a runtime escape hatch. `
-            + `See docs/adr/0005-metadata-customization-overlay.md.`
+            + ` See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.`
         );
         (err as any).code = 'NOT_OVERRIDABLE';
         (err as any).status = 403;
@@ -16448,6 +16476,41 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [ADR-0131 D6] Is `(type, name)` MANAGED CONTENT — sealed against every
+     * write onto it and every removal of it? THE predicate both package doors
+     * ask ({@link refusePackagedBaseOverride} and {@link refusePackagedBaseRemoval},
+     * and through them {@link packagedBaseRefusal} for the `/automation` doors
+     * and the read envelope), and the one `saveMetaItem` / `deleteMetaItem` ask
+     * where the `OS_METADATA_WRITABLE` hatch would otherwise decide an item's
+     * fate. `SysMetadataRepository.assertAllowed` states the same rule at the
+     * store, where it is told the item is artifact-backed by the write intent.
+     *
+     * True when an item a managed package ships ({@link isArtifactBacked} — the
+     * registry's artifact-only lookup, never the body a caller sends) is of a
+     * type whose registry entry opens no overlay channel
+     * ({@link registryAllowsOverlay}). The install mode is not modelled yet, so
+     * every package the artifact loader registered items for is managed.
+     *
+     * What it deliberately leaves open:
+     *  - the regime-O overlay: a type whose registry entry allows an
+     *    environment overlay (`view`, `dashboard`, `report`, `translation`,
+     *    `email_template`) keeps it — an overlay replaces the managed item
+     *    beside it, it does not edit it;
+     *  - an item no managed package ships: creating, editing and removing it is
+     *    environment authoring, governed by `allowRuntimeCreate` and the hatch as
+     *    before;
+     *  - the removal of a stored overlay row that merges at read (#6960) — the
+     *    removal door's own carve-out, which restores the managed definition.
+     *
+     * ⛔ The hatch is not consulted: `OS_METADATA_WRITABLE` unlocks a TYPE, and a
+     * type-level unlock says nothing about an item a managed package ships.
+     */
+    private isSealedManagedItem(type: string, name: string): boolean {
+        return this.isArtifactBacked(type, name)
+            && !ObjectStackProtocolImplementation.registryAllowsOverlay(type);
+    }
+
+    /**
      * [#7743] Is `(field, '<object>.<field>')` a field a code package ships?
      *
      * ## Why this predicate needs a second resolver at all
@@ -16642,20 +16705,21 @@ export class ObjectStackProtocolImplementation implements
      * "Is this artifact-backed?" ({@link isArtifactBacked}: the registry's
      * artifact-only lookup, which answers from the entries the artifact loader
      * registered under a package id — never from the body a caller sends) and
-     * "does the type have an overlay channel?" ({@link isOverlayAllowed},
-     * `allowOrgOverride` plus the `OS_METADATA_WRITABLE` hatch) keep exactly
-     * one spelling. The refusal — code, status and sentence — is registered to
+     * "does the type have an overlay channel?" — [ADR-0131 D6] asked together
+     * as {@link isSealedManagedItem}, the registry's `allowOrgOverride` alone,
+     * never the `OS_METADATA_WRITABLE` hatch — keep exactly one spelling. The refusal — code, status and sentence — is registered to
      * this package in the ADR-0112 ledger, so the caller relays it verbatim
      * and stamps no code of its own.
      *
      * ## Topology-INDEPENDENT, deliberately
      *
-     * `saveMetaItem` asks its package door behind `environmentId !== undefined`
-     * because on a host-config kernel the SAME predicate is enforced one layer
-     * down, by `SysMetadataRepository.assertAllowed` at the write itself — so
-     * the `/meta` door refuses a packaged item's in-place write on every
-     * topology. A caller whose write never reaches the repository has no such
-     * second layer, so it is answered here on every topology. The removal side
+     * [#22220] `saveMetaItem` asks its package door on every topology too,
+     * ahead of the gates that judge the body; the SAME predicate is enforced
+     * one layer down, by `SysMetadataRepository.assertAllowed` at the write
+     * itself, as the store-level backstop — so the `/meta` door refuses a
+     * packaged item's in-place write on every topology. A caller whose write
+     * never reaches the repository has no such second layer, so it is
+     * answered here on every topology. The removal side
      * agrees: the `/meta` door never removes a packaged base on any topology
      * (on a host-config kernel with no overlay row its delete is a no-op that
      * leaves the artifact standing, and with one the repository's delete gate
@@ -16728,8 +16792,9 @@ export class ObjectStackProtocolImplementation implements
      *    no overlay channel — {@link packagedBaseRefusal}, the verdict the
      *    `/meta` doors and the `/automation` doors already share (`NOT_OVERRIDABLE`,
      *    or `ITEM_LOCKED` when the write names the read-only package). It
-     *    carries the registry's flags, the #6960 removal carve-out and the
-     *    `OS_METADATA_WRITABLE` hatch, and answers alike on every topology.
+     *    carries the registry's flags and the #6960 removal carve-out, and
+     *    answers alike on every topology and — [ADR-0131 D6] managed content
+     *    being sealed — with the `OS_METADATA_WRITABLE` hatch open or shut.
      *
      * Asked from the first limb alone, a packaged flow or action read
      * `lock: 'none'`, `editable: true`, `deletable: true` while every door
@@ -16964,10 +17029,10 @@ export class ObjectStackProtocolImplementation implements
      *     locked base, and the answer is {@link packagedBaseRefusal}'s —
      *     reused, never re-implemented. That covers a round trip of a shipped
      *     flow: its served body echoes stamps that AGREE with the set, and the
-     *     write is still an in-place edit of a locked base. With the
-     *     `OS_METADATA_WRITABLE` hatch open the lock admits the write, and it
-     *     is still tenant-authored: the body's stamps decide nothing (the base
-     *     the write names still does — see the named-base rule below).
+     *     write is still an in-place edit of a locked base. [ADR-0131 D6] The
+     *     `OS_METADATA_WRITABLE` hatch no longer admits it: a managed flow is
+     *     sealed with the hatch open or shut, so the body's stamps never get
+     *     the chance to decide anything for a name the loader's set holds.
      *  2. **Any other name, with a body whose stamps would classify it as
      *     code-shipped** (`isCodeArtifactBody`, ADR-0029 D9.6), is refused
      *     LOUDLY. The body asserts a provenance the platform never
@@ -17151,8 +17216,9 @@ export class ObjectStackProtocolImplementation implements
      * record and both emitters are that method's lines, byte for byte apart
      * from indentation — so {@link packagedBaseRefusal} can hand a second write
      * door the same verdict. `saveMetaItem` calls it at the same position
-     * (behind `environmentId !== undefined`, below the code-only and org-scope
-     * refusals, above the ADR-0010 `_lock` check). The one added line computes
+     * (below the code-only and org-scope refusals, above the ADR-0010 `_lock`
+     * check) — [#22220] on every topology, where it used to be asked behind
+     * `environmentId !== undefined` only. The one added line computes
      * `overlayAllowed` the way `saveMetaItem` computes it at its top. In the
      * record, "the block comment above" and "this method" mean `saveMetaItem`.
      *
@@ -17162,13 +17228,18 @@ export class ObjectStackProtocolImplementation implements
      * limb's emitter, `readOnlyBaseOverrideError`, takes a Regime C type's
      * prescription from the same table — in that emitter, so both doors that
      * call it keep one sentence.
+     *
+     * [ADR-0131 D6] Managed content is sealed: the predicate is
+     * {@link isSealedManagedItem}, shared with {@link refusePackagedBaseRemoval},
+     * and the `OS_METADATA_WRITABLE` hatch no longer takes a write past it. The
+     * sentence names the managed package ({@link managedItemSealedSentence}, the
+     * one builder the repository's type door reads too); the code and the status
+     * are unchanged.
      */
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
     ): void {
-        const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
-        const artifactBacked = this.isArtifactBacked(request.type, request.name);
-        if (artifactBacked && !overlayAllowed) {
+        if (this.isSealedManagedItem(request.type, request.name)) {
             // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
             // condition, and the reason this card exists.
             //
@@ -17196,34 +17267,28 @@ export class ObjectStackProtocolImplementation implements
             // started.
             //
             // THE LIMB ORDERING IS THE RULE, and it is the same ordering
-            // the repository states: BELOW every registry limb, ABOVE the
-            // hatch limb.
+            // the repository states: BELOW every registry limb, and the
+            // hatch is not a limb at all.
             //   • Below the registry limb — this whole branch is guarded
-            //     by `!overlayAllowed`, so an `allowOrgOverride` type
-            //     never reaches the door. That is ADR-0005: an org
-            //     overlay of a code-shipped item ALWAYS names the
-            //     read-only package it customizes, and a door one limb
-            //     higher would close the overlay model outright. Pinned.
-            //   • Above the hatch limb — `isOverlayAllowed` folds
-            //     `OS_METADATA_WRITABLE` in, so an OPEN hatch takes the
-            //     write past this branch entirely, down to the repository
-            //     door, which applies the same rule with `hatchOpen:
-            //     true` and its own remedy. The hatch therefore still
-            //     never unlocks package writability on this topology
-            //     either (#8146 NARROW), and both directions of that
-            //     remedy selection are pinned in
-            //     `sys-metadata-repository.package-writability.test.ts`.
-            //     That is also why `hatchOpen` is passed as a literal
-            //     `false` here rather than recomputed: reaching this line
-            //     PROVES the hatch is closed, and a recomputed value
-            //     would be dead code dressed as a decision.
+            //     by {@link isSealedManagedItem}, whose type half is the
+            //     registry's `allowOrgOverride` alone, so a regime-O type
+            //     never reaches the door. That is ADR-0005: an overlay of
+            //     a code-shipped item ALWAYS names the read-only package
+            //     it customizes, and a door one limb higher would close
+            //     the overlay model outright. Pinned.
+            //   • [ADR-0131 D6] No hatch limb. `OS_METADATA_WRITABLE` used
+            //     to take an artifact-backed write past this branch, down
+            //     to the repository door, where a package-less write landed
+            //     an overlay of the managed item (#8146 had narrowed that to
+            //     "never a NAMED read-only base"). Managed content is sealed
+            //     now — the broad reading that comment reserved for a
+            //     maintainer decision is the decision ADR-0131 D6 records —
+            //     so the hatch is not consulted here, and the repository
+            //     refuses the same write without it.
             //
-            // ⛔ NARROW, exactly as the repository is: only a write that
-            // NAMES a read-only base is re-coded. A package-less write
-            // keeps `NOT_OVERRIDABLE` verbatim. Refusing a hatch write
-            // that names NO read-only base (BROAD) retires the hatch's
-            // only documented use and needs a maintainer decision plus a
-            // docs/ADR change — never arrived at from here.
+            // The named-base limb below keeps its own code: a write that
+            // NAMES the read-only base answers `ITEM_LOCKED`, and a
+            // package-less one `NOT_OVERRIDABLE`, with or without the hatch.
             //
             // `runtime-only` needs no limb here: this branch is guarded by
             // `artifactBacked`, so the intent is always
@@ -17234,18 +17299,13 @@ export class ObjectStackProtocolImplementation implements
             const namedBase = typeof request.packageId === 'string' && request.packageId.length > 0;
             if (namedBase && !this.isWritablePackage(request.packageId)) {
                 throw SysMetadataRepository.readOnlyBaseOverrideError(
-                    request.type, request.packageId as string, false,
+                    request.type, request.packageId as string,
                 );
             }
-            // [#20819] The SENTENCE is chosen per ADR-0126 regime; the code,
-            // the status and this branch's predicate are unchanged.
-            const err = new Error(
-                packagedBaseRegimeSentence(request.type, request.name, 'save')
-                ?? (`Metadata item '${request.type}/${request.name}' is provided by a code package `
-                + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
-                + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
-                + `See docs/adr/0005-metadata-customization-overlay.md.`)
-            );
+            // [#20819, ADR-0131 D6] The SENTENCE is chosen per ADR-0126 regime,
+            // and names the managed package for every other type; the code and
+            // the status are unchanged.
+            const err = new Error(managedItemSealedSentence(request.type, request.name, 'save'));
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
             throw err;
@@ -17271,20 +17331,20 @@ export class ObjectStackProtocolImplementation implements
      * [#20819] Since lifted, the SENTENCE is chosen per ADR-0126 regime
      * ({@link packagedBaseRegimeSentence}); the predicate, the code and the
      * status are unchanged.
+     *
+     * [ADR-0131 D6] Managed content is sealed against removal as against edits:
+     * the predicate is {@link isSealedManagedItem}, the save door's, so the
+     * `OS_METADATA_WRITABLE` hatch no longer opens the removal either. The
+     * #6960 carve-out stands — removing a row that merges at read restores the
+     * managed definition, it does not remove it. The sentence names the managed
+     * package ({@link managedItemSealedSentence}).
      */
     private refusePackagedBaseRemoval(request: { type: string; name: string }): void {
-        const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
-        const artifactBacked = this.isArtifactBacked(request.type, request.name);
         const legacyOverlayRemoval = ObjectStackProtocolImplementation
             .mergesOverlayAtRead(request.type);
-        if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
-            // [#20819] Sentence per ADR-0126 regime, as in the save door.
-            const err = new Error(
-                packagedBaseRegimeSentence(request.type, request.name, 'delete')
-                ?? (`Metadata item '${request.type}/${request.name}' is provided by a code package `
-                + `and the type has not opted into per-org overlay writes. `
-                + `See docs/adr/0005-metadata-customization-overlay.md.`)
-            );
+        if (this.isSealedManagedItem(request.type, request.name) && !legacyOverlayRemoval) {
+            // [#20819, ADR-0131 D6] Sentence per ADR-0126 regime, as in the save door.
+            const err = new Error(managedItemSealedSentence(request.type, request.name, 'delete'));
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
             throw err;
@@ -17297,9 +17357,11 @@ export class ObjectStackProtocolImplementation implements
      * runtime-created free) when the item is code-defined: the package door's
      * own refusal, {@link packagedBaseRefusal} for `delete`, held for
      * {@link deleteMetaItem} to answer at its row probe. `null` for an item of
-     * any other type, for a runtime item of this one (nothing ships the name),
-     * and with `OS_METADATA_WRITABLE` open on the type — each keeps the verdict
-     * it had.
+     * any other type and for a runtime item of this one (nothing ships the
+     * name) — each keeps the verdict it had. [ADR-0131 D6] `OS_METADATA_WRITABLE`
+     * open on the type no longer lifts it: a code-defined item is sealed with
+     * the hatch open or shut, and the stored-row repair below is the same in
+     * both.
      *
      * ## The one removal it lifts, and the one it keeps
      *
@@ -20195,11 +20257,20 @@ export class ObjectStackProtocolImplementation implements
         // declaration depend on deployment topology; the declaration decides
         // it here instead.
         //
+        // [#22220] "The rest of this block" no longer stays behind it either:
+        // the package door below now asks on every topology too — see its
+        // call site for why that moves no acceptance set.
+        //
         // `isOverlayAllowed` still consults `OS_METADATA_WRITABLE`, so the
         // documented operator escape hatch stays the ONE door: unlocking a
-        // type there unlocks it here too. `deleteMetaItem` is deliberately
-        // NOT gated the same way — removing a code-only row that predates
-        // this refusal is repair, and must stay possible.
+        // type there unlocks it here too — [ADR-0131 D6] for a NEW item only.
+        // An item a managed package ships is sealed, so for it this refusal
+        // reads the registry alone ({@link isSealedManagedItem}'s type half):
+        // with the hatch open or shut it is refused here, by the same sentence,
+        // instead of being carried past this gate to be refused by the package
+        // door in another one. `deleteMetaItem` is deliberately NOT gated the
+        // same way — removing a code-only row that predates this refusal is
+        // repair, and must stay possible.
         //
         // [#6960] THAT CARVE-OUT NOW NAMES BOTH TIERS, because as written it
         // covered only the CODE-ONLY one (`allowRuntimeCreate: false` AND
@@ -20227,10 +20298,16 @@ export class ObjectStackProtocolImplementation implements
         // (`supportsOverlay: false`, its overlay a contributor LAYER per
         // ADR-0029 D9) keeps refusing both verbs, which is D9.6's declared
         // cost and is pinned. See {@link deleteMetaItem}.
-        if (!overlayAllowed && !runtimeCreateAllowed) {
-            throw this.isArtifactBacked(request.type, request.name)
-                ? ObjectStackProtocolImplementation.codeOnlyOverrideError(request.type, request.name)
-                : ObjectStackProtocolImplementation.codeOnlyCreateError(request.type);
+        if (!runtimeCreateAllowed) {
+            const shipped = this.isArtifactBacked(request.type, request.name);
+            const channel = shipped
+                ? ObjectStackProtocolImplementation.registryAllowsOverlay(request.type)
+                : overlayAllowed;
+            if (!channel) {
+                throw shipped
+                    ? ObjectStackProtocolImplementation.codeOnlyOverrideError(request.type, request.name)
+                    : ObjectStackProtocolImplementation.codeOnlyCreateError(request.type);
+            }
         }
 
         // [#6190] …and the ORG dimension of the same declaration, on the tier
@@ -20264,39 +20341,69 @@ export class ObjectStackProtocolImplementation implements
             if (intakeRefusal) throw intakeRefusal;
         }
 
-        if (this.environmentId !== undefined) {
-            // [#8184] THE PACKAGE DOOR — the refusal of a write onto an item a
-            // code package ships, on a type with no per-org overlay channel.
-            // The verdict and its full record live in
-            // {@link refusePackagedBaseOverride}: [#20679] lifted out of this
-            // method UNCHANGED, so a second write door onto the same artifact
-            // asks this exact predicate and gets this exact emitter through
-            // {@link packagedBaseRefusal}, rather than a copy that agrees with
-            // this one only until either of them moves.
-            this.refusePackagedBaseOverride(request);
-        }
+        // [#8184] THE PACKAGE DOOR — the refusal of a write onto an item a
+        // code package ships, on a type with no per-org overlay channel.
+        // The verdict and its full record live in
+        // {@link refusePackagedBaseOverride}: [#20679] lifted out of this
+        // method UNCHANGED, so a second write door onto the same artifact
+        // asks this exact predicate and gets this exact emitter through
+        // {@link packagedBaseRefusal}, rather than a copy that agrees with
+        // this one only until either of them moves.
+        //
+        // [#22220] ON EVERY TOPOLOGY, and HERE: ahead of every check below
+        // that judges the request's body or the store. It used to sit behind
+        // `environmentId !== undefined`, on the ground that a host-config
+        // kernel meets the same predicate one layer down, at the repository
+        // write (`SysMetadataRepository.assertAllowed`, the first statement
+        // of `repo.put`). It does, but `repo.put` is this method's LAST act,
+        // so on that kernel every refusal in between answered first. Measured
+        // on a host-config boot: a publish of a packaged `object` whose body
+        // the runtime authoring gate refuses answered `422 INVALID_METADATA`
+        // where an environment kernel answered `403 NOT_OVERRIDABLE` for the
+        // same request, and a body the spec-conformance parse refuses did the
+        // same in draft and publish mode. The author was told to repair
+        // findings that no write through this door could ever land, and was
+        // refused for the basic reason only after repairing them. The same
+        // window held the ADR-0029 D9.9 package mismatch, the destructive
+        // diff, the layered-envelope and save-name refusals, the flow
+        // conversion conflict, the stored-hook body refusal and the domain
+        // plugins' authoring gates; #21694 had taught the `_lock` gate below
+        // to defer to this door by hand. Asked once, here, the door answers
+        // before all of them — one request, one refusal, on both kernels —
+        // and none of them has to learn to defer to it.
+        //
+        // ⛔ NO ACCEPTANCE SET MOVES. This predicate is the repository's
+        // (the registry's `allowOrgOverride` — [ADR-0131 D6] never the
+        // `OS_METADATA_WRITABLE` hatch for an item a managed package ships —
+        // and a named read-only base through the one `isWritablePackage`),
+        // and `repo.put` refuses every write it refuses, on every topology —
+        // so a request refused here was refused before, and only which
+        // refusal its author reads has changed: the same code and status on
+        // both kernels, and this door's sentence on both. The repository's
+        // check stays the store-level backstop for the doors that reach `put`
+        // without passing here (draft promotion, restore, revert). Nor does
+        // this retire a single-kernel carve-out: ADR-0005 §"Whitelist
+        // enforcement" kept such deployments "any type writable", but the
+        // repository has refused these writes on them all along; the door
+        // only answers first.
+        this.refusePackagedBaseOverride(request);
 
         // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
         // overlay `_lock`) blocks save independent of the L1 type-level
         // flag. Records the denial in `sys_metadata_audit` before
         // throwing so refused attempts are visible in compliance reports.
         //
-        // [#21694] On EVERY topology — it used to sit inside the block above,
-        // so a host-config kernel never asked it (see {@link lockWriteRefusal}).
-        // Its rank is unchanged and is the same on every kernel: BELOW the
-        // package door. On an environment kernel that door has thrown above
-        // whenever it refuses, so the condition is always true there; on a
-        // host-config kernel the same door answers at the repository write
-        // (`SysMetadataRepository.assertAllowed`), so a packaged base it will
-        // refuse is left to it. One request, one refusal code, on both kernels
-        // — the `_lock` gate never pre-empts `NOT_OVERRIDABLE` on one topology
-        // only.
-        if (this.packagedBaseRefusal({
-            type: request.type,
-            name: request.name,
-            operation: 'save',
-            ...(request.packageId ? { packageId: request.packageId } : {}),
-        }) === null) {
+        // [#21694] On EVERY topology — it used to sit inside the package
+        // door's `environmentId` block, so a host-config kernel never asked
+        // it (see {@link lockWriteRefusal}). Its rank is unchanged and is the
+        // same on every kernel: BELOW the package door. #21694 kept that rank
+        // on a host-config kernel by asking {@link packagedBaseRefusal} here,
+        // because that kernel's door then answered only at the repository
+        // write; [#22220] the door above now throws on every kernel whenever
+        // it refuses, so that question always answered "no refusal" here and
+        // is gone. One request, one refusal code, on both kernels — the
+        // `_lock` gate never pre-empts `NOT_OVERRIDABLE` on either topology.
+        {
             const lockErr = await this.assertLockAllowsWrite({
                 type: request.type,
                 name: request.name,
@@ -20550,11 +20657,28 @@ export class ObjectStackProtocolImplementation implements
         // an already-canonical body comes back reference-identical, so
         // `migrateStoredMetadata` and `duplicatePackage` re-entering here pay
         // nothing.
+        //
+        // [#21982] The two gates below — the schema gate and the runtime
+        // authoring gate — JUDGE a flow in its canonical spelling on every path. When no canonicalizer resolved, or it threw,
+        // `flowGateVerdictBody` is the raw body with the spec's ADR-0087 D2
+        // conversions applied (`applyConversionsToFlow`) — for the VERDICT
+        // only: what is stored stays the raw request body, exactly as before.
+        // The flow parse judges an undeclared config key on the builtin node
+        // types, so a D2 spelling the load path still rewrites (`filters`,
+        // script `functionName`, subflow `flow`, …) would otherwise be refused
+        // here and accepted at every converting door (`os validate`,
+        // `defineStack`, `registerFlow`): a verdict that depended on whether
+        // this host runs an automation service. No `reservedNodeTypes` (no
+        // engine here): a node-type rename's conflict guard keeps its one home
+        // in the engine's canonicalizer, and this converted body is never
+        // persisted. A key no conversion rewrites is judged exactly as written.
+        let flowGateVerdictBody: unknown;
         if (singularType === 'flow' && request.item) {
             // No automation service reachable (control-plane / metadata-only
             // host): save exactly as today — a host must not start refusing
             // flow writes it accepted yesterday.
             const canonicalizeFlow = this.resolveFlowCanonicalizer();
+            let canonicalized = false;
             if (canonicalizeFlow) {
                 let result: StoredFlowCanonicalization | undefined;
                 try {
@@ -20616,8 +20740,10 @@ export class ObjectStackProtocolImplementation implements
                         throw err;
                     }
                     request.item = result.storable;
+                    canonicalized = true;
                 }
             }
+            if (!canonicalized) flowGateVerdictBody = applyConversionsToFlow(request.item);
         }
 
         // Spec-conformance check: if a Zod schema is registered for this
@@ -20642,7 +20768,10 @@ export class ObjectStackProtocolImplementation implements
         {
             const schema = resolveOverlaySchema(request.type, request.item);
             if (schema) {
-                const parsed = schema.safeParse(request.item);
+                // [#21982] A flow on the canonicalizer's fallback is judged in
+                // its D2-converted spelling (see `flowGateVerdictBody` above);
+                // every other body is judged as stored.
+                const parsed = schema.safeParse(flowGateVerdictBody ?? request.item);
                 if (!parsed.success) {
                     const issues = zodIssuesToMetadataIssues(parsed.error.issues);
                     // [#10524 → commit d806081dd] The findings clause is rendered PER
@@ -20755,7 +20884,12 @@ export class ObjectStackProtocolImplementation implements
             type: request.type,
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
-            body: gatedItem,
+            // [#21982] The same verdict body as the schema gate above: a flow
+            // on the canonicalizer's fallback is judged in its D2-converted
+            // spelling (the lint's config judge refuses an undeclared key, so
+            // the raw `filters` alias would be refused here and nowhere else).
+            // Stored, and handed to the credential walk below, as written.
+            body: flowGateVerdictBody ?? gatedItem,
             source: writeSource,
             // [#6285] The write's organization partition. It was always here;
             // it simply never travelled to the gate, which is the whole reason
@@ -26663,7 +26797,16 @@ export class ObjectStackProtocolImplementation implements
         // folded `request.type` to singular at the top of this method, which
         // makes `singularTypeForRepo` a no-op re-fold — see #4432.)
         const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
-        const overlayAllowedForRepoDel = ObjectStackProtocolImplementation.isOverlayAllowed(singularTypeForRepo);
+        // [ADR-0131 D6] For an item a managed package ships the hatch decides
+        // nothing, the route included: the item takes the route it takes with
+        // `OS_METADATA_WRITABLE` shut. Read through the hatch, a code-only
+        // managed item's stored residue was routed onto the repository, which
+        // refuses it as sealed, away from the raw-engine repair below that
+        // removes it with the hatch shut — so setting the hatch would have
+        // blocked a repair the deployment otherwise has.
+        const overlayAllowedForRepoDel = artifactBacked
+            ? ObjectStackProtocolImplementation.registryAllowsOverlay(singularTypeForRepo)
+            : ObjectStackProtocolImplementation.isOverlayAllowed(singularTypeForRepo);
         const runtimeCreateAllowedForRepoDel = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularTypeForRepo);
         const useRepoPath = overlayAllowedForRepoDel || runtimeCreateAllowedForRepoDel;
 

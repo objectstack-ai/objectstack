@@ -26,7 +26,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -1534,10 +1534,22 @@ function declaredMultiValued(field: { type?: unknown; multiple?: unknown } | nul
   });
 }
 
+/**
+ * Plan the formula pass of a read: which formula fields to evaluate, and —
+ * when the caller named a projection — the projection the DRIVER is asked for.
+ *
+ * A projection naming a formula field is widened to every stored column (plus
+ * `id`), because CEL's `record.<field>` reads whatever the formula needs off
+ * the full row. That widening is a means of EVALUATING the formula and never
+ * an answer: [#22300] `widened` lists the columns it added beyond what the
+ * caller named, and {@link withoutFormulaWidening} cuts them back off the rows
+ * once the read is done, so the caller gets the projection it declared plus
+ * the formula's value. `widened` is absent whenever nothing was widened.
+ */
 function planFormulaProjection(
   schema: any,
   requestedFields: string[] | undefined
-): { plan: FormulaPlanEntry[]; projected?: string[] } {
+): { plan: FormulaPlanEntry[]; projected?: string[]; widened?: string[] } {
   if (!schema?.fields) return { plan: [] };
   const allFieldNames = Object.keys(schema.fields);
   // When no explicit projection, evaluate every formula field on the schema —
@@ -1578,11 +1590,67 @@ function planFormulaProjection(
       if (fdef?.type === 'formula') continue;
       projected.add(fname);
     }
-    return { plan, projected: Array.from(projected) };
+    // [#22300] What the widening added — `id` included when the caller did not
+    // name it — is what the read cuts back off once the formulas are computed.
+    const named = new Set(requestedFields);
+    const widened = Array.from(projected).filter((f) => !named.has(f));
+    return { plan, projected: Array.from(projected), ...(widened.length > 0 ? { widened } : {}) };
   }
   // Implicit/full projection — leave projected undefined so the driver
   // returns its default columns (typically *).
   return { plan };
+}
+
+/**
+ * [#22300] Cut the columns {@link planFormulaProjection} widened a projection
+ * by back off what a read RETURNS — the formula saw the full row, the caller
+ * does not. Without it, a projection naming a formula field answered with every
+ * stored column (tenant, owner, owning unit, audit actors and timestamps, every
+ * unnamed field): a flow's `get_record`, whose `config.fields` is declared as
+ * "only these fields are read", passed all of them on to whatever its later
+ * nodes sent out.
+ *
+ * ## The answer it restores
+ *
+ * The same projection without the formula, plus the formula's value: measured
+ * on driver-sql (a projection is exactly the named columns — no `id` unless it
+ * is named) and pinned against it in `engine-formula-projection-trim.test.ts`.
+ * `id` is cut like any other widened column when the caller did not name it.
+ *
+ * ## Where it runs, and why there
+ *
+ * On the result `find` / `findOne` hand back, AFTER the middleware chain —
+ * the last internal consumer. Everything before it keeps reading the widened
+ * row exactly as before: the formula pass, `expand`, file-reference
+ * resolution, the `afterFind` hooks, the secret mask and the `__search`
+ * strip, and the middlewares' post-phase (field-level security's result mask,
+ * the audit redactions that judge a row by columns the caller did not name).
+ * Cutting earlier would starve those of a column they read today.
+ *
+ * It REMOVES the widened columns rather than keeping a list: a key an
+ * `afterFind` hook derives, or an expanded relation the caller named, is not
+ * the widening's and survives. A widened column a hook re-assigns is cut — the
+ * caller never named it.
+ *
+ * Never mutates a row: a row carrying a widened column is replaced by a copy
+ * without it, in the row's own key order; a row carrying none is returned as
+ * is.
+ */
+function withoutFormulaWidening<T>(row: T, widened: ReadonlySet<string> | undefined): T {
+  if (!widened || !row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const source = row as unknown as Record<string, unknown>;
+  if (!Object.keys(source).some((key) => widened.has(key))) return row;
+  const cut: Record<string, unknown> = {};
+  for (const key of Object.keys(source)) {
+    if (!widened.has(key)) cut[key] = source[key];
+  }
+  return cut as unknown as T;
+}
+
+/** {@link withoutFormulaWidening} over a `find` result; anything but an array passes through. */
+function rowsWithoutFormulaWidening<T>(rows: T, widened: ReadonlySet<string> | undefined): T {
+  if (!widened || !Array.isArray(rows)) return rows;
+  return rows.map((row) => withoutFormulaWidening(row, widened)) as unknown as T;
 }
 
 /**
@@ -2126,6 +2194,163 @@ function callerSuppliedRow(row: unknown, sent: ReadonlySet<string> | undefined):
     }
   }
   return copy;
+}
+
+/**
+ * [#22306] The insert side of the #16344 invariant — a hook is never handed a
+ * value that will not be stored. Takes out of ONE caller row every value the
+ * create-side static-`readonly` strip will take, before the defaults and
+ * before `beforeInsert`, and says what it took.
+ *
+ * ## What was measured broken
+ *
+ * `insert()` dispatched `beforeInsert` on the caller's payload and ran the
+ * runtime-owned and static-`readonly` strips after it. A hook that stamps a
+ * read-only column only when it is absent — `if (!data.stage_entry_date)` —
+ * saw the caller's value, stood down, and the strip then took that value: the
+ * row stored NULL where the hook would have stamped today. Real engine over
+ * `driver-sql` (better-sqlite3), non-system context: caller value present ⇒
+ * stored `stage_entry_date` NULL; key absent ⇒ stored the hook's stamp. The
+ * update path has hidden these values from its hooks since #16344; insert
+ * did not.
+ *
+ * ## The SAME function as the strip, so the two cannot disagree
+ *
+ * `stripReadonlyFields` over {@link staticReadonlyInsertSubject} with no
+ * `preserveAudit` — the function, subject and options the post-hook
+ * static-`readonly` strip (`staticReadonlyCreateStrip`) runs. Before any hook
+ * has run there is no hook write to spare, so what it would take here is what
+ * it WILL take after the hooks unless a hook assigns the key. A key it would
+ * keep — middleware-filled (not in `supplied`), or on a `sys_` or
+ * platform-internal object — is still shown to the hook.
+ *
+ * ⛔ Runtime-owned values (`autonumber`) are NOT withheld, though the
+ * runtime-owned strip takes them after the hooks too. #6339 keeps the caller's
+ * record number visible to `beforeInsert` on purpose, so a guard can report
+ * what the caller submitted — pinned as "the hook can still SEE the
+ * caller-submitted record number" (`engine-insert-runtime-owned-strip.test.ts`)
+ * and by #14259's provenance seam. Moving that is a decision of its own, not a
+ * rider on this one.
+ *
+ * ⚠️ One narrowing, and it is the create side's own declared channel rather
+ * than a second opinion: under `preserveAudit` the audit timeline
+ * (`AUDIT_PROVENANCE_FIELDS`) stays visible. The static strip takes those keys
+ * on a create whatever the flag says (the 2026-08-08 ruling made its
+ * `preserveAudit` exemption UPDATE-only), but the historical-import channel the
+ * 2026-09-06 ruling (#15964) kept working reinstates them THROUGH the audit
+ * binder's `preserveAudit` branch (`record.created_at ?? now`, `plugin.ts`) —
+ * a `beforeInsert` hook reading the caller's value and assigning it back, which
+ * the strip then keeps as a hook write. Those values ARE stored, so they are
+ * not withheld; withholding them would erase every historical `created_at` an
+ * import carries. A business `readonly` column under `preserveAudit` is still
+ * withheld: the create side strips it (and says so in the WARN).
+ *
+ * ## Why before the DEFAULTS
+ *
+ * So the hook is shown exactly the row a caller who never sent the key would
+ * have produced: `applyFieldDefaults` then fills a withheld key from its
+ * `defaultValue`, just as it fills any absent key, and that default IS what
+ * the create stores for it (`staticReadonlyCreateStrip` re-derives it after
+ * the strip). A forged `approval_status: 'approved'` is shown as `'draft'`,
+ * never as a hole — the hook cannot tell the two callers apart, which is the
+ * point. A key with no default reads absent, which is what the row will hold.
+ *
+ * Pure: neither the caller's row nor `supplied` is touched. The row keeps its
+ * reference when nothing was taken, else it is a shallow copy without the keys.
+ *
+ * @returns the row the hook view is built from, and the withheld keys with the
+ *   caller's values (`undefined` when nothing was withheld) — handed back after
+ *   the hooks by {@link handBackWithheldInsertReadonly}.
+ */
+function withholdInsertReadonlyFromHooks(
+  schema: unknown,
+  row: Record<string, unknown>,
+  supplied: Readonly<Record<string, unknown>>,
+  preserveAudit: boolean,
+): { row: Record<string, unknown>; withheld: Record<string, unknown> | undefined } {
+  let subject = staticReadonlyInsertSubject(schema as any);
+  if (subject && preserveAudit) {
+    const fields = { ...subject.fields };
+    for (const name of AUDIT_PROVENANCE_FIELDS) delete fields[name];
+    subject = Object.keys(fields).length > 0 ? { name: subject.name, fields } : null;
+  }
+  if (!subject) return { row, withheld: undefined };
+  // No logger and no `strictReadonlyWrites`, deliberately: this pass is SILENT
+  // by construction. The strip after the hooks owns every word said about
+  // these keys — the WARN, `onFieldsDropped`, the strict refusal — and says it
+  // over the handed-back payload exactly as it did before this pass existed.
+  const shown = stripReadonlyFields(subject as any, row, supplied, undefined) as Record<string, unknown>;
+  if (shown === row) return { row, withheld: undefined };
+  const withheld: Record<string, unknown> = {};
+  for (const key of Object.keys(row)) {
+    if (!(key in shown)) withheld[key] = row[key];
+  }
+  return { row: shown, withheld };
+}
+
+/**
+ * [#22306] The other end of {@link withholdInsertReadonlyFromHooks}: put the
+ * caller's withheld values back on a row after its `beforeInsert` dispatch is
+ * SEALED, wherever the hook did not write the key — so the strips below judge,
+ * take, re-default, WARN, report and (under `strictReadonlyWrites`) refuse
+ * exactly the payload they judged before the hide existed.
+ *
+ * The update path's hand-back (#16344), carried over with one addition the
+ * insert view needs: a withheld key may have been SHOWN holding its
+ * `defaultValue` (`shown`), so "the hook left it alone" is not always "the key
+ * is absent". Per key:
+ *
+ *  - present and `undefined` ⇒ the `data.x = data.x` self-assignment of a key
+ *    the hook was shown absent. Undone (deleted, dropped from the record) and
+ *    handed back, as on update: no driver can store `undefined`, and the write
+ *    must read exactly as it would with no hook at all.
+ *  - absent ⇒ handed back unless the hook was shown a value there, in which
+ *    case the hook REMOVED it, and the removal stands — the row a caller who
+ *    never sent the key would have stored.
+ *  - present, record available ⇒ handed back unless a hook assigned the key
+ *    (`hookWrittenKeys`): an untouched default is replaced by the caller's
+ *    value, which the static strip then takes and re-defaults to the same
+ *    value it showed.
+ *  - present, no record (a hook replaced the payload object) ⇒ the #5591 value
+ *    test: handed back only while it still holds exactly what was shown.
+ *
+ * ⛔ Never over a hook's write, and placed AFTER the seal: a hand-back inside
+ * the recording window would enter the record as a hook write, and the strip
+ * would then keep the caller's forgery as the hook's — the laundering #14088
+ * exists to prevent. Every key handed back is dropped from the returned record
+ * for the same reason.
+ *
+ * @returns the row's `hookWrittenKeys`, narrowed by every key handed back
+ *   (`undefined` stays `undefined`).
+ */
+function handBackWithheldInsertReadonly(
+  target: Record<string, unknown>,
+  withheld: Readonly<Record<string, unknown>>,
+  shown: ReadonlyMap<string, unknown>,
+  hookWrittenKeys: ReadonlySet<string> | undefined,
+): ReadonlySet<string> | undefined {
+  let narrowed: Set<string> | undefined;
+  for (const [key, callerValue] of Object.entries(withheld)) {
+    const present = Object.prototype.hasOwnProperty.call(target, key);
+    let handBack: boolean;
+    if (present && target[key] === undefined) {
+      delete target[key];
+      handBack = true;
+    } else if (!present) {
+      handBack = !shown.has(key);
+    } else if (hookWrittenKeys !== undefined) {
+      handBack = !hookWrittenKeys.has(key);
+    } else {
+      handBack = shown.has(key) && Object.is(target[key], shown.get(key));
+    }
+    if (!handBack) continue;
+    target[key] = callerValue;
+    if (hookWrittenKeys?.has(key)) {
+      narrowed ??= new Set(hookWrittenKeys);
+      narrowed.delete(key);
+    }
+  }
+  return narrowed ?? hookWrittenKeys;
 }
 
 /**
@@ -2883,9 +3108,11 @@ export interface OperationContext {
    * to stamp `BulkDataEvent.organizationId`.
    *
    * The seam ruled on #15706: the wall is computed ONCE, where every input is
-   * visible (the posture in force, the caller's organization scope, the
-   * object's tenancy clauses AND the deployment's #12699 carve-out, which no
-   * schema carries), and its decision travels here as a value. A reader
+   * visible (the posture in force, the caller's organization scope and the
+   * object's tenancy clauses — which, since ADR-0131 D7, include the
+   * deployment's #12699 platform-global declaration, recorded on the
+   * registered object as `systemFields.tenant: false`), and its decision
+   * travels here as a value. A reader
    * answers from this member ALONE and re-derives nothing — a re-derivation
    * is a mirror of the wall, and a mirror structurally sees only the clauses
    * it was taught (the #15706 mislabel).
@@ -3545,10 +3772,14 @@ function eventOrganizationValue(value: unknown): string | undefined {
  * re-derived the wall here — from the enforced posture, the execution
  * context's `tenantId` / `accessible_org_ids` / `posture` rung, and the
  * object schema's tenancy clauses. It could not see the third clause
- * plugin-security folds into `tenancyDisabled` — the deployment-declared
- * `platformGlobalObjects` carve-out (#12699), which no schema carries — and
+ * plugin-security then folded into `tenancyDisabled` — the deployment-declared
+ * `platformGlobalObjects` carve-out (#12699), which no schema carried — and
  * stamped the caller's organization onto a batch Layer 0 had never
- * constrained: a WRONG key, the #13566 leak shape. The ruling's acceptance
+ * constrained: a WRONG key, the #13566 leak shape. (ADR-0131 D7 has since
+ * made that declaration total: a declared object is registered with no
+ * organization column and declaring `systemFields.tenant: false`, so the fold
+ * is retired — but the rule below does not lean on that; the ruling's
+ * acceptance criterion is about the seam, not one clause.) The ruling's acceptance
  * criterion, verbatim: the verdict recorded must be what the wall decided,
  * not a re-statement of its inputs; if the recorded value can be derived by
  * the reader from anything else on the context, the mirror has not been
@@ -3670,6 +3901,59 @@ export interface DatasourceDef {
   };
 }
 
+/**
+ * [#22305] The records ONE by-id cascade delete removes, collected before any
+ * of them is judged — see {@link ObjectQL.cascadeDeleteRelations}.
+ *
+ * Without it, every level of the depth-first walk judged its own `restrict`
+ * refusals with no knowledge of the cascade that called it: a record the same
+ * cascade was about to delete refused the delete of its sibling, and whether
+ * it got the chance depended on which object was registered first. The triage
+ * ruling on #22305 is the rule this set exists to apply: a child that is itself
+ * in the cascade set never restricts a sibling in the same set.
+ *
+ * Engine-internal and never part of a context: it rides
+ * {@link ObjectQL.cascadeDeleteSets}, an `AsyncLocalStorage`, so no request
+ * input can name a record into it, and a caller that passed no context still
+ * passes none.
+ */
+interface CascadeDeleteSet {
+  /**
+   * Object name → ids the cascade deletes, the root included. Collected by a
+   * read-only walk across every CASCADING relation before any write, so it is
+   * complete before the first refusal is judged.
+   */
+  readonly members: Map<string, Set<string>>;
+  /**
+   * Object name → ids whose own referential walk has started, in progress or
+   * done. The walk never re-enters one, which is what makes a cycle in the
+   * data terminate and what keeps a row reached by two paths from being
+   * deleted twice.
+   */
+  readonly entered: Map<string, Set<string>>;
+  /**
+   * The #12166 elevation records already filed, one per deleted record per
+   * referenced object, so the collection walk and the deleting walk, which
+   * read the same relations, file each record once between them.
+   */
+  readonly elevationsFiled: Set<string>;
+}
+
+/** Is `id` of `object` in this index of a {@link CascadeDeleteSet}? */
+function cascadeSetHas(index: Map<string, Set<string>>, object: string, id: unknown): boolean {
+  return id != null && index.get(object)?.has(String(id)) === true;
+}
+
+/** Add `id` of `object`; `true` when it was not there yet. */
+function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unknown): boolean {
+  let ids = index.get(object);
+  if (!ids) { ids = new Set(); index.set(object, ids); }
+  const key = String(id);
+  if (ids.has(key)) return false;
+  ids.add(key);
+  return true;
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -3699,6 +3983,16 @@ export class ObjectQL implements IObjectQLEngine {
      */
     scope?: TransactionScope;
   }>();
+
+  /**
+   * [#22305] The {@link CascadeDeleteSet} of the by-id cascade delete in
+   * progress, ambient for the same reason as {@link txStore}: the cascade
+   * recurses through the public `delete()`, and each level must judge its
+   * refusals against the set its root collected. A context key would be the
+   * other carrier, and it is not used: it would turn a caller's absent context
+   * into a present one on every nested delete.
+   */
+  private readonly cascadeDeleteSets = new AsyncLocalStorage<CascadeDeleteSet>();
 
   private drivers = new Map<string, IDataDriver>();
   private defaultDriver: string | null = null;
@@ -12091,6 +12385,9 @@ export class ObjectQL implements IObjectQLEngine {
     assertProjectionHasNoDottedPaths(object, 'find', _findSchema, ast.fields);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
+    // [#22300] The columns that widening added, cut back off the answer at the
+    // `return` — see `withoutFormulaWidening`.
+    const _findWidened = _findFormula.widened ? new Set(_findFormula.widened) : undefined;
 
     // Drop any requested PLAIN field that doesn't exist on the schema.
     // Without this, drivers (notably SqlDriver) emit `SELECT unknown_col
@@ -12227,7 +12524,9 @@ export class ObjectQL implements IObjectQLEngine {
       }
     });
 
-    return opCtx.result as any[];
+    // [#22300] The formula widening is cut back off the answer here, after the
+    // middleware chain — every internal consumer above read the full row.
+    return rowsWithoutFormulaWidening(opCtx.result as any[], _findWidened);
   }
 
   /**
@@ -12394,6 +12693,8 @@ export class ObjectQL implements IObjectQLEngine {
     const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
+    // [#22300] Same as `find`: what the widening added is cut at the `return`.
+    const _findOneWidened = _findOneFormula.widened ? new Set(_findOneFormula.widened) : undefined;
 
     // Drop unknown PLAIN fields — see the equivalent block in `find()` for
     // the rationale, and for why this tolerance is plain-columns-only ([#7589]
@@ -12496,7 +12797,8 @@ export class ObjectQL implements IObjectQLEngine {
       return hookContext.result;
     });
 
-    return opCtx.result;
+    // [#22300] Same cut as `find`, same position: after the middleware chain.
+    return withoutFormulaWidening(opCtx.result, _findOneWidened);
   }
 
   /**
@@ -13139,6 +13441,43 @@ export class ObjectQL implements IObjectQLEngine {
         (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
           (row, i) => callerSuppliedRow(row, callerKeysPerRow[i]),
         );
+      // ── [#22306] WITHHOLD caller-supplied read-only values from beforeInsert ──
+      //
+      // The insert side of #16344's invariant, in the ruling's words:「交给生命
+      // 周期钩子的记录,就是它打算持久化的那条记录。」— see
+      // `withholdInsertReadonlyFromHooks` for the measured defect and for WHICH
+      // keys (the post-hook static strip's own function, subject and options).
+      //
+      // ⭐ WITHHOLD, not strip, exactly as on update. The ENFORCEMENT stays
+      // where ruling C (#14147) put it — after the hooks, the only point that
+      // can tell a hook's stamp from a caller's forgery (`rowHookWrittenKeys`)
+      // — and the caller's values are handed straight back after the seal, so
+      // the strips, their re-default, the WARN, `onFieldsDropped` and
+      // `strictReadonlyWrites` all judge the payload they judged before.
+      //
+      // Placed HERE, after `suppliedPerRow` took the caller's values (the
+      // strips' evidence) and BEFORE the defaults, the summary seed and the
+      // recording: the defaults then fill a withheld key exactly as they fill
+      // an absent one, and nothing this pass does can be recorded as a hook
+      // write. `opCtx.data` keeps the caller's payload; only the hook view is
+      // built from the withheld rows. ⛔ `isSystem` withholds nothing — the
+      // strips do not run for it, so every value it sends is stored.
+      const insertWithheld: Array<Record<string, unknown> | undefined> = [];
+      const hookViewSource: unknown[] = (isBatch ? (opCtx.data as unknown[]) : [opCtx.data]).slice();
+      if (!opCtx.context?.isSystem) {
+        const preserveAuditForHide = opCtx.context?.preserveAudit === true;
+        const hideSchema = this._registry.getObject(object);
+        for (let i = 0; i < hookViewSource.length; i++) {
+          const row = hookViewSource[i];
+          if (undeclaredPerRow[i] !== undefined) continue;
+          if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+          const hidden = withholdInsertReadonlyFromHooks(
+            hideSchema, row as Record<string, unknown>, suppliedPerRow[i] ?? {}, preserveAuditForHide,
+          );
+          insertWithheld[i] = hidden.withheld;
+          hookViewSource[i] = hidden.row;
+        }
+      }
       // [#20082] The write's ONE permission resolution, shared by every consumer
       // below that needs the map: the CEL defaults here, the re-default after
       // the static-`readonly` strip, the option gates at validation, and the
@@ -13152,7 +13491,9 @@ export class ObjectQL implements IObjectQLEngine {
       // door's per-row refusals — the array every later pass already reads as
       // "this row is dead on arrival" (no hook, seeded into `rowErrors`).
       const permissionResolution = this.permissionResolution(opCtx.context);
-      const payloadRows: unknown[] = isBatch ? (opCtx.data as unknown[]) : [opCtx.data];
+      // [#22306] The hook view's rows: a withheld key is absent here, so a
+      // `can` default on it is resolved for this row as for any absent key.
+      const payloadRows: unknown[] = hookViewSource;
       const defaultPermissionsFor = await this.resolveDefaultPermissions(
         object, payloadRows.filter((_, i) => undeclaredPerRow[i] === undefined), opCtx.context, permissionResolution,
       );
@@ -13167,7 +13508,7 @@ export class ObjectQL implements IObjectQLEngine {
         }
       });
       const defaultedData = isBatch
-        ? (opCtx.data as any[]).map((row, i) =>
+        ? payloadRows.map((row, i) =>
             this.initializeSummaryFields(
               object,
               this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[i]),
@@ -13175,8 +13516,22 @@ export class ObjectQL implements IObjectQLEngine {
           )
         : this.initializeSummaryFields(
             object,
-            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[0]),
+            this.applyFieldDefaults(object, payloadRows[0] as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[0]),
           );
+      // [#22306] What each withheld key was SHOWN holding — its default, or
+      // nothing — read before any hook runs, because the hooks mutate these
+      // row objects in place. `handBackWithheldInsertReadonly` reads it to tell
+      // "the hook left the default alone" from "the hook removed it".
+      const insertShown: Array<ReadonlyMap<string, unknown> | undefined> =
+        (isBatch ? (defaultedData as any[]) : [defaultedData]).map((row, i) => {
+          const withheld = insertWithheld[i];
+          if (!withheld || !row || typeof row !== 'object') return undefined;
+          const shown = new Map<string, unknown>();
+          for (const key of Object.keys(withheld)) {
+            if (Object.prototype.hasOwnProperty.call(row, key)) shown.set(key, (row as Record<string, unknown>)[key]);
+          }
+          return shown;
+        });
 
       // Batch inserts trigger beforeInsert/afterInsert PER ROW, each with the
       // exact single-record context shape (`input.data` = one row, `result` =
@@ -13255,7 +13610,12 @@ export class ObjectQL implements IObjectQLEngine {
       // ledger or calls out must not fire for a row that will never be written.
       for (let i = 0; i < rowHookContexts.length; i++) {
         if (undeclaredPerRow[i] !== undefined) continue;
-        await this.triggerHooks('beforeInsert', rowHookContexts[i]);
+        // [#22306] The update path's wrapper (commit 706ad0fcc), so a hook that
+        // faults reaching THROUGH a key this row's hide withheld names that key
+        // instead of surfacing as an anonymous crash. Byte-identical to a bare
+        // dispatch whenever nothing was withheld or the hook refused on purpose.
+        await dispatchHooksExplainingWithheldReadonly(insertWithheld[i], 'beforeInsert',
+          () => this.triggerHooks('beforeInsert', rowHookContexts[i]));
       }
       // ── [#14259] SEAL, before anything engine-owned reads or writes a row ──
       //
@@ -13280,6 +13640,26 @@ export class ObjectQL implements IObjectQLEngine {
         const sealed = rowHookWrites[i]?.seal(rowHookContexts[i]!.input.data);
         if (sealed) rowHookContexts[i]!.input.data = sealed.data as any;
         rowHookWrittenKeys[i] = sealed?.hookWrittenKeys;
+      }
+
+      // ── [#22306] HAND BACK what was withheld from beforeInsert ─────────────
+      //
+      // The other end of the pre-defaults pass, at the line where each row has
+      // stopped being its hooks' (sealed above) and nothing engine-owned has
+      // read it yet — the update path's confluence, row by row. AFTER the seal
+      // so no hand-back can enter the record as a hook write, and BEFORE the
+      // post-hook declared-field door so every pass from here down sees the
+      // payload it saw before the hide existed, wherever no hook wrote the key.
+      // The per-key rule is `handBackWithheldInsertReadonly`'s. A culled row is
+      // handed back too: it ran no hook, so it gets its caller's row back whole.
+      for (let i = 0; i < rowHookContexts.length; i++) {
+        const withheld = insertWithheld[i];
+        if (!withheld) continue;
+        const target = rowHookContexts[i]!.input.data as Record<string, unknown> | null | undefined;
+        if (!target || typeof target !== 'object' || Array.isArray(target)) continue;
+        rowHookWrittenKeys[i] = handBackWithheldInsertReadonly(
+          target, withheld, insertShown[i] ?? new Map(), rowHookWrittenKeys[i],
+        );
       }
 
       // ── [commit b003cf2e8] The POST-hook half of the declared-field door ───────────
@@ -16385,6 +16765,28 @@ export class ObjectQL implements IObjectQLEngine {
    * a row the removal would EMPTY keeps the refusal, and the refusal counts
    * only those rows. Only runs for single-id deletes — multi/predicate
    * deletes skip cascade (logged).
+   *
+   * [#22305] Two phases, so the walk knows its own set before it judges
+   * anything:
+   *   1. {@link collectCascadeDeleteSet} — read-only. Every record the cascade
+   *      deletes, transitively, across every CASCADING relation, the root
+   *      included.
+   *   2. {@link walkReferencingRelations} — the walk above, unchanged in
+   *      order, except that a `restrict` (authored, or the escalated
+   *      required `set_null`) and a `set_null` write consider only rows
+   *      OUTSIDE the set. A row in the set is about to be deleted by this same
+   *      cascade: it cannot be left dangling, so it refuses nothing, and
+   *      clearing its reference would be a write against a row about to go.
+   * Before this, the outcome depended on registration order: with the
+   * contacts registered ahead of the contracts, deleting an account refused
+   * on a contract's required lookup to a contact, a contract the same delete
+   * was about to remove; the other order deleted. A refusal from a row outside
+   * the set is unchanged, and so is the unit of work: the set is collected
+   * inside the transaction that `delete()` opens for the cascade.
+   *
+   * A nested `delete()` the walk makes for a member joins the ambient set
+   * ({@link cascadeDeleteSets}); any other delete reaching here — a hook's,
+   * say — is the root of its own cascade, as before.
    */
   private async cascadeDeleteRelations(
     object: string,
@@ -16413,73 +16815,328 @@ export class ObjectQL implements IObjectQLEngine {
     // raised reaches the caller with its envelope intact, exactly as #8895's
     // probe failure does.
     const objects: ServiceObject[] = this._registry.getAllObjects();
-    // [#12166, ruling constraint 3] Referenced objects this call has already
-    // filed an elevation record for. One record per referenced OBJECT, not per
-    // relation: two lookup fields on the same child pointing at the same parent
-    // are one "the platform read object X as system" fact, and filing it twice
-    // would make the ledger's row count a function of the child's field layout.
-    const elevationRecorded = new Set<string>();
+    // [#22305] A member of a cascade already in progress joins that cascade's
+    // set. Any other delete is the root of its own cascade, and collects the
+    // set first: before one refusal is judged and before one row is written.
+    const inherited = this.cascadeDeleteSets.getStore();
+    if (inherited && cascadeSetHas(inherited.members, object, id)) {
+      await this.walkReferencingRelations(object, id, context, objects, inherited);
+      return;
+    }
+    const cascadeSet = await this.collectCascadeDeleteSet(object, id, context, objects);
+    await this.cascadeDeleteSets.run(cascadeSet, () =>
+      this.walkReferencingRelations(object, id, context, objects, cascadeSet),
+    );
+  }
+
+  /**
+   * [#22305] Phase 1 of {@link cascadeDeleteRelations}: every record a by-id
+   * delete of `object`/`id` removes, the root included, collected READ-ONLY.
+   *
+   * Breadth-first across every relation whose resolved behaviour is
+   * `cascade`, read through the walk's own two readings — which relations
+   * point at an object ({@link cascadeRelationBehavior}) and which rows
+   * reference a record ({@link probeReferencingRows}: system identity, the
+   * same filter, the same missing-table and multi-value handling) — so the
+   * two phases cannot disagree about which rows a cascade reaches. A record
+   * already in the set is not expanded again, so a cycle in the data (a
+   * self-reference, two objects cascading into each other) terminates.
+   *
+   * The cost is one extra probe per CASCADING relation per member, since the
+   * walk probes those relations again as it deletes. `restrict` and
+   * `set_null` relations are not read here. Every probe here is an elevated
+   * read, so it files its #12166 record before it runs, through the
+   * once-per-record ledger the walk shares ({@link fileReferenceCheckElevation}).
+   */
+  private async collectCascadeDeleteSet(
+    object: string,
+    id: string | number,
+    context: ExecutionContext | undefined,
+    objects: ServiceObject[],
+  ): Promise<CascadeDeleteSet> {
+    const set: CascadeDeleteSet = { members: new Map(), entered: new Map(), elevationsFiled: new Set() };
+    cascadeSetAdd(set.members, object, id);
+    // The cascading relations pointing at each object, scanned once per object
+    // rather than once per record: a wide cascade has many records of few
+    // objects.
+    const cascading = new Map<string, Array<{ childName: string; fieldName: string; fdef: any }>>();
+    const cascadingInto = (target: string) => {
+      let relations = cascading.get(target);
+      if (!relations) {
+        relations = [];
+        for (const child of objects) {
+          const childName = (child as any)?.name as string | undefined;
+          const fields = (child as any)?.fields as Record<string, any> | undefined;
+          if (!childName || !fields) continue;
+          for (const [fieldName, fdef] of Object.entries(fields)) {
+            if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'cascade') {
+              relations.push({ childName, fieldName, fdef });
+            }
+          }
+        }
+        cascading.set(target, relations);
+      }
+      return relations;
+    };
+    // A queue the loop appends to while it iterates: an array iterator reads
+    // `length` on every step, so each record pushed below is visited in turn.
+    const queue: Array<{ object: string; id: string | number }> = [{ object, id }];
+    for (const target of queue) {
+      for (const { childName, fieldName, fdef } of cascadingInto(target.object)) {
+        this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
+        const rows = await this.probeReferencingRows(
+          childName, fieldName, fdef, target.id, this.referenceProbeFilter(fieldName, fdef, target.id), context,
+        );
+        for (const row of rows) {
+          const depId = row?.id;
+          if (depId != null && cascadeSetAdd(set.members, childName, depId)) {
+            queue.push({ object: childName, id: depId });
+          }
+        }
+      }
+    }
+    return set;
+  }
+
+  /**
+   * Does `fieldName` on `child` point at `object` as a relation the cascade
+   * walk follows, and with which behaviour? `undefined` when it does not. The
+   * behaviour is the RESOLVED one, before the required-`set_null` escalation,
+   * which also reads the field's `multiple` and, on a multi-value field, the
+   * rows themselves.
+   *
+   * [#22305] Lifted out of the walk so both phases of
+   * {@link cascadeDeleteRelations} read relations one way: the set the first
+   * collects is the set the second deletes.
+   */
+  private cascadeRelationBehavior(
+    object: string,
+    child: ServiceObject,
+    fieldName: string,
+    fdef: any,
+  ): string | undefined {
+    if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) return undefined;
+    // [#18550] Same arbiter, same absence-vs-unreadability split as
+    // {@link ObjectQL.planCascadeAtomicity} states above — and this is the
+    // seam where the silence was measurable end to end: an unreadable
+    // carrier made the relation invisible to the cascade, so `delete()`
+    // removed the parent, left a `master_detail` child behind, and
+    // reported success. No `restrict` refusal, no `set_null`, nothing
+    // logged. Absence still skips the field here exactly as before.
+    const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
+    if (!ref) return undefined;
+    // Match the target object by raw or resolved name.
+    let resolvedRef: string | undefined;
+    try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
+    if (ref !== object && resolvedRef !== object) return undefined;
+
+    // [#21910, #21918] A lookup the registry INJECTED into a federated
+    // object, and the object does not provision, is not a reference to
+    // anything, so it is not a relation to probe. That is the tenant
+    // anchor `organization_id`, the ADR-0117 D1 anchor
+    // `owning_business_unit_id`, and the owner and audit lookups
+    // `owner_id` / `created_by` / `updated_by`. On a federated object each
+    // exists in the registered schema and nowhere else: the probe below
+    // was refused by the driver (`INVALID_FILTER`, no such column), its
+    // catch propagated the refusal as #8895 rules for a missing column,
+    // and deleting the organization, business unit or user it names was
+    // refused on a deployment with a federated object bound.
+    // `buildDriverOptions` and the related-record read already refuse this
+    // reading of the tenant column.
+    // {@link isFederatedUnprovisionedInjectedColumn} reads which columns
+    // those are from the registry's own provenance, never from a list of
+    // names, and {@link ObjectQL.planCascadeAtomicity} asks it too.
+    //
+    // ⛔ The probe's catch ({@link probeReferencingRows}) is deliberately NOT
+    // widened to pass a missing column as benign. That would invert #8895's
+    // discriminate or propagate for every object, not just these injected
+    // columns: a lookup the author declared on a federated object, including
+    // an author's own `organization_id` or `owner_id`, stays in the scan, and
+    // its probe failure still propagates.
+    if (isFederatedUnprovisionedInjectedColumn(child, fieldName)) return undefined;
+
+    // A master-detail parent owns its children: cascade by default (the
+    // child FK is typically required, so set_null would be invalid). Only
+    // an explicit `restrict` deviates. A plain lookup honors its
+    // configured deleteBehavior (default set_null).
+    //
+    // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
+    // every other value a master_detail can declare — including an
+    // explicit `deleteBehavior: 'set_null'` — resolves to `cascade` here,
+    // silently. Measured and pinned (`engine-cascade-delete.test.ts`).
+    return fdef.type === 'master_detail'
+      ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')
+      : (fdef.deleteBehavior || 'set_null');
+  }
+
+  /**
+   * [#12166, ruling constraint 3] File the elevation record for a probe of
+   * `childName` made while deleting `object`/`id` — once. One record per
+   * referenced OBJECT, not per relation: two lookup fields on the same child
+   * pointing at the same parent are one "the platform read object X as
+   * system" fact, and filing it twice would make the ledger's row count a
+   * function of the child's field layout.
+   *
+   * [#22305] The dedupe is the cascade's, not one call's: the collection walk
+   * and the deleting walk probe the same cascading relations, and between
+   * them file one record per deleted record per referenced object, as the
+   * single walk did.
+   */
+  private fileReferenceCheckElevation(
+    set: CascadeDeleteSet,
+    object: string,
+    id: string | number,
+    childName: string,
+    fieldName: string,
+    context: ExecutionContext | undefined,
+  ): void {
+    const key = JSON.stringify([object, String(id), childName]);
+    if (set.elevationsFiled.has(key)) return;
+    set.elevationsFiled.add(key);
+    this.recordReferenceCheckElevation(object, id, childName, fieldName, context);
+  }
+
+  /**
+   * The dependents probe of {@link cascadeDeleteRelations}: the rows of
+   * `childName` whose `fieldName` references `id`, read under SYSTEM identity
+   * and exactly narrowed. [#22305] Both phases read through it, so the set the
+   * collection walk gathers and the rows the deleting walk acts on are one
+   * reading of the same relation.
+   */
+  private async probeReferencingRows(
+    childName: string,
+    fieldName: string,
+    fdef: any,
+    id: string | number,
+    probeWhere: Record<string, unknown>,
+    context: ExecutionContext | undefined,
+  ): Promise<any[]> {
+    let dependents: any[];
+    try {
+      dependents = await this.find(
+        childName,
+        // [#12166] (maintainer ruling 2026-08-26, option A) SYSTEM identity,
+        // unconditionally. This probe is the platform's own referential-
+        // integrity read, not a query the caller asked for, and running it
+        // as the caller made "delete permission" silently mean "delete +
+        // read on EVERY referencing table": a caller with full delete rights
+        // on `object` but no read grant on `childName` got a blanket 403
+        // from the security middleware — whether or not a reference existed,
+        // and with `childName` EMPTY. Measured on a real deployment across
+        // 17 role×object pairs, with the A/B control that granting read-only
+        // on the referencing object (touching NOTHING about delete rights)
+        // turned the identical delete into a 200.
+        //
+        // Referential-integrity actions are engine responsibility executed
+        // under system identity on every mainstream platform — the RDBMS FK
+        // baseline, Salesforce (lookup clearing / cascade delete documented
+        // as bypassing sharing), Dataverse, ServiceNow, Odoo. Caller
+        // identity here was the outlier.
+        //
+        // The elevation is `sudo()`-SHAPED (`{ ...context, isSystem: true }`),
+        // never a bare `{ isSystem: true }` — the same posture
+        // `recomputeSummaries` holds one axis over. Three reasons, and each
+        // one is a defect if dropped:
+        //   - the open transaction handle, `tenantId` and `timezone` must
+        //     survive, or this probe leaves the caller's transaction and
+        //     stops being TENANT-scoped — a bare system context would widen
+        //     the probe across the tenant wall, which is the opposite of
+        //     what this card relaxes;
+        //   - `userId` survives, and that IS the audit ledger's
+        //     "triggered-by" half (ruling constraint 3): the record carries
+        //     triggered-by = the deleting operator and executed-as = system.
+        //     `read-audit.ts` states the same property of `sudo()`;
+        //   - it is a NARROW elevation: nothing else about the delete path
+        //     changes identity (ruling constraint 1). The `set_null` UPDATE
+        //     and the `cascade` DELETE below still run as the caller, byte
+        //     for byte, so this relaxes the reference CHECK and not the
+        //     caller's own authority over the dependent rows.
+        //
+        // [Constraint 4] If the spec later declares per-relationship
+        // on-delete behaviour, BEHAVIOUR follows the declaration; the
+        // identity of this probe stays system, unconditionally. Do not make
+        // this line conditional on `behavior`.
+        { where: probeWhere, context: ObjectQL.referenceCheckContext(context) } as any,
+      );
+    } catch (error) {
+      // [#8895] Discriminate by error TYPE — this probe IS the referential
+      // guard, so an empty answer is only truthful for the one failure that
+      // really means "no dependents".
+      //
+      // The bare `catch { continue }` this replaces reached `continue` on
+      // ANY probe failure, and every consequence of that is silent: the
+      // walk's `restrict` branch never fires, so a delete the integrity
+      // rules say must be REFUSED is allowed through; `set_null`/`cascade`
+      // never run, so child rows that should have been nulled or removed
+      // are left orphaned; nothing is logged and the caller is told the
+      // delete succeeded. Fail-OPEN on an integrity guard — the read did
+      // not happen and the answer "there are none" was invented for it
+      // (ADR-0110 D3: "the probe found nothing" and "the probe could not
+      // run" are different facts with opposite meanings here).
+      //
+      // Benign: the child object is registered but its TABLE was never
+      // provisioned (schema sync not run yet). It cannot hold a row that
+      // references anything, so zero dependents IS the truth and skipping
+      // the relation is correct. Asked through the shared
+      // `isMissingTableError` predicate (`@objectstack/metadata/errors`,
+      // #4825) — the same call `seedAutonumber` and `resolveFileReferences`
+      // make — never a hand-rolled code test.
+      //
+      // Everything else (connection drop, timeout, permission denial, a
+      // query error, a missing COLUMN on a provisioned table) means the
+      // dependents may well exist and simply were not seen. It propagates:
+      // the delete fails loudly and nothing is written, which is the same
+      // disposition the maintainer's 2026-08-15 ruling gives this family —
+      // unprovisioned is truthful emptiness, everything else must surface.
+      // A guard that could not be EVALUATED must not silently pass.
+      //
+      // No new response field and no new error code: the caller receives
+      // the probe's own failure, envelope intact.
+      if (isMissingTableError(error, childName)) return [];
+      throw error;
+    }
+    // [#9362] The multi-value pushdown in the probe filter can be a SUPERSET
+    // (the substring reading, on a backend without the declaration), so the
+    // exact answer is taken here, on the rows themselves. Everything the walk
+    // does with them — the `restrict` count in the 409 envelope, the `cascade`
+    // recursion, the `set_null` write — and the set the collection walk
+    // gathers read this answer, so narrowing anywhere later would leave one of
+    // them acting on a row that never referenced this record.
+    if (declaredMultiValued(fdef) && dependents) {
+      dependents = dependents.filter((row) =>
+        ObjectQL.storedReferenceIncludes(row?.[fieldName], id),
+      );
+    }
+    return dependents ?? [];
+  }
+
+  /**
+   * [#22305] Phase 2 of {@link cascadeDeleteRelations}, for one record of
+   * `cascadeSet`: refuse, clear or cascade each relation that points at it.
+   * Unchanged from the single walk it was, but for three readings of the set:
+   * a `restrict` and a `set_null` consider only rows OUTSIDE it, and a row the
+   * walk has already entered is not cascaded into again.
+   */
+  private async walkReferencingRelations(
+    object: string,
+    id: string | number,
+    context: ExecutionContext | undefined,
+    objects: ServiceObject[],
+    cascadeSet: CascadeDeleteSet,
+  ): Promise<void> {
+    // Entered before the first nested `delete()` can come back here.
+    cascadeSetAdd(cascadeSet.entered, object, id);
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
       if (!childName || !fields) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
-        if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
-        // [#18550] Same arbiter, same absence-vs-unreadability split as
-        // {@link ObjectQL.planCascadeAtomicity} states above — and this is the
-        // seam where the silence was measurable end to end: an unreadable
-        // carrier made the relation invisible to the cascade, so `delete()`
-        // removed the parent, left a `master_detail` child behind, and
-        // reported success. No `restrict` refusal, no `set_null`, nothing
-        // logged. Absence still `continue`s here exactly as before.
-        const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
-        if (!ref) continue;
-        // Match the target object by raw or resolved name.
-        let resolvedRef: string | undefined;
-        try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
-        if (ref !== object && resolvedRef !== object) continue;
-
-        // [#21910, #21918] A lookup the registry INJECTED into a federated
-        // object, and the object does not provision, is not a reference to
-        // anything, so it is not a relation to probe. That is the tenant
-        // anchor `organization_id`, the ADR-0117 D1 anchor
-        // `owning_business_unit_id`, and the owner and audit lookups
-        // `owner_id` / `created_by` / `updated_by`. On a federated object each
-        // exists in the registered schema and nowhere else: the probe below
-        // was refused by the driver (`INVALID_FILTER`, no such column), its
-        // catch propagated the refusal as #8895 rules for a missing column,
-        // and deleting the organization, business unit or user it names was
-        // refused on a deployment with a federated object bound.
-        // `buildDriverOptions` and the related-record read already refuse this
-        // reading of the tenant column.
-        // {@link isFederatedUnprovisionedInjectedColumn} reads which columns
-        // those are from the registry's own provenance, never from a list of
-        // names, and {@link ObjectQL.planCascadeAtomicity} asks it too.
-        //
-        // ⛔ The catch below is deliberately NOT widened to pass a missing
-        // column as benign. That would invert #8895's discriminate or
-        // propagate for every object, not just these injected columns: a
-        // lookup the author declared on a federated object, including an
-        // author's own `organization_id` or `owner_id`, stays in the scan, and
-        // its probe failure still propagates.
-        if (isFederatedUnprovisionedInjectedColumn(child, fieldName)) continue;
-
-        // A master-detail parent owns its children: cascade by default (the
-        // child FK is typically required, so set_null would be invalid). Only
-        // an explicit `restrict` deviates. A plain lookup honors its
-        // configured deleteBehavior (default set_null).
-        //
-        // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
-        // every other value a master_detail can declare — including an
-        // explicit `deleteBehavior: 'set_null'` — resolves to `cascade` here,
-        // silently. Measured and pinned (`engine-cascade-delete.test.ts`).
-        let behavior: string =
-          fdef.type === 'master_detail'
-            ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')
-            : (fdef.deleteBehavior || 'set_null');
+        const resolvedBehavior = this.cascadeRelationBehavior(object, child, fieldName, fdef);
+        if (resolvedBehavior === undefined) continue;
+        let behavior: string = resolvedBehavior;
 
         // [#9689] (maintainer ruling 2026-08-19, Q3 = B): the judgement the
-        // #9625 comment above deferred is now taken — `FieldSchema` REJECTS an
+        // #9625 comment in `cascadeRelationBehavior` deferred is now taken — `FieldSchema` REJECTS an
         // authored `deleteBehavior: 'set_null'` on a `master_detail` at parse
         // time, so the value is meaningful again: one that still reaches this
         // site came in around the parse seam (a raw `registerObject`, or a
@@ -16519,7 +17176,7 @@ export class ObjectQL implements IObjectQLEngine {
         // NOT NULL FK). Authors who want the children gone set
         // deleteBehavior:'cascade' explicitly.
         //
-        // [#9625] The test reads the RESOLVED `behavior`, one statement above,
+        // [#9625] The test reads the RESOLVED `behavior` (`cascadeRelationBehavior`),
         // which no longer records how the value got there. So it escalates
         // BOTH the defaulted set_null and one the author wrote out as
         // `deleteBehavior: 'set_null'` — the two are indistinguishable here by
@@ -16586,108 +17243,10 @@ export class ObjectQL implements IObjectQLEngine {
         // none, refuses the delete, or fails — and a record written only on the
         // success path would be missing exactly the runs an auditor goes
         // looking for.
-        if (!elevationRecorded.has(childName)) {
-          elevationRecorded.add(childName);
-          this.recordReferenceCheckElevation(object, id, childName, fieldName, context);
-        }
+        this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
 
-        let dependents: any[];
-        try {
-          dependents = await this.find(
-            childName,
-            // [#12166] (maintainer ruling 2026-08-26, option A) SYSTEM identity,
-            // unconditionally. This probe is the platform's own referential-
-            // integrity read, not a query the caller asked for, and running it
-            // as the caller made "delete permission" silently mean "delete +
-            // read on EVERY referencing table": a caller with full delete rights
-            // on `object` but no read grant on `childName` got a blanket 403
-            // from the security middleware — whether or not a reference existed,
-            // and with `childName` EMPTY. Measured on a real deployment across
-            // 17 role×object pairs, with the A/B control that granting read-only
-            // on the referencing object (touching NOTHING about delete rights)
-            // turned the identical delete into a 200.
-            //
-            // Referential-integrity actions are engine responsibility executed
-            // under system identity on every mainstream platform — the RDBMS FK
-            // baseline, Salesforce (lookup clearing / cascade delete documented
-            // as bypassing sharing), Dataverse, ServiceNow, Odoo. Caller
-            // identity here was the outlier.
-            //
-            // The elevation is `sudo()`-SHAPED (`{ ...context, isSystem: true }`),
-            // never a bare `{ isSystem: true }` — the same posture
-            // `recomputeSummaries` holds one axis over. Three reasons, and each
-            // one is a defect if dropped:
-            //   - the open transaction handle, `tenantId` and `timezone` must
-            //     survive, or this probe leaves the caller's transaction and
-            //     stops being TENANT-scoped — a bare system context would widen
-            //     the probe across the tenant wall, which is the opposite of
-            //     what this card relaxes;
-            //   - `userId` survives, and that IS the audit ledger's
-            //     "triggered-by" half (ruling constraint 3): the record carries
-            //     triggered-by = the deleting operator and executed-as = system.
-            //     `read-audit.ts` states the same property of `sudo()`;
-            //   - it is a NARROW elevation: nothing else about the delete path
-            //     changes identity (ruling constraint 1). The `set_null` UPDATE
-            //     and the `cascade` DELETE below still run as the caller, byte
-            //     for byte, so this relaxes the reference CHECK and not the
-            //     caller's own authority over the dependent rows.
-            //
-            // [Constraint 4] If the spec later declares per-relationship
-            // on-delete behaviour, BEHAVIOUR follows the declaration; the
-            // identity of this probe stays system, unconditionally. Do not make
-            // this line conditional on `behavior`.
-            { where: probeWhere, context: ObjectQL.referenceCheckContext(context) } as any,
-          );
-        } catch (error) {
-          // [#8895] Discriminate by error TYPE — this probe IS the referential
-          // guard, so `continue` is only truthful for the one failure that
-          // really means "no dependents".
-          //
-          // The bare `catch { continue }` this replaces reached `continue` on
-          // ANY probe failure, and every consequence of that is silent: the
-          // `restrict` branch below never fires, so a delete the integrity
-          // rules say must be REFUSED is allowed through; `set_null`/`cascade`
-          // never run, so child rows that should have been nulled or removed
-          // are left orphaned; nothing is logged and the caller is told the
-          // delete succeeded. Fail-OPEN on an integrity guard — the read did
-          // not happen and the answer "there are none" was invented for it
-          // (ADR-0110 D3: "the probe found nothing" and "the probe could not
-          // run" are different facts with opposite meanings here).
-          //
-          // Benign: the child object is registered but its TABLE was never
-          // provisioned (schema sync not run yet). It cannot hold a row that
-          // references anything, so zero dependents IS the truth and skipping
-          // the relation is correct. Asked through the shared
-          // `isMissingTableError` predicate (`@objectstack/metadata/errors`,
-          // #4825) — the same call `seedAutonumber` and `resolveFileReferences`
-          // make — never a hand-rolled code test.
-          //
-          // Everything else (connection drop, timeout, permission denial, a
-          // query error, a missing COLUMN on a provisioned table) means the
-          // dependents may well exist and simply were not seen. It propagates:
-          // the delete fails loudly and nothing is written, which is the same
-          // disposition the maintainer's 2026-08-15 ruling gives this family —
-          // unprovisioned is truthful emptiness, everything else must surface.
-          // A guard that could not be EVALUATED must not silently pass.
-          //
-          // No new response field and no new error code: the caller receives
-          // the probe's own failure, envelope intact.
-          if (isMissingTableError(error, childName)) continue;
-          throw error;
-        }
-        // [#9362] The multi-value pushdown above can be a SUPERSET (the
-        // substring reading, on a backend without the declaration), so the
-        // exact answer is taken here, on the rows themselves. Everything below —
-        // the `restrict` count in the 409 envelope, the `cascade` recursion,
-        // the `set_null` write — reads `dependents`, so narrowing anywhere
-        // later would leave one of them acting on a row that never referenced
-        // this record.
-        if (multiValued && dependents) {
-          dependents = dependents.filter((row) =>
-            ObjectQL.storedReferenceIncludes(row?.[fieldName], id),
-          );
-        }
-        if (!dependents || dependents.length === 0) continue;
+        let dependents = await this.probeReferencingRows(childName, fieldName, fdef, id, probeWhere, context);
+        if (dependents.length === 0) continue;
 
         // [#12166] The elevated probe's row IDENTITY, captured here — after the
         // multi-value narrowing and BEFORE the `requiredSetNull && multiValued`
@@ -16698,6 +17257,29 @@ export class ObjectQL implements IObjectQLEngine {
         // emptied count too, while a caller who cannot see them can derive
         // neither. Comparing at the later stage would leak the difference.
         const probedIds: readonly string[] = dependents.map((r: any) => String(r?.id));
+
+        // [#22305] A row the cascade itself deletes refuses nothing and is
+        // cleared of nothing: the triage ruling on #22305 is that a child in the
+        // cascade set never restricts a sibling in the same set. Such a row is
+        // not left dangling, because this same unit of work removes it, and
+        // clearing its reference would be a write against a row about to go.
+        // (The one cascade that is not one unit of work is
+        // `planCascadeAtomicity`'s `'split'`: there a later refusal can strand
+        // such a row, the partial outcome `warnCascadeNotAtomic` already
+        // declares for every row that path deletes.) So `restrict` (authored,
+        // or either half of the required escalation) and `set_null` judge only
+        // the rows OUTSIDE the set, and a relation whose rows are all inside it
+        // is done. `cascade` keeps every row: its rows ARE the set, and the
+        // walk deletes them below.
+        //
+        // After `probedIds`, on purpose: the disclosure check still compares
+        // the caller's own view against every row the elevated probe read, so a
+        // count is disclosed only to a caller who can see the whole relation,
+        // as before; what it counts is the rows that actually refuse.
+        if (behavior !== 'cascade') {
+          dependents = dependents.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id));
+          if (dependents.length === 0) continue;
+        }
 
         // [#9688] The deferred half of the required escalation, decided per
         // ROW now that the rows are read and exactly narrowed — every row
@@ -16814,6 +17396,12 @@ export class ObjectQL implements IObjectQLEngine {
           const depId = dep?.id;
           if (depId == null) continue;
           if (behavior === 'cascade') {
+            // [#22305] Entered already: an ancestor of this delete, still in
+            // progress up the stack (a cycle in the data), or a row an earlier
+            // branch of this cascade has deleted (a row reached by two paths).
+            // Either way this cascade removes it once, and re-entering would
+            // loop forever on the first and answer 404 on the second.
+            if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
             // Recurse via the public delete so the child's own cascade,
             // hooks and events fire.
             await this.delete(childName, { where: { id: depId }, context } as any);

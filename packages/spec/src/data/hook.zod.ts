@@ -558,8 +558,27 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    * Two things this deliberately does NOT change: a hook's OWN write to a
    * read-only column still lands (#5591 / #14088 — the enforcement pass stays
-   * after the hooks, where provenance is knowable), and `beforeInsert` is
-   * untouched (ruling C, #14147, keeps the create-side strip post-hook).
+   * after the hooks, where provenance is knowable), and the create-side strip
+   * stays post-hook (ruling C, #14147).
+   *
+   * WHICH RECORD `data` IS, on `beforeInsert` (#22306)
+   *
+   * The same rule on the CREATE verb: `input.data` is the row the create will
+   * store. A caller-supplied value for a field the create-side static
+   * `readonly` strip takes is withheld before the before phase is dispatched,
+   * and BEFORE the defaults run, so the hook sees exactly what an honest
+   * caller's hook sees — the field's `defaultValue`, or no key — and a hook that
+   * stamps an absent read-only column (`if (!data.x) data.x = …`) stamps it
+   * whether or not the caller sent one. The enforcement pass does not move: the
+   * caller's values are handed back after the hooks and the strip judges,
+   * reports and refuses them as before. Its subject is the create strip's own
+   * (`staticReadonlyInsertSubject` — `sys_` and platform-internal objects
+   * keep their own guards), with two scope edges: a runtime-owned
+   * `autonumber` value stays visible (#6339), and under `preserveAudit` the
+   * audit timeline (`created_at` / `created_by` / `updated_at` /
+   * `updated_by`) stays visible, because the historical-import channel
+   * reinstates it through a `beforeInsert` hook. No second channel carries the
+   * withheld values on a create: {@link HookContext.submitted} stays UPDATE-only.
    *
    * DECLARATIVE SURFACE — what an app author is actually handed
    *
@@ -822,11 +841,13 @@ export const HookContextSchema = lazySchema(() => z.object({
    * than a payload the engine curated.
    *
    * ⛔ NOT bound on `insert` or `delete`, and that is a scope statement rather
-   * than an omission: the create side's strip position is settled POST-hook by
-   * ruling C (#14147, "one semantics, one enforcement point"), so `beforeInsert`
-   * still receives the caller's own values in `input.data` and needs no second
-   * channel to see them. Whether it should is a separate measurement, raised
-   * against #14147 if a create-side leak is ever measured.
+   * than an omission. Since #22306 `beforeInsert` no longer receives a
+   * caller-supplied value the create-side static `readonly` strip will take
+   * (see `input` above). The one in-repo `beforeInsert` reader that needs a
+   * caller's read-only value — the audit binder's `preserveAudit` branch,
+   * reinstating the audit timeline — still sees it, because that timeline
+   * stays visible under the flag. A consumer that needs the rest is the
+   * measurement that would bind this record on insert too.
    *
    * ⛔ NOT marshalled into the sandboxed `body` face, for the same reason
    * `dispatch.scope` is not: the body surface is assembled key by key

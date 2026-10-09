@@ -87,6 +87,8 @@ const sysUserPermissionSet = {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     user_id: { name: 'user_id', type: 'text' as const },
     permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    // [ADR-0131 D4] The grant's set BY NAME — the column the guard reads.
+    permission_set: { name: 'permission_set', type: 'text' as const },
     organization_id: { name: 'organization_id', type: 'text' as const },
     valid_from: { name: 'valid_from', type: 'datetime' as const },
     valid_until: { name: 'valid_until', type: 'datetime' as const },
@@ -174,7 +176,7 @@ async function seedGrantAdmin(engine: ObjectQL, userId = 'usr_grant'): Promise<v
   await engine.insert('sys_permission_set', { id: 'ps_admin', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
   await engine.insert(
     'sys_user_permission_set',
-    { id: 'ups_admin', user_id: userId, permission_set_id: 'ps_admin' },
+    { id: 'ups_admin', user_id: userId, permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS },
     SYSTEM,
   );
 }

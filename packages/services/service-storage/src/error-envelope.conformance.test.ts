@@ -248,12 +248,12 @@ describe('storage error envelope (#3675)', () => {
       },
     },
     {
-      // #22283: the saved `max_upload_mb`, enforced at the upload doors — the
-      // standard member the platform derives for a 413 (no 413 member exists,
-      // and `PAYLOAD_TOO_LARGE` is registered under another package).
+      // #22283: the saved `max_upload_mb`, enforced at the upload doors —
+      // #22314: the ledger code registered for "too large" under this
+      // package's owner key, not the status-derived `VALIDATION_ERROR`.
       name: 'an upload declared over the saved max_upload_mb',
       status: 413,
-      code: 'VALIDATION_ERROR',
+      code: 'PAYLOAD_TOO_LARGE',
       run: async () => {
         const routes = mount(await tmpAdapter(), new StorageMetadataStore(null), {
           limitsSnapshot: () => ({ maxUploadMb: { value: 1, authored: true } }),
@@ -312,6 +312,19 @@ describe('storage error envelope (#3675)', () => {
           authorizeFileRead: async () => 'unauthenticated',
         });
         return drive(routes, 'GET', `${BASE}/files/:fileId/url`, { params: { fileId: 'a2' } });
+      },
+    },
+    {
+      // #22431: a file with neither an attachments scope nor a field owner
+      // needs a signed-in caller — the same pair as the two 401s above.
+      name: 'anonymous download of a file with neither an attachments scope nor a field owner',
+      status: 401,
+      code: 'AUTH_REQUIRED',
+      run: async () => {
+        const store = new StorageMetadataStore(null);
+        await committedAttachment(store, 'u1', { scope: 'user', key: 'user/u1.png' });
+        const routes = mount(await tmpAdapter(), store, { resolveSession: async () => null });
+        return drive(routes, 'GET', `${BASE}/files/:fileId`, { params: { fileId: 'u1' } });
       },
     },
     {

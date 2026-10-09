@@ -10,6 +10,11 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 // through the contract is that the two sides cannot disagree.
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import type { DevLogin } from '@objectstack/spec/system';
+import { explainRule } from '@objectstack/lint/rule-explanations';
+// #22255 — the deployment's scheduled-work sentence, read as an IDENTITY: the
+// Flows section tells the policy class apart by equality with it, never by its
+// words. See `isDeploymentPolicyClass`.
+import { SCHEDULED_WORK_DISABLED_REASON } from '@objectstack/types';
 import { writeStdoutDirect } from './json-stdout.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 import { stripAnsi } from './boot-log-capture.js';
@@ -1587,6 +1592,38 @@ function unboundFlowClasses(
 }
 
 /**
+ * Whether one unbound-flow class is the deployment's scheduled-work switch
+ * (#22255) — flows refused because package-authored scheduled work is OFF,
+ * the documented default. That is an expected degradation, so its class line
+ * prints dim under `ℹ`, the way the maintainer's noise budget asks for one
+ * (「预期中的降级记 info」); every other class is the author's to fix and keeps
+ * its yellow `⚠`.
+ *
+ * Judged by IDENTITY with the producer's sentence, ⛔ never by its words. The
+ * engine records `scheduledWorkDisabledReason(policy)` of the reading that
+ * refused, and on every policy the environment resolves that is
+ * `SCHEDULED_WORK_DISABLED_REASON` byte for byte (`resolveScheduledWorkPolicy`
+ * never sets a `hostDisabledReason`). So equality is exact in both directions:
+ *
+ *  - a binding failure, a missing trigger, or any reason that merely QUOTES the
+ *    policy's words is not equal, and keeps `⚠`;
+ *  - a reworded producer is not equal either, and drifts back to `⚠` — the
+ *    loud direction. A substring or pattern match would drift the other way,
+ *    dimming a real failure that happened to share a phrase.
+ *
+ * A host-injected per-kernel policy carrying its OWN `hostDisabledReason` is
+ * not this class: its sentence is the host's, not the documented default, and
+ * the printer cannot know it — it keeps `⚠`, as before.
+ *
+ * Not `scheduledWorkDisabledReason(resolveScheduledWorkPolicy())`: on that
+ * reading it answers this same constant by construction, and the resolver
+ * throws on an unrecognised `OS_TENANCY_POSTURE` — a printer must not.
+ */
+function isDeploymentPolicyClass(reason: string): boolean {
+  return reason === SCHEDULED_WORK_DISABLED_REASON;
+}
+
+/**
  * One-glance answer to "did my flows actually arm?" — the question the
  * boot-quiet stdout window otherwise makes unanswerable (the engine's own
  * bind/registration logs are swallowed during startup).
@@ -1639,17 +1676,21 @@ function printAutomationSummary(a: AutomationReadySummary): string[] {
   // eight package-authored scheduled flows on a deployment with scheduled work
   // off used to print the same paragraph eight times here and eight more in
   // Boot diagnostics; it now prints one line.
+  //
+  // [#22255] Only the glyph and color depend on the class: the deployment's
+  // scheduled-work switch is information (dim `ℹ`), every other reason a
+  // warning (yellow `⚠`). Text, order and the records handed back are the same
+  // for both.
   let shortened = false;
   for (const c of unboundFlowClasses(a.unbound)) {
     const n = c.flowNames.length;
     const short = leadSentence(c.reason);
     if (short !== c.reason.trim().replace(/\.$/, '')) shortened = true;
-    console.error(
-      chalk.yellow(
-        `  ⚠ ${n} flow${n === 1 ? ' declares' : 's declare'} a '${c.triggerType}' trigger but ` +
-        `${n === 1 ? 'is' : 'are'} NOT bound — ${short}: ${c.flowNames.join(', ')}`,
-      ),
-    );
+    const expected = isDeploymentPolicyClass(c.reason);
+    const line =
+      `  ${expected ? 'ℹ' : '⚠'} ${n} flow${n === 1 ? ' declares' : 's declare'} a '${c.triggerType}' trigger but ` +
+      `${n === 1 ? 'is' : 'are'} NOT bound — ${short}: ${c.flowNames.join(', ')}`;
+    console.error(expected ? chalk.dim(line) : chalk.yellow(line));
     for (const flowName of c.flowNames) {
       restated.push(`[Automation] flow '${flowName}' declares a '${c.triggerType}' trigger but is NOT bound`);
     }
@@ -1950,6 +1991,40 @@ export interface AuthoringAdvisory {
 }
 
 /**
+ * [#22161] The pointer the `rule:` line carries for a rule with a long-form
+ * explanation — an em dash, then `os explain <rule-id>` in backticks, then
+ * "for <what it covers>" — or `''` for a rule without one, so the line never
+ * names a command that has nothing to show.
+ *
+ * ⛔ The ONE place the pointer is spelled. A finding carries one verdict and
+ * one fix; what the rule counts and why it exists is its explanation, which
+ * `@objectstack/lint` keys by rule id and `os explain <rule-id>` prints. The
+ * table is read from the `rule-explanations` entry, which imports nothing, so
+ * this formatter stays free of the rule engine (see {@link AuthoringAdvisory}).
+ */
+export function explainPointer(rule: string): string {
+  const explanation = explainRule(rule);
+  return explanation ? ` — \`os explain ${rule}\` for ${explanation.covers}` : '';
+}
+
+/**
+ * [#22161] The lines printed under an author-time finding's verdict line, in
+ * order: `fix: <hint>` (when the finding has one) and
+ * `rule: <id>  at <path>` with the {@link explainPointer}. Every text face that
+ * prints a registry finding renders these through this function — the build
+ * and validate advisory lists and every gating-error list — so the three
+ * commands cannot print one finding three ways.
+ */
+export function authoringFindingDetailLines(
+  f: Pick<AuthoringAdvisory, 'rule' | 'path' | 'hint'>,
+): string[] {
+  const lines: string[] = [];
+  if (f.hint) lines.push(`fix: ${f.hint}`);
+  lines.push(`rule: ${f.rule}  at ${f.path}${explainPointer(f.rule)}`);
+  return lines;
+}
+
+/**
  * The pointer a truncation notice offers when — and ONLY when — the command's
  * own `--json` payload really does carry the list that was cut.
  *
@@ -2053,8 +2128,7 @@ export function printAuthoringAdvisories(
 
   for (const f of advisories.slice(0, limit)) {
     printWarning(`${f.where}: ${f.message}`);
-    if (f.hint) console.log(chalk.dim(`    ${f.hint}`));
-    console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
+    for (const line of authoringFindingDetailLines(f)) console.log(chalk.dim(`    ${line}`));
   }
 
   // [#11642] The notice sentence now lives in ONE place. Rendering here is
@@ -2094,9 +2168,10 @@ export type AuthoringRuleFinding = AuthoringAdvisory;
  *
  * The `hint` line is conditional, which is how `printAuthoringAdvisories` and
  * `init` already rendered it; `compile`/`validate` printed it unconditionally.
- * `AuthoringFinding.hint` is a required non-empty string in every rule the
- * registry ships (checked: no rule emits an empty one), so the two forms
- * differ on no finding this CLI can actually produce.
+ * [#22161] The condition is now load-bearing: `hint` prints as the `fix:`
+ * line, and `expression-invalid` emits an empty one — its finding carries no
+ * fix of its own, and the authored source it used to put there is a quote,
+ * which rides the message instead.
  */
 export function printAuthoringRuleErrors(
   errors: readonly AuthoringRuleFinding[],
@@ -2105,8 +2180,7 @@ export function printAuthoringRuleErrors(
   const limit = options.limit ?? DIAGNOSTIC_PRINT_LIMIT;
   for (const f of errors.slice(0, limit)) {
     console.log(`  • ${f.where}: ${f.message}`);
-    if (f.hint) console.log(chalk.dim(`      ${f.hint}`));
-    console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
+    for (const line of authoringFindingDetailLines(f)) console.log(chalk.dim(`      ${line}`));
   }
   printTruncationNotice({
     total: errors.length,

@@ -163,10 +163,11 @@ const probeObject = (over: Record<string, unknown> = {}) => ({
  * which is the shape the lightweight assembler produces and the one under
  * test. Passing `'package-author'` exercises the #6710 carve-out explicitly.
  * @param opts.envWritableObject set `OS_METADATA_WRITABLE=object`. R1's own
- * docblock names this as the path it judges — without it,
- * `SysMetadataRepository.assertAllowed()` refuses an `object` overlay of a
- * PACKAGED item outright (`NOT_OVERRIDABLE`), so an R1-legal overlay could
- * never land and "R1 permits tightening" would be unobservable.
+ * docblock names this as the path it judges — without it, `saveMetaItem`'s
+ * package door refuses an `object` overlay of a PACKAGED item outright
+ * (`NOT_OVERRIDABLE`), on this topology as on an environment kernel, before
+ * the lint door or R1 is asked; so every case that drives a packaged overlay
+ * through those doors opens it.
  */
 async function boot(opts: { channel?: MetadataAuthoringChannel; envWritableObject?: boolean } = {}) {
     const { channel } = opts;
@@ -342,24 +343,23 @@ describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () =
             .toContain('security-external-wider-than-internal');
     }, 60_000);
 
-    it('door ORDER: when lint AND R1 would both refuse, the 422 lint door answers first', async () => {
+    it('[ADR-0131 D6] door ORDER over a PACKAGED object: the package door answers ahead of lint AND R1, hatch open', async () => {
         // An env overlay over the packaged object whose body is BOTH
         // external-wider (lint) and posture-widening against the packaged
-        // baseline (R1: external `public_read` > declared external `private`).
-        // The ruling fixes the order: the lint table answers first
-        // (`saveMetaItem` runs it before `runAuthoringGate`), so the author
-        // sees the 422 vocabulary, never a coin-flip between two doors.
-        const { put, storedRows } = await boot();
+        // baseline (R1). The lint table used to answer first, because the
+        // hatch carried the write past the package door. Managed content is
+        // sealed now: with the hatch open as with it shut, the package door
+        // answers ahead of both, and nothing is stored. The lint-before-R1
+        // order itself stands wherever both are reached.
+        const { put, storedRows } = await boot({ envWritableObject: true });
 
         const res = await put('qa_packaged_account', packagedOverlay({
             sharingModel: 'private',
             externalSharingModel: 'public_read',
         }));
 
-        expect(res._status).toBe(422);
-        expect(res._json?.code).toBe('INVALID_METADATA');
-        expect((res._json?.issues ?? []).map((i: any) => i.rule))
-            .toContain('security-external-wider-than-internal');
+        expect(res._status).toBe(403);
+        expect(res._json?.code).toBe('NOT_OVERRIDABLE');
         expect(await storedRows('qa_packaged_account')).toEqual([]);
     }, 60_000);
 });
@@ -370,12 +370,14 @@ describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () =
 
 describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:name', () => {
     /**
-     * On a host config R1 is the ONLY guard, which is why it belongs here and
-     * not only in the unit suite. The ADR-0005 two-tier authorization that
-     * would normally refuse an overlay of a packaged `object` with
-     * `not_overridable` is ITSELF scoped to `environmentId !== undefined`, so on
-     * this topology the write sails past it and arrives at the posture gate
-     * with nothing else in front of it.
+     * R1 judges the overlay writes that reach it: with `OS_METADATA_WRITABLE`
+     * shut, `saveMetaItem`'s package door refuses an overlay of a packaged
+     * `object` (`NOT_OVERRIDABLE`) ahead of every gate, on this topology as on
+     * an environment kernel. That door used to be scoped to
+     * `environmentId !== undefined`, so on a host config the write sailed past
+     * it to the posture gate; it is asked on every topology now, so these
+     * cases open the hatch — the path R1's own docblock names — and R1 is the
+     * door in front of the write.
      *
      * ## [#9232] Why the wire `code` is `PERMISSION_DENIED` and the gate's own
      * ## spelling now rides `declaredCode`
@@ -401,45 +403,27 @@ describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:n
      * rather than fixed here — registering a code is the `packages/spec` lane's
      * call, and this card narrows doors rather than editing the ledger.
      */
-    it('refuses an env overlay that widens a packaged object\'s internal OWD', async () => {
-        // Declared baseline: `public_read`. The overlay asks for
-        // `public_read_write`, and leaves the external side unset so R2 has
-        // nothing to compare — only R1 can produce this refusal.
-        const { put, storedRows } = await boot();
+    // [ADR-0131 D6] These two cases drove R1 through the hatch and pinned its
+    // `owd_widening_forbidden` refusal. Managed content is sealed now: the
+    // hatch opens no overlay of a packaged object, so the package door refuses
+    // both writes ahead of R1 (`NOT_OVERRIDABLE`), and R1's packaged-baseline
+    // comparison has no write that reaches it through this door. Pinned as
+    // that, rather than deleted, so the change in who answers is visible.
+    for (const [label, over] of [
+        ['widens a packaged object\'s internal OWD', { sharingModel: 'public_read_write' }],
+        ['widens the EXTERNAL side against the packaged baseline', { sharingModel: 'public_read', externalSharingModel: 'public_read' }],
+    ] as const) {
+        it(`[ADR-0131 D6] an env overlay that ${label} is refused by the package door before R1, hatch open`, async () => {
+            const { put, storedRows } = await boot({ envWritableObject: true });
 
-        const res = await put('qa_packaged_account', packagedOverlay({
-            sharingModel: 'public_read_write',
-        }));
+            const res = await put('qa_packaged_account', packagedOverlay(over));
 
-        expect(res._status).toBe(403);
-        // [#9232] The closed member the 403 derives, with the gate's own
-        // spelling demoted beside it rather than dropped.
-        expect(res._json?.code).toBe('PERMISSION_DENIED');
-        expect(res._json?.declaredCode).toBe('owd_widening_forbidden');
-        expect(String(res._json?.error)).toContain('TIGHTEN');
-        expect(await storedRows('qa_packaged_account')).toEqual([]);
-    }, 60_000);
-
-    it('refuses a widened EXTERNAL side against the packaged baseline', async () => {
-        // Distinct from the lint door: `public_read` external against
-        // `public_read` internal is NOT external-wider, so the 422 lint table
-        // passes the body. Only the comparison against the PACKAGED
-        // declaration (external `private`) can refuse it — which is exactly
-        // why R1 SURVIVES the #8310 retirement while R2 did not. A suite that
-        // only ever sent an external-wider pair could not tell the doors
-        // apart.
-        const { put, storedRows } = await boot();
-
-        const res = await put('qa_packaged_account', packagedOverlay({
-            sharingModel: 'public_read',
-            externalSharingModel: 'public_read',
-        }));
-
-        expect(res._status).toBe(403);
-        expect(res._json?.code).toBe('PERMISSION_DENIED');
-        expect(res._json?.declaredCode).toBe('owd_widening_forbidden');
-        expect(await storedRows('qa_packaged_account')).toEqual([]);
-    }, 60_000);
+            expect(res._status).toBe(403);
+            expect(res._json?.code).toBe('NOT_OVERRIDABLE');
+            expect(res._json?.declaredCode).toBeUndefined();
+            expect(await storedRows('qa_packaged_account')).toEqual([]);
+        }, 60_000);
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -472,25 +456,23 @@ describe('[#7674] what the gate must still let through', () => {
         expect(await storedRows('qa_probe')).toHaveLength(1);
     }, 60_000);
 
-    it('an env overlay that TIGHTENS a packaged object is allowed (R1 is directional)', async () => {
-        // `OS_METADATA_WRITABLE=object` is the escape hatch R1's own docblock
-        // names as the path it judges. Without it the overlay is refused a
-        // layer later by `SysMetadataRepository.assertAllowed()`
-        // (`NOT_OVERRIDABLE`) — a DIFFERENT door, measured on this harness —
-        // and this case would then pass for a reason that has nothing to do
-        // with the posture gate.
+    it('[ADR-0131 D6] an env overlay that TIGHTENS a packaged object is sealed too — refused by the package door, hatch open', async () => {
+        // This was R1's directional control: through the hatch, the overlay
+        // narrowing the packaged baseline (`public_read` / `private` →
+        // `private` / `private`) landed. Managed content is sealed now, so no
+        // overlay of a packaged object lands through this door in either
+        // direction; the posture gate's directionality stays pinned in its
+        // own suite.
         const { put, storedRows } = await boot({ envWritableObject: true });
 
-        // The packaged baseline is `public_read` / `private`; the overlay
-        // narrows the internal side to `private`. ADR-0086 D1 permits exactly
-        // this direction, and R1 refusing it would be the overshoot.
         const res = await put('qa_packaged_account', packagedOverlay({
             sharingModel: 'private',
             externalSharingModel: 'private',
         }));
 
-        expect(res._status, `unexpected refusal: ${JSON.stringify(res._json)}`).toBe(200);
-        expect(await storedRows('qa_packaged_account')).toHaveLength(1);
+        expect(res._status).toBe(403);
+        expect(res._json?.code).toBe('NOT_OVERRIDABLE');
+        expect(await storedRows('qa_packaged_account')).toEqual([]);
     }, 60_000);
 
     /**

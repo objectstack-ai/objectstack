@@ -2180,16 +2180,30 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * and still without `map`. The third is `case 'map':` in `ObjectView.tsx`,
  * `2299` -> `2300`, the whole arm byte-identical: objectui#8347 grew one
  * comment line above it. `ObjectMap.tsx` and `ListView.tsx` are
- * byte-identical, so their anchors did not move. Each anchor quotes the line it was read at,
+ * byte-identical, so their anchors did not move. RE-READ again at pin
+ * `f0268ad78` on 2026-10-09: that bump redded all seven anchors, and none of
+ * them changed what it reads. `ListView.tsx` gained one import line above
+ * both of its anchors (objectui#11860), so `resolveListMapConfig` `146` ->
+ * `147` and `FLAT_MAP_CONFIG_SPELLING` `85` -> `86`, each byte-identical;
+ * `case 'map':` in `ObjectView.tsx` `2300` -> `2340`, the whole arm
+ * byte-identical (objectui#11695, objectui#11775, objectui#11880 item 5 and
+ * objectui#6152 rounds 8 and 10 changed the file around it); in
+ * `objectql.zod.ts`, which grew above them again (+218/-125:
+ * objectui#6152 rounds 7 to 12 among others), `ObjectMapConfigSchema` `2388`
+ * -> `2513`, its declaration byte-identical and still closed with
+ * `.strict()`, and `LIST_VIEW_LOCAL_OVERRIDES` `1437` -> `1506`, the whole
+ * list byte-identical and still without `map`; and the two `getMapConfig`
+ * lines `415` -> `449` and `420` -> `454`, byte-identical, objectui#11819's
+ * WebGL2 probe landing above them. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
- *   (`packages/plugin-list/src/ListView.tsx:146` first line
+ *   (`packages/plugin-list/src/ListView.tsx:147` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2300` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2340` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
- *   (`packages/plugin-list/src/ListView.tsx:85` first line
+ *   (`packages/plugin-list/src/ListView.tsx:86` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
  *   the whitelist was a key LIST named `FLAT_MAP_CONFIG_KEYS` carrying this
  *   block's keys MINUS `style`, and objectui#9950 made it a total map from
@@ -2199,7 +2213,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:2388` first line
+ *   `packages/types/src/zod/objectql.zod.ts:2513` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object` at `dd3f7e1be`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. ⚠️ At `db11afd49` the declaration is closed with `.strict()`
@@ -2208,10 +2222,10 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   the node with an `unrecognized_keys` issue at `map` — the flatten whitelist
  *   above still drops the key in silence, and the spread below still returns the
  *   authored block. `getMapConfig` consults that `safeParse`
- *   (`packages/plugin-map/src/ObjectMap.tsx:415` first line
+ *   (`packages/plugin-map/src/ObjectMap.tsx:449` first line
  *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
  *   whether to `console.warn`, then returns a spread of the AUTHORED block
- *   (`:420` first line `return { ...config, style };`),
+ *   (`:454` first line `return { ...config, style };`),
  *   undeclared key and all. That spread is reached by objectui's own
  *   component-node `map` prop, never by this face's flatten product ("neither
  *   flattener emits a `map` key at all", `getMapConfig`).
@@ -2222,7 +2236,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * `db11afd49` it is closed by `.strict()` and still warn-only). And this parse is
  * the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:1437`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:1506`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -3280,7 +3294,16 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+   * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
+   * `a58626c88` (`git diff --quiet`), so `resolveColSpan` `:154`,
+   * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
+   * unmoved, and `form.tsx` changed on this hop — 100 insertions, 5 deletions:
+   * objectui#11777, ungrouped fields rendered as their own block rather than
+   * under the last group's heading — none of it inside `spanLadderFor`, which
+   * MOVED `:204-231` -> `:274-301` byte-identical, and its one call site moved
+   * `:3132` -> `:3202` with the call byte-identical, so it still emits the
+   * ladder. At `a58626c88`, re-read there 2026-10-06:
    * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
    * `0abd4f9f8` (`git diff --quiet`), so `resolveColSpan` `:154`,
    * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
@@ -3344,7 +3367,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * had changed only in its registration's input list, objectui#9910's
    * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `a58626c88dc8`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `f0268ad78485`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -4472,16 +4495,16 @@ export const FormViewSchema = lazySchema(() => strictObject({
   // The `url` describe below carries the rule in full, but it reaches only
   // the generated JSON Schema: the references page renders a union as one type
   // expression, so a member's inner key gets no row of its own. The headline
-  // therefore rides HERE, where the reference table does have a row (#7496).
-  //
-  // ⚠️ This describe still carries its ruling date, deliberately left for a
-  // separate change (#22093): its text is projected into the published skill
-  // `skills/objectstack-ui/references/react-blocks.md` (`gen:react-blocks`), a
-  // governed surface, so editing it here would make this wording sweep land
-  // the way a governed PR does.
+  // therefore rides HERE, where the reference table does have a row. The
+  // ruling is #7496 on the tracker, ruled 2026-08-11. Internal readers get the
+  // id and the date here; the author-facing sentence carries neither — it
+  // states the rule, which is what an author reading the property help acts
+  // on (#22093). This text is projected into the published skill
+  // `skills/objectstack-ui/references/react-blocks.md` (`gen:react-blocks`),
+  // a governed surface, and into the reference docs (`gen:docs`).
   ]).optional().describe(
     "Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates "
-    + 'only declared record fields as `{{record.field_name}}`, URL-escaped (ruled 2026-08-11).',
+    + 'only declared record fields as `{{record.field_name}}`, URL-escaped.',
   ),
 
   /**

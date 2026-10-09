@@ -110,7 +110,7 @@ doors whenever the plugin is bound to settings (the default):
 
 | Setting | Default | Applies to |
 |:---|:---|:---|
-| `max_upload_mb` | 100 (MB, counted as MiB) | Every upload door: the presigned upload's declared `size`, the chunked upload's declared `totalSize`, the local raw PUT body and each chunk's running total. Over it ⇒ `413` with code `VALIDATION_ERROR`, before anything is stored. |
+| `max_upload_mb` | 100 (MB, counted as MiB) | Every upload door: the presigned upload's declared `size`, the chunked upload's declared `totalSize`, the local raw PUT body and each chunk's running total. Over it ⇒ `413` with code `PAYLOAD_TOO_LARGE`, before anything is stored. |
 | `presigned_ttl` | 3600 s | Presigned upload URLs and non-gated download URLs issued from then on. |
 | `session_ttl` | 86400 s | Chunked upload sessions started from then on. |
 

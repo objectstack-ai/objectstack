@@ -84,7 +84,9 @@ import {
   parseCelToAst,
   SCOPE_ROOTS,
   analyzeRelationshipTraversals,
+  buildScope,
 } from '@objectstack/formula';
+import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
 import {
   collectFlowGraphs,
   flowNodeConfigRefusals,
@@ -111,6 +113,10 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
 import { referenceCarrierOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+// [#22394] The acting user's declared members — the contract half of the option
+// verdict's member allowlist for `current_user` and its ADR-0068 aliases. Read
+// off the schema at first use, never restated here.
+import { EvalUserSchema } from '@objectstack/spec/identity';
 
 import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
@@ -561,6 +567,9 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] 
  * options resolve against the host's predicate scope, which binds
  * `current_user` (ADR-0068 / objectui#2284) — that surface is where such a
  * predicate belongs, which is why it is also the first prescription below.
+ * The option has its own root verdict (`optionVisibleWhenRootIssue`, #22157),
+ * over the roots the server's option check binds: the acting user, and never
+ * `parent`.
  *
  * ## The user roots, and why `ctx` is judged whole-root (#6585)
  *
@@ -576,9 +585,11 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] 
  * set in #6713 — it is the fourth name `buildScope` mounts the same object
  * under, and the allowlist would have rejected it anyway; what the user tier
  * decides is only WHICH prescription it gets, and the user one is right for
- * `os.user`. `os.org` / `os.env` land in the same tier because the option
- * surface named by the first prescription binds the whole `os` namespace, not
- * only its `user` member.)
+ * `os.user`. `os.org` / `os.env` land in the same tier too. The option
+ * surface named by the first prescription does NOT bind them: the server's
+ * option check fills `os` with its `user` member only, so a predicate moved
+ * there meets that surface's member verdict (#22274), which names what is
+ * bound instead.)
  *
  * `ctx` is judged as a WHOLE root, not only in `ctx.user` form, because at
  * this surface that is simply what is true: `buildScope` creates the `ctx`
@@ -1078,6 +1089,415 @@ function fieldTraversalMessage(
 }
 
 /**
+ * [#22157] The roots a select option's own `visibleWhen` binds, read off the
+ * one server site that evaluates it: ObjectQL's `evaluateOptionVisibility`
+ * (`rule-validator.ts`). That call hands the expression engine `record` (the
+ * merged write), `previous`, the acting user and `permissions`, and nothing
+ * else; `@objectstack/formula`'s `buildScope` turns that into these roots:
+ *
+ *  - `record`, and `previous` (bound on an update);
+ *  - the acting user, under ADR-0068 D1's canonical `current_user` and the
+ *    three aliases `buildScope` hangs the same object on: `user`, and the
+ *    `user` member of `ctx` and of `os`. They are listed at bare-root
+ *    granularity because that is what {@link collectCelRootIdentifiers}
+ *    reports, the same reading as the runtime's own `USER_SCOPE_ROOTS` beside
+ *    the evaluator. All four are bound only when the write carries a user; a
+ *    system write takes the evaluator's "no acting user" branch by design,
+ *    which is not what this verdict judges.
+ *
+ * `permissions` mounts NO root: it answers `current_user.can(…)` through the
+ * environment (#18783), so it is absent here.
+ *
+ * `parent` is NOT bound. The write path binds a master-detail header for a
+ * field's own `readonlyWhen` / `requiredWhen` only, so the field-rule verdict
+ * one level up ({@link FIELD_RULE_BOUND_ROOTS}) accepts it and this one does
+ * not.
+ *
+ * ⛔ A root joins this list in the same change that binds it in
+ * `evaluateOptionVisibility`, never before.
+ *
+ * Two of these roots are accepted WHOLE here but bound only IN PART: `ctx` and
+ * `os` carry just their `user` member at the option check. What they carry is
+ * {@link OPTION_VISIBLE_WHEN_BOUND_MEMBERS}'s to say (#22274). And the acting
+ * user itself — under all four spellings — carries only the members
+ * {@link optionVisibleWhenUserMembers} derives (#22394).
+ */
+const OPTION_VISIBLE_WHEN_BOUND_ROOTS: readonly string[] = ['record', 'previous', 'current_user', 'user', 'ctx', 'os'];
+
+/**
+ * [#22274] The MEMBERS the option check binds under the two namespace roots
+ * {@link OPTION_VISIBLE_WHEN_BOUND_ROOTS} accepts whole, read off the same
+ * call as that list.
+ *
+ * `evaluateOptionVisibility` (`rule-validator.ts`) hands the evaluator
+ * `{ record, previous, user, permissions }`. `@objectstack/formula`'s
+ * `buildScope` builds `ctx` and `os` as containers, and from that context it
+ * fills each with one member, `user` (ADR-0068 D1's alias of `current_user`,
+ * the same `EvalUser` object). `os` gains `org` only from an `org` in the
+ * context, and `os.env` only from an `env`. The option check passes neither,
+ * and `ctx` has no other source in `buildScope` at all. So `os.org.id`,
+ * `os.env` and `ctx.locale` are unbound at the option check, though `os.org`
+ * is bound at other sites (a `formula` field, an expression `defaultValue`, a
+ * seed value) and `os.env` at the seed loader. Measured through the built
+ * `evaluateValidationRules` with an authenticated caller, each faults
+ * (`No such key: org` / `env` / `locale`) and the value is admitted.
+ *
+ * Only `ctx` and `os` are listed, and every member listed IS the acting user
+ * (`buildScope` hangs the one `EvalUser` object on `current_user`, `user`,
+ * `ctx.user` and `os.user`). So this map judges the FIRST member under each
+ * namespace, and what the acting user carries one level further down
+ * (`ctx.user.positions`, `os.user.roles`) is judged against
+ * {@link optionVisibleWhenUserMembers}, exactly as `current_user.positions` is
+ * (#22394).
+ *
+ * The test suite derives this list from the real `buildScope` and evaluator,
+ * given the option check's context, so a member `buildScope` starts mounting
+ * there, or one this list accepts that it never mounts, turns that test red.
+ * ⛔ A member joins this list in the same change that binds it in
+ * `evaluateOptionVisibility`, never before.
+ */
+const OPTION_VISIBLE_WHEN_BOUND_MEMBERS: Readonly<Record<string, readonly string[]>> = {
+  ctx: ['user'],
+  os: ['user'],
+};
+
+/**
+ * [#22394] The two ROOTS the option check binds the acting user under. Its
+ * other two spellings, `ctx.user` and `os.user`, are the members
+ * {@link OPTION_VISIBLE_WHEN_BOUND_MEMBERS} lists. All four are one `EvalUser`
+ * object (ADR-0068 D1), so all four are judged against one allowlist.
+ */
+const OPTION_VISIBLE_WHEN_USER_ROOTS: readonly string[] = ['current_user', 'user'];
+
+/**
+ * [#22394] The acting user as the option check's caller hands it over: the
+ * return shape of ObjectQL's `buildEvalUser` (`engine.ts`) — the caller's id,
+ * its scope-resolved `positions` and its organization id (`null` outside one),
+ * and nothing else. The VALUES are irrelevant; only which keys are present
+ * decides which members `buildScope` mounts.
+ *
+ * This is the one fact the allowlist below cannot read from code:
+ * `@objectstack/lint` cannot depend on ObjectQL. ⛔ It changes in the same
+ * change that changes `buildEvalUser`'s shape, never before — the rule
+ * {@link OPTION_VISIBLE_WHEN_BOUND_MEMBERS} states for the call around it.
+ */
+const OPTION_CHECK_ACTING_USER: { id: string; positions: string[]; organizationId: string | null } = {
+  id: '',
+  positions: [],
+  organizationId: null,
+};
+
+let optionVisibleWhenUserMembersMemo: readonly string[] | undefined;
+
+/**
+ * [#22394] The members of the acting user an option `visibleWhen` may read:
+ * the members that are BOTH declared by the contract and bound by the option
+ * check. Derived on first use from two sources, never written out here:
+ *
+ *  - **declared** — the keys of `EvalUserSchema` (`@objectstack/spec`, ADR-0068
+ *    D1): `id`, `name`, `email`, `positions`, `isPlatformAdmin`,
+ *    `organizationId`. `roles` is not among them: ADR-0090 D3 renamed it
+ *    `positions`, with no alias.
+ *  - **bound** — the keys of the object `@objectstack/formula`'s `buildScope`
+ *    mounts as `current_user` for {@link OPTION_CHECK_ACTING_USER}, the very
+ *    normalisation the evaluator runs (`createEvalUser`, which also derives
+ *    `isPlatformAdmin` from `positions`).
+ *
+ * Where the two differ, either one refuses: a member is accepted only when
+ * both name it. Measured before this verdict existed, through the built
+ * `evaluateValidationRules` with an authenticated caller: `name` and `email`
+ * are declared but never set at the option check (the engine passes neither),
+ * so `current_user.email == '…'` faulted (`No such key: email`) and the value
+ * was admitted; `roles` is bound nowhere and declared nowhere, and faulted the
+ * same way. Bound-but-undeclared is empty today, and the test suite pins it
+ * empty: a member the evaluator mounted without a declaration would be a
+ * capability the contract never promised.
+ *
+ * `current_user.can(object, verb)` is not a member read at all — it is a
+ * receiver call the evaluator's environment answers from the permission map
+ * (#18783) — so it never reaches this list.
+ *
+ * Memoised, and computed on first use rather than at module load: resolving a
+ * `lazySchema` builds it, and the boot path imports this package.
+ */
+function optionVisibleWhenUserMembers(): readonly string[] {
+  if (optionVisibleWhenUserMembersMemo !== undefined) return optionVisibleWhenUserMembersMemo;
+  const declaredUserMembers = Object.keys(EvalUserSchema.shape);
+  const actingUser = buildScope({ user: OPTION_CHECK_ACTING_USER })['current_user'];
+  const boundUserMembers = actingUser !== null && typeof actingUser === 'object' ? Object.keys(actingUser) : [];
+  optionVisibleWhenUserMembersMemo = declaredUserMembers.filter((m) => boundUserMembers.includes(m));
+  return optionVisibleWhenUserMembersMemo;
+}
+
+/** `` `a`, `b` and `c` `` — names spelled for a message, in the order given. */
+function tickedList(listedNames: readonly string[]): string {
+  const tickedNames = listedNames.map((n) => '`' + n + '`');
+  return tickedNames.length > 1
+    ? `${tickedNames.slice(0, -1).join(', ')} and ${tickedNames[tickedNames.length - 1]}`
+    : tickedNames.join('');
+}
+
+/** The members read under one root, in name order: hop, value and deeper reads alike. */
+function membersReadUnder(found: RelationshipTraversalAnalysis): string[] {
+  const { traversals, bareFields, multiHopFields } = found;
+  return [...new Set([...Array.from(traversals, ([m]) => m), ...bareFields, ...multiHopFields])].sort();
+}
+
+/** The members read one hop below `member` of the analysed root, in name order. */
+function membersReadThrough(found: RelationshipTraversalAnalysis, member: string): string[] {
+  const { traversals } = found;
+  for (const [m, reads] of traversals) {
+    if (m === member) return [...reads].sort();
+  }
+  return [];
+}
+
+/** A CEL member path, spelled for a message: `` `root.member` ``. */
+function celMemberPath(root: string, member: string): string {
+  // Assembled with `+`: #5017's receiver scan reads string literals too, so a
+  // literal CEL path in a message would register its root as a read receiver.
+  return '`' + root + '.' + member + '`';
+}
+
+/**
+ * [#22157] The root verdict for a select option's own `visibleWhen`: a root
+ * the server's option check does not bind ({@link OPTION_VISIBLE_WHEN_BOUND_ROOTS})
+ * is refused, located at the option.
+ *
+ * ## Why it is refused
+ *
+ * The evaluator faults on an unbound root (`Unknown variable: parent`,
+ * measured through the real `evaluateValidationRules` with an authenticated
+ * caller), and a faulting option predicate is fail-OPEN: the fault is logged
+ * and the value admitted, so the gate is never enforced. A declared gate the
+ * runtime cannot enforce must not pass a door (ADR-0049), and nothing else
+ * refused it: every root judged here is in `SCOPE_ROOTS`, which the strict env
+ * declares, so the bare-reference check stays silent on it. The case that made
+ * the hole credible is `parent`, which the field-rule slots one level up accept
+ * on an object with exactly one `master_detail`.
+ *
+ * ## Why the membership test is `SCOPE_ROOTS`, not the field-rule vocabulary
+ *
+ * The gap is exactly the roots that pass the strict env. A root outside
+ * `SCOPE_ROOTS` (a nowhere-bound root such as `app`) is undeclared there, so
+ * the bare-reference check already refuses it at error on this slot; judging
+ * it here as well would give one mistake two verdicts. The test is an
+ * ALLOWLIST read against that list, for the reason {@link fieldRuleRootIssue}
+ * records (#6713): a root added to `SCOPE_ROOTS` is judged here the day it
+ * lands, with no second list to copy it into.
+ *
+ * ## Members of a bound root (#22274)
+ *
+ * `ctx` and `os` pass the root test, but the option check fills them with
+ * their `user` member only ({@link OPTION_VISIBLE_WHEN_BOUND_MEMBERS}). A
+ * predicate that reads any other member of either (`os.org.id`, `os.env`,
+ * `ctx.locale`) is refused by the same verdict, located at the same option,
+ * when it reads no unbound root. The members a source reads are
+ * `@objectstack/formula`'s `analyzeRelationshipTraversals` reading of that
+ * root, so `os.org`, `os.?org`, `os['org']` and `has(os.org)` are one read. A
+ * computed key (`os[k]`) names no member and is not judged.
+ *
+ * ## Members of the acting user (#22394)
+ *
+ * The same verdict judges what the acting user carries, under all four of its
+ * spellings: the first member of `current_user` / `user`, and the member one
+ * hop below `ctx.user` / `os.user`. Each is held to
+ * {@link optionVisibleWhenUserMembers} — declared by `EvalUserSchema` AND bound
+ * by the option check — so `current_user.roles` (renamed `positions` by
+ * ADR-0090 D3) and `current_user.email` (declared, never set there) are
+ * refused, read by the same reader and so in every spelling.
+ *
+ * With #22157 (roots) and #22274 (namespace members) this closes the family:
+ * every receiver the option check binds has its members judged against a
+ * declared source — `record` / `previous` against the object's fields (the
+ * `unknown field` check in `validateExpression`), `ctx` / `os` against
+ * {@link OPTION_VISIBLE_WHEN_BOUND_MEMBERS}, and the four spellings of the
+ * acting user against {@link optionVisibleWhenUserMembers}. The test suite
+ * enumerates the receivers off the real `buildScope` and pins that table.
+ *
+ * `null` = nothing to report: the source does not parse (the syntax pass owns
+ * that), or every root and member it reads is one the option check binds.
+ */
+function optionVisibleWhenRootIssue(
+  objectName: string | undefined,
+  field: string,
+  option: string,
+  source: string,
+): { root: string; message: string } | null {
+  const roots = collectCelRootIdentifiers(source);
+  if (!roots.ok) return null;
+  const kept = SCOPE_ROOTS.filter(
+    (r) => !OPTION_VISIBLE_WHEN_BOUND_ROOTS.includes(r) && roots.roots.includes(r),
+  );
+  if (kept.length === 0) return optionVisibleWhenMemberIssue(objectName, field, option, source, roots.roots);
+  // One issue per option even when the predicate reads two unbound roots, in
+  // `SCOPE_ROOTS` order: stable, never AST walk order. The author fixes one
+  // and the next run names the other.
+  const root = kept[0]!;
+  const owner = objectName ? `'${objectName}'` : 'this object';
+  const prescription = root === 'parent'
+    ? `An option is judged against the record being written, never against its master-detail ` +
+      `header: only a field's own \`readonlyWhen\` and \`requiredWhen\` bind \`parent\`, on an ` +
+      `object with exactly one \`master_detail\`. To gate this choice on the header, read a column ` +
+      `${owner} declares instead (denormalise the header value you need onto ${owner}).`
+    : `\`${root}\` is declared platform-wide and bound at OTHER evaluation sites, never by the ` +
+      `option check. Rewrite the predicate against \`record\` (plus \`previous\`), or against the ` +
+      `acting user as \`current_user\`.`;
+  return {
+    root,
+    message:
+      `\`visibleWhen\` of option ${option} on field '${field}' reads \`${root}\`, but the server's ` +
+      `option check binds only \`record\`, \`previous\` and the acting user (\`current_user\`, and ` +
+      `its ADR-0068 aliases \`user\`, \`ctx\` and \`os\`), so \`${root}\` is unbound there. ` +
+      `${FIELD_TRAVERSAL_CONSEQUENCE['option visibleWhen']}. ${prescription}`,
+  };
+}
+
+/**
+ * The clause every member refusal ends its consequence with: a member the
+ * option check never sets is not only a fault, it also defeats the two
+ * spellings an author reaches for to guard it.
+ */
+const OPTION_MEMBER_GUARD_CONSEQUENCE =
+  'a `has()` test or an optional read of it never finds it set, so the option is refused on every ' +
+  'write instead, or admitted on every write when the test is negated or the read\'s default passes';
+
+/**
+ * [#22274] The member half of {@link optionVisibleWhenRootIssue}: a member of
+ * `ctx` or `os` the option check does not bind
+ * ({@link OPTION_VISIBLE_WHEN_BOUND_MEMBERS}) — and [#22394] a member of the
+ * acting user it does not bind ({@link optionVisibleWhenUserMembers}), under
+ * `current_user` / `user` or one hop below `ctx.user` / `os.user`. One finding
+ * per option, the first unbound member in `SCOPE_ROOTS` order, then (under a
+ * namespace) the namespace's own member before the acting user's, then in name
+ * order: stable, never AST walk order.
+ *
+ * The message names the member, says what the option check DOES bind there,
+ * and gives the remedy that is true for the member. For `os.org` that is
+ * `current_user.organizationId`: the engine builds the acting user with the
+ * caller's organization id (`null` outside one), so that one organization fact
+ * IS bound at the option check.
+ */
+function optionVisibleWhenMemberIssue(
+  objectName: string | undefined,
+  field: string,
+  option: string,
+  source: string,
+  roots: readonly string[],
+): { root: string; message: string } | null {
+  for (const root of SCOPE_ROOTS) {
+    if (!roots.includes(root)) continue;
+    const namespaceMembers = OPTION_VISIBLE_WHEN_BOUND_MEMBERS[root];
+    const isUserRoot = OPTION_VISIBLE_WHEN_USER_ROOTS.includes(root);
+    if (namespaceMembers === undefined && !isUserRoot) continue;
+    const found = analyzeRelationshipTraversals(source, root);
+    if (found === null) continue;
+    const membersRead = membersReadUnder(found);
+    if (isUserRoot) {
+      const member = membersRead.find((m) => !optionVisibleWhenUserMembers().includes(m));
+      if (member !== undefined) return optionVisibleWhenUserMemberIssue(objectName, field, option, root, member);
+      continue;
+    }
+    const member = membersRead.find((m) => !namespaceMembers!.includes(m));
+    if (member !== undefined) {
+      return optionVisibleWhenNamespaceMemberIssue(objectName, field, option, root, member);
+    }
+    // [#22394] Every member the namespace binds IS the acting user, so what is
+    // read one hop below it is the acting user's member.
+    for (const userMember of namespaceMembers!) {
+      const below = membersReadThrough(found, userMember).find((m) => !optionVisibleWhenUserMembers().includes(m));
+      if (below !== undefined) {
+        return optionVisibleWhenUserMemberIssue(objectName, field, option, `${root}.${userMember}`, below);
+      }
+    }
+  }
+  return null;
+}
+
+/** [#22274] The refusal of a `ctx` / `os` member the option check does not bind. */
+function optionVisibleWhenNamespaceMemberIssue(
+  objectName: string | undefined,
+  field: string,
+  option: string,
+  root: string,
+  member: string,
+): { root: string; message: string } {
+  const path = celMemberPath(root, member);
+  const owner = objectName ? `'${objectName}'` : 'this object';
+  const prescription = root === 'os' && member === 'org'
+    ? `The option check binds no organization. The one organization fact it carries is the acting ` +
+      `user's: ${celMemberPath('current_user', 'organizationId')} holds the caller's organization ` +
+      `id (\`null\` outside one), so compare that instead. Any other fact about the organization ` +
+      `cannot gate an option; read a column ${owner} declares.`
+    : root === 'os' && member === 'env'
+      ? `The option check binds no deployment environment (${path} is bound only where an ` +
+        `evaluation is given one, such as a seed value), so the choices a record offers cannot ` +
+        `depend on it there. Gate on a column ${owner} declares, or on the acting user as ` +
+        `\`current_user\`.`
+      : `Whatever other evaluation sites bind under \`${root}\`, the option check binds only its ` +
+        `\`user\` member. Rewrite the predicate against \`record\` (plus \`previous\`), or against ` +
+        `the acting user as \`current_user\`.`;
+  return {
+    root,
+    message:
+      `\`visibleWhen\` of option ${option} on field '${field}' reads ${path}, but the server's ` +
+      `option check binds only \`record\`, \`previous\` and the acting user (\`current_user\`, and ` +
+      `its ADR-0068 aliases \`user\`, \`ctx\` and \`os\`), and under \`${root}\` it binds the ` +
+      `\`user\` member and nothing else, so ${path} is unbound there. ` +
+      `${FIELD_TRAVERSAL_CONSEQUENCE['option visibleWhen']}; ${OPTION_MEMBER_GUARD_CONSEQUENCE}. ${prescription}`,
+  };
+}
+
+/**
+ * [#22394] The refusal of a member of the acting user the option check does
+ * not bind. `receiver` is the spelling the author wrote (`current_user`,
+ * `user`, `ctx.user` or `os.user`), so the remedy is written back in it.
+ *
+ * Three remedies, by what the member is:
+ *
+ *  - `roles` / `role` — not an `EvalUser` member at all: ADR-0090 D3 renamed
+ *    the membership array `positions`, one-step, with no alias. The remedy is
+ *    the rename, `'NAME' in RECEIVER.positions`.
+ *  - a member `EvalUserSchema` declares but the option check never sets
+ *    (`name`, `email`) — real on a surface that is handed a fuller user, never
+ *    here: the engine builds the acting user from the caller's id, positions
+ *    and organization id only. The remedy is a bound member, or a column.
+ *  - anything else — a member nobody declares. The remedy is the bound list.
+ */
+function optionVisibleWhenUserMemberIssue(
+  objectName: string | undefined,
+  field: string,
+  option: string,
+  receiver: string,
+  member: string,
+): { root: string; message: string } {
+  const path = celMemberPath(receiver, member);
+  const owner = objectName ? `'${objectName}'` : 'this object';
+  const carried = tickedList(optionVisibleWhenUserMembers());
+  const declared = Object.keys(EvalUserSchema.shape).includes(member);
+  const prescription = member === 'roles' || member === 'role'
+    ? `The acting user has no \`${member}\`: ADR-0090 D3 renamed its membership array ` +
+      `${celMemberPath(receiver, 'positions')} — the built-in identity and position names the user ` +
+      `holds — with no alias. Write \`'NAME' in ${receiver}.positions\` instead.`
+    : declared
+      ? `\`${member}\` is declared on the acting user (\`EvalUser\`) but the server builds the user ` +
+        `for this check from the caller's ${tickedList(Object.keys(OPTION_CHECK_ACTING_USER))} only, ` +
+        `so it is never set here, whichever surface sets it elsewhere. Gate on a member the check ` +
+        `binds, or on a column ${owner} declares.`
+      : `\`${member}\` is not a member of the acting user (\`EvalUser\`). Gate on a member the check ` +
+        `binds, or on a column ${owner} declares.`;
+  return {
+    root: receiver,
+    message:
+      `\`visibleWhen\` of option ${option} on field '${field}' reads ${path}, but the acting user the ` +
+      `server's option check binds (\`current_user\`, and its ADR-0068 aliases \`user\`, ` +
+      `${celMemberPath('ctx', 'user')} and ${celMemberPath('os', 'user')}) carries ${carried} and ` +
+      `nothing else, so ${path} is unbound there. ` +
+      `${FIELD_TRAVERSAL_CONSEQUENCE['option visibleWhen']}; ${OPTION_MEMBER_GUARD_CONSEQUENCE}. ${prescription}`,
+  };
+}
+
+/**
  * [#20078] The master object of an object with exactly ONE `master_detail`
  * relationship — the record the field level binds as `parent` — or `undefined`
  * when there is not exactly one (the #4889 gate above owns that verdict).
@@ -1169,7 +1589,11 @@ export interface StackExpressionOptions {
    *    `formulas.mdx` covers it, and the door gave none of it either: an
    *    option whose `visibleWhen` read a bare `amount` saved with a 200, and
    *    the server's option check cannot evaluate it and fails open (logged,
-   *    allowed through), so the gate it declares is never enforced;
+   *    allowed through), so the gate it declares is never enforced. Since
+   *    #22157 the pass also refuses a root that option check does not bind
+   *    (`parent` above all), at both doors through this same call; since
+   *    #22274 a member of `ctx` / `os` it does not fill, and since #22394 a
+   *    member of the acting user it does not bind (`current_user.roles`);
    *  - [#22032, pass 4] the object's own `actions[]` pass — each action's
    *    `visible`, and its `disabled` unless that is a boolean literal, as a
    *    `record`-scoped predicate (`checkAction` below). The same sentence of
@@ -2031,15 +2455,37 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // binds it. Same helper, two verdicts, because the two surfaces have two
       // evaluators; neither verdict is a side effect of a shared root list.
       //
-      // [#22032, pass 3] NOT fenced on an object write: the option's `check`
-      // and its traversal refusal are the pass the object save door runs, at
-      // the build's own position in this walk, so the door's findings and
-      // their order are the build's — the `current_user` acceptance above
-      // included. See {@link StackExpressionOptions.runtimeWriteType}.
+      // [#22157] …and the option has a root verdict of its own, over the roots
+      // the SERVER's option check binds (`optionVisibleWhenRootIssue`). The
+      // shared root list (`SCOPE_ROOTS`) let every platform-wide root through
+      // here, `parent` among them, though `evaluateOptionVisibility` binds only
+      // `record`, `previous` and the acting user: such a predicate faulted on
+      // every write that picked the option and was admitted unchecked. So the
+      // two surfaces now differ by exactly what their evaluators bind: this
+      // one accepts the acting user and refuses `parent`, the field-rule slots
+      // the other way round. [#22274] The same verdict judges the members of
+      // `ctx` and `os`, which the option check fills with `user` only, and
+      // [#22394] the acting user's own members under all four of its spellings,
+      // held to what `EvalUserSchema` declares AND the option check binds.
+      //
+      // [#22032, pass 3] NOT fenced on an object write: the option's `check`,
+      // its root verdict (#22157) and its traversal refusal are the pass the
+      // object save door runs, at the build's own position in this walk, so the
+      // door's findings and their order are the build's — the `current_user`
+      // acceptance above included. See
+      // {@link StackExpressionOptions.runtimeWriteType}.
       for (const [oi, opt] of recordsOf(f.options).entries()) {
         const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
         const optionWhere = `object '${objectName}' · field '${fname}' option ${label} visibleWhen`;
         check(optionWhere, opt.visibleWhen, objectName, 'record');
+        // [#22157] After `check`, before the traversal refusal: every root this
+        // verdict judges is declared in the strict env, so `check` never
+        // reports a bare reference to it and the two stay disjoint.
+        const optionSource = celSourceOf(opt.visibleWhen);
+        const verdict = optionSource ? optionVisibleWhenRootIssue(objectName, fname, label, optionSource) : null;
+        if (verdict) {
+          issues.push({ where: optionWhere, message: verdict.message, source: optionSource!, severity: 'error' });
+        }
         // [#20078] An option's predicate is evaluated against the record as
         // stored — a read through a reference faults, and the server admits the
         // value unchecked. `current_user` (and `current_user.can(…)`) is NOT a

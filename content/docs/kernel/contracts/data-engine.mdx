@@ -123,9 +123,16 @@ interface EngineQueryOptions {
 ```
 
 `ExecutionContext` is the author state — every field optional (the parse result,
-with defaults applied, is `ExecutionContextParsed`). Supply what you have, the engine reads what it needs. A system read passes
-`{ isSystem: true }`; an automation run with no resolvable identity passes only
-its run id (`{ flowRunId }`), a context that deliberately carries no principal.
+with defaults applied, is `ExecutionContextParsed`). Supply what you have, the engine reads what it needs.
+
+What it needs is a principal or an explicit elevation. Pass the caller's own
+context (a user id, a position or a named permission set), or, for platform code
+whose own door already authorized the caller, the system opt-in
+`{ isSystem: true }`. A context that carries neither is refused by the security
+plugin with `403 PERMISSION_DENIED` (`PermissionDeniedError`) before the operation
+runs, for every verb (ADR-0096 D5). `{ flowRunId }` alone is such a context: a run
+id is provenance, not identity, and grants nothing, so a context that carries it
+must also carry the caller's principal or `isSystem: true`.
 
 #### Removed in protocol 17: `cursor` and `distinct`
 

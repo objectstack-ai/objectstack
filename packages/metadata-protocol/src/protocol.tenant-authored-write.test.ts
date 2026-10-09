@@ -124,11 +124,16 @@ describe('tenantAuthoredWriteRefusal — every flow written through an authoring
         }
     });
 
-    it('with the operator hatch open the lock admits the write, and the body\'s stamps decide nothing', async () => {
+    it('[ADR-0131 D6] with the operator hatch open a shipped flow is still a locked base — the hatch opens no managed flow', async () => {
+        // Was `with the operator hatch open the lock admits the write`. Managed
+        // content is sealed: the answer is the shut hatch's, sentence and all.
+        const shut: any = protocolWith().protocol.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' });
         process.env.OS_METADATA_WRITABLE = 'flow';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         const { protocol } = protocolWith();
-        expect(await protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'pkg_flow', item: flowBody('pkg_flow', ASSERTED) })).toBeNull();
+        const refusal: any = await protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'pkg_flow', item: flowBody('pkg_flow', ASSERTED) });
+        expect(shape(refusal)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(refusal.message).toBe(shut.message);
     });
 
     it('a body claiming a package\'s provenance for a name no package ships is refused INVALID_METADATA / 422', async () => {
@@ -294,14 +299,19 @@ describe('a flow saved naming, as its base, a package no installed package holds
         }
     });
 
-    it('with the operator hatch open a shipped flow passes the lock, and a base no installed package holds is still refused', async () => {
+    it('[ADR-0131 D6] with the operator hatch open a shipped flow is refused as a locked base first, whatever base the save names', async () => {
+        // Was `with the operator hatch open a shipped flow passes the lock`: the
+        // hatch carried the write past the lock to the named-base rule. Managed
+        // content is sealed now, so the hatch-open answer is the control's above.
         process.env.OS_METADATA_WRITABLE = 'flow';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         const { protocol } = protocolWith();
         const served = ARTIFACTS.get('flow')!.get('pkg_flow');
-        expect(shape(await protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'pkg_flow', item: served, packageId: ORPHAN })))
-            .toEqual({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
-        expect(await protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'pkg_flow', item: served, packageId: PACKAGE_ID })).toBeNull();
+        for (const packageId of [ORPHAN, PACKAGE_ID]) {
+            const refusal: any = await protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'pkg_flow', item: served, packageId });
+            expect(refusal?.status, packageId).toBe(403);
+            expect(['NOT_OVERRIDABLE', 'ITEM_LOCKED']).toContain(refusal.code);
+        }
     });
 
     it('every other metadata type is untouched — a view naming the same base is not this rule\'s to judge', async () => {

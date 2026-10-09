@@ -136,10 +136,11 @@ describe('judgeAuthorTimeRules — the stage os verify runs first (#21323)', () 
     expect(verdict.refusal).toBeNull();
     const perPackage = verdict.advisories.filter((f) => PER_PACKAGE_WHERE.test(f.where));
     expect(perPackage.map((f) => f.rule)).toContain('field-no-consumers');
-    expect(perPackage.some((f) => f.message.includes('industry'))).toBe(true);
+    // [#22161] The verdict no longer restates the location; the field is named in `where`.
+    expect(perPackage.some((f) => f.where.includes('field "industry"'))).toBe(true);
     // ...and the union run did not raise it, so the pass is the only source.
     const union = verdict.advisories.filter((f) => !PER_PACKAGE_WHERE.test(f.where));
-    expect(union.some((f) => f.rule === 'field-no-consumers' && f.message.includes('industry'))).toBe(false);
+    expect(union.some((f) => f.rule === 'field-no-consumers' && f.where.includes('field "industry"'))).toBe(false);
   });
 
   it('refuses a stack that does not parse — there is no rule verdict to give about it', () => {

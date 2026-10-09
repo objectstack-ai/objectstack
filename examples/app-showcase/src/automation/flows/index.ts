@@ -1581,9 +1581,11 @@ export const InboundTaskWebhookFlow = defineFlow({
   type: 'api',
   status: 'active',
   // An inbound webhook has no authenticated user, so the create must run as the
-  // system principal (#1888 runAs is now enforced). Without this it relies on the
-  // "no identity → security-skipped" fall-through, which breaks the moment the
-  // target object carries row-level security.
+  // system principal (#1888 runAs is now enforced). Without this the run is
+  // user-less under the default `runAs:'user'`, so its create is refused
+  // (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`); the "no identity → security-skipped"
+  // fall-through it once relied on is gone (ADR-0096 D5 refuses a principal-less
+  // context in the security middleware too).
   runAs: 'system',
   nodes: [
     {
@@ -1632,15 +1634,23 @@ export const InboundTaskWebhookFlow = defineFlow({
  * by the same filter, and report. Config keys follow the executor contract
  * exactly — `objectName` + `filter` + the declared bulk intent `multi`
  * (Prime Directive #12: no `object`/`filters` aliases). `runAs: 'system'`
- * because a janitor acts
- * across owners; autolaunched with no record trigger — invoke it on demand
- * (API/subflow) rather than on every write.
+ * because a janitor acts across owners.
+ *
+ * `type: 'screen'` because it IS an entry: a signed-in caller starts it on
+ * demand through `InquiryPurgeEndpoint` (`src/system/apis/index.ts`), with no
+ * record trigger and no cadence. An elevated flow of a self-triggered type
+ * (`autolaunched`, `record_change`, `schedule`) runs on its own trigger or as a
+ * `subflow` from a parent, and every door that starts a flow by name — the
+ * trigger route, a `type: 'flow'` action, a declared `type: 'flow'` endpoint —
+ * refuses it to any caller but the system principal (`403 PERMISSION_DENIED`).
+ * Declaring the type an entry is the explicit, reviewable statement that
+ * signed-in callers may start this elevated work.
  */
 export const InquiryPurgeFlow = defineFlow({
   name: 'showcase_inquiry_purge',
   label: 'Purge Closed Inquiries',
   description: 'Deletes inquiries already marked closed — demonstrates get_record + delete_record.',
-  type: 'autolaunched',
+  type: 'screen',
   runAs: 'system',
   nodes: [
     { id: 'start', type: 'start', label: 'Start' },

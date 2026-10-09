@@ -147,6 +147,63 @@ describe('RetryPolicySchema — converged shape', () => {
 });
 
 /**
+ * The policy is CLOSED: a key it does not declare is refused at parse, never
+ * stripped. Stripping was the expensive direction for this shape in particular —
+ * its defaults are opt-in, so a misspelt `maxRetries` parsed to `0` and the
+ * declared retry silently became "never retry". The census before closing it
+ * found no writer relying on the strip (the docblock on `RetryPolicySchema`
+ * names them), so it is closed on the shared schema, for both of its parsers.
+ */
+describe('RetryPolicySchema refuses a key it does not declare', () => {
+  it('from both entries: one unrecognized_keys issue naming the key, with the declared key it was near', () => {
+    for (const entry of [Automation.RetryPolicySchema, System.RetryPolicySchema]) {
+      const result = entry.safeParse({ maxRetry: 2 });
+      expect(result.success).toBe(false);
+      const issues = result.success ? [] : result.error.issues;
+      expect(issues.map((issue) => ({ code: issue.code, path: issue.path, keys: (issue as { keys?: unknown }).keys })))
+        .toEqual([{ code: 'unrecognized_keys', path: [], keys: ['maxRetry'] }]);
+      // The did-you-mean's subject: the rename pair to the declared key, never to the tombstone.
+      expect(issues[0]!.message).toContain('`maxRetry` → `maxRetries`');
+      expect(issues[0]!.message).not.toContain('`retryDelayMs`');
+    }
+  });
+
+  it('a neighbouring retry vocabulary is answered with the declared key; maxAttempts with the off-by-one', () => {
+    for (const [key, target] of [
+      ['initialDelayMs', 'backoffMs'], ['baseDelayMs', 'backoffMs'], ['maxDelayMs', 'maxRetryDelayMs'],
+      ['retries', 'maxRetries'], ['attempts', 'maxRetries'],
+    ] as const) {
+      const result = RetryPolicySchema.safeParse({ [key]: 1 });
+      expect(result.success, key).toBe(false);
+      expect(result.success ? '' : result.error.issues[0]!.message, key).toContain(`\`${key}\` → \`${target}\``);
+    }
+    const attempts = RetryPolicySchema.safeParse({ maxAttempts: 3 });
+    const message = attempts.success ? '' : attempts.error.issues[0]!.message;
+    expect(message).toContain('`maxRetries: <maxAttempts - 1>`');
+    expect(message).toContain('one attempt more than you asked for');
+    expect(message).not.toMatch(/fewer/i);
+    expect(message).not.toContain('`maxAttempts` → ');
+  });
+
+  it('job.retryPolicy refuses it at the job\'s own path', () => {
+    const job = { name: 'nightly_sync', schedule: { type: 'interval', intervalMs: 60000 }, handler: 'jobs/sync.ts' };
+    const result = System.JobSchema.safeParse({ ...job, retryPolicy: { maxRetries: 2, bogusKey: 1 } });
+    expect(result.success).toBe(false);
+    expect(result.success ? [] : result.error.issues.map((issue) => ({ code: issue.code, path: issue.path.join('.') })))
+      .toEqual([{ code: 'unrecognized_keys', path: 'retryPolicy' }]);
+    // CONTROL: the same job with every declared key parses.
+    const declared = { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2, maxRetryDelayMs: 60000, jitter: true };
+    expect(System.JobSchema.safeParse({ ...job, retryPolicy: declared }).success).toBe(true);
+  });
+
+  it('the retryDelayMs tombstone keeps its own refusal — the rename — rather than becoming an unknown key', () => {
+    const result = RetryPolicySchema.safeParse({ retryDelayMs: 500 });
+    expect(result.success ? [] : result.error.issues.map((issue) => ({ code: issue.code, path: issue.path })))
+      .toEqual([{ code: 'invalid_type', path: ['retryDelayMs'] }]);
+  });
+});
+
+/**
  * The assertion class that would have caught #4964 and #4962 — and the reason
  * it did not exist before them.
  *

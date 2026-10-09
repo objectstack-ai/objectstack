@@ -163,7 +163,7 @@ The group has no `install`: ADR-0025 records the code-plugin install half (downl
 
 | Command | Description |
 |---------|-------------|
-| `os explain [schema]` | Display human-readable explanation of an ObjectStack schema |
+| `os explain [schema]` | Display a human-readable explanation of an ObjectStack schema, or of an author-time rule by its id (`os explain field-no-consumers`) |
 
 ## Configuration
 
@@ -241,7 +241,7 @@ There are no short forms: `os -h` and `os -v` exit 2 with `command -h not found`
 
 - `-p, --port <port>` — Server port. Resolution: `--port` › `$OS_PORT` › `$PORT` › `3000`. With `--dev` a busy port auto-hops to the next free one; in production mode it's a hard error (never silently drifts).
 - `--dev` — Run in development mode (load devPlugins, pretty logging)
-- `--ui` — Enable the bundled Console portal at `/_console/` when `@object-ui/console` is installed (default: true)
+- `--ui` — Enable the bundled Console portal at `/_console/`, served from `@objectstack/console` (default: true). With no built Console, `/_console/` answers `503` naming how to build or reinstall it.
 - `--no-server` — Skip starting HTTP server plugin
 
 ### `os generate`

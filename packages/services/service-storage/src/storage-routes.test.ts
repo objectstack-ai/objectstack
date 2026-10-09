@@ -271,7 +271,10 @@ describe('Storage REST Routes', () => {
     }
 
     it("stamps 'failed' on the row when the backend completion throws", async () => {
-      const { uploadId } = await initSession();
+      const { uploadId, resumeToken } = await initSession();
+      // The upload holds its declared bytes, so the completion reaches the
+      // backend: one that does not is refused before it (#22313).
+      await putChunk(uploadId, resumeToken);
       vi.spyOn(adapter, 'completeChunkedUpload').mockRejectedValue(new Error('NoSuchUpload'));
 
       const res = await complete(uploadId);
@@ -560,6 +563,155 @@ describe('Storage REST Routes', () => {
     });
   });
 
+  // ── [#22431] The unclaimed class: neither an attachments scope nor a field
+  // owner. It has no parent record to derive access from, so the download
+  // asks for one thing only — a signed-in caller — unless the file declares
+  // `acl: 'public_read'` (ADR-0104's one anonymous download).
+  describe('a file with neither an attachments scope nor a field owner needs a signed-in caller (#22431)', () => {
+    const DOORS = ['/api/v1/storage/files/:fileId/url', '/api/v1/storage/files/:fileId'] as const;
+
+    const commit = async (s: StorageMetadataStore, rec: Partial<import('./metadata-store.js').FileRecord>) =>
+      s.createFile({
+        id: rec.id ?? 'u-dl',
+        key: rec.key ?? `user/${rec.id ?? 'u-dl'}.png`,
+        name: 'x.png',
+        status: 'committed',
+        acl: 'private',
+        scope: 'user',
+        ...rec,
+      } as any);
+
+    function serverWith(resolveSession: any, extra: any = {}) {
+      const server = createMockHttpServer();
+      const s = new StorageMetadataStore(null);
+      const authorizeFileRead = vi.fn(async () => 'deny' as const);
+      const logger = { info: vi.fn(), warn: vi.fn() };
+      registerStorageRoutes(server as any, adapter, s, {
+        basePath: '/api/v1/storage',
+        resolveSession,
+        authorizeFileRead,
+        logger,
+        downloadTtl: 120,
+        ...extra,
+      });
+      return { server, store: s, authorizeFileRead, logger };
+    }
+
+    const hit = async (server: any, path: string, fileId: string) => {
+      const res = createMockRes();
+      await server._getHandler('GET', path)!(createMockReq({ params: { fileId } }), res);
+      return res;
+    };
+
+    /** Seconds of life the minted local capability URL carries. */
+    const ttlOf = (url: string) =>
+      adapter.verifyToken(url.split('/').pop()!, 'get').exp - Math.floor(Date.now() / 1000);
+
+    it('refuses an anonymous caller 401 AUTH_REQUIRED at both download doors, minting no URL', async () => {
+      const resolveSession = vi.fn(async () => null);
+      const { server, store: s, authorizeFileRead } = serverWith(resolveSession);
+      await commit(s, { id: 'u1' });
+      const minted = vi.spyOn(adapter, 'getPresignedDownload');
+      for (const door of DOORS) {
+        const res = await hit(server, door, 'u1');
+        expect(res._status, door).toBe(401);
+        expect(res._json?.success, door).toBe(false);
+        expect(res._json?.error?.code, door).toBe('AUTH_REQUIRED');
+        expect(res._headers.Location, door).toBeUndefined();
+      }
+      expect(minted).not.toHaveBeenCalled();
+      expect(resolveSession).toHaveBeenCalledTimes(2);
+      // Not the parent-governed authorizer's file: there is no parent record.
+      expect(authorizeFileRead).not.toHaveBeenCalled();
+      minted.mockRestore();
+    });
+
+    it('answers the same code and status the upload doors give an anonymous caller', async () => {
+      const { server, store: s } = serverWith(async () => null);
+      await commit(s, { id: 'u2' });
+      const download = await hit(server, DOORS[0], 'u2');
+      const upload = createMockRes();
+      await server._getHandler('POST', '/api/v1/storage/upload/presigned')!(
+        createMockReq({ body: { filename: 'a.png', mimeType: 'image/png', size: 3 } }),
+        upload,
+      );
+      expect([download._status, download._json?.error?.code]).toEqual([upload._status, upload._json?.error?.code]);
+    });
+
+    it('fails closed when the session resolver throws, or resolves a session with no user', async () => {
+      for (const resolveSession of [
+        async () => { throw new Error('auth backend down'); },
+        async () => ({ organizationId: 'org-1' }),
+      ]) {
+        const { server, store: s } = serverWith(resolveSession);
+        await commit(s, { id: 'u3' });
+        for (const door of DOORS) {
+          const res = await hit(server, door, 'u3');
+          expect(res._status, door).toBe(401);
+          expect(res._json?.error?.code, door).toBe('AUTH_REQUIRED');
+        }
+      }
+    });
+
+    it('serves a signed-in caller as before: a 302 and a URL carrying the presigned TTL', async () => {
+      const { server, store: s, authorizeFileRead } = serverWith(async () => ({ userId: 'user-7' }), { presignedTtl: 1800 });
+      await commit(s, { id: 'u4' });
+      const url = await hit(server, DOORS[0], 'u4');
+      expect(url._status).toBe(200);
+      expect(url._json.data.url).toContain('/_local/raw/');
+      const ttl = ttlOf(url._json.data.url);
+      expect(ttl).toBeGreaterThan(1700);
+      expect(ttl).toBeLessThanOrEqual(1800);
+      const redirect = await hit(server, DOORS[1], 'u4');
+      expect(redirect._status).toBe(302);
+      expect(redirect._headers.Location).toContain('/_local/raw/');
+      expect(authorizeFileRead).not.toHaveBeenCalled();
+    });
+
+    it("keeps an acl: 'public_read' file anonymous without asking for a session", async () => {
+      const resolveSession = vi.fn(async () => null);
+      const { server, store: s } = serverWith(resolveSession);
+      await commit(s, { id: 'u5', acl: 'public_read' });
+      expect((await hit(server, DOORS[0], 'u5'))._status).toBe(200);
+      expect((await hit(server, DOORS[1], 'u5'))._status).toBe(302);
+      expect(resolveSession).not.toHaveBeenCalled();
+    });
+
+    it('leaves the parent-governed classes to the authorizer: attachments-scope and field-owned verdicts are unchanged', async () => {
+      const resolveSession = vi.fn(async () => ({ userId: 'user-7' }));
+      const { server, store: s, authorizeFileRead } = serverWith(resolveSession);
+      await commit(s, { id: 'g1', scope: 'attachments', key: 'attachments/g1.bin' });
+      await commit(s, { id: 'g2', ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
+      const attached = await hit(server, DOORS[0], 'g1');
+      expect(attached._status).toBe(403);
+      expect(attached._json?.error?.code).toBe('ATTACHMENT_DOWNLOAD_DENIED');
+      const owned = await hit(server, DOORS[0], 'g2');
+      expect(owned._status).toBe(403);
+      expect(owned._json?.error?.code).toBe('FILE_DOWNLOAD_DENIED');
+      expect(authorizeFileRead).toHaveBeenCalledTimes(2);
+      expect(resolveSession).not.toHaveBeenCalled();
+    });
+
+    it('answers a missing file 404 before the session is asked', async () => {
+      const resolveSession = vi.fn(async () => null);
+      const { server } = serverWith(resolveSession);
+      const res = await hit(server, DOORS[0], 'missing');
+      expect(res._status).toBe(404);
+      expect(res._json?.error?.code).toBe('FILE_NOT_FOUND');
+      expect(resolveSession).not.toHaveBeenCalled();
+    });
+
+    it('keeps a kernel with no session resolver open, and says so once', async () => {
+      const { server, store: s, logger } = serverWith(undefined);
+      await commit(s, { id: 'u6' });
+      expect((await hit(server, DOORS[1], 'u6'))._status).toBe(302);
+      expect((await hit(server, DOORS[0], 'u6'))._status).toBe(200);
+      const notices = logger.info.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('no session resolver wired'));
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain('download');
+    });
+  });
+
   describe('PUT/GET /_local/raw/:token', () => {
     it('should accept raw upload with valid token and serve download', async () => {
       // Generate a presigned upload
@@ -641,14 +793,16 @@ describe('Storage REST Routes', () => {
       expect(file?.owner_id).toBe('user-42');
     });
 
-    it('download routes stay open even with a resolver wired (capability URLs)', async () => {
+    it('download routes are not behind the upload gate: an anonymous read of a missing file is a 404', async () => {
       const server = registerWithResolver(async () => null);
       const res = createMockRes();
       await server._getHandler('GET', '/api/v1/storage/files/:fileId/url')!(
         createMockReq({ params: { fileId: 'missing' } }),
         res,
       );
-      expect(res._status).toBe(404); // not 401 — anonymous reads reach the handler
+      // Not 401: the download doors look the file up first and judge the
+      // caller per file class (#22431 — see the unclaimed-class block above).
+      expect(res._status).toBe(404);
     });
 
     it('stays open (back-compat) when no resolver is wired', async () => {

@@ -363,6 +363,45 @@ const SESSION_READ_CONSEQUENCE =
 const ENGINE_BACKED_STORES = new WeakSet<object>();
 
 /**
+ * [#22332] The progress a `sys_upload_session` row records: every chunk the
+ * upload holds (`parts`) and the two counts derived from it. The chunk door
+ * reads these, merges its chunk in, and writes all three back together.
+ */
+export type UploadSessionProgress = Required<
+  Pick<UploadSessionRecord, 'parts' | 'uploaded_chunks' | 'uploaded_size'>
+>;
+
+/** A store's conditional progress write — see {@link updateSessionProgressIfUnchanged}. */
+type ConditionalProgressWrite = (
+  id: string,
+  seen: UploadSessionRecord,
+  progress: UploadSessionProgress,
+  context?: StorageWriteContext,
+) => Promise<boolean>;
+
+/**
+ * [#22332] Each store's conditional progress write, keyed by store — the
+ * {@link ENGINE_BACKED_STORES} pattern: module-private, so the chunk door can
+ * reach it through {@link updateSessionProgressIfUnchanged} without the
+ * class's public face growing a method.
+ */
+const CONDITIONAL_PROGRESS_WRITES = new WeakMap<object, ConditionalProgressWrite>();
+
+/**
+ * [#22332] The progress columns `seen` held, as the guard a conditional write
+ * compares against. A column the row did not carry is `null` in the guard —
+ * never `undefined`, which a `where` would drop, silently removing that term
+ * from the comparison.
+ */
+function progressGuard(seen: UploadSessionRecord): { [K in keyof UploadSessionProgress]: UploadSessionProgress[K] | null } {
+  return {
+    parts: seen.parts ?? null,
+    uploaded_chunks: seen.uploaded_chunks ?? null,
+    uploaded_size: seen.uploaded_size ?? null,
+  };
+}
+
+/**
  * Storage metadata persistence.
  *
  * Backed by `IDataEngine` (objectql). The process-local `Map` is the
@@ -393,6 +432,9 @@ export class StorageMetadataStore {
 
   constructor(private readonly engine: IDataEngine | null) {
     if (engine) ENGINE_BACKED_STORES.add(this);
+    CONDITIONAL_PROGRESS_WRITES.set(this, (id, seen, progress, context) =>
+      this.updateSessionProgressIfUnchanged(id, seen, progress, context),
+    );
   }
 
   /**
@@ -647,6 +689,63 @@ export class StorageMetadataStore {
   }
 
   /**
+   * [#22332] Write `progress` to one `sys_upload_session` row only while the
+   * row's progress columns still hold what `seen` held — a compare-and-set.
+   * `true` when the write landed; `false` when it did not, because another
+   * write moved the progress first or the row is no longer there.
+   *
+   * {@link updateSession} cannot serve the chunk door: it writes whatever it
+   * is handed, so two chunk PUTs that read the same record each wrote their
+   * own merge of it back and the later write erased the earlier chunk.
+   *
+   * On a wired engine this is the engine's own conditional update: the guard
+   * rides the `where` beside the id and `multi: true` declares the predicate
+   * (the compare-and-set spelling of `resolveEngineUpdateDispatch`), so the
+   * driver evaluates it in the same statement that writes, and the call
+   * answers the matched-row count. Same opt-in and same scope as
+   * {@link updateSession}: a row out of the acting organization's reach
+   * matches nothing. On the engine-absent stand-in it is one synchronous
+   * compare-and-set on the Map, which no other call can interleave with.
+   */
+  private async updateSessionProgressIfUnchanged(
+    id: string,
+    seen: UploadSessionRecord,
+    progress: UploadSessionProgress,
+    context?: StorageWriteContext,
+  ): Promise<boolean> {
+    const guard = progressGuard(seen);
+    if (!this.engine) {
+      // Same reasoning as `updateSession`'s stand-in branch: no reach to enforce.
+      const row = this.sessions.get(id);
+      if (!row) return false;
+      const held = progressGuard(row);
+      if (held.parts !== guard.parts || held.uploaded_chunks !== guard.uploaded_chunks || held.uploaded_size !== guard.uploaded_size) {
+        return false;
+      }
+      this.sessions.set(id, { ...row, ...progress, id, updated_at: new Date().toISOString() });
+      return true;
+    }
+    const matched = await this.engineOp('sys_upload_session', 'update', SESSION_UPDATE_CONSEQUENCE, async (engine) => {
+      const answer = await engine.update(
+        'sys_upload_session',
+        { ...progress },
+        { where: { ...guard, id }, multi: true, ...systemByIdWriteOptionsFor(context) },
+      );
+      // A predicate update answers the matched-row count (`IDataEngine.update`);
+      // anything else leaves the write's outcome unknown, so it is not read
+      // as either one.
+      if (typeof answer !== 'number') {
+        throw new Error(
+          `the conditional update answered ${answer === null ? 'null' : `a value of type ${typeof answer}`} where a matched-row count was due, ` +
+            'so whether the progress landed is unknown',
+        );
+      }
+      return answer;
+    });
+    return matched > 0;
+  }
+
+  /**
    * Delete one `sys_upload_session` row.
    *
    * `context` carries the acting organization (commit f087c376f) — the `delete` half of
@@ -703,4 +802,36 @@ export function organizationOutOfWriteReach(
   const started = row?.organization_id;
   if (typeof started !== 'string' || started.length === 0) return null;
   return started === acting ? null : started;
+}
+
+/**
+ * [#22332] Write `progress` to the `sys_upload_session` row `id` only while
+ * its progress columns (`parts`, `uploaded_chunks`, `uploaded_size`) still
+ * hold what `seen` — the row as the caller read it — held. `true` when the
+ * write landed; `false` when another write moved the progress first or the
+ * row is gone, and the caller re-reads and merges again.
+ *
+ * The chunk door's progress write: it merges its chunk into the record it
+ * read, so a write that does not check the record is unchanged erases every
+ * chunk a concurrent PUT recorded in between. See the store's
+ * `updateSessionProgressIfUnchanged` for how each store makes the comparison
+ * and the write one step.
+ *
+ * ⛔ Not re-exported from the package entry, like
+ * {@link organizationOutOfWriteReach}: it is the chunk door's write, not API.
+ */
+export function updateSessionProgressIfUnchanged(
+  store: StorageMetadataStore,
+  id: string,
+  seen: UploadSessionRecord,
+  progress: UploadSessionProgress,
+  context?: StorageWriteContext,
+): Promise<boolean> {
+  const write = CONDITIONAL_PROGRESS_WRITES.get(store);
+  if (!write) {
+    throw new TypeError(
+      'updateSessionProgressIfUnchanged: the store was not constructed by StorageMetadataStore, so it has no conditional progress write',
+    );
+  }
+  return write(id, seen, progress, context);
 }

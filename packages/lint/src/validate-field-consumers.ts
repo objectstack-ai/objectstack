@@ -1290,15 +1290,21 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
     const verdict: FieldConsumerVerdict = carriers.length > 0 ? 'carrier-only' : 'inert';
     const sharedWith = [...(ledger.objectsByField.get(field) ?? [])].filter((o) => o !== object);
 
-    const verdictClause =
+    // [#22161] One verdict sentence and one fix — the finding is printed on
+    // every `os validate` / `os build` / `os dev` run. What counts as a
+    // consumer, what is only a carrier, the exemptions and the roots scanned
+    // are the rule's long-form explanation (`rule-explanations.ts`), which
+    // `os explain field-no-consumers` prints and the CLI's `rule:` line names.
+    // Only what is specific to THIS field stays here: the verdict, the carrier
+    // sites a removal must clean, and the other objects whose consumers of the
+    // same name do not count.
+    const verdictTag =
       verdict === 'carrier-only'
-        ? `Verdict: carrier-only — ${carriers.length} carrier site(s) name it without reading it, and a removal ` +
-          `must clean each: ${listPaths(carriers)}.`
-        : `Verdict: inert — no site of any kind names it.`;
+        ? `carrier-only: ${carriers.length} site(s) name it without reading it`
+        : 'inert';
     const sharedClause =
       sharedWith.length > 0
-        ? ` The same name is declared on ${sharedWith.map((o) => `"${o}"`).join(', ')}; verdicts are per ` +
-          `object, so a consumer there does not cover this declaration.`
+        ? `; a consumer of the same name on ${sharedWith.map((o) => `"${o}"`).join(', ')} does not count`
         : '';
 
     findings.push({
@@ -1306,25 +1312,12 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
       rule: FIELD_NO_CONSUMERS,
       where: `object "${object}" · field "${field}"`,
       path,
-      message:
-        `field "${field}" on object "${object}" is declared but nothing in this stack reads or displays ` +
-        `it: no view column, inline grid column, form section, page binding, flow node, dataset or cube ` +
-        `member, widget, formula, validation, hook or action names it, no declared field group places it on the ` +
-        `synthesized layout, and no ` +
-        `seed or import mapping matches on it. A translation label, a seed value, an import-mapping ` +
-        `target, a permission grant, a flow that only WRITES it, an \`inlineColumns\` entry on a ` +
-        `relationship field that does not set \`inlineEdit\` (no grid is drawn), or a dataset or cube ` +
-        `member path the analytics door refuses (a hop or column that does not resolve, or a join the ` +
-        `dataset's \`include\` does not declare) is a carrier, not a consumer. ` +
-        `${verdictClause}${sharedClause}`,
+      message: `declared, but nothing in this stack displays or reads it (${verdictTag}${sharedClause})`,
       hint:
-        `Give "${field}" a consumer — a view column, a form section, a page binding, a formula, a ` +
-        `validation, a flow node, a dataset dimension, or a \`group\` naming one of this object's ` +
-        `declared \`fieldGroups\` so the synthesized layout draws it — or remove the declaration` +
-        (carriers.length > 0 ? ` together with its ${carriers.length} carrier site(s) listed above` : '') +
-        `. Ignore this if the field is read only by an API client, by a hook or package this stack does not ` +
-        `carry, or by a Studio-authored view. Roots scanned: ${CONSUMER_ROOTS.join(', ')} (consumers) · ` +
-        `${CARRIER_ROOTS.join(', ')} (carriers); test fixtures are never scanned.`,
+        `add it to a view column or a form section, or remove the declaration` +
+        (carriers.length > 0
+          ? ` together with its ${carriers.length} carrier site(s): ${listPaths(carriers)}`
+          : ''),
       object,
       field,
       verdict,

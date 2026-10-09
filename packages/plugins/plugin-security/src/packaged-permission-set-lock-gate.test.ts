@@ -19,12 +19,18 @@
  * source — see `vitest.config.ts`) over a minimal fake engine, on the
  * host-config topology (`environmentId` undefined — the flagship showcase's
  * own assembly, the one whose `saveMetaItem` runs the authoring gate ahead of
- * every persistence path). The refusal cases assert the lock's ERROR CLASS
- * IDENTITY (`instanceof PackagedPermissionSetLockedError`), not only the
- * `code`/`status` envelope: `NOT_OVERRIDABLE`/403 is shared with the ADR-0005
- * tier gate by design, so the class is the only fingerprint that proves WHICH
- * layer answered. And every refusal case asserts the ROW COUNT — the defect
- * this card measured was a write that landed, so "threw" alone is half a pin.
+ * every persistence path). The refusal cases assert WHICH layer answered by
+ * ERROR CLASS IDENTITY, not only by the `code`/`status` envelope:
+ * `NOT_OVERRIDABLE`/403 is shared by the lock, the ADR-0005 tier gate and the
+ * protocol's package door, so the class is the only fingerprint. Since
+ * ADR-0131 D6 (#15206 S2) the protocol's own package door seals an item a
+ * managed package ships with the hatch OPEN as well as CLOSED, and it answers
+ * ahead of the seam on every topology. So every save of the package-declared
+ * name asserts the class is NOT the lock's (`PackagedPermissionSetLockedError`):
+ * the lock is still registered on the seam (`wired`), and the preservation
+ * cases below still pass through it. And every refusal case asserts the ROW
+ * COUNT — the defect this card measured was a write that landed, so "threw"
+ * alone is half a pin.
  *
  * ## What is deliberately NOT re-pinned here (Prime Directive #8)
  *
@@ -194,33 +200,38 @@ describe('#11843 — the lock answers at the metadata door', () => {
 
   // ── the inversion of the measured defect ─────────────────────────────────
 
-  it('hatch OPEN: a package-less save targeting a package-declared set is refused by the LOCK, and no row lands', async () => {
+  it('hatch OPEN: a package-less save targeting a package-declared set is refused by the protocol package door, and no row lands', async () => {
     const { engine, protocol, wired } = boot();
     expect(wired).toBe(true);
     openHatch();
 
     const err = await save(protocol, { type: 'permission', name: PACKAGED_SET, item: body(PACKAGED_SET) });
 
-    // Class identity is the layer fingerprint — the ADR-0005 tier gate shares
-    // this code and status, but only the lock constructs this class.
-    expect(err).toBeInstanceOf(PackagedPermissionSetLockedError);
+    // [ADR-0131 D6] The hatch no longer opens an item a managed package ships:
+    // the protocol's package door answers ahead of the seam, as with the hatch
+    // closed, so the lock is not reached. Class identity is the layer
+    // fingerprint — only the lock constructs this class.
+    expect(err).not.toBeInstanceOf(PackagedPermissionSetLockedError);
     expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-    expect((err as Error).message).toContain(PKG);
     // The defect was a write that LANDED — the throw alone is half the pin.
     expect(metaRowsOf(engine)).toEqual([]);
   }, 30_000);
 
-  it('hatch CLOSED: the identical save is refused by the same lock — the refusal does not depend on the hatch', async () => {
+  it('hatch CLOSED: the identical save is still refused, with the same envelope — the refusal does not depend on the hatch', async () => {
     const { engine, protocol } = boot();
 
     const err = await save(protocol, { type: 'permission', name: PACKAGED_SET, item: body(PACKAGED_SET) });
 
-    expect(err).toBeInstanceOf(PackagedPermissionSetLockedError);
+    // With the hatch closed the protocol's own package door answers first, on
+    // this topology as on an environment kernel (`saveMetaItem` asks it on
+    // every topology, ahead of the authoring-gate seam), so the lock is not
+    // reached. Same condition, same envelope: NOT_OVERRIDABLE / 403.
+    expect(err).not.toBeInstanceOf(PackagedPermissionSetLockedError);
     expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     expect(metaRowsOf(engine)).toEqual([]);
   }, 30_000);
 
-  it('hatch OPEN: a DRAFT save of the packaged name is refused too — the seam gates both minting paths', async () => {
+  it('hatch OPEN: a DRAFT save of the packaged name is refused by the protocol package door too, and no row lands', async () => {
     const { engine, protocol } = boot();
     openHatch();
 
@@ -228,7 +239,7 @@ describe('#11843 — the lock answers at the metadata door', () => {
       type: 'permission', name: PACKAGED_SET, item: body(PACKAGED_SET), mode: 'draft',
     });
 
-    expect(err).toBeInstanceOf(PackagedPermissionSetLockedError);
+    expect(err).not.toBeInstanceOf(PackagedPermissionSetLockedError);
     expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     expect(metaRowsOf(engine)).toEqual([]);
   }, 30_000);

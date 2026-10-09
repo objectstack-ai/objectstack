@@ -54,6 +54,16 @@ export {
 // re-exports both names unchanged.
 export { HTTP_SIGNATURE_HEADER, signHttpBody } from './http-signature.js';
 
+// [#12699 / ADR-0131 D7] The ONE fail-closed reader of the mounted `org-scoping`
+// service's per-deployment keys — shared by the engine's schema registry
+// (`platformGlobalObjects`: no organization column on a declared object) and
+// plugin-security (`suppressUnboundedOrgAdminGrant`).
+export {
+  readDeploymentOrgScopingEntitlement,
+  type DeploymentOrgScopingEntitlementReading,
+  type RefusedEntitlementKey,
+} from './deployment-org-scoping-entitlement.js';
+
 // `PluginConfigValidator` / `createPluginConfigValidator` were RETIRED here on
 // 2026-08-27 (#11982, ADR-0049 enforce-or-remove; recorded in ADR-0025 §3.7).
 // The kernel never received a plugin's config to validate — factories close

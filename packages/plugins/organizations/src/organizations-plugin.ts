@@ -161,6 +161,16 @@ export class OrganizationsPlugin implements Plugin {
   type = 'standard' as const;
   version = '1.0.0';
   dependencies = ['com.objectstack.engine.objectql'];
+  /**
+   * Services `init()` UNCONDITIONALLY registers (ADR-0116 D2). `org-scoping` is
+   * registered first thing in `init()`, so every plugin's `start()` reads the
+   * final answer — the engine's schema sync included, which plans each object's
+   * columns from this service's `platformGlobalObjects` declaration (ADR-0131
+   * D7: a declared object gets no organization column on this deployment).
+   * A subclass that moved the registration out of `init()` would break that
+   * order; the engine refuses such a boot at `kernel:ready`.
+   */
+  readonly providesServices = ['org-scoping'];
 
   /**
    * [ADR-0105 D12, as amended by ADR-0132] Which tenancy postures THIS runtime
