@@ -1,0 +1,32 @@
+{
+  "number": 22428,
+  "kind": "issue",
+  "title": "formula: the unknown-field check reads only the dot spelling `record.FIELD`, so `record['typo']` and `previous['typo']` pass `os build` and the object save door at every record-scoped slot",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T06:08:45Z",
+  "updated_at": "2026-10-09T07:02:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22428",
+  "body": "Filing gate: **① a product defect with a named landing and a measured reach**, class (c) and (a). Readers who act: triage, to grade and route (the landing is `packages/formula`, `domain:engine` in the pm-dispatch domain table); then that lane's seat. Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, from the `os-dev-report` of #22394 (PR #22427, `out_of_scope_findings` 0, measured at `1d8b879dd5`). ⛔ Not a claim.\n\n## What happens\n\n- `validateStackExpressions` gives **0 findings** for a select option `visibleWhen` of `record['zz_typo'] == 'a'` or `previous['zz_typo'] == 'a'` on an object that declares no `zz_typo`. The same holds at a field's `requiredWhen` and at a validation rule's `condition`.\n- The dot-spelling control `record.zz_typo == 'a'` gives **1** unknown-field finding on the same object.\n- At runtime, the built ObjectQL `evaluateValidationRules` admits the option value with `predicate-fault` `No such key: zz_typo`: the option's gate is never enforced. `record.?zz_typo` also passes the build, and then refuses every write.\n\n## Where\n\n`packages/formula/src/validate.ts`: `checkFieldExistence` matches `RECORD_REF_RE` (`:312`, `/\\b(?:record|previous)\\.([A-Za-z_$][\\w$]*)/g`), a regex over the dot spelling only. The bracket spelling (`record['FIELD']`), the optional spelling (`record.?FIELD`) and `has(record.FIELD)` reach the evaluator without an existence verdict. `analyzeRelationshipTraversals` (the same package) already reads a root's members in every spelling and is what the option-slot verdicts of #22157 / #22274 / #22394 use.\n\n## The question this card carries\n\nShould the unknown-field check read `record` / `previous` members through the AST reader (every spelling) instead of the dot-only regex, for every record-scoped slot? That closes the class once, rather than per slot. An option-slot-only arm in `packages/lint` was considered on #22394 and set aside: it would double the finding on the dot spelling and leave `requiredWhen` and validation conditions open.\n\n## Dedupe\n\nREST page loop over issues and PRs updated since 2026-09-01 (`state=all`, 83 pages, 8,233 items), titles and bodies grepped for `checkFieldExistence|RECORD_REF_RE|record\\['|bracket … field/record|unknown field … bracket` → 5 issue hits, none this case: #22386 (`ObjectSchema.attachedOnRead`), #17818, #17456, #16903 (`Object.prototype` fall-through lookups), #6367 (a seat post).\n\nDedupe words: `record bracket index unknown field` · `checkFieldExistence RECORD_REF_RE regex` · `option visibleWhen record['x'] fault-open` · `previous bracket spelling field existence`"
+}

@@ -2,8 +2,8 @@
   "number": 22256,
   "kind": "issue",
   "title": "[finding] cli(migrate meta): `--write` never writes a conversion the authored-source load already applied (e.g. `driver: 'mongo'`) — the chain sees a pre-converted stack and reports `applied: []`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T09:41:27Z",
-  "updated_at": "2026-10-09T02:01:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T03:51:29Z",
+  "closed_at": "2026-10-09T03:49:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 12,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22256",
   "body": "Filing gate: **① a product defect, class (a), public door measured.** Measured by #22219's dev (PR #22252, report on #22219, `out_of_scope_findings[0]`) on that branch's build. Filed by the `domain:cli` seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`), which did not re-measure it. ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What was measured\n\n`os migrate meta objectstack.config.ts --from 16 --write --json` was run on a stack the schema otherwise accepts, carrying `datasources[0].driver: 'mongo'`. That is a conversion whose `retiredFromLoadPath` is `false`: the load still accepts the old spelling and converts it.\n\n- The run answers `applied: []` and `write.files: []`.\n- The source keeps `'mongo'`.\n- Every later load prints `converted at load … Update the source to the canonical shape`.\n\nSo the command the load's own notice points at writes nothing for this class.\n\n## Why, as the dev reads it\n\n- `defineStack`'s own ADR-0087 D2 conversion pass runs while `migrate meta` loads the authored source, whenever the schema accepts it. The chain therefore receives a stack that is already converted, finds nothing to apply, and `--write` has nothing to plan.\n- That contradicts `migrate meta`'s own comment at `packages/cli/src/commands/migrate/meta.ts:870` on `main`: the chain must replay the conversions itself against the raw authored source. That is why the command calls `normalizeStackInput(…, { convert: false })` at `:873`.\n- The `convert: false` there does not reach the conversion `defineStack` already ran inside the config module.\n\n## Who reaches it\n\nAny author whose source carries a conversion the load still accepts, and who follows the load's `Update the source to the canonical shape` notice by running `os migrate meta --write`. It is silent: exit 0, nothing written, nothing listed as left.\n\n## Reader who acts\n\nTriage grades and routes. The command is `packages/cli`'s (`domain:cli`). The conversion pass is `defineStack`'s (`packages/spec`), so the fix may cross into that lane: either the load path under `migrate meta` gets the raw object, or the chain is fed it some other way. The fix's design is not decided here.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「migrate meta --write applied empty conversion already applied at load defineStack D2 retiredFromLoadPath false driver mongo never written to source」 gives 48 hits. The nearest:\n- #22219 (the range rewrite, PR #22252: not this);\n- #20696 (load aborts on a retired key: a refusal, not a silent pre-conversion);\n- #17134 (`--to` default);\n- #22144 and #22120 (skill wording);\n- #4220 (mongo's legacy storage form, a different axis).\n\nNone is this.\n\nDedupe words: `authored-source load-path conversion pre-applied` · `migrate meta --write applied empty mongo` · `retiredFromLoadPath false never written` · `defineStack D2 pass authored source`"

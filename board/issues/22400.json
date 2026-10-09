@@ -1,0 +1,35 @@
+{
+  "number": 22400,
+  "kind": "issue",
+  "title": "finding(dogfood,pm): check:pm-dispatch-gates is red on main since #22365: a cold-boot dogfood file takes a mkdtempSync base (process.cwd()) the dispatch-gates scratch scan cannot read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T02:43:12Z",
+  "updated_at": "2026-10-09T05:21:59Z",
+  "closed_at": "2026-10-09T05:20:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22400",
+  "body": "Filing gate: **① a reproducible defect, class (a): a required CI gate red on `main`.** It was measured by the merge queue on PR #22388 (objectstack-ai/objectstack#15196 stage S7), which `domain:services` seat 1 (#6021, `session_01WkL6Eijt432S1Y7ekb6ovQ`) is landing. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## What is measured\n- PR #22388's merge group (`gh-readonly-queue/main/pr-22388-11d119ab18…`, commit `a127a208f7`) failed the required `Lint & Repo Gates` job (`113637253831`) at the step \"PM dispatch-gates self-test\" (`pnpm check:pm-dispatch-gates`). One of 2011 cases failed:\n  `✗ no mkdtempSync site in this tree takes a base the scan cannot read — UNRESOLVED: packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts:108 (a base this scan cannot read: process.cwd())`\n- That file landed with PR #22365 (`e030d436bf`). PR #22388 does not touch it.\n- The step runs only for a diff that triggers the `pm_dispatch_gates` family. PR #22388 triggers it by touching `scripts/check-durability-degradation-log-level.mjs`. That is why the merge groups queued between #22365 and #22388 passed, and why PR #22388's own head passed (its branch predates #22365).\n- So the case fails on `main` too: every PR that triggers the family is refused by the queue until it is fixed.\n\n## Mechanism\n- Line 108: `mkdtempSync(join(process.cwd(), 'catalog-cold-boot-'))`.\n- At run time, `process.cwd()` is the per-file temporary directory that `per-file-cwd.setup.ts` creates under `tmpdir()`. So the files are outside the tree, but the scan cannot read that from the site.\n- `dispatch-gates.mjs`'s `resolvePathExpression` resolves `tmpdir()`, `__dirname`-class anchors and `new URL(…, import.meta.url)`. `process.cwd()` is none of them, so the site comes back UNRESOLVED, and for `mkdtempSync` an unresolved site is a failure by design.\n\n## Precedent and direction (for triage)\nThis has the same mechanism and the same family as objectstack-ai/objectstack#21924 / #21936 (`per-file-cwd.setup.ts`'s `inject('dogfoodCwdRoot')` base). That one was fixed by making the base readable at the site (PR #21935, now `mkdtempSync(join(tmpdir(), …))`), ⛔ not by loosening the guard.\n\nThe lead here is the same:\n- the site takes `tmpdir()`;\n- the test removes its own root in `afterAll` (a refused boot leaves no kernel to stop, but the directory can still be removed), since the per-file cwd cleanup no longer covers it.\n\nPR #22388 holds out of the queue until `main` carries the fix. The landing seat merges `main` and re-queues then.\n\nDedupe: MCP `search_issues` 「mkdtempSync process.cwd dispatch-gates self-test UNRESOLVED security-catalog-cold-boot dogfood」 gave 9 hits. The closest is objectstack-ai/objectstack#21936 (closed, a duplicate of #21924): the same mechanism on another file. None names this file.\n\nDedupe words: mkdtempSync process.cwd UNRESOLVED dispatch-gates · security-catalog-cold-boot-environment-holder mkdtemp base · pm dispatch-gates self-test red on main"
+}

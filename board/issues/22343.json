@@ -2,8 +2,8 @@
   "number": 22343,
   "kind": "issue",
   "title": "spec(automation): `try_catch`'s `retry` is the shared non-strict `RetryPolicySchema`, so `objectstack validate` passes an undeclared `retry` key that `registerFlow` refuses — the one builtin left on the descriptor walk after #21982",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:workflow",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T19:05:34Z",
-  "updated_at": "2026-10-09T02:33:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T03:29:31Z",
+  "closed_at": "2026-10-09T03:27:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22343",
   "body": "Filing gate: **① a product defect with a named landing site and a measured reach.** reach: public entry. On #21982's build round, `objectstack validate` and `objectstack compile` pass an undeclared `try_catch` key that `registerFlow` refuses (the P1 table in PR #22319's body; dev report `6063482248`). This is the follow-up the `domain:spec` seat 2 ruling `6060189970` committed to file when #21982 landed (PR #22319 → `2f70c2222`). Filed by `domain:spec` seat 2 (#18549), session `session_01DhTqaEHqPVSVnAkjG3jywn`. ⛔ Not a claim.\n\n## What holds on `main` (`2f70c2222`)\n\n- #21982 moved the undeclared-config-key judge for 10 builtins from `registerFlow`'s descriptor walk (`service-automation` `validateNodeConfigKeys`) into the spec key arm. The flow parse now refuses such a key at `objectstack validate`, `objectstack compile`, the save door and `registerFlow`, located and in the contract's words.\n- **`try_catch` was deliberately left on the walk** (`BUILTIN_KEYS_JUDGED_AT_REGISTRATION` in `packages/spec/src/automation/flow-node-config-refusals.ts`). Its contract's `retry` is the shared `RetryPolicySchema` (`packages/spec/src/shared/retry-policy.zod.ts`, used at `automation/control-flow.zod.ts` about `:330`). That is a plain `z.object`, so it **strips** an unknown key. The descriptor closes `retry` to `maxRetries`, `backoffMs`, `backoffMultiplier`, `maxRetryDelayMs` and `jitter`. Moving `try_catch` to the spec arm would have widened `registerFlow`.\n- **So today:** `try_catch.retry.bogusKey`, or a typo such as `try_catch.retry.maxRetry`, passes `objectstack validate` and `objectstack compile` silently and is refused only when the flow registers.\n\n## What this card does\n\n1. **Census first:** who parses `RetryPolicySchema` today, and does any of them write a key outside the declared five? Its importers on `main` are `automation/control-flow.zod.ts` (`try_catch.retry`), `automation/flow.zod.ts` (the converged retry contract, about `:1117` / `:1207`), `integration/connector-fetch-policy.ts`, `contracts/job-service.ts` (a mirror), and `service-job` `run-with-policy.ts`. Measure every authored corpus in this repo (examples, dogfood, docs) and the published seeds.\n2. **Then close the contract,** by the census: `RetryPolicySchema` strict everywhere if no writer relies on the strip, or a strict variant at `try_catch.retry` if one does. Either way an unknown `retry` key is refused at parse, located, with a did-you-mean.\n3. **Then one judge:** remove `try_catch` from `BUILTIN_KEYS_JUDGED_AT_REGISTRATION`, so the spec key arm judges it like the other 12. `validateNodeConfigKeys` stands aside for it and keeps plugin node types only.\n4. Pins at the spec function, at `objectstack validate` and at `registerFlow`; a D3 semantic entry; a changeset (`@objectstack/spec` `minor` + BREAKING, `Clause-②: no (narrowing)`, or `yes (narrowing)` if a strip is retired somewhere else too).\n\n## Reader who acts\n\nThe `domain:spec` seat, once triage grades it. The landing is `packages/spec` (and `service-automation` `engine.ts` for step 3), and it is the same family and lane as #21982.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped, closed included: 「RetryPolicySchema strict unknown key」 → 5 hits, and 「try_catch retry undeclared key」 → 1 hit (#7546, about step logging). None is this card. #21982 (closed) is the parent work.\n\nDedupe words: `RetryPolicySchema strict` · `try_catch retry undeclared key` · `BUILTIN_KEYS_JUDGED_AT_REGISTRATION try_catch`"

@@ -1,0 +1,36 @@
+{
+  "number": 22430,
+  "kind": "issue",
+  "title": "rest: the API-description endpoints (`RestServer.registerOpenApiEndpoints`) answer an anonymous caller with the whole object model; ADR-0056 D2 and ADR-0138 D2 require 401",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T06:29:34Z",
+  "updated_at": "2026-10-09T07:24:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22430",
+  "body": "Filing gate: **① a product defect with a named landing and a measured reach**, `reach:` an anonymous HTTP request, measured on a booted reference deployment (the G2 sweep, `os-dev-report` `6074331185` on #22146; route-level readings kept private). Readers who act: triage, to route (`packages/rest` is `domain:cli` in the pm-dispatch domain table); then the owning seat. Blocks: ADR-0138 acceptance (#22146 criterion 2).\n\nFiled by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, under the ruling [`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686) on #22146 (batch #300 item 1, letter A, maintainer 「同意」): \"The spec seat files three defect cards, public and at function level, for triage to route\". ⛔ Not a claim.\n\n## What happens\n\nThe API-description endpoints registered by `packages/rest/src/rest-server.ts#RestServer.registerOpenApiEndpoints` (defined at `:5095` on `origin/main` `27a8b33dec`) serve the generated API description document, and its HTML viewer, to an unauthenticated caller. The document names every object (one path family per object) and every declared app endpoint. Neither ADR-0138 D2's five door classes nor the control-plane allowlist names these endpoints; ADR-0056 D2 (Accepted) is default-deny for anonymous callers.\n\n## The ruling's direction, quoted verbatim (`6074960686`, item 2)\n\n> **The API-description endpoints** refuse an anonymous caller (401).\n\n## Acceptance\n\n- An anonymous request to each API-description endpoint (the document and the viewer) answers 401 `UNAUTHENTICATED`; a signed-in caller is served as today. A reject-path test asserts `code` and `status`.\n- The conformance matrix classifies the endpoints (today listed unclassified in `packages/qa/dogfood/test/authz-ledger-population.baseline.ts`).\n- Not measured (from the ruling's confidence gaps): whether any anonymous consumer exists today (a public API portal). The dev reports what it finds in the tree.\n\n## Dedupe\n\nREST page loop over issues and PRs updated since 2026-09-15 (`state=all`, 47 pages, 4,608 items), titles and bodies grepped for the i18n / OpenAPI / unscoped-download anonymous patterns → i18n 1 hit (#19621, closed, unrelated), OpenAPI 0, storage 8 (QA run records #21784, #21720, #21318 and closed findings #19775, #19652, #19514, #19300, #18831, none about anonymous download). None is this case."
+}

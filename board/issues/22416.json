@@ -1,0 +1,36 @@
+{
+  "number": 22416,
+  "kind": "pull_request",
+  "title": "test(dogfood): the cold-boot catalog file takes its database roots under tmpdir() and removes them itself",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T04:21:36Z",
+  "updated_at": "2026-10-09T05:20:32Z",
+  "closed_at": "2026-10-09T05:20:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-09T05:20:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22416",
+  "body": "Fixes #22400\nClause-②: no\n\n## What this changes\n\nOne test file, `packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts`, in the private `@objectstack/dogfood` package:\n\n- `databaseFile()` takes its `mkdtempSync` base from `join(tmpdir(), 'catalog-cold-boot-')`. Before, the base was `join(process.cwd(), 'catalog-cold-boot-')`.\n- The per-file cwd sweep no longer covers these directories, so the file records every root `databaseFile()` creates and removes them in a new `afterAll`. That hook runs after `afterEach` has stopped the last kernel. A refused boot leaves no kernel to stop, but its directory is still removed. This follows the harness's own `BootOptions.databaseFile` contract: \"Callers own the file's lifetime (create it under a temp dir, delete it after)\".\n- The header comment now describes the new placement and why the base is spelled `tmpdir()`. The old text (\"the files live in this test file's own working directory, which the dogfood run removes at its end\") is no longer true.\n\nWhy: `scripts/pm/dispatch-gates.mjs`'s scratch-directory scan must be able to read every `mkdtempSync` base. `process.cwd()` is not a base it reads, so the site came back UNRESOLVED and the `pm dispatch-gates self-test` case failed on `main`. This uses the same remedy as PR #21935, which fixed the same mechanism on `per-file-cwd.setup.ts`: the base is made readable at the site. Per triage, `dispatch-gates.mjs` is not touched (the guard is not loosened, and `process.cwd()` is not taught to the scan), and `per-file-cwd.setup.ts` is not touched.\n\n## Evidence\n\n### `pnpm check:pm-dispatch-gates` (run detached, followed with `tail --pid`)\n\n| tree | final line |\n|---|---|\n| `main` `83e7ae93a` (unfixed, in a separate worktree pinned there) | `✗ dispatch-gates self-test: 1 of 2011 case(s) failed.` (the failing case: `✗ no mkdtempSync site in this tree takes a base the scan cannot read — UNRESOLVED: packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts:108 (a base this scan cannot read: process.cwd())`) |\n| this branch `d8eee2191` | `✓ dispatch-gates self-test: 2011 cases pass.` |\n\nOn this branch the case itself reads `✓ no mkdtempSync site in this tree takes a base the scan cannot read` (log line 1533 in both runs). The wrapper's own battery reads `✓ check:pm-dispatch-gates --self-test: the exit contract holds in all three directions.` on both trees. The unfixed run ends `ELIFECYCLE Command failed with exit code 1.`, and the fixed run prints no such line. Battery time on this shared box: 781.7s before and 774.7s after.\n\nThe same scan, read directly through `exposedScratchDirs()` on both trees: `sites=1625 inTree=63 exposed=0`, with `unresolved(mkdtempSync)` going from 1 to 0 and `unresolved(all)` from 289 to 288. Site and in-tree counts are unchanged, so the one site moved to \"outside\", not out of the scan.\n\n### The dogfood file itself (through `scripts/pm/os-verify-lock.sh`, on `d8eee2191`)\n\n`pnpm --filter @objectstack/dogfood exec vitest run --maxWorkers=2 test/security-catalog-cold-boot-environment-holder.dogfood.test.ts`\n\n```\n Test Files  1 passed (1)\n      Tests  4 passed (4)\nos-verify-lock: VERDICT command-exit 0\n```\n\nA `catalog-cold-boot-*` listing under `tmpdir()` (`/tmp` here), taken before and after the run, with a poller sampling `/tmp` every 100 ms during it:\n\n```\nbefore (2026-10-09T04:02:10Z): count=0\nseen during the run:\n  2026-10-09T04:02:32.669Z /tmp/catalog-cold-boot-6eM9D3\n  2026-10-09T04:02:36.183Z /tmp/catalog-cold-boot-KGxFei\n  2026-10-09T04:02:37.484Z /tmp/catalog-cold-boot-eGpgIr\n  2026-10-09T04:02:39.290Z /tmp/catalog-cold-boot-PzYAkQ\n  (distinct seen=4, one per case)\nafter (2026-10-09T04:02:41Z): count=0\n```\n\nSo the four roots really are created under `tmpdir()` and none survives the file. Nothing else removes them: the dogfood globalSetup teardown only sweeps its own `os-dogfood-run-TAG-file-` prefix.\n\n`pnpm --filter @objectstack/dogfood typecheck` gives `VERDICT command-exit 0`. The package's `tsconfig.json` includes `test/**/*`, and `tsc --noEmit --listFiles` names this file once.\n\n### Derived gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 53 commands from this diff (1 path vs merge base `83e7ae93a`). Each was run on `d8eee2191` with its exit code recorded, then reconciled with `--ran`:\n\n```\nRun reconciliation — 53 derived, 53 run, 0 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 53 derived famil(ies) accounted for — 53 run, 0 NOT-MEASURED (a DERIVED zero — all 53 recorded an exit code and none of them is 3).\n```\n\nOn its first pass, `pnpm check:dual-build-cjs-loads` exited 3 (`PREREQUISITE NOT MET`): eight packages outside the dogfood closure had no `dist/`. They were built through the lock (44 of 44 turbo tasks, all cache hits), and the re-run exited 0: `✓ check:dual-build-cjs-loads — 107 published require entry point(s) across 66 package(s) load`. The record above carries that re-run's code. The other 52 exited 0 on the first pass.\n\nESLint, narrowed to the one changed file: `eslint --no-inline-config --format json` gives 1 file, 0 errors, 0 warnings, and the file is not ignored. The resolved config sets neither `parserOptions.project` nor `projectService`, so linting is not type-aware and this diff cannot change the verdict on any file it does not touch. The repo-wide `pnpm lint` is CI's.\n\n## Acceptance notes\n\n- No changeset: `@objectstack/dogfood` is `private: true` and the diff is one test file.\n- The full dogfood suite is not run locally. CI's `Dogfood Regression Gate` runs it. Locally this file ran on its own, as above.\n- The workflow-valued families the derivation names as NOT MEASURED (`check-shard-attestation --emit …`, `check-test-completeness \"$RUNNER_TEMP/…\"`, `check-issue-citations --census`) take a value that exists only in a CI run. They are CI's.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01WYYhVJ78u7PhwFViWo1EmQ)_\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 22418,
+  "kind": "issue",
+  "title": "Flaky on Test Core: `packages/plugins/plugin-sharing` `share-link-password-webcontainer.test.ts` › \"a password whose NFKC form differs from its input is one password on both paths\" times out at vitest's 5000 ms default",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T04:38:43Z",
+  "updated_at": "2026-10-09T07:12:36Z",
+  "closed_at": "2026-10-09T07:11:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22418",
+  "body": "Filing gate: **① a defect with a named locus and a reproduction** — a required context (`Test Core`) reddens on a test whose budget is the vitest default while its own work is CPU-bound. Reader: the seat triage routes `packages/plugins/plugin-sharing` to (`domain:services` in the pm-dispatch domain table) — a one-line fix in one test file. Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, which met it on PR #22215. ⛔ Not a claim.\n\n## The failure\n\n`packages/plugins/plugin-sharing/src/share-link-password-webcontainer.test.ts:72` — `[#21839] share-link password: node:crypto and pure-JS scrypt are interchangeable` › `a password whose NFKC form differs from its input is one password on both paths`:\n\n```text\nError: Test timed out in 5000ms.\n```\n\nIt is a timeout, not an assertion. The case runs four pure-JS and four native scrypt derivations (N=16384, r=16) under no per-test timeout.\n\n| run | head | event | this case | verdict |\n|:--|:--|:--|:--|:--|\n| CI `37882709848`, job `113665992253` (`Test Core (5/6)`) | `e75dceddd7` (`main`) | push | 5030 ms | **failure**: `Tests 1 failed \\| 1001 passed (1002)` |\n| CI `37883437221`, job `113668129564` (`Test Core (5/6)`) | `577ac3db0e` (PR #22215, a merge of `e75dceddd7`) | pull_request | 5039 ms | **failure**, the same 1 of 1002 |\n| CI `37880885462`, job `113660142313` | `e75dceddd7` | merge_group | — | success |\n| CI `37883152892`, job `113667560208` | `abd254508b` (`main`) | push | — | success |\n\nThe same commit is red and green across runs. The case's three siblings ran 1.1–4.1 s in the red runs. No commit in `b460153912..e75dceddd7` touches `packages/plugins/plugin-sharing`, `pnpm-lock.yaml`, the root `package.json` or the vitest config. The one plausible load change in that range is `040184752c` (#22368, the Test Core shard-timings refresh), which can re-pack which packages share shard 5/6 — unverified.\n\nThe `ELIFECYCLE Test failed` lines for `plugin-security`, `lint` and `rest` in the same job are turbo terminating in-flight siblings after this failure: each package's last line is a passing `✓`, and turbo's summary names one failed task, `@objectstack/plugin-sharing#test`.\n\n## Proposed fix (not applied)\n\nGive that one `it` an explicit timeout that fits its measured work — the case is deliberately CPU-bound, so the default budget is the defect, not the code under test. The precedents fixed the same shape this way or by removing the work: #21920 (a `rest` case at the 5000 ms default) and #22356 / #22346 (a `lint` case). ⛔ Do not skip or quarantine the case.\n\n## Dedupe\n\nREST page loop over issues and PRs updated since 2026-10-01 (`state=all`, 17 pages, 1,607 items), titles and bodies grepped for `share-link-password|webcontainer|NFKC|scrypt|timed out in 5000` → 3 issue hits, all closed and about other files: #22356 (`lint` `build-access-matrix.test.ts`), #21920 (`rest` `meta-state-route-engine-outage.test.ts`), #21428 (`rest` `import-template-route.test.ts`). None names this file."
+}

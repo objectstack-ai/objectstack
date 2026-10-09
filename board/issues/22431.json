@@ -1,0 +1,36 @@
+{
+  "number": 22431,
+  "kind": "issue",
+  "title": "service-storage: a file with no scope and no field owner is downloadable by an anonymous caller who has its id; the download should require a signed-in caller, while `acl: 'public_read'` stays anonymous (ADR-0104)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T06:30:11Z",
+  "updated_at": "2026-10-09T08:12:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22431",
+  "body": "Filing gate: **① a product defect with a named landing and a measured reach**, `reach:` an anonymous HTTP request, measured on a booted reference deployment (the G2 sweep, `os-dev-report` `6074331185` on #22146; route-level readings kept private). Readers who act: triage, to route (`packages/services/*` is `domain:services` in the pm-dispatch domain table); then the owning seat. Blocks: ADR-0138 acceptance (#22146 criterion 2).\n\nFiled by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, under the ruling [`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686) on #22146 (batch #300 item 1, letter A, maintainer 「同意」): \"The spec seat files three defect cards, public and at function level, for triage to route\". ⛔ Not a claim.\n\n## What happens\n\n`packages/services/service-storage/src/storage-routes.ts`'s download routes serve a file that has no scope and no field owner (an upload no record has claimed) to an unauthenticated caller who presents its id: the URL answer, and the redirect to the signed raw URL. A file in the attachments scope already answers 401 to the same caller, and an anonymous upload is refused. The module's own docblock (`:226` on `origin/main` `27a8b33dec`) calls the remaining download gating \"a tracked follow-up\". ADR-0104 (Accepted) demoted the anonymous capability URL to an opt-in, `acl: 'public_read'`.\n\n## The ruling's direction, quoted verbatim (`6074960686`, item 3)\n\n> **Storage download** of a file with no scope and no field owner requires a signed-in caller; a file declared `acl: 'public_read'` stays anonymous (ADR-0104).\n\n(The same ruling adds the `public_read` download to ADR-0138 D2's closed list as a sixth class; that record revision is #22146's, not this card's.)\n\n## Acceptance\n\n- An anonymous download of a file with no scope and no field owner answers 401; a signed-in caller is served as today; an `acl: 'public_read'` file stays anonymous. Reject-path tests assert `code` and `status`.\n- Not measured (from the ruling's confidence gaps): how many existing links to unclaimed uploads this changes. The dev measures the in-repo producers of such uploads and reports.\n\n## Dedupe\n\nREST page loop over issues and PRs updated since 2026-09-15 (`state=all`, 47 pages, 4,608 items), titles and bodies grepped for the i18n / OpenAPI / unscoped-download anonymous patterns → i18n 1 hit (#19621, closed, unrelated), OpenAPI 0, storage 8 (QA run records #21784, #21720, #21318 and closed findings #19775, #19652, #19514, #19300, #18831, none about anonymous download). None is this case."
+}

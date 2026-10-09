@@ -2,8 +2,8 @@
   "number": 22335,
   "kind": "issue",
   "title": "[decision] a kernel with gracefulShutdown: false still calls process.exit(1) when its teardown times out, ending every other kernel in a multi-kernel host; the docs say such a kernel stays out of process management",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T18:29:55Z",
-  "updated_at": "2026-10-09T02:13:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T03:13:43Z",
+  "closed_at": "2026-10-09T03:11:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22335",
   "body": "Ruled: 6070759640 · letter B · 2026-10-08T23:04Z\n\nFiling gate: **② a decision only the maintainer can make.** It is the family item of #22286 (the `repo:cloud` seat's card), which the card asked to \"fold in, or record why not\". PR #22334 recorded why not: folding it reverses a landed pin and gives an existing option a second meaning. Filed by `domain:engine` seat 1 (seat post #6367) · `session_01EUBvqtauTDmHi2ZgY759p2`, from the dev report on #22286 (6066371231). ⛔ Not graded or routed here; ⛔ not a claim.\n\n**Who acts on it:** the maintainer answers one letter; triage grades it; the `domain:engine` seat claims and dispatches the answer. PR #22334 (#22286) does not wait for it.\n\n### 维护者速读\n- **一个进程可以同时跑多个 ObjectStack 内核。** cloud 的托管运行时就是这样，每个环境一个内核，每个都设了 `gracefulShutdown: false`，意思是\"进程归宿主管，内核别插手\"。文档也这么写：设成 `false` 的内核\"不碰进程管理\"。\n- **但有一条路例外。** 宿主关掉其中一个内核时，如果它的清理卡住超过超时（默认 60 秒），这个内核会直接 `process.exit(1)`，整个进程退出，同一进程里其他正常运行的环境一起被带走。dev 已在进程内实测（退出函数打桩）：两个内核，停一个，另一个还在运行时进程就退出了。\n- **推荐 B：** 设了 `false` 的内核在清理超时后只记错误、把自己标成已停止，把控制权交还宿主，由宿主决定退不退出。回一个字母：A / B / C / D。\n\n### 一句话问题\n宿主明确说过\"进程归我管\"的内核，清理卡住时该不该自己把整个进程关掉？\n\n### Background (measured and read)\n- **The code.** `packages/core/src/kernel.ts`: in `shutdown()`, a GENUINE teardown timeout calls `process.exit(1)`. `gracefulShutdown` is not consulted. The reason the pin states is that \"`performShutdown()` is still running and has stopped making progress, so the process would hang holding whatever it failed to release\".\n- **The pin.** `packages/core/src/kernel.test.ts`, \"still logs the timeout and still forces exit(1) when shutdown genuinely times out (#5274)\". Its fixture kernel is `gracefulShutdown: false`. #5274 itself was about telling a throwing handler apart from a timeout; the exit was kept as-is.\n- **The docs.** `content/docs/protocol/kernel/lifecycle.mdx`: \"The host process is responsible for signal handling. ObjectStack ships the listeners only when `gracefulShutdown: true`; otherwise it stays out of the process-management business so adapters (Express, Fastify, Hono, Vercel, …) can install their own.\"\n- **Measured reach** (PR #22334's dev, probe R7, in process with a stubbed exit). A host holds two `gracefulShutdown: false` kernels and stops one of them. That kernel's teardown hangs past `shutdownTimeout`, and `exit(1)` fires while the other kernel is still `running`.\n  - **Producer:** objectstack-ai/cloud's hosted runtime, which builds one kernel per environment and set `gracefulShutdown: false` on them in cloud PR #2715.\n- **Related, same question:** two LIVE `gracefulShutdown: true` kernels in one process each drain and exit on one signal (probe R8). This is unchanged by #22334.\n\n### Governing text\n- The docs sentence above is the only written statement of what `gracefulShutdown: false` means for process ownership. The code and the pin say otherwise for the timeout path.\n- Prior rulings: `check-prior-rulings --terms gracefulShutdown,shutdownTimeout,process.exit,safeExit` → 0 hits. No ADR decides it.\n- No protocol change and no `packages/spec` edit under A, B or D. C widens `ObjectKernelConfig`.\n\n### 选项 × 真实代价\n| 选项 | 做什么 | 客户感受到的后果 |\n|:--|:--|:--|\n| A | 保持现状：任何内核清理超时都退出进程；把文档那句改成\"超时仍会退出进程\" | 不改代码。cloud 这类多环境宿主：一个环境清理卡住 60 秒，整个宿主连同其他所有环境一起退出 |\n| B | `gracefulShutdown: false` 一并表示\"不拥有进程\"：超时后记错误、标记已停止、返回，不退出；`true`（默认，内核自己装了信号监听）照旧退出 | 多环境宿主里，一个环境卡住只影响它自己，宿主自己决定后续。依赖\"`false` 也会在超时时退出\"的宿主得自己退出（它本来就自己管信号）。#5274 的那个 pin 改用 `true` 的内核做夹具，测的东西不变 |\n| C | 新增一个显式选项，把\"装信号监听\"和\"可以退出进程\"拆开 | 最明确，但多一个公开开关，可能被设错；目前没有任何实测用户需要把两者分开 |\n| D | 只有内核自己的信号处理路径在超时时退出；宿主调用的 `shutdown()` 改为把超时以类型化错误抛回给调用方 | 最精确，但改掉 `shutdown()`\"从不抛错\"的既有行为，每个宿主都受影响；CLI 的迁移后退出路径也要跟着改 |\n\n**业务含义直译:**\n- A：合租房里一个房客关门卡住了，房东直接把整栋楼断电。\n- B：签了\"物业归房东管\"的房客，卡住就报修、交钥匙，断不断电由房东定。\n- C：合同里再加一条\"能不能拉总闸\"的单独条款。\n- D：只有自己拉过警报的人能拉总闸，别人叫他关门时卡住了就把问题交回给叫他的人。\n\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 项目长远合理性：B 让一个既有选项只有一种含义，而且正是文档写的那种；A 让文档迁就代码，保留\"非进程所有者也能结束进程\"的特例；C 新增开关、扩大公开面；D 改动 `shutdown()` 对所有宿主的既有契约。\n- ② 实际业务拉动：有实测生产者。cloud 的托管运行时每个环境一个 `false` 内核，任一环境清理超时就会带走整个宿主。仓库内其余 `false` 用户是测试夹具。\n- ③ 防 AI 犯错：B 下文档、JSDoc、行为三者一致，AI 照文档写宿主不会被意外退出坑；A 也一致，但一致在\"会退出\"上，AI 照 Express/Fastify 的习惯以为宿主自己管退出时会踩坑；C 多一个可设错的开关。\n- ④ 创业阶段不扩散：A、B、D 不加键（B 改一个 pin 的夹具并新增一个\"不退出\"的 pin）；C 加一个公开选项（`Clause-②: yes`，契约复审档）。\n\nPrior rulings read: gracefulShutdown, shutdownTimeout, process.exit, safeExit → 0 hits; ADR none; thread: #22286 (dev report 6066371231), #5274 (closed, the timeout pin's origin).\n\n### 推荐\n**B：`gracefulShutdown: false` 的内核超时不退出进程。**\n- **终态句：**两年后，ObjectStack 内核作为可嵌入的运行时，退不退出进程只取决于它是不是进程的所有者。主流 Node 框架都这样建模：Fastify 的 `close()`、Node `http.Server.close()`、NestJS 的 `app.close()` 都不调用 `process.exit`，退出是应用自己的事；NestJS 只在 `enableShutdownHooks()` 时装信号监听。\n- **自检：**只看①选 B；②③④ 是否翻转：否。\n- **回退：**A。不改行为，只把文档改成与代码一致；多环境宿主须自己防\"一个环境卡死带走全部\"。\n- **置信缺口：**\n  - 仓库外还有哪些宿主设了 `false` 却依赖超时退出，没法测。\n  - 多环境宿主在清理卡住后自行处理时，资源能不能释放，也没测。卡住的清理在后台继续跑，代码里已注明这一点。\n\n### 裁后执行\n- **选 B：**分诊定级后，本席认领派发。\n  - 落点 `packages/core/src/kernel.ts` 的超时分支：`false` 时记错误、标记 `stopped`、返回。\n  - #5274 的 pin 改用 `true` 夹具，测的东西不变；新增一个\"`false` 超时不退出\"的 pin。\n  - JSDoc 写明 `gracefulShutdown` 的两层含义。\n  - changeset 写明宿主须自己退出的形态。\n  - 与 #22272 同文件，串行。\n- **选 A：**本席派一张小卡改 `lifecycle.mdx` 那句文档和 `gracefulShutdown` 的 JSDoc，写明超时仍退出。\n- **选 C：**本卡转 `domain:spec` 车道（扩大公开面）。\n- **选 D：**本席先测所有调用 `shutdown()` 的宿主（CLI、runtime、cloud），再派发；changeset 写明契约变化。\n\n**Dedupe:** MCP `search_issues`, repo-scoped, open and closed: 「ObjectKernel shutdown timeout process.exit gracefulShutdown false process owner multi-kernel host」 → 4 results. #22286 (this card's source); #22272 (open, a bootstrap option, a different question); #5274 (closed, the timeout pin's origin, which discriminated a throw from a timeout and kept the exit); #13027 (closed, `os migrate` never exiting, the opposite symptom). None decides this.\n\nDedupe words: `gracefulShutdown process owner timeout exit` · `multi-kernel host process.exit` · `kernel teardown timeout ends host`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

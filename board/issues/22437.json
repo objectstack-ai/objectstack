@@ -1,0 +1,34 @@
+{
+  "number": 22437,
+  "kind": "issue",
+  "title": "rest(public forms): `POST /forms/:slug/submit` answers the anonymous submitter with the whole stored record, so any field a hook derives from existing data (a duplicate match, an owner) reaches the internet",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T07:47:10Z",
+  "updated_at": "2026-10-09T07:56:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22437",
+  "body": "Filing gate: **① product defect with reach measured. Class (a), security: disclosure to an anonymous caller.** reach: the public door `POST /api/v1/forms/:slug/submit`, measured once with a wrong result on `@objectstack/*` 17.7.0 by the dev of objectstack-ai/hotcrm#2014 (report `6063106768`), session `session_012zh91QzFgePbkmuHnugLN3`. The leg that elevates the app's web-intake hooks was a measurement prototype; it is not shipped.\n\n**Who acts on it:** the objectstack triage seat routes it; the fix lands in `packages/rest` (the submit handler) or in the `publicFormGrant` read-back of `plugin-security`. Filed by the `repo:hotcrm` seat on the maintainer's ruling hotcrm-R74b item 4, letter B: 「平台先修，应用等待」. ⛔ Not a claim. hotcrm WAITs for it (hotcrm AGENTS.md §2); its web-intake fix is parked on this card.\n\n## What happens\n\nThe submit handler (`packages/rest/src/rest-server.ts`, `:11211`–`:11224` on `main` `05c7c3fa3b`) builds the anonymous context `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }`, calls `createData`, and answers `res.status(201).json(result)`. `createData` returns `{ record: result }`, the record as stored after the insert pipeline (`packages/metadata-protocol/src/protocol.ts`, from `:13609`). The grant admits \"create + the immediate read-back\" for the target object (the comment at `:11204`–`:11206`).\n\nThe input side is filtered: only the form's declared section fields pass, and the system anchors are stripped (#3022, #6920). The output side is not: the read-back serves every stored field, including fields the caller never sent and fields that `beforeInsert` / `afterInsert` hooks computed. #21062 (PR #21101) put the masking rule's answer on this read-back; a field with no masking rule is served as stored.\n\nThat is harmless only while no hook on a form-target object reads existing data. The platform's own guidance points the other way: an app routes or de-duplicates web intake in a hook, and that hook needs elevation (`runAs: 'system'`) to read the pool or the existing records. Then the anonymous 201 carries what the elevated read found.\n\n## Measured (hotcrm, 17.7.0)\n\nWith hotcrm's three web-intake hooks elevated (`lead_auto_assign`, `case_auto_assign`, `lead_duplicate_check`), an anonymous web-to-lead submit through the form door's context returned `201` with `{ record }` carrying:\n- `duplicate_status: 'suspected'` and `duplicate_of_type: 'crm_contact'`: the submitted email matched an existing contact;\n- that existing contact's id;\n- `owner_id`: a staff user's id, from the round-robin.\n\nhotcrm's `guest_portal` set declares that a guest never reads existing CRM data (`allowRead: false`). Through this echo, anyone on the internet can test whether an email address is in the CRM and collect staff user ids. hotcrm therefore does NOT elevate these hooks: web leads and cases stay unrouted and un-deduplicated until this door is fixed.\n\n**Not measured:** other apps; whether any shipped hook on a form-target object already derives a field from existing data without elevation.\n\n## Acceptance\n\n- The submit answer carries nothing the anonymous caller's grant may not read. For example: only the new record's id, or the record projected to the form's declared fields plus the id. Which shape is triage's call.\n- Fields written by hooks from existing data never reach the anonymous caller, elevated hooks included.\n- A pin: an elevated `beforeInsert` hook on a form-target object stamps a field from an existing record, and the 201 answer does not carry it.\n- The public form still answers `201` and the console's success screen still works.\n\n## Related\n\n- #21062 (closed): masking on this same read-back (position 1, PR #21101). This card is the unmasked remainder.\n- #22146 (open, `target:v18`): the complete guest model ADR. Its disclosure item names metadata (ADR-0106 D7), not this write echo; triage may fold this card into it.\n- #22310 / #22407: the same app pattern (rule-9 elevation) meeting a door that was not built for it.\n\n## Duplicate check\n\n`gh search` is refused in this container (GraphQL and REST search answer 403). So all objectstack issues were listed into a local index (`/issues?state=all` through #22292, plus every issue updated since 2026-10-08) and matched case-insensitively:\n- `submit read-back`: 11 hits; the only defect card is #21062 (closed, masking only).\n- `publicFormGrant`: 7, all closed; #6920 is the input side, #21062 the masking side.\n- `forms/:slug/submit`: 7, all closed; none is the read-back.\n- `anonymous form hook`: 24; #22146 (guest model, metadata disclosure) and #22310 are related, not this.\n- `public form echo`: 21, QA runs and CI cards only.\n\nNone is this defect.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

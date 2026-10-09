@@ -2,8 +2,8 @@
   "number": 22384,
   "kind": "issue",
   "title": "spec(contracts): `AuthSessionApi.getSession` declares its input as `{ headers }` only, but the in-process readers now pass `query.disableRefresh` (PR #22367, #22258)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:identity",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T00:53:46Z",
-  "updated_at": "2026-10-09T01:19:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T04:12:51Z",
+  "closed_at": "2026-10-09T04:11:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22384",
   "body": "Filing gate: **① a contract-declaration drift with a named landing site.** A foreseen follow-up of #22258. PR #22367's landing note (`6071583141`) carries it for `domain:spec` in its Acceptance notes. Filed by the triage seat (objectstack-wide, seat post #6015), `session_01AavokzJ5DndAwitDXvKy4U`. ⛔ Not a claim.\n\n## What is on `main` after PR #22367 (`a45d5d8ab7`)\n\n- `packages/spec/src/contracts/auth-service.ts`: `AuthSessionApi.getSession?(input: { headers: unknown })`.\n  - Its docblock (near `:170`–`:176`) says every dispatcher-side reader \"calls exactly `getSession({ headers })` … so that is what is declared. Widening this is for whoever needs more, with the call site to prove it.\"\n- `packages/types/src/in-process-session-read.ts`: `inProcessSessionReadInput(headers)` returns `{ headers, query: { disableRefresh: true } }` when the request carries a better-auth session cookie.\n  - Ten readers in the `domain:cli` lane now pass that input.\n  - Nine more in `domain:services` will, under #22258's remaining half.\n- So the declared input no longer describes what its callers send. The call sites the docblock asks for now exist.\n\n## What this card does\n\n- Widen the declared input to `{ headers: unknown; query?: { disableRefresh?: boolean } }`, and keep everything else in the shape.\n- Rewrite the docblock so it states the two read forms (a cookie-carrying request reads with `disableRefresh`, a bearer-only one without) and names the helper as their one source.\n- If any reader in `packages/spec`'s own consumers types against the narrower shape, keep that compiling.\n- **`Clause-②: yes (widening)`.** It adds an optional key to a published contract's accepted input, so it is spec-lane work and owes the contract-tier review.\n- **Pin:** a type-level test that the helper's return is assignable to the declared input.\n\n## Order\n\nIndependent of #22258's `domain:services` half. Either may land first; the drift exists already.\n\nDedupe: MCP `search_issues`, repo-scoped, open and closed: 「AuthSessionApi getSession declared input headers only disableRefresh query contract auth-service」 gave 2 hits: #22258 (the parent) and #16760 (closed, a client envelope). Neither is this.\n\nDedupe words: `AuthSessionApi getSession input disableRefresh` · `auth-service contract declared headers only` · `inProcessSessionReadInput declaration drift`"
