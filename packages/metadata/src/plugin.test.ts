@@ -341,6 +341,31 @@ describe('MetadataPlugin — system object provisioning (ADR-0067 commit log)', 
         expect(names).toContain('sys_metadata_commit');
     });
 
+    it('registers exactly the four metadata-storage objects — sys_view_definition is retired (ADR-0131 D13)', async () => {
+        const plugin = new MetadataPlugin({
+            watch: false,
+            config: { bootstrap: 'lazy' },
+            environmentId: 'proj_test',
+        });
+        const { ctx, registered } = fakeCtxWithManifest();
+
+        await plugin.init(ctx);
+
+        const names = registered.flatMap((m) => m.objects ?? []).map((o: any) => o.name);
+        // The absence, by name: no framework writer or reader of its rows ever
+        // existed, so a registration here would only provision an empty table
+        // the generic data door then serves.
+        expect(names).not.toContain('sys_view_definition');
+        // …and the whole set, so a rename or a second retirement is a decision
+        // this pin is told about rather than one it waves through.
+        expect([...names].sort()).toEqual([
+            'sys_metadata',
+            'sys_metadata_audit',
+            'sys_metadata_commit',
+            'sys_metadata_history',
+        ]);
+    });
+
     it('registers NOTHING when registerSystemObjects=false (control-plane kernel)', async () => {
         const plugin = new MetadataPlugin({
             watch: false,
