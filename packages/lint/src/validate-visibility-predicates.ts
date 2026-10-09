@@ -1144,8 +1144,8 @@ function checkElement(
       // both surfaces' outcome. Why a view/page fails open and an action fails
       // closed is this id's `os explain` entry.
       message:
-        `visibility predicate calls unregistered function \`${unknownCall.name}\` ` +
-        `(${unknownCall.detail}), so a view/page element always renders and an action hides for everyone`,
+        `visibility predicate calls unregistered \`${unknownCall.name}\` (${unknownCall.detail}), ` +
+        `so view/page elements always render and actions hide for everyone`,
       hint:
         `\`${unknownCall.name}\` is not a function this platform registers — a NAME fault, not a ` +
         `dialect mistake, so re-spelling the predicate will not fix it. The callable names ` +

@@ -196,7 +196,7 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     // The TRUE consequence: the axis `field` is stripped, not queried and missed.
     // [#22161] That it is a silent no-op is `os explain chart-field-unknown`'s
     // (pinned at the foot of this file), not the one-line verdict's.
-    expect(findings[0].message).toContain('ignores an authored axis `field`');
+    expect(findings[0].message).toContain('an authored axis `field` re-points nothing');
     expect(findings[0].message).not.toContain('will not contain');
     expect(findings[0].hint).toContain('Did you mean "sum_amount"?');
     expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_FIELD_UNKNOWN}']`);

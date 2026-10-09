@@ -898,10 +898,14 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                 push({
                   severity: 'error',
                   rule: DASHBOARD_FILTER_FIELD_UNKNOWN,
-                  // [#22161] One verdict sentence. The #2501 fan-out (the filter
-                  // is ANDed into EVERY bound widget's query) is this id's
-                  // `os explain` entry, never a tracker id in the string.
-                  message: `${provenance}${account.message}`,
+                  // [#22161] One verdict sentence. The account names the field
+                  // path, so the provenance drops it; the #2501 fan-out (the
+                  // filter is ANDed into EVERY bound widget's query) is this
+                  // id's `os explain` entry, never a tracker id in the string.
+                  message:
+                    (eff.explicit
+                      ? `binds dashboard filter \`${def.name}\` (via filterBindings), but `
+                      : `inherits dashboard filter \`${def.name}\`, but `) + account.message,
                   hint:
                     `Point filterBindings: { ${def.name}: '<field>' } at a field that resolves on ` +
                     `\`${datasetObject}\` — or at a \`relationship[.relationship].field\` path whose ` +
@@ -1161,9 +1165,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
             message:
-              `chartConfig.xAxis.field "${xAxis.field}" is not a dimension of dataset "${dsName}", ` +
-              `and the renderer ignores an authored axis \`field\`: the x-axis stays bound to ` +
-              `this widget's first dimension (${list(dims)})`,
+              `chartConfig.xAxis.field "${xAxis.field}" is not a dimension of dataset "${dsName}" ` +
+              `and is ignored anyway: the x-axis stays bound to this widget's first dimension (${list(dims)})`,
             hint:
               `Delete the key: \`chartConfig.xAxis\` is refused on a dataset-bound widget ` +
               `(ADR-0021) and the x-axis binding comes from this widget's \`dimensions\`. ` +
@@ -1189,7 +1192,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             : `chartConfig.${label} "${field}" is not a measure of dataset "${dsName}"`;
           const consequence = kind === 'series'
             ? `so it pairs with no series and its presentation lands on nothing`
-            : `and the renderer ignores an authored axis \`field\`, so it re-points nothing`;
+            : `and an authored axis \`field\` re-points nothing`;
           const fixHint = declaredButUnselected
             ? `Add "${field}" to the widget's values, or bind the chart to a selected measure.`
             : `Post-cutover data is keyed by the dataset's measure NAME, not the ` +
