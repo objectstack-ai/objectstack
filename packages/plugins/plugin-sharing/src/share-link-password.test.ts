@@ -471,6 +471,13 @@ describe('[#21839] how the password travels in', () => {
     expect(loggedText(logger)).not.toContain(wrong);
   });
 
+  // [#22418] An explicit budget, sized to the measured work: one mint and eight
+  // redemptions are nine native scrypt derivations at the production
+  // parameters, the most of any case in this file. Its slowest `Test Core`
+  // reading was 3805 ms, over half of vitest's 5000 ms default, so it gets 3x
+  // that, rounded up to the next second; the rule and why 3x is in
+  // share-link-password-webcontainer.test.ts. Every other case here read at
+  // most 2163 ms and keeps the default.
   it('no log line carries the presented password, on any outcome', async () => {
     const { http, link, logger } = await protectedConversation();
     for (const pw of [PASSWORD, 'wrong one 21839']) {
@@ -481,7 +488,7 @@ describe('[#21839] how the password travels in', () => {
     }
     expect(loggedText(logger)).not.toContain(PASSWORD);
     expect(loggedText(logger)).not.toContain('wrong one 21839');
-  });
+  }, 12_000);
 });
 
 describe('[#22049] the password header declares its encoding', () => {
