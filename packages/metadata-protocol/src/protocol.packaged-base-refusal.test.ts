@@ -15,11 +15,13 @@
  *     deliberately `null` — a name no package ships, a Regime O overlay type,
  *     and the #6960 delete carve-out. [ADR-0131 D6] The operator hatch is no
  *     longer one of them: managed content is sealed, so the verdict on an item
- *     a managed package ships is the same with `OS_METADATA_WRITABLE` (either
- *     spelling) set or not.
+ *     a managed package ships is the same with `OS_METADATA_WRITABLE` set or
+ *     not. [#22411] The legacy spelling `OBJECTSTACK_METADATA_WRITABLE`, which
+ *     11.0 removed, is not read at all: the hatch is shut under it.
  *
- * The registry double serves only `getArtifactItem`, which is all the verdict
- * reads; what it returns is what the real `SchemaRegistry` returns for an
+ * The registry double serves `getArtifactItem`, which is all the verdict
+ * reads, and `getRegisteredTypes`, which the type listing reads to show the
+ * hatch shut under the removed spelling; what `getArtifactItem` returns is what the real `SchemaRegistry` returns for an
  * artifact a code package registered (`_packageId` stamped, package
  * provenance). `@objectstack/objectql` cannot be imported here: it depends on
  * this package.
@@ -46,7 +48,10 @@ const ARTIFACTS = new Map<string, Map<string, unknown>>([
 ]);
 
 function protocolOn(environmentId: string | undefined): ObjectStackProtocolImplementation {
-    const registry = { getArtifactItem: (type: string, name: string) => ARTIFACTS.get(type)?.get(name) };
+    const registry = {
+        getArtifactItem: (type: string, name: string) => ARTIFACTS.get(type)?.get(name),
+        getRegisteredTypes: () => Array.from(ARTIFACTS.keys()),
+    };
     return new ObjectStackProtocolImplementation({ registry } as never, () => new Map(), environmentId);
 }
 
@@ -120,37 +125,78 @@ describe('packagedBaseRefusal — the /meta door\'s locked-base verdict, handed 
             .toThrow('registry unreadable');
     });
 
-    // [ADR-0131 D6] Managed content is sealed: the hatch, under either spelling
-    // its reader honours, opens neither verb on an item a managed package
-    // ships — the verdict is the one it gives with the hatch shut, sentence
-    // included. Every door that asks this verdict (the `/automation` doors, the
-    // read envelope) inherits that.
-    for (const variable of ['OS_METADATA_WRITABLE', 'OBJECTSTACK_METADATA_WRITABLE'] as const) {
-        for (const environmentId of [undefined, 'env_1']) {
-            it(`${variable}=flow,page does not open a managed item (${environmentId ? 'environment' : 'host-config'} kernel)`, () => {
-                const shut = protocolOn(environmentId);
-                const sealed = {
-                    save: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }) as any,
-                    delete: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }) as any,
-                    page: shut.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' }) as any,
-                };
-                process.env[variable] = 'flow,page';
-                ObjectStackProtocolImplementation.resetEnvWritableCache();
-                const p = protocolOn(environmentId);
-                const open = {
-                    save: p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }) as any,
-                    delete: p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }) as any,
-                    page: p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' }) as any,
-                };
-                for (const verb of ['save', 'delete', 'page'] as const) {
-                    expect(shape(open[verb]), verb).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-                    expect(open[verb].message, verb).toBe(sealed[verb].message);
-                }
-                // The #6960 carve-out and the regime-O overlay keep their `null`.
-                expect(p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'delete' })).toBeNull();
-                expect(p.packagedBaseRefusal({ type: 'view', name: 'pkg_view', operation: 'save' })).toBeNull();
-            });
-        }
+    // [ADR-0131 D6] Managed content is sealed: the hatch opens neither verb on
+    // an item a managed package ships — the verdict is the one it gives with
+    // the hatch shut, sentence included. Every door that asks this verdict (the
+    // `/automation` doors, the read envelope) inherits that.
+    for (const environmentId of [undefined, 'env_1']) {
+        it(`OS_METADATA_WRITABLE=flow,page does not open a managed item (${environmentId ? 'environment' : 'host-config'} kernel)`, () => {
+            const shut = protocolOn(environmentId);
+            const sealed = {
+                save: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }) as any,
+                delete: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }) as any,
+                page: shut.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' }) as any,
+            };
+            process.env.OS_METADATA_WRITABLE = 'flow,page';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            const p = protocolOn(environmentId);
+            const open = {
+                save: p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }) as any,
+                delete: p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }) as any,
+                page: p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' }) as any,
+            };
+            for (const verb of ['save', 'delete', 'page'] as const) {
+                expect(shape(open[verb]), verb).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+                expect(open[verb].message, verb).toBe(sealed[verb].message);
+            }
+            // The #6960 carve-out and the regime-O overlay keep their `null`.
+            expect(p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'delete' })).toBeNull();
+            expect(p.packagedBaseRefusal({ type: 'view', name: 'pkg_view', operation: 'save' })).toBeNull();
+        });
+    }
+
+    // [#22411] The legacy spelling `OBJECTSTACK_METADATA_WRITABLE` was removed in
+    // 11.0, and the protocol now reads the setting through the repository's one
+    // reader, which reads the preferred spelling only. Under the legacy
+    // spelling alone the hatch is SHUT: the type listing reports no env
+    // override, and every verdict is the one the shut hatch gives. Control: the
+    // preferred spelling still opens the listing.
+    for (const environmentId of [undefined, 'env_1']) {
+        it(`OBJECTSTACK_METADATA_WRITABLE=flow,page is not read — the hatch is shut (${environmentId ? 'environment' : 'host-config'} kernel)`, async () => {
+            const shut = protocolOn(environmentId);
+            const sealed = {
+                save: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }) as any,
+                delete: shut.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }) as any,
+                page: shut.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' }) as any,
+            };
+            const hatchOf = async (p: ObjectStackProtocolImplementation) => {
+                const { entries } = await (p as any).getMetaTypes();
+                return Object.fromEntries(['flow', 'page'].map((t) => {
+                    const e = entries.find((x: any) => x.type === t);
+                    return [t, { allowOrgOverride: e?.allowOrgOverride, overrideSource: e?.overrideSource }];
+                }));
+            };
+            const SHUT = { allowOrgOverride: false, overrideSource: 'registry' };
+            expect(await hatchOf(shut)).toEqual({ flow: SHUT, page: SHUT });
+
+            process.env.OBJECTSTACK_METADATA_WRITABLE = 'flow,page';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            const legacy = protocolOn(environmentId);
+            expect(await hatchOf(legacy)).toEqual({ flow: SHUT, page: SHUT });
+            for (const verb of ['save', 'delete', 'page'] as const) {
+                const verdict: any = verb === 'page'
+                    ? legacy.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' })
+                    : legacy.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: verb });
+                expect(shape(verdict), verb).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+                expect(verdict.message, verb).toBe(sealed[verb].message);
+            }
+
+            // Control: the preferred spelling is read, so the same names open the listing.
+            process.env.OS_METADATA_WRITABLE = 'flow,page';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            const OPEN = { allowOrgOverride: true, overrideSource: 'env' };
+            expect(await hatchOf(protocolOn(environmentId))).toEqual({ flow: OPEN, page: OPEN });
+        });
     }
 });
 

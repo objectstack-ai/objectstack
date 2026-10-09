@@ -40,7 +40,9 @@ parse the RAW stored config — their typed slots are strings (or `unknown`
 where values interpolate), so `{token}` templates pass and resolve at the
 executor's existing interpolation points. The value slots are the exception
 since #19939: the `{token}` dialect is retired there (the "value slots"
-section below).
+section below). So are the text slots since #22110: a screen `title` /
+`description` and an `end` `message` render `{{ }}` holes, and a `{token}`
+there is refused (`flow-text-slot-template.ts`).
 
 ## Unknown keys — closed here too, as of #4001 批 9
 
@@ -171,7 +173,7 @@ Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` eval
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **outcome** | `Enum<'completed' \| 'refused'>` | optional (default: `"completed"`) | How the run ends when it reaches this node. `completed` (the default) is the ordinary terminal. `refused` is a first-class refusal: the run records `refused` — distinct from `failed`, a refusal is a successful evaluation that says no — carries the rendered `message`, is never resumed, and a runner shows the message with Close only: no Submit, no completion toast. |
-| **message** | `string` | optional | Why the run was refused, as a `{token}` template interpolated at run time exactly like a screen `description` (`{record.name}` etc.), so the text names the record. Required when `outcome` is `refused`; refused when it is `completed` — a completion renders nothing, so the key would be a silent no-op. |
+| **message** | `string` | optional | Why the run was refused, as a template rendered at run time exactly like a screen `description` — `{{ }}` holes over the flow's variables (`{{ record.name }}`), so the text names the record. Required when `outcome` is `refused`; refused when it is `completed` — a completion renders nothing, so the key would be a silent no-op. |
 
 
 ---
@@ -221,8 +223,8 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **title** | `string` | optional | Heading shown above the screen |
-| **description** | `string` | optional | Body text shown under the heading |
+| **title** | `string` | optional | Heading shown above the screen — a template rendered per run with `{{ }}` holes over the flow's variables (`{{ record.name }}`); falls back to the node label when it renders nothing |
+| **description** | `string` | optional | Body text shown under the heading — a template rendered per run with `{{ }}` holes (`{{ record.name }}`) |
 | **fields** | `{ name: string; label?: string; type?: string; required?: boolean; … }[]` | optional | Input fields collected on this screen |
 | **waitForInput** | `boolean` | optional | Pause to show the screen even with no fields; false forces a server pass-through |
 | **objectName** | `string` | optional | Render this object's full create/edit form instead of a flat field list |

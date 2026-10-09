@@ -291,12 +291,12 @@ export type TypedExpressionDialect = Extract<ExpressionDialect, 'cron' | 'templa
  *
  * The `template` sentence prescribes `{{record.name}}`: it is the sentence of
  * {@link TemplateExpressionInputSchema}, whose slots' renderers read `{{var}}`
- * (or, for `titleFormat`, either spelling). A template slot whose renderer
- * reads another spelling does not answer with it: it takes the same input
- * from the package-internal constructor (`./typed-expression-input.ts`) with
- * sentences prescribing its own renderer's spelling. The notify node's
- * `title` / `message`, rendered by the flow interpolator, prescribe
- * `{record.name}` (`automation/io-node-config.zod.ts`).
+ * (or, for `titleFormat`, either spelling). A template slot that must name
+ * itself in the refusal does not answer with it: it takes the same input from
+ * the package-internal constructor (`./typed-expression-input.ts`) with its
+ * own sentences. The notify node's `title` / `message` do, so their refusals
+ * can name the key (`automation/io-node-config.zod.ts`); since protocol 18
+ * they prescribe the same `{{ }}` hole, `{{ record.name }}`.
  */
 export const TYPED_EXPRESSION_SOURCE_REQUIRED: Readonly<Record<TypedExpressionDialect, string>> = {
   cron:
@@ -392,18 +392,16 @@ export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
  *   `@objectstack/metadata-protocol`). Both spellings resolve identically
  *   there — single-brace `titleFormat` values are legal by construction, not
  *   a grammar this schema failed to enforce.
- * - A notify flow node's `title` / `message` read the other way: their
- *   renderer is the flow interpolator (`interpolate()` in
- *   `@objectstack/service-automation`), which substitutes single-brace `{var}`
- *   only — a `{{var}}` keeps its outer braces in the sent text, and the
- *   build's `flow-double-brace-interpolation` rule flags it on a flow node.
- *   Those two slots take this same input from the package-internal
- *   constructor (`./typed-expression-input.ts`), so their refusals prescribe
- *   `{record.name}` instead of this schema's `{{record.name}}`.
+ * - A notify flow node's `title` / `message` read `{{var}}` too, and only that:
+ *   since protocol 18 (#22110, ADR-0032 D3) their renderer is the formula
+ *   template engine, and a single-brace `{var}` there is refused at every door
+ *   (`automation/flow-text-slot-template.ts`). Those two slots take this same
+ *   input from the package-internal constructor (`./typed-expression-input.ts`)
+ *   so their refusals can name the slot.
  *
  * So write the spelling the slot's renderer reads — `{{var}}` on this schema's
- * slots, `{var}` on a notify node's — and do not read either spelling as
- * declared, preferred or rejected here.
+ * slots and on a notify node's `title` / `message` alike — and do not read
+ * either spelling as declared, preferred or rejected here.
  */
 export const TemplateExpressionInputSchema = templateExpressionInput(ExpressionSchema, typedExpressionRefusals('template'));
 export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSchema>;
@@ -510,11 +508,10 @@ export const P = cel;
  *
  * - `{{record.x}}` — the `@objectstack/formula` template engine and the
  *   messaging, email and i18n renderers read double braces only, and leave a
- *   `{record.x}` in their output verbatim;
- * - `{record.x}` — a notify flow node's `title` / `message` are rendered by the
- *   flow interpolator, which reads single braces only: a `{{record.x}}` keeps
- *   its outer braces in the sent text, and the build's
- *   `flow-double-brace-interpolation` rule flags it;
+ *   `{record.x}` in their output verbatim. Since protocol 18 a notify flow
+ *   node's `title` / `message` read `{{record.x}}` too — the formula template
+ *   engine renders them — and a single-brace token there is refused at every
+ *   door (`automation/flow-text-slot-template.ts`);
  * - either — `titleFormat`'s renderers normalize `{{record.x}}` to `{record.x}`.
  */
 export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {

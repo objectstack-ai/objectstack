@@ -12,9 +12,9 @@
  * "Validation passed". The field level is never hydrated, so at run time the
  * reference holds a bare id, every read through it faults, and since
  * ADR-0137 D2 the two field-rule slots refuse every write that reaches them
- * (an option, fail-open, admits the value unchecked). So an author — or an AI —
- * shipped a predicate every authoring door accepted, and met it as a refused
- * write in production. `packages/lint/src/validate-expressions.test.ts` pins
+ * (and since #22402 so does the option gate on the write path). So an author
+ * — or an AI — shipped a predicate every authoring door accepted, and met it
+ * as a refused write in production. `packages/lint/src/validate-expressions.test.ts` pins
  * the rule; this file pins that the rule reaches the command.
  *
  * ## The two fixtures are a pair, and the control is load-bearing

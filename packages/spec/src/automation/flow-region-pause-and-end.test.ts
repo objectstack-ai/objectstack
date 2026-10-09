@@ -218,7 +218,7 @@ describe('a region body refuses an `end` node', () => {
   });
 
   it('refuses it whatever the `outcome` — a plain terminal is a no-op there, a refusing one is converted to a region error', () => {
-    for (const config of [undefined, { outcome: 'completed' as const }, { outcome: 'refused' as const, message: 'Refused: {record.name}' }]) {
+    for (const config of [undefined, { outcome: 'completed' as const }, { outcome: 'refused' as const, message: 'Refused: {{ record.name }}' }]) {
       const issues = issuesOf(flowWith([loopOver([{ id: 'stop', type: 'end', label: 'Stop', config }])]));
       expect(issues.map(([p]) => p), JSON.stringify(config)).toEqual(['nodes.1.config.body.nodes.0.type']);
     }
