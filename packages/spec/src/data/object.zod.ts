@@ -1707,7 +1707,7 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * `viewer: { can_act, is_submitter, can_override }` on every `sys_approval_request`
  * row it reads, from the CALLER's identity, and the object's own action
  * predicates gate on `record.viewer.can_act`. Before this key nothing could
- * declare such a block in a shape the expression validator reads, so those
+ * declare such a block in a shape the build validator reads, so those
  * predicates were refused as naming an undeclared field.
  *
  * ## Shape — a strict record of strict records
@@ -1730,13 +1730,26 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  *
  * ## Its reader (ADR-0049 enforce-or-remove)
  *
- * The shared expression validator. `@objectstack/lint`'s field index adds every
+ * The shared BUILD validator — `@objectstack/lint`'s expression rule over
+ * `@objectstack/formula`, the pair `os build` / `os validate` run, and no other
+ * field-existence check. `@objectstack/lint`'s field index adds every
  * declared block name to the names `record.<x>` may resolve to, and
  * `@objectstack/formula`'s field-existence pass judges the SECOND segment of
  * `record.<block>.<leaf>` against the block's declared leaves, under its
  * existing `unknown-field` refusal — so `record.viewer.can_actt` is refused and
  * the refusal names the leaves `viewer` declares. An object without this key
- * keeps exactly the verdicts it had.
+ * keeps exactly the verdicts it had. Two other doors build their own
+ * `record.*` field set from `fields` alone and do not read this key — the MCP
+ * expression tool (`packages/mcp`) and flow registration's schema resolver
+ * (`service-automation`); the first package to declare a block settles them
+ * (#22387).
+ *
+ * The collision refusal reads the AUTHORED field map only. A block named like
+ * an injected system column (`id`, `organization_id`, the audit family, the
+ * ownership anchors) is not refused here: the per-object derivation,
+ * `resolveInjectedSystemColumns`, lives in a module that imports this one, and
+ * its column-name constants are module-private, so this file cannot reach
+ * them without an import cycle or a new export.
  *
  * The validator judges names only. The leaf TYPES are for the declaring
  * package's conformance test to read: it pins that the keys its service emits,
@@ -2236,7 +2249,8 @@ const ObjectSchemaBase = strictObject(
     'Blocks a service attaches to each row it serves, computed per caller on read and never stored: '
     + 'block name → { leaf key → value type (number | text | boolean | date) }. NOT a field — no column, '
     + 'form, list view, export, write path or translation bundle reads it, and a block name may not repeat '
-    + 'a declared field name. Its reader is the expression validator: `record.<block>` resolves, and '
+    + 'a declared field name. Its reader is the shared build validator (`@objectstack/lint` over '
+    + '`@objectstack/formula`, as `os build` / `os validate` run it): `record.<block>` resolves, and '
     + '`record.<block>.<leaf>` resolves only to a leaf the block declares.',
   ),
   indexes: z.array(IndexSchema).optional().describe('Database performance indexes'),
