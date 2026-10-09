@@ -53,6 +53,30 @@
  * on a quiet box reaches a verdict at all, where before it could only ever be
  * killed.
  *
+ * ## Two tiers, and who runs which
+ *
+ * The battery has a FAST tier (every in-process case: fixture derivations, path
+ * matching, the grammars, the renderings, one memoised discovery of this tree)
+ * and a SLOW tier (the full replay: every case that spawns the tool's own CLI,
+ * builds a temporary git repository or sweeps the whole tracked corpus). The
+ * split is the tool's own — `dispatch-gates.self-test.mjs` names each slow
+ * section and pins that the two tiers partition the battery — and this file
+ * only decides which tier a run gets:
+ *
+ *   a dev box, no flag          `--self-test --fast`     the fast tier, what a delivery runs
+ *   `--slow` on argv            `--self-test`            both tiers, on demand
+ *   `GITHUB_ACTIONS` is `true`  `--self-test`            both tiers, what CI runs
+ *
+ * The CI read is the one environment read this file makes, and its failure
+ * direction is the SAFE one: an unset variable where it should be set buys a
+ * shorter run that still prints which tier it was, never a quiet one; a set
+ * variable on a dev box buys the full battery, loud. `lint.yml` runs this gate
+ * with no argument, so the slow tier stays wired in CI without a workflow edit
+ * and without a second family for the derivation to name. The tier chosen and
+ * the reason are printed before the spawn, and the wall clock after it names
+ * the tier it measured. The fast tier fits a quiet box's foreground cap with
+ * room to spare; the detached form above stays the form for both tiers.
+ *
  * ## The exit contract, and why the kill branch does not keep its old code
  *
  * Four endings, four codes, and what fixes them is not this file's taste — it
@@ -297,6 +321,21 @@ const SELF_TEST_CHILD_FLAG = '--self-test-child';
 /** The flag that runs this file's own battery instead of the tool's. */
 const SELF_TEST_FLAG = '--self-test';
 
+/** The flag that asks for both tiers off CI; without it a dev box runs the fast tier. */
+const SLOW_TIER_FLAG = '--slow';
+
+/**
+ * Which tier this run gets, and why — one read of argv and one of the
+ * environment, decided here so the spawn below and its announcement cannot
+ * disagree. Not exported: this file is a CLI, and the self-test drives the
+ * decision through spawned children that echo the argv they were given.
+ */
+function tierOfThisRun({ argv = process.argv.slice(2), env = process.env } = {}) {
+  if (argv.includes(SLOW_TIER_FLAG)) return { args: [], word: 'both tiers', why: `${SLOW_TIER_FLAG} on argv` };
+  if (env.GITHUB_ACTIONS === 'true') return { args: [], word: 'both tiers', why: 'GITHUB_ACTIONS is true — the CI run owes the slow tier' };
+  return { args: ['--fast'], word: 'the fast tier', why: `the default off CI; ${SLOW_TIER_FLAG} runs both` };
+}
+
 const argv = process.argv.slice(2);
 
 if (argv.includes(SELF_TEST_FLAG)) await selfTest();
@@ -315,6 +354,9 @@ if (child !== TOOL) {
   );
 }
 
+const tier = tierOfThisRun({ argv });
+console.error(`check:pm-dispatch-gates: running ${tier.word} (${tier.why}).`);
+
 const started = Date.now();
 /**
  * ⛔ The production spawn names TOOL DIRECTLY, and it has to keep doing so.
@@ -327,12 +369,14 @@ const started = Date.now();
  * file's self-test was first written that way: five cases of the tool's own
  * battery red, and a workflows-only derivation stopped naming this gate
  * entirely. The substituted child therefore gets its OWN call, and the
- * production one is byte-for-byte the expression that was here before.
+ * production one keeps `join(ROOT, TOOL)` as the first element of its argv —
+ * the component the scan resolves. The tier flags spread after it are not
+ * paths, so the edge they ride on is the one that was here before.
  */
 const result =
   childAt < 0
-    ? spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' })
-    : spawnSync(process.execPath, [resolve(ROOT, child), '--self-test'], { stdio: 'inherit' });
+    ? spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test', ...tier.args], { stdio: 'inherit' })
+    : spawnSync(process.execPath, [resolve(ROOT, child), '--self-test', ...tier.args], { stdio: 'inherit' });
 /**
  * What the battery cost on THIS box, printed rather than frozen anywhere.
  *
@@ -377,7 +421,7 @@ if (result.signal) {
   console.error('  then tail that log until it stops growing. CI runs this step with no such cap.');
   process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
-console.error(`check:pm-dispatch-gates: the battery took ${seconds}s on this box.`);
+console.error(`check:pm-dispatch-gates: the battery (${tier.word}) took ${seconds}s on this box.`);
 process.exit(result.status ?? 2);
 
 /**
@@ -434,12 +478,33 @@ async function selfTest() {
     const redChild = stub('red.mjs', 'process.exit(1);\n');
     const greenChild = stub('green.mjs', 'process.exit(0);\n');
 
-    const drive = (childPath) =>
-      spawnSync(process.execPath, [SELF, SELF_TEST_CHILD_FLAG, childPath], { encoding: 'utf8' });
+    const drive = (childPath, { extra = [], env = {} } = {}) =>
+      spawnSync(process.execPath, [SELF, SELF_TEST_CHILD_FLAG, childPath, ...extra], {
+        encoding: 'utf8',
+        env: { ...process.env, GITHUB_ACTIONS: '', ...env },
+      });
 
     const killed = drive(killedChild);
     const red = drive(redChild);
     const green = drive(greenChild);
+
+    // The tier decision, driven against a child that echoes the argv it was given.
+    const echoChild = stub('echo.mjs', "console.log(process.argv.slice(2).join(' '));\nprocess.exit(0);\n");
+    const offCi = drive(echoChild);
+    const onCi = drive(echoChild, { env: { GITHUB_ACTIONS: 'true' } });
+    const slowAsked = drive(echoChild, { extra: [SLOW_TIER_FLAG] });
+    t(
+      'off CI with no flag the child runs the FAST tier — the argv it received says so',
+      offCi.status === 0 && (offCi.stdout ?? '').trim() === '--self-test --fast' && offCi.stderr.includes('running the fast tier'),
+    );
+    t(
+      `⭐ under GITHUB_ACTIONS=true the child runs BOTH tiers — the slow tier stays wired in CI without a workflow edit`,
+      onCi.status === 0 && (onCi.stdout ?? '').trim() === '--self-test' && onCi.stderr.includes('running both tiers'),
+    );
+    t(
+      `…and ${SLOW_TIER_FLAG} asks for both tiers off CI, on demand`,
+      slowAsked.status === 0 && (slowAsked.stdout ?? '').trim() === '--self-test' && slowAsked.stderr.includes('running both tiers'),
+    );
 
     t(
       'CONTROL: the killed stub really died by SIGNAL, so the branch under test is the one that ran',
@@ -495,7 +560,7 @@ async function selfTest() {
 
   console.log(
     failures === 0
-      ? '✓ check:pm-dispatch-gates --self-test: the exit contract holds in all three directions.'
+      ? '✓ check:pm-dispatch-gates --self-test: the exit contract holds in all three directions, and the tier decision in both.'
       : `✗ check:pm-dispatch-gates --self-test: ${failures} case(s) failed.`,
   );
   process.exit(failures === 0 ? 0 : 1);
