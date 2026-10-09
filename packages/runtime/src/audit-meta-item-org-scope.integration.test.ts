@@ -104,19 +104,23 @@ const viewBody = (name: string) => ({
  * so the discriminating control keeps the stamp production produces. The
  * organization-scoped READ this file pins is S5's to re-premise.
  */
+/** One legacy organization-scoped save, at rest: its overlay row and its audit row. */
+async function plantLegacyOrgSave(engine: any, org: string, name: string, actor: string) {
+  await engine.insert('sys_metadata', {
+    type: 'view', name, organization_id: org, package_id: null, state: 'active',
+    metadata: JSON.stringify(viewBody(name)), checksum: `legacy_${org}_${name}`, version: 1,
+  }, { context: { isSystem: true } });
+  await engine.insert('sys_metadata_audit', {
+    occurred_at: new Date().toISOString(), actor, source: 'studio',
+    type: 'view', name, organization_id: org,
+    operation: 'save', outcome: 'allowed', code: 'ok',
+    lock_state: 'none', lock_overridden: false, note: 'active',
+  }, { context: { isSystem: true } });
+}
+
 async function seedThreeOrgs(protocol: any, engine: any) {
-  for (const [org, actor] of [[ORG_A, ACTOR_A], [ORG_B, ACTOR_B]] as const) {
-    await engine.insert('sys_metadata', {
-      type: 'view', name: NAME, organization_id: org, package_id: null, state: 'active',
-      metadata: JSON.stringify(viewBody(NAME)), checksum: `legacy_${org}`, version: 1,
-    }, { context: { isSystem: true } });
-    await engine.insert('sys_metadata_audit', {
-      occurred_at: new Date().toISOString(), actor, source: 'studio',
-      type: 'view', name: NAME, organization_id: org,
-      operation: 'save', outcome: 'allowed', code: 'ok',
-      lock_state: 'none', lock_overridden: false, note: 'active',
-    }, { context: { isSystem: true } });
-  }
+  await plantLegacyOrgSave(engine, ORG_A, NAME, ACTOR_A);
+  await plantLegacyOrgSave(engine, ORG_B, NAME, ACTOR_B);
   await protocol.saveMetaItem({
     type: 'view', name: NAME, item: viewBody(NAME),
     actor: ACTOR_ENV, source: 'package',
@@ -221,10 +225,7 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
   it('scoping does not disturb the (type, name) key — a different item is still excluded', async () => {
     const { engine, protocol } = await boot();
     await seedThreeOrgs(protocol, engine);
-    await (protocol as any).saveMetaItem({
-      type: 'view', name: 'other_grid', item: viewBody('other_grid'),
-      organizationId: ORG_A, actor: 'carol@alpha.example', source: 'studio',
-    });
+    await plantLegacyOrgSave(engine, ORG_A, 'other_grid', 'carol@alpha.example');
 
     const actors = actorsOf(await (protocol as any).auditMetaItem({
       type: 'view', name: NAME, organizationId: ORG_A,
