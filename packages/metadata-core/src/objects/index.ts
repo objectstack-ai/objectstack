@@ -5,8 +5,10 @@
  *
  * `sys_metadata` + `sys_metadata_history` + `sys_metadata_audit` are the
  * canonical single-source-of-truth storage substrate for ALL metadata
- * customisations (ADR-0005). `sys_view_definition` backs runtime-authored
- * shared/personal views (ADR-0017).
+ * customisations (ADR-0005). Runtime-authored views are `view` items on that
+ * same substrate: `sys_view_definition`, the table ADR-0017 once declared for
+ * them, was retired as inert under ADR-0131 D13 (no framework writer or reader
+ * of its rows ever existed).
  *
  * These definitions live HERE (the metadata core package) — not in
  * `@objectstack/platform-objects` — because the packages that actually read
@@ -20,4 +22,3 @@ export { SysMetadataObject, SysMetadataObject as SysMetadata } from './sys-metad
 export { SysMetadataHistoryObject } from './sys-metadata-history.object.js';
 export { SysMetadataCommitObject } from './sys-metadata-commit.object.js';
 export { SysMetadataAuditObject } from './sys-metadata-audit.object.js';
-export { SysViewDefinitionObject } from './sys-view-definition.object.js';

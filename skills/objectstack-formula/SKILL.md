@@ -146,6 +146,7 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `addDays(d, n)` | timestamp | Shift **any** date by `n` days (negative ok). `addDays(record.last_service, record.cycle_days)` = next due date |
 | `addMonths(d, n)` | timestamp | Shift **any** date by `n` months; clamps to month-end (`addMonths(date('2026-01-31'), 1)` → Feb 28) |
 | `date(s)` / `datetime(s)` | timestamp | Parse an ISO date / date-time string to a timestamp |
+| `isoDate(t)` / `isoDatetime(t)` | string | Timestamp to UTC ISO text, `2026-10-08` / `2026-10-08T17:55:06.123Z`. Text in? `isoDate(date(s))` |
 
 > **No date arithmetic.** A date mixed with a number faults and the build
 > rejects it; `end - start` does not fault — it yields a `duration` stored as

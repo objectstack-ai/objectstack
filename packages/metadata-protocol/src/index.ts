@@ -32,30 +32,18 @@ export { SDUI_MANIFEST_SERVICE } from './runtime-authoring-gate.js';
 // undefined` proxy the #4463 gate used to key its activation off.
 export type { MetadataAuthoringChannel } from './protocol.js';
 
-// [#5839] `sys_view_definition`'s active-row uniqueness, delivered as a runtime
-// partial-UNIQUE migration (the `ensureOverlayIndex` paradigm, for the one other
-// table that declared the same intent with nothing behind it).
-export {
-    ensureViewDefinitionActiveIndex,
-    resolveIndexExec,
-    buildActiveIndexSql,
-    classifyIndexFailure,
-    VIEW_DEFINITION_TABLE,
-    VIEW_ACTIVE_INDEX_NAME,
-    VIEW_ACTIVE_PROBE_INDEX_NAME,
-    VIEW_ACTIVE_INDEX_COLUMNS,
-} from './migrations/view-definition-active-index.js';
-export type {
-    IndexExec,
-    EnsureViewIndexLogger,
-    EnsureViewIndexStatus,
-    EnsureViewIndexResult,
-} from './migrations/view-definition-active-index.js';
+// The probe-first replacement's shared vocabulary: the raw-SQL seam type the
+// exported migrations below take, and the dialect classifier their reports
+// rest on. Both used to ride out on the `sys_view_definition` migration's
+// exports (#5839); that migration retired with its table (ADR-0131 D13), and
+// these two are not specific to it, so they are exported from their own module.
+export { classifyIndexFailure } from './migrations/partial-index-probe.js';
+export type { IndexExec } from './migrations/partial-index-probe.js';
 
 // [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime
-// NULL-safe UNIQUE migration — the same paradigm again, for the object whose
-// `user_id` key part is NULL on every tenant- and global-scope row and was
-// therefore constraining nothing there (maintainer ruling 2026-08-14: route 1
+// NULL-safe UNIQUE migration — the `ensureOverlayIndex` paradigm again, for the
+// object whose `user_id` key part is NULL on every tenant- and global-scope row
+// and was therefore constraining nothing there (maintainer ruling 2026-08-14: route 1
 // now, refuse-to-migrate on duplicates, never keep-newest).
 export {
     ensureSysSettingIdentityIndex,
@@ -75,7 +63,7 @@ export type {
     EnsureSysSettingIndexStatus,
     EnsureSysSettingIndexResult,
 } from './migrations/sys-setting-identity-index.js';
-// #8686 — the seed/API tenancy split. Unlike its two siblings above this
+// #8686 — the seed/API tenancy split. Unlike its index sibling above this
 // migration moves stored ROWS rather than tightening an index, so it is
 // single-tenant-guarded and reports (never renumbers) identifiers already minted
 // twice (maintainer ruling 2026-08-15: contract option 1, stored data shape 2).
@@ -106,11 +94,11 @@ export {
     // asserted, which is also what an operator copies out of the docs page.
 } from './migrations/seed-tenancy-backfill.js';
 export type { SeedTenancySeam } from './migrations/seed-tenancy-backfill.js';
-// [#8725] The read-only duplicate PRE-FLIGHT for the three `kernel:ready` index
-// tightenings above. Exported because it has a real consumer outside this
+// [#8725] The read-only duplicate PRE-FLIGHT for the `kernel:ready` index
+// tightenings. Exported because it has a real consumer outside this
 // package — `os migrate duplicates`, the reporting path the maintainer ruled
 // (2026-08-22) for a class the drift differ cannot see by construction, and
-// which the three migrations' conflict reports now name. Nothing about when a
+// which the migrations' conflict reports now name. Nothing about when a
 // migration runs or what it does changes here; only its evidence becomes
 // readable one command before the restart.
 export {
