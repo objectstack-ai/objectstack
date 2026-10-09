@@ -73,6 +73,20 @@
  *
  * Severity follows ADR-0078 decision 1: `error` when the instance is fully
  * inert, `warning` when it degrades to something that partially works.
+ *
+ * ## One verdict per finding — the reasoning is `os explain <rule-id>`
+ *
+ * `os validate`, `os build` and `os dev` print every finding on every run,
+ * and the `field/*` findings also ride the metadata write door's 422 issues
+ * and 2xx advisories. So `message` is ONE verdict sentence — what is inert,
+ * and the runtime site that makes it so (ADR-0078 §6 keeps that citation in
+ * the message) — and `fix` is one pastable line. The rest of what a rule
+ * knows — the full mechanism, each view type's measured reading, the
+ * carriers and exemptions — is that rule id's entry in `@objectstack/lint`'s
+ * `RULE_EXPLANATIONS` (`packages/lint/src/rule-explanations.ts`), which
+ * `os explain <rule-id>` prints. ⛔ A mechanism corrected here is corrected
+ * in that entry in the same edit: it is the long-form carrier of the same
+ * reading.
  */
 
 /** One completeness violation on one instance. */
@@ -83,7 +97,11 @@ export interface CompletenessFinding {
   severity: 'error' | 'warning';
   /** Path of the omitted config relative to the item (e.g. `summaryOperations`). */
   path: string;
-  /** What is inert, the runtime line that makes it so, and what to add. */
+  /**
+   * One verdict sentence: what is inert and the runtime line that makes it so
+   * (ADR-0078 §6). The long reasoning is the rule's `os explain` entry — see
+   * the module doc.
+   */
   message: string;
   /** One-line prescription, machine-pastable where possible. */
   fix: string;
@@ -153,10 +171,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
       severity: 'error',
       path: 'summaryOperations',
       message:
-        'A `summary` field with no `summaryOperations` computes nothing: the engine\'s '
-        + 'summary index skips it (`engine.ts` — `if (!d.summaryOperations) continue`), so it '
-        + 'reads 0/null everywhere and anything derived from it is stuck at 0 — while every '
-        + 'authoring surface reports success. This is the shape ADR-0078 was written for.',
+        'A `summary` field with no `summaryOperations` reads 0/null everywhere: the engine\'s '
+        + 'summary index skips it (`engine.ts` — `if (!d.summaryOperations) continue`)',
       fix: "summaryOperations: { object: '<child_object>', field: '<child_field>', function: 'sum' }",
     });
   }
@@ -167,9 +183,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
       severity: 'error',
       path: 'expression',
       message:
-        'A `formula` field with no `expression` never computes: the engine builds its formula '
-        + 'plan only from fields that HAVE one (`engine.ts` — `if (def?.type === \'formula\' && '
-        + 'def.expression)`), so this field is permanently empty while parsing and publishing succeed.',
+        'A `formula` field with no `expression` is always empty: the engine plans formulas only '
+        + 'for fields that have one (`engine.ts` — `if (def?.type === \'formula\' && def.expression)`)',
       fix: 'expression: F`record.<a> * record.<b>`',
     });
   }
@@ -180,9 +195,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
       severity: 'error',
       path: 'reference',
       message:
-        `A \`${type}\` field with no \`reference\` is a relationship to nowhere: \`$expand\` `
-        + 'silently skips it (`engine.ts` — `if (!referenceObject) continue`) and the record '
-        + 'picker has no object to search, so the column stores raw ids that never resolve.',
+        `A \`${type}\` field with no \`reference\` points nowhere: \`$expand\` skips it `
+        + '(`engine.ts` — `if (!referenceObject) continue`) and the record picker has no object to search',
       fix: "reference: '<target_object_name>'",
     });
   }
@@ -197,9 +211,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
       severity: 'error',
       path: 'options',
       message:
-        `A \`${type}\` field with no \`options\` is a choice with nothing to choose: the form `
-        + 'control is empty AND server-side value validation is disabled (`record-validator.ts` '
-        + 'skips the check when the allowed list is empty), so any value writes through the API.',
+        `A \`${type}\` field with no \`options\` offers nothing to pick and validates nothing: `
+        + '`record-validator.ts` skips the value check on an empty list, so any value writes through',
       fix: "options: [{ label: '…', value: '…' }] — or picklist: '<name>' for a shared list",
     });
   } else if (DEAD_WITHOUT_OPTIONS_WARNING.has(type) && !hasOptionSource) {
@@ -208,10 +221,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
       severity: 'warning',
       path: 'options',
       message:
-        'A `checkboxes` field with no `options` renders zero checkboxes. The validator\'s '
-        + 'multi-value branch tolerates it as free-form (the `multiselect` tags mode), but a '
-        + 'checkbox group is almost never meant to be free-form — declare the boxes, or use '
-        + '`multiselect` if free-form tags were the intent.',
+        'A `checkboxes` field with no `options` renders zero checkboxes (`record-validator.ts` '
+        + 'accepts it as free-form tags); declare the boxes, or use `multiselect` if tags were meant',
       fix: "options: [{ label: '…', value: '…' }]",
     });
   }
@@ -641,44 +652,31 @@ const VIEW_BINDING_FIX: Readonly<Record<string, string>> = {
  * ⚠️ What the correction must PRESERVE is the prescription. The old sentence
  * was wrong about the mechanism and still right about the remedy, and the
  * remedy is the whole value of a warning an author meets at authoring time:
- * it says which key to declare, not merely that something is missing.
+ * it says which key to declare, not merely that something is missing. The
+ * keys ride {@link VIEW_BINDING_FIX}, the `fix:` line printed directly under
+ * this verdict.
+ *
+ * Each entry is ONE verdict sentence: the refusal screen the author will see
+ * and the renderer symbol that shows it (ADR-0078 §6). The measured path
+ * behind it — the `ListView.tsx` branch that forwards only declared bindings,
+ * which keys the schema requires and which stay optional — is the
+ * `view/layout-without-binding` entry in `@objectstack/lint`'s
+ * `RULE_EXPLANATIONS`, one paragraph per type: the long-form carrier of
+ * each reading, corrected together with this map and the table above.
  */
 const VIEW_BINDING_MESSAGE: Readonly<Record<string, string>> = {
   calendar:
-    'A `calendar` view with no `calendar` block declares no date axis, and the renderer does '
-    + 'not invent one: objectui\'s `ListView.tsx` calendar branch forwards only the bindings the '
-    + 'view DECLARED, so `getCalendarConfig` (objectui `ObjectCalendar.tsx`) resolves `null` and '
-    + 'the view renders its "Calendar configuration required" refusal screen instead of records '
-    + '— it parses and publishes clean, then shows no event on any object, not just on one that '
-    + 'happens to lack a field. Declare `calendar.startDateField`, the block\'s one required key; '
-    + 'the event title resolves through the ADR-0079 record display-name chain when `titleField` '
-    + 'is omitted.',
+    'A `calendar` view with no `calendar` block shows the "Calendar configuration required" '
+    + 'screen on every object (`ObjectCalendar.tsx` — `getCalendarConfig` resolves `null`)',
   gantt:
-    'A `gantt` view with no `gantt` block declares no date axis, and the renderer does not '
-    + 'invent one: objectui\'s `ListView.tsx` gantt branch forwards only the bindings the view '
-    + 'DECLARED, so `getGanttConfig` (objectui `ObjectGantt.tsx`) resolves `null` without both '
-    + 'dates and the view renders its "Gantt configuration required" refusal screen instead of '
-    + 'tasks — it parses and publishes clean, then shows no task on any object, not just on one '
-    + 'that happens to lack a field. Declare `gantt.startDateField`, `gantt.endDateField` and '
-    + '`gantt.titleField`, the three keys `GanttConfigSchema` requires; `progressField` and '
-    + '`dependenciesField` are optional and stay unbound when omitted.',
+    'A `gantt` view with no `gantt` block shows the "Gantt configuration required" screen on '
+    + 'every object (`ObjectGantt.tsx` — `getGanttConfig` resolves `null`)',
   timeline:
-    'A `timeline` view with no `timeline` block declares no date axis, and the renderer does not '
-    + 'invent one: objectui\'s `ListView.tsx` timeline branch forwards a start date only when the '
-    + 'view declared one, so `ObjectTimeline.tsx` resolves no date field and renders its '
-    + '"Timeline date axis required" refusal instead of records — it parses and publishes clean, '
-    + 'then shows no item on any object. Only the title has a renderer default (`name`); the date '
-    + 'axis never does. Declare `timeline.startDateField` and `timeline.titleField`, the two keys '
-    + '`TimelineConfigSchema` requires.',
+    'A `timeline` view with no `timeline` block shows the "Timeline date axis required" screen '
+    + 'on every object (`ObjectTimeline.tsx` resolves no date field)',
   map:
-    'A `map` view with no `map` block declares no coordinate binding, and the renderer does not '
-    + 'guess one: objectui\'s `ListView.tsx` map branch forwards only the keys the view declared, '
-    + 'and `ObjectMap.tsx` no longer guesses `location` / `latitude` / `longitude` field names, so '
-    + 'its `hasCoordinateBinding` gate fails and the view renders its "Map configuration required" '
-    + 'refusal instead of markers — it parses and publishes clean, then plots nothing on any '
-    + 'object. Declare `map.locationField`, or both `map.latitudeField` and `map.longitudeField`; '
-    + '`ListMapConfigSchema` requires neither form, so this warning is where the requirement is '
-    + 'stated.',
+    'A `map` view with no `map` block shows the "Map configuration required" screen on every '
+    + 'object (`ObjectMap.tsx` — its `hasCoordinateBinding` gate fails)',
 };
 
 /**
@@ -691,9 +689,8 @@ const VIEW_BINDING_MESSAGE: Readonly<Record<string, string>> = {
  * an entry above, not a reworded sentence here.
  */
 const unboundBlockMessage = (type: string, block: string): string =>
-  `A \`${type}\` view with no \`${block}\` block is bound to nothing: the renderer falls `
-  + 'back to literal default field names, which works only if the object happens to declare '
-  + 'them — on any other object the view renders empty while authoring reports success.';
+  `A \`${type}\` view with no \`${block}\` block falls back to literal default field names, `
+  + 'so it renders empty on any object that does not declare them';
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 
@@ -922,13 +919,9 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
       severity: 'warning',
       path: 'map.locationField',
       message:
-        'A `map` view whose `map` block declares neither `locationField` nor the `latitudeField`/'
-        + '`longitudeField` pair is bound to nothing, and the renderer does not guess: objectui '
-        + '`ObjectMap.tsx` applies its `hasCoordinateBinding` gate to a declared block exactly as '
-        + 'to an absent one, so the view renders its "Map configuration required" refusal instead '
-        + 'of markers — while the block parses and publishes clean, because `ListMapConfigSchema` '
-        + 'requires neither form. Declare `map.locationField`, or both `map.latitudeField` and '
-        + '`map.longitudeField` (half a pair is not a binding).',
+        'A `map` block with neither `map.locationField` nor both `map.latitudeField` and '
+        + '`map.longitudeField` shows the "Map configuration required" screen (`ObjectMap.tsx` — '
+        + '`hasCoordinateBinding`)',
       fix: VIEW_BINDING_FIX.map,
     });
   }
@@ -941,13 +934,9 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
         severity: 'warning',
         path: 'tree.parentField',
         message:
-          'A `tree` view with no resolvable parent pointer renders FLAT, not empty: `parentField` is '
-          + 'undeclared and the bound object declares neither a `tree` field (with no `reference`, or one '
-          + 'naming this object) nor a lookup/master_detail back to itself, so the renderer\'s '
-          + 'auto-detection finds nothing (objectui `ObjectTree.tsx` — '
-          + '`detectParentField`) and `buildForest` makes every record a root at depth 0. The result is '
-          + 'a complete, correct-looking table with an expand slot that never opens, while authoring '
-          + 'reports success. Declare `tree.parentField`, or add a self-referencing field to the object.',
+          'A `tree` view with no resolvable parent pointer renders flat, every record at depth 0: '
+          + '`parentField` is undeclared and `detectParentField` (objectui `ObjectTree.tsx`) finds no '
+          + 'self-reference',
         fix: "tree: { parentField: '<self_lookup_field>' }",
       });
     }
@@ -962,14 +951,7 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
         path: 'rowColor.colors',
         message:
           `A \`${type}\` view whose \`rowColor\` binds \`${field}\` and declares no \`colors\` map never `
-          + 'colours a row: the grid\'s row-className resolver returns before it reads a record (objectui '
-          + '`useRowColor.ts` — `if (!config?.field || !config.colors) return undefined`), so every row keeps '
-          + 'the default background while parsing and publishing report success. An empty `colors: {}` is the '
-          + 'same dead shape spelled out — it passes that guard and then matches no value. The map is what '
-          + 'does the colouring; the field only says which value to look up. Each value is a colour NAME from '
-          + 'the resolver\'s own vocabulary (`red`, `blue`, `slate`, …) or a complete Tailwind background class '
-          + '(`bg-red-200`) — a hex parses, publishes and silences this very rule while still colouring '
-          + `nothing (\`${VIEW_ROW_COLOR_UNRESOLVABLE_VALUE}\`).`,
+          + 'colours a row (`useRowColor.ts` — `if (!config?.field || !config.colors) return undefined`)',
         // ⛔ The prescription must name a spelling that RESOLVES. It used to
         // read `'<hex_or_token>'`, which put the one spelling the renderer
         // cannot resolve in first position: the gate fired, handed the author a
@@ -990,16 +972,12 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
           rule: VIEW_ROW_COLOR_UNRESOLVABLE_VALUE,
           severity: 'warning',
           path: 'rowColor.colors',
+          // The offending entries close the sentence: the list is data, as long as
+          // the author's map, and the fixed text before it stays one short line.
           message:
-            `A \`${type}\` view whose \`rowColor\` binds \`${field}\` declares ${dead.length} colour `
-            + `value${dead.length === 1 ? '' : 's'} the renderer resolves to nothing: ${dead.join(', ')}. `
-            + 'objectui `useRowColor.ts` — `colorToClass` — hands a `bg-`-prefixed literal through untouched '
-            + 'and otherwise looks the lower-cased, trimmed value up in its own closed vocabulary of colour '
-            + 'NAMES, returning `undefined` for everything else; Tailwind v4 has no runtime, so no class can '
-            + 'be fabricated from a hex. A map like this CLEARS the `!config.colors` guard, so '
-            + `\`${VIEW_ROW_COLOR_WITHOUT_COLORS}\` goes quiet, and every row still keeps its default `
-            + 'background while parsing and publishing report success. Write a colour name (`red`, `blue`, '
-            + '`slate`, …) or a complete Tailwind background class (`bg-red-200`).',
+            `A \`${type}\` view's \`rowColor\` on \`${field}\` has ${dead.length} colour `
+            + `value${dead.length === 1 ? '' : 's'} the renderer resolves to nothing (\`useRowColor.ts\` — `
+            + `\`colorToClass\`), which silences \`${VIEW_ROW_COLOR_WITHOUT_COLORS}\`: ${dead.join(', ')}`,
           fix: `rowColor: { field: '${field}', colors: { '<field_value>': 'red' } }`,
         });
       }
@@ -1053,13 +1031,8 @@ export function checkWebhookCompleteness(webhook: unknown): CompletenessFinding[
     severity: 'error',
     path: 'triggers',
     message:
-      'A webhook with no `triggers` never fires on any path. The auto-enqueuer drops it while '
-      + 'building its subscription cache (`auto-enqueuer.ts` — `if (triggers.size === 0) … return '
-      + 'null`), and there is no manual fire path to reach it either: `webhook.zod.ts` '
-      + 'records that the `api` trigger was removed because "no manual fire path exists — the only '
-      + 'webhook HTTP surface re-queues already-failed deliveries". The webhook materializes into '
-      + '`sys_webhook`, looks armed in Setup, and delivers nothing. To disable a webhook use '
-      + '`isActive: false`; an empty `triggers` is not an off switch, just a dead one.',
+      'A webhook with no `triggers` never fires: `auto-enqueuer.ts` drops it (`if (triggers.size '
+      + '=== 0) … return null`) and no manual fire path exists; to turn it off, use `isActive: false`',
     fix: "triggers: ['create', 'update']",
   }];
 }

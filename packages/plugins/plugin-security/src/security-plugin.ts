@@ -7359,6 +7359,10 @@ export class SecurityPlugin implements Plugin {
    *       driver.
    *   (c) admin-authored rows (`managed_by` user/∅/admin) are untouched — the
    *       admin fully owns those (incl. a delegate's rows in their own subtree).
+   *   (d) [#22360] ONE carve-out from (b): an `update` of a PACKAGE-provided
+   *       `sys_position` row whose patch touches only ROW STATE passes — see
+   *       {@link SecurityPlugin.PACKAGE_POSITION_ROW_STATE_COLUMNS}. Platform
+   *       rows and `sys_capability` get no carve-out.
    * Fails CLOSED and never depends on the caller's grants, so a superuser with
    * modifyAllRecords cannot delete a platform position either.
    */
@@ -7395,17 +7399,27 @@ export class SecurityPlugin implements Plugin {
 
     if (!this.ql) return;
 
+    // (d) Whether this write is the row-state-only update the carve-out admits.
+    const rowStateOnly = SecurityPlugin.isPackagePositionRowStatePatch(opCtx);
+
     const targetId = this.extractSingleId(opCtx);
     if (targetId == null) {
       // Multi-row / filter write with no single id. Deny ONLY if a managed row
       // actually falls within the write's own filter — so a bulk edit that
       // targets only admin-authored rows still succeeds (no over-broad block). A
       // whole-table write (no filter) matches every managed row, so it is denied.
+      //
+      // (d) A row-state-only patch asks only about the rows the carve-out does
+      // not cover: package positions in the filter no longer refuse it, a
+      // platform position in the filter still does.
+      const guardedValues = rowStateOnly
+        ? managedValues.filter((v) => !SecurityPlugin.PACKAGE_POSITION_PROVENANCE.has(v))
+        : managedValues;
       const writeWhere = opCtx?.options?.where;
       const managedWhere =
         writeWhere && typeof writeWhere === 'object'
-          ? { $and: [writeWhere, { managed_by: { $in: managedValues } }] }
-          : { managed_by: { $in: managedValues } };
+          ? { $and: [writeWhere, { managed_by: { $in: guardedValues } }] }
+          : { managed_by: { $in: guardedValues } };
       // [#7505] No `.catch(() => null)` — see the sibling gate: a swallowed
       // fault made this asset guard answer "nothing managed matched" and admit
       // the write. Fail-closed: propagate.
@@ -7427,6 +7441,8 @@ export class SecurityPlugin implements Plugin {
       ? String((existing as Record<string, unknown>).managed_by ?? '')
       : '';
     const ownerLabel = spec.managed[existingManagedBy];
+    // (d) The carve-out: a row-state-only patch of a package-provided position.
+    if (existing && rowStateOnly && SecurityPlugin.PACKAGE_POSITION_PROVENANCE.has(existingManagedBy)) return;
     if (existing && ownerLabel) {
       const row = existing as Record<string, unknown>;
       const source = ownerLabel === 'the platform' ? 'platform definition' : 'application package';
@@ -7437,6 +7453,57 @@ export class SecurityPlugin implements Plugin {
         { operation: op, object: opCtx.object, recordId: targetId, managedBy: existingManagedBy },
       );
     }
+  }
+
+  /**
+   * [#22360] The ROW-STATE columns of `sys_position`: the one named allowlist
+   * the carve-out (d) of {@link SecurityPlugin.assertSystemRowWriteGate} admits
+   * on a package-provided position.
+   *
+   * A package position row is locked the way a packaged permission set is.
+   * `permission-set-projection.ts`'s write door (#4669) passes a bare
+   * `{ active }` patch on a packaged set straight through: switching a packaged
+   * set off is not a customization of it. Under #15196's Q2 = A,
+   * `sys_position.active` stays row-authoritative, so switching a package's
+   * position off — or making it the default for new users — is the operator's
+   * lever on the row, not an edit of the package's definition. Neither column
+   * is a `PositionSchema` key.
+   *
+   * Everything else stays refused, with the gate's own code and message:
+   * a definition column (`name`, `label`, `description`, `delegatable`), any
+   * column not named here, `delete`, and `transfer` / `restore` / `purge`.
+   * `delegatable` is deliberately NOT row state: it is declared on the position
+   * definition, and the triage ruling locks it ahead of #15196's S8b reader
+   * switch. ⛔ Widening this set is a ruling, not an edit.
+   */
+  private static readonly PACKAGE_POSITION_ROW_STATE_COLUMNS: ReadonlySet<string> = new Set(['active', 'is_default']);
+
+  /**
+   * [#22360] The `sys_position` provenance values carve-out (d) applies to:
+   * `package`, and `config`, its legacy pre-A4 spelling, which
+   * `SYSTEM_ROW_PROVENANCE` guards as the same owner ("an application
+   * package") — the two vocabularies are kept in lockstep there, so a legacy
+   * row the boot normalizer has not healed yet answers as its canonical twin.
+   * ⛔ Never `platform` / `system`: switching off a built-in such as
+   * `everyone` is not an operator lever.
+   */
+  private static readonly PACKAGE_POSITION_PROVENANCE: ReadonlySet<string> = new Set(['package', 'config']);
+
+  /**
+   * [#22360] Is this the write carve-out (d) admits: an `update` of
+   * `sys_position` whose patch is ONE object naming at least one row-state
+   * column and nothing else? `id` is the row's identifier (the single-id
+   * branch reads it from the payload), not a column the patch changes. An
+   * array payload is never admitted here: its rows are judged by the gate
+   * exactly as before.
+   */
+  private static isPackagePositionRowStatePatch(opCtx: any): boolean {
+    if (opCtx?.object !== 'sys_position' || opCtx?.operation !== 'update') return false;
+    const patch = opCtx.data;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return false;
+    const columns = Object.keys(patch).filter((k) => k !== 'id');
+    return columns.length > 0
+      && columns.every((k) => SecurityPlugin.PACKAGE_POSITION_ROW_STATE_COLUMNS.has(k));
   }
 
   /**

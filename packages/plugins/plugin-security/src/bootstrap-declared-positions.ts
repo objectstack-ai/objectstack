@@ -25,6 +25,14 @@
  * over the driver's compatibility arm and leaves the strict equality alone.
  * `single` posture keeps exactly one organization-less pass. Doctrine, and the
  * loud guard that stands in place of a reap: `per-organization-catalog.ts`.
+ *
+ * [#22360] PROVENANCE: the row of a position a code package holds is stamped
+ * `managed_by: 'package'` — on insert, and on an existing row that lacks a
+ * managed value — so the system-row write gate refuses an admin-door edit of
+ * its definition, or a delete of it, as the metadata door already refuses one
+ * (ADR-0131 D6). Its row state (`active`, `is_default`) stays switchable, as a
+ * packaged permission set's does — carve-out (d) of the gate in
+ * `security-plugin.ts`. See {@link packageProvenanceStamp}.
  */
 
 import { createSecurityCatalogReader } from '@objectstack/core';
@@ -140,20 +148,119 @@ function isSeededHere(item: { name?: unknown } | undefined): boolean {
  * [#8378] No `{ name, content }` unwrap: the catalog entry's `definition` IS the
  * authoring document — see `bootstrap-declared-permissions.ts`. It is the
  * reader's own object, shared with every other reader, and is only read here.
+ *
+ * [#22360] Each definition comes back with whether a code package holds its
+ * name ({@link packageHoldsName}), asked here, before the pass writes
+ * anything, so a registry that cannot answer fails the pass the way an
+ * unreadable catalog does instead of failing it half-way through.
  */
-async function readDeclaredPositions(engine: any, metadataService: any): Promise<any[]> {
+async function readDeclaredPositions(
+  engine: any,
+  metadataService: any,
+): Promise<Array<{ definition: any; packageHeld: boolean }>> {
   const catalog = createSecurityCatalogReader({ registry: engine?.registry, metadata: metadataService });
   const listed = await catalog.list('position');
-  return listed.filter(isSeededHere).map((entry) => entry.definition);
+  return listed.filter(isSeededHere).map((entry) => ({
+    definition: entry.definition,
+    packageHeld: packageHoldsName(engine?.registry, entry),
+  }));
 }
 
 /**
  * The columns a re-seed writes. Position IDENTITY + display only: the record
- * side (bindings, `active`, `is_default`, `delegatable`, `managed_by`) belongs
- * to the runtime/admin and is never projected from the declaration (#2909 T2).
+ * side (bindings, `active`, `is_default`, `delegatable`) belongs to the
+ * runtime and is never projected from the declaration (#2909 T2).
+ *
+ * `managed_by` is not projected either — a position declaration has no such
+ * key. It is written separately, by {@link packageProvenanceStamp}, and only
+ * to record WHO holds the name.
  */
 function positionRowFields(r: any): { label: any; description: any } {
   return { label: r.label ?? r.name, description: r.description ?? null };
+}
+
+/**
+ * The provenance value this seeder stamps on the row of a position a package
+ * holds — the value the permission-set and capability seeders stamp on their
+ * declared rows, and one the system-row write gate refuses an admin-door
+ * update or delete of (`SYSTEM_ROW_PROVENANCE`, security-plugin.ts).
+ */
+const PACKAGE_PROVENANCE = 'package';
+
+/**
+ * The `managed_by` values the system-row write gate already treats as managed
+ * on `sys_position` — `SYSTEM_ROW_PROVENANCE` in security-plugin.ts, canonical
+ * and legacy spellings both. Keep the two in lockstep (see the same note in
+ * `normalize-managed-by.ts`). A row carrying one of these is never re-stamped:
+ * `platform`/`system` are the built-in seeder's, and a legacy `config` row is
+ * already guarded and is healed to `package` by the boot normalizer.
+ */
+const GATE_MANAGED_VALUES: ReadonlySet<string> = new Set(['platform', 'package', 'system', 'config']);
+
+/**
+ * Does a code package hold this position name?
+ *
+ * Asked of the engine registry's artifact lookup (`getArtifactItem`), which
+ * answers only an item a code package registered — an environment definition
+ * saved through the metadata door carries no package there. It is the same
+ * lookup the metadata door refuses a save of the name from (`403
+ * NOT_OVERRIDABLE`), so the data door now refuses what the metadata door
+ * refuses, and no more: a position the environment authored keeps an
+ * unmanaged row, editable as before.
+ *
+ * A registry without that lookup is asked the way the metadata door asks one
+ * (`lookupArtifactItem`, metadata-protocol): the definition must name a
+ * package, and not the `sys_metadata` rehydration sentinel.
+ */
+function packageHoldsName(registry: any, entry: { name: string; packageId?: string }): boolean {
+  if (typeof registry?.getArtifactItem === 'function') {
+    return registry.getArtifactItem('position', entry.name) !== undefined;
+  }
+  return typeof entry.packageId === 'string' && entry.packageId !== '' && entry.packageId !== 'sys_metadata';
+}
+
+/**
+ * [#22360] The provenance a pass writes on a declared position's row: the
+ * `package` stamp when a package holds the name and the row does not already
+ * carry a managed value, nothing otherwise.
+ *
+ * ## Why the row needs it
+ *
+ * Before this, a declared position's row carried the object default
+ * (`admin`), so the system-row write gate did not protect it: a data-door edit
+ * of its label answered `200`, and the next boot wrote the declaration's label
+ * back over it with no message. The metadata door refused the same edit
+ * (`403 NOT_OVERRIDABLE`). ADR-0131 D6: no door edits a managed definition;
+ * D3: managed items are read-only and clonable. With the stamp, the data door
+ * refuses a definition edit or a delete through the gate that already protects
+ * the six built-ins; a row-state-only patch passes its carve-out (d).
+ *
+ * ## Why this is not a #2909 T2 projection
+ *
+ * T2 locks that a re-seed never writes the record-authoritative columns from
+ * the declaration (bindings, `delegatable`, `active`, `is_default`). The stamp
+ * is not declaration content — a position declaration has no `managed_by` —
+ * and it overwrites no admin edit: `managed_by` is `readonly`, and the gate
+ * refuses an admin-door payload naming `platform`/`package`, so the `admin`
+ * on a declared row was only ever the object default. It records which door
+ * owns the name, the fact the metadata door already reads.
+ *
+ * ## The existing row of an upgraded deployment
+ *
+ * A declared row written before this carries `admin`. The pass corrects the
+ * stamp in place — `managed_by` and nothing else beyond the label and
+ * description refresh it always made — so a definition edit is refused there
+ * too, and the columns an administrator set before the upgrade stay as they
+ * are.
+ * ⚠️ That row is matched by NAME, as the label refresh always matched it: a
+ * Setup-created position whose name a package declares later is taken over by
+ * the package here, and from then on its definition is refused at the data
+ * door like any other package position's.
+ */
+function packageProvenanceStamp(packageHeld: boolean, existing?: any): { managed_by?: string } {
+  if (!packageHeld) return {};
+  if (existing && GATE_MANAGED_VALUES.has(String(existing.managed_by ?? ''))) return {};
+  return { managed_by: PACKAGE_PROVENANCE };
 }
 
 /** True when the stored row differs from what a re-seed would write (#10946). */
@@ -170,8 +277,10 @@ export async function bootstrapDeclaredPositions(
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
     return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
   }
-  const positions = await readDeclaredPositions(ql, metadataService);
-  if (positions.length === 0) return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
+  const declared = await readDeclaredPositions(ql, metadataService);
+  if (declared.length === 0) return { seeded: 0, updated: 0, unchanged: 0, unreadable: 0 };
+  const positions = declared.map((d) => d.definition);
+  const packageHeld = new Map(declared.map((d) => [String(d.definition?.name), d.packageHeld]));
 
   // [#10946] ONE existence read for the whole declaration, before the loop.
   // See `seed-name-lookup.ts` for why a read that cannot ANSWER must never be
@@ -194,6 +303,9 @@ export async function bootstrapDeclaredPositions(
   let updated = 0;
   let unchanged = 0;
   let unreadable = 0;
+  // [#22360] Existing rows whose provenance this pass corrected to `package` —
+  // counted inside `updated` as well, and named in the pass's info line.
+  let restamped = 0;
   // One log per pass, not per refused row: a legacy platform-wide unique index
   // refuses EVERY declared position, and a line each would bury the remedy.
   const refusals = createSeedWriteRefusals();
@@ -212,6 +324,7 @@ export async function bootstrapDeclaredPositions(
     // no-op the per-organization catalog exists to prevent.
     if (lookup.status === 'absent' && lookup.organizationLessResidue) residue.push(String(r.name));
     const existing = lookup.status === 'present' ? lookup.row : undefined;
+    const heldByPackage = packageHeld.get(String(r.name)) === true;
     if (existing?.id) {
       // [#10946] Only write when the stored row actually differs. An
       // unconditional UPDATE here cost two remote round trips per position on
@@ -221,16 +334,24 @@ export async function bootstrapDeclaredPositions(
       // description drifted from the declaration still gets its UPDATE. Only
       // the display fields are compared because only the display fields are
       // written — the record-authoritative columns (`active`, `is_default`,
-      // `delegatable`, `managed_by`) are deliberately never touched by a
-      // re-seed (#2909 T2), so they can neither cause nor suppress one.
-      if (!positionRecordDiffers(existing, fields)) {
+      // `delegatable`) are deliberately never touched by a re-seed (#2909 T2),
+      // so they can neither cause nor suppress one.
+      //
+      // [#22360] The one other column a pass writes is the provenance stamp,
+      // and only where it is missing (`packageProvenanceStamp`): an upgraded
+      // deployment's declared row, stamped `admin` by the object default.
+      const display = positionRecordDiffers(existing, fields) ? fields : {};
+      const stamp = packageProvenanceStamp(heldByPackage, existing);
+      if (Object.keys(display).length === 0 && Object.keys(stamp).length === 0) {
         unchanged += 1;
-      } else if (await tryUpdate(ql, 'sys_position', { id: existing.id, ...fields }, organizationId, refusals)) {
+      } else if (await tryUpdate(ql, 'sys_position', { id: existing.id, ...display, ...stamp }, organizationId, refusals)) {
         updated += 1;
+        if (stamp.managed_by) restamped += 1;
       }
     } else {
       const row = {
         id: genId('position'), name: r.name, ...fields, active: true, is_default: false,
+        ...packageProvenanceStamp(heldByPackage),
       };
       const created = await tryInsert(ql, 'sys_position', row, organizationId, refusals);
       if (created) {
@@ -260,6 +381,8 @@ export async function bootstrapDeclaredPositions(
   }
   options.logger?.info?.('[security] declared positions seeded into sys_position', {
     seeded, updated, unchanged, unreadable, total: positions.length,
+    // Present only when a row was corrected, so a routine boot's line is unchanged.
+    ...(restamped > 0 ? { restampedPackageProvenance: restamped } : {}),
     ...(organizationId ? { organization: organizationId } : {}),
   });
   return { seeded, updated, unchanged, unreadable };
