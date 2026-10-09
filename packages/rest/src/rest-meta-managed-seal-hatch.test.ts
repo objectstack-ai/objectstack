@@ -151,7 +151,9 @@ describe('[ADR-0131 D6] the hatch opens no removal of a managed item at the REST
 });
 
 describe('[#22411] the removed spelling OBJECTSTACK_METADATA_WRITABLE is not read: the hatch is shut at the REST door', () => {
-    const HATCH_TYPES = ['flow', 'object', 'field', 'permission', 'position'] as const;
+    // The types this registry lists (`field` is named in the variable but is no registered type here:
+    // its items live inside an object, so the listing carries no entry for it).
+    const HATCH_TYPES = ['flow', 'object', 'permission', 'position'] as const;
     const SHUT = { allowOrgOverride: false, overrideSource: 'registry' };
 
     for (const environmentId of [undefined, 'env_1']) {
