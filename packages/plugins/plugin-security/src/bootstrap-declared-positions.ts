@@ -28,9 +28,11 @@
  *
  * [#22360] PROVENANCE: the row of a position a code package holds is stamped
  * `managed_by: 'package'` — on insert, and on an existing row that lacks a
- * managed value — so the system-row write gate refuses an admin-door edit or
- * delete of it, as the metadata door already refuses one (ADR-0131 D6). See
- * {@link packageProvenanceStamp}.
+ * managed value — so the system-row write gate refuses an admin-door edit of
+ * its definition, or a delete of it, as the metadata door already refuses one
+ * (ADR-0131 D6). Its row state (`active`, `is_default`) stays switchable, as a
+ * packaged permission set's does — carve-out (d) of the gate in
+ * `security-plugin.ts`. See {@link packageProvenanceStamp}.
  */
 
 import { createSecurityCatalogReader } from '@objectstack/core';
@@ -230,7 +232,8 @@ function packageHoldsName(registry: any, entry: { name: string; packageId?: stri
  * back over it with no message. The metadata door refused the same edit
  * (`403 NOT_OVERRIDABLE`). ADR-0131 D6: no door edits a managed definition;
  * D3: managed items are read-only and clonable. With the stamp, the data door
- * refuses through the gate that already protects the six built-ins.
+ * refuses a definition edit or a delete through the gate that already protects
+ * the six built-ins; a row-state-only patch passes its carve-out (d).
  *
  * ## Why this is not a #2909 T2 projection
  *
@@ -246,12 +249,13 @@ function packageHoldsName(registry: any, entry: { name: string; packageId?: stri
  *
  * A declared row written before this carries `admin`. The pass corrects the
  * stamp in place — `managed_by` and nothing else beyond the label and
- * description refresh it always made — so the edit is refused there too, and
- * the columns an administrator set before the upgrade stay as they are.
+ * description refresh it always made — so a definition edit is refused there
+ * too, and the columns an administrator set before the upgrade stay as they
+ * are.
  * ⚠️ That row is matched by NAME, as the label refresh always matched it: a
  * Setup-created position whose name a package declares later is taken over by
- * the package here, and from then on refused at the data door like any other
- * package position.
+ * the package here, and from then on its definition is refused at the data
+ * door like any other package position's.
  */
 function packageProvenanceStamp(packageHeld: boolean, existing?: any): { managed_by?: string } {
   if (!packageHeld) return {};
