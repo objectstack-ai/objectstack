@@ -111,7 +111,7 @@ record, and issue a **short-lived signed URL**:
 
 | Code | Status | When |
 | --- | --- | --- |
-| `AUTH_REQUIRED` | 401 | Anonymous download of an attachments-scope file, or a credential the organization wall refuses (see below) |
+| `AUTH_REQUIRED` | 401 | Anonymous download of any file not marked `acl: 'public_read'` (see below), or a credential the organization wall refuses |
 | `ATTACHMENT_DOWNLOAD_DENIED` | 403 | The caller is neither the file's owner nor able to read any record it is attached to |
 
 **The 401 is the generic "unauthenticated" answer, and it has always covered
@@ -132,10 +132,15 @@ anonymous case does: the response is byte-identical to sending no credential at
 all, and the reason is written to the server log instead. The check itself lives
 in the shared API-key admission path, not in the attachments gate.
 
-The gate is scoped to attachments files on purpose: **non-attachments files**
-(avatars, `Field.image` thumbnails, org logos) keep their stable, anonymous
-capability URL, because they are embedded in `<img src>` which cannot carry a
-bearer token. Their discovery is already gated by access to the owning record.
+The parent-record check applies to files that have a parent: attachments-scope
+files, and files a record's `file` / `image` field owns, which are judged against
+that one record (`FILE_DOWNLOAD_DENIED`, 403, when it cannot be read). A file with
+**neither** — an upload no record has claimed, such as an avatar or an
+organization logo stored as a URL — has no parent to check, so its download
+requires only a signed-in caller (`AUTH_REQUIRED`, 401, otherwise). A browser's
+`<img src>` sends the session cookie set at sign-in, so a signed-in page keeps
+rendering these files. Only a file marked `acl: 'public_read'` is served to a
+caller with no session: mark a file that way when it must render before sign-in.
 
 The upload entry points (presigned / chunked) likewise require a session when
 an auth service is wired, and stamp `owner_id` on the new `sys_file`.
@@ -174,7 +179,7 @@ can be shared across records). Reclamation is handled by the platform LifecycleS
 | Attach (create) | can edit the parent record | `ATTACHMENT_PARENT_ACCESS` (403) |
 | List / read | inherits parent read visibility | *(filtered out)* |
 | Delete | uploader or parent editor (+ RBAC delete grant) | `ATTACHMENT_DELETE_DENIED` (403); `PERMISSION_DENIED` (403) when the parent is not readable or no delete grant is held |
-| Download | session + owner-or-parent-read (attachments scope) | `AUTH_REQUIRED` (401) / `ATTACHMENT_DOWNLOAD_DENIED` (403) |
+| Download | session + owner-or-parent-read (attachments scope); session only for a file with no parent; none for `acl: 'public_read'` | `AUTH_REQUIRED` (401) / `ATTACHMENT_DOWNLOAD_DENIED` (403) |
 
 ## See also
 

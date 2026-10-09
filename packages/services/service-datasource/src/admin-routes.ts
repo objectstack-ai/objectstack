@@ -32,7 +32,7 @@ import type { ErrorCode } from '@objectstack/spec/api';
 // message reports that erasure hiding, on the exact member this guard reads.
 import type { IAuthService, IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError } from '@objectstack/types';
+import { inProcessSessionReadInput, sendOk, sendError } from '@objectstack/types';
 import { DRIVER_CATALOG } from './driver-catalog.js';
 
 /**
@@ -209,7 +209,7 @@ function buildGetSession(ctx: PluginContext): ((headers: Headers) => Promise<unk
     // reads that as "no session". `getApi()` is the accessor to prefer;
     // `api` is its legacy twin, kept because a provider may still mount it.
     const api = service.api ?? (await service.getApi?.());
-    return api?.getSession?.({ headers });
+    return api?.getSession?.(inProcessSessionReadInput(headers));
   };
 }
 

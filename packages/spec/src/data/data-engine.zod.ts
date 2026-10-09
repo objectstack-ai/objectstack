@@ -64,11 +64,13 @@ export const BaseEngineOptionsSchema = lazySchema(() => z.object({
    * `ExecutionContextSchema` gives `positions`/`permissions`/`isSystem`
    * parse-time defaults, which makes them REQUIRED in its inferred output
    * type. On a caller-supplied option that asserts something untrue: that
-   * every data-engine context carries a principal. Callers routinely pass a
-   * slice — `{ isSystem: true }` for a system read — and a flow run that
-   * resolves no identity passes provenance alone (`{ flowRunId }`, #3712), a
-   * context deliberately carrying no principal at all. `.partial()` states the
-   * real contract: supply what you have, the engine reads what it needs.
+   * every data-engine context carries a principal. A system context does not:
+   * callers routinely pass a slice, `{ isSystem: true }` for a system read.
+   * Every other context must carry the caller's principal. The security plugin
+   * refuses a non-system context with no user id, no position and no named
+   * permission set (`{ flowRunId }` alone included) with `403 PERMISSION_DENIED`
+   * (ADR-0096 D5). `.partial()` states the real contract: supply what you have,
+   * the engine reads what it needs.
    */
   context: ExecutionContextSchema.partial().optional(),
 }));

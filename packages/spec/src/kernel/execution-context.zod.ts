@@ -331,13 +331,16 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * its own target record, which `isSystem` cannot express for a
    * `runAs:'user'` run without elevating it.
    *
-   * It may be the ONLY populated field of the envelope. A run that resolves no
-   * principal (a schedule-triggered `runAs:'user'` run) passes exactly
-   * `{ flowRunId }`: every principal gate keys on `isSystem`/`userId`/
-   * `positions`/`permissions`, so such a context authorizes identically to no
-   * context at all, and the run keeps the #1888 unscoped posture it already had
-   * while becoming attributable (#3712). Surfaced to hooks as
-   * `HookContext.provenance`, deliberately not folded into `session`.
+   * It is never a principal, so a context carrying `{ flowRunId }` alone is
+   * not admitted: every principal gate keys on `isSystem`/`userId`/`positions`/
+   * `permissions`, and a non-system context with none of the principal fields
+   * is refused with `403 PERMISSION_DENIED` (ADR-0096 D5). The automation
+   * engine builds no such context. A data node of a run that resolves no
+   * principal (a schedule-triggered `runAs:'user'` run) is refused with
+   * `AUTOMATION_UNSCOPED_RUN_DATA_ACCESS` before the data engine is called, and
+   * a `runAs:'system'` run passes `isSystem: true` with this id beside it.
+   * Surfaced to hooks as `HookContext.provenance`, deliberately not folded into
+   * `session`.
    */
   flowRunId: z.string().optional(),
 
@@ -496,9 +499,12 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
  * caller rather than out of a parse — `options.context` and everything the
  * engine threads it into.
  *
- * Some callers have no principal to state at all: a system read passes
- * `{ isSystem: true }`, and a flow run with no resolvable identity passes
- * provenance alone (`{ flowRunId }`, #3712).
+ * Any subset is legal input, but not every subset is admitted. A non-system
+ * context that carries no principal (no user id, no position, no named
+ * permission set) is refused by the security plugin with `403 PERMISSION_DENIED`
+ * (ADR-0096 D5); a run id alone (`{ flowRunId }`) is provenance, not a
+ * principal, and is refused the same way. A caller acting for no user passes the
+ * explicit system opt-in: a system read passes `{ isSystem: true }`.
  *
  * Spelled `ExecutionContextInput` until protocol 17; ADR-0122 phase 2 moved the
  * author state onto the bare name and retired that synonym.

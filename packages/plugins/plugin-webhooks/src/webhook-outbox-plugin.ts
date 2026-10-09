@@ -8,6 +8,7 @@ import type {
     IRealtimeService,
 } from '@objectstack/spec/contracts';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
+import { inProcessSessionReadInput } from '@objectstack/types';
 import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 import { SysWebhook } from './sys-webhook.object.js';
 import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
@@ -479,7 +480,7 @@ export class WebhookOutboxPlugin implements Plugin {
                 api = await authService.getApi();
             }
             if (!api?.getSession) return undefined;
-            return await api.getSession({ headers: c.req.raw.headers });
+            return await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
         } catch {
             return undefined;
         }
