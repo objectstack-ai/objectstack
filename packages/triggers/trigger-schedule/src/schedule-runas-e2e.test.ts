@@ -119,7 +119,7 @@ describe('schedule trigger -> engine: user-less runAs fail-open via the REAL cro
     const w = runAsWarns(warns);
     expect(w).toHaveLength(1);
     expect(w[0]).toContain("flow 'nightly_sweep'");
-    expect(w[0]).toMatch(/UNSCOPED/);
+    expect(w[0]).toMatch(/refused by the security plugin where one is composed, unscoped where none is/);
     expect(w[0]).toMatch(/runAs:'system'/);
   });
 

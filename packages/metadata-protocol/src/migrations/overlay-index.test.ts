@@ -28,9 +28,8 @@ import type { IndexExec } from './partial-index-probe.js';
  * all — silently, since both `catch` blocks were empty.
  *
  * Uses Node's built-in `node:sqlite` rather than `better-sqlite3` (which the
- * driver packages use), for the reason the sibling
- * `view-definition-active-index.test.ts` gives: this package needs no SQL
- * dependency of its own, and the built-in gives the same real SQLite — real
+ * driver packages use), for the reason the sibling migration suites share:
+ * this package needs no SQL dependency of its own, and the built-in gives the same real SQLite — real
  * partial indexes, real UNIQUE enforcement, real NULL-distinctness — for free.
  */
 describe('sys_metadata overlay uniqueness (#6418)', () => {
@@ -537,8 +536,7 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
 
     /**
      * The scope caution, as a test. A full UNIQUE here would reject the ACTIVE
-     * + DRAFT coexistence this table is built on, which is the key difference
-     * from `sys_view_definition`.
+     * + DRAFT coexistence this table is built on.
      */
     it('the dialect fallback is NOT unique, and never drops anything first', () => {
         const sql = buildOverlayFallbackIndexSql(OVERLAY_INDEX_NAMES.active);

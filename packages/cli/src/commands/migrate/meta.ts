@@ -1167,8 +1167,9 @@ export default class MigrateMeta extends Command {
       // call runs the D2 pass inside the config module whenever the schema
       // accepts its input, so `config` is the raw source only because the
       // load starts it from the argument that call was given (`loadConfig`,
-      // `authoredSource`). That holds for a one-package stack; a composed
-      // project's package bodies are assembled from converted stacks.
+      // `authoredSource`). A composed project's inputs are produced again from
+      // their authored arguments with that pass skipped before they are
+      // composed, so its package bodies are raw source too (#22256).
       const normalized = normalizeStackInput(config as Record<string, unknown>, { convert: false });
 
       if (!flags.json) printStep(`Replaying chain: protocol ${fromMajor} → ${toMajor}…`);

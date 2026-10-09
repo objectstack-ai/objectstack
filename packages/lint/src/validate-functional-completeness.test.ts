@@ -15,7 +15,10 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { FUNCTIONAL_COMPLETENESS_RULES } from '@objectstack/spec/kernel';
+
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
 import { validateFunctionalCompleteness } from './validate-functional-completeness.js';
 
 const bareSummary = { type: 'summary' };
@@ -424,4 +427,44 @@ describe('#14320 acceptance — object-nested `list` / `listViews` reach `valida
       expect([...errors, ...advisories].filter((f) => BINDING_RULES.includes(f.rule))).toEqual([]);
     });
   }
+});
+
+// [#22161] Each completeness finding prints ONE verdict sentence and one fix;
+// the reasoning the verdict used to carry is the rule id's `os explain` entry.
+// The predicate's own suite pins the short verdicts. This pins the other half:
+// every id the predicate can emit has an explanation, and each explanation
+// still names what the verdict stopped saying — the renderer screens and
+// required keys per view type, the exemptions, the off switch.
+describe('every completeness rule id has an `os explain` entry carrying what its verdict no longer does', () => {
+  const MOVED: Record<string, readonly string[]> = {
+    'field/summary-without-operations': ['engine.ts', 'summaryOperations', 'ADR-0078'],
+    'field/formula-without-expression': ['engine.ts', 'expression'],
+    'field/relationship-without-reference': ['$expand', 'never resolve', '`user`', 'sys_user'],
+    'field/choice-without-options': ['record-validator.ts', '`picklist`', '`multiselect`', '`checkboxes`'],
+    'view/layout-without-binding': [
+      'Calendar configuration required', 'ObjectCalendar.tsx', 'calendar.startDateField', 'ADR-0079',
+      'Gantt configuration required', 'ObjectGantt.tsx',
+      'gantt.startDateField', 'gantt.endDateField', 'gantt.titleField', 'GanttConfigSchema',
+      'Timeline date axis required', 'ObjectTimeline.tsx',
+      'timeline.startDateField', 'timeline.titleField', 'TimelineConfigSchema',
+      'Map configuration required', 'ObjectMap.tsx', 'hasCoordinateBinding',
+      'map.locationField', 'map.latitudeField', 'map.longitudeField', 'ListMapConfigSchema',
+      'falls back to literal default field names', 'ListView.tsx',
+    ],
+    'view/tree-without-parent-field': ['ObjectTree.tsx', 'detectParentField', 'buildForest', 'depth 0', 'tree.parentField'],
+    'view/row-color-without-colors': ['useRowColor.ts', 'colors: {}', 'bg-red-200', 'view/row-color-unresolvable-value'],
+    'view/row-color-unresolvable-value': ['colorToClass', 'Tailwind v4', 'view/row-color-without-colors', 'bg-red-200'],
+    'webhook/without-triggers': ['auto-enqueuer.ts', 'webhook.zod.ts', 'no manual fire path exists', 'sys_webhook', 'isActive'],
+  };
+
+  it('covers exactly the ids the predicate can emit', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...FUNCTIONAL_COMPLETENESS_RULES].sort());
+  });
+
+  it.each([...FUNCTIONAL_COMPLETENESS_RULES])('%s', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
 });

@@ -1532,14 +1532,13 @@ The report carries a second section, `runtimeIndexPreflight`, answering a
 different question: **will the next server start be able to finish tightening
 the platform's own unique indexes?**
 
-Three migrations run at `kernel:ready` on a serving boot (`os dev`, `os serve`,
+Two migrations run at `kernel:ready` on a serving boot (`os dev`, `os serve`,
 `os start`) and replace a declared UNIQUE index with the NULL-safe — and
-sometimes active-rows-only — form it was always meant to have:
+sometimes state-scoped — form it was always meant to have:
 
 | Table | Index | What the tightening adds |
 | :--- | :--- | :--- |
 | `sys_metadata` | overlay `active` and `draft` | package-less overlays stop being NULL-distinct |
-| `sys_view_definition` | `idx_sys_view_def_active` | shared and environment-level views stop being NULL-distinct, and only active rows are constrained |
 | `sys_setting` | the declared row identity | tenant- and global-scope rows stop being NULL-distinct on `user_id` |
 
 Each is a **tightening**, so rows an installation already holds can block it.

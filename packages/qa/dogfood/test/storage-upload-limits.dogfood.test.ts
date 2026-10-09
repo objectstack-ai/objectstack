@@ -65,7 +65,7 @@ describe('[#22283] the storage Limits settings are enforced at the upload doors 
     expect(over.status, 'a declared size one byte over 100 MB').toBe(413);
     const refusal = (await over.json()) as any;
     expect(refusal.success).toBe(false);
-    expect(refusal.error.code).toBe('VALIDATION_ERROR');
+    expect(refusal.error.code).toBe('PAYLOAD_TOO_LARGE');
 
     const ok = await presign(100 * MIB);
     expect(ok.status, 'exactly 100 MB').toBe(200);
@@ -88,7 +88,7 @@ describe('[#22283] the storage Limits settings are enforced at the upload doors 
       over = await presign(MIB + 1);
     }
     expect(over.status, 'a declared size one byte over the saved 1 MB').toBe(413);
-    expect(((await over.json()) as any).error.code).toBe('VALIDATION_ERROR');
+    expect(((await over.json()) as any).error.code).toBe('PAYLOAD_TOO_LARGE');
 
     const ok = await presign(10);
     expect(ok.status).toBe(200);
@@ -99,7 +99,7 @@ describe('[#22283] the storage Limits settings are enforced at the upload doors 
     const path = String(data.uploadUrl).replace(/^https?:\/\/[^/]+/, '');
     const tooBig = await rawPut(path, MIB + 1);
     expect(tooBig.status, 'a body one byte over the saved 1 MB').toBe(413);
-    expect(((await tooBig.json()) as any).error.code).toBe('VALIDATION_ERROR');
+    expect(((await tooBig.json()) as any).error.code).toBe('PAYLOAD_TOO_LARGE');
     const fits = await rawPut(path, MIB);
     expect(fits.status, 'a body of exactly 1 MB').toBeLessThan(300);
   });

@@ -235,7 +235,7 @@ describe('resolveRunDataContext (#1888 unit)', () => {
     expect(err).toBeInstanceOf(UnscopedRunDataAccessError);
     expect((err as UnscopedRunDataAccessError & { code: string }).code).toBe('AUTOMATION_UNSCOPED_RUN_DATA_ACCESS');
     expect(err!.message).toMatch(/runAs: 'system'/);
-    expect(err!.message).toMatch(/UNSCOPED/);
+    expect(err!.message).toMatch(/refused by the security plugin where one is composed, unscoped where none is/);
     // Names WHERE, so a refusal in a busy log is traceable to a flow + record.
     expect(err!.message).toContain("object 'invoice'");
     expect(err!.message).toContain("run 'run_1'");

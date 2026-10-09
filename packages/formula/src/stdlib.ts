@@ -81,6 +81,34 @@ function toDate(v: unknown): Date {
 /** One UTC day in milliseconds. */
 const MS_PER_DAY = 86_400_000;
 
+/**
+ * The range cel-js's own `timestamp()` accepts, 0001-01-01T00:00:00Z through
+ * 9999-12-31T23:59:59.999Z. Inside it `toISOString()` has one fixed shape,
+ * `YYYY-MM-DDTHH:mm:ss.sssZ`; outside it the year expands (`+010000-…`).
+ */
+const MIN_TIMESTAMP_MS = -62_135_596_800_000;
+const MAX_TIMESTAMP_MS = 253_402_300_799_999;
+
+/**
+ * The ISO text of a timestamp: `toISOString()`, the UTC calendar, three-digit
+ * milliseconds and a `Z`. These are the bytes the flow template dialect writes
+ * for `{NOW()}`, and their first ten characters are what it writes for
+ * `{TODAY()}` (`service-automation` `builtin/template.ts`, `resolveToken`).
+ *
+ * An invalid or out-of-range instant is refused rather than rendered. The
+ * refusal is a throw, which the engine reports as a runtime error.
+ */
+function isoTimestampText(fn: string, d: Date): string {
+  const ms = d.getTime();
+  if (!(ms >= MIN_TIMESTAMP_MS && ms <= MAX_TIMESTAMP_MS)) {
+    throw new Error(
+      `${fn}(t): \`t\` is not a renderable timestamp (${Number.isNaN(ms) ? 'an invalid date' : 'outside 0001-01-01 … 9999-12-31'}). ` +
+      `Pass a valid timestamp, e.g. ${fn}(${fn === 'isoDate' ? 'today()' : 'now()'}), or ISO text through date(…).`,
+    );
+  }
+  return d.toISOString();
+}
+
 /** Add `n` days to a Date in UTC; returns a new Date. */
 function addDaysUtc(d: Date, n: number): Date {
   const out = new Date(d.getTime());
@@ -333,6 +361,31 @@ export function registerStdLib(
     // intent); kept distinct because authors reach for whichever reads clearer.
     .registerFunction('date(dyn): google.protobuf.Timestamp', (s: unknown) => toDate(s))
     .registerFunction('datetime(dyn): google.protobuf.Timestamp', (s: unknown) => toDate(s))
+    // The string form of a timestamp, the reverse of `date` / `datetime`:
+    // `isoDate(t)` is `YYYY-MM-DD` and `isoDatetime(t)` is
+    // `YYYY-MM-DDTHH:mm:ss.sssZ`, both on the UTC calendar. They write the
+    // bytes the flow template dialect writes for `{TODAY()}` and `{NOW()}`.
+    // `isoDate(today())` is the reference-timezone day, because `today()` is
+    // that day at UTC midnight (ADR-0053 D1).
+    //
+    // Two named functions, not a `string(timestamp)` overload. A `string()`
+    // overload answers one shape for one type, so it cannot spell the date
+    // shape. CEL also defines `string(timestamp)` as RFC 3339 text that drops
+    // zero fractions, so matching the template's `.000` would make `string()`
+    // a dialect. That name stays refused for a timestamp, which a test pins.
+    //
+    // The parameter is a timestamp, never `dyn`. Text, a number or `null` is
+    // refused: at build when the argument's type is known, at run otherwise.
+    // Coercing like `toDate` would parse non-ISO text in the host's local
+    // zone and could render a different day.
+    .registerFunction(
+      'isoDate(google.protobuf.Timestamp): string',
+      (d: Date) => isoTimestampText('isoDate', d).slice(0, 10),
+    )
+    .registerFunction(
+      'isoDatetime(google.protobuf.Timestamp): string',
+      (d: Date) => isoTimestampText('isoDatetime', d),
+    )
     // ── Numbers ──────────────────────────────────────────────────────────
     .registerFunction('abs(dyn): double', (x: unknown) => Math.abs(Number(x)))
     .registerFunction('round(dyn): int', (x: unknown) => BigInt(Math.round(Number(x))))

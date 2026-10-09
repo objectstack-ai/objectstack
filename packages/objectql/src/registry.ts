@@ -59,6 +59,7 @@ import {
   BUILT_IN_SECURITY_CATALOG_NAMES,
   declaredSecurityCatalogNames,
   describeSecurityCatalogHolder,
+  ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES,
   isSecurityCatalogType,
   securityCatalogHolderKey,
   securityCatalogTypeLabel,
@@ -1610,6 +1611,31 @@ export interface SecurityCatalogNameConflict {
 }
 
 /**
+ * The cold-boot wording of {@link SecurityCatalogNameConflictError}: every
+ * package registered before the environment catalog hydrated, so each line
+ * names the package that declares the name and the holder it meets, and the
+ * remedy is stated for an operator restarting a deployment, not for an install.
+ */
+function coldBootConflictMessage(conflicts: readonly SecurityCatalogNameConflict[]): string {
+  const lines = conflicts.map(
+    (c) =>
+      `package "${c.incomingPackageId}" declares the ${securityCatalogTypeLabel(c.catalogType)} "${c.name}", ` +
+      `already held by ${describeSecurityCatalogHolder(c.existingHolder)}`,
+  );
+  return (
+    `Security catalog name conflict at boot: ${conflicts.length === 1 ? 'a name' : `${conflicts.length} names`} ` +
+    `a configured package declares ${conflicts.length === 1 ? 'is' : 'are'} already held by another holder — ` +
+    `${lines.join('; ')}. Positions, permission sets and capabilities each hold one name per deployment: an ` +
+    `assignment names a position or a permission set by its bare name, so with two holders the environment's ` +
+    `stored item would be served in place of the package's definition. The environment catalog loads from ` +
+    `sys_metadata before this check, so the boot is refused. Rename the item in the package, or rename or ` +
+    `delete the environment's item (its environment-wide sys_metadata row: through the metadata API on a boot ` +
+    `that leaves the package out of the configuration, or in the database), then restart. ` +
+    `See ADR-0048.`
+  );
+}
+
+/**
  * Raised when a package registers a position, permission set or capability
  * whose name another holder already holds — an installed package, the
  * environment catalog or a built-in (`security-catalog-namespace.ts` states the
@@ -1625,6 +1651,12 @@ export interface SecurityCatalogNameConflict {
  *
  * Every conflict the registration carries is listed — `conflicts` — so one boot
  * reports all of them; the top-level fields repeat the first.
+ *
+ * `door: 'cold-boot'` is the same refusal raised by the engine plugin after
+ * `sys_metadata` hydration ({@link findEnvironmentHeldSecurityCatalogNames}):
+ * the packages registered first, so the message says which package declares
+ * each name the environment catalog holds, and that the boot is what is refused.
+ * The envelope is unchanged.
  */
 export class SecurityCatalogNameConflictError extends Error {
   readonly code = NAMESPACE_CONFLICT_CODE;
@@ -1642,7 +1674,7 @@ export class SecurityCatalogNameConflictError extends Error {
   /** The first conflict's existing holder. */
   readonly existingHolder: SecurityCatalogHolder;
 
-  constructor(conflicts: readonly SecurityCatalogNameConflict[]) {
+  constructor(conflicts: readonly SecurityCatalogNameConflict[], options: { door?: 'cold-boot' } = {}) {
     const [first] = conflicts;
     const lines = conflicts.map(
       (c) =>
@@ -1650,19 +1682,21 @@ export class SecurityCatalogNameConflictError extends Error {
         describeSecurityCatalogHolder(c.existingHolder),
     );
     super(
-      `Security catalog name conflict: package "${first.incomingPackageId}" cannot register ` +
-        `${conflicts.length === 1 ? 'a name' : `${conflicts.length} names`} another holder ` +
-        `already holds — ${lines.join('; ')}. Positions, permission sets and capabilities each ` +
-        `hold one name per deployment: an assignment names a position or a permission set by ` +
-        `its bare name, with no package to tell two definitions apart, so with two holders ` +
-        `which definition grants would depend on registration order. Rename the item in ` +
-        `"${first.incomingPackageId}"${
-          first.existingHolder.kind === 'package'
-            ? `, rename it in "${first.existingHolder.packageId}", or uninstall one of the two packages`
-            : first.existingHolder.kind === 'environment'
-              ? ', or rename or delete the environment\'s item first'
-              : ' — a built-in name is never available to a package'
-        }. See ADR-0048.`,
+      options.door === 'cold-boot'
+        ? coldBootConflictMessage(conflicts)
+        : `Security catalog name conflict: package "${first.incomingPackageId}" cannot register ` +
+          `${conflicts.length === 1 ? 'a name' : `${conflicts.length} names`} another holder ` +
+          `already holds — ${lines.join('; ')}. Positions, permission sets and capabilities each ` +
+          `hold one name per deployment: an assignment names a position or a permission set by ` +
+          `its bare name, with no package to tell two definitions apart, so with two holders ` +
+          `which definition grants would depend on registration order. Rename the item in ` +
+          `"${first.incomingPackageId}"${
+            first.existingHolder.kind === 'package'
+              ? `, rename it in "${first.existingHolder.packageId}", or uninstall one of the two packages`
+              : first.existingHolder.kind === 'environment'
+                ? ', or rename or delete the environment\'s item first'
+                : ' — a built-in name is never available to a package'
+          }. See ADR-0048.`,
     );
     this.name = 'SecurityCatalogNameConflictError';
     this.conflicts = conflicts;
@@ -1671,6 +1705,21 @@ export class SecurityCatalogNameConflictError extends Error {
     this.incomingPackageId = first.incomingPackageId;
     this.existingHolder = first.existingHolder;
   }
+}
+
+/**
+ * Every package-held position and permission-set name the environment catalog
+ * also holds, read off `registry` — the conflicts the engine plugin's cold-boot
+ * check refuses the boot with (`ObjectQLPlugin`, right after `sys_metadata`
+ * hydration; the reading itself is the registry's private
+ * `environmentHeldSecurityCatalogConflicts`, documented there).
+ *
+ * A module-level function rather than a public method so the reading stays off
+ * the public surface: `index.ts` and `core.ts` re-export named lists from this
+ * module, and this name is on neither.
+ */
+export function findEnvironmentHeldSecurityCatalogNames(registry: SchemaRegistry): SecurityCatalogNameConflict[] {
+  return registry['environmentHeldSecurityCatalogConflicts']();
 }
 
 /**
@@ -2412,6 +2461,74 @@ export class SchemaRegistry {
     for (const byName of this.securityCatalogClaims.values()) {
       for (const [name, claimant] of byName) if (claimant === packageId) byName.delete(name);
     }
+  }
+
+  /**
+   * The cold-boot half of the rule (`security-catalog-namespace.ts`, "The cold
+   * boot"; maintainer ruling letter A on #22307, record 6063176077): every
+   * package-held position and permission-set name the environment catalog also
+   * holds, as the conflicts {@link SecurityCatalogNameConflictError} reports —
+   * the package that declares the name as the incoming side, the environment
+   * catalog as the holder. Read-only: it records nothing and refuses nothing;
+   * the engine plugin asks it once `sys_metadata` has hydrated, and refuses the
+   * boot on any answer.
+   *
+   * - **The environment's names** are the bare-slot items of the two types the
+   *   environment can author ({@link ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES}).
+   *   Every bare-slot item is the environment's whatever `_packageId` it wears:
+   *   only a registration with no package writes the bare slot, and at a cold
+   *   boot hydration grafts the package's envelope onto the stored row (the
+   *   protocol's artifact-protection merge), so the stamp names the very
+   *   package the row collides with.
+   * - **A package holds a name** through an item registered under it (its
+   *   composite slot) or its install claim — never through the bare slot.
+   * - **Built-in names are skipped**, as the item seam skips the environment
+   *   holder for them: the platform declares its built-in positions itself
+   *   (after this check, in its own `start()`), and an environment item under a
+   *   built-in name is a stored definition that shadows the declaration at
+   *   read (ADR-0005) — a legitimate shadow, not a second holder.
+   *
+   * Sorted by type, then name, so two boots of one database report alike.
+   *
+   * Private, like the rest of this rule's registry half, so the public surface
+   * does not grow; the engine plugin, which owns the boot sequence it is asked
+   * in, reaches it through the module-level {@link findEnvironmentHeldSecurityCatalogNames},
+   * which the package entries do not re-export.
+   */
+  private environmentHeldSecurityCatalogConflicts(): SecurityCatalogNameConflict[] {
+    const conflicts: SecurityCatalogNameConflict[] = [];
+    for (const type of ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES) {
+      const collection = this.metadata.get(type);
+      if (!collection) continue;
+      const environmentNames = [...collection.keys()]
+        .filter((key) => !key.includes(':') && !BUILT_IN_SECURITY_CATALOG_NAMES[type].has(key))
+        .sort();
+      for (const name of environmentNames) {
+        for (const packageId of this.securityCatalogPackageHolders(type, name)) {
+          conflicts.push({ catalogType: type, name, incomingPackageId: packageId, existingHolder: { kind: 'environment' } });
+        }
+      }
+    }
+    return conflicts;
+  }
+
+  /**
+   * The packages holding `(type, name)` through an item registered under them
+   * (a composite `<packageId>:<name>` slot) or an install claim — the package
+   * half of {@link securityCatalogHoldersOtherThan}'s reading, without the bare
+   * slot, whose stamp is not a claim (see {@link environmentHeldSecurityCatalogConflicts}).
+   */
+  private securityCatalogPackageHolders(type: SecurityCatalogType, name: string): string[] {
+    const holders = new Set<string>();
+    const suffix = `:${name}`;
+    for (const [key, item] of this.metadata.get(type) ?? []) {
+      if (key === name || !key.endsWith(suffix)) continue;
+      const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+      holders.add(typeof stamped === 'string' && stamped !== '' ? stamped : key.slice(0, -suffix.length));
+    }
+    const claimant = this.securityCatalogClaims.get(type)?.get(name);
+    if (claimant !== undefined) holders.add(claimant);
+    return [...holders];
   }
 
   // ==========================================

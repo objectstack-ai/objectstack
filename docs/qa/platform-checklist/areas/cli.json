@@ -1102,7 +1102,7 @@
       "title": "os migrate duplicates: a read-only JSON inventory of identifiers minted across partitions — within-partition repeats excluded, nothing written, the live two-counter condition reported, and runnable BEFORE the #8686 repair destroys the evidence",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell, pre-repair audit)"],
@@ -1122,7 +1122,7 @@
         "seed via direct SQL per the fixture recipe: the cross-partition duplicate, the within-partition repeat, an organizations row for '<org>', and the paired sequence counters",
         "dump the DB's CONTENT before the run — every user table's rows (sqlite3 <db> '.dump' with the CREATE lines aside, or one ordered SELECT * per table), `SELECT * FROM _objectstack_sequences ORDER BY 1`, and `SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name` — and checksum each dump; run `os migrate duplicates > report.json; echo $?`; dump and checksum again and byte-compare the three pairs. ⛔ Do not use the whole-file md5 as the oracle: it is not what the read-only contract promises (rows, counters and schema)",
         "jq the report: .report/.reportVersion/.generatedAt/.database/.globalPartition/.filter/.counters/.scanned/.skipped/.duplicates/.liveConditions/.runtimeIndexPreflight/.summary",
-        "seed the kernel:ready blocker too (#8725): two ACTIVE sys_view_definition rows with the SAME name and organization_id/owner both NULL — then jq .runtimeIndexPreflight and .summary.runtimeIndexesBlocked",
+        "seed the kernel:ready blocker too (#8725): the first boot already TIGHTENED idx_sys_metadata_overlay_active, so first put back the declared NULL-distinct form an untightened install still has (DROP INDEX idx_sys_metadata_overlay_active, then CREATE UNIQUE INDEX idx_sys_metadata_overlay_active ON sys_metadata (type, name, organization_id, package_id)); then insert two ACTIVE sys_metadata rows with the SAME type and name, the SAME non-NULL organization_id and package_id NULL, every other NOT NULL column filled — then jq .runtimeIndexPreflight and .summary.runtimeIndexesBlocked",
         "run `os migrate duplicates --object <the-object>` and `--object <an-object-with-no-findings>` — capture .filter in both payloads",
         "run `os migrate duplicates --database-url file:/tmp/<run>/dup.db` and confirm it reaches the same DB (the flag also honors OS_DATABASE_URL)",
         "negative (no_sql_seam): run `pnpm --filter @objectstack/cli exec vitest run src/commands/migrate/duplicates.null-seam.test.ts` and cite its pass — the seam double that answers no result set, driving the real command; then run `os migrate duplicates --database-url memory://qa; echo $?` and capture the boot_failed payload (the retired engine is refused at boot, naming the replacement)",
@@ -1148,9 +1148,9 @@
           "evidence": "the three before/after dump-checksum pairs (rows, _objectstack_sequences, sqlite_master)"
         },
         {
-          "clause": "the kernel:ready pre-flight (#8725) reports the RUNTIME-migration class os migrate plan cannot see: one entry per index the three kernel:ready migrations tighten (four — the overlay migration owns two), each blocked|clear|table-absent|unreadable, a blocked one naming every colliding key group and its row count",
+          "clause": "the kernel:ready pre-flight (#8725) reports the RUNTIME-migration class os migrate plan cannot see: one entry per index the two kernel:ready migrations tighten (three — the overlay migration owns two; the third migration, sys_view_definition's, retired with its table under ADR-0131 D13), each blocked|clear|table-absent|unreadable, a blocked one naming every colliding key group and its row count",
           "oracle": "log",
-          "verify": ".runtimeIndexPreflight names idx_sys_view_def_active as blocked with the seeded view name, organization_id_key '__global__' and owner_key '' — and the SAME database run through `os migrate plan` mentions neither the index nor the view name (the matched control: the declared-index duplicate above IS reported by plan, this one is not)",
+          "verify": ".runtimeIndexPreflight names idx_sys_metadata_overlay_active as blocked with the seeded type, name and organization_id and package_id_key '' — and the SAME database run through `os migrate plan` mentions neither the index nor the seeded name (the matched control: the declared-index duplicate above IS reported by plan, this one is not); no entry names sys_view_definition",
           "evidence": "the pre-flight section beside the plan output for one database"
         },
         {
@@ -1201,6 +1201,12 @@
           "date": "2026-10-04",
           "change": "A3 and its step re-pointed: the read-only oracle is the DB's content — rows, _objectstack_sequences and sqlite_master byte-identical before and after — not the whole-file md5, which is not what the contract promises (duplicates.ts header: 'a full run leaves both the rows and `_objectstack_sequences` byte-identical'; duplicates.pre-repair.test.ts pins the same). Assertion defect. Source duplicates.ts contract header",
           "ref": "#21735"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-08",
+          "change": "the kernel:ready blocker re-seeded on sys_metadata: sys_view_definition retired as inert with its active-row index migration (ADR-0131 D13), so the pre-flight now probes three indexes from two migrations and never names that table. The seeding step and A4 now use two ACTIVE package-less sys_metadata overlays for one type, name and NON-NULL organization — the organization key part stays bare in the tightened index (#6418), so a NULL-organization pair would not block its CREATE — and the step first puts back the declared NULL-distinct index the first boot replaced, without which the insert is refused. Source runtime-index-preflight.ts runtimeIndexProbes",
+          "ref": "#15206"
         }
       ]
     },

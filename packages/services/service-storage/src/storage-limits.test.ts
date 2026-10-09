@@ -9,7 +9,7 @@
  *  - **§1 every upload door refuses over the limit, and stores nothing.** The
  *    presigned door (declared `size`), the chunked start (declared
  *    `totalSize`), the local raw PUT (the body) and the chunk door (the bytes
- *    received so far plus this chunk) each answer `413` / `VALIDATION_ERROR`
+ *    received so far plus this chunk) each answer `413` / `PAYLOAD_TOO_LARGE`
  *    in the ADR-0112 envelope, with no row written and no byte handed to the
  *    adapter. Each has its control at exactly the limit, which is accepted.
  *  - **§2 the TTLs and the precedence.** A saved TTL is what a presigned URL
@@ -117,7 +117,7 @@ async function call(
 function expectTooLarge(answer: Answer): void {
   expect(answer.status).toBe(413);
   expect(answer.body?.success).toBe(false);
-  expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+  expect(answer.body?.error?.code).toBe('PAYLOAD_TOO_LARGE');
   expect(String(answer.body?.error?.message)).toContain('max_upload_mb');
 }
 
@@ -148,7 +148,7 @@ const SAVED_ONE_MB: StorageLimitsSnapshot = { maxUploadMb: { value: 1, authored:
 // ---------------------------------------------------------------------------
 
 describe('[#22283] §1 · the upload doors refuse a file over max_upload_mb, before anything is stored', () => {
-  it('presigned door: a declared size over the limit is 413 VALIDATION_ERROR — no row, no URL minted', async () => {
+  it('presigned door: a declared size over the limit is 413 PAYLOAD_TOO_LARGE — no row, no URL minted', async () => {
     const { adapter, store, routes } = await mountDoors(SAVED_ONE_MB);
     const createFile = vi.spyOn(store, 'createFile');
     const presign = vi.spyOn(adapter, 'getPresignedUpload');
