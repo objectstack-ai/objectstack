@@ -915,9 +915,10 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
  * every surface that judges a field-level `*When` stands on the same verdict
  * AND the same message (Prime Directive #12). Two consumers today: the
  * metadata walk in {@link validateStackExpressions} below, and the docs-corpus
- * gate `scripts/check-doc-formula-expressions.mjs`, which judges the same three
- * slots where a fenced example's enclosing structure identifies the field layer
- * (#11407). Before that gate existed this lived as a closure inside the walk —
+ * gate `scripts/check-doc-formula-expressions.mjs`, which judges the same
+ * field-rule slots (the three siblings, and since #22227 a deadline's
+ * `settledWhen`) where a fenced example's enclosing structure identifies the
+ * field layer (#11407). Before that gate existed this lived as a closure inside the walk —
  * fine while there was one caller, and exactly how a second caller comes to own
  * a DIALECT of the rule instead of the rule.
  *
