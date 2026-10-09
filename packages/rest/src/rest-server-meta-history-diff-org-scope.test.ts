@@ -21,7 +21,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation, SysMetadataRepository } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
 const META = '/api/v1/meta';
@@ -313,9 +313,16 @@ function boot() {
     return {
         rows,
         historyRows,
-        /** A LEGACY organization-scoped write, as a door made one before ADR-0131 D6. */
-        plantLegacyOrgRow: (type: string, name: string, label = MARKER, organizationId = ORG_A) =>
-            protocol.saveMetaItem({ type, name, item: bodyFor(type, name, label), organizationId }),
+        /**
+         * A LEGACY organization-scoped write, as a door made one before ADR-0131 D6,
+         * planted at rest — the protocol now refuses it (`403 NOT_OVERRIDABLE`).
+         */
+        plantLegacyOrgRow: async (type: string, name: string, label = MARKER, organizationId = ORG_A) => {
+            const repo = new SysMetadataRepository({ engine, organizationId, orgLabel: organizationId });
+            const ref = { org: organizationId, type, name };
+            const head = await repo.get(ref);
+            return repo.put(ref, bodyFor(type, name, label), { parentVersion: head?.hash ?? null, actor: null });
+        },
         as(tenantId: string | undefined) {
             session = tenantId === undefined
                 ? { userId: 'u1', systemPermissions: ['manage_metadata'] }

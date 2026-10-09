@@ -151,6 +151,20 @@ describe('[#20790] the stored flow credential move', () => {
         expect(f.receipts[0]!.advisory).toBe(1);
     });
 
+    it('[ADR-0131 D6] a legacy organization-scoped row is not re-saved: it is reported NOT_OVERRIDABLE, loudly', async () => {
+        const f = fakes([
+            { name: 'org_one', state: 'active', organization_id: 'org_a', metadata: JSON.stringify(body('org_one', HOOK)) },
+            { name: 'env_one', state: 'active', organization_id: null, metadata: JSON.stringify(body('env_one', HOOK)) },
+        ]);
+        const result = await migrateFlowCredentialsIntoChannel(f);
+        expect(result.found).toBe(2);
+        expect(result.failed).toEqual([{ flow: 'org_one', state: 'active', code: 'NOT_OVERRIDABLE' }]);
+        expect(result.migrated).toEqual(['env_one (active)']);
+        expect(f.saves.map((s) => s.name)).toEqual(['env_one']);
+        expect(f.logs.some((l) => l.level === 'error' && l.msg.includes("flow 'org_one'"))).toBe(true);
+        for (const log of f.logs) expect(log.msg).not.toContain(HOOK);
+    });
+
     it('finds nothing to move on a store with no credential left — and writes no receipt', async () => {
         const f = fakes([{ name: 'clean', state: 'active', metadata: JSON.stringify(body('clean')) }]);
         const result = await migrateFlowCredentialsIntoChannel(f);

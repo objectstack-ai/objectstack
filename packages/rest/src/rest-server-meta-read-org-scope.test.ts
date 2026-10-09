@@ -26,7 +26,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation, SysMetadataRepository } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
 const META = '/api/v1/meta';
@@ -336,11 +336,16 @@ function boot() {
         rows,
         historyRows,
         /**
-         * Write a LEGACY organization-scoped row the way a door did before
-         * ADR-0131 D6: straight through the protocol, naming the organization.
+         * Plant a LEGACY organization-scoped row (and its change log) at rest,
+         * as a door wrote it before ADR-0131 D6 — the protocol now refuses an
+         * organization-scoped write (`403 NOT_OVERRIDABLE`).
          */
-        plantLegacyOrgRow: (type: string, name: string, label = LEGACY_MARKER, organizationId = ORG_A) =>
-            protocol.saveMetaItem({ type, name, item: bodyFor(type, name, label), organizationId }),
+        plantLegacyOrgRow: async (type: string, name: string, label = LEGACY_MARKER, organizationId = ORG_A) => {
+            const repo = new SysMetadataRepository({ engine, organizationId, orgLabel: organizationId });
+            const ref = { org: organizationId, type, name };
+            const head = await repo.get(ref);
+            return repo.put(ref, bodyFor(type, name, label), { parentVersion: head?.hash ?? null, actor: null });
+        },
         as(tenantId: string | undefined) {
             session = tenantId === undefined
                 ? { userId: 'u1', systemPermissions: ['manage_metadata'] }
