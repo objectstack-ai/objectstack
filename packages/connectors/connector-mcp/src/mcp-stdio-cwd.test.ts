@@ -101,7 +101,7 @@ describe('stdio transport cwd — real spawns through the SDK (#22423)', () => {
     });
 
     it('control: an absolute command and an absolute script are unaffected by cwd', async () => {
-        const absolute = { kind: 'stdio', command: process.execPath, args: [join(APP, 'scripts', 'server.mjs')] } as const;
+        const absolute = { kind: 'stdio' as const, command: process.execPath, args: [join(APP, 'scripts', 'server.mjs')] };
         await expect(childCwd({ ...absolute, cwd: ELSEWHERE })).resolves.toBe(ELSEWHERE);
         await expect(childCwd({ ...absolute })).resolves.toBe(realpathSync(process.cwd()));
     });
