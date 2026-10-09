@@ -340,7 +340,7 @@ describe('#22474 — the preview binds the master-detail header the write binds'
       for (const status of ['draft', 'sent']) {
         setHeaderStatus(status);
         // Precondition: the read door serves the header to erin, with `status` restricted.
-        const served = await engine.findOne(HEADER, { where: { id: 'h_x' }, context: erin } as any);
+        const served = await engine.findOne(HEADER, { where: { id: 'h_x' }, context: erin });
         expect(served).toMatchObject({ id: 'h_x' });
         expect(served?.status === status).toBe(false);
         verdicts.push(await preview(engine, LINE, { name: 'l', invoice: 'h_x', quantity: 1 }, 'insert', erin));
@@ -361,11 +361,11 @@ describe('#22474 — the preview binds the master-detail header the write binds'
         setHeaderStatus(status);
         const row = { name: 'l', invoice: 'h_x', quantity: 1 };
         expect(await preview(engine, LINE, row, 'insert', alice)).toEqual(expected);
-        expect(await write(() => engine.insert(LINE, row, { context: alice } as any))).toEqual(expected);
+        expect(await write(() => engine.insert(LINE, row, { context: alice }))).toEqual(expected);
         storeFor(LINE).set('l_x', { id: 'l_x', name: 'l', invoice: 'h_x', description: 'seat', quantity: 1 });
         const patch = { description: null, id: 'l_x' };
         expect(await preview(engine, LINE, patch, 'update', alice)).toEqual(expected);
-        expect(await write(() => engine.update(LINE, patch, { context: alice } as any))).toEqual(expected);
+        expect(await write(() => engine.update(LINE, patch, { context: alice }))).toEqual(expected);
       }
     });
   });

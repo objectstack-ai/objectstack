@@ -8787,7 +8787,7 @@ export class ObjectQL implements IObjectQLEngine {
         const rows = await this.find(rel.master, {
           where: { id: { $in: [...ids] } },
           context,
-        } as any) as Array<Record<string, unknown>>;
+        } as EngineQueryOptions) as Array<Record<string, unknown>>;
         for (const row of Array.isArray(rows) ? rows : []) {
           if (row?.id != null && ids.has(String(row.id))) served.set(String(row.id), row);
         }
