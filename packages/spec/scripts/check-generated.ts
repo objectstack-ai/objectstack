@@ -87,7 +87,14 @@ const GATED: ReadonlyArray<{
     artifact: 'src/migrations/registry.ts — its generated regions, from src/migrations/entries/',
   },
   { check: 'check:spec-changes', gen: 'gen:spec-changes', artifact: 'spec-changes.json' },
-  { check: 'check:upgrade-guide', gen: 'gen:upgrade-guide', artifact: 'docs/protocol-upgrade-guide.md' },
+  // Its committed copy is gone: `docs/protocol-upgrade-guide.md` is a hand-written
+  // pointer stub, and `gen:upgrade-guide` writes the docs pages that are the
+  // guide's address. The gate generates in memory, so it never reports stale.
+  {
+    check: 'check:upgrade-guide',
+    gen: 'gen:upgrade-guide',
+    artifact: 'content/docs/protocol-upgrade/ (the docs pages; gitignored, generated at docs build)',
+  },
   // [#10096] The schema-free `/meta` URL-spelling data module. Cheap: tsx-loads
   // the two source maps (lazySchema keeps the kernel module light), re-derives
   // the three-limb union, and runs the manifest/derived agreement assertion
