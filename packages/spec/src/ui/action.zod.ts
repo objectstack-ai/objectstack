@@ -1364,7 +1364,11 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
-   * `a58626c88`, re-read there 2026-10-06:
+   * `f0268ad78`, re-read there 2026-10-09:
+   * `core/src/actions/ActionRunner.ts` changed above the reader only (+7/-0,
+   * objectui#11695: the confirmation handler's `destructive` option and its
+   * docblock), so `composeSuccessMessage` MOVED `1497` -> `1504` with its body
+   * byte-identical. At `a58626c88`, re-read there 2026-10-06:
    * every objectui file this record cites is byte-identical across the hop from
    * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
    * At `0abd4f9f8`, re-read there 2026-10-05:
@@ -1375,7 +1379,7 @@ const actionObject = () => strictObject({
    * `ab1879721`, where it was read 2026-10-03, so the anchor below held
    * unmoved). The reader is objectui#11344 (objectui
    * `c476be0e0`): `ActionRunner.composeSuccessMessage`
-   * (`core/src/actions/ActionRunner.ts:1497`) picks `outcomeMessages[outcome]`
+   * (`core/src/actions/ActionRunner.ts:1504`) picks `outcomeMessages[outcome]`
    * off the handler's return value, falls back to `successMessage` and then to
    * the runner's default text, and fills `${result.*}` in whichever it shows.
    * The four action renderers forward the key to the runner (`action:bar`
