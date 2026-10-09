@@ -105,8 +105,8 @@ undeclared key is a named parse error. **RAW** keys never interpolate: a
 ```ts
 { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
     recipients: '{record.assignee}',   // REQUIRED — id, CSV, or string[]
-    title: 'Done: {record.title}',     // inline path; XOR `template` (RAW, localizable)
-    message: 'Closed by {$User.Id}',   // body; only with inline `title`
+    title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
+    message: 'Closed {{ record.closed_at | date:long }}', // body; only with inline `title`
     topic: 'task',                     // RAW; default 'notify'
     severity: 'warning',               // RAW; CLOSED enum info|warning|critical
     channels: ['inbox'],               // RAW; default inbox
@@ -196,21 +196,18 @@ run reports success. `objectstack validate` names the offending template.
 
 ### Filter tokens (`config.filter`)
 
-The one slot where two `{…}` dialects meet, and the one whose failure **widens**
-a query instead of narrowing it.
-
 - **Precedence — flow variables win, placeholders pass through.** The flow
   template engine runs first. A whole-string token it resolves is a flow value;
   one it does **not** resolve that IS a recognised filter placeholder
   (`{current_user_id}`, `{current_year_start}`) passes through **verbatim** for
   the query engine to expand. So a flow variable named after a placeholder
-  **shadows** it. Only `filter` gets this hand-off — in `title`, `message`
-  and `url` a bare `{current_year_start}` is a nonsense reference.
+  **shadows** it. Only `filter` gets this hand-off — in `url` a bare
+  `{current_year_start}` is a nonsense reference.
 - **Static checkability splits by position.** A `{record.…}` token **inside a
   filter** naming an unknown field, or hopping a relation the start node does not
   list in `config.expand`, is an **ERROR** at `objectstack validate`: it resolves
   to nothing, the condition is DROPPED, and the node refuses to execute. The
-  *same* reference **outside** a filter (message body, `http` url) only
+  *same* reference **outside** a filter (a `{{ }}` hole, `http` url) only
   renders an empty string — a **warning**. A `{var}` naming a flow variable
   or node output is **not statically checkable at all**.
 
@@ -235,13 +232,15 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
    - still accepted there until CEL can write them: `{NOW()}` / `{TODAY() ± N}`
      and `{$User.<path>}`
 
-   Text slots (notify `title` / `message`, `inputs`, `http` `url` / `body`, …)
-   and `filter` keep the SINGLE-brace template — `{var}` / `{record.title}`,
-   `{record.tags.0}` (array index), `{$User.Id}`, `{NOW()}`, `{TODAY() + 30}`,
-   `{round(x)}`-style arithmetic; no `{…}` ⇒ literal; `{{x}}` is the
-   template-field dialect. ❌ `'{ROUND(x, 2)}'` — an unknown name in call
-   position **fails the node** at run time, unchecked at build, not
-   `fault`-routable.
+   Text slots (notify `title` / `message`, screen `title` / `description`, end
+   `message`) render `{{ }}` holes — a variable path, optional formatter, no
+   logic; `os validate` / `registerFlow` refuse a `{…}` token there with its
+   `{{ }}` spelling. `{$User.Id}` / `{NOW()}` have no hole (`{{ $User.Id }}`
+   renders blank): assign them to a variable first. Every other slot
+   (`recipients`, `inputs`, `http`, `filter`) keeps the SINGLE-brace template:
+   `{record.tags.0}`, `{TODAY() + 30}`, `{round(x)}`; no `{…}` ⇒ literal.
+   ❌ `'{ROUND(x, 2)}'` — an unknown name in call position **fails the node**
+   at run time, unchecked at build, not `fault`-routable.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    Reference a field explicitly.
