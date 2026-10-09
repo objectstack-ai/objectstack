@@ -176,8 +176,8 @@ export class ExternalDatasourceServicePlugin implements Plugin {
        * beside the save — the save already writes the registry through.
        *
        * The request is the one that door sends for an `object`, field for
-       * field: no `organizationId`, because `object` is not org-overridable and
-       * that door's `organizationIdForMetaWrite` resolves none for it; no
+       * field: no `organizationId`, because that door carries none into any
+       * metadata write (ADR-0131 D6); no
        * `packageId`, `mode` or `force`, because the import route takes no
        * `?package`, `?mode` or `?force`.
        *

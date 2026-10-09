@@ -87,8 +87,10 @@ const mockCtx = (): PluginContext =>
 /**
  * Mount the plugin's REAL route registration on a real Hono app (the
  * auth-catchall-fallthrough.test.ts harness), with the auth manager reduced to
- * the two seams the bridges read: `getApi().getSession` (what the gate judges)
- * and `handleRequest` (where the bridge delegates).
+ * the seams the bridges read: `getApi().getSession` (what the gate judges),
+ * `handleRequest` (where the bridge delegates) and, after the gate, the two
+ * domain-verification mounts' `isSsoDomainVerificationEnabled()` [#22463] —
+ * ON here, as in `makeSsoVendor` below.
  */
 async function mountBridges(deps: {
   getSession: (headers: Headers) => unknown | Promise<unknown>;
@@ -110,6 +112,7 @@ async function mountBridges(deps: {
     getApi: async () => ({
       getSession: async ({ headers }: { headers: Headers }) => deps.getSession(headers),
     }),
+    isSsoDomainVerificationEnabled: () => true,
   };
   (plugin as any).registerAuthRoutes({ getRawApp: () => app, getPort: () => 0 }, ctx);
   return app;

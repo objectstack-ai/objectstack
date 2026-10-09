@@ -2087,7 +2087,7 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **drafts** | `{ type: string; name: string; organizationId: string \| null; packageId: string \| null; … }[]` | ✅ | Every pending draft visible to the caller, one row per item. |
+| **drafts** | `{ type: string; name: string; label: string \| Record<string, string> \| null; organizationId: string \| null; … }[]` | ✅ | Every pending draft visible to the caller, one row per item. |
 
 ### Nested Shape: `ListDraftsResponse.drafts[number]`
 
@@ -2095,6 +2095,7 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name (canonical singular). |
 | **name** | `string` | ✅ | Item name. |
+| **label** | `string \| Record<string, string> \| null` | ✅ | The draft body's own top-level `label`, as authored: a plain string or an inline locale map (`I18nLabel`), resolved by the reader. `null` when the body declares none, or none this shape admits — never the item name standing in for it. |
 | **organizationId** | `string \| null` | ✅ | Owning organization of the draft row, `null` for an environment-wide draft. |
 | **packageId** | `string \| null` | ✅ | Package the draft is bound to, `null` for a package-less draft. |
 | **updatedAt** | `string \| null` | ✅ | Last-touch timestamp of the draft row (ISO-8601 string), `null` when the row recorded none. |
@@ -2984,7 +2985,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | The object name. |
 | **data** | `Record<string, any> \| Record<string, any>[]` | ✅ | A candidate record, or an array of them. Nothing is persisted. |
-| **mode** | `Enum<'insert' \| 'update'>` | optional | Which write the verdict should predict. `insert` (default) walks every declared field, so a missing required field is a finding; `update` judges only the supplied keys, matching a PATCH. |
+| **mode** | `Enum<'insert' \| 'update'>` | optional | Which write the verdict should predict. `insert` (default) walks every declared field, so a missing required field is a finding; `update` checks only the supplied keys, matching a PATCH. An `update` row that carries its `id` is judged as the by-id update judges it: its rules read the stored row that id names, merged with the supplied keys. The stored row is read with the caller's own read access, so a row the caller cannot read is judged on the supplied keys alone, as a row with no `id` is. |
 
 
 ---

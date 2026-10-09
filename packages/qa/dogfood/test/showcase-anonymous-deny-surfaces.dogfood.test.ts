@@ -50,6 +50,17 @@
 // authz-row: anonymous-deny-automation
 // authz-row: anonymous-deny-packages
 // authz-row: anonymous-deny-analytics
+// authz-row: anonymous-deny-api-description
+//
+// ── Why the API-description endpoints are here (#22430) ────────────────────
+//
+// `@objectstack/rest`'s `registerOpenApiEndpoints` mounts the API-description
+// endpoints — the document and its viewer page — and until #22430 neither
+// handler asked who was calling: on a stock boot both answered an
+// unauthenticated caller 200, exactly as they answered a signed-in one, while
+// the record doors beside them answered 401. Both are driven below anonymously
+// (401 in the REST flat envelope, nothing of either served) and with a
+// signed-in member as the 200 control, on this one boot.
 //
 // ── Why the analytics faces are here (#21061) ──────────────────────────────
 //
@@ -135,6 +146,21 @@ const ANALYTICS_FACES: readonly AnalyticsFace[] = [
   { face: 'the analytics cube-read face', method: 'POST', path: '/analytics/query', body: ANALYTICS_VALID_BODY, malformed: ANALYTICS_MALFORMED_BODY },
   { face: 'the analytics SQL face', method: 'POST', path: '/analytics/sql', body: ANALYTICS_VALID_BODY, malformed: ANALYTICS_MALFORMED_BODY },
   { face: 'the analytics meta face', method: 'GET', path: '/analytics/meta' },
+];
+
+// ── #22430 — the API-description endpoints (@objectstack/rest) ──────────────
+//
+// Both register on every base the server mounts; this boot mounts only the
+// unscoped one (the showcase does not enable project scoping), and the
+// environment-scoped twin — the same handler closures — is pinned per base in
+// `packages/rest/src/rest-api-description-anonymous-deny.test.ts`.
+interface ApiDescriptionEndpoint {
+  readonly endpoint: string;
+  readonly path: string;
+}
+const API_DESCRIPTION_ENDPOINTS: readonly ApiDescriptionEndpoint[] = [
+  { endpoint: 'the API-description document', path: '/openapi.json' },
+  { endpoint: 'the API-description viewer', path: '/docs' },
 ];
 
 // ── #11373 — the /meta WRITE doors, driven through the REAL mount ──────────
@@ -495,13 +521,15 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   // ── /automation (dispatcher-mounted; runtime domains/automation.ts) ─────
   //
   // The gate is DOMAIN-WIDE and sits ahead of the `isServiceServeable` probe on
-  // purpose: this stack installs no `@objectstack/service-automation`, so the
-  // domain's own answer here is 501. If the gate ran after the probe, anonymous
-  // and authenticated callers would both get 501 and the 401/501 difference
-  // would fingerprint whether a deployment mounts automation at all. The
-  // authenticated 501 case below is what gives these three cases their teeth:
-  // in this one process, the same route answers 401 to anonymous and 501 to a
-  // member, so the 401 can only be the gate's answer.
+  // purpose: if the gate ran after the probe, a deployment without
+  // `@objectstack/service-automation` would answer 501 to anonymous and
+  // authenticated callers alike, and the 401/501 difference would fingerprint
+  // whether it mounts automation at all. [#22301] This stack is the SERVED
+  // composition — `bootStack` mounts what `objectstack serve` mounts, and the
+  // showcase's `requires` names `automation` — so the domain's own answer to a
+  // member is 200. The authenticated case below is what gives these three cases
+  // their teeth: in this one process, the same route answers 401 to anonymous
+  // and 200 to a member, so the 401 can only be the gate's answer.
   it('anonymous POST /automation/:name/trigger is denied (401)', async () => {
     const r = await anon('POST', `/automation/${FLOW}/trigger`, { recordId: 'anon-probe-id' });
     expect(r.status, 'anonymous flow trigger must be 401').toBe(401);
@@ -521,14 +549,20 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'anonymous flow deregistration must be 401').toBe(401);
   });
 
-  it('an authenticated caller reaches the domain, which answers 501 — not 401', async () => {
+  it('an authenticated caller reaches the domain, which answers 200 — not 401', async () => {
+    // [#22301] The served composition: the showcase's `requires: ['automation']`
+    // mounts the service, as `objectstack serve` does.
+    expect(
+      stack.kernel.hasPlugin('com.objectstack.service-automation'),
+      'the showcase requires automation, so the served composition mounts it',
+    ).toBe(true);
     const r = await stack.apiAs(memberToken, 'GET', '/automation/_status');
     expect(r.status, 'authenticated flow-inventory read must clear the auth gate').not.toBe(401);
-    // The domain's OWN answer on a stack with no automation service. Asserting
-    // it (rather than only `.not.toBe(401)`) is what proves the anonymous 401
-    // above is produced by the gate and not by the domain: drop the gate and
-    // the anonymous cases collapse onto THIS status.
-    expect(r.status, 'no @objectstack/service-automation is installed on this boot').toBe(501);
+    // The domain's OWN answer on a stack with the automation service mounted.
+    // Asserting it (rather than only `.not.toBe(401)`) is what proves the
+    // anonymous 401 above is produced by the gate and not by the domain: drop
+    // the gate and the anonymous cases collapse onto THIS status.
+    expect(r.status, 'the mounted automation domain answers the member').toBe(200);
   });
 
   // ── /packages (dispatcher-mounted; runtime domains/packages.ts) — #7033/#7023 ─
@@ -636,6 +670,40 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     },
   );
 
+  // ── the API-description endpoints (@objectstack/rest) — #22430 ──────────
+  //
+  // The refusal is the handler's first act, so the anonymous body is the REST
+  // seam's shared one, whole, and carries nothing of the document or the page.
+  // The member control is the teeth: the same endpoint, with a session, is
+  // served 200 on this boot, so the 401 is the floor's answer and the endpoint
+  // is really mounted here.
+  it.each(API_DESCRIPTION_ENDPOINTS)('an anonymous caller on $endpoint is denied (401) and served nothing', async (ep) => {
+    const r = await anon('GET', ep.path);
+    expect(r.status, `${ep.endpoint}: an anonymous caller must be refused by the floor`).toBe(ANONYMOUS_DENY_STATUS);
+    expect(r.headers.get('content-type') ?? '', `${ep.endpoint}: the refusal is JSON, never the page`).toContain('application/json');
+    const body = await r.json();
+    expect(body, `${ep.endpoint}: the refusal is the REST seam's shared body, whole`).toEqual(ANONYMOUS_DENY_BODY);
+    expect(body, `${ep.endpoint}: nothing of the document rides on the refusal`).not.toHaveProperty('openapi');
+    expect(body, `${ep.endpoint}: nothing of the document rides on the refusal`).not.toHaveProperty('paths');
+  });
+
+  it('a signed-in member is served the API-description document (200) — the control', async () => {
+    const r = await stack.apiAs(memberToken, 'GET', '/openapi.json');
+    expect(r.status, 'an authenticated member must clear the floor and be served the document').toBe(200);
+    const body = await r.json();
+    expect(body.openapi, 'the served body is the OpenAPI 3.1 document').toBe('3.1.0');
+    expect(Object.keys(body.paths ?? {}).length, 'the document describes the mounted surface').toBeGreaterThan(0);
+  });
+
+  it('a signed-in member is served the API-description viewer page (200) — the control', async () => {
+    const r = await stack.apiAs(memberToken, 'GET', '/docs');
+    expect(r.status, 'an authenticated member must clear the floor and be served the viewer').toBe(200);
+    expect(r.headers.get('content-type') ?? '', 'the viewer is an HTML page').toContain('text/html');
+    // The page loads its sibling document on the same base — the request that,
+    // from a signed-in browser, carries that browser's session.
+    expect(await r.text(), 'the viewer points at its sibling document').toContain('data-url="/api/v1/openapi.json"');
+  });
+
   // ── one code, one message — two wrappers ───────────────────────────────
   it('every denied surface answers the SAME code and message (the wrappers differ)', async () => {
     const rest = await Promise.all([
@@ -740,6 +808,13 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     // [#21060] The two remaining REST families the checklist item names.
     { seam: 'POST /batch', owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('POST', BATCH, BATCH_PROBE_BODY) },
     { seam: 'GET /security/explain', owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', EXPLAIN) },
+    // [#22430] The API-description endpoints, labelled by endpoint.
+    ...API_DESCRIPTION_ENDPOINTS.map((ep) => ({
+      seam: ep.endpoint,
+      owner: '@objectstack/rest registerOpenApiEndpoints (enforceAuth)',
+      family: 'rest-flat' as DenyFamily,
+      call: () => anon('GET', ep.path),
+    })),
     { seam: 'POST /actions/:object/:action/:id', owner: 'runtime domains/actions.ts', family: 'dispatcher-wrapper', call: () => anon('POST', ACTION, { params: {} }) },
     { seam: 'POST /automation/:name/trigger', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('POST', `/automation/${FLOW}/trigger`, {}) },
     { seam: 'GET /automation/_status', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('GET', '/automation/_status') },

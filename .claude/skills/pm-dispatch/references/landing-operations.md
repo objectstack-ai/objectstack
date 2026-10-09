@@ -55,7 +55,7 @@
 - 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
-- 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>5000 行(含生成物)照 Tier H。
+- 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>3000 行(含生成物)照 Tier H。
 - 受管路径全在 `.claude/**` 者 Tier S:席内达档复核过落地前检三条即转正式入队。
 - Tier H(其余受管面)者:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
@@ -87,7 +87,7 @@
 - 这种 PR 停在 draft,正文写精确的预期红清单:逐条失败测试名 + 报错签名。
 - 正文同写解除条件:点名所依赖的那张 PR 合入。
 - 每个 CI-failure 事件与清单比对:签名匹配静默跳过,新签名才是真问题。
-- 依赖合入后:最后一轮同步 → 红清零 → 转 ready → 入队。
+- 依赖合入后:末轮同步走中继 `pr_update_branch`(`rest-channel.md`)→ 红清零 → 转 ready → 入队。
 
 ## D. 串行接力:多个已实现 PR 全碰生成物时,一次只放行一个
 

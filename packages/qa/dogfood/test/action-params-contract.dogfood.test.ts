@@ -20,8 +20,8 @@
 // unnoticed unless a test drives it.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const ACTION_PATH = '/actions/showcase_field_zoo/showcase_action_param_gallery';
 
@@ -30,7 +30,7 @@ describe('dogfood: action param contract enforced at dispatch (ADR-0104 D2)', ()
   let token: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     token = await stack.signIn();
   }, 60_000);
 

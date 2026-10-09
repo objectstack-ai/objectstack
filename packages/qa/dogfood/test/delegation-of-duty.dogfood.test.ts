@@ -18,8 +18,8 @@
 // @proof: delegation-of-duty
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { resolveAuthzContext } from '@objectstack/core';
@@ -59,7 +59,7 @@ describe('delegation of duty (ADR-0091 D3) — end to end', () => {
   const sessionFor = (userId: string) => async () => ({ user: { id: userId }, session: { activeOrganizationId: orgId } });
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       security: new SecurityPlugin({
         defaultPermissionSets: [...securityDefaultPermissionSets, delegMember],
         fallbackPermissionSet: 'deleg_member',

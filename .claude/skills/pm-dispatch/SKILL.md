@@ -146,7 +146,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 代执行他人指令的关闭、摘标、回收认领,评论带出处三件:谁的指令、原话、在哪说。
 - 标签写恒四步:取现集 → 只增删目标 → 写合并集 → 回读 diff 对 union(现集, 增删)。
 - union 有而回读缺 = 被并发剥掉,重挂并报告。
-- 多席可写面恒读回;API 200 不等于落地正确。
 - PM 写进 GitHub 的文本 ⛔ 不用尖括号路径占位符,改写成后跟显式路径的说法。
 - 携带易损片段的评论(派发令与裁决)post 后读回;写侧形状见 `references/platform-readings.md`。
 
@@ -184,7 +183,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - governed 面统一定义:`docs/adr/**` + `.claude/**`(全量)+ `skills/**` + `docs/NORTH-STAR.md`。
 - governed 面同含 `AGENTS.md` + `CLAUDE.md`;`GOVERNED_REPOS` 各仓同治理待遇,执行席恒随落地仓车道。
 - 路径面命中 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
-- 改动 >5000 行(含生成物)同换终局四件套,⛔ 无 Tier S 例外;读数 = PR additions+deletions。
+- 改动 >3000 行(含生成物)同换终局四件套,⛔ 无 Tier S 例外;读数 = PR additions+deletions。
 - ① 复核结论照常写在 issue 上;技能面 hunk 须由契约复审档的席复核,档外席先交 skills 席。
 - ② PR 留给维护者看得见地悬着;终局两条:人工直合即审核记录;授权批准 ⇒ 席位落地。
 - 看得见 = ACCEPT 同笔挂 `needs-user-decision` + 贴终稿「维护者速读」评论;①仍是审核记录。
@@ -316,4 +315,5 @@ Clause-②: yes | no
 Responsibility: `<whose code produces the risk | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards only, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
+Resume-from: `BRANCH@SHA` (only when the card's newest `Release:` carries one; the dev starts from that sha, never from zero)
 ```

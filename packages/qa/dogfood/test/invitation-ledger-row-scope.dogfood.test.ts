@@ -73,8 +73,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const SYSTEM_CTX = { isSystem: true };
 
@@ -166,7 +166,7 @@ describe('#8095/#8240: the sys_invitation ledger, read by four personas', () => 
   let ownerUserId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     const adminToken = await stack.signIn(); // the seeded dev admin (platform admin)
     ql = await stack.kernel.getServiceAsync<unknown>('objectql');
 

@@ -43,8 +43,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 describe('#7727: sys_api_key revoke/restore through the declared product route', () => {
   let stack: VerifyStack;
@@ -73,7 +73,7 @@ describe('#7727: sys_api_key revoke/restore through the declared product route',
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     token = await stack.signIn();
   }, 120_000);
 

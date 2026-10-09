@@ -62,6 +62,8 @@ function makeQl(tables: Record<string, any[]>) {
         rows.filter((r) =>
           Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
             if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+            // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+            if (v === null) return (r[k] ?? null) === null;
             return r[k] === v;
           }),
         ),
@@ -117,7 +119,7 @@ describe('resolveAuthzContext — single source of truth', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null }],
       sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
     });
     const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
@@ -129,7 +131,7 @@ describe('resolveAuthzContext — single source of truth', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', organization_id: 'o1' }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: 'o1' }],
       sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
     });
     const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
@@ -169,6 +171,8 @@ function makeCountingQl(tables: Record<string, any[]>) {
         rows.filter((r) =>
           Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
             if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+            // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+            if (v === null) return (r[k] ?? null) === null;
             return r[k] === v;
           }),
         ),
@@ -754,7 +758,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       sys_member: [],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'u1', permission_set_id: 'psA', organization_id: null, valid_until: PAST },
+        { user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null, valid_until: PAST },
       ],
       sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
     });
@@ -926,7 +930,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
         sys_user: [{ id: 'esc2' }],
         sys_member: [{ user_id: 'esc2', role: 'owner', organization_id: 'o1', valid_until: PAST }],
         sys_user_position: [],
-        sys_user_permission_set: [{ user_id: 'esc2', permission_set_id: 'psO', organization_id: 'o1' }],
+        sys_user_permission_set: [{ user_id: 'esc2', permission_set_id: 'psO', permission_set: 'organization_admin', organization_id: 'o1' }],
         sys_permission_set: [{ id: 'psO', name: 'organization_admin' }],
       });
       const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('esc2', { org: 'o1' }), nowMs: NOW });
@@ -975,7 +979,7 @@ describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
         sys_user: [{ id: 'pa' }],
         sys_member: [],
         sys_user_position: [],
-        sys_user_permission_set: [{ user_id: 'pa', permission_set_id: 'psA', organization_id: null }],
+        sys_user_permission_set: [{ user_id: 'pa', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null }],
         sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
       }),
       getSession: session('pa'),
@@ -986,7 +990,7 @@ describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
         sys_user: [{ id: 'ta' }],
         sys_member: [{ user_id: 'ta', role: 'admin', organization_id: 'o1' }],
         sys_user_position: [],
-        sys_user_permission_set: [{ user_id: 'ta', permission_set_id: 'psO', organization_id: 'o1' }],
+        sys_user_permission_set: [{ user_id: 'ta', permission_set_id: 'psO', permission_set: 'organization_admin', organization_id: 'o1' }],
         sys_permission_set: [{ id: 'psO', name: 'organization_admin' }],
       }),
       getSession: session('ta', { org: 'o1' }),
@@ -1049,8 +1053,8 @@ describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
       sys_member: [{ user_id: 'both', role: 'admin', organization_id: 'o1' }],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'both', permission_set_id: 'psA', organization_id: null },
-        { user_id: 'both', permission_set_id: 'psO', organization_id: 'o1' },
+        { user_id: 'both', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null },
+        { user_id: 'both', permission_set_id: 'psO', permission_set: 'organization_admin', organization_id: 'o1' },
       ],
       sys_permission_set: [
         { id: 'psA', name: 'admin_full_access' },
@@ -1080,7 +1084,7 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
       sys_user: [{ id: 'u1', email: 'ada@x.com' }],
       sys_member: [{ user_id: 'u1', role: 'admin', organization_id: 'o1' }],
       sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: null }],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'ehr_all', organization_id: null }],
       sys_permission_set: [{ id: 'psA', name: 'ehr_all', system_permissions: ['cap_ehr'] }],
     });
     const grants = await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'o1' });
@@ -1097,7 +1101,7 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
       sys_user: [{ id: 'u1', email: 'ada@x.com' }],
       sys_member: [],
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'contributor_ps', organization_id: null }],
       sys_position: [{ id: 'r1', name: 'contributor' }],
       sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
       sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', system_permissions: ['cap_x'] }],
@@ -1115,7 +1119,7 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'sales_ps', organization_id: null }],
       sys_permission_set: [{ id: 'ps1', name: 'sales_ps' }],
     });
     const grants = await resolveUserAuthzGrants(ql, 'u1', { seedPermissions: ['api:scope'] });
@@ -1150,7 +1154,7 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', organization_id: null, valid_until: past }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'expired_ps', organization_id: null, valid_until: past }],
       sys_permission_set: [{ id: 'psA', name: 'expired_ps' }],
     });
     const grants = await resolveUserAuthzGrants(ql, 'u1');
@@ -1456,7 +1460,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: null }],
       sys_permission_set: [{
         id: 'ps1',
         name: 'crm_full',
@@ -1476,7 +1480,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null }],
       sys_permission_set: [{
         id: 'psA',
         name: 'admin_full_access',
@@ -1500,8 +1504,8 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_member: [],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'u1', permission_set_id: 'ps1', organization_id: null },
-        { user_id: 'u1', permission_set_id: 'ps2', organization_id: null },
+        { user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: null },
+        { user_id: 'u1', permission_set_id: 'ps2', permission_set: 'crm_read', organization_id: null },
       ],
       sys_permission_set: [
         { id: 'ps1', name: 'crm_full', active: false },
@@ -1520,7 +1524,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: null }],
       sys_position: [{ id: 'r1', name: 'contributor', active: false }],
       sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
       sys_permission_set: [{ id: 'ps1', name: 'crm_full' }],
@@ -1893,9 +1897,9 @@ describe('[#20515] with no active organization, only global grants apply', () =>
       { user_id: userId, position: 'beta_position', organization_id: BETA },
     ],
     sys_user_permission_set: [
-      { user_id: userId, permission_set_id: 'ps_global', organization_id: null },
-      { user_id: userId, permission_set_id: 'ps_alpha', organization_id: ALPHA },
-      { user_id: userId, permission_set_id: 'ps_beta', organization_id: BETA },
+      { user_id: userId, permission_set_id: 'ps_global', permission_set: 'global_set', organization_id: null },
+      { user_id: userId, permission_set_id: 'ps_alpha', permission_set: 'alpha_set', organization_id: ALPHA },
+      { user_id: userId, permission_set_id: 'ps_beta', permission_set: 'beta_set', organization_id: BETA },
     ],
     sys_permission_set: [
       { id: 'ps_global', name: 'global_set', system_permissions: ['global_cap'] },
@@ -2012,10 +2016,10 @@ describe('[#20515] with no active organization, only global grants apply', () =>
       ],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'u_ex', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_gone', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_member', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_global_ex', permission_set_id: 'ps_meta', organization_id: null },
+        { user_id: 'u_ex', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_gone', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_member', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_global_ex', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: null },
       ],
       sys_permission_set: [{ id: 'ps_meta', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata'] }],
     });
@@ -2076,7 +2080,7 @@ describe('[#20515] with no active organization, only global grants apply', () =>
       sys_user: [{ id: 'u_admin', email: 'admin@x.com' }],
       sys_member: [{ user_id: 'u_admin', organization_id: ALPHA, role: 'owner' }],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_admin', organization_id: organizationId }],
+      sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: organizationId }],
       sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata'] }],
     });
 

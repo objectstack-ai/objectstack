@@ -14,8 +14,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const SYSTEM_CTX = { isSystem: true };
 
@@ -41,7 +41,7 @@ describe('membership under the auto policy is decided at user creation (ADR-0093
   let orgId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 

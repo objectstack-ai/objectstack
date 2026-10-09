@@ -44,8 +44,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { assertArmed, authSettingArmed } from './armed.js';
 import { secretFromTotpUri, totp } from './totp.js';
 
@@ -85,7 +85,7 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     priorTwoFactor = process.env.OS_AUTH_TWO_FACTOR;
     process.env.OS_AUTH_TWO_FACTOR = 'true';
 
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
     // [#3690] Apply the operator policy the same way the settings service does

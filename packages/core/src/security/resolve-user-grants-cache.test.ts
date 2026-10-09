@@ -73,6 +73,8 @@ function makeSeamQl(tables: Record<string, any[]>) {
     Object.entries(where ?? {}).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
+      // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+      if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
   async function writeOp(object: string, operation: 'insert' | 'update' | 'delete', executor: () => void): Promise<void> {
@@ -136,7 +138,7 @@ function adminTables(): Record<string, any[]> {
     sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
     sys_user_position: [],
     sys_user_permission_set: [
-      { user_id: 'u1', permission_set_id: 'ps_admin', organization_id: null },
+      { user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
     ],
     sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
     sys_position: [],
@@ -284,7 +286,7 @@ describe('pin 2 — read-after-write on the writing node (invalidation, not TTL)
     expect(before.permissions).not.toContain('admin_full_access');
 
     await ql.insert('sys_user_permission_set', {
-      user_id: 'u1', permission_set_id: 'ps_admin', organization_id: null,
+      user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null,
     });
 
     const after = await resolveUserAuthzGrants(ql, 'u1', OPTS);
@@ -554,8 +556,8 @@ describe('[#20515] with the cache on, a no-tenant resolution never serves an org
       sys_member: [],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'u1', permission_set_id: 'ps_org', organization_id: 'org_a' },
-        { user_id: 'u1', permission_set_id: 'ps_global', organization_id: null },
+        { user_id: 'u1', permission_set_id: 'ps_org', permission_set: 'org_a_editors', organization_id: 'org_a' },
+        { user_id: 'u1', permission_set_id: 'ps_global', permission_set: 'everyone_readers', organization_id: null },
       ],
       sys_permission_set: [
         { id: 'ps_org', name: 'org_a_editors', system_permissions: ['manage_metadata'] },

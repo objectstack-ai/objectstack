@@ -15,7 +15,7 @@ import { ObjectPermissionSchema, PermissionSetSchema } from '@objectstack/spec/s
 import {
   SECURITY_FLS_UNQUALIFIED_KEY,
   SECURITY_FLS_UNKNOWN_FIELD,
-  validateSecurityPosture,
+  validateSecurityPosture as validateSecurityPostureUnrecorded,
   validateSecurityRoleWord,
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,
@@ -33,6 +33,28 @@ import {
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: that case reads what the cases above
+// fired.
+const SHORTENED_RULE_IDS: readonly string[] = [
+  SECURITY_CBP_AMBIGUOUS_RELATION,
+  SECURITY_FLS_UNKNOWN_FIELD,
+  SECURITY_CBP_NO_RELATION,
+  SECURITY_MASTER_DETAIL_UNGRANTED,
+  SECURITY_OWD_ALIAS,
+  SECURITY_DELEGATION_MISSING_REASON,
+];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateSecurityPosture: typeof validateSecurityPostureUnrecorded = (...args) => {
+  const findings = validateSecurityPostureUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
 
 const rulesOf = (stack: Record<string, unknown>) =>
   validateSecurityPosture(stack).map((f) => f.rule);
@@ -247,8 +269,10 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     // that is in fact an unenforced security control.
     expect(findings[0].message).toContain("crm_account.description_nope");
     expect(findings[0].message).toContain("declares no field 'description_nope'");
-    expect(findings[0].message).toMatch(/NEVER ENFORCES/);
-    expect(findings[0].message).toMatch(/stays as readable and as editable/);
+    // [#22161] The cost, in the one-line verdict. HOW the runtime resolves the
+    // key — and that the field stays as readable and editable as the object
+    // grant leaves it — is `os explain security-fls-unknown-field`.
+    expect(findings[0].message).toContain('the masking it declares never enforces');
     // And the hint must be actionable: the fields that DO exist.
     expect(findings[0].hint).toContain('description');
   });
@@ -376,8 +400,7 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(findings[0].message).toMatch(/names NO field/);
     // The consequence half is the same sentence the dangling case carries — an
     // author must be told what it costs, not merely that the key is malformed.
-    expect(findings[0].message).toMatch(/NEVER ENFORCES/);
-    expect(findings[0].message).toMatch(/stays as readable and as editable/);
+    expect(findings[0].message).toContain('the masking it declares never enforces');
     // ⛔ And it must not read as the dangling-field message: there is no field
     // name to quote, so the wrong branch would render `declares no field ''`.
     expect(findings[0].message).not.toContain("declares no field");
@@ -728,7 +751,9 @@ describe('validateSecurityPosture · master-detail detail ungranted (framework#2
     expect(md).toHaveLength(1);
     expect(md[0]).toMatchObject({ severity: 'warning', where: 'object "work_order_item"' });
     expect(md[0].path).toBe('objects[1].fields.order');
-    expect(md[0].message).toContain('controlled_by_parent');
+    // [#22161] Why object-level CRUD is never derived from the master
+    // (ADR-0055 controlled_by_parent) is `os explain security-master-detail-ungranted`.
+    expect(md[0].message).toContain('no object-level CRUD grant');
     expect(md[0].message).toContain('403');
     expect(md[0].message).toContain('work_order'); // names the master
     expect(md[0].hint).toContain('permissions[i].objects.work_order_item');
@@ -1036,25 +1061,25 @@ describe('validateSecurityPosture · controlled_by_parent with an AMBIGUOUS mast
       where: 'object "crm_contract"',
       path: 'objects[2].fields',
     });
-    // Every candidate is named — field, type and master — in DECLARATION order,
-    // which is the order that decides the winner. A message naming only the
-    // winner would describe the pick, not the ambiguity.
-    expect(findings[0].message).toContain('"account" (lookup -> "crm_account")');
-    expect(findings[0].message).toContain('"contact" (lookup -> "crm_contact")');
-    expect(findings[0].message.indexOf('"account" (lookup')).toBeLessThan(
-      findings[0].message.indexOf('"contact" (lookup'),
+    // Every candidate is named — field and master, its type in the tier — in
+    // DECLARATION order, which is the order that decides the winner. A message
+    // naming only the winner would describe the pick, not the ambiguity.
+    expect(findings[0].message).toContain('"account" → crm_account');
+    expect(findings[0].message).toContain('"contact" → crm_contact');
+    expect(findings[0].message.indexOf('"account" →')).toBeLessThan(
+      findings[0].message.indexOf('"contact" →'),
     );
     // The tier that was actually tested, and the winner it currently resolves.
     expect(findings[0].message).toContain('required lookup tier');
-    expect(findings[0].message).toContain('Today "account" wins');
+    expect(findings[0].message).toContain('"account" wins today');
     expect(findings[0].hint).toContain('master_detail');
   });
 
   it('names the OTHER field as the winner when the same two are declared the other way round', () => {
     const findings = ambiguousOnly(cbpStack({ contact: REQ_CONTACT_LOOKUP, account: REQ_ACCOUNT_LOOKUP }));
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('Today "contact" wins');
-    expect(findings[0].message).toContain('derives from "crm_contact"');
+    expect(findings[0].message).toContain('"contact" wins today');
+    expect(findings[0].message).toContain('"contact" → crm_contact');
   });
 
   it('errors on tier 1: two REQUIRED master_detail fields', () => {
@@ -1088,7 +1113,7 @@ describe('validateSecurityPosture · controlled_by_parent with an AMBIGUOUS mast
       }),
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('3 of its fields tie');
+    expect(findings[0].message).toContain('3 fields tie');
   });
 
   it('reports the array field form too', () => {
@@ -1826,5 +1851,38 @@ describe('validateSecurityPosture — every branch is reachable without an undec
       [...new Set(pushedRuleIds())].filter((id) => !emitted.has(id)),
       'a branch no key-legal stack can reach must be deleted, not kept "just in case" (#5017)',
     ).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [SECURITY_CBP_AMBIGUOUS_RELATION]: ['ADR-0055', 'FIELD DECLARATION ORDER', 'security boundary', 'it does not refuse, it picks'],
+    [SECURITY_FLS_UNKNOWN_FIELD]: ['PermissionEvaluator.getFieldPermissions', 'stays as readable and as editable', 'field rename', 'security-fls-unqualified-key'],
+    [SECURITY_CBP_NO_RELATION]: ['ADR-0055', 'INVALID_METADATA', 'unusable rather than merely locked down'],
+    [SECURITY_MASTER_DETAIL_UNGRANTED]: ['`controlled_by_parent`', 'SEPARATE gate', "can't submit the", 'wildcard'],
+    [SECURITY_OWD_ALIAS]: ["'read_write'", "'full'", "'publicSharing'", "'allowedAudiences'", 'fails CLOSED'],
+    [SECURITY_DELEGATION_MISSING_REASON]: ['ADR-0091 D3', 'dual audit trail', '`granted_by`', '`sys_user_position`'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

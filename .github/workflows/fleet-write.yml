@@ -20,7 +20,10 @@
 # alone, that transfer's one target too: `transferIssue` needs issues write on
 # both ends) and to the permissions the op table declares (`issues: write`,
 # `pull-requests: write`, the `contents: write` GitHub's auto-merge mutations
-# require, and the `metadata: read` the sender gate's permission read needs)
+# require, and the `metadata: read` the sender gate's permission read needs;
+# plus, for a `workflow_dispatch` stroke ALONE, the `actions: write` the
+# dispatch endpoint needs — minted from the validator's per-stroke output, so
+# every other run's token is exactly the four grants above)
 # — and revoked by that action's post step. The workflow's own `GITHUB_TOKEN` gets nothing
 # (`permissions: {}` below); the job grants it `contents: read` for the
 # checkout and nothing else, so the run's ONLY write path is the App token,
@@ -84,7 +87,9 @@ jobs:
       # non-integer number, an over-cap string or an over-cap payload with
       # every reason in the step summary and zero writes; on success it hands
       # the mint below the repository NAMES its token must reach through
-      # `$GITHUB_OUTPUT` — one for every stroke, two for a transfer stroke.
+      # `$GITHUB_OUTPUT` — one for every stroke, two for a transfer stroke —
+      # and `permission_actions`: `write` for a stroke carrying the one
+      # `workflow_dispatch` action, EMPTY for every other stroke.
       - name: Validate the payload (closed schema, zero writes on refusal)
         id: validate
         env:
@@ -119,6 +124,15 @@ jobs:
           # or branch write — so this grant is spent only by those two mutations.
           permission-contents: write
           permission-metadata: read
+          # ONE consumer: the `workflow_dispatch` row — `POST .../actions/workflows/{file}/dispatches`
+          # on an allowlisted file at `main`. Minted ONLY for a stroke carrying that op: the validator
+          # writes `permission_actions=write` for such a stroke and an EMPTY value for every other,
+          # and `actions/create-github-app-token` skips an empty `permission-*` input (its
+          # `lib/get-permissions-from-inputs.js`: an empty value leaves the set unchanged, measured
+          # at the v3 tag), so every other run keeps exactly the four grants above. `actions: write`
+          # also reaches cancel, re-run, delete, cache and artifact endpoints; the op table has no
+          # row for any of them, and `validate.mjs --self-test` pins that none is reachable.
+          permission-actions: ${{ steps.validate.outputs.permission_actions }}
 
       # The sender gate, then the actions in order, then the step summary —
       # request id · sender and role · session · target · one row per request.

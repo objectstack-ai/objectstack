@@ -227,8 +227,9 @@ function collectBindings(fn: ts.FunctionLikeDeclarationBase): Set<string> {
 /**
  * Collect identifiers used in VALUE position (potential references). Excludes
  * the false-positive sources: property-access member names, non-shorthand
- * object/class member keys, and statement labels. Binding names that slip
- * through are harmless — they are subtracted via `bindings` downstream.
+ * object/class member keys, non-computed destructuring keys, and statement
+ * labels. Binding names that slip through are harmless — they are subtracted
+ * via `bindings` downstream.
  */
 function collectReferences(fn: ts.FunctionLikeDeclarationBase): Set<string> {
   const refs = new Set<string>();
@@ -251,6 +252,19 @@ function collectReferences(fn: ts.FunctionLikeDeclarationBase): Set<string> {
       // visit computed key names.
       if (ts.isComputedPropertyName(node.name)) walk(node.name.expression);
       walk(node.initializer);
+      return;
+    }
+    if (ts.isBindingElement(node)) {
+      // `{ key: alias = d } = ctx` — the same rule as `{ key: value }` above:
+      // `key` names a property READ OFF the source, so it is not a ref (unless
+      // computed). Visit the binding name (an alias is subtracted via
+      // `bindings`; a nested pattern recurses here), a computed key's
+      // expression, and the default — `{ [k]: v = d }` reads `k` and `d`.
+      if (node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
+        walk(node.propertyName.expression);
+      }
+      walk(node.name);
+      if (node.initializer) walk(node.initializer);
       return;
     }
     if (ts.isMethodDeclaration(node) || ts.isPropertyDeclaration(node) || ts.isGetAccessor(node) || ts.isSetAccessor(node)) {

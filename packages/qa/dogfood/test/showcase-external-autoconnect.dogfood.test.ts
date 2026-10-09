@@ -9,7 +9,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 function listOf(body: unknown): Array<Record<string, unknown>> {
   const b = body as { records?: unknown[]; data?: unknown[] } | unknown[];
@@ -28,7 +29,7 @@ describe('showcase: external datasource auto-connects with no onEnable bridge (A
     // tables, exactly as `os dev` does at boot. Crucially this does NOT register a
     // driver (ADR-0062 D8); auto-connect (below, during bootStack) does that.
     await onEnable({ logger: { info() {}, warn() {} } } as never);
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     admin = await stack.signIn();
   }, 60_000);
 
@@ -46,7 +47,7 @@ describe('showcase: external datasource auto-connects with no onEnable bridge (A
     // at boot with no `onEnable` driver bridge, and its federated objects
     // answer a genuine authenticated read through the real REST stack.
     //
-    // What it does NOT cover: the organization wall. `bootStack(showcaseStack)`
+    // What it does NOT cover: the organization wall. `bootShowcase()`
     // above passes NO options, and `bootStack` requests
     // `OS_TENANCY_POSTURE = 'isolated'` only when `opts.multiTenant` is truthy
     // (`packages/verify/src/harness.ts`, `requestIsolatedPosture`), and it

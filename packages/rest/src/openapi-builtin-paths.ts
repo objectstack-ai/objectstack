@@ -108,10 +108,12 @@
  * One consequence worth stating: per-operation `security` is emitted ONLY as
  * `[]`, for routes whose registration tags them `public` (the anonymous form
  * runner). Every other operation says nothing and inherits the document-level
- * requirement. That under-claims for the handful of routes that answer
- * anonymously (`/discovery`, `/openapi.json`, `/docs`) — deliberately: the
- * registration carries no auth fact for them, and "credentials not needed" is
- * the one direction where a wrong claim leaks data.
+ * requirement. That under-claims for the discovery routes, which answer
+ * anonymously — deliberately: the registration carries no auth fact for them,
+ * and "credentials not needed" is the one direction where a wrong claim leaks
+ * data. The two API-description routes (`/openapi.json`, `/docs`) refuse an
+ * anonymous caller (#22430), so the inherited requirement is simply true of
+ * them.
  */
 
 /** The slice of a registered route this module reads. */

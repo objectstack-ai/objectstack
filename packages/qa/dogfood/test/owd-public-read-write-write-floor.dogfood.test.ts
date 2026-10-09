@@ -147,7 +147,7 @@ const probeApp = defineStack({
     version: '0.0.1',
     type: 'app',
     name: 'OWD public_read_write Write Floor Probe',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
   objects: [mk(OPEN, 'public_read_write'), mk(READ, 'public_read'), mk(SECRET, 'private')],
   permissions: [EditorSet, ViewerSet, ScopedSet],

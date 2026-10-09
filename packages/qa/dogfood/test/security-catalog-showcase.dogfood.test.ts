@@ -31,7 +31,8 @@
 // declared by its host root.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import showcaseStack from '@objectstack/example-showcase';
 import { securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { createSecurityCatalogReader, type SecurityCatalogType } from '@objectstack/core';
@@ -77,7 +78,7 @@ describe.each(POSTURES)('showcase, $label: the security catalog read', ({ opts, 
   let reader: ReturnType<typeof createSecurityCatalogReader>;
 
   beforeAll(async () => {
-    booted = await bootStack(showcaseStack as Parameters<typeof bootStack>[0], opts);
+    booted = await bootShowcase(opts);
     admin = await booted.signIn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql: any = await booted.kernel.getServiceAsync('objectql');

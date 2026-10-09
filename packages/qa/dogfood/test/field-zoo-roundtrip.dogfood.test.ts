@@ -17,9 +17,9 @@
 // Field.time rejected time-of-day).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
 import { SECRET_MASK } from '@objectstack/objectql';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 import { MATRIX, REFERENCE_TARGETS } from './field-zoo.matrix.js';
 describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', () => {
@@ -29,7 +29,7 @@ describe('dogfood: field-type capability matrix round-trips over HTTP (#2004)', 
   const referenceIds: Record<string, string> = {};
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     const token = await stack.signIn();
 
     // [#4441] Create a REAL row in each reference target first.

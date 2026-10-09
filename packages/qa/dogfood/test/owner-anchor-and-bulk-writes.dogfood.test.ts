@@ -28,8 +28,8 @@
 // authz-row: bulk-write-owner-scoping
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { resolveAuthzContext } from '@objectstack/core';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
@@ -78,7 +78,7 @@ describe('owner anchor guard + owner-scoped bulk writes (#3004 / #2982)', () => 
     (await ql.findOne('showcase_private_note', { where: { id: noteId }, context: { isSystem: true } }))?.owner_id;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       security: new SecurityPlugin({
         defaultPermissionSets: [...securityDefaultPermissionSets, noteDeleteSet],
       }),

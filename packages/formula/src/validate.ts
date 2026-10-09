@@ -22,11 +22,13 @@ import {
   firstUndeclaredReference,
   firstTypeMismatch,
   inferCelType,
+  parseCelToAst,
   parseCelToAstWithReason,
+  type CelAstNode,
   type FieldCelType,
 } from './cel-engine';
 import { templateEngine } from './template-engine';
-import { analyzeRelationshipTraversals, findTraversalConflicts } from './relationship-traversal';
+import { findTraversalConflicts, readRootMembers, traversalsOf, type RootMemberRead } from './relationship-traversal';
 import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 // #13594 — the one reader of cel-js's `found no matching overload for '…'`
 // template. Both this module (which asks whether the name is ADVERTISED, to word
@@ -63,8 +65,29 @@ export type ExprInput = string | { dialect?: string; source?: string } | null | 
 export interface ExprSchemaHint {
   /** Object the expression is authored against (for error text). */
   objectName?: string;
-  /** Known top-level field names, so `record.<field>` can be checked. */
+  /**
+   * Known top-level field names, so each member read on `record` / `previous`
+   * can be checked — in every spelling that names a member: `record.f`,
+   * `record.?f`, `record['f']`, `record[?'f']`, and the same inside `has(…)`.
+   * A computed key (`record[someVar]`) names no member before evaluation and
+   * gets no verdict.
+   */
   fields?: readonly string[];
+  /**
+   * The object's read attachments (`ObjectSchema.attachedOnRead`) — block name
+   * → the leaf keys that block declares. A block is computed per caller and
+   * attached to each served row, never stored, so it is not a field; this map
+   * lets the field-existence pass judge the SECOND segment of
+   * `record.<block>.<leaf>` (and `previous.…`, in every member spelling): a
+   * leaf the block does not declare is refused under the same `unknown-field`
+   * code, and the refusal names the leaves the block does declare.
+   *
+   * It only ADDS the second-segment judgement. Whether `record.<block>`
+   * resolves at all is still {@link fields}' question, so a caller lists each
+   * block name there too (`@objectstack/lint`'s field index does). Absent or
+   * empty ⇒ only first segments are judged, exactly as before this key.
+   */
+  attachedOnRead?: Readonly<Record<string, readonly string[]>>;
   /**
    * #1928 tier 4 — field name → spec field type (`'text'`, `'currency'`,
    * `'boolean'`, `'date'`, …). Enables the advisory type-soundness check: a
@@ -308,8 +331,8 @@ function typeSoundnessIssue(
 
 /** A bare `{x}` that is NOT part of a `{{x}}` mustache hole. */
 const SINGLE_BRACE_RE = /(?:^|[^{])\{\s*([A-Za-z_$][\w.$]*)\s*\}(?!\})/;
-/** `record.<field>` / `previous.<field>` head references for field-existence. */
-const RECORD_REF_RE = /\b(?:record|previous)\.([A-Za-z_$][\w$]*)/g;
+/** The roots whose members the field-existence pass judges against `schema.fields`. */
+const FIELD_EXISTENCE_ROOTS = ['record', 'previous'] as const;
 
 /** The dialect a field role expects (Decision 2). */
 export function expectedDialect(role: FieldRole): 'cel' | 'template' {
@@ -622,15 +645,48 @@ function receiverCallHint(celMessage: string, source: string): { text: string; n
   };
 }
 
-function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined, errors: ExprValidationError[]): void {
+/**
+ * Every member `source` reads on `record` / `previous`, judged against
+ * `schema.fields` — one `unknown-field` refusal per undeclared name.
+ *
+ * The members come from `readRootMembers`, the AST member reader the
+ * relationship-traversal analysis is built on, so every spelling that names a
+ * member is judged once and the same way: `record.f`, `record.?f`,
+ * `record['f']`, `record[?'f']`, and any of them inside `has(…)`. A reader that
+ * saw only the dot spelling let a typo written any other way reach the
+ * evaluator with no authoring verdict, to fault there on every row instead.
+ * A computed key (`record[someVar]`) names no member before evaluation, so it
+ * gets no verdict here.
+ *
+ * `ast` is null only for a source the canonical front end will not parse; the
+ * caller reaches this after `celEngine.compile` accepted the source, which owns
+ * that verdict, so there is nothing to judge.
+ */
+function checkFieldExistence(
+  ast: () => CelAstNode | null,
+  source: string,
+  schema: ExprSchemaHint | undefined,
+  errors: ExprValidationError[],
+): void {
   if (!schema?.fields || schema.fields.length === 0) return;
+  const tree = ast();
+  if (tree == null) return;
   const known = new Set(schema.fields);
   const seen = new Set<string>();
-  let m: RegExpExecArray | null;
-  RECORD_REF_RE.lastIndex = 0;
-  while ((m = RECORD_REF_RE.exec(source)) !== null) {
-    const field = m[1];
-    if (seen.has(field) || known.has(field)) continue;
+  const blocks = schema.attachedOnRead;
+  const seenLeaves = new Set<string>();
+  for (const read of readRootMembers(tree, FIELD_EXISTENCE_ROOTS)) {
+    const field = read.field;
+    if (known.has(field)) {
+      // [#22211 ruling A] A head that names a declared read attachment has a
+      // closed second segment: judge it against the block's declared leaves.
+      // Own-key test, so an inherited name (`constructor`) is never a block.
+      if (blocks && Object.prototype.hasOwnProperty.call(blocks, field)) {
+        checkAttachedLeaf(source, schema.objectName, field, blocks[field], read, seenLeaves, errors);
+      }
+      continue;
+    }
+    if (seen.has(field)) continue;
     seen.add(field);
     const suggestion = nearest(field, schema.fields);
     errors.push(refusal(
@@ -645,6 +701,61 @@ function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined,
         (suggestion ? ` — did you mean \`${suggestion}\`?` : ''),
     ));
   }
+}
+
+/**
+ * [#22211 ruling A] The second segment of `record.<block>.<leaf>` when
+ * `<block>` is a declared read attachment (`ExprSchemaHint.attachedOnRead`).
+ *
+ * The same `unknown-field` refusal as a first segment, with `field` naming the
+ * dotted path as written, so a consumer rendering only the first-segment params
+ * still says something true. The one addition is an optional clause naming the
+ * leaves the block declares — the remedy — carried as `block` + `leaves`,
+ * present together exactly when the message carries that clause.
+ *
+ * The leaf is judged in every spelling that names a member, exactly like the
+ * block itself: `record.viewer.can_act`, `record.viewer.?can_act`,
+ * `record.viewer['can_act']`, `record['viewer'][?'can_act']`, inside `has(…)`
+ * or not. Unjudged, deliberately (each a missed catch, never a false refusal):
+ * a computed key (`record.viewer[k]`), a method call on the block, which reads
+ * the block's value rather than a member of it, and any segment past the
+ * second — a leaf is a scalar, so a third segment is not this declaration's
+ * question.
+ */
+function checkAttachedLeaf(
+  source: string,
+  objectName: string | undefined,
+  block: string,
+  leaves: unknown,
+  read: RootMemberRead,
+  seenLeaves: Set<string>,
+  errors: ExprValidationError[],
+): void {
+  if (!Array.isArray(leaves)) return;
+  const leaf = read.leaf;
+  if (leaf === undefined) return;
+  if (leaves.includes(leaf)) return;
+  const field = `${block}.${leaf}`;
+  if (seenLeaves.has(field)) return;
+  seenLeaves.add(field);
+  const declared = leaves.filter((l): l is string => typeof l === 'string');
+  const nearLeaf = nearest(leaf, declared);
+  const suggestion = nearLeaf ? `${block}.${nearLeaf}` : undefined;
+  errors.push(refusal(
+    'unknown-field',
+    {
+      field,
+      ...(objectName ? { objectName } : {}),
+      ...(suggestion ? { suggestion } : {}),
+      ...(declared.length > 0 ? { block, leaves: declared } : {}),
+    },
+    source,
+    `unknown field \`${field}\`${objectName ? ` on \`${objectName}\`` : ''}` +
+      (declared.length > 0
+        ? ` (the read attachment \`${block}\` declares ${declared.map((l) => `\`${l}\``).join(', ')})`
+        : '') +
+      (suggestion ? ` — did you mean \`${suggestion}\`?` : ''),
+  ));
 }
 
 /**
@@ -868,6 +979,11 @@ export function validateExpression(
     return { ok: false, errors, warnings };
   }
   const compiled = celEngine.compile(source);
+  // One parse through the canonical front end, shared by the two passes that
+  // read members — field existence and the relationship-traversal arm — and
+  // taken only when one of them runs.
+  let parsedAst: CelAstNode | null | undefined;
+  const ast = (): CelAstNode | null => (parsedAst === undefined ? (parsedAst = parseCelToAst(source)) : parsedAst);
   if (!compiled.ok) {
     // #7073 — a bounds refusal gets the SIZE prescription, never the dialect
     // trailer: the source is already bare CEL, so "write bare CEL" is advice
@@ -916,7 +1032,7 @@ export function validateExpression(
       ));
     }
   } else {
-    checkFieldExistence(source, schema, errors);
+    checkFieldExistence(ast, source, schema, errors);
     checkRoleCatalog(source, schema, errors);
     if (schema?.scope === 'record') {
       // In a `record`-scoped site a bare top-level identifier is a silent bug —
@@ -1001,7 +1117,8 @@ export function validateExpression(
   // Metadata authored through Studio, written straight to `sys_metadata` or
   // produced by an agent never reaches this check.
   if (schema?.fieldTypes && schema.traversalHydration === true && role === 'predicate') {
-    const analysis = analyzeRelationshipTraversals(source);
+    const tree = ast();
+    const analysis = tree ? traversalsOf(readRootMembers(tree, [DEFAULT_TRAVERSAL_ROOT])) : null;
     if (analysis) {
       const conflicts = findTraversalConflicts(
         analysis,

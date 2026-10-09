@@ -94,7 +94,7 @@ Three layers, each *derive + only store differences* — never "re-list all 40 f
 ```
 1. Derived default   derive(object, 'create' | 'edit')      ← free, no authoring
 2. Author override   formViews.create  (sparse patch)       ← this recipe; only on real divergence
-3. Tenant override   org overlay delta (ADR-0005)           ← a single org wants its own form
+3. Runtime override  environment overlay (ADR-0005)        ← an admin edits it in Studio; per-org overlays retired (ADR-0131 D6)
 ```
 
 Welding two independent full forms is the **Salesforce page-layout tax**: add a required field, forget the create form → runtime "missing required field" on create; rename a field → silent drift. Keeping data semantics on the object (never on the form) means a form can only ever drift on *which fields appear* — a flat name list that **reference-integrity diagnostics catch as a hard failure** in the AI loop (ADR-0047 §3.5, ADR-0033). That guardrail is what makes the escape hatch safe to hand to an AI author.

@@ -293,15 +293,15 @@ describe('#6603 — the exempt authoring caller is unaffected', () => {
 });
 
 /**
- * [#12702] `manage_org_presentation` on this door — the org-scoped
- * presentation capability. A subset key beside `manage_metadata`: admitted
- * ONLY for a type whose registry entry declares `allowOrgOverride: true` AND a
- * session with an active organization (`ctx.tenantId` — the very value the
- * door threads as the write's organization). Both directions pinned: the
- * tier-A admission with the threaded organization ASSERTED, and the tier-B /
- * env-wide / foreign-scope refusals with the protocol never entered.
+ * [#12702 · ADR-0131 D6] The organization-admin authoring door is CLOSED. The
+ * per-organization overlay axis is retired: this door threads no organization
+ * into a metadata write, so `manage_org_presentation` — which admitted only an
+ * org-scoped write of an org-overridable type — retired with it. Its holder is
+ * refused like any caller without `manage_metadata`, with the protocol never
+ * entered; a `manage_metadata` caller's write lands environment-wide whatever
+ * its active organization.
  */
-describe('#12702 — PUT /meta/:type/:name: `manage_org_presentation`, org-scoped tier-A admission', () => {
+describe('ADR-0131 D6 — PUT /meta/:type/:name: an organization admin\'s metadata write is refused; writes land env-wide', () => {
     const ORG = 'org_a';
 
     /** A lean boot for driving the door with arbitrary `:type` params. */
@@ -339,67 +339,47 @@ describe('#12702 — PUT /meta/:type/:name: `manage_org_presentation`, org-scope
         };
     }
 
-    const HOLDER = { userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'], tenantId: ORG };
-
-    it('admits an org-scoped tier-A save, threaded to the caller\'s OWN organization', async () => {
-        const stack = bootDoor(HOLDER);
-        const write = await stack.put('view', 'org_grid', { name: 'org_grid', label: 'Org Grid' });
-        expect(write.res.statusCode).toBe(200);
-        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
-        // The threading IS the wall: the only organization an admitted write
-        // can carry is the caller's own active one.
-        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({
-            type: 'view', name: 'org_grid', organizationId: ORG,
-        });
-    });
-
-    it('[#10340] the URL-only spelling is folded BEFORE the verdict — `email_templates` is tier-A here too', async () => {
-        const stack = bootDoor(HOLDER);
-        const write = await stack.put('email_templates', 'welcome', { name: 'welcome', subject: 'Hi' });
-        expect(write.res.statusCode).toBe(200);
-        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({
-            type: 'email_templates', name: 'welcome', organizationId: ORG,
-        });
-    });
+    const ORG_ADMIN = { userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'], tenantId: ORG };
 
     it.each([
+        ['view'],
+        ['email_templates'],
+        ['dashboard'],
         ['object'],
         ['flow'],
-    ])('refuses the SAME holder a tier-B `%s` write — nothing is written', async (type) => {
-        const stack = bootDoor(HOLDER);
-        const write = await stack.put(type, 'account', { label: 'x' });
+    ])('refuses a `manage_org_presentation`-only caller with an active organization a `%s` write — nothing is written', async (type) => {
+        const stack = bootDoor(ORG_ADMIN);
+        const write = await stack.put(type, 'org_grid', { name: 'org_grid', label: 'x' });
         expect(write.res.statusCode).toBe(403);
         expect(write.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
-        // The tier-B sentence is byte-identical to the pre-#12702 one: the
-        // message varies on the request's tier, never on the caller's own
-        // grants (#7450).
+        // The plain sentence, for every type: the message names the sanctioned
+        // capability and never the caller's own grants (#7450).
         expect(write.body.error.message).toBe('Saving a metadata item requires the `manage_metadata` capability.');
         expect(stack.saveMetaItem).not.toHaveBeenCalled();
     });
 
-    it('refuses the SAME holder a tier-A write when the session has NO active organization — env-wide is walled', async () => {
-        const stack = bootDoor({ userId: 'u_orgadmin', systemPermissions: ['manage_org_presentation'] });
-        const write = await stack.put('view', 'org_grid', { name: 'org_grid' });
-        expect(write.res.statusCode).toBe(403);
-        expect(write.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
-        expect(String(write.body.error.message)).toContain('active organization');
-        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    it('a `manage_metadata` caller WITH an active organization saves a view environment-wide — no organization reaches the protocol', async () => {
+        const stack = bootDoor({ userId: 'u_author', systemPermissions: ['manage_metadata'], tenantId: ORG });
+        const write = await stack.put('view', 'org_grid', { name: 'org_grid', label: 'Org Grid' });
+        expect(write.res.statusCode).toBe(200);
+        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
+        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({ type: 'view', name: 'org_grid' });
+        expect('organizationId' in stack.saveMetaItem.mock.calls[0][0]).toBe(false);
     });
 
-    it('a foreign organization is not expressible: query/body-smuggled organization ids do not move the threading', async () => {
-        const stack = bootDoor(HOLDER);
+    it('query/body-smuggled organization ids do not reach the write either', async () => {
+        const stack = bootDoor({ userId: 'u_author', systemPermissions: ['manage_metadata'], tenantId: ORG });
         const write = await stack.put(
             'view', 'org_grid',
             { name: 'org_grid', organization_id: 'org_b', organizationId: 'org_b' },
             { organizationId: 'org_b' },
         );
         expect(write.res.statusCode).toBe(200);
-        // The save request is built field by field from named `req` values:
-        // the write still carries the CALLER's organization.
-        expect(stack.saveMetaItem.mock.calls[0][0]).toMatchObject({ organizationId: ORG });
+        // The save request is built field by field from named `req` values.
+        expect('organizationId' in stack.saveMetaItem.mock.calls[0][0]).toBe(false);
     });
 
-    it('control: `manage_metadata` with no active organization still saves a view env-wide, as today', async () => {
+    it('control: `manage_metadata` with no active organization still saves a view env-wide, as before', async () => {
         const stack = bootDoor({ userId: 'u_author', systemPermissions: ['manage_metadata'] });
         const write = await stack.put('view', 'org_grid', { name: 'org_grid' });
         expect(write.res.statusCode).toBe(200);

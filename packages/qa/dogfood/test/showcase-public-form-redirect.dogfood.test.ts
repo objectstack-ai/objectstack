@@ -35,8 +35,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { createConsoleStaticPlugin } from '../../../cli/src/utils/console.js';
 
@@ -74,7 +74,7 @@ afterAll(() => {
 });
 
 const boot = (extra: { multiTenant?: 'posture-only' } = {}): Promise<VerifyStack> =>
-  bootStack(showcaseStack, {
+  bootShowcase({
     ...extra,
     security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }),
     extraPlugins: [createConsoleStaticPlugin(distPath)],

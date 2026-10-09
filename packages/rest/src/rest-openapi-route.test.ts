@@ -57,6 +57,10 @@ function makeRest(protocol: any, config: Record<string, unknown> = {}) {
     protocol,
     { api: { requireAuth: false, version: 'v1', ...config } } as any,
   );
+  // [#22430] The document refuses an anonymous caller, so every case here is a
+  // signed-in one — what is described is the document a reader is served. The
+  // refusal itself is pinned in `rest-api-description-anonymous-deny.test.ts`.
+  (rest as any).resolveExecCtx = async () => ({ userId: 'u_docs_reader' });
   rest.registerRoutes();
   return rest;
 }

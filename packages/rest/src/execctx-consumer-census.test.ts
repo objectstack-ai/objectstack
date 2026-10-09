@@ -319,7 +319,32 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('66 invocation sites, 90 mentions — the thread\'s two control numbers hold', () => {
+    it('63 invocation sites, 78 mentions — the thread\'s two control numbers hold', () => {
+        // [ADR-0131 D6 + #22430, merged] 68 → 63 sites / 92 → 78 mentions:
+        // #22430's two new BARE sites and ADR-0131 D6's five removed CAUGHT
+        // sites, landed on parallel branches and composed at the merge. The
+        // two entries below are each measured against their own base.
+        //
+        // [ADR-0131 D6] 66 → 61 sites / 90 → 76 mentions (on its own base) — five consumers
+        // REMOVED, all from the CAUGHT half (21 → 16; 13 → 12 on the
+        // invocation line). The `/meta` doors stopped carrying an organization
+        // into metadata reads, so the five reads that resolved the caller only
+        // to name its organization no longer resolve it:
+        // `fetchCurrentMetaDocument` (same-line), the layered read, the
+        // diagnostics sweep, the references sweep and the `/published` overlay
+        // read (continuation-line). The bare half (45) is untouched. Nine prose
+        // mentions went with the org-scope comments that named the seam, so
+        // mentions fall by 14 against 5 sites.
+        //
+        // [#22430] 66 → 68 sites / 90 → 92 mentions (on its own base) — two NEW consumers, both
+        // BARE. The API-description endpoints (`registerOpenApiEndpoints`: the
+        // document and its viewer) resolved no identity at all and served an
+        // anonymous caller; each handler now opens with a bare site and the
+        // shared anonymous floor on the very next line, the family §2's third
+        // case describes and §3 drives. The caught half (21, 13 on the
+        // invocation line) is untouched. No prose mention was added, so the
+        // two numbers move together (+2 / +2).
+        //
         // [#20237] 68 → 66 sites / 92 → 90 mentions — a MOVE, not a lost
         // consumer. `GET /meta/:type`'s app nav filter and dashboard widget
         // gate each resolved the context inline (two same-line CAUGHT sites);
@@ -457,43 +482,45 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // naming the seam is the point of the sentence — and the sentence
         // moving only the mention count is this control working: a site was not
         // added, and the number that tracks sites did not move.
-        expect(SITES.length).toBe(66);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(90);
+        expect(SITES.length).toBe(63);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(78);
     });
 
-    it('the split is 21 locally caught / 45 bare — NOT 13 / 45, which does not add to 66', () => {
-        // 13 sites spell the catch on the invocation line; 8 more spell it on
-        // the continuation line. A single-line grep sees 13 and the arithmetic
-        // silently loses eight sites. [#20237] 15 → 13 and 23 → 21: the list
+    it('the split is 16 locally caught / 47 bare — NOT 12 / 47, which does not add to 63', () => {
+        // 12 sites spell the catch on the invocation line; 4 more spell it on
+        // the continuation line. A single-line grep sees 12 and the arithmetic
+        // silently loses four sites. [#20237] 15 → 13 and 23 → 21: the list
         // route's app and dashboard sites moved into the shared list gate (§2).
+        // [ADR-0131 D6] 13 → 12 and 21 → 16: five organization-only reads
+        // stopped resolving the caller (§2).
         //
         // [commit cc837dbfe] The new site is BARE, and that is a decision the next case
         // enforces: a locally-caught site sitting behind the shared floor would
         // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
-        expect(sameLine.length).toBe(13);
-        expect(CAUGHT.length).toBe(21);
-        expect(BARE.length).toBe(45);
+        expect(sameLine.length).toBe(12);
+        expect(CAUGHT.length).toBe(16);
+        expect(BARE.length).toBe(47);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 45 bare sites is guarded on the VERY NEXT LINE, and none of the 21 caught ones is', () => {
+    it('⭐ every one of the 47 bare sites is guarded on the VERY NEXT LINE, and none of the 16 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the
         // next statement; the locally-caught ones carry a `.catch` because
         // they are NOT behind that floor and each must decide for itself.
-        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(45);
+        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(47);
         expect(CAUGHT.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(0);
     });
 });
 
 // ---------------------------------------------------------------------------
-// 3. The 45 bare sites, driven
+// 3. The 47 bare sites, driven
 // ---------------------------------------------------------------------------
 
-describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
-    it('all 45 are reached by the mounted route table, so none is classified by inference', async () => {
+describe('[#13160] §3 the 47 bare sites — driven, every one of them', () => {
+    it('all 47 are reached by the mounted route table, so none is classified by inference', async () => {
         const reached = sitesOf(await sweep(undefined, 'FULL'));
         const unreached = BARE.map((s) => s.line).filter((l) => !reached.has(l));
         // ⛔ A bare site that stopped being reachable must show up as a
@@ -501,14 +528,14 @@ describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
         expect(unreached).toEqual([]);
     }, 120_000);
 
-    it('an absent context is the ANONYMOUS SUBJECT at all 45: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
+    it('an absent context is the ANONYMOUS SUBJECT at all 47: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
         const fault = await sweep(undefined, 'FULL');
         const control = await sweep(ENTITLED, 'FULL');
         const bareLines = new Set(BARE.map((s) => s.line));
         const controlByRoute = new Map(control.map((r) => [r.route, r]));
 
         const rows = fault.filter((r) => r.sites.some((l) => bareLines.has(l)));
-        expect(rows.length).toBeGreaterThanOrEqual(45);
+        expect(rows.length).toBeGreaterThanOrEqual(47);
 
         for (const row of rows) {
             expect(row.status, `${row.route} under an absent context`).toBe(ANONYMOUS_DENY_STATUS);
@@ -1043,16 +1070,18 @@ describe('[#13538] §9 a PARTIAL outage is not served as an org-unscoped 200', (
             .toEqual({ driven: true, section8: false });
     });
 
-    it('CONTROL: healthy, the list door serves 200 and its read NAMES the caller\'s organization', async () => {
-        // Without this, "no unscoped read" below is satisfied by an instrument
-        // that never scoped anything in the first place.
+    it('CONTROL: healthy, the list door serves 200 and its read names NO organization (ADR-0131 D6)', async () => {
+        // Without this, "no read" below is satisfied by an instrument that
+        // never reads in the first place. Since the per-organization overlay
+        // axis retired, the healthy read is environment → code even for a
+        // caller with an active organization.
         const { rows, reads } = await sweepSelective(0, ORG_SCOPED_DOC, ORG_SCOPED_TYPE);
         const list = listRow(rows);
         expect({ found: list !== undefined, status: list?.status }).toEqual({ found: true, status: 200 });
         const listReads = reads.filter((r) => r.route === list!.route);
         expect(listReads.length).toBeGreaterThan(0);
         expect(listReads.map((r) => r.request?.organizationId))
-            .toEqual(listReads.map(() => ENTITLED.tenantId));
+            .toEqual(listReads.map(() => undefined));
     });
 
     it('CONTROL: the injector is SELECTIVE — with the second read faulted, the first still fulfils', async () => {
@@ -1080,17 +1109,14 @@ describe('[#13538] §9 a PARTIAL outage is not served as an org-unscoped 200', (
             .toEqual({ route: list!.route, fabricated200: false });
     });
 
-    it('⭐ and it issues NO metadata read without an organization while the tenant is unresolvable', async () => {
-        // ⭐ THE PROPERTY. The harm is the READ, not the status: a door that
-        // proceeds with `listCtx === undefined` asks `getMetaItems` for the
-        // env-wide partition and serves rows from outside the caller's org.
-        // Asserting on the request the handler BUILT is what survives a
-        // refactor that changes no spelling.
+    it('⭐ and it issues NO metadata read while the caller is unresolvable', async () => {
+        // ⭐ THE PROPERTY. The harm is the READ, not the status: the list still
+        // resolves its caller (the draft-preview admission reads it), and a
+        // door that proceeded with `listCtx === undefined` would serve an
+        // answer to a caller it never identified. Asserting on the requests the
+        // handler BUILT is what survives a refactor that changes no spelling.
         const { rows, reads } = await sweepSelective(1, ORG_SCOPED_DOC, ORG_SCOPED_TYPE);
         const list = listRow(rows);
-        const unscoped = reads.filter(
-            (r) => r.route === list!.route && r.request?.organizationId === undefined,
-        );
-        expect(unscoped.map((r) => r.route)).toEqual([]);
+        expect(reads.filter((r) => r.route === list!.route).map((r) => r.route)).toEqual([]);
     });
 });

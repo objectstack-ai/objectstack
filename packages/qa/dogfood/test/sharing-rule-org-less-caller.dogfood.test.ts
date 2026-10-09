@@ -61,8 +61,8 @@
 // @proof: sharing-rule-org-less-caller
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { leaveOrganization } from './armed.js';
 
 const RULES = '/sharing/rules';
@@ -123,7 +123,7 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
   });
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    stack = await bootShowcase();
     await stack.signIn(); // the first user: the bootstrap account
     ql = await stack.kernel.getServiceAsync('objectql');
 

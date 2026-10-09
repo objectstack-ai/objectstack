@@ -318,7 +318,7 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
       sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: 'orgA', expires_at: FUTURE }],
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
       sys_user_permission_set: [
-        { id: 'ups_global', user_id: 'u1', permission_set_id: 'ps_admin', organization_id: null },
+        { id: 'ups_global', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
         ...extraGrants,
       ],
       sys_permission_set: [
@@ -359,7 +359,7 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
   });
 
   it('still drops a grant scoped to a DIFFERENT org', async () => {
-    const ql = makeAuthQl([{ id: 'ups_otherorg', user_id: 'u1', permission_set_id: 'ps_other', organization_id: 'orgB' }]);
+    const ql = makeAuthQl([{ id: 'ups_otherorg', user_id: 'u1', permission_set_id: 'ps_other', permission_set: 'other_org_set', organization_id: 'orgB' }]);
     const ctx = await resolveExecutionContext(opts(ql));
     expect(ctx.permissions).toContain('admin_full_access'); // global grant kept
     expect(ctx.permissions).not.toContain('other_org_set'); // foreign-org grant dropped
@@ -411,7 +411,7 @@ describe('resolveExecutionContext — posture plumbing (#2947)', () => {
   it('carries MEMBER for an ordinary principal (no admin / org-admin capability)', async () => {
     const ql = makeQlFor(
       [{ id: 'ps_basic', name: 'sales_rep', system_permissions: '[]', object_permissions: '{}' }],
-      [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_basic', organization_id: null }],
+      [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_basic', permission_set: 'sales_rep', organization_id: null }],
     );
     const ctx = await resolveExecutionContext(opts(ql));
     expect(ctx.userId).toBe('u1');
@@ -501,7 +501,7 @@ describe('resolveExecutionContext — ADR-0090 D10 agent principal (OAuth on /mc
   const capQl = () => {
     const tables: Record<string, any[]> = {
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
-      sys_user_permission_set: [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', organization_id: null }],
+      sys_user_permission_set: [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }],
       sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access', system_permissions: '["manage_users","manage_platform_settings"]', object_permissions: '{}' }],
       sys_position: [], sys_position_permission_set: [], sys_user_position: [],
     };

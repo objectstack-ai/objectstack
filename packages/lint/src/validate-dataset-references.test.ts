@@ -2,12 +2,33 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateDatasetReferences,
+  validateDatasetReferences as validateDatasetReferencesUnrecorded,
   DATASET_INCLUDE_UNKNOWN,
   DATASET_FIELD_UNKNOWN,
   DATASET_FIELD_NOT_INCLUDED,
   DATASET_FILTER_FIELD_UNKNOWN,
 } from './validate-dataset-references.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: that case reads what the cases above
+// fired.
+const SHORTENED_RULE_IDS: readonly string[] = [
+  DATASET_INCLUDE_UNKNOWN,
+  DATASET_FIELD_UNKNOWN,
+  DATASET_FIELD_NOT_INCLUDED,
+  DATASET_FILTER_FIELD_UNKNOWN,
+];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateDatasetReferences: typeof validateDatasetReferencesUnrecorded = (...args) => {
+  const findings = validateDatasetReferencesUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
 
 /**
  * The object graph every case below resolves against. Deliberately a real
@@ -555,5 +576,36 @@ describe('validateDatasetReferences — the shipped dataset shapes', () => {
         ],
       }),
     ).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [DATASET_INCLUDE_UNKNOWN]: ['Joins are COMPILED', 'ADR-0071', 'addresses nothing'],
+    [DATASET_FIELD_UNKNOWN]: ['compiled into the analytics query as written', 'empty or wrong numbers', 'nothing reports the miss', 'widget-dimension-unknown'],
+    [DATASET_FIELD_NOT_INCLUDED]: ['joins ONLY', 'empty or wrong numbers', 'nothing reports the miss'],
+    [DATASET_FILTER_FIELD_UNKNOWN]: ['widens the scope', 'empty or wrong numbers', 'filter-token-unknown'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

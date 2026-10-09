@@ -37,7 +37,9 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 // verification — `@objectstack/organizations` above all — must be resolved from
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
+import { materializeStackPlugin } from '@objectstack/core';
 import { createHandle, type VerifyHandle } from './handle.js';
+import { constructRequiredProviders } from './required-providers.js';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -326,6 +328,17 @@ export interface BootOptions {
    * the current working directory — a programmatic harness verifying several
    * apps in one process, or a test fixture on a temp path.
    *
+   * [#22301] It is also the app's root in the two places `objectstack serve`
+   * anchors at the directory holding `objectstack.config.ts`: the `packageRoot`
+   * the automation service is handed (whether the app's `requires` names
+   * `automation` or {@link BootOptions.automation} asks for it), which is where
+   * a declarative connector's package-relative file ref is read from; and the
+   * root a string entry of the app's own `plugins` array is resolved from. A
+   * suite whose working directory is not the app's directory passes the app's
+   * directory here — otherwise such a file ref resolves against the working
+   * directory, and the boot refuses the connector loudly, as `serve` would
+   * from the wrong root.
+   *
    * Exists because Node ESM resolves a bare `import()` against the importer's
    * own realpath: without a host anchor, `packages/verify` can only ever see the
    * framework's own `node_modules`, so an app-installed package was invisible no
@@ -352,6 +365,13 @@ export interface BootOptions {
    * #4420 grew in exactly that gap.
    *
    * Pass `{ suspendedRunStore: 'memory' }` to opt a fixture back out.
+   *
+   * [#22301] An app that DECLARES `requires: ['automation']` gets the service
+   * without this option, as it does under `objectstack serve` (see
+   * `./required-providers.ts`). Set it anyway for an app that does not declare
+   * it, or for the `suspendedRunStore` choice above: with it set, this option's
+   * instance is the one the boot keeps. Either way the service is handed
+   * {@link BootOptions.hostRoot} as its `packageRoot`.
    */
   automation?: boolean | { suspendedRunStore?: 'auto' | 'memory' };
   /**
@@ -395,9 +415,25 @@ export interface BootOptions {
    * Extra plugins to register between the app/service pairs and the
    * SecurityPlugin — the slot where `objectstack dev` auto-loads optional
    * service pairs the lean harness omits (e.g. `StorageServicePlugin` +
-   * `AuditPlugin` for the attachments surface). The caller instantiates the
-   * plugins so `@objectstack/verify` gains no new dependencies. Registered in
-   * array order. Default `[]`.
+   * `AuditPlugin` for the attachments surface). Registered in array order.
+   * Default `[]`.
+   *
+   * [#22301] Not for what the configuration itself declares: the boot mounts
+   * the providers the app's `requires` names, by `objectstack serve`'s table
+   * (see `./required-providers.ts`), and the plugins in the app's own `plugins`
+   * array, by `serve`'s rule for an entry (`materializeStackPlugin`,
+   * `@objectstack/core`). A plugin here TAKES PRECEDENCE over both, by
+   * identity:
+   *
+   *  - over a `requires` provider it IS (exact `name` or class name, `serve`'s
+   *    "an explicit instance wins" rule) — the capability is skipped whole;
+   *  - over an entry of the app's `plugins` array that has the same `name`,
+   *    the identity the kernel registers a plugin under — that entry is not
+   *    mounted, and this instance is the one the boot keeps.
+   *
+   * So a suite that needs one of those configured its own way passes it here.
+   * {@link BootOptions.security} and {@link BootOptions.analytics} take
+   * precedence over an app plugin of the same `name` the same way.
    */
   extraPlugins?: unknown[];
   /**
@@ -432,15 +468,244 @@ export interface BootOptions {
   organizationsPackage?: string;
 }
 
+/** One entry of the app's own `plugins` array, resolved, and how a refusal names it. */
+interface AppPluginEntry {
+  plugin: unknown;
+  label: string;
+}
+
+/** A plugin's registered `name` — the identity the kernel keys it by. */
+function registeredName(plugin: unknown): string | undefined {
+  const name = (plugin as { name?: unknown } | null | undefined)?.name;
+  return typeof name === 'string' && name !== '' ? name : undefined;
+}
+
+/**
+ * [#22301] The plugins of the app's own `plugins` array, each resolved by
+ * `objectstack serve`'s rule for an entry (`materializeStackPlugin`,
+ * `@objectstack/core`: a string is a package specifier, a plain bundle is
+ * wrapped into `AppPlugin`, an instance is itself), minus every entry whose
+ * `name` a caller-handed instance already has — that instance takes precedence
+ * (see BootOptions.extraPlugins).
+ *
+ * `name` is the precedence key because it is the kernel's identity for a
+ * plugin: two plugins with different names both run, and of two with one name
+ * the kernel keeps one. A class-name match is deliberately NOT used here —
+ * every bundle entry becomes an `AppPlugin`, so a caller's own `AppPlugin`
+ * would silently drop every bundle the app declares.
+ *
+ * Reads the top-level `plugins` only, as `serve` does; `devPlugins` is the
+ * `objectstack dev`-only addition `serve` does not mount, and is not read.
+ */
+async function resolveAppPlugins(
+  config: unknown,
+  opts: { hostRoot: string; callerInstances: readonly unknown[] },
+): Promise<AppPluginEntry[]> {
+  const declared = (config as { plugins?: unknown } | null | undefined)?.plugins;
+  // Absent (or `null`) is no plugins, as `serve`'s `config.plugins || []` reads it.
+  if (declared === undefined || declared === null) return [];
+  if (!Array.isArray(declared)) {
+    throw new Error(
+      `verify: the configuration's \`plugins\` is ${typeof declared}, not an array, so bootStack cannot mount it ` +
+        'the way objectstack serve mounts the plugins an app declares. Declare `plugins` as an array of plugin ' +
+        'instances, bundles or package names.',
+    );
+  }
+  const callerNames = new Set(
+    opts.callerInstances.map(registeredName).filter((n): n is string => n !== undefined),
+  );
+  let importer: ((specifier: string) => Promise<unknown>) | undefined;
+  const resolved: AppPluginEntry[] = [];
+  for (const [index, entry] of declared.entries()) {
+    const at = typeof entry === 'string' ? `plugins[${index}] ('${entry}')` : `plugins[${index}]`;
+    let plugin: unknown;
+    try {
+      plugin = await materializeStackPlugin(entry, {
+        importSpecifier: (specifier) => {
+          // Host-anchored, as `serve` loads an app-declared package (the
+          // `multiTenant` import below uses the same helper the same way).
+          importer ??= createHostImporter(opts.hostRoot, {
+            fallbackImport: (s) => import(/* webpackIgnore: true */ s),
+          });
+          return importer(specifier);
+        },
+        wrapBundle: (bundle) => new AppPlugin(bundle as any),
+      });
+    } catch (e) {
+      throw new Error(
+        `verify: the app's ${at} could not be loaded: ${(e as Error).message}. bootStack mounts the plugins of ` +
+          "the app's own `plugins` array as `objectstack serve` does, and does not boot on without one. A package " +
+          `name resolves from the app's root, BootOptions.hostRoot (${opts.hostRoot}): declare and install it ` +
+          "there, or pass the app's directory as hostRoot. A relative path never resolves from the app " +
+          '(`serve` refuses it); write a package name or an absolute URL.',
+      );
+    }
+    const name = registeredName(plugin);
+    if (name !== undefined && callerNames.has(name)) continue;
+    resolved.push({ plugin, label: name !== undefined ? `${at} '${name}'` : at });
+  }
+  return resolved;
+}
+
+/**
+ * [#22301] Configurations with a live `bootStack` kernel in this process, and
+ * the app-plugin instances those kernels mounted — the instance rule's two
+ * keys (see {@link bootStack}). Weak, so a configuration nobody holds any more
+ * is never kept alive by having booted once.
+ */
+const LIVE_CONFIGURATIONS = new WeakSet<object>();
+const LIVE_APP_PLUGINS = new WeakSet<object>();
+
+/** How a configuration names itself in a refusal: its manifest id, else its name. */
+function configurationLabel(config: unknown): string {
+  const c = config as { manifest?: { id?: unknown }; name?: unknown; id?: unknown } | null | undefined;
+  const id = c?.manifest?.id ?? c?.id ?? c?.name;
+  return typeof id === 'string' && id !== '' ? `'${id}'` : '(no manifest id)';
+}
+
+/**
+ * The instance rule's refusal — the ADR-0112 shape (`code` + `status`) a test
+ * asserts on, with `RESOURCE_CONFLICT` from the standard catalog: the
+ * configuration is held by a live kernel, and the second boot conflicts with it.
+ */
+function instanceRuleRefusal(message: string): Error {
+  return Object.assign(new Error(message), { code: 'RESOURCE_CONFLICT', status: 409 });
+}
+
+// [#22301] Three remedies, and the third is spelled by a measurement: a boot
+// keeps live references into the configuration's nested definitions (the
+// registry stores each object as a shallow copy whose field definitions are
+// the authored objects — `@objectstack/objectql` `registry.ts`,
+// `definition: { ...schema, name: fqn }`; and the engine's `registerApp` writes
+// `objDef.name` into a map-form `objects` entry in place). So a `{ ...config }`
+// spread is NOT a configuration of its own, and the remedy names building it
+// again instead.
+const INSTANCE_RULE_REMEDY =
+  'stop() the live stack before booting this configuration again; or share it: bootStackOnce(config, opts) ' +
+  'hands every caller with the same config and options object the one boot; or, to keep two stacks live at ' +
+  'once, boot the second on a configuration of its own, BUILT AGAIN (call its builder once more, or import a ' +
+  'fresh module instance of it), never a `{ ...config }` copy, which shares the nested definitions and plugin ' +
+  'instances a live boot holds.';
+
+/** One boot's hold on its configuration and on the app-plugin instances it mounts. */
+interface ConfigurationClaim {
+  /** Hold these app-plugin instances too; refuses one another live kernel already mounted. */
+  holdAppPlugins(entries: ReadonlyArray<{ plugin: unknown; label: string }>): void;
+  /** Let go of everything held. Idempotent. */
+  release(): void;
+}
+
+/**
+ * Claim `config` for one live kernel, or refuse — synchronously, before the
+ * boot awaits anything, so two boots started together are refused too.
+ */
+function claimConfiguration(config: unknown): ConfigurationClaim {
+  const key = config !== null && typeof config === 'object' ? (config as object) : undefined;
+  if (key && LIVE_CONFIGURATIONS.has(key)) {
+    throw instanceRuleRefusal(
+      `verify: configuration ${configurationLabel(config)} already has a live bootStack kernel in this process. ` +
+        'One configuration supports one live kernel at a time: the plugins in its own `plugins` array are ' +
+        'module-level instances, and a live kernel holds references into its nested definitions, so a second ' +
+        'kernel would share both. ' +
+        INSTANCE_RULE_REMEDY,
+    );
+  }
+  if (key) LIVE_CONFIGURATIONS.add(key);
+  const heldPlugins: object[] = [];
+  let released = false;
+  return {
+    holdAppPlugins(entries) {
+      for (const { plugin, label } of entries) {
+        if (plugin === null || typeof plugin !== 'object') continue;
+        if (LIVE_APP_PLUGINS.has(plugin)) {
+          throw instanceRuleRefusal(
+            `verify: the app's ${label} is already mounted by another live bootStack kernel in this process — ` +
+              `configuration ${configurationLabel(config)} is a copy of one that is booted, and a copy carries ` +
+              'the same plugin instances. One configuration supports one live kernel at a time. ' +
+              INSTANCE_RULE_REMEDY,
+          );
+        }
+      }
+      for (const { plugin } of entries) {
+        if (plugin === null || typeof plugin !== 'object') continue;
+        LIVE_APP_PLUGINS.add(plugin);
+        heldPlugins.push(plugin);
+      }
+    },
+    release() {
+      if (released) return;
+      released = true;
+      if (key) LIVE_CONFIGURATIONS.delete(key);
+      for (const plugin of heldPlugins) LIVE_APP_PLUGINS.delete(plugin);
+    },
+  };
+}
+
 /**
  * Boot an app config in-process and return a live verification stack.
  *
  * `NODE_ENV` is forced to `development` so the auth plugin's dev-admin
  * bootstrap provisions a known, loginable admin (mirrors `objectstack dev`).
+ *
+ * ## What it composes — one composition rule (#22301, ruling A)
+ *
+ * For one configuration, what `objectstack serve` composes from it: the
+ * harness's service set, the providers the app's `requires` names
+ * (`./required-providers.ts`), and the plugins in the app's own `plugins`
+ * array, by `serve`'s rule for an entry — with {@link BootOptions.extraPlugins}
+ * taking precedence by identity, and every app-relative path anchored to
+ * {@link BootOptions.hostRoot}. An entry of that array that cannot be loaded
+ * or registered fails the boot, with its remedy. There is no switch: an app's
+ * tests boot what the app declares, so a plugin the app forgot to declare
+ * fails in its tests the way it would in production.
+ *
+ * ### Offline CI: `OS_CLOUD_URL=off`
+ *
+ * An app whose `plugins` array wires marketplace-facing plugins (the
+ * `@objectstack/cloud-connection` set) gets them mounted here, as `serve`
+ * mounts them, and their marketplace routes reach the control plane they are
+ * pointed at — by default the public ObjectStack catalog. A suite that must
+ * stay offline sets `OS_CLOUD_URL=off` in its environment before the
+ * configuration module is imported: a configuration that reads the URL with
+ * `resolveCloudUrl()` (`@objectstack/cloud-connection`) then declines the
+ * marketplace, the same switch a fully-offline `serve` uses.
+ * `packages/qa/dogfood` sets it in its vitest config.
+ *
+ * ## The instance rule: one live kernel per configuration, per process
+ *
+ * A second `bootStack` of the SAME configuration object while the first is
+ * still live is refused with `RESOURCE_CONFLICT` (`status: 409`), so the
+ * module-level plugin instances in its `plugins` array are never mounted by two
+ * kernels at once. A copy of a booted configuration (`{ ...config }`) is
+ * refused the same way when it carries an app-plugin instance a live kernel
+ * mounted. Live means from the call until `stop()` resolves, or until the boot
+ * fails. Booting again after `stop()` is fine, and {@link bootStackOnce}
+ * shares one boot among callers instead of starting a second.
+ *
+ * A suite that needs two stacks of one app live at once (two postures, two
+ * option sets) boots the second on a configuration of its own, BUILT AGAIN —
+ * its builder called once more, or a fresh module instance of the module that
+ * exports it. A `{ ...config }` spread is not one: a live boot holds references
+ * into the configuration's nested definitions as well as its plugin instances.
  */
 export async function bootStack(
   config: any,
   opts: BootOptions = {},
+): Promise<VerifyStack> {
+  const claim = claimConfiguration(config);
+  try {
+    return await bootClaimed(config, opts, claim);
+  } catch (e) {
+    claim.release();
+    throw e;
+  }
+}
+
+/** {@link bootStack}'s boot, under a claim the caller holds and releases on failure. */
+async function bootClaimed(
+  config: any,
+  opts: BootOptions,
+  claim: ConfigurationClaim,
 ): Promise<VerifyStack> {
   process.env.NODE_ENV = 'development';
 
@@ -502,6 +767,9 @@ export async function bootStack(
   };
 
   const kernel = new ObjectKernel();
+  // The host app's root — where `multiTenant` resolves the enterprise package
+  // from, and the `packageRoot` a required `automation` is handed (#22301).
+  const hostRoot = opts.hostRoot ?? process.cwd();
 
   // Data engine + in-memory SQLite (pure-JS WASM driver — no native build, CI-safe).
   // The default datasource is a DECLARED DEFINITION connected through the
@@ -539,8 +807,10 @@ export async function bootStack(
   // [#21499] The settings service seals under the harness's in-process key,
   // never under a provider of its own (see `harnessCryptoProvider`).
   const cryptoProvider = harnessCryptoProvider();
-  await kernel.use(new SettingsServicePlugin({ cryptoProvider }));
-  await kernel.use(opts.analytics ?? new AnalyticsServicePlugin());
+  const settingsPlugin = new SettingsServicePlugin({ cryptoProvider });
+  await kernel.use(settingsPlugin);
+  const analyticsPlugin = opts.analytics ?? new AnalyticsServicePlugin();
+  await kernel.use(analyticsPlugin);
   // [ADR-0131 D3 / D11] The production `single` shape, as `objectstack dev` /
   // `serve` boot it: `AuthPlugin`'s defaults, owner bind included. Under
   // `single` the Default Organization is a boot invariant — `AuthPlugin.start()`
@@ -632,7 +902,6 @@ export async function bootStack(
     // it" can hand in a name the workspace can never supply. Production callers
     // pass nothing and get `ORGANIZATIONS_PKG` — see BootOptions.organizationsPackage.
     const organizationsPkg = opts.organizationsPackage ?? ORGANIZATIONS_PKG;
-    const hostRoot = opts.hostRoot ?? process.cwd();
     let mod: any;
     try {
       mod = await createHostImporter(hostRoot, {
@@ -680,18 +949,73 @@ export async function bootStack(
   // approval e2e covered, and #4420 grew there. It now boots the plugin's own
   // `'auto'` default, the same wiring `objectstack dev`/`serve` get, and a
   // fixture that wants the old behaviour asks for it explicitly.
+  let automationPlugin: unknown;
   if (opts.automation) {
     const { AutomationServicePlugin } = await import('@objectstack/service-automation');
     const automationOpts = typeof opts.automation === 'object' ? opts.automation : {};
-    await kernel.use(new AutomationServicePlugin({
+    automationPlugin = new AutomationServicePlugin({
       ...(automationOpts.suspendedRunStore ? { suspendedRunStore: automationOpts.suspendedRunStore } : {}),
-    }));
+      // [#22301] The app's root, as `serve` hands it — see BootOptions.hostRoot.
+      packageRoot: hostRoot,
+    });
+    await kernel.use(automationPlugin as any);
   }
 
   // Caller-supplied optional service pairs (see BootOptions.extraPlugins).
   // Before SecurityPlugin, mirroring the CLI's ordering for service pairs.
   for (const plugin of opts.extraPlugins ?? []) {
     await kernel.use(plugin as any);
+  }
+
+  // [#22301] The plugins in the app's own `plugins` array, as `objectstack
+  // serve` mounts them. Resolved HERE, before the `requires` providers, because
+  // `serve`'s "an explicit instance wins" rule counts them as held; registered
+  // below, after the harness's own services, in `serve`'s slot for them. An
+  // instance the caller handed this boot takes precedence by identity (see
+  // BootOptions.extraPlugins), and the instance rule holds the rest.
+  let appPlugins: AppPluginEntry[];
+  try {
+    appPlugins = await resolveAppPlugins(config, {
+      hostRoot,
+      callerInstances: [
+        ...(opts.extraPlugins ?? []),
+        ...(opts.security ? [opts.security] : []),
+        ...(opts.analytics ? [opts.analytics] : []),
+      ],
+    });
+    claim.holdAppPlugins(appPlugins);
+  } catch (e) {
+    restoreTenancyPosture();
+    throw e;
+  }
+
+  // [#22301] The providers the app's `requires` names, as `objectstack serve`
+  // mounts them — same reader, same table, same "an explicit instance wins"
+  // rule (see `./required-providers.ts`). In the `extraPlugins` slot, after it,
+  // so a caller's own instance is the one that stays. The harness's sharing
+  // service is constructed here so a `requires: ['sharing']` sees it held.
+  const sharingPlugin = new SharingServicePlugin();
+  try {
+    const requiredProviders = await constructRequiredProviders({
+      config,
+      held: [
+        settingsPlugin,
+        analyticsPlugin,
+        sharingPlugin,
+        ...(automationPlugin ? [automationPlugin] : []),
+        ...(opts.extraPlugins ?? []),
+        ...appPlugins.map((entry) => entry.plugin),
+      ],
+      dependents: appPlugins.map((entry) => entry.plugin),
+      isRegistered: (name) => kernel.hasPlugin(name),
+      packageRoot: hostRoot,
+    });
+    for (const plugin of requiredProviders) {
+      await kernel.use(plugin as any);
+    }
+  } catch (e) {
+    restoreTenancyPosture();
+    throw e;
   }
 
   // [#7001] The app's DECLARED default profile, resolved the one way every boot
@@ -709,7 +1033,27 @@ export async function bootStack(
   // Sharing service — apps that declare `requires: ['sharing']` rely on it for
   // record-share grants; without it their RLS/sharing rules are inert and the
   // verifier would under-report authorization.
-  await kernel.use(new SharingServicePlugin());
+  await kernel.use(sharingPlugin);
+
+  // [#22301] The app's own `plugins` (resolved above), in `serve`'s slot for
+  // them: after the services the boot composes itself, so an entry that shares
+  // a `name` with one of THOSE supersedes it by the kernel's declared
+  // last-one-wins contract, as it does under `serve`; before the route
+  // surfaces. `serve` logs an entry it cannot register and boots on; a test
+  // boot that went on without a plugin the app declares would pass green on a
+  // composition production never runs, so here the boot stops, with the remedy.
+  for (const { plugin, label } of appPlugins) {
+    try {
+      await kernel.use(plugin as any);
+    } catch (e) {
+      restoreTenancyPosture();
+      throw new Error(
+        `verify: the app's ${label} could not be registered: ${(e as Error).message}. bootStack mounts the ` +
+          "plugins of the app's own `plugins` array as `objectstack serve` does, and does not boot on without one. " +
+          'Fix that entry, or hand bootStack an instance with the same `name` in `extraPlugins`, which takes its place.',
+      );
+    }
+  }
 
   // REST + dispatcher route surfaces (mount onto the http-server service).
   // Anonymous access to object data is denied unconditionally (#3963 retired the
@@ -939,6 +1283,8 @@ export async function bootStack(
       /* best-effort */
     }
     restoreTenancyPosture();
+    // [#22301] The kernel is gone, so the configuration may boot again.
+    claim.release();
   };
 
   // The in-process handle over the SAME kernel (hotcrm#1579 step 5a). Built
@@ -964,6 +1310,14 @@ const SHARED_BOOTS = new WeakMap<object, Map<unknown, Promise<VerifyStack>>>();
  * gets — including its dev-admin sign-in state. A different `opts` object,
  * even one spelled identically, is a different stack: the memo never guesses
  * that two `SecurityPlugin` instances mean the same thing.
+ *
+ * A different stack over the SAME `config` is still a second boot of that
+ * configuration, so the instance rule `bootStack` enforces applies to it: while
+ * the first key's boot is live, a second `opts` key on that `config` is refused
+ * (`RESOURCE_CONFLICT`, status 409), the returned promise rejects, and the memo
+ * drops that key so a later caller boots again. To keep two stacks live at
+ * once, pass the second a configuration BUILT AGAIN (its builder called once
+ * more, or a fresh module instance), never a `{ ...config }` copy.
  *
  * Sharing only makes sense under `isolate: false` (files in one worker share
  * one module registry); under vitest's default isolation every file still

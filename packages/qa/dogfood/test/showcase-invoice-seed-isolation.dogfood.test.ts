@@ -27,8 +27,8 @@
 // matches the seeded `owner` values.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 const SYS = { isSystem: true } as const;
@@ -94,7 +94,7 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { security: showcaseAppDefaultSecurity() });
+    stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 

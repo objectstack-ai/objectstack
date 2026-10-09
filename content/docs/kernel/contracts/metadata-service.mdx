@@ -401,14 +401,26 @@ const views = await metadataService.listViews('account');
 const dashboard = await metadataService.get('dashboard', 'sales_overview');
 ```
 
-### Org-Level Customization
+### Environment Customization
 
-Per-org view customization rides ADR-0005's metadata overlay (opt-in per type
-via `allowOrgOverride`, `view` among the overlay types): an org-scoped write
-through the REST meta doors stores a `sys_metadata` row, and the layered read
-returns `code` / `overlay` / `effective` for it. The per-user, per-field patch
-overlay a previous revision of this page taught here was removed in #13135 —
-it was never served by any route.
+View customization rides ADR-0005's metadata overlay (opt-in per type via
+`allowOrgOverride`, `view` among the overlay types): a write through the
+`/meta` doors stores a `sys_metadata` row, and the layered read returns
+`code` / `overlay` / `effective` for it. Since ADR-0131 D6 the per-organization
+overlay axis is retired: the doors carry no organization, so the overlay is
+**environment-wide** (`organization_id` NULL) and served to every organization
+of the deployment, whatever the author's active organization. An overlay row an
+earlier release stored under an organization is not served by any `/meta` read
+until the promotion ceremony (ADR-0131 C7) carries it to the environment layer.
+Public forms are the exception: until that ceremony the anonymous form doors
+read a form `view` in the Default Organization and prefer its overlay for the
+form's body, while a withdrawal in either layer closes the form, fail-closed.
+So a legacy organization overlay of a public form keeps serving its body there:
+a Studio re-save of that body (an environment row) does not change the body the
+public form serves, and a Studio withdrawal (an environment row) still closes
+it. The per-user,
+per-field patch overlay a previous revision of this page taught here was
+removed in #13135 — it was never served by any route.
 
 ### Permission-Based UI Filtering
 

@@ -183,21 +183,67 @@ export interface AutomationServicePluginOptions {
      * against (#3016, e.g. `providerConfig.spec: './billing-openapi.json'` for
      * `provider: 'openapi'`). The CLI passes the directory containing
      * `objectstack.config.ts`; embedders pass their stack root. Defaults to
-     * `process.cwd()`. Reads are confined to this root (see
-     * {@link createPackageFileLoader}).
+     * `process.cwd()`. Reads and resolved paths are confined to this root (see
+     * {@link createPackageFileLoader} and {@link createPackagePathResolver}).
      */
     packageRoot?: string;
 }
 
 /**
+ * The ONE confinement rule behind both package-anchored members of
+ * {@link ConnectorProviderContext} — `loadPackageFile` (#3016) and
+ * `resolvePackagePath` (#22434) — so the two can never disagree about what
+ * "inside the stack/package root" means. Resolves `relativePath` against
+ * `packageRoot` (default `process.cwd()`, read at call time) and returns the
+ * absolute result. Rejects an empty ref, an absolute ref (posix or Windows
+ * drive-letter), and any ref that escapes the root after resolution (`../…`,
+ * `a/../../…`). The check is on the normalized path, not on `realpath`: a
+ * symlink inside the root is judged by where it sits, not by where it points,
+ * for both members alike.
+ *
+ * `confined` only words the escape refusal for the member that raised it
+ * (`reads` for the loader, whose text is pinned verbatim by the platform
+ * checklist, `paths` for the resolver); the rule itself is identical.
+ *
+ * `node:path` is imported lazily so merely constructing either capability
+ * never touches it — hosts without a filesystem only fail if a factory
+ * actually dereferences a package ref.
+ */
+async function resolveInsidePackageRoot(
+    packageRoot: string | undefined,
+    relativePath: string,
+    confined: 'reads' | 'paths',
+): Promise<string> {
+    if (typeof relativePath !== 'string' || relativePath.trim().length === 0) {
+        throw new Error('package file ref must be a non-empty relative path.');
+    }
+    const path = await import('node:path');
+    // Windows drive-letter absolutes ('C:\…') are not `isAbsolute` on posix —
+    // reject them explicitly so the guard is platform-independent.
+    if (path.isAbsolute(relativePath) || /^[a-zA-Z]:[\\/]/.test(relativePath)) {
+        throw new Error(
+            `package file ref '${relativePath}' is absolute — file refs must be relative to the declaring stack/package root.`,
+        );
+    }
+    const root = path.resolve(packageRoot ?? process.cwd());
+    const resolved = path.resolve(root, relativePath);
+    const rel = path.relative(root, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        throw new Error(
+            `package file ref '${relativePath}' escapes the stack/package root — ${confined} are confined to '${root}'.`,
+        );
+    }
+    return resolved;
+}
+
+/**
  * Build the `loadPackageFile` capability handed to provider factories via
  * {@link ConnectorProviderContext} (#3016): read a UTF-8 text file resolved
- * against `packageRoot`, **confined to that root**. Rejects absolute paths and
- * any path that escapes the root after resolution (`../…`, `a/../../…`), so a
- * declarative entry can never read outside the stack/package that declared it.
- * A missing/unreadable file throws — the materializer's reconcile policy makes
- * that fatal at boot and a skipped entry on reload, like every other ADR-0097
- * materialization failure.
+ * against `packageRoot`, **confined to that root** by
+ * {@link resolveInsidePackageRoot}, so a declarative entry can never read
+ * outside the stack/package that declared it. A missing/unreadable file throws
+ * — the materializer's reconcile policy makes that fatal at boot and a skipped
+ * entry on reload, like every other ADR-0097 materialization failure.
  *
  * Node builtins are imported lazily inside the returned closure so merely
  * constructing the capability never touches `node:fs`/`node:path` — hosts
@@ -205,25 +251,7 @@ export interface AutomationServicePluginOptions {
  */
 export function createPackageFileLoader(packageRoot?: string): (relativePath: string) => Promise<string> {
     return async (relativePath: string) => {
-        if (typeof relativePath !== 'string' || relativePath.trim().length === 0) {
-            throw new Error('package file ref must be a non-empty relative path.');
-        }
-        const path = await import('node:path');
-        // Windows drive-letter absolutes ('C:\…') are not `isAbsolute` on posix —
-        // reject them explicitly so the guard is platform-independent.
-        if (path.isAbsolute(relativePath) || /^[a-zA-Z]:[\\/]/.test(relativePath)) {
-            throw new Error(
-                `package file ref '${relativePath}' is absolute — file refs must be relative to the declaring stack/package root.`,
-            );
-        }
-        const root = path.resolve(packageRoot ?? process.cwd());
-        const resolved = path.resolve(root, relativePath);
-        const rel = path.relative(root, resolved);
-        if (rel.startsWith('..') || path.isAbsolute(rel)) {
-            throw new Error(
-                `package file ref '${relativePath}' escapes the stack/package root — reads are confined to '${root}'.`,
-            );
-        }
+        const resolved = await resolveInsidePackageRoot(packageRoot, relativePath, 'reads');
         const { readFile } = await import('node:fs/promises');
         try {
             return await readFile(resolved, 'utf8');
@@ -233,6 +261,20 @@ export function createPackageFileLoader(packageRoot?: string): (relativePath: st
             );
         }
     };
+}
+
+/**
+ * Build the `resolvePackagePath` capability handed to provider factories via
+ * {@link ConnectorProviderContext} (#22434): the absolute path of a ref
+ * resolved against `packageRoot` — `'.'` is the root itself — **confined to
+ * that root** by the same {@link resolveInsidePackageRoot} rule the loader
+ * uses, with the same `process.cwd()` default. It reads nothing and does not
+ * check existence; a factory that needs a location (a launched process's
+ * working directory) gets the declaring app's root instead of the server's
+ * current directory.
+ */
+export function createPackagePathResolver(packageRoot?: string): (relativePath: string) => Promise<string> {
+    return (relativePath: string) => resolveInsidePackageRoot(packageRoot, relativePath, 'paths');
 }
 
 /**
@@ -1975,6 +2017,9 @@ export class AutomationServicePlugin implements Plugin {
                 // openapi's `providerConfig.spec: './billing-openapi.json'`),
                 // confined to the stack/package root.
                 loadPackageFile: createPackageFileLoader(this.options.packageRoot),
+                // #22434 — the same root as a location (e.g. a launched
+                // process's working directory), under the same confinement.
+                resolvePackagePath: createPackagePathResolver(this.options.packageRoot),
             };
 
             let materialization;
