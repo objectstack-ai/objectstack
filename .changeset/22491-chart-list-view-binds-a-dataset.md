@@ -4,7 +4,7 @@
 
 A `type: 'chart'` list view must bind a dataset: a view whose effective chart binding names no `dataset` is refused at every list-view door, at `chart` (no binding at all) or at `options.chart.dataset` / `options.chart.values` (an incomplete legacy bag), with the binding to declare.
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered view-chart-binding-dataset-required -->
 
@@ -17,7 +17,7 @@ Clause-②: no (narrowing)
 - declares no `chart` block and no `options.chart` bag: one `custom` issue at `chart`, whose message begins *This list view is `type: 'chart'` but declares no `chart` block, so it binds no dataset and there is nothing to plot.*;
 - declares no `chart` block and an `options.chart` bag with no `dataset` or no `values` (the bag is legal on the flattened overlay only): one `custom` issue per missing key, at `options.chart.dataset` / `options.chart.values`.
 
-It is a check on the list-view schema itself, so it reaches every door that parses a list view: `defineView`, `defineStack`, `os validate` / `os build`, a view item's `config`, and the metadata write door, which answers `422 INVALID_METADATA`. The check is exported as `checkListViewChartBinding` from `@objectstack/spec/ui`, for a mirror built from `ListViewSchema.shape` to re-attach.
+It is a check on the list-view schema itself, so it reaches every door that parses a list view: `defineView`, `defineStack`, `os validate` / `os build`, a view item's `config`, and the metadata write door, which answers `422 INVALID_METADATA`. **New export:** `checkListViewChartBinding`, published from `@objectstack/spec/ui`, is this refinement check itself, a `(view, ctx) => void` function; objectui's `ListViewSchema` mirror, which is built from `ListViewSchema.shape` and so drops the schema's object-level checks, attaches it with `.superRefine(checkListViewChartBinding)`.
 
 **What stays accepted, byte for byte.** A chart view whose `chart` block names a `dataset` and at least one measure in `values`; a chart overlay whose `options.chart` bag carries both and no `chart` block replaces it; an incomplete bag under a complete `chart` block, which replaces it whole; a flattened overlay patch that names no `type`; and every view of another type, including a grid that only offers a chart in `appearance.allowedVisualizations`.
 
