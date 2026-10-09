@@ -649,11 +649,23 @@ interface CelBoundsFault {
  */
 type CelRefusal = CelSyntaxFault | CelBoundsFault;
 
-/** The predicate as it appears in a message — whitespace flattened, long sources elided. */
+/**
+ * The predicate as it appears in a message — whitespace flattened, long sources
+ * elided. [#22161] Capped so the verdict stays one line: the `path` locates the
+ * whole predicate, the quote only shows where the fault sits.
+ */
 function quoteSource(source: string): string {
   const flat = source.replace(/\s+/g, ' ').trim();
-  return flat.length > 120 ? `${flat.slice(0, 117)}...` : flat;
+  return flat.length > 72 ? `${flat.slice(0, 69)}...` : flat;
 }
+
+/**
+ * [#22161] What a predicate that can never evaluate does on a view/page surface,
+ * as the one clause each verdict below ends with. Why the console falls OPEN —
+ * and that failing open is its settled behaviour — is each rule id's
+ * `os explain` entry (`rule-explanations.ts`).
+ */
+const NEVER_EVALUATES = 'so it never evaluates and the element always renders';
 
 /**
  * The canonical front end's refusal of `source`, or `null` when it parses.
@@ -971,10 +983,8 @@ const MISLAYER_BY_LAYER: Record<
   runtime: {
     forbiddenRoot: 'data',
     message:
-      'visibility predicate is rooted at `data.` — that is the root a ' +
-      'metadata-editing form binds (the row under edit), not a runtime ' +
-      'surface. A runtime view/page predicate that binds `data.` never matches ' +
-      'and the element renders unconditionally (ADR-0089).',
+      'visibility predicate is rooted at `data.`, the root a metadata-editing form binds, so on ' +
+      'this runtime view/page surface it never matches and the element always renders',
     hint:
       'Runtime record surfaces bind `record` + `current_user` (pages also ' +
       "expose `page.<var>`). Use e.g. `record.status == 'open'` instead of " +
@@ -983,11 +993,8 @@ const MISLAYER_BY_LAYER: Record<
   metadata: {
     forbiddenRoot: 'record',
     message:
-      'visibility predicate is rooted at `record.` — that is the root a ' +
-      'runtime view/page surface binds (the live record), not the root a ' +
-      'metadata-editing form binds. On a metadata-editing form — the row ' +
-      'under edit — a `record.`-rooted predicate never matches and the ' +
-      'element renders unconditionally (ADR-0089).',
+      'visibility predicate is rooted at `record.`, the root a runtime view/page surface binds, so ' +
+      'on this metadata-editing form it never matches and the element always renders',
     hint:
       'Metadata-editing forms bind `data` (the row under edit). Use e.g. ' +
       "`data.type == 'grid'` instead of `record.type == 'grid'`.",
@@ -1057,12 +1064,13 @@ function checkElement(
       rule: VISIBILITY_PREDICATE_OVER_BUDGET,
       where,
       path,
+      // [#22161] The bound names its own limit, so the front end's summary line
+      // is echoed only when it does not; the predicate is not echoed at all —
+      // it is over budget by definition, and the `path` locates it.
       message:
-        `visibility predicate is syntactically valid CEL but overruns ${bound} ` +
-        `(${refusal.overrun.summary}) (predicate: \`${quoteSource(source)}\`). The canonical front ` +
-        `end refuses it, so it can never evaluate, and the console falls OPEN: the element renders ` +
-        `unconditionally and looks exactly like one with no predicate at all (failing open is the ` +
-        `console's settled behaviour).`,
+        `visibility predicate is syntactically valid CEL but overruns ${bound}` +
+        `${refusal.overrun.limit && refusal.overrun.limitValue !== null ? '' : ` (${refusal.overrun.summary})`}, ` +
+        NEVER_EVALUATES,
       hint:
         `There is no syntax or dialect error to correct here — this is a SIZE fault, not a dialect ` +
         `mistake, so re-spelling the predicate will not fix it. Make it smaller, or move the work ` +
@@ -1082,9 +1090,7 @@ function checkElement(
       path,
       message:
         `visibility predicate is not valid CEL — ${refusal.detail} ` +
-        `(predicate: \`${quoteSource(source)}\`). A predicate that does not parse can never ` +
-        `evaluate, and the console falls OPEN: the element renders unconditionally and looks ` +
-        `exactly like one with no predicate at all (failing open is the console's settled behaviour).`,
+        `(predicate: \`${quoteSource(source)}\`), ${NEVER_EVALUATES}`,
       hint: refusal.token
         ? `\`${refusal.token.wrote}\` is not a CEL operator — CEL spells it ` +
           `\`${refusal.token.cel}\`. Replace \`${refusal.token.wrote}\` with ` +
@@ -1134,14 +1140,12 @@ function checkElement(
       // #5149 for the fail-open half, objectui#4421 for the fail-closed half —
       // are in the comment above and in the module note, where the reader who
       // CAN resolve them is.
+      // [#22161] One verdict sentence: the name, the engine's own wording, and
+      // both surfaces' outcome. Why a view/page fails open and an action fails
+      // closed is this id's `os explain` entry.
       message:
-        `visibility predicate calls \`${unknownCall.name}\`, which the platform's CEL environment ` +
-        `does not register — ${unknownCall.detail} (predicate: \`${quoteSource(source)}\`). The ` +
-        `predicate parses, so nothing else reports it, and it faults the moment it is evaluated: on ` +
-        `a view/page surface the console falls OPEN and the element renders unconditionally, exactly ` +
-        `like one carrying no predicate at all; on an action surface — evaluated with ` +
-        `\`throwOnError: true\` — it falls CLOSED and the action disappears for EVERY user, ` +
-        'including one who holds the grant, leaving one deduped `console.warn` as the only signal.',
+        `visibility predicate calls unregistered function \`${unknownCall.name}\` ` +
+        `(${unknownCall.detail}), so a view/page element always renders and an action hides for everyone`,
       hint:
         `\`${unknownCall.name}\` is not a function this platform registers — a NAME fault, not a ` +
         `dialect mistake, so re-spelling the predicate will not fix it. The callable names ` +
@@ -1188,10 +1192,8 @@ function checkElement(
         where,
         path,
         message:
-          `visibility predicate reads through \`${unbound.name}.\`, a namespace no binding on this surface ` +
-          `provides — so \`${unbound.name}\` resolves to nothing, the predicate can never evaluate, and the ` +
-          `console falls OPEN: the element renders unconditionally and looks exactly like one with no ` +
-          `predicate at all (failing open is the console's settled behaviour).`,
+          `visibility predicate reads through \`${unbound.name}.\`, a namespace this surface does not ` +
+          `bind, ${NEVER_EVALUATES}`,
         hint:
           `Root the path at a namespace this surface binds — e.g. \`${root}.<field>\` instead of ` +
           `\`${unbound.name}.<field>\`` +
@@ -1208,12 +1210,8 @@ function checkElement(
         where,
         path,
         message:
-          `visibility predicate references \`${bare}\` as a bare identifier. ` +
-          `Values are bound under a namespace on this surface — they are never ` +
-          `flattened to top level — so \`${bare}\` resolves to nothing, the predicate ` +
-          `can never evaluate, and the console falls OPEN: the element renders ` +
-          `unconditionally and looks exactly like one with no predicate at all (failing open is the ` +
-          `console's settled behaviour).`,
+          `visibility predicate references \`${bare}\` as a bare identifier, which resolves to ` +
+          `nothing on this surface, ${NEVER_EVALUATES}`,
         hint:
           `Write \`${root}.${bare}\` instead of \`${bare}\`` +
           (layer === 'runtime'

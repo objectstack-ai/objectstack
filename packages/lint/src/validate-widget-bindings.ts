@@ -16,8 +16,8 @@ import {
 } from './object-graph.js';
 import {
   indexUnprovisionedAnchors,
-  unprovisionedAnchorCause,
   unprovisionedAnchorHint,
+  unprovisionedAnchorVerdict,
 } from './system-fields.js';
 
 /**
@@ -789,9 +789,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             severity: 'error',
             rule: WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
             message:
-              `sets legacy analytics key${plural ? 's' : ''} ${keyList} ` +
-              `(removed by the ADR-0021 single-form cutover) and binds no data source ` +
-              `(no \`dataset\`, \`object\`, or inline \`data\`) — it renders nothing.`,
+              `sets legacy analytics key${plural ? 's' : ''} ${keyList}, removed by the ADR-0021 ` +
+              `cutover, and binds no \`dataset\`, \`object\` or inline \`data\`, so it renders nothing`,
             hint:
               `${datasetHint} The renderer ignores the legacy keys, so without a data ` +
               `source this widget has no data at all.`,
@@ -893,18 +892,16 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               // population, and this PR narrows the accept set rather than
               // re-wording what already fires.
               const account = field.includes('.')
-                ? describeFieldPathVerdict(verdict, field, 'the effective field')
+                ? describeFieldPathVerdict(verdict, field, 'field')
                 : undefined;
               if (account) {
                 push({
                   severity: 'error',
                   rule: DASHBOARD_FILTER_FIELD_UNKNOWN,
-                  // #2501 is the fan-out this sentence describes; the id stays
-                  // in the comment, never in the string an author reads.
-                  message:
-                    `${provenance}${account.message} The filter is ANDed into EVERY bound ` +
-                    `widget's analytics query, so the query addresses a column that ` +
-                    `does not exist.`,
+                  // [#22161] One verdict sentence. The #2501 fan-out (the filter
+                  // is ANDed into EVERY bound widget's query) is this id's
+                  // `os explain` entry, never a tracker id in the string.
+                  message: `${provenance}${account.message}`,
                   hint:
                     `Point filterBindings: { ${def.name}: '<field>' } at a field that resolves on ` +
                     `\`${datasetObject}\` — or at a \`relationship[.relationship].field\` path whose ` +
@@ -947,11 +944,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                   // Same #2501 fan-out as above — id in the comment, not the
                   // message: `#NNNN` resolves for nobody downstream of here.
                   message:
-                    `${provenance}its relationship prefix "${prefix}" is not declared in dataset ` +
-                    `"${dsName}"'s \`include\` — and ADR-0021 joins ONLY declared paths, so no join ` +
-                    `is compiled and the column is out of this query's reach. The filter is ANDed ` +
-                    `into EVERY bound widget's analytics query, so the whole board renders ` +
-                    `empty, not one tile.`,
+                    `${provenance}its relationship prefix "${prefix}" is not in dataset ` +
+                    `"${dsName}"'s \`include\`, so no join reaches it and the whole board renders empty`,
                   hint:
                     `Add "${prefix}" to dataset "${dsName}"'s include (declaring "a.b" implicitly ` +
                     `includes "a"), filter on a field of "${datasetObject}" itself, or opt out with ` +
@@ -977,11 +971,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             push({
               severity: 'warning',
               rule: DASHBOARD_FILTER_FIELD_UNPROVISIONED,
-              message:
-                `${provenance}${unprovisionedAnchorCause(leafObject, leafField)}. The filter is ANDed ` +
-                `into this widget's analytics query, so it can never match a real value — ` +
-                `on SQLite it silently degrades to constant-false and the widget renders empty ` +
-                `(HTTP 200, zero rows, no error).`,
+              message: `${provenance}${unprovisionedAnchorVerdict(leafObject, leafField)}, so the widget renders empty`,
               hint:
                 `${unprovisionedAnchorHint(leafObject, leafField)} A widget can also opt out ` +
                 `with filterBindings: { ${def.name}: false }. Suppress with ` +
@@ -1016,11 +1006,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                 severity: 'error',
                 rule: WIDGET_FILTER_FIELD_UNKNOWN,
                 path: at,
-                message:
-                  `${account.message} The widget's own \`filter\` is ANDed into the ` +
-                  `dataset query as \`runtimeFilter\`, so the condition addresses a column ` +
-                  `that does not exist: the widget renders successfully and empty, and ` +
-                  `nothing reports the miss.`,
+                message: account.message,
                 hint:
                   `Filter on a field that exists on "${filterObject}" (dataset "${dsName}"), ` +
                   `or on a \`relationship[.relationship].field\` path whose prefix is declared ` +
@@ -1042,10 +1028,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               rule: WIDGET_FILTER_FIELD_NOT_INCLUDED,
               path: at,
               message:
-                `filter key "${field}" resolves on the object graph, but its relationship ` +
-                `prefix "${prefix}" is not declared in dataset "${dsName}"'s \`include\` — ` +
-                `and ADR-0021 joins ONLY declared paths, so no join is compiled and the ` +
-                `column is out of this query's reach. The widget renders empty.`,
+                `filter key "${field}" resolves, but its relationship prefix "${prefix}" is not in ` +
+                `dataset "${dsName}"'s \`include\`, so no join reaches it and the widget renders empty`,
               hint:
                 `Add "${prefix}" to dataset "${dsName}"'s include (declaring "a.b" implicitly ` +
                 `includes "a"), or filter on a field of "${filterObject}" itself. Declared ` +
@@ -1129,12 +1113,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           rule: WIDGET_SORTBY_UNSELECTED,
           path: `${path}.options.sortBy`,
           message: declaredButUnselected
-            ? `options.sortBy "${sortBy}" is declared by dataset "${dsName}" but is not ` +
-              `selected by this widget (selects: ${list(selected)}), so the query result ` +
-              `will not contain that column and the authored order cannot be applied.`
-            : `options.sortBy "${sortBy}" is neither a \`dimensions\` nor a \`values\` entry ` +
-              `of this widget (selects: ${list(selected)}) — \`sortBy\` must name one this ` +
-              `widget actually selects, so the authored order cannot be applied.`,
+            ? `options.sortBy "${sortBy}" is declared by dataset "${dsName}" but not selected by ` +
+              `this widget (selects: ${list(selected)}), so the authored order cannot be applied`
+            : `options.sortBy "${sortBy}" is neither a \`dimensions\` nor a \`values\` entry of ` +
+              `this widget (selects: ${list(selected)}), so the authored order cannot be applied`,
           hint: declaredButUnselected
             ? `Add "${sortBy}" to this widget's ${dimensionNames.has(sortBy) ? 'dimensions' : 'values'}, ` +
               `or order by something it already selects.` +
@@ -1179,12 +1161,9 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
             message:
-              `chartConfig.xAxis.field "${xAxis.field}" does not resolve to a ` +
-              `dimension of dataset "${dsName}" (declared dimensions: ${list(dimensionNames)}) — ` +
-              `and the dashboard renderer ignores an authored axis \`field\` in any case: ` +
-              `\`axisPresentation\` strips it, so the x-axis stays bound to this widget's ` +
-              `first dimension (${list(dims)}). The binding is a silent no-op, not a query ` +
-              `that fails.`,
+              `chartConfig.xAxis.field "${xAxis.field}" is not a dimension of dataset "${dsName}", ` +
+              `and the renderer ignores an authored axis \`field\`: the x-axis stays bound to ` +
+              `this widget's first dimension (${list(dims)})`,
             hint:
               `Delete the key: \`chartConfig.xAxis\` is refused on a dataset-bound widget ` +
               `(ADR-0021) and the x-axis binding comes from this widget's \`dimensions\`. ` +
@@ -1201,18 +1180,16 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         const measureField = (label: string, field: string, kind: 'axis' | 'series'): void => {
           if (values.includes(field)) return; // resolvable, or already errored via rule (c)
           const declaredButUnselected = measures.has(field);
+          // [#22161] One verdict sentence: the name clause and a short
+          // consequence. How the renderer derives series and strips an axis
+          // `field` is this id's `os explain` entry.
           const nameClause = declaredButUnselected
             ? `chartConfig.${label} "${field}" is a measure of dataset "${dsName}" ` +
-              `but is not selected in the widget's values (${list(values)})`
-            : `chartConfig.${label} "${field}" does not resolve to a measure of ` +
-              `dataset "${dsName}" (declared measures: ${list(measures.keys())})`;
+              `not selected in this widget's values (${list(values)})`
+            : `chartConfig.${label} "${field}" is not a measure of dataset "${dsName}"`;
           const consequence = kind === 'series'
-            ? `the dashboard renderer derives one series per selected measure and matches an ` +
-              `authored entry BY NAME, so this entry pairs with no series and the presentation ` +
-              `on it (mark, colour, stack, axis side) lands on nothing`
-            : `the dashboard renderer ignores an authored axis \`field\` — \`axisPresentation\` ` +
-              `strips it — so the y-axis bindings stay derived from this widget's values ` +
-              `(${list(values)}) and the key re-points nothing`;
+            ? `so it pairs with no series and its presentation lands on nothing`
+            : `and the renderer ignores an authored axis \`field\`, so it re-points nothing`;
           const fixHint = declaredButUnselected
             ? `Add "${field}" to the widget's values, or bind the chart to a selected measure.`
             : `Post-cutover data is keyed by the dataset's measure NAME, not the ` +
@@ -1228,7 +1205,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           push({
             severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
-            message: `${nameClause} — ${consequence}. It is a silent no-op, not a query that fails.`,
+            message: `${nameClause}, ${consequence}`,
             hint: `${fixHint} ${shapeHint} ${suppressHint}`,
           });
         };
@@ -1293,10 +1270,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             severity: 'warning',
             rule: CHART_MEASURES_MISSING,
             message:
-              `'${w.type}' widget selects no measures (\`values\` is empty), so the ` +
-              `renderer short-circuits to the authoring placeholder "Pick measures ` +
-              `(values) for this dataset widget." before any query runs — no chart is ` +
-              `drawn at all.`,
+              `'${w.type}' widget selects no measures (\`values\` is empty), so the renderer ` +
+              `shows the "Pick measures (values) for this dataset widget." placeholder and no chart`,
             hint:
               `Select at least one measure of dataset "${dsName}" BY NAME — ` +
               `values: ['<measure>'] (declared measures: ${list(measures.keys())}).` +
@@ -1312,16 +1287,13 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           // single-value families lose the NUMBER the tile exists to show, the
           // tabular ones lose the grid. The placeholder is the same one, and
           // it is quoted from the pin rather than paraphrased.
-          const drawn = METRIC_WIDGET_TYPES.has(w.type as string)
-            ? 'the single KPI number this tile is for is not drawn at all'
-            : 'no table is rendered at all';
+          const drawn = METRIC_WIDGET_TYPES.has(w.type as string) ? 'no KPI number' : 'no table';
           push({
             severity: 'warning',
             rule: WIDGET_MEASURES_MISSING,
             message:
-              `'${w.type}' widget selects no measures (\`values\` is empty), so the ` +
-              `renderer short-circuits to the authoring placeholder "Pick measures ` +
-              `(values) for this dataset widget." before any query runs — ${drawn}.`,
+              `'${w.type}' widget selects no measures (\`values\` is empty), so the renderer ` +
+              `shows the "Pick measures (values) for this dataset widget." placeholder and ${drawn}`,
             hint:
               `Select at least one measure of dataset "${dsName}" BY NAME — ` +
               `values: ['<measure>'] (declared measures: ${list(measures.keys())}). ` +
@@ -1336,11 +1308,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             severity: 'warning',
             rule: CHART_DIMENSIONS_MISSING,
             message:
-              `'${w.type}' widget selects no dimensions, so the renderer's ` +
-              `\`isMetric\` test (\`METRIC_TYPES.has(widgetType) || dimensions.length ` +
-              `=== 0\`) is true and it draws a single KPI number instead of a ` +
-              `'${w.type}' chart. The number is real, so nothing looks broken — the ` +
-              `declared chart family is simply gone.`,
+              `'${w.type}' widget selects no dimensions, so the renderer draws a single KPI ` +
+              `number instead of a '${w.type}' chart`,
             hint:
               `Plot the chart against a dataset dimension — dimensions: ['<name>'] ` +
               `(declared dimensions: ${list(dimensionNames)}) — or, if a single value ` +

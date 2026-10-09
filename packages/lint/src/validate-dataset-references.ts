@@ -163,11 +163,10 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** The shared consequence sentence — why an unresolved path is not merely inert. */
-const SILENT_EMPTY =
-  'The path is compiled into the analytics query as written, so it addresses a column ' +
-  'that does not exist: the surface renders successfully with empty or wrong numbers, ' +
-  'and nothing reports the miss.';
+// [#22161] Each finding is one verdict sentence plus its fix. Why an unresolved
+// path is not merely inert — it is compiled into the analytics query as written,
+// and the surface renders successfully with empty or wrong numbers — is each
+// rule id's long-form explanation (`rule-explanations.ts`, `os explain RULE_ID`).
 
 /**
  * Validate every ADR-0021 dataset's references against the object graph.
@@ -232,8 +231,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
           message:
             `include[${ii}] "${entry}" names a` +
             `${type ? ` \`${type}\`` : 'n ordinary'} field on object "${verdict.object}", ` +
-            `not a relationship — no join can be derived from it, so every dimension or ` +
-            `measure written against that prefix addresses nothing.`,
+            `not a relationship, so no join is derived from it`,
           hint: prescription,
         });
         return;
@@ -246,9 +244,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
         rule: DATASET_INCLUDE_UNKNOWN,
         where,
         path,
-        message:
-          `${account.message} Joins are COMPILED from \`include\` (ADR-0021), so an entry ` +
-          `that resolves to nothing produces no join at all.`,
+        message: account.message,
         hint: `${prescription} ${account.detail}`,
       });
     });
@@ -279,7 +275,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
           rule,
           where: positionWhere,
           path,
-          message: `${account.message} ${SILENT_EMPTY}`,
+          message: account.message,
           hint: `${prescription} ${account.detail}`,
         });
         return;
@@ -300,10 +296,8 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
         where: positionWhere,
         path,
         message:
-          `${subject} "${written}" resolves on the object graph, but its relationship ` +
-          `prefix "${prefix}" is not declared in this dataset's \`include\` — and ADR-0021 ` +
-          `joins ONLY declared paths, so no join is compiled and the column is out of the ` +
-          `query's reach. ${SILENT_EMPTY}`,
+          `${subject} "${written}" resolves, but its relationship prefix "${prefix}" is not ` +
+          `declared in this dataset's \`include\`, so no join reaches the column`,
         hint:
           `Add "${prefix}" to include (declaring "a.b" implicitly includes "a"), or bind ` +
           `this position to a field on "${object}" itself. Declared include paths: ` +

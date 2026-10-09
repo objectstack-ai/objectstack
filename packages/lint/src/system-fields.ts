@@ -208,6 +208,20 @@ export function unprovisionedAnchorCause(objectName: string, field: string): str
 }
 
 /**
+ * [#22161] The SHORT form of {@link unprovisionedAnchorCause}, for a rule whose
+ * finding is one verdict sentence: it names the same column and object and
+ * says the same thing — an injected anchor with no storage behind it — in one
+ * clause, and the rule's `os explain` entry (`rule-explanations.ts`) carries
+ * the long cause (ADR-0015 federation, who owns the schema, why the anchor is
+ * registered unprovisioned). One wording for every converted rule, so the
+ * drift the long form's note warns about cannot reopen between them; a rule
+ * still on the long form converges here when its message is shortened.
+ */
+export function unprovisionedAnchorVerdict(objectName: string, field: string): string {
+  return `'${field}' is an injected column with no storage on external object '${objectName}'`;
+}
+
+/**
  * The FIX clause paired with {@link unprovisionedAnchorCause} — the two ways
  * out, in the order an author should consider them: vouch for the remote column
  * by declaring it, or stop referencing an anchor this object does not have.
