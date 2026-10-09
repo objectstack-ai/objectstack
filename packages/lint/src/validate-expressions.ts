@@ -34,6 +34,7 @@
  * | Read                                   | Declared by                       |
  * |----------------------------------------|-----------------------------------|
  * | `objects[].validations[]`              | `ObjectSchema`                    |
+ * | `objects[].attachedOnRead`             | `ObjectSchema`                    |
  * | `validations[].condition` / `.when` / `.then` / `.otherwise` | the six `*ValidationSchema` variants |
  * | `objects[].fields[].reference`         | `FieldSchema`                     |
  * | `objects[].fields[].expression`        | `FieldSchema`                     |
@@ -171,7 +172,57 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
     // Injected columns come second, de-duplicated by insertion order: a DECLARED
     // `owner_id` is the author's field (the registry lets it win), so the
     // authored spelling keeps its position in the "did you mean?" candidates.
-    idx.set(name, [...new Set([...names, ...injectedColumnsFor(obj)])]);
+    // [#22211 ruling A] Declared read attachments come last: a block the
+    // object's service attaches per caller on read is something `record.<x>`
+    // resolves to on a served row, although it is not a field. Its second
+    // segment is judged against the block's own leaves — see
+    // {@link buildAttachedOnReadIndex}.
+    idx.set(name, [...new Set([...names, ...injectedColumnsFor(obj), ...attachedBlockNames(obj)])]);
+  }
+  return idx;
+}
+
+/**
+ * [#22211 ruling A] The object's declared read-attachment blocks —
+ * `ObjectSchema.attachedOnRead`, block name → (leaf key → value type) — as
+ * block name → its leaf keys, in declaration order. Empty for an object that
+ * declares none, which is every object that does not write the key: such an
+ * object hands the shared validator no `attachedOnRead` and keeps exactly the
+ * verdicts it had.
+ *
+ * Own keys only, read off the parsed value; the spec's strict record has
+ * already refused a malformed block or leaf at parse.
+ */
+function attachedOnReadOf(obj: AnyRec): Record<string, string[]> {
+  const declared = obj.attachedOnRead;
+  const out: Record<string, string[]> = {};
+  if (!declared || typeof declared !== 'object' || Array.isArray(declared)) return out;
+  for (const [block, leaves] of Object.entries(declared as AnyRec)) {
+    if (!leaves || typeof leaves !== 'object' || Array.isArray(leaves)) continue;
+    out[block] = Object.keys(leaves as AnyRec);
+  }
+  return out;
+}
+
+/** The block names {@link attachedOnReadOf} reads — what joins the field-existence set. */
+function attachedBlockNames(obj: AnyRec): string[] {
+  return Object.keys(attachedOnReadOf(obj));
+}
+
+/**
+ * [#22211 ruling A] object name → its declared read attachments (block name →
+ * leaf keys), for the shared validator's second-segment judgement of
+ * `record.<block>.<leaf>` (`ExprSchemaHint.attachedOnRead`). Only objects that
+ * declare at least one block get an entry, so `index.get(name)` is `undefined`
+ * — the hint absent — for every other object.
+ */
+function buildAttachedOnReadIndex(objects: AnyRec[]): Map<string, Record<string, string[]>> {
+  const idx = new Map<string, Record<string, string[]>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const blocks = attachedOnReadOf(obj);
+    if (Object.keys(blocks).length > 0) idx.set(name, blocks);
   }
   return idx;
 }
@@ -1320,6 +1371,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const objectWrite = options.runtimeWriteType === 'object';
   const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
+  const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(objects);
   const nullableIndex = buildNullableFieldIndex(objects);
 
@@ -1471,8 +1523,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // Field types feed the #1928 tier-4 soundness warning; only consulted for
     // `record`-scoped sites, so it is harmless to pass for flattened ones too.
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
+    // [#22211 ruling A] Absent for an object that declares no read attachment.
+    const attachedOnRead = objectName ? attachedOnReadIndex.get(objectName) : undefined;
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields, fieldTypes, scope, traversalHydration } : { scope });
+      objectName ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration } : { scope });
     for (const e of res.errors) {
       if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_NOWHERE_BOUND_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
@@ -2075,7 +2129,15 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // deciding later is low. Raise it as its own issue rather than widening
         // this call. Ledger: `validate-null-guards.ts`.
         const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
-          objectName ? { objectName, fields: fieldIndex.get(objectName), fieldTypes: fieldTypeIndex.get(objectName), scope: 'record' } : { scope: 'record' });
+          objectName
+            ? {
+                objectName,
+                fields: fieldIndex.get(objectName),
+                attachedOnRead: attachedOnReadIndex.get(objectName),
+                fieldTypes: fieldTypeIndex.get(objectName),
+                scope: 'record',
+              }
+            : { scope: 'record' });
         // Names the KEY the author edits, not the field type. Saying "formula"
         // here is how the wrong spelling propagates: the next author reads the
         // diagnostic and writes `formula:`, which the schema then rejects.

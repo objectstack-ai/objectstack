@@ -1725,8 +1725,8 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * Not a field. It provisions no column, and no driver, form, list view, export,
  * write path or translation bundle reads it — a block exists only on a row a
  * service has served, never on the row a write carries. For the same reason a
- * block may not reuse a declared field name (refused in this schema's
- * `superRefine`): one name cannot be both a stored column and a per-caller block.
+ * block may not reuse a declared field name, and a block names at least one
+ * leaf — both refused by {@link refuseAttachedBlockConflicts}.
  *
  * ## Its reader (ADR-0049 enforce-or-remove)
  *
@@ -1751,27 +1751,45 @@ const AttachedOnReadSchema = z.record(
 );
 
 /**
- * [#22211 ruling A] A block of `attachedOnRead` may not reuse the name of a
- * field this object declares — see {@link AttachedOnReadSchema}. One located
- * issue per colliding block, at `['attachedOnRead', <block>]`.
+ * [#22211 ruling A] The two `attachedOnRead` refusals that need more than the
+ * record's own grammar — see {@link AttachedOnReadSchema}. One located issue
+ * per offending block, at `['attachedOnRead', <block>]`:
  *
- * Judged against the AUTHORED field map, in the object's `superRefine` beside
- * {@link refuseNonPictureImageField}, for the same reason: only the object holds
- * both maps.
+ *  - a block that names NO leaf — it would make every `record.<block>.<leaf>`
+ *    a refusal while claiming the service attaches something;
+ *  - a block that reuses the name of a field this object declares — one name
+ *    cannot be both a stored column and a per-caller block.
+ *
+ * Judged here, in the object's `superRefine` beside
+ * {@link refuseNonPictureImageField}, rather than as a refinement on the record
+ * itself: the field half needs the object's own field map, and keeping both
+ * halves in the existing callback adds no check node the JSON Schema
+ * projection would have to drop. Collisions are judged against the AUTHORED
+ * field map.
  */
-function refuseAttachedBlockFieldCollision(attachedOnRead: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, ctx: z.RefinementCtx): void {
   if (attachedOnRead === null || typeof attachedOnRead !== 'object') return;
-  if (fields === null || typeof fields !== 'object') return;
-  for (const block of Object.keys(attachedOnRead)) {
-    if (!Object.prototype.hasOwnProperty.call(fields, block)) continue;
-    ctx.addIssue({
-      code: 'custom',
-      path: ['attachedOnRead', block],
-      message:
-        `\`attachedOnRead\` declares a block \`${block}\`, but \`${block}\` is also a declared field of this object. `
-        + 'A read attachment is computed per caller and never stored, so it cannot share a name with a stored '
-        + 'column — rename the block, or remove it if the field is what the expression should read.',
-    });
+  for (const [block, leaves] of Object.entries(attachedOnRead)) {
+    if (leaves !== null && typeof leaves === 'object' && Object.keys(leaves).length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['attachedOnRead', block],
+        message:
+          `\`attachedOnRead\` declares the block \`${block}\` with no leaves. A block names the leaf keys its `
+          + `service attaches and their value types (e.g. \`${block}: { can_act: 'boolean' }\`); declare them, `
+          + 'or remove the block.',
+      });
+    }
+    if (fields !== null && typeof fields === 'object' && Object.prototype.hasOwnProperty.call(fields, block)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['attachedOnRead', block],
+        message:
+          `\`attachedOnRead\` declares a block \`${block}\`, but \`${block}\` is also a declared field of this object. `
+          + 'A read attachment is computed per caller and never stored, so it cannot share a name with a stored '
+          + 'column — rename the block, or remove it if the field is what the expression should read.',
+      });
+    }
   }
 }
 
@@ -2668,9 +2686,9 @@ const ObjectSchemaBase = strictObject(
   // object — the same door, for the same reason: only the object holds the
   // field map the pointer resolves against.
   refuseNonPictureImageField(object.name, object.imageField, object.fields, ctx);
-  // [#22211 ruling A] A read attachment is not a field: its block names may not
-  // repeat a declared field name.
-  refuseAttachedBlockFieldCollision(object.attachedOnRead, object.fields, ctx);
+  // [#22211 ruling A] A read attachment names at least one leaf, and is not a
+  // field: its block names may not repeat a declared field name.
+  refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
 });
 
 /**
