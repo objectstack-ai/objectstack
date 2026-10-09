@@ -156,7 +156,7 @@ describe('settledWhen without dueLike: true is refused (ADR-0049: a declared key
 // =========================================================================
 
 describe('field.form offers the deadline keys on exactly the types the door accepts', () => {
-  const rows = fieldForm.sections.flatMap((s) => s.fields ?? []) as Array<{ field?: string; visibleWhen?: unknown }>;
+  const rows = (fieldForm.sections ?? []).flatMap((s) => s.fields ?? []) as Array<{ field?: string; visibleWhen?: unknown }>;
   const rowFor = (key: string) => rows.find((r) => r.field === key);
   // `defineForm` normalizes a bare predicate string to its `{ dialect, source }`
   // envelope, so the gate is read off `source`.
