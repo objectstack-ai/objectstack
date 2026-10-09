@@ -561,6 +561,9 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] 
  * options resolve against the host's predicate scope, which binds
  * `current_user` (ADR-0068 / objectui#2284) — that surface is where such a
  * predicate belongs, which is why it is also the first prescription below.
+ * The option has its own root verdict (`optionVisibleWhenRootIssue`, #22157),
+ * over the roots the server's option check binds: the acting user, and never
+ * `parent`.
  *
  * ## The user roots, and why `ctx` is judged whole-root (#6585)
  *
@@ -1078,6 +1081,101 @@ function fieldTraversalMessage(
 }
 
 /**
+ * [#22157] The roots a select option's own `visibleWhen` binds, read off the
+ * one server site that evaluates it: ObjectQL's `evaluateOptionVisibility`
+ * (`rule-validator.ts`). That call hands the expression engine `record` (the
+ * merged write), `previous`, the acting user and `permissions`, and nothing
+ * else; `@objectstack/formula`'s `buildScope` turns that into these roots:
+ *
+ *  - `record`, and `previous` (bound on an update);
+ *  - the acting user, under ADR-0068 D1's canonical `current_user` and the
+ *    three aliases `buildScope` hangs the same object on: `user`, and the
+ *    `user` member of `ctx` and of `os`. They are listed at bare-root
+ *    granularity because that is what {@link collectCelRootIdentifiers}
+ *    reports, the same reading as the runtime's own `USER_SCOPE_ROOTS` beside
+ *    the evaluator. All four are bound only when the write carries a user; a
+ *    system write takes the evaluator's "no acting user" branch by design,
+ *    which is not what this verdict judges.
+ *
+ * `permissions` mounts NO root: it answers `current_user.can(…)` through the
+ * environment (#18783), so it is absent here.
+ *
+ * `parent` is NOT bound. The write path binds a master-detail header for a
+ * field's own `readonlyWhen` / `requiredWhen` only, so the field-rule verdict
+ * one level up ({@link FIELD_RULE_BOUND_ROOTS}) accepts it and this one does
+ * not.
+ *
+ * ⛔ A root joins this list in the same change that binds it in
+ * `evaluateOptionVisibility`, never before.
+ */
+const OPTION_VISIBLE_WHEN_BOUND_ROOTS: readonly string[] = ['record', 'previous', 'current_user', 'user', 'ctx', 'os'];
+
+/**
+ * [#22157] The root verdict for a select option's own `visibleWhen`: a root
+ * the server's option check does not bind ({@link OPTION_VISIBLE_WHEN_BOUND_ROOTS})
+ * is refused, located at the option.
+ *
+ * ## Why it is refused
+ *
+ * The evaluator faults on an unbound root (`Unknown variable: parent`,
+ * measured through the real `evaluateValidationRules` with an authenticated
+ * caller), and a faulting option predicate is fail-OPEN: the fault is logged
+ * and the value admitted, so the gate is never enforced. A declared gate the
+ * runtime cannot enforce must not pass a door (ADR-0049), and nothing else
+ * refused it: every root judged here is in `SCOPE_ROOTS`, which the strict env
+ * declares, so the bare-reference check stays silent on it. The case that made
+ * the hole credible is `parent`, which the field-rule slots one level up accept
+ * on an object with exactly one `master_detail`.
+ *
+ * ## Why the membership test is `SCOPE_ROOTS`, not the field-rule vocabulary
+ *
+ * The gap is exactly the roots that pass the strict env. A root outside
+ * `SCOPE_ROOTS` (a nowhere-bound root such as `app`) is undeclared there, so
+ * the bare-reference check already refuses it at error on this slot; judging
+ * it here as well would give one mistake two verdicts. The test is an
+ * ALLOWLIST read against that list, for the reason {@link fieldRuleRootIssue}
+ * records (#6713): a root added to `SCOPE_ROOTS` is judged here the day it
+ * lands, with no second list to copy it into.
+ *
+ * `null` = nothing to report: the source does not parse (the syntax pass owns
+ * that), or every root it reads is one the option check binds.
+ */
+function optionVisibleWhenRootIssue(
+  objectName: string | undefined,
+  field: string,
+  option: string,
+  source: string,
+): { root: string; message: string } | null {
+  const roots = collectCelRootIdentifiers(source);
+  if (!roots.ok) return null;
+  const kept = SCOPE_ROOTS.filter(
+    (r) => !OPTION_VISIBLE_WHEN_BOUND_ROOTS.includes(r) && roots.roots.includes(r),
+  );
+  if (kept.length === 0) return null;
+  // One issue per option even when the predicate reads two unbound roots, in
+  // `SCOPE_ROOTS` order: stable, never AST walk order. The author fixes one
+  // and the next run names the other.
+  const root = kept[0]!;
+  const owner = objectName ? `'${objectName}'` : 'this object';
+  const prescription = root === 'parent'
+    ? `An option is judged against the record being written, never against its master-detail ` +
+      `header: only a field's own \`readonlyWhen\` and \`requiredWhen\` bind \`parent\`, on an ` +
+      `object with exactly one \`master_detail\`. To gate this choice on the header, read a column ` +
+      `${owner} declares instead (denormalise the header value you need onto ${owner}).`
+    : `\`${root}\` is declared platform-wide and bound at OTHER evaluation sites, never by the ` +
+      `option check. Rewrite the predicate against \`record\` (plus \`previous\`), or against the ` +
+      `acting user as \`current_user\`.`;
+  return {
+    root,
+    message:
+      `\`visibleWhen\` of option ${option} on field '${field}' reads \`${root}\`, but the server's ` +
+      `option check binds only \`record\`, \`previous\` and the acting user (\`current_user\`, and ` +
+      `its ADR-0068 aliases \`user\`, \`ctx\` and \`os\`), so \`${root}\` is unbound there. ` +
+      `${FIELD_TRAVERSAL_CONSEQUENCE['option visibleWhen']}. ${prescription}`,
+  };
+}
+
+/**
  * [#20078] The master object of an object with exactly ONE `master_detail`
  * relationship — the record the field level binds as `parent` — or `undefined`
  * when there is not exactly one (the #4889 gate above owns that verdict).
@@ -1169,7 +1267,9 @@ export interface StackExpressionOptions {
    *    `formulas.mdx` covers it, and the door gave none of it either: an
    *    option whose `visibleWhen` read a bare `amount` saved with a 200, and
    *    the server's option check cannot evaluate it and fails open (logged,
-   *    allowed through), so the gate it declares is never enforced;
+   *    allowed through), so the gate it declares is never enforced. Since
+   *    #22157 the pass also refuses a root that option check does not bind
+   *    (`parent` above all), at both doors through this same call;
    *  - [#22032, pass 4] the object's own `actions[]` pass — each action's
    *    `visible`, and its `disabled` unless that is a boolean literal, as a
    *    `record`-scoped predicate (`checkAction` below). The same sentence of
@@ -2031,15 +2131,34 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // binds it. Same helper, two verdicts, because the two surfaces have two
       // evaluators; neither verdict is a side effect of a shared root list.
       //
-      // [#22032, pass 3] NOT fenced on an object write: the option's `check`
-      // and its traversal refusal are the pass the object save door runs, at
-      // the build's own position in this walk, so the door's findings and
-      // their order are the build's — the `current_user` acceptance above
-      // included. See {@link StackExpressionOptions.runtimeWriteType}.
+      // [#22157] …and the option has a root verdict of its own, over the roots
+      // the SERVER's option check binds (`optionVisibleWhenRootIssue`). The
+      // shared root list (`SCOPE_ROOTS`) let every platform-wide root through
+      // here, `parent` among them, though `evaluateOptionVisibility` binds only
+      // `record`, `previous` and the acting user: such a predicate faulted on
+      // every write that picked the option and was admitted unchecked. So the
+      // two surfaces now differ by exactly what their evaluators bind: this
+      // one accepts the acting user and refuses `parent`, the field-rule slots
+      // the other way round.
+      //
+      // [#22032, pass 3] NOT fenced on an object write: the option's `check`,
+      // its root verdict (#22157) and its traversal refusal are the pass the
+      // object save door runs, at the build's own position in this walk, so the
+      // door's findings and their order are the build's — the `current_user`
+      // acceptance above included. See
+      // {@link StackExpressionOptions.runtimeWriteType}.
       for (const [oi, opt] of recordsOf(f.options).entries()) {
         const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
         const optionWhere = `object '${objectName}' · field '${fname}' option ${label} visibleWhen`;
         check(optionWhere, opt.visibleWhen, objectName, 'record');
+        // [#22157] After `check`, before the traversal refusal: every root this
+        // verdict judges is declared in the strict env, so `check` never
+        // reports a bare reference to it and the two stay disjoint.
+        const optionSource = celSourceOf(opt.visibleWhen);
+        const verdict = optionSource ? optionVisibleWhenRootIssue(objectName, fname, label, optionSource) : null;
+        if (verdict) {
+          issues.push({ where: optionWhere, message: verdict.message, source: optionSource!, severity: 'error' });
+        }
         // [#20078] An option's predicate is evaluated against the record as
         // stored — a read through a reference faults, and the server admits the
         // value unchecked. `current_user` (and `current_user.can(…)`) is NOT a

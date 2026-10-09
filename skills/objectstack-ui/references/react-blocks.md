@@ -50,7 +50,7 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `splitDirection` | `'horizontal' \| 'vertical'` | data |  | Split orientation (split forms) |
 | `sections` | `any[]` | data |  |  |
 | `subforms` | `object[]` | data |  | Inline master-detail child collections |
-| `submitBehavior` | `object` | data |  | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled… |
+| `submitBehavior` | `object` | data |  | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
 
 ## `<ListView>` — `list-view`
 

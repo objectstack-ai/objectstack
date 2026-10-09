@@ -98,6 +98,8 @@ import {
     postureGatesGlobalUniques,
     GLOBAL_UNIQUE_CONFIRMATION_REQUIRED,
     type GlobalUniqueFinding,
+    // [#22258] The in-process session-read rule — both session reads below.
+    inProcessSessionReadInput,
 } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
@@ -2617,7 +2619,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             let api: any = authService?.api;
             if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
             if (!api?.getSession) return null;
-            const session = await api.getSession({ headers: c.req.raw.headers });
+            // [#22258] A request carrying a session cookie reads without
+            // renewal: this route's response never carries a renewed cookie.
+            const session = await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
             const direct = session?.session?.activeOrganizationId ?? session?.activeOrganizationId ?? null;
             if (direct) return String(direct);
         } catch { /* ignore */ }
@@ -2785,7 +2789,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     if (!api && typeof authService?.getApi === 'function') {
                         api = await authService.getApi();
                     }
-                    return await api?.getSession?.({ headers: h });
+                    // [#22258] The in-process session-read rule, as in
+                    // `resolveActiveOrgId` above.
+                    return await api?.getSession?.(inProcessSessionReadInput(h));
                 } catch {
                     return undefined;
                 }
