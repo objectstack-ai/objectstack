@@ -30,7 +30,7 @@ import { isServiceServeable } from '../service-serveable.js';
 import {
     validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
 } from '../validation-failure.js';
-import { ExecutionStatus } from '@objectstack/spec/automation';
+import { ExecutionStatus, type FlowParsed } from '@objectstack/spec/automation';
 import { ListRunsRequestSchema } from '@objectstack/spec/api';
 import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
@@ -1685,6 +1685,87 @@ async function unregisterAndDeleteFlow(
 }
 
 /**
+ * The three flow types that start on their OWN trigger — or as a sub-flow
+ * called from a parent flow's `subflow` node — and never as a door: an
+ * `autolaunched` flow has no trigger of its own beyond a parent or an engine
+ * event, a `record_change` flow starts on a write, and a `schedule` flow on
+ * its cadence. Bound to the spec's `Flow.type` enum at compile time, so a
+ * member the spec drops reds this line.
+ *
+ * `screen` and `api` are deliberately NOT here: they are doors the author
+ * designed for users and API callers, and an elevated one is the author's
+ * explicit choice (ADR-0073 D2), reviewable at publish.
+ */
+const SELF_TRIGGERED_FLOW_TYPES: ReadonlySet<FlowParsed['type']> = new Set(
+    ['autolaunched', 'record_change', 'schedule'] as const satisfies readonly FlowParsed['type'][],
+);
+
+/**
+ * Refusal vocabulary for an elevated self-triggered flow at the trigger door
+ * (ADR-0112: code AND status) — the code and status this domain's other
+ * permission refusals already answer with (`RUN_READ_DENY_*`,
+ * `FLOW_WRITE_DENY_*`, `RUN_LIFECYCLE_DENY_*`). ⛔ No new code is minted here.
+ *
+ * The message names what admits such a flow and nothing about THIS flow: not
+ * its type, not its run-as declaration, not its definition. It reads the same
+ * for every refused flow, so it tells a caller nothing the refusal itself does
+ * not.
+ */
+const ELEVATED_TRIGGER_DENY_STATUS = 403;
+const ELEVATED_TRIGGER_DENY_CODE = 'PERMISSION_DENIED';
+const ELEVATED_TRIGGER_DENY_MESSAGE =
+    'This caller may not start this flow through the trigger door. A flow that runs on its own trigger '
+    + "starts there, or as a sub-flow from a parent flow's `subflow` node.";
+
+/**
+ * Whether the trigger door refuses this caller starting `flowName`: the
+ * caller is not the system principal, AND the flow is declared
+ * `runAs: 'system'`, AND its `type` is one of {@link SELF_TRIGGERED_FLOW_TYPES}.
+ *
+ * Implements the maintainer's ruling (letter B) on the defect class "a
+ * self-triggered flow declared to run as system could be started by any
+ * signed-in member through the trigger door": the door used to ask only
+ * whether the caller was anonymous, so an elevated flow meant to run on its
+ * own trigger — or as a sub-flow, the platform's own pattern for an elevated
+ * write — was also an elevated door every signed-in user could open. Same
+ * direction as ADR-0073 D2 (`system` is an explicit opt-in, never a default)
+ * and as ADR-0138 D2b, its publish-time sibling (no anonymous flow door may
+ * target a `system` flow).
+ *
+ * What stays exactly as it was, and why each is outside this predicate:
+ *
+ *  - **The system principal** (`executionContext.isSystem` — the same field
+ *    the domain's anonymous floor reads, never set on inbound HTTP) still
+ *    starts every flow.
+ *  - **A parent flow's `subflow` node** starts its child through the engine
+ *    (`engine.execute`), never through this door, so an elevated sub-flow
+ *    called from its parent is untouched — the check lives at the door
+ *    precisely so that path stays open.
+ *  - **`screen` and `api` flows**, elevated or not, and every flow that does
+ *    not declare `runAs: 'system'`.
+ *
+ * Reads the flow through the automation service's own `getFlow` — the probe
+ * {@link flowIsUnknown} uses, which serves the same definition `execute`
+ * runs — so there is no second loader and no second copy of the engine's
+ * run-as policy here: the predicate reads two declared keys and decides
+ * admission, while elevation stays the engine's. `getFlow` is optional on
+ * `IAutomationService`; an implementation that omits it cannot be asked, and
+ * the door dispatches as before, exactly as the existence check does.
+ */
+async function refusesElevatedSelfTriggeredStart(
+    automationService: IAutomationService,
+    flowName: string,
+    context: HttpProtocolContext,
+): Promise<boolean> {
+    const ec: any = (context as any)?.executionContext;
+    if (ec?.isSystem === true) return false;
+    if (typeof automationService.getFlow !== 'function') return false;
+    const flow = await automationService.getFlow(flowName);
+    if (!flow) return false;
+    return flow.runAs === 'system' && SELF_TRIGGERED_FLOW_TYPES.has(flow.type);
+}
+
+/**
  * [#9378] The ONE mapper both trigger doors answer through — `POST
  * /:name/trigger` and the legacy `POST /trigger/:name`, which
  * `client.automation.trigger()` calls. Extracted rather than written twice:
@@ -1798,6 +1879,17 @@ async function respondToFlowTrigger(
         return {
             handled: true,
             response: deps.error(flowNotFoundMessage(flowName), FLOW_NOT_FOUND_STATUS),
+        };
+    }
+    // The caller × flow check: AFTER existence (an unknown name keeps its 404)
+    // and BEFORE dispatch, so a refused start runs nothing — no run record, no
+    // node, no side effect. See {@link refusesElevatedSelfTriggeredStart}.
+    if (await refusesElevatedSelfTriggeredStart(automationService, flowName, context)) {
+        return {
+            handled: true,
+            response: deps.error(ELEVATED_TRIGGER_DENY_MESSAGE, ELEVATED_TRIGGER_DENY_STATUS, {
+                code: ELEVATED_TRIGGER_DENY_CODE,
+            }),
         };
     }
     const result = await automationService.execute(flowName, buildAutomationContext(body, context));
@@ -2169,7 +2261,12 @@ export async function classifyResumeResult(
  *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415;
  *                                  a run that PAUSED → 200 with `runId` / `screen`,
  *                                  on whichever attempt it paused — #9510)
- *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535). Switches
+ *                                  ⚑ a `runAs: 'system'` flow of a self-triggered
+ *                                    type (`autolaunched`, `record_change`,
+ *                                    `schedule`) — the system principal only;
+ *                                    anyone else → 403 `PERMISSION_DENIED`, never
+ *                                    dispatched (`refusesElevatedSelfTriggeredStart`)
+ *   POST   /:name/toggle       → toggleFlow (unknown name → 404, #7535). Switches
  *                                  PACKAGED flows only — it writes the ADR-0126 §7.2
  *                                  activation ledger. A flow no package ships → 409
  *                                  `RESOURCE_CONFLICT` naming that flow's own switch,

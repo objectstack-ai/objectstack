@@ -107,16 +107,16 @@ describe('PUT / DELETE /api/v1/meta/flow/:name on a packaged flow — the refusa
         expectRegimeC(r.message);
     });
 
-    it('control: a packaged `page` (no declared regime) reads the sentence it always read', async () => {
+    it('control: a packaged `page` (no declared regime) reads the managed seal (ADR-0131 D6)', async () => {
         const { call } = boot('env_1');
         const r = await call('PUT', 'page', PACKAGED_PAGE, { name: PACKAGED_PAGE, label: 'Changed in place' });
         expect(r.status).toBe(403);
         expect(r.code).toBe('NOT_OVERRIDABLE');
         expect(r.message).toBe(
-            `Metadata item 'page/${PACKAGED_PAGE}' is provided by a code package `
-            + 'and the type has not opted into per-org overlay writes (allowOrgOverride=false). '
-            + 'Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. '
-            + 'See docs/adr/0005-metadata-customization-overlay.md.',
+            `Metadata item 'page/${PACKAGED_PAGE}' is provided by a managed package and is sealed against in-place edits: `
+            + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+            + 'a managed item. Edit the source artifact and redeploy. '
+            + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.',
         );
     });
 });
