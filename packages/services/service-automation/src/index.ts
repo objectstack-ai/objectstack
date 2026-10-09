@@ -79,6 +79,9 @@ export type {
     // barrel-reachable through `setFlowCredentialSource` and that method.
     FlowCredentialSource,
     FlowCredentialHolding,
+    // [#22450] What the reader `AutomationEngine.setI18nServiceSource` takes
+    // answers — barrel-reachable through that method.
+    RefusalI18nService,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot

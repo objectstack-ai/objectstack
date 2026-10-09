@@ -17,11 +17,28 @@ import { FileMetadataSchema } from '../system/object-storage.zod';
 // ==========================================
 
 import { lazySchema } from '../shared/lazy-schema';
+
+// The upload requests' `scope` — the scope a new `sys_file` row is filed under
+// (`service-storage` stores it and prefixes the storage key with it).
+//
+// Not an access setting, and it never was (#22443): the download doors judge a
+// file by its `acl`, the `attachments` scope and field ownership alone, so the
+// upload doors refuse `public` by name rather than store a private file under a
+// name that says otherwise. Anonymous download is a file's `acl: 'public_read'`
+// (ADR-0104), set on the stored file record — these requests carry no `acl`,
+// and every upload is stored private. Module-private and written with `//`:
+// prose the two `scope` describes consume, not documented surface.
+const UPLOAD_SCOPE_DESCRIPTION =
+  'Storage scope the new file is filed under (default user; attachments for the record attachments '
+  + 'surface). Not an access setting: the upload doors refuse public, and a file is served without '
+  + "sign-in only when its stored file record carries acl 'public_read' (ADR-0104). The upload request "
+  + 'carries no acl; every upload is stored private.';
+
 export const GetPresignedUrlRequestSchema = lazySchema(() => z.object({
   filename: z.string().describe('Original filename'),
   mimeType: z.string().describe('File MIME type'),
   size: z.number().describe('File size in bytes'),
-  scope: z.string().default('user').describe('Target storage scope (e.g. user, private, public)'),
+  scope: z.string().default('user').describe(UPLOAD_SCOPE_DESCRIPTION),
   bucket: z.string().optional().describe('Specific bucket override (admin only)'),
 }));
 
@@ -148,7 +165,7 @@ export const InitiateChunkedUploadRequestSchema = lazySchema(() => z.object({
   totalSize: z.number().int().min(1).describe('Total file size in bytes'),
   chunkSize: z.number().int().min(5242880).default(5242880)
     .describe('Size of each chunk in bytes (minimum 5MB per S3 spec)'),
-  scope: z.string().default('user').describe('Target storage scope'),
+  scope: z.string().default('user').describe(UPLOAD_SCOPE_DESCRIPTION),
   bucket: z.string().optional().describe('Specific bucket override (admin only)'),
   metadata: z.record(z.string(), z.string()).optional().describe('Custom metadata key-value pairs'),
 }));

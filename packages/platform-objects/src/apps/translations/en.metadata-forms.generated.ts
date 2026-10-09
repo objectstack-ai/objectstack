@@ -628,6 +628,14 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Reference Via",
         helpText: "Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`."
       },
+      dueLike: {
+        label: "Deadline",
+        helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name."
+      },
+      settledWhen: {
+        label: "Settled When",
+        helpText: "CEL predicate over the record (e.g. record.status == 'done') — while it is TRUE the deadline is settled, and no overdue wording or colour applies to that record. Display only."
+      },
       options: {
         label: "Options",
         helpText: "Available options (label/value pairs)"

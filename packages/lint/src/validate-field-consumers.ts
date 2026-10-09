@@ -310,7 +310,9 @@ const BEHAVIOUR_SEGMENTS: ReadonlySet<string> = new Set([
   'titleField', 'colorField', 'latitudeField', 'longitudeField', 'locationField',
   'addressField', 'parentField', 'statusField', 'kanban', 'calendar', 'gantt', 'timeline',
   'map', 'tree', 'rowColor', 'rowTint', 'conditionalFormatting',
-  'expression', 'formula', 'visibleWhen', 'readonlyWhen', 'requiredWhen', 'validations',
+  // `settledWhen` (#22227) is the fourth field-rule predicate slot, a deadline's
+  // settle condition — a read of the fields it names, like its three siblings.
+  'expression', 'formula', 'visibleWhen', 'readonlyWhen', 'requiredWhen', 'settledWhen', 'validations',
   'rules', 'summaryOperations', 'dimensions', 'measures', 'handler', 'body', 'script',
   'nameField', 'displayNameField', 'externalId', 'upsertKey',
 ]);

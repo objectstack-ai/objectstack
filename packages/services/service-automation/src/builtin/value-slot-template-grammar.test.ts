@@ -18,11 +18,18 @@
  *  - every REFUSED spelling resolves through the variables (a path), computes
  *    (an expression), or resolves to nothing — and the judge refuses each,
  *    including the dispatch-order edges (`{$User}` with no path, `{NOW}` with
- *    no call, a padded `{ amount }`).
+ *    no call, a padded `{ amount }`);
+ *  - for a refused PATH, the remedy the judge prints reads the same value
+ *    through this package's CEL evaluator (`evaluateValueEnvelope`: the
+ *    author-time envelope check, then the built `@objectstack/formula` engine
+ *    over the flow's real CEL scope) as the interpolator read from the
+ *    template — including a head variable named like an identifier CEL claims
+ *    for itself (`{list.0}` → `vars["list"][0]`, #22290).
  */
 
 import { describe, expect, it } from 'vitest';
 import { valueSlotTemplateRefusals } from '@objectstack/spec/automation';
+import { AutomationEngine } from '../engine.js';
 import { interpolateString } from './template.js';
 
 const VARIABLES = new Map<string, unknown>([
@@ -98,5 +105,75 @@ describe('a spelling the retirement REFUSES is one the interpolator reads as tem
     expect(interpolateString('a {} b', VARIABLES, CONTEXT)).toBe('a {} b');
     expect(valueSlotTemplateRefusals('approved')).toEqual([]);
     expect(valueSlotTemplateRefusals('a {} b')).toEqual([]);
+  });
+});
+
+describe('the remedy a refused path prints reads, through CEL, the value the interpolator read', () => {
+  const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => quiet } as never;
+  const engine = new AutomationEngine(quiet);
+
+  /** The CEL spellings the one refusal of `token` names: the envelope's source, and the `has()` guard when it prints one. */
+  function printedSpellings(token: string): string[] {
+    const refusals = valueSlotTemplateRefusals(token);
+    expect(refusals, `exactly one refusal for ${token}`).toHaveLength(1);
+    const message = refusals[0]!.message;
+    const envelope = /Write `[^`]+` as \{ dialect: 'cel', source: (?:'([^']*)'|("(?:[^"\\]|\\.)*")) \}/.exec(message);
+    expect(envelope, `an envelope remedy in: ${message}`).not.toBeNull();
+    const guard = /: `(has\([^`]*)` \(the guarded form writes `null`\)/.exec(message);
+    return [envelope![1] ?? (JSON.parse(envelope![2]!) as string), ...(guard ? [guard[1]!] : [])];
+  }
+
+  /** Both readings of `token` over `variables`, and every printed spelling evaluated to the interpolator's value. */
+  function expectReadingsAgree(token: string, variables: Map<string, unknown>, value: unknown): void {
+    expect(interpolateString(token, variables, CONTEXT)).toEqual(value);
+    for (const source of printedSpellings(token)) {
+      expect(engine.evaluateValueEnvelope({ dialect: 'cel', source }, variables, token), source).toEqual(value);
+    }
+  }
+
+  // Every identifier CEL claims before a flow variable can (`flow-template-token.ts`
+  // in the spec reads them off cel-js 8.0.0): the type identifiers, the namespace
+  // constants, the reserved words and the keywords. `__proto__` is claimed there
+  // too, and is left out of this list: the flow CEL scope is a plain object, where
+  // `__proto__` names the prototype rather than a key, so no CEL spelling reads a
+  // variable of that name.
+  it.each([
+    'bool', 'bytes', 'double', 'int', 'list', 'map', 'null_type', 'string', 'type', 'uint',
+    'cel', 'google', 'optional',
+    'as', 'break', 'const', 'continue', 'else', 'for', 'function', 'if', 'import', 'let', 'loop', 'namespace',
+    'package', 'return', 'var', 'void', 'while', 'prototype',
+    'true', 'false', 'null', 'in',
+  ])('a head variable named `%s`', (name) => {
+    const value = ['first', { key: 'second' }];
+    const variables = new Map<string, unknown>([[name, value]]);
+    expectReadingsAgree(`{${name}}`, variables, value);
+    expectReadingsAgree(`{${name}.0}`, variables, 'first');
+    expectReadingsAgree(`{${name}.1.key}`, variables, 'second');
+    expectReadingsAgree(`{${name}.tags}`, new Map<string, unknown>([[name, { tags: 'T' }]]), 'T');
+  });
+
+  it('the guard is read off the refusal too, so each row above evaluates it where one is printed', () => {
+    expect(printedSpellings('{list.tags}')).toEqual(['vars["list"].tags', 'has(vars.list.tags) ? vars.list.tags : null']);
+    expect(printedSpellings('{list}')).toEqual(['vars["list"]', 'has(vars.list) ? vars.list : null']);
+    expect(printedSpellings('{null.tags}')).toEqual(['vars["null"].tags']);
+  });
+
+  it('a later keyword segment, and an index in the middle of a path', () => {
+    const variables = new Map<string, unknown>([['record', { in: 'x', tags: { null: 'y' } }], ['rows', [{ name: 'r0' }]]]);
+    expectReadingsAgree('{record.in}', variables, 'x');
+    expectReadingsAgree('{record.tags.null}', variables, 'y');
+    expectReadingsAgree('{rows.0.name}', variables, 'r0');
+  });
+
+  it.each(['items', 'timestamp', 'duration', 'dyn'])('control: an ordinary head `%s` is read bare, unchanged', (name) => {
+    const variables = new Map<string, unknown>([[name, ['first', { key: 'second' }]]]);
+    expect(printedSpellings(`{${name}.0}`)).toEqual([`${name}[0]`]);
+    expectReadingsAgree(`{${name}.0}`, variables, 'first');
+    expectReadingsAgree(`{${name}.1.key}`, variables, 'second');
+  });
+
+  it('control: a `$`-named head is still read through `vars`', () => {
+    expect(printedSpellings('{$error.message}')).toEqual(['vars["$error"].message']);
+    expectReadingsAgree('{$error.message}', VARIABLES, 'boom');
   });
 });

@@ -45,7 +45,7 @@ export const NotificationPositionSchema = lazySchema(() => z.enum([
 
 export type NotificationPosition = z.input<typeof NotificationPositionSchema>;
 
-// [#5015] `NotificationActionSchema` / `NotificationAction` were REMOVED per
+// [no-door retirement] `NotificationActionSchema` / `NotificationAction` were REMOVED per
 // ADR-0049 enforce-or-remove, ruled REMOVE on 2026-08-04.
 //
 // The shape declared an interactive action button inside a notification —
@@ -91,7 +91,7 @@ export type NotificationPosition = z.input<typeof NotificationPositionSchema>;
 // enforce route of ADR-0049 — a carrier key on a real metadata type, with a
 // renderer that reads it, in one change. Vocabulary second, never first.
 
-// [#4610] `NotificationSchema` / `Notification` and `NotificationConfigSchema`
+// [dual-source removal] `NotificationSchema` / `Notification` and `NotificationConfigSchema`
 // / `NotificationConfig` were removed from this module (dual-source cleanup,
 // #4535 C3). The bare name `Notification(Schema)` now belongs to
 // `@objectstack/spec/api` alone: the REST inbox-row contract served by
@@ -100,7 +100,7 @@ export type NotificationPosition = z.input<typeof NotificationPositionSchema>;
 // `./system` twin was wired into no parent schema and contradicted ADR-0030's
 // accepted delivery model. What survives on this module is the presentation
 // vocabulary above: `NotificationType` / `NotificationSeverity` /
-// `NotificationPosition` — three enums, not four, since #5015 took
+// `NotificationPosition` — three enums, not four, since the no-door retirement took
 // `NotificationAction` — which objectui's toaster reads as a vocabulary.
 //
 // ⚠️ [#5781] The retirement STANDS; the evidence #4610 published for it does
