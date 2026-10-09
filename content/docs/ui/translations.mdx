@@ -126,9 +126,13 @@ saying so.
 **Page headers are keyed by page name (#3589).** A page's `page:header`
 component has no stable id, so its `properties.title` / `properties.subtitle`
 are addressed through the page itself: `pages.<name>.title` / `subtitle`.
-`title` falls back to `pages.<name>.label`, so a page whose header title
-matches its nav label needs only `label`. Every `page:header` in the page's
-regions receives the same copy.
+When `title` is omitted, the header keeps the title its author wrote, and
+`pages.<name>.label` stands in only where the header authors no title or its
+title restates the page's `label`. So a page whose header title matches its
+nav label needs only `label`, while a header whose title says something else,
+such as a dynamic `'{name}'`, keeps it until the bundle supplies a `title`.
+Every root-level `page:header` (a region's entry or a `slots.<slot>` entry)
+is resolved by this one rule.
 </Callout>
 
 <Callout type="info">

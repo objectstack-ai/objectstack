@@ -1724,8 +1724,12 @@ describe('translatePage', () => {
     // widened to the open bag it is: the overlay adds keys the literal does
     // not spell out, and inferring it as `{title}` alone would make reading
     // the result a type error.
+    // `label` is `PageSchema`'s required key, and the header title restates
+    // it, exactly as on `homePage()`: that is the shape whose title the
+    // page-name route answers from `pages.<name>.label` (#22508).
     const regionHeaderWithId = () => ({
       name: 'sales_home_page',
+      label: 'Sales Home',
       regions: [{
         name: 'header',
         components: [{
@@ -2719,6 +2723,93 @@ describe('resolveTabLabel — filter-preset tab labels, keyed under `_tabs`', ()
     const tab = { name: 'urgent', label: 'Urgent' };
     expect(resolveTabLabel(undefined, 'showcase_task', tab, { locale: 'zh-CN' })).toBe('Urgent');
     expect(resolveTabLabel(bundle, undefined, tab, { locale: 'zh-CN' })).toBe('Urgent');
+  });
+});
+
+// #22508: the header title used to be "the bundle's page `title`, else the
+// bundle's page `label`", spread over whatever the header authored. So a pack
+// carrying `label` and no `title` (the natural partial translation) turned a
+// record page's dynamic `'{name}'` heading into the page's static name in that
+// locale, with no diagnostic. The order is now: bundle `title`, then the
+// AUTHORED title, then the bundle `label` only where the header authors no
+// title or its title restates the page's own `label`. Pinned at both roots,
+// because both reach the one resolution through the same visitor.
+describe('translatePage — a bundle label never replaces a header title that says something else', () => {
+  const PAGE = 'account_detail_page';
+  type Root = 'region' | 'slot';
+  const ROOTS: readonly Root[] = ['region', 'slot'];
+
+  const pageWith = (root: Root, header: Record<string, unknown>, label: any = 'Account Detail'): any => {
+    const component = { type: 'page:header', properties: header };
+    return root === 'region'
+      ? { name: PAGE, label, regions: [{ name: 'header', components: [component] }] }
+      : { name: PAGE, label, kind: 'slotted', regions: [], slots: { header: component } };
+  };
+  const headerOf = (root: Root, page: any): Record<string, unknown> =>
+    root === 'region' ? page.regions[0].components[0].properties : page.slots.header.properties;
+
+  /** The measured hotcrm shape: `label` in the pack, no `title`. */
+  const labelOnly: TranslationBundle = {
+    en: { pages: { [PAGE]: { label: 'Account Detail' } } },
+    'zh-CN': { pages: { [PAGE]: { label: '客户详情', subtitle: '客户概览' } } },
+  };
+  const withTitle: TranslationBundle = {
+    'zh-CN': { pages: { [PAGE]: { label: '客户详情', title: '客户 {name}' } } },
+  };
+
+  for (const root of ROOTS) {
+    describe(`at a ${root} root`, () => {
+      it('keeps an authored template title (`{name}`) when the pack carries `label` and no `title`', () => {
+        for (const locale of ['en', 'zh-CN']) {
+          const out = translatePage(pageWith(root, { title: '{name}' }), labelOnly, { locale });
+          expect({ locale, title: headerOf(root, out).title }).toEqual({ locale, title: '{name}' });
+        }
+        // The page's own label still translates; only the header title is guarded.
+        expect(translatePage(pageWith(root, { title: '{name}' }), labelOnly, { locale: 'zh-CN' }).label).toBe('客户详情');
+      });
+
+      it('keeps an authored plain-string title that differs from the page label', () => {
+        const out = translatePage(pageWith(root, { title: 'Customer overview' }), labelOnly, { locale: 'zh-CN' });
+        expect(headerOf(root, out).title).toBe('Customer overview');
+      });
+
+      it('keeps an authored inline locale map title, and still applies the bundle subtitle beside it', () => {
+        const title = { en: '{name}', 'zh-CN': '{name}(客户)' };
+        const out = translatePage(pageWith(root, { title, subtitle: 'Overview' }), labelOnly, { locale: 'zh-CN' });
+        expect(headerOf(root, out)).toEqual({ title, subtitle: '客户概览' });
+      });
+
+      it('CONTROL: a pack with `title` replaces the authored title', () => {
+        const out = translatePage(pageWith(root, { title: '{name}' }), withTitle, { locale: 'zh-CN' });
+        expect(headerOf(root, out).title).toBe('客户 {name}');
+      });
+
+      it('CONTROL: a header with no authored title still shows the bundle `label`', () => {
+        for (const header of [{}, { title: '' }, { subtitle: 'Overview' }]) {
+          const out = translatePage(pageWith(root, header), labelOnly, { locale: 'zh-CN' });
+          expect({ header, title: headerOf(root, out).title }).toEqual({ header, title: '客户详情' });
+        }
+      });
+
+      it('a header title that restates the page label takes the label translation (the extractor offers no `title` key for it)', () => {
+        const out = translatePage(pageWith(root, { title: 'Account Detail' }), labelOnly, { locale: 'zh-CN' });
+        expect(headerOf(root, out).title).toBe('客户详情');
+
+        // The same rule for the inline-map form: one map restating the other,
+        // entry for entry, in a different key order.
+        const label = { en: 'Account Detail', 'zh-CN': '客户详情页' };
+        const restated = { 'zh-CN': '客户详情页', en: 'Account Detail' };
+        const mapped = translatePage(pageWith(root, { title: restated }, label), labelOnly, { locale: 'zh-CN' });
+        expect(headerOf(root, mapped).title).toBe('客户详情');
+      });
+    });
+  }
+
+  it('serves the same answer through `translateMetadataDocument`, the function the REST page doors call', () => {
+    for (const root of ROOTS) {
+      const out = translateMetadataDocument('page', pageWith(root, { title: '{name}' }), labelOnly, { locale: 'en' });
+      expect({ root, title: headerOf(root, out).title }).toEqual({ root, title: '{name}' });
+    }
   });
 });
 
