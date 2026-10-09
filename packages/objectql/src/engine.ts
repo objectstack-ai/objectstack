@@ -12982,9 +12982,32 @@ export class ObjectQL implements IObjectQLEngine {
    * case of a hook deriving a *business* field that its object also
    * validates.
    *
-   * Nothing is written, no sequence is consumed, and no driver is touched —
-   * validation is in-process, which is what makes row-by-row dry run of a
-   * large import affordable.
+   * ## An `update`-mode preview judges the stored row (#22445)
+   *
+   * A by-id update reads its prior row and judges the stored row merged with
+   * the patch, so a rule that reads a column the patch omits sees the stored
+   * value. A preview that judged the patch alone refused rows the write
+   * admits: the omitted column was missing from the judged record, and the
+   * rule faulted. So a row that carries its address — the `id` every update
+   * door folds into the payload (`updateData`), classified by the write's
+   * own `resolveEngineUpdateDispatch` — is judged against the row that id
+   * names, as the by-id update judges it: the stored row is the rules'
+   * `previous`, and their record is that row merged with the patch.
+   *
+   * ⛔ The stored row is read through the READ DOOR, under the caller's own
+   * context (`findOne`), never through the driver. A row the caller cannot
+   * read is a row that does not exist (the by-id write answers 404 for it
+   * before it reads anything), so the preview reads no row for it and gives
+   * no verdict about its columns; a column the caller may not read is absent
+   * from the image the read door serves, and is judged as empty. A refused
+   * read propagates as the refusal it is. A row with no address, or whose id
+   * names no row this caller can read, is judged on the patch alone, as
+   * before.
+   *
+   * Nothing is written and no sequence is consumed. Reads do happen: the
+   * stored row above, and the related rows a traversing rule names (see the
+   * `previewRelatedForRow` block below). Validation itself is in-process,
+   * which is what makes row-by-row dry run of a large import affordable.
    */
   async validate(
     object: string,
@@ -13022,8 +13045,11 @@ export class ObjectQL implements IObjectQLEngine {
     // ⚠️ "Nothing is executed" is no longer literally true and must not be
     // restated as if it were: a traversing validation rule needs its related
     // rows, so this operation issues a READ per reference field the rules name
-    // (see the `previewRelatedForRow` block below). Nothing is written, no hook
-    // runs, and the read happens only for a caller who passes the arms the
+    // (see the `previewRelatedForRow` block below), and [#22445] an
+    // `update`-mode row that carries its address issues one READ of the stored
+    // row, through the read door under the caller's own context (the
+    // `storedRows` block below). Nothing is written, no hook runs, and the
+    // RELATED read happens only for a caller who passes the arms the
     // write-gate probe RUNS — ⛔ never a category of the write decision, and
     // ⛔ not a promise the write would succeed (`registerWriteGateProbe` names
     // those arms, and the families it does not carry).
@@ -13088,12 +13114,13 @@ export class ObjectQL implements IObjectQLEngine {
     // that verb. No logger: a preview writes nothing, and a strip line says
     // the value was not stored.
     //
-    // ⚠️ An `update`-mode preview has no bound row, so a supplied `id` is read
-    // as the address the write binds — every update door folds the target id
-    // into the payload (`updateData`) — and is never judged as a payload key
-    // (#8093, ADDRESSING IS NOT PAYLOAD). `readonlyWhen` and the primary-key
-    // strip are not run: both judge a prior record or a dispatch this
-    // operation does not have (the named limits below).
+    // ⚠️ On `update`, a supplied `id` is read as the address the write binds —
+    // every update door folds the target id into the payload (`updateData`) —
+    // and is never judged as a payload key (#8093, ADDRESSING IS NOT PAYLOAD).
+    // [#22445] That address now names the stored row the rules judge (the
+    // `storedRows` block below). `readonlyWhen` and the primary-key strip are
+    // still not run: they remain the named limit `ValidateDataResponse`
+    // states, so the preview can report fewer drops than the update.
     //
     // [#20922] Each strip's result is recorded twice at the strip itself: into
     // the batch-level union the listener reports (unchanged), and into the
@@ -13167,6 +13194,44 @@ export class ObjectQL implements IObjectQLEngine {
     const currentUser = this.buildEvalUser(options?.context);
     const skipStateMachine = shouldSkipStateMachine(options?.context);
 
+    // [#22445] THE STORED ROW an `update`-mode row is judged against — the
+    // by-id update's prior row, read here for the same reason the write reads
+    // it: a rule that reads a column the patch omits judges the stored value,
+    // so the rules' record is the stored row merged with the patch and their
+    // `previous` is the stored row (`evaluateValidationRules` below, called as
+    // the by-id branch of `update()` calls it).
+    //
+    // The address is the write's own: `resolveEngineUpdateDispatch`, the
+    // ladder `update()` resolves its by-id branch with, asked of the row as
+    // submitted. ⛔ Read through the READ DOOR under the caller's context,
+    // never through the driver: the by-id write reads its row raw only after
+    // the write gates answered 404 for a row this caller cannot read, and the
+    // preview runs none of those gates. So a hidden row is a missing row here
+    // too — no image, no verdict about its columns — and a column the caller
+    // may not read is absent from the image and judged as empty. A refused
+    // read propagates as raised. `undefined` = no stored row: the row is
+    // judged on the patch alone, as it was before this read existed.
+    const storedRows: Array<Record<string, unknown> | undefined> = [];
+    for (const submitted of submittedRows) {
+      let stored: Record<string, unknown> | undefined;
+      if (mode === 'update' && submitted && typeof submitted === 'object') {
+        const dispatch = resolveEngineUpdateDispatch(submitted as EngineUpdateDispatchData, undefined);
+        if (dispatch.kind === 'by-id') {
+          const row = await this.findOne(object, {
+            where: { id: dispatch.id },
+            context: options?.context,
+          } as EngineQueryOptions);
+          if (row && typeof row === 'object') stored = row as Record<string, unknown>;
+        }
+      }
+      storedRows.push(stored);
+    }
+    // The merged view each rule evaluates, and the one the reference reads
+    // below key on: the write reads a traversed FK off the same merge
+    // (`updateView` in `update()`), so a FK the patch omits resolves from the
+    // stored row.
+    const judgedViews = rows.map((row, i) => (storedRows[i] ? { ...storedRows[i], ...row } : row));
+
     // [#18682] The preview owes the SAME relationship resolution the real write
     // does. Without it a rule that reads one hop through a reference field
     // reports `valid: false` (unevaluable) against a row `insert()` happily
@@ -13174,12 +13239,12 @@ export class ObjectQL implements IObjectQLEngine {
     // import dry run rides on it.
     //
     // Resolved once for the whole set, like every other posture input above.
-    // ⚠️ Named limit, not widened here: an `update`-mode preview
-    // carries no prior row (nothing is read), so a traversing rule whose FK the
-    // PATCH does not itself carry has no id to resolve and still refuses. The
-    // real update path reads the prior row and does resolve it; closing the
-    // preview's half needs a read this operation's "nothing is executed"
-    // contract does not make.
+    // [#22445] The named limit that sat here — an `update`-mode preview read
+    // no prior row, so a traversing rule whose FK the PATCH did not carry had
+    // no id to resolve — is CLOSED for a row that carries its address: the FK
+    // is read off `judgedViews`, the stored row merged with the patch. A row
+    // with no address (or no stored row this caller can read) still resolves
+    // only the FKs its patch carries.
     // [#20805] The second named limit that used to sit here is CLOSED: a
     // reference field the author declared static `readonly` is stripped from a
     // non-system caller's payload by the write, so the write resolves no
@@ -13203,7 +13268,7 @@ export class ObjectQL implements IObjectQLEngine {
       ? await this._writeGateProbe(object, mode, options?.context, submittedRows).catch(() => false)
       : true;
     const previewRelatedForRow = mayWrite
-      ? await this.resolvePredicateRelated(schemaForValidation, rows, options?.context)
+      ? await this.resolvePredicateRelated(schemaForValidation, judgedViews, options?.context)
       : () => undefined;
     // [#18783] The preview answers a `can`-gated option with the SAME map the
     // write would — resolved once for the whole set, like every posture input
@@ -13244,8 +13309,11 @@ export class ObjectQL implements IObjectQLEngine {
           keptOptionValues: options?.context?.keptOptionValues,
         });
         evaluateValidationRules(schemaForValidation as any, row, mode, {
+          // [#22445] The stored row, when this row named one: the by-id
+          // update's `previous: priorRecord`. Absent, the record is the patch.
+          ...(storedRows[i] ? { previous: storedRows[i] } : {}),
           logger: this.logger, currentUser, skipStateMachine, messages,
-          related: previewRelatedForRow(row),
+          related: previewRelatedForRow(judgedViews[i]),
           permissions: previewPermissionsFor(row),
         });
       } catch (e) {
