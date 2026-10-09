@@ -18,6 +18,7 @@
  */
 
 import type { IAuthService } from '@objectstack/spec/contracts';
+import { inProcessSessionReadInput } from '@objectstack/types';
 
 /** Headers as adapters deliver them, or an already-built `Headers`. */
 export type HeaderBag = Record<string, unknown> | Headers;
@@ -48,7 +49,12 @@ export async function resolveSessionData(
             api = await (authService as any).getApi();
         }
         if (!api?.getSession) return undefined;
-        return await api.getSession({ headers: toHeaders(headers) });
+        // [#22258] The in-process session-read rule: a request carrying a
+        // session cookie reads without renewal. Load-bearing here twice over —
+        // the inbound rate limiter runs this on EVERY request, `/get-session`
+        // included, so a renewal here would also leave the very route that
+        // re-issues the cookie with nothing left to renew.
+        return await api.getSession(inProcessSessionReadInput(toHeaders(headers)));
     } catch {
         return undefined;
     }

@@ -214,7 +214,7 @@ ObjectStack uses standard HTTP status codes:
 | **403** | Forbidden | Authenticated but insufficient permissions |
 | **404** | Not Found | Resource doesn't exist |
 | **409** | Conflict | Resource already exists or version mismatch |
-| **413** | Content Too Large | An upload over the storage settings' `max_upload_mb` — answered as [`VALIDATION_ERROR`](#validation_error), its one exception to 400 |
+| **413** | Content Too Large | An upload over the storage settings' `max_upload_mb`, or an import over its row ceiling — answered as [`PAYLOAD_TOO_LARGE`](/docs/api/error-catalog#payload_too_large) |
 | **422** | Unprocessable Entity | Semantic validation failed (e.g. metadata spec validation); also an absent `controlled_by_parent` master reference — see [`MISSING_REQUIRED_FIELD`](#missing_required_field) |
 | **429** | Too Many Requests | Rate limit exceeded |
 | **500** | Internal Server Error | Server-side error |
@@ -402,7 +402,7 @@ if (body.code === 'VALIDATION_FAILED') {
 ```
 
 #### `VALIDATION_ERROR`
-**HTTP Status:** 400 — with one documented exception, which answers **413** (see below)  
+**HTTP Status:** 400  
 **Meaning:** The request is malformed — the generic "you sent something wrong" code  
 **Envelope:** **both**, and one emitter writes neither (see the warning below)
 
@@ -418,12 +418,10 @@ Where it comes from:
   specific.
 - **Query-parameter refusals.** `refuseUnknownQueryParams` and `refuseRepeatedQueryParams`
   answer 400 `VALIDATION_ERROR` for an unrecognised or repeated query parameter.
-- **Upload size refusals — the one 413.** The storage upload doors answer **413**
-  `VALIDATION_ERROR` for an upload over the File Storage settings' `max_upload_mb`: the
-  presigned-upload door (the declared `size`), the chunked-upload start (the declared
-  `totalSize`), the local adapter's raw upload (the body) and the chunk door (the bytes the
-  upload already holds plus the chunk), each before anything is stored. The message names the
-  size, the limit and the setting.
+
+Not from a request too large for its door: an upload over the File Storage settings'
+`max_upload_mb` answers **413** with the registered code
+[`PAYLOAD_TOO_LARGE`](/docs/api/error-catalog#payload_too_large), not this one.
 
 **Nested** (the dispatcher door, status-derived — `GET /api/v1/packages/:id?version=1&version=2`):
 ```json

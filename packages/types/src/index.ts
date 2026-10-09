@@ -6,6 +6,13 @@ export * from './degraded-boot.js';
 // (plugin-auth) both read — see the module doc for why it must be one.
 export * from './email-verified.js';
 export * from './env.js';
+// [#22258] The one rule for an in-process better-auth `getSession` read: a
+// request carrying a session cookie reads without renewal, so a renewal never
+// lands where its cookie cannot be re-issued. Its readers live in `rest`,
+// `runtime`, `plugin-hono-server` and `cloud-connection` — `rest` and the hono
+// server cannot import `runtime` — and every one of them already depends on
+// this package, so adopting the rule adds no edge.
+export * from './in-process-session-read.js';
 export * from './error-leak.js';
 // [#17681] The SIBLING question, kept deliberately separate: `error-leak.js`
 // asks "is this message a driver dump?", this asks "did the JS RUNTIME raise

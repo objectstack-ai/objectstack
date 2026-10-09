@@ -12,7 +12,7 @@ Clause-②: no (narrowing)
 
 Setup's File Storage page has always rendered a "Limits" group — "Max upload size (MB)", "Presigned URL TTL (seconds)" and "Upload session TTL (seconds)" — and saved it, but nothing read it. `StorageServicePlugin` now reads the group on every settings pass and its upload doors honour it, on the plugin's own mount and on a host's `mountStorageRoutes` mount alike.
 
-**What stops being accepted.** Where the plugin is bound to the `storage` settings namespace (its default, `bindToSettings: true`, with a settings service present), an upload larger than the resolved `max_upload_mb` is refused with `413` and the standard code `VALIDATION_ERROR`, in the usual error envelope, with a message naming the limit and the setting. Nothing is stored: no `sys_file` or `sys_upload_session` row is written and no byte reaches the adapter. The doors that judge it:
+**What stops being accepted.** Where the plugin is bound to the `storage` settings namespace (its default, `bindToSettings: true`, with a settings service present), an upload larger than the resolved `max_upload_mb` is refused with `413` and the registered code `PAYLOAD_TOO_LARGE`, in the usual error envelope, with a message naming the limit and the setting. Nothing is stored: no `sys_file` or `sys_upload_session` row is written and no byte reaches the adapter. The doors that judge it:
 
 - `POST /storage/upload/presigned` — the declared `size`;
 - `POST /storage/upload/chunked` — the declared `totalSize`;
