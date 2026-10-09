@@ -76,7 +76,7 @@ const MANIFEST = {
   version: '1.0.0',
   type: 'app',
   namespace: 'probe',
-  engines: { protocol: '^17' },
+  engines: { protocol: '^18' },
 };
 
 /** A module-scope binding, so the hook handler below cannot be lowered. */
@@ -286,7 +286,7 @@ describe('#17528 — os lint judges the stack the author declared, in either ADR
     });
     const manifest = {
       id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob',
-      engines: { protocol: '^17' },
+      engines: { protocol: '^18' },
     };
 
     const fromPackages = lintConfig({

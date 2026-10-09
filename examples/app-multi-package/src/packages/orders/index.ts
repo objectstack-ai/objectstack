@@ -58,7 +58,7 @@ export default defineStack({
     version: '1.0.0',
     type: 'module',
     description: 'The Module half of a two-package release artifact (ADR-0130 D4)',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
     // The App package this module extends. `resolveArtifactPackageOrder` reads
     // it as the topological edge that registers core BEFORE orders (ADR-0130
     // D5, ADR-0116's one sorter) — the array order below is not what decides.

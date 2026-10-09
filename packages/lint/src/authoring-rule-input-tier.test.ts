@@ -55,7 +55,7 @@ const manifest = {
   version: '1.0.0',
   type: 'app',
   name: 'Tier Probe',
-  engines: { protocol: '^17' },
+  engines: { protocol: '^18' },
 };
 
 /** `defineStack` warns on the D2 conversion channel; keep test output clean. */
