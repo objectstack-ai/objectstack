@@ -257,7 +257,7 @@ describe('#22190 placement — the two-package build', () => {
     const service = bodyOf(artifact, SERVICE_ID);
     expect(docNames(service.docs)).toEqual(['acme_service_runbook']);
     expect((service.docs as DocItem[])[0].content).toContain(MARKER_SERVICE);
-    expect(JSON.stringify(bodyOf(artifact, APP_ID).docs)).not.toContain(MARKER_SERVICE);
+    expect(JSON.stringify(bodyOf(artifact, APP_ID).docs ?? [])).not.toContain(MARKER_SERVICE);
   });
 
   it('appends after the owner\'s OWN directory docs — a second set for one package is not dropped', () => {
@@ -296,13 +296,21 @@ describe('#22190 the metadata door — no residual warning, same docs, same owne
   });
 
   it('lit control: the SAME docs on the top level draw exactly one warning from the same door, under the same owners', async () => {
-    const { artifact } = build(composedArtifact());
-    // Undo the placement by hand: the pre-fix artifact.
-    const app = bodyOf(artifact, APP_ID);
-    const flat = app.docs as DocItem[];
-    expect(docNames(flat).sort()).toEqual(['acme_faq', 'acme_guide']);
-    delete app.docs;
-    const prefix = { ...artifact, docs: flat };
+    const { collected, artifact } = build(composedArtifact());
+    // The pre-fix artifact, built from the collection rather than from the
+    // placement, so this control reads the same whether the fix is in or not:
+    // the flat set on the top level, and on no body.
+    const flat = new Set<DocItem>(collected.flatDocs);
+    expect(docNames(collected.flatDocs).sort()).toEqual(['acme_faq', 'acme_guide']);
+    const prefix = {
+      ...artifact,
+      docs: [...collected.flatDocs],
+      packages: (artifact.packages as Array<{ manifest: Record<string, any> }>).map((entry) => {
+        const { docs, ...rest } = entry.manifest;
+        const kept = ((docs ?? []) as DocItem[]).filter((doc) => !flat.has(doc));
+        return { ...entry, manifest: kept.length > 0 ? { ...rest, docs: kept } : rest };
+      }),
+    };
 
     const read = await door(prefix);
     expect(read.warnings).toBe(1);
