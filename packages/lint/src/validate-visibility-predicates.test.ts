@@ -6,15 +6,37 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateVisibilityPredicates,
+  validateVisibilityPredicates as validateVisibilityPredicatesUnrecorded,
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_OVER_BUDGET,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
 } from './validate-visibility-predicates.js';
+import { explainRule } from './rule-explanations.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
 import { CEL_STDLIB_FUNCTIONS } from '@objectstack/formula';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: that case reads what the cases above
+// fired.
+const SHORTENED_RULE_IDS: readonly string[] = [
+  VISIBILITY_ROOT_MISLAYERED,
+  VISIBILITY_PREDICATE_OVER_BUDGET,
+  VISIBILITY_PREDICATE_SYNTAX,
+  VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
+  VISIBILITY_BARE_IDENTIFIER,
+];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateVisibilityPredicates: typeof validateVisibilityPredicatesUnrecorded = (...args) => {
+  const findings = validateVisibilityPredicatesUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
 
 describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
   it('is clean for canonical `visibleWhen` with a runtime binding root', () => {
@@ -1041,8 +1063,10 @@ describe('visibility-predicate-syntax (#6253)', () => {
       // the predicate is echoed so the finding is self-contained.
       expect(findings[0].message).toContain('Unexpected character: =');
       expect(findings[0].message).toContain('country === "USA"');
-      // The consequence is stated, because on screen it is invisible.
-      expect(findings[0].message).toContain("failing open is the console's settled behaviour");
+      // The consequence is stated, because on screen it is invisible. [#22161]
+      // That failing open is the console's settled behaviour is the rule's
+      // `os explain` entry (pinned at the foot of this file).
+      expect(findings[0].message).toContain('never evaluates and the element always renders');
     });
 
     it('the CEL spelling of the SAME predicate is clean — paired so it cannot pass vacuously', () => {
@@ -1487,12 +1511,13 @@ describe('visibility-predicate-over-budget (#7217)', () => {
       // ⛔ The headline was FALSE: this IS valid CEL.
       expect(findings[0].message).not.toContain('is not valid CEL');
       expect(findings[0].message).toContain('syntactically valid CEL');
-      // The front end's own summary is quoted, and the bound is NAMED with the
-      // platform's value for it — which is what "shrink it to fit" needs.
-      expect(findings[0].message).toContain('Exceeded maxAstNodes (256)');
+      // The bound is NAMED with the platform's value for it — which is what
+      // "shrink it to fit" needs. [#22161] The front end's summary line repeats
+      // exactly that, so the one-line verdict quotes it only when the bound
+      // cannot be named.
       expect(findings[0].message).toContain('`maxAstNodes` budget (platform limit 256)');
       // The consequence is unchanged: it still falls OPEN on screen.
-      expect(findings[0].message).toContain("failing open is the console's settled behaviour");
+      expect(findings[0].message).toContain('never evaluates and the element always renders');
 
       // ⛔ The defect itself: the dialect prescription must not reach this class.
       expect(findings[0].hint).not.toMatch(/bare CEL/);
@@ -1553,10 +1578,13 @@ describe('visibility-predicate-over-budget (#7217)', () => {
       .toEqual([VISIBILITY_PREDICATE_OVER_BUDGET]);
   });
 
-  it('elides the echoed predicate — one runaway expression cannot flood the console', () => {
+  it('does not echo the predicate — one runaway expression cannot flood the console', () => {
+    // [#22161] An over-budget predicate is long by definition, and the `path`
+    // locates it, so the one-line verdict quotes none of it (it used to quote
+    // an elided head).
     const findings = overBudgetFindings(formStack(OVER_AST_NODES));
-    expect(findings[0].message).not.toContain(OVER_AST_NODES);
-    expect(findings[0].message).toContain('...');
+    expect(findings[0].message).not.toContain(OVER_AST_NODES.slice(0, 20));
+    expect(findings[0].message).not.toContain('(predicate:');
   });
 
   it('a blank predicate is still not a fault of any class', () => {
@@ -1710,5 +1738,37 @@ describe('emitted prose names the surface, not a source file (#8042)', () => {
     );
     expect(source).toContain('a file-aware caller linting a `*.form.ts` does');
     expect(source).toContain('when linting a `*.form.ts` metadata-editing form');
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [VISIBILITY_ROOT_MISLAYERED]: ['ADR-0089', '`*.form.ts`', '`page.VAR`'],
+    [VISIBILITY_PREDICATE_OVER_BUDGET]: ['falls OPEN', 'settled behaviour', 'SIZE fault', '`maxListElements` is 64'],
+    [VISIBILITY_PREDICATE_SYNTAX]: ['falls OPEN', 'settled behaviour', 'ADR-0032', '`===`'],
+    [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION]: ['`throwOnError: true`', 'falls CLOSED', '`console.warn`', 'CEL_STDLIB_FUNCTIONS'],
+    [VISIBILITY_BARE_IDENTIFIER]: ['never flattened', 'falls OPEN', 'predicate-rhs-path-shaped'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

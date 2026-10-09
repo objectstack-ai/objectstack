@@ -28,12 +28,30 @@
  *
  * ## What is refused BY CONSTRUCTION
  *
- * An op is only what this table names. There is no row for a merge, a review
- * submission, a branch or ref write, a contents or workflow write, a release,
- * or any organization / administration endpoint, so a payload naming one is
- * refused at the validator with zero writes — the `--self-test` of
- * `validate.mjs` pins that every path spelled here stays clear of those
- * families and that no row issues a whole-set `PUT`.
+ * An op is only what this table names. There is no row for a merge of a pull,
+ * a review submission, a direct branch or ref write (`/git/**`, `/branches/**`,
+ * `/contents/**`), a workflow write, a release, or any organization /
+ * administration endpoint, so a payload naming one is refused at the validator
+ * with zero writes — the `--self-test` of `validate.mjs` pins that every path
+ * spelled here stays clear of those families and that the table's one `PUT`
+ * (`pr_update_branch`, below) reaches no whole-set replace of labels or
+ * assignees.
+ *
+ * ## The one row that moves a branch — `pr_update_branch`
+ *
+ * `PUT /repos/{o}/{r}/pulls/{n}/update-branch` is GitHub's own base sync: the
+ * PLATFORM merges the pull's base into its head and authors that merge commit
+ * as the identity that asked — through the relay, `objectstack-fleet[bot]`;
+ * as bare REST under a seat's session token, the seat's personal account, the
+ * identity exchange every other relay write already refuses. The relay sends
+ * no ref write of its own. GitHub's permission ledger (the file cited below)
+ * lists the endpoint under `pull_requests: write`, server-to-server, with no
+ * additional permission, so the row spends `pull-requests` and the mint step
+ * widens nothing. `expected_head_sha` is REQUIRED and full-length (`FIELDS`,
+ * kind `sha`): a short or malformed sha is refused by the validator before the
+ * dispatch, never left to the platform's 422; a stale one IS the platform's
+ * 422. How the executor tells that 422 from the "nothing to merge" one, and
+ * how it confirms a 202, is `execute.mjs`'s (`confirmUpdateBranch`).
  *
  * ## The permissions the relay's token is narrowed to
  *
@@ -45,8 +63,9 @@
  * `disablePullRequestAutoMerge`) additionally require `contents: write` —
  * measured on the first live use, where a token without it answered
  * "Resource not accessible by integration" — and those two rows are the ONLY
- * spenders of it: the table has no contents op (no file, ref or branch write);
- * the sender gate's `GET /repos/{o}/{r}/collaborators/{login}/permission` is
+ * spenders of it: the table has no contents op (no direct file, ref or branch
+ * write; `pr_update_branch` is the platform's own merge, `pull_requests: write`
+ * in that ledger); the sender gate's `GET /repos/{o}/{r}/collaborators/{login}/permission` is
  * `metadata: read`. `PERMISSIONS` is that set and nothing wider; the workflow
  * declares exactly it on `actions/create-github-app-token`, and
  * `validate.mjs --self-test` pins the two spellings equal.
@@ -161,6 +180,8 @@ export const PAYLOAD_KEYS = Object.freeze(['request_id', 'repo', 'session', 'act
 
 export const REQUEST_ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const SESSION_SHAPE = /^session_[A-Za-z0-9]{6,}$/;
+/** A full commit sha, as GitHub spells one — the only shape `expected_head_sha` takes. */
+export const SHA_SHAPE = /^[0-9a-f]{40}$/;
 /** The container variable's shape; group 1 is the tail `session_` is prefixed to. */
 export const CONTAINER_SESSION_SHAPE = /^cse_([A-Za-z0-9]{6,})$/;
 export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`);
@@ -170,7 +191,9 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  *   `int`   a positive integer (never a numeric string);
  *   `str`   a non-empty string of at most `max` UTF-8 bytes;
  *   `list`  an array of 1..`max` non-empty strings, each at most `itemMax` bytes;
- *   `enum`  one of `values`.
+ *   `enum`  one of `values`;
+ *   `sha`   a full commit sha — exactly 40 lowercase hex characters, never a
+ *           short one (that is refused here, not by the platform's 422).
  */
 export const FIELDS = Object.freeze({
   issue: Object.freeze({ kind: 'int' }),
@@ -180,6 +203,7 @@ export const FIELDS = Object.freeze({
   title: Object.freeze({ kind: 'str', max: MAX_TITLE_BYTES }),
   head: Object.freeze({ kind: 'str', max: MAX_REF_BYTES }),
   base: Object.freeze({ kind: 'str', max: MAX_REF_BYTES }),
+  expected_head_sha: Object.freeze({ kind: 'sha' }),
   labels: Object.freeze({ kind: 'list', max: MAX_LABELS_PER_ACTION, itemMax: MAX_LABEL_BYTES }),
   assignees: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS }),
   reviewers: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS }),
@@ -193,7 +217,8 @@ export const FIELDS = Object.freeze({
  * The App permissions the relay token is narrowed to — the union of every
  * row's `permission`, plus the sender gate's read. `contents: write` is spent
  * by the two auto-merge rows alone (GitHub's requirement for those mutations);
- * no row writes a file, a ref or a branch.
+ * no row writes a file, a ref or a branch itself — `pr_update_branch`'s merge
+ * is the platform's, under `pull-requests`.
  */
 export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read' });
 
@@ -291,12 +316,14 @@ export function transferRemedy(source, target) {
  *   `secondRepo`  (optional) the key naming a SECOND repository the token
  *                 must reach — `transfer`'s alone (header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql? }` — a
- *                 `graphql` descriptor names the mutation and the pull (or
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch? }`
+ *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
  *                 entry, which is how the executor tells a landing from a
- *                 bare 200.
+ *                 bare 200; an `updateBranch` descriptor carries the pull and
+ *                 the expected head `confirmUpdateBranch` (execute.mjs) judges
+ *                 the answer against.
  */
 export const OPS = Object.freeze({
   comment: Object.freeze({
@@ -377,6 +404,17 @@ export const OPS = Object.freeze({
       if ('team_reviewers' in a) body.team_reviewers = [...a.team_reviewers];
       return [{ verb: 'POST', path: `${pulls(repo, a.pull)}/requested_reviewers`, body }];
     },
+  }),
+  // The base sync — GitHub's own update-branch action (header): the platform merges the pull's base into
+  // its head and authors the merge commit as the App, so the relay writes no ref itself. `expected_head_sha`
+  // is REQUIRED and full-length; the validator refuses a short one before the dispatch. The executor confirms
+  // a 202 by polling the head off that sha and measures a 422 as a no-op only when the compare says the head
+  // is not behind its base (`confirmUpdateBranch`, execute.mjs) — never by the answer's spelling.
+  pr_update_branch: Object.freeze({
+    permission: 'pull-requests',
+    required: Object.freeze(['pull', 'expected_head_sha']),
+    optional: Object.freeze([]),
+    requests: (a, repo) => [{ verb: 'PUT', path: `${pulls(repo, a.pull)}/update-branch`, body: { expected_head_sha: a.expected_head_sha }, updateBranch: { pull: a.pull, expectedHeadSha: a.expected_head_sha } }],
   }),
   pr_ready: Object.freeze({
     permission: 'pull-requests',

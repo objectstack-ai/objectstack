@@ -217,50 +217,63 @@ export const WARN_MEASURED_OVER_PREDICTED = 1.3;
 // test file each. Applied to one package with hundreds of them it cannot arise,
 // and `sliceCountFor` below refuses the configuration in which it could.
 //
-// HOW n IS DERIVED, AND WHAT HOLDS EACH HALF. n is the SMALLEST integer for
-// which the split meets the acceptance bound against the mean the committed
-// dataset produces. Meeting it is pins 2 and 3 below, on the configured split.
-// Smallest is pin 3c: every slice past the first costs the shard that carries
-// it a turbo leg of its own and a build of the package's whole closure (ci.yml,
-// "Build the sliced package's dependency closure"), and buys nothing once the
-// bound is met, so an n that n - 1 could replace is refused -- n = 2 that 1
-// could replace means retire the entry.
+// HOW n IS DERIVED, AND WHAT HOLDS EACH HALF (#22075). A slice runs as a SERIAL
+// leg of its own, after its shard's whole-package leg, so what decides n is not
+// the bins' summed weight -- slicing redistributes weight and never moves the
+// mean -- but the run's SERIAL FLOOR: no run finishes before its heaviest
+// single task, and a package past MAX_SHARD_OVER_MEAN x the next-heaviest
+// serial task in the list IS that floor, alone. n is the SMALLEST integer at
+// which one slice sits within MAX_SHARD_OVER_MEAN x the heaviest serial task of
+// every OTHER package on the committed dataset's full list (serialFloorOf: a
+// package that runs `test` and `test:repo` as two concurrent turbo tasks
+// counts half its weight, since the dataset holds their sum). Meeting it, and
+// being the smallest that does, are both pin 3c: every slice past the first
+// costs the shard that carries it a turbo leg of its own and a build of the
+// package's whole closure (ci.yml, "Build the sliced package's dependency
+// closure"), and buys nothing once another task is the floor -- so an n that
+// n - 1 could replace is refused, and n = 2 that 1 could replace means retire
+// the entry.
 //
-// THE MAP IS EMPTY, BY THAT DERIVATION. `@objectstack/cli` was sliced at n = 2
-// on a reading of 1231.52s (run 34009395649 attempt 2, job 101427282674)
-// against a 458.15s dataset entry: the mean was then ~800s, the bound ~1041s,
-// and the whole CLI stood at 1.54x of the mean. Until a refresh landed, pin 3c
-// substituted that reading into the stale dataset.
+// THE HISTORY, IN ONE LINE PER TURN. Sliced at 2 on a reading of 1231.52s
+// against a stale 458.15s entry (run 34009395649); retired (#21487, #21758) and
+// re-derived on the refresh that measured the CLI whole (#21826: 1702.69s
+// against a 1630.22s mean, "fits whole until ~2234s") -- every one of those
+// derivations solved the bound on BIN SUMS, on which a shard holding one
+// 1739s suite and a shard holding thirty packages summing 1772s read the same.
+// They are not the same: the second runs its packages four at a time and the
+// first runs one suite with nothing to overlap it. Measured on the 14 runs
+// after the 21-run dataset refresh (040184752c), the job holding the whole CLI
+// ran 20.5-39.1 minutes while every other Test Core job finished within 20.8.
+// #22415 then graded the split on a shard-WALL model and placed each slice at
+// four times its weight; that pushed the remaining whole packages onto three
+// shards at ~2641s of predicted windows each, their windows inflated 1.5-1.9x
+// under the denser concurrency, and the drift step below redded on full runs
+// until it was reverted (806b03e2ae).
 //
-// ⚠ THE ENTRY WAS FIRST RETIRED ON A FIGURE THAT WAS NOT THE CLI'S WHOLE COST
-// (#21758). The refresh of run 36380128221 (72 packages, 7430.00s) recorded the
-// CLI at 733.33s -- its two slice windows summed within that ONE run, the only
-// sample that refresh had -- and this block solved the bound against it,
-// C <= (1.3/6)(6696.67 + C), to "fits whole until ~1852s". Once the CLI ran
-// whole, its windows read 1659.03s and 1667.97s (runs 37199214385 and
-// 37212954836), 2.26-2.27x that entry. The conclusion survived, since both sit
-// under ~1852s; the figure it was argued from did not.
+// RE-DERIVED ON THE SERIAL FLOOR (#22075), on the same 21-run dataset (the
+// CLI's median 1738.88s). The heaviest other serial task on the full list is
+// `@objectstack/spec`'s, half of its 1146.69s `test` + `test:repo` sum:
+// 573.35s, so a slice must sit within 1.3 x 573.35 = 745.35s.
 //
-// RE-DERIVED on the refresh that measured the CLI WHOLE (#21826): run
-// 37262126122, 72 packages, 9781.33s, the CLI at 1702.69s and now the heaviest
-// item. The other 71 packages total 8078.64s, so the mean is 1630.22s and the
-// bound 2119.29s, and on that dataset
+//   n = 1   1738.88s   2.33x the next floor   the CLI IS the run's floor
+//   n = 2    869.44s   1.52x                  still the floor
+//   n = 3    579.63s   1.01x                  meets -- spec's task is the floor
 //
-//   CLI whole, as measured there (1702.69s)   max/mean 1.044x   heaviest 1703s (cli)
-//   CLI sliced at 2                           max/mean 1.002x   heaviest 1135s (spec)
-//   CLI whole at its worst since (1753.66s)   max/mean 1.070x   heaviest 1754s (cli)
+// So n = 3, and pin 3c holds it there. Slices are placed at their PLAIN weight
+// (partition() is unchanged), so every bin keeps the density the whole-package
+// split had -- see densityCap() for the hard limit on that and its pin.
 //
-// -- all inside 1.3x. Whole, the CLI fills bin 1 alone and the other five bins
-// sit at 1614.77-1616.73s. Slicing would lower the maximum, but the bound is
-// already met at n = 1, which is exactly the refusal pin 3c makes of a
-// `{ '@objectstack/cli': 2 }` entry ("Retire the entry"). Solving
-// C <= (1.3/6)(8078.64 + C) for the CLI's whole cost C, it fits whole until it
-// reaches ~2234s: 1.31x its dataset entry, 1.27x its worst reading since
-// (run 37415122516). n = 1 is the derived answer, so the entry stays retired.
-// The MECHANISM stays, and its pins run on fixtures: the item grammar,
-// expandSlices, the vitest file-count floor, the OS_TEST_SHARD wiring judge and
-// the generator's slice reassembly. The next package pin 3 names is one entry
-// here, plus its own OS_TEST_SHARD wiring, away from being sliced.
+// ⛔ THE COUNT IS CONFIGURED; WHETHER A RUN SLICES IS DECIDED BY THAT RUN. A
+// pull_request or merge_group run splits its own affected set, so planShards()
+// asks, of the run's own list, whether a configured package is that run's
+// floor (NEEDED), whether its slices land on distinct shards (SPREADS), and
+// whether the sliced split keeps every shard within the density cap (WITHIN
+// CAP); it slices only when all three hold and runs the package whole
+// otherwise, printing the decision in "Compute this shard's package set". The
+// count is not derived per run because the generator decodes a slice from the
+// sha256 of its `OS_TEST_SHARD` value against the counts this map names
+// (measure-test-shard-timings.mjs `sliceOfEnvironment`), so a free per-run
+// count would make every count up to SHARD_COUNT decodable.
 //
 // ⛔ Slicing is a SCHEDULING fact, not a measurement one: the dataset keeps
 // holding each package's WHOLE cost, and the division by n happens here. That
@@ -269,7 +282,9 @@ export const WARN_MEASURED_OVER_PREDICTED = 1.3;
 // records one -- see `sliceOfCliArguments` there. A change to this map is also
 // a change to what that generator can DECODE, which is why the map it replaced
 // is kept below.
-export const FILE_SHARDED_PACKAGES = Object.freeze({});
+export const FILE_SHARDED_PACKAGES = Object.freeze({
+  '@objectstack/cli': 3,
+});
 
 // THE MAP AS IT STOOD BEFORE ITS LAST CHANGE, read only by the generator's
 // slice-digest matcher (measure-test-shard-timings.mjs `sliceOfEnvironment`).
@@ -294,9 +309,9 @@ export const FILE_SHARDED_PACKAGES = Object.freeze({});
 // Its only readers are run summaries, which ci.yml keeps for one day
 // (`retention-days: 1` on `test-core-run-summary-*`), so a day after that PR
 // lands no retained summary predates the change and this map decodes nothing.
-export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
-  '@objectstack/cli': 2,
-});
+// The outgoing map of #22075's third round was empty -- the runs before it
+// carried no slice -- so this one is empty too.
+export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({});
 
 // The item grammar. A shard item is a package (`@objectstack/cli`) or a SLICE
 // of one (`@objectstack/cli 1/2`), and this pair of functions is the only place
@@ -456,12 +471,17 @@ export function sliceWiringProblems(root = REPO_ROOT, sliced = FILE_SHARDED_PACK
 // balanceOf, the balancing pins -- sees one flat list of `{name, weight}` whose
 // `name` is the item's printed label, so nothing below has to know that some
 // items are slices.
+//
+// `tasks` rides along for serialFloorOf(): how many concurrent turbo tasks the
+// package's suite runs as (testTaskCount). A slice leg runs `test` alone, so a
+// slice is one task. A caller that knows no manifest -- the fixtures -- passes
+// none and is weighed as a single-task suite.
 export function expandSlices(items) {
   const out = [];
   for (const it of items) {
     const count = it.sliceCount ?? sliceCountFor(it.name);
     if (count === 1) {
-      out.push({ name: it.name, weight: it.weight, pkg: it.name, slice: null });
+      out.push({ name: it.name, weight: it.weight, pkg: it.name, slice: null, tasks: it.tasks ?? 1 });
       continue;
     }
     for (let index = 1; index <= count; index++) {
@@ -471,10 +491,37 @@ export function expandSlices(items) {
         weight: it.weight / count,
         pkg: it.name,
         slice,
+        tasks: 1,
       });
     }
   }
   return out;
+}
+
+// How many turbo tasks a package's suite runs as on a Test Core shard: 2 for a
+// package that declares a `test:repo` script beside `test` (ci.yml runs
+// `turbo run test test:repo`, and the two schedule concurrently), 1 otherwise.
+// The dataset holds their SUM per package (measure-test-shard-timings.mjs
+// SAMPLED_TASKS), so this is what lets serialFloorOf() see that such a
+// package's heaviest serial task is shorter than its weight.
+export function testTaskCount(manifest) {
+  return manifest?.scripts && Object.hasOwn(manifest.scripts, 'test:repo') ? 2 : 1;
+}
+
+// testTaskCount() for every workspace package, by name: the dataset-level pins
+// have names and weights only, and must weigh the floor the way a real run does.
+export function workspaceTestTaskCounts(root = REPO_ROOT) {
+  return new Map(workspacePackages(root).map(({ manifest }) => [manifest?.name, testTaskCount(manifest)]));
+}
+
+// The longest single task an item can put on a shard's critical path. A slice
+// is one task of its own; a whole package is its weight split across the turbo
+// tasks its suite runs as (testTaskCount), evenly, because the dataset records
+// only their sum. Measured for the one that sets the floor today: merge_group
+// 37875522518, `@objectstack/spec` `test:repo` ran 547.04s of a 1146.69s
+// entry, against the 573.35s this assigns it.
+export function serialFloorOf(item) {
+  return item.slice ? item.weight : item.weight / (item.tasks ?? 1);
 }
 
 // Two slices of the same package must never share a bin, and this asserts it
@@ -505,37 +552,30 @@ export function assertSlicesSpread(bins) {
   return bins;
 }
 
-// Whether a split of `items` meets the acceptance bound, in the two halves pins
-// 2 and 3 grade on the committed dataset: the heaviest bin within
-// MAX_SHARD_OVER_MEAN x the mean, and no single item heavier than that, because
-// no split can put a bin below its heaviest item.
-function meetsBound(items, shardCount, bound) {
-  const b = balanceOf(partition(items, shardCount), items);
-  return { ...b, meets: b.ratio <= bound && b.floor <= bound * b.mean };
-}
-
-// THE "SMALLEST" HALF OF THE SLICE-COUNT DERIVATION -- pin 3c. For every
-// package `sliced` names, re-split the dataset with that package at n - 1
-// slices (every other package at its configured count) and report the entry
-// when that split ALSO meets the bound: n is then not the smallest count that
-// works, and the slices past it cost legs and closure builds for nothing. The
-// "meets" half is pins 2 and 3 on the configured split, so this judges
-// minimality only.
+// THE SLICE-COUNT DERIVATION -- pin 3c, both halves (#22075). For every package
+// `sliced` names, against the heaviest serial task of every OTHER package in
+// `packages` (the committed dataset's full list, as CI bins it):
+//
+//   MEETS     one slice, weight / n, is within `bound` x that task -- the
+//             package is no longer the list's serial floor on its own;
+//   SMALLEST  at n - 1 it is not -- otherwise the slices past n - 1 cost a
+//             turbo leg and a closure build each, and buy nothing.
+//
+// The FILE_SHARDED_PACKAGES docblock has the arithmetic on today's dataset.
+// Why the serial floor and not the bins: slicing redistributes weight and never
+// moves the mean, so a bin-sum bound reads the same at every n -- it is the
+// quantity on which the whole CLI already "fit" while the job holding it ran
+// twice as long as any other.
 //
 // Two shapes are problems before any arithmetic, because nothing can derive
 // the count they claim: a named package the dataset carries no weight for, and
 // a count below 2 -- 1 is no slicing at all, and 0 would make expandSlices emit
 // NO item for the package, a package no shard runs.
 //
-// `packages` is whole-package `{name, weight}` (the dataset as CI bins it).
-// `judged` is returned beside the problems so a caller can tell "every sliced
-// package is minimal" apart from "no package was looked at".
-export function sliceCountProblems(
-  packages,
-  sliced = FILE_SHARDED_PACKAGES,
-  shardCount = SHARD_COUNT,
-  bound = MAX_SHARD_OVER_MEAN
-) {
+// `packages` is whole-package `{name, weight, tasks?}`. `judged` is returned
+// beside the problems so a caller can tell "every sliced package is derived"
+// apart from "no package was looked at".
+export function sliceCountProblems(packages, sliced = FILE_SHARDED_PACKAGES, bound = MAX_SHARD_OVER_MEAN) {
   const weights = new Map(packages.map((p) => [p.name, p.weight]));
   const problems = [];
   let judged = 0;
@@ -555,20 +595,26 @@ export function sliceCountProblems(
       continue;
     }
     judged++;
-    const fewer = n - 1;
-    const items = expandSlices(
-      packages.map((p) => ({
-        name: p.name,
-        weight: p.weight,
-        sliceCount: p.name === name ? fewer : Object.hasOwn(sliced, p.name) ? sliced[p.name] : 1,
-      }))
+    const weight = weights.get(name);
+    const others = expandSlices(
+      packages.filter((p) => p.name !== name).map((p) => ({ ...p, sliceCount: 1 }))
     );
-    const at = meetsBound(items, shardCount, bound);
-    if (at.meets) {
+    const floor = Math.max(0, ...others.map(serialFloorOf));
+    const limit = bound * floor;
+    const meets = (count) => weight / count <= limit;
+    if (!meets(n)) {
+      let enough = n + 1;
+      while (!meets(enough)) enough++;
       problems.push(
-        `${name}: sliced ${n} ways at ${weights.get(name)}s, but at ${fewer} the split already meets ` +
-          `${bound}x (max/mean ${at.ratio.toFixed(2)}x, heaviest item ${at.floor.toFixed(0)}s against a ` +
-          `${at.mean.toFixed(0)}s mean). ${fewer === 1 ? 'Retire the entry' : `Lower it to ${fewer}`}: ` +
+        `${name}: sliced ${n} ways at ${weight}s, one slice is ${(weight / n).toFixed(0)}s -- past ${bound}x ` +
+          `the heaviest other serial task (${floor.toFixed(0)}s, so ${limit.toFixed(0)}s), so the package is still ` +
+          `the list's serial floor on its own. Raise it to ${enough}.`
+      );
+    } else if (meets(n - 1)) {
+      problems.push(
+        `${name}: sliced ${n} ways at ${weight}s, but at ${n - 1} one slice (${(weight / (n - 1)).toFixed(0)}s) ` +
+          `already sits within ${bound}x the heaviest other serial task (${floor.toFixed(0)}s, so ` +
+          `${limit.toFixed(0)}s). ${n - 1 === 1 ? 'Retire the entry' : `Lower it to ${n - 1}`}: ` +
           'a slice count a smaller one could replace is one no pin can hold.'
       );
     }
@@ -702,6 +748,11 @@ export function weighPackage(name, dir, timings) {
 // while re-opening #10472 exactly. The end-to-end pin in selfTest() below
 // calls THIS function, which is why it can tell duration from count.
 //
+// `weighed` carries each package's CONFIGURED slice count and its turbo task
+// count; whether this run uses the slice count is planShards()' call, so main()
+// hands `weighed` there. `weighted` is the configured expansion, kept for the
+// callers that grade the map itself.
+//
 // `sliced` is the live map everywhere but the self-test (see sliceCountFor).
 export function weighItems(items, excluded, timings, label = 'package list', sliced = FILE_SHARDED_PACKAGES) {
   const weighed = [];
@@ -720,9 +771,19 @@ export function weighItems(items, excluded, timings, label = 'package list', sli
     const sliceCount = Object.hasOwn(sliced, it.name)
       ? sliceCountFor(it.name, countTestFiles(dir), sliced)
       : 1;
-    weighed.push({ name: it.name, weight: seconds, sliceCount });
+    weighed.push({ name: it.name, weight: seconds, sliceCount, tasks: testTaskCount(readManifest(dir)) });
   }
-  return { weighted: expandSlices(weighed), estimated, packages: weighed.length };
+  return { weighed, weighted: expandSlices(weighed), estimated, packages: weighed.length };
+}
+
+// A package directory's manifest, or null where there is none to read -- the
+// same missing-locally case countTestFiles() weighs as 0 and still assigns.
+function readManifest(dir) {
+  try {
+    return JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 // LPT greedy: heaviest package into the currently lightest bin. Deterministic:
@@ -755,6 +816,180 @@ export function balanceOf(bins, items = null) {
   const max = Math.max(...totals);
   const floor = items ? Math.max(0, ...items.map((i) => i.weight)) : null;
   return { totals, sum, mean, max, min: Math.min(...totals), ratio: mean === 0 ? 1 : max / mean, floor };
+}
+
+// ── THE DENSITY CAP: NO SHARD CARRIES MORE THAN THE SPLIT PROVEN GREEN (#22075) ─
+//
+// A shard runs its whole packages four at a time, and each package's window
+// stretches with how much else shares the runner. The dataset's windows were
+// measured on shards carrying about the density the whole-package split gives
+// the full list, so a split that packs MORE predicted windows onto a shard
+// predicts windows the runner will not deliver. Measured, both sides:
+//
+//   whole-package split, ~1772s per shard   drift step <= 1.21x on full runs
+//     (main push 37888117205, Test Core (6/6): 2136.1s measured vs 1766.1s)
+//   #22415's split, ~2641s on three shards  drift step 1.52-1.62x, RED, on 5 of
+//     7 full runs (main push 37894048074, Test Core (6/6): 3992.4s vs 2467.1s;
+//     objectql 1.91x, plugin-security 1.82x, rest 1.70x on that one shard)
+//
+// So the cap is the densest bin of the WHOLE-package split of the committed
+// dataset's full list -- the split this partitioner computed before any slicing
+// (partition() of the unsliced items, exactly as it ran before #22075), at the
+// run's shard count -- and it is DERIVED here on every call, never typed: a
+// dataset refresh moves it with the windows it is a statement about. On today's
+// dataset it is 1772.65s (bins 1771/1773/1772/1772/1772/1771s).
+//
+// ⛔ Density is never traded for balance. planShards() takes a slicing only
+// when the sliced split keeps every shard within this cap, and the self-test
+// pins the committed dataset's full list, split as CI splits it, within it.
+//
+// `packages` is whole-package `{name, weight}`, CI's exclusions already applied.
+export function densityCap(packages, shardCount = SHARD_COUNT) {
+  const whole = packages.map((p) => ({ name: p.name, weight: p.weight }));
+  return balanceOf(partition(whole, shardCount)).max;
+}
+
+// The cap for a real run: the dataset's full list minus the packages the
+// caller excludes (`--exclude`, the same flag ci.yml hands this script), at
+// the run's own shard count.
+export function densityCapOf(timings, excluded, shardCount) {
+  const packages = Object.entries(timings.packages)
+    .filter(([name]) => !excluded.has(name))
+    .map(([name, weight]) => ({ name, weight }));
+  return densityCap(packages, shardCount);
+}
+
+// LPT can overshoot the cap by a second or two on a near-full list, purely by
+// where its last small items fall: on today's dataset the CLI cut 2 or 4 ways
+// lands its densest bin at 1773.23s / 1773.16s against the 1772.65s cap, while
+// 3 lands at 1772.63s. A cap that a refresh could breach by that noise would
+// stop the full list slicing on roughly every other refresh, so a sliced split
+// that overshoots is REPAIRED rather than refused: whole packages (never a
+// slice, so the slices stay spread) move or swap out of the densest bin while
+// that strictly lowers it, until every bin is within the cap or no move helps.
+//
+// Deterministic (candidates in bin and item order, the first strictly best
+// kept), and it terminates: every accepted move lowers the sum of squared bin
+// totals. A split already within the cap comes back unchanged.
+export function refineToCap(bins, items, cap) {
+  const weightOf = new Map(items.map((i) => [i.name, i.weight]));
+  const slices = new Set(items.filter((i) => i.slice).map((i) => i.name));
+  const movable = (name) => !slices.has(name);
+  const out = bins.map((b) => ({ total: b.total, names: [...b.names] }));
+  const EPSILON = 1e-9;
+  for (let step = 0; step < 10_000; step++) {
+    let h = 0;
+    for (let i = 1; i < out.length; i++) if (out[i].total > out[h].total) h = i;
+    if (out[h].total <= cap) break;
+    let best = null;
+    const consider = (newMax, to, give, take) => {
+      if (newMax < out[h].total - EPSILON && (best === null || newMax < best.newMax - EPSILON)) {
+        best = { newMax, to, give, take };
+      }
+    };
+    for (const give of out[h].names) {
+      if (!movable(give)) continue;
+      const w = weightOf.get(give);
+      for (let to = 0; to < out.length; to++) {
+        if (to === h) continue;
+        consider(Math.max(out[h].total - w, out[to].total + w), to, give, null);
+        for (const take of out[to].names) {
+          if (!movable(take)) continue;
+          const d = w - weightOf.get(take);
+          if (d > 0) consider(Math.max(out[h].total - d, out[to].total + d), to, give, take);
+        }
+      }
+    }
+    if (best === null) break;
+    const { to, give, take } = best;
+    out[h].names.splice(out[h].names.indexOf(give), 1);
+    out[h].total -= weightOf.get(give);
+    out[to].names.push(give);
+    out[to].total += weightOf.get(give);
+    if (take !== null) {
+      out[to].names.splice(out[to].names.indexOf(take), 1);
+      out[to].total -= weightOf.get(take);
+      out[h].names.push(take);
+      out[h].total += weightOf.get(take);
+    }
+  }
+  return out;
+}
+
+// The split a run actually runs: partition(), and -- only when the split
+// carries a slice -- refineToCap() against the density cap. A split with no
+// slice is the plain LPT split it always was, byte for byte.
+export function placeItems(items, shardCount, cap = Infinity) {
+  const bins = partition(items, shardCount);
+  return Number.isFinite(cap) && items.some((i) => i.slice) ? refineToCap(bins, items, cap) : bins;
+}
+
+// ── WHETHER THIS RUN SLICES: THE RUN'S OWN PACKAGE LIST (#22075) ─────────────
+//
+// FILE_SHARDED_PACKAGES says how many slices a package is cut into; this says
+// whether THIS run cuts it. A pull_request or merge_group run splits its
+// affected set, not the dataset, so the question is asked of the run's own
+// packages, in three halves:
+//
+//   NEEDED      the package, whole, is the run's serial floor on its own: its
+//               heaviest task is past `bound` x the heaviest serial task of
+//               every OTHER package in the run (past that one, slicing cannot
+//               lower the run's floor, because that one becomes it);
+//   SPREADS     its slices land on distinct shards at this run's shard count,
+//               which is what makes them run in parallel at all;
+//   WITHIN CAP  the sliced split keeps every shard within the density cap
+//               (densityCap), repaired by refineToCap() where LPT overshoots.
+//
+// All three => sliced at the configured count. Any one fails => whole, and the
+// decision says which. Packages are decided in name order, each against the
+// decisions already made. Returns the items, the split main() runs (placed the
+// way the decision was judged) and one decision per configured package present
+// in the run, which main() prints.
+export function planShards(weighed, shardCount, { bound = MAX_SHARD_OVER_MEAN, cap = Infinity } = {}) {
+  const chosen = new Map(weighed.map((p) => [p.name, 1]));
+  const expandWith = (name, n) =>
+    expandSlices(weighed.map((p) => ({ ...p, sliceCount: p.name === name ? n : chosen.get(p.name) })));
+  const decisions = [];
+  const configured = weighed
+    .filter((p) => (p.sliceCount ?? 1) > 1)
+    .sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  for (const pkg of configured) {
+    const wholeItems = expandWith(pkg.name, 1);
+    const own = serialFloorOf(wholeItems.find((i) => i.pkg === pkg.name));
+    const otherFloor = Math.max(0, ...wholeItems.filter((i) => i.pkg !== pkg.name).map(serialFloorOf));
+    const target = bound * otherFloor;
+    const needed = own > target;
+    let spreads = false;
+    let densest = null;
+    if (needed) {
+      const bins = placeItems(expandWith(pkg.name, pkg.sliceCount), shardCount, cap);
+      try {
+        assertSlicesSpread(bins);
+        spreads = true;
+      } catch {
+        spreads = false;
+      }
+      densest = Math.max(...bins.map((b) => b.total));
+    }
+    const withinCap = densest !== null && densest <= cap;
+    const count = needed && spreads && withinCap ? pkg.sliceCount : 1;
+    chosen.set(pkg.name, count);
+    decisions.push({ name: pkg.name, configured: pkg.sliceCount, count, needed, spreads, withinCap, own, target, densest, cap });
+  }
+  const items = expandSlices(weighed.map((p) => ({ ...p, sliceCount: chosen.get(p.name) })));
+  return { items, bins: placeItems(items, shardCount, cap), decisions };
+}
+
+// One line per decision, for the shard log: what the run chose and why.
+export function renderSliceDecision(d) {
+  const floor = `whole ${d.own.toFixed(0)}s against ${d.target.toFixed(0)}s, ${MAX_SHARD_OVER_MEAN}x the heaviest other serial task`;
+  const capText = Number.isFinite(d.cap) ? `${d.cap.toFixed(2)}s density cap` : 'no density cap';
+  let why;
+  if (!d.needed) why = `not the run's floor: ${floor}`;
+  else if (!d.spreads) why = `${floor}, but ${d.configured} slices cannot spread across this run's shards`;
+  else if (!d.withinCap) why = `${floor}, but sliced the densest shard would carry ${d.densest.toFixed(2)}s, past the ${capText}`;
+  else why = `${floor}; densest shard ${d.densest.toFixed(2)}s, within the ${capText}`;
+  return `${d.name}: ${d.count > 1 ? `sliced x${d.count}` : 'whole'} (${why})`;
 }
 
 // Compare what a shard was PREDICTED to cost against what it actually cost.
@@ -1013,11 +1248,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
   'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 11,
+  'density cap and the per-run slice decision (#22075)': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1221,21 +1457,31 @@ function selfTest() {
     if (ciExcludes.size === 0) throw new Error('ci.yml: no --exclude found for the partitioner invocation');
   });
   const timings = loadTimings();
-  // Through expandSlices, because that is the item list CI bins. Reading the
-  // dataset's packages straight into the pin would grade a shape no shard runs:
-  // after #16173 the CLI reaches the partitioner as file-level slices, and a pin
-  // that still weighs it whole would red on the refresh that fixes it and go
-  // green on a revert that removes the slicing.
+  // Through planShards(), because that is the item list -- and the split -- CI
+  // runs. Reading the dataset's packages straight into the pin would grade a
+  // shape no shard runs: the CLI reaches the partitioner as file-level slices
+  // whenever a run's own list makes it the floor (#22075), and a pin that still
+  // weighs it whole would red on the change that slices it and go green on a
+  // revert that removes the slicing. The task counts come from the workspace
+  // manifests, as weighItems() reads them in a real run, and the density cap is
+  // the one main() derives for a full run.
+  const taskCounts = workspaceTestTaskCounts();
   const datasetPackages = Object.entries(timings.packages)
     .filter(([name]) => !ciExcludes.has(name))
-    .map(([name, weight]) => mk(name, weight));
-  const datasetItems = expandSlices(datasetPackages);
+    .map(([name, weight]) => ({ ...mk(name, weight), tasks: taskCounts.get(name) ?? 1 }));
+  const datasetCap = densityCap(datasetPackages);
+  const datasetPlan = planShards(
+    datasetPackages.map((p) => ({ ...p, sliceCount: sliceCountFor(p.name) })),
+    SHARD_COUNT,
+    { cap: datasetCap }
+  );
+  const datasetItems = datasetPlan.items;
   check(() => {
     if (datasetItems.length < 20) {
       throw new Error(`dataset: only ${datasetItems.length} package(s) measured -- that is not the workspace`);
     }
   });
-  const real = partition(datasetItems, SHARD_COUNT);
+  const real = datasetPlan.bins;
   const balance = balanceOf(real, datasetItems);
   check(() => {
     if (balance.ratio > MAX_SHARD_OVER_MEAN) {
@@ -1267,17 +1513,20 @@ function selfTest() {
 
   // 3b. THE SLICES A SPLIT CARRIES ARE SPREAD (#16173). main() asserts it on
   //     every real run; the first case grades the committed dataset as CI
-  //     splits it. While the live map slices nothing that case has no slice to
-  //     look at, so the second cuts the dataset's heaviest package in two and
-  //     grades THAT split -- real weights, a real slice pair, whatever the map
-  //     says -- and first proves the pair is there to grade.
+  //     splits it, and first proves that split carries a slice to look at. The
+  //     second cuts the dataset's heaviest package in two and grades THAT split
+  //     -- real weights, a real slice pair, whatever the map says.
   check(() => {
+    if (!datasetItems.some((i) => i.slice)) {
+      throw new Error(
+        'slice spread: the committed dataset, split as CI splits it, carries no slice -- ' +
+          (datasetPlan.decisions.map(renderSliceDecision).join('; ') || 'FILE_SHARDED_PACKAGES configures none')
+      );
+    }
     assertSlicesSpread(real);
   });
   const heaviest = datasetPackages.reduce((m, p) => (p.weight > m.weight ? p : m));
-  const cutItems = expandSlices(
-    datasetPackages.map((p) => ({ ...p, sliceCount: p === heaviest ? 2 : sliceCountFor(p.name) }))
-  );
+  const cutItems = expandSlices(datasetPackages.map((p) => ({ ...p, sliceCount: p === heaviest ? 2 : 1 })));
   check(() => {
     const cut = partition(cutItems, SHARD_COUNT);
     const halves = [1, 2].map((index) => formatShardItem(heaviest.name, { index, count: 2 }));
@@ -1288,19 +1537,14 @@ function selfTest() {
     assertSlicesSpread(cut);
   });
 
-  // 3c. THE SLICE COUNT IS DERIVED, NOT REMEMBERED (#16173). Pins 2 and 3
-  //     prove the configured split meets the bound; neither can fail because a
-  //     count is LARGER than the bound needs, and a count nothing can fail on
-  //     is how a slicing outlives its reason. sliceCountProblems() re-splits
-  //     with each sliced package at n - 1 and refuses an n that n - 1 could
-  //     replace -- the counterfactual this pin used to hard-code for the CLI,
-  //     now asked of the committed dataset for every entry.
+  // 3c. THE SLICE COUNT IS DERIVED, NOT REMEMBERED (#16173, #22075). Pins 2
+  //     and 3 grade bin sums, which read the same at every slice count -- so
+  //     neither can fail because a count is too small or larger than needed,
+  //     and a count nothing can fail on is how a slicing outlives its reason.
+  //     sliceCountProblems() asks both halves of the serial-floor derivation
+  //     (see FILE_SHARDED_PACKAGES) of the committed dataset for every entry:
+  //     the count meets it, and n - 1 does not.
   //
-  //     The live map is EMPTY by this pin's own arithmetic (see
-  //     FILE_SHARDED_PACKAGES), so the live case judges zero entries, and that
-  //     zero is the true reading rather than a skipped one: the empty map's
-  //     claim is that every package fits WHOLE, and pin 3 above is the case
-  //     that fails the day one stops fitting, naming slicing as the remedy.
   //     The fixtures after it hold every refusal sliceCountProblems() makes, in
   //     both directions, on numbers that do not move with a refresh.
   const derivation = sliceCountProblems(datasetPackages);
@@ -1313,13 +1557,13 @@ function selfTest() {
       );
     }
   });
-  // Six shards, ten 50s fillers and one `big` package; the bound is 1.3x the
-  // mean. big = 300: mean 133.3s, bound 173.3s, so whole it breaches and one
-  // 150s half fits -- 2 is the smallest count. big = 120: mean 103.3s, bound
-  // 134.3s, so whole it already fits -- today's CLI, in miniature.
+  // One `big` package and ten 50s fillers: the heaviest other serial task is
+  // 50s, so a slice must sit within 1.3 x 50 = 65s. big = 120: whole it is the
+  // floor (120s), one 60s half is within 65s -- 2 is the smallest count. big =
+  // 60: whole it already sits within 65s -- a package that is not the floor.
   const fixture = (big) => [mk('big', big), ...Array.from({ length: 10 }, (_, i) => mk(`filler${i}`, 50))];
   check(() => {
-    const r = sliceCountProblems(fixture(300), { big: 2 });
+    const r = sliceCountProblems(fixture(120), { big: 2 });
     if (r.judged !== 1 || r.problems.length > 0) {
       throw new Error(
         `slice derivation: a count of 2 that 1 cannot replace was refused (judged ${r.judged}; ` +
@@ -1328,15 +1572,37 @@ function selfTest() {
     }
   });
   check(() => {
-    const r = sliceCountProblems(fixture(120), { big: 2 });
+    const r = sliceCountProblems(fixture(60), { big: 2 });
     if (!r.problems.some((m) => m.includes('Retire the entry'))) {
-      throw new Error('slice derivation: a package that fits whole kept its slicing with no refusal');
+      throw new Error('slice derivation: a package that is not the floor kept its slicing with no refusal');
     }
   });
   check(() => {
-    const r = sliceCountProblems(fixture(300), { big: 3 });
+    const r = sliceCountProblems(fixture(120), { big: 3 });
     if (!r.problems.some((m) => m.includes('Lower it to 2'))) {
-      throw new Error('slice derivation: a count of 3 where 2 meets the bound was accepted');
+      throw new Error('slice derivation: a count of 3 where 2 meets the floor was accepted');
+    }
+  });
+  check(() => {
+    // Too FEW is a refusal too: 300s cut in two is 150s, still past 65s. 300/4 =
+    // 75s is past it as well, 300/5 = 60s is not, so the remedy names 5.
+    const r = sliceCountProblems(fixture(300), { big: 2 });
+    if (!r.problems.some((m) => m.includes('Raise it to 5'))) {
+      throw new Error(`slice derivation: a count whose slice is still the floor was accepted (${r.problems.join(' | ') || 'no problem named'})`);
+    }
+  });
+  check(() => {
+    // The two-task half: a 100s package that runs as `test` + `test:repo` puts
+    // 50s on the path, not 100s -- so beside it a 120s package IS the floor and
+    // 2 is derived; read as one task, 120s would sit within 130s and retire.
+    const pair = [mk('big', 120), { ...mk('pair', 100), tasks: 2 }];
+    const asTwo = sliceCountProblems(pair, { big: 2 });
+    const asOne = sliceCountProblems([mk('big', 120), mk('pair', 100)], { big: 2 });
+    if (asTwo.problems.length > 0 || !asOne.problems.some((m) => m.includes('Retire the entry'))) {
+      throw new Error(
+        `slice derivation: a two-task package was not weighed as its half on the path ` +
+          `(as two: ${asTwo.problems.join(' | ') || 'ok'}; as one: ${asOne.problems.join(' | ') || 'ok'})`
+      );
     }
   });
   check(() => {
@@ -1970,6 +2236,176 @@ function selfTest() {
     }
   });
 
+  // -- THE DENSITY CAP AND THE PER-RUN SLICE DECISION (#22075) -------------
+  //
+  // The balancing pins above grade bin sums; these hold the limit on them that
+  // #22415's revert measured -- no shard denser than the whole-package split
+  // proven green -- and the decision every run makes on its own package list.
+  battery('density cap and the per-run slice decision (#22075)');
+
+  // The cap is the WHOLE-package split's densest bin -- the split this script
+  // computed before any slicing -- whatever the map says. Read through a
+  // fixture map that slices the heaviest package too, it must not move: a cap
+  // computed from the sliced split would be a cap that moves with the very
+  // change it bounds.
+  check(() => {
+    const wholeMax = balanceOf(partition(expandSlices(datasetPackages.map((p) => ({ ...p, sliceCount: 1 }))), SHARD_COUNT)).max;
+    if (datasetCap !== wholeMax || densityCap(datasetPackages.map((p) => ({ ...p, sliceCount: 2 }))) !== wholeMax) {
+      throw new Error(`density cap: ${datasetCap}s is not the whole-package split's densest bin (${wholeMax}s)`);
+    }
+  });
+
+  // ⛔ THE HARD CONSTRAINT. The committed dataset's full list, split as CI
+  // splits it, puts no shard past the cap -- and that split slices, so the cap
+  // is graded on the shape it exists to bound (pin 3b proves the slice is
+  // there). This is the case that fails when a slicing packs a shard denser
+  // than the split the drift step was proven green on.
+  check(() => {
+    const over = real.map((b, i) => ({ shard: i + 1, total: b.total })).filter((b) => b.total > datasetCap);
+    if (over.length > 0 || !datasetItems.some((i) => i.slice)) {
+      throw new Error(
+        `density cap: the committed dataset's full list, split as CI splits it, puts ` +
+          `${over.map((b) => `shard ${b.shard} at ${b.total.toFixed(2)}s`).join(', ') || 'no slice on any shard'} ` +
+          `against the ${datasetCap.toFixed(2)}s cap (the whole-package split's densest bin). ` +
+          `Bins: ${real.map((b) => b.total.toFixed(2)).join('/')}s; ` +
+          (datasetPlan.decisions.map(renderSliceDecision).join('; ') || 'no slicing decision') + '.'
+      );
+    }
+  });
+
+  // The ENFORCEMENT, on a split no repair can bring under the cap: three 100s
+  // slices and ten 20s fillers on three shards come out 180/160/160s, and no
+  // move or swap of a 20s filler lowers the 180s bin. With the cap set at 170s
+  // the run must keep the package whole and say the cap is why. (A real run is
+  // handed densityCap()'s value; this one is set under the sliced split on
+  // purpose, so the refusal is what is graded.)
+  const capFixture = [{ name: 'big', weight: 300, sliceCount: 3 }, ...Array.from({ length: 10 }, (_, i) => mk(`f${i}`, 20))];
+  check(() => {
+    const [d] = planShards(capFixture, 3, { cap: 170 }).decisions;
+    if (d.count !== 1 || d.withinCap || !renderSliceDecision(d).includes('density cap')) {
+      throw new Error(`density cap: a slicing whose densest shard is past the cap was taken: ${renderSliceDecision(d)}`);
+    }
+  });
+  check(() => {
+    // ...and the same split, with the cap above it, is taken -- so the refusal
+    // above is the cap's, not another half's.
+    const [d] = planShards(capFixture, 3, { cap: 180 }).decisions;
+    if (d.count !== 3 || !d.withinCap) {
+      throw new Error(`density cap: a slicing within the cap was refused: ${renderSliceDecision(d)}`);
+    }
+  });
+
+  // The REPAIR: LPT overshoots a cap by where its last small items fall, and
+  // refineToCap() moves whole packages until the split is back within it. Two
+  // shards, `big` cut in two, and five packages: the whole split's densest bin
+  // is 69s, LPT puts the sliced split at 70s, and one swap brings it to 69s.
+  const repairFixture = [mk('big', 12), mk('a', 30), mk('b', 30), mk('c', 29), mk('d', 27), mk('e', 7)];
+  check(() => {
+    const cap = densityCap(repairFixture, 2);
+    const items = expandSlices(repairFixture.map((p) => ({ ...p, sliceCount: p.name === 'big' ? 2 : 1 })));
+    const raw = balanceOf(partition(items, 2)).max;
+    const bins = placeItems(items, 2, cap);
+    const placed = balanceOf(bins).max;
+    if (!(raw > cap)) throw new Error(`density repair: the fixture no longer overshoots (LPT ${raw}s, cap ${cap}s)`);
+    if (placed > cap) throw new Error(`density repair: a split LPT put at ${raw}s was left at ${placed}s, past the ${cap}s cap`);
+    assertSlicesSpread(bins);
+    if (bins.flatMap((b) => b.names).sort().join() !== items.map((i) => i.name).sort().join()) {
+      throw new Error('density repair: the repaired split does not carry every item exactly once');
+    }
+  });
+  check(() => {
+    // A split with NO slice is the plain LPT split it always was, byte for
+    // byte, even under a cap it overshoots: the repair is the sliced split's.
+    const whole = expandSlices(repairFixture.map((p) => ({ ...p, sliceCount: 1 })));
+    if (JSON.stringify(placeItems(whole, 2, 1)) !== JSON.stringify(partition(whole, 2))) {
+      throw new Error('density repair: an unsliced split was re-placed');
+    }
+  });
+  check(() => {
+    // The repair never moves a slice: the slices stay where LPT spread them.
+    const items = expandSlices(repairFixture.map((p) => ({ ...p, sliceCount: p.name === 'big' ? 2 : 1 })));
+    const before = partition(items, 2).map((b) => b.names.filter((n) => parseShardItem(n).slice).join());
+    const after = placeItems(items, 2, densityCap(repairFixture, 2)).map((b) => b.names.filter((n) => parseShardItem(n).slice).join());
+    if (before.join('|') !== after.join('|')) throw new Error(`density repair: a slice moved (${before.join('|')} -> ${after.join('|')})`);
+  });
+
+  // The floor a two-task package puts on the path is half its weight; a slice
+  // puts its own weight there.
+  check(() => {
+    const [pairItem] = expandSlices([{ name: 'pair', weight: 100, sliceCount: 1, tasks: 2 }]);
+    const [sliceItem] = expandSlices([{ name: 'big', weight: 300, sliceCount: 3, tasks: 2 }]);
+    if (serialFloorOf(pairItem) !== 50 || serialFloorOf(sliceItem) !== 100) {
+      throw new Error(`serial floor: a two-task 100s package read ${serialFloorOf(pairItem)}s, a 100s slice ${serialFloorOf(sliceItem)}s`);
+    }
+  });
+
+  // THE MEASURED SHAPE, in miniature (merge_group 37875522518: the CLI alone,
+  // 1739s, against five ~1400s bins of many packages). Bin sums read 1.17x,
+  // inside the bound, which is the reading every PR and queue build paid ~31
+  // minutes for; on the serial floor the package is 17x the next task, so the
+  // run slices it, and the sliced split stays within the cap its own whole
+  // split defines.
+  const fillers = (n, w, prefix = 'f') => Array.from({ length: n }, (_, i) => mk(`${prefix}${String(i).padStart(2, '0')}`, w));
+  const measuredShape = [{ name: 'big', weight: 1700, sliceCount: 3 }, ...fillers(70, 100)];
+  check(() => {
+    const cap = densityCap(measuredShape);
+    const plan = planShards(measuredShape, SHARD_COUNT, { cap });
+    const [d] = plan.decisions;
+    if (!d.needed || !d.spreads || !d.withinCap || d.count !== 3) {
+      throw new Error(`measured shape: one serial suite at 17x the next task was not sliced: ${renderSliceDecision(d)}`);
+    }
+    if (balanceOf(plan.bins).max > cap) {
+      throw new Error(`measured shape: sliced, a shard carries ${balanceOf(plan.bins).max}s against the ${cap}s cap`);
+    }
+  });
+
+  // Per run, not per dataset: a run without the package decides nothing, and a
+  // run where another, unsliceable task sits within the bound of it keeps it
+  // whole -- slicing cannot take the run below that task.
+  check(() => {
+    const plan = planShards(fillers(30, 100), SHARD_COUNT, { cap: Infinity });
+    if (plan.decisions.length !== 0 || plan.items.some((i) => i.slice)) {
+      throw new Error('per run: a run without the configured package sliced something');
+    }
+  });
+  check(() => {
+    const plan = planShards([{ name: 'big', weight: 400, sliceCount: 3 }, mk('heavy', 350), ...fillers(8, 100)], SHARD_COUNT);
+    const [d] = plan.decisions;
+    if (d.needed || d.count !== 1 || !renderSliceDecision(d).includes("not the run's floor")) {
+      throw new Error(`per run: slicing a 400s suite beside an unsliceable 350s one was chosen: ${renderSliceDecision(d)}`);
+    }
+  });
+
+  // Slices that cannot spread do not run in parallel, so they are not taken:
+  // three slices across two shards (the nightly tier run's shape) stay whole.
+  check(() => {
+    const [d] = planShards([{ name: 'big', weight: 1700, sliceCount: 3 }, mk('other', 100)], 2).decisions;
+    if (!d.needed || d.spreads || d.count !== 1 || !renderSliceDecision(d).includes('cannot spread')) {
+      throw new Error(`spread: 3 slices over 2 shards were not refused by name: ${renderSliceDecision(d)}`);
+    }
+  });
+
+  // The committed dataset, split as CI splits a full run, takes the configured
+  // count for every configured package it carries.
+  check(() => {
+    const wrong = datasetPlan.decisions.filter((d) => d.count !== FILE_SHARDED_PACKAGES[d.name]);
+    if (datasetPlan.decisions.length !== Object.keys(FILE_SHARDED_PACKAGES).length || wrong.length > 0) {
+      throw new Error(`dataset plan: ${datasetPlan.decisions.map(renderSliceDecision).join('; ') || 'no decision made'}`);
+    }
+  });
+
+  // The path main() runs, on the real CLI: weighItems() reads its configured
+  // count, test-file floor and task count from the tree, planShards() takes the
+  // count, and partition() receives slices rather than one package-shaped lump.
+  check(() => {
+    const { weighed } = weighItems([{ name: '@objectstack/cli', path: 'packages/cli' }], new Set(), timings, 'plan pin');
+    const { items, decisions } = planShards(weighed, SHARD_COUNT, { cap: datasetCap });
+    const n = FILE_SHARDED_PACKAGES['@objectstack/cli'];
+    if (items.length !== n || !items.every((i) => i.slice && i.pkg === '@objectstack/cli')) {
+      throw new Error(`plan: the CLI alone on ${SHARD_COUNT} shards reached partition() as ${items.map((i) => i.name).join(', ')} (${decisions.map(renderSliceDecision).join('; ')})`);
+    }
+  });
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -2021,8 +2457,9 @@ function selfTest() {
     `partition-test-shards: self-test OK (${datasetPackages.length} measured packages ` +
       `-> ${datasetItems.length} shard items, ${SHARD_COUNT} shards, ` +
       `max/mean ${balance.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
-      `bins ${balance.totals.map((t) => t.toFixed(0)).join('/')}s, file-level slices: ` +
-      `${Object.entries(FILE_SHARDED_PACKAGES).map(([name, n]) => `${name} x${n}`).join(', ') || 'none'})`
+      `bins ${balance.totals.map((t) => t.toFixed(2)).join('/')}s within the ${datasetCap.toFixed(2)}s density cap, ` +
+      `file-level slices: ` +
+      `${datasetPlan.decisions.filter((d) => d.count > 1).map((d) => `${d.name} x${d.count}`).join(', ') || 'none'})`
   );
 
   return SELF_TEST_VERDICT;
@@ -2124,21 +2561,29 @@ function main() {
   const parsed = JSON.parse(readFileSync(listPath, 'utf8'));
   const items = readPackageItems(parsed, listPath);
   const timings = loadTimings();
-  const { weighted, estimated, packages } = weighItems(items, excluded, timings, listPath);
-  const bins = assertSlicesSpread(partition(weighted, shardCount));
+  const { weighed, estimated, packages } = weighItems(items, excluded, timings, listPath);
+  // The cap is the whole-package split of the dataset's full list, not of this
+  // run's list (densityCap): the density proven green is a fact about the
+  // dataset, and the run's own list is what is graded against it.
+  const cap = densityCapOf(timings, excluded, shardCount);
+  const { items: weighted, bins: placed, decisions } = planShards(weighed, shardCount, { cap });
+  const bins = assertSlicesSpread(placed);
   const mine = bins[shardIndex - 1];
   const { max, mean, ratio } = balanceOf(bins);
   // Printed on every shard, not just the imbalanced one, and printed as the
   // RATIO the acceptance bound is written in: the per-shard numbers alone never
   // said whether the split was balanced, which is why #10472's imbalance had to
-  // be found by reading six job durations side by side after the fact.
+  // be found by reading six job durations side by side after the fact. The
+  // density cap is printed beside the bins it bounds (#22075).
   console.error(
     `shard ${shardSpec}: ${mine.names.length}/${weighted.length} items ` +
       `(${weighted.length - packages} of them file-level slices of ${packages} package(s)), ` +
       `${mine.total.toFixed(1)}s predicted (all bins: ${bins.map((b) => b.total.toFixed(0)).join('/')}s; ` +
       `max/mean ${ratio.toFixed(2)}x of the ${MAX_SHARD_OVER_MEAN}x bound, max ${max.toFixed(0)}s, mean ${mean.toFixed(0)}s; ` +
+      `density cap ${cap.toFixed(2)}s; ` +
       `${packages - estimated} measured, ${estimated} estimated from test-file count)`
   );
+  for (const d of decisions) console.error(`  slicing: ${renderSliceDecision(d)}`);
   for (const name of mine.names) console.log(name);
 }
 
