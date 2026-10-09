@@ -7,11 +7,11 @@
 
 feat(metadata-protocol,runtime,service-automation,spec)!: the metadata protocol refuses every organization-scoped write, and an uninstall is environment-wide (ADR-0131 D6/D12)
 
-Clause-②: yes
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered metadata-write-organization-scope-refused, package-uninstall-environment-wide -->
 
-**BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+**BREAKING, in both directions.** It narrows: an organization-scoped metadata write is refused, and request keys retire. It widens one refusal: a package uninstall naming neither `organizationId` nor `allTenants`, refused before with `400 TENANT_SCOPE_REQUIRED`, is now accepted and runs environment-wide. Graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
 
 ADR-0131 D6 retires the per-organization overlay axis. The `/meta` doors already carry no organization; now the metadata protocol itself refuses an organization-scoped write from every door, and the per-organization write path behind it is deleted.
 
