@@ -4,7 +4,7 @@ import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError } from '@objectstack/core';
-import { declaredUserMessage, readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
+import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
@@ -43,7 +43,14 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
-import { DraftConflictError, SysMetadataRepository, packageScopedRowWhere, type SysMetadataEngine } from './sys-metadata-repository.js';
+import {
+    DraftConflictError,
+    SysMetadataRepository,
+    envWritableMetadataTypes,
+    packageScopedRowWhere,
+    resetEnvWritableMetadataTypes,
+    type SysMetadataEngine,
+} from './sys-metadata-repository.js';
 import { isOriginGatedType, managedItemSealedSentence } from './packaged-base-regime.js';
 import {
     resolveArtifactLockLayer,
@@ -15860,29 +15867,24 @@ export class ObjectStackProtocolImplementation implements
      * use to enable Studio-side editing of types whose protocol-level flag
      * is still false (object, field, permission, …).
      *
-     * Memoised at first call. Tests can override by clearing the cache via
+     * [#22411] Delegates to the repository's {@link envWritableMetadataTypes},
+     * the ONE reader of the setting, so the listing and the save door read the
+     * same set. This used to be a second copy of the parse. The 11.0 removal of
+     * the legacy `OBJECTSTACK_METADATA_WRITABLE` spelling edited the other
+     * copy and missed this one, so the listing advertised a hatch that the
+     * repository then refused. ⛔ Never parse the variable here again.
+     *
+     * Memoised at first call (by the shared reader). Tests can override by
+     * clearing the cache via
      * {@link ObjectStackProtocolImplementation.resetEnvWritableCache}.
      */
-    private static _envWritableTypes: Set<string> | null = null;
     private static envWritableTypes(): ReadonlySet<string> {
-        if (this._envWritableTypes !== null) return this._envWritableTypes;
-        const raw = readEnvWithDeprecation('OS_METADATA_WRITABLE', 'OBJECTSTACK_METADATA_WRITABLE') || '';
-        const set = new Set<string>();
-        for (const tok of raw.split(',')) {
-            const t = tok.trim();
-            if (!t) continue;
-            const singular = PLURAL_TO_SINGULAR[t] ?? t;
-            set.add(singular);
-            const plural = SINGULAR_TO_PLURAL[singular];
-            if (plural) set.add(plural);
-        }
-        this._envWritableTypes = set;
-        return set;
+        return envWritableMetadataTypes();
     }
 
-    /** Test hook — clear the memoised env-writable cache. */
+    /** Test hook — clear the memoised env-writable cache (the shared reader's one cache). */
     static resetEnvWritableCache(): void {
-        this._envWritableTypes = null;
+        resetEnvWritableMetadataTypes();
     }
 
     /**
