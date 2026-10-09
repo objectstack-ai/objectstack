@@ -830,7 +830,13 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+     * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+     * `containers.tsx` changed across the hop from `a58626c88` (+92/-6,
+     * objectui#11811: a record action disabled by its predicate says why, in the
+     * `page:header` renderer), every hunk at `:1512` or below, so both anchors
+     * were re-READ in place and NEITHER moved, each byte-identical;
+     * `lib/lazy-icon.tsx` is byte-identical (`git diff --quiet`). At `a58626c88`,
+     * re-read there 2026-10-06:
      * every objectui file this record cites is byte-identical across the hop
      * from `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
      * At `0abd4f9f8`, re-read there 2026-10-05:
@@ -1055,7 +1061,18 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `a58626c88dc8`, re-read there 2026-10-06:
+ * (`.objectui-sha` = `f0268ad78485`, re-read there 2026-10-09:
+ * across the hop from `a58626c88dc8` `record-details.tsx`,
+ * `record-highlights.tsx` and the three `permissions` files are byte-identical
+ * (`git diff --quiet`), so NO anchor in those five moved;
+ * `record-related-list.tsx` (+62/-4: objectui#11768's author-facing
+ * action-refusal notice and objectui#11733's plural titles) and
+ * `record-quick-actions.tsx` (+55/-3: objectui#11811's disabled-reason text)
+ * changed above and below the gate without touching a cited line, so every anchor
+ * in those two MOVED with its cited text byte-identical, by 35 and by 9 — `393`
+ * -> `428`, `380` -> `415`, `326` -> `361`, `344` -> `379`, `393-401` ->
+ * `428-436`; `273` -> `282`, `262` -> `271`, `273-281` -> `282-290` — and each is
+ * cited below at this pin. At `a58626c88dc8`, re-read there 2026-10-06:
  * across the hop from `0abd4f9f8769` `record-highlights.tsx`,
  * `record-related-list.tsx`, `record-quick-actions.tsx` and the three
  * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor in
@@ -1122,22 +1139,22 @@ export const PageCardProps = strictObject({
  *
  * 1. CAPABILITIES, NOT OBJECT ACTIONS. Every block gates through
  *    `perms.hasCapabilities(required)` — `record-details.tsx:347`,
- *    `record-highlights.tsx:102`, `record-related-list.tsx:393`,
- *    `record-quick-actions.tsx:273` — and never `perms.can(objectName, …)`;
+ *    `record-highlights.tsx:102`, `record-related-list.tsx:428`,
+ *    `record-quick-actions.tsx:282` — and never `perms.can(objectName, …)`;
  *    each renderer's docblock states the capability "is not object-scoped"
  *    (`record-details.tsx:336`, `record-highlights.tsx:81`,
- *    `record-related-list.tsx:380`, `record-quick-actions.tsx:262`). `read`
+ *    `record-related-list.tsx:415`, `record-quick-actions.tsx:271`). `read`
  *    is looked up in the capability set like any other name.
  * 2. ALL OF THEM. `MePermissionsProvider.tsx:416` is
  *    `required.every((p) => held.has(p))`.
  * 3. THE OUTCOME. Each block returns a `role="status"` "Insufficient
  *    permissions to view …" notice instead of its content —
  *    `record-details.tsx:347-355`, `record-highlights.tsx:160-173`,
- *    `record-related-list.tsx:393-401`, `record-quick-actions.tsx:273-281`.
+ *    `record-related-list.tsx:428-436`, `record-quick-actions.tsx:282-290`.
  *    Checks that already withhold the content run first on two of them (no
  *    record bound, `record-details.tsx:291`; no object,
- *    `record-related-list.tsx:326`; the related object's read gate,
- *    `record-related-list.tsx:344`), which is why the text says "wherever it
+ *    `record-related-list.tsx:361`; the related object's read gate,
+ *    `record-related-list.tsx:379`), which is why the text says "wherever it
  *    would otherwise render" rather than promising the notice unconditionally.
  * 4. PRESENTATION ONLY. The gate is renderer code: nothing in this repo's
  *    server packages reads a page component's `requiredPermissions`. The data
@@ -2370,7 +2387,13 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+     * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+     * `containers.tsx` changed across the hop from `a58626c88` (+92/-6,
+     * objectui#11811: a record action disabled by its predicate says why, in the
+     * `page:header` renderer), every hunk at `:1512` or below, so both anchors
+     * were re-READ in place and NEITHER moved, each byte-identical;
+     * `lib/lazy-icon.tsx` is byte-identical (`git diff --quiet`). At `a58626c88`,
+     * re-read there 2026-10-06:
      * every objectui file this record cites is byte-identical across the hop
      * from `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
      * At `0abd4f9f8`, re-read there 2026-10-05:
@@ -2717,7 +2740,10 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+   * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `a58626c88` (`git diff --quiet`), so every anchor held unmoved. At
+   * `a58626c88`, re-read there 2026-10-06:
    * every objectui file this record cites is byte-identical across the hop from
    * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
    * At `0abd4f9f8`, re-read there 2026-10-05:
@@ -3206,7 +3232,38 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `a58626c88`, re-read there 2026-10-06:
+ * against, `.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts` and `ui/button.tsx`
+ * are byte-identical across the hop from `a58626c88` (`git diff --quiet`), so
+ * their anchors held unmoved. All four `action-*.tsx` renderers changed for
+ * objectui#11839 (objectui `cef0eeec0`: a predicate-disabled control says why,
+ * through a reason hook in each renderer and a wrapper around the drawn control),
+ * and `action-button.tsx` also for objectui#11168 (objectui `f0496bdf1`: an
+ * `undoable` update of the record in scope carries that record as its Undo
+ * baseline, and the input is published), +95/-9, +22/-0, +23/-2 and +10/-1; so
+ * every action anchor MOVED with its cited line byte-identical — by 57 to 80 in
+ * `action-button.tsx`, by 1 to 22 in `action-icon.tsx`, by 6 to 21 in
+ * `action-group.tsx` and by 1 to 9 in `action-menu.tsx` (the `objectName`
+ * forwards `318` -> `389`, `211` -> `218`, `373` -> `394`, `320` -> `329`) —
+ * except where objectui rewrote a line around the same read, each range re-read:
+ * the button's `params` statement (`180-183` -> `247-254`, now wrapped in
+ * `withUndoBaseline`), and the members' drawn label (a `<span>` became
+ * `DisabledReasonMenuLabel`, still `action.label || action.name`) in the group's
+ * dropdown item (`205-243` -> `219-264`) and the menu item (`108-147` ->
+ * `109-156`), the group's inline member growing `114-171` -> `120-184`. Two row
+ * sentences turned false and are rewritten where they stand: `action:button` now
+ * publishes and delivers `undoable`, and `action:icon` reads `label` six times.
+ * `basic/data-list.tsx` changed for objectui#11880's repeater half (objectui
+ * `aaba8655a`, +99/-16): every `element:definition-list` anchor MOVED by 10 with
+ * its text byte-identical; the repeater's display anchors MOVED by 19 to 83, and
+ * its query reads were rewritten to take the node-level `dataSource` binding
+ * first, so the row's "NOT read at the pin" sentence is false at this pin and is
+ * rewritten there. `data-objectstack/src/index.ts` (+51/-9, objectui#11699) moved
+ * the `translateFilterArray` arm `5000-5011` -> `5042-5053` and left
+ * `serializeOrderBy` (`868-894`) unmoved; `previews/block-config.ts` (+33/-13,
+ * objectui#11880's designer rows and the `@objectstack/*` 17.7.0 moves) moved the
+ * `columns` control `320` -> `335`. Each moved anchor is cited below at this pin.
+ * At `a58626c88`, re-read there 2026-10-06:
  * `public-blocks.ts`, `auto-trigger.ts`, `action-button.tsx`,
  * `action-icon.tsx`, `basic/data-list.tsx` and `ui/button.tsx` are
  * byte-identical across the hop from `0abd4f9f8` (`git diff --quiet`), so their
@@ -3331,10 +3388,10 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  *
  * `objectName` IS declared on `action:button` / `action:icon`: absent at the
  * first measurement, it is forwarded to the runner at the current pin
- * (`action-button.tsx:318`, `action-icon.tsx:211`), and the console resolves
+ * (`action-button.tsx:389`, `action-icon.tsx:218`), and the console resolves
  * its dispatch target as `action.objectName || <page object>`. On
  * `action:group` / `action:menu` the forward is the MEMBER's
- * (`action-group.tsx:373`, `action-menu.tsx:320`), so it rides each member
+ * (`action-group.tsx:394`, `action-menu.tsx:329`), so it rides each member
  * object and the container rows gain no key.
  */
 
@@ -3413,28 +3470,28 @@ const ACTION_NODE_GUIDANCE = {
  * runner (`components/src/renderers/action/action-button.tsx` at the pin).
  * Read points, per key:
  *
- * - `name` — `:123` (the visibility-diagnostic label, `schema.name ??
- *   schema.label`) and `:216` (forwarded). OPTIONAL, as it is read: an inline
+ * - `name` — `:180` (the visibility-diagnostic label, `schema.name ??
+ *   schema.label`) and `:287` (forwarded). OPTIONAL, as it is read: an inline
  *   page button is not a registered object action, and the runner takes a
  *   nameless action on its `type` leg. `UIActionSchema` declares it required;
  *   the read does not.
- * - `label` — `:394`, placed as a React child (so a literal string: an inline
+ * - `label` — `:468`, placed as a React child (so a literal string: an inline
  *   locale map is not resolved on this path; the translation bundle's
- *   `components.<id>.label` is the localization channel); also `:123`, `:220`.
- * - `icon` — `:138`, through the shared `resolveIcon`.
- * - `actionType` — `:215`, forwarded as the runner's `type`.
- * - `variant` / `size` — `:141` / `:142`: `primary` → the primitive's
+ *   `components.<id>.label` is the localization channel); also `:180`, `:291`.
+ * - `icon` — `:202`, through the shared `resolveIcon`.
+ * - `actionType` — `:286`, forwarded as the runner's `type`.
+ * - `variant` / `size` — `:205` / `:206`: `primary` → the primitive's
  *   `default` and `md` → `default`, everything else handed to `Button` as-is.
- * - `visible` / `disabled` — `:121` + `:346` / `:134` + `:382`, evaluated
+ * - `visible` / `disabled` — `:178` + `:417` / `:191` + `:453`, evaluated
  *   against the row the host binds (`usePredicateRecordContext`).
- * - `params` — `:180-183`. An array is the input list, forwarded as
+ * - `params` — `:247-254`. An array is the input list, forwarded as
  *   `actionParams`; the static values are read off `properties.params`
  *   itself (`readStaticParamValues`, `static-params.ts:98-108`). On a page
  *   node the two are one key: this row IS `properties`, and `SchemaRenderer`'s
  *   hoist makes `schema.params` the same object, so an array here is the input
  *   list and an object is the static values. (A node-level object `params`
  *   outside `properties` is ignored with a development warning.)
- * - Forwarded to the runner (`action-button.tsx:215-318` first line
+ * - Forwarded to the runner (`action-button.tsx:286-389` first line
  *   `type: schema.actionType,`): `description`, `target`, `openIn`,
  *   `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
  *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
@@ -3442,11 +3499,11 @@ const ACTION_NODE_GUIDANCE = {
  *   `onSuccess`, `objectName` — and, since objectui#11344, `outcomeMessages`.
  *
  * ⚠️ New at this pin, and NOT a key of this row: objectui#11344 forwards
- * `outcomeMessages` (`:261`), the success copy per handler outcome that
+ * `outcomeMessages` (`:332`), the success copy per handler outcome that
  * `ActionSchema` declares, because an `action:bar` member is spread onto an
  * `action:button` node whole and a registered action's map would otherwise
  * never reach the success toast. objectui leaves the input unpublished
- * (`:422-426`) until this row declares it. So the key reaches the renderer
+ * (`:502-506`) until this row declares it. So the key reaches the renderer
  * only on that member path; written on an `action:button` node, this strict
  * row refuses it at save. The row stays as measured from the block's own
  * authorable reads: declaring the key is a contract decision, not a pin
@@ -3459,16 +3516,20 @@ const ACTION_NODE_GUIDANCE = {
  * `target` (`ACTION_NODE_ALIASES` above) — one concept, one spelling, one
  * verdict on the action and on the block that runs it.
  *
- * The registration's `inputs` (`:427-572`) publish twenty-seven of the
- * twenty-nine keys the renderer forwards or reads since objectui#11168 slice 1
- * (at `db11afd49` they published seven, `:395-416`), and since slice 2 the
+ * The registration's `inputs` (`:507-658`) publish twenty-eight of the
+ * twenty-nine keys the renderer forwards or reads at this pin — twenty-seven
+ * since objectui#11168 slice 1, and `undoable` since objectui `f0496bdf1` (at
+ * `db11afd49` they published seven, `:395-416`) — and since slice 2 the
  * `size` input publishes the same five values this row declares (`default`,
- * `sm`, `md`, `lg`, `icon`); the two left unpublished are `endpoint` (refused
- * here, above) and `undoable`, each still forwarded (`:215-318`), on
- * objectui's measurement that the console's own `api` handler reads `target`
- * and never `endpoint`, and that the runner offers Undo only with a host row
- * stash this block never writes. It also publishes `className`, which is read
- * but is a node key.
+ * `sm`, `md`, `lg`, `icon`); the one left unpublished is `endpoint` (refused
+ * here, above), still forwarded (`:286-389`), on objectui's measurement that
+ * the console's own `api` handler reads `target` and never `endpoint`.
+ * `undoable` is published because the block now writes the row stash the
+ * runner's Undo needs: an `undoable` `operation: 'update'` of the record in
+ * scope carries that record as its Undo baseline (`withUndoBaseline`,
+ * `:72-81`, called at `:247-251`; objectui#11168, ruling B on objectui#11754),
+ * where at `a58626c88` it wrote none. It also publishes `className`, which is
+ * read but is a node key.
  */
 export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   surface: 'this `action:button`',
@@ -3534,27 +3595,30 @@ export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
  * (`components/src/renderers/action/action-icon.tsx` at the pin). The same
  * runner path as `action:button`, measured separately because the two differ:
  *
- * - `size` is NOT read — `:120` pins the primitive's `icon` size — so it is
+ * - `size` is NOT read — `:127` pins the primitive's `icon` size — so it is
  *   not declared (the registration does not publish it either).
- * - `undoable` and `recordIdField` are NOT forwarded (`:147-212` lists the
+ * - `undoable` and `recordIdField` are NOT forwarded (`:154-219` lists the
  *   rest of `action:button`'s forward and not these two), so not declared.
- * - `label` is read five times at this pin (four at `db11afd49`):
- *   `:109` (the visibility-diagnostic label, `schema.name ?? schema.label`,
- *   new with objectui#11212's fail-closed `visible`), `:165` (forwarded),
- *   `:281` (`aria-label`, falling back to `name`), `:290` (its first letter
- *   when no icon resolves) and `:296` / `:302` (the tooltip). `description`
- *   is the tooltip's fallback (`:302`) as well as forwarded (`:166`).
- * - `visible` / `disabled` — `:107` + `:245` / `:115` + `:274`; `visible`
+ * - `label` is read six times at this pin (five at `a58626c88`, four at
+ *   `db11afd49`): `:110` (the visibility-diagnostic label, `schema.name ??
+ *   schema.label`, new with objectui#11212's fail-closed `visible`), `:172`
+ *   (forwarded), `:288` (`aria-label`, falling back to `name`), `:301` (its
+ *   first letter when no icon resolves), `:311` (the heading of the
+ *   disabled-reason tooltip a predicate-disabled icon is wrapped in, new with
+ *   objectui#11839, objectui `cef0eeec0`) and `:318` / `:324` (the tooltip).
+ *   `description` is the fallback of both tooltips (`:311`, `:324`) as well as
+ *   forwarded (`:173`).
+ * - `visible` / `disabled` — `:108` + `:252` / `:116` + `:281`; `visible`
  *   fails CLOSED on a faulting predicate since objectui#11212, as on
- *   `action:button`. `variant` — `:119`, `primary` mapped to `default`,
+ *   `action:button`. `variant` — `:126`, `primary` mapped to `default`,
  *   renderer default `ghost`.
- * - `params` — `:143-146`, routed exactly as on `action:button`.
- * - Forwarded (`action-icon.tsx:160-211` first line
+ * - `params` — `:150-153`, routed exactly as on `action:button`.
+ * - Forwarded (`action-icon.tsx:167-218` first line
  *   `type: schema.actionType,`): `actionType`, `name`, `target`, `openIn`,
  *   `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
  *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
  *   `locations`, `toast`, `resultDialog`, `onSuccess`, `objectName`.
- * - `outcomeMessages` is forwarded too since objectui#11344 (`:189`) and NOT
+ * - `outcomeMessages` is forwarded too since objectui#11344 (`:196`) and NOT
  *   declared, for `action:button`'s reason: it is an `ActionSchema` key that
  *   reaches this renderer on the `action:bar` member path, and objectui
  *   leaves its input unpublished until the row declares it.
@@ -3698,9 +3762,12 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  *
  * [#21855] The rows' value ratchet for this one member, with its own
  * inventory. A member's `params` is its `ActionParam[]` input list: both
- * containers forward an array as `actionParams` (group `:325-327`, menu
- * `:261-263`, re-read at the pin this repo builds against, `.objectui-sha` =
- * `a58626c88`). Any
+ * containers forward an array as `actionParams` (group `:346-348`, menu
+ * `:270-272`, re-read at the pin this repo builds against, `.objectui-sha` =
+ * `f0268ad78`, 2026-10-09: both MOVED with their text byte-identical, by 21
+ * and by 9, from `a58626c88`'s `:325-327` and `:261-263`, for objectui#11839's
+ * disabled-reason wrapper above them; `static-params.ts` is byte-identical).
+ * Any
  * other value goes through `readActionEntryParamValues`
  * (`static-params.ts:164-174`), which returns it unchanged for a `type: 'api'`
  * member — the inline-action payload window (#5777), as the request payload
@@ -3881,37 +3948,37 @@ const actionMenuMember = () => (actionMenuMemberOnce ??= buildActionMenuMember()
  * (`components/src/renderers/action/action-group.tsx` at the pin). Read
  * points, per key:
  *
- * - `actions` — `:300`, then filtered by `location` through `actionRendersAt`
- *   (`:301`); members are read at `:114-171` (inline), `:205-243` (dropdown),
- *   both through the shared `useMemberVisible` for `visible` (`:81-86`), and
- *   forwarded at `action-group.tsx:325-374` first line
+ * - `actions` — `:321`, then filtered by `location` through `actionRendersAt`
+ *   (`:322`); members are read at `:120-184` (inline), `:219-264` (dropdown),
+ *   both through the shared `useMemberVisible` for `visible` (`:87-92`), and
+ *   forwarded at `action-group.tsx:346-395` first line
  *   `const paramsPayload: ActionDef = Array.isArray(action.params)` (`params`
- *   `:325-327`, no longer joined by the member's own `properties.params`
- *   since objectui#11638; `objectName` `:373`; the member's
+ *   `:346-348`, no longer joined by the member's own `properties.params`
+ *   since objectui#11638; `objectName` `:394`; the member's
  *   `outcomeMessages` too since objectui#11344).
- * - `display` — `:396`, `inline` unless it is `dropdown`.
- * - `label` / `icon` — `:416` / `:400`: the DROPDOWN trigger's text (default
+ * - `display` — `:417`, `inline` unless it is `dropdown`.
+ * - `label` / `icon` — `:437` / `:421`: the DROPDOWN trigger's text (default
  *   `Actions`) and icon. Inline mode renders neither.
- * - `variant` — `:406` (dropdown trigger) and `:448` (each inline member's
+ * - `variant` — `:427` (dropdown trigger) and `:469` (each inline member's
  *   fallback); no `primary` mapping at group level, so the primitive's six.
- * - `size` — `:407` maps `md` → `default` for the dropdown trigger, but `:449`
- *   hands the group size to each inline member raw, and `:124` maps only a
+ * - `size` — `:428` maps `md` → `default` for the dropdown trigger, but `:470`
+ *   hands the group size to each inline member raw, and `:136` maps only a
  *   member's OWN `md`. So `md` renders only in dropdown mode, and in the
  *   default inline mode reaches the Button primitive, which has no `md`.
  *   Declared: the primitive's four sizes. (Since objectui#11168 the
- *   registration publishes those same four, `:479-520`; through `db11afd49`
+ *   registration publishes those same four, `:500-541`; through `db11afd49`
  *   it published `sm` / `md` / `lg`. A stored `md` is still mapped in
  *   dropdown mode only, which objectui records as a back-compat read.)
- * - `visible` — `:287` + `:393`; `:287` fails CLOSED on a faulting predicate
- *   since objectui#11212. `:393` tests the raw value's truthiness, so a
+ * - `visible` — `:308` + `:414`; `:308` fails CLOSED on a faulting predicate
+ *   since objectui#11212. `:414` tests the raw value's truthiness, so a
  *   literal `false` is honoured by `SchemaRenderer`'s node gate, which also
  *   evaluates the hoisted value, rather than by this check.
  *
  * ⚠️ New at this pin, and NOT a key of this row: objectui#11182 has the group
- * consume the host's EVALUATED `disabled` verdict by name (`:274`), the one
+ * consume the host's EVALUATED `disabled` verdict by name (`:295`), the one
  * `SchemaRenderer`'s generic enablement gate computes from a hoisted
- * `disabled` on any node, and apply it to every inline member (`:159`) or to
- * the dropdown trigger (`:410`). So a `properties.disabled` on this block now
+ * `disabled` on any node, and apply it to every inline member (`:171`) or to
+ * the dropdown trigger (`:431`). So a `properties.disabled` on this block now
  * greys it out at render while this strict row refuses the key at save. The
  * row stays as measured from the block's own reads: declaring the key is a
  * contract decision, not a pin re-measure.
@@ -3920,7 +3987,7 @@ const actionMenuMember = () => (actionMenuMemberOnce ??= buildActionMenuMember()
  * and inline mode only spreads it onto the wrapping `<div>` as a DOM
  * attribute. The registration published it through `db11afd49` (`:415`
  * there); objectui#11168 stopped publishing it because nothing reads it and
- * this row refuses it (`action-group.tsx:40-42`). Refused with a
+ * this row refuses it (`action-group.tsx:46-48`). Refused with a
  * prescription, the `page:accordion` item `value` precedent: an author
  * copying an older designer's output is told what happened rather than
  * merely refused.
@@ -3966,27 +4033,27 @@ export type ActionGroupPropsParsed = z.infer<typeof ActionGroupPropsSchema>;
  * (`components/src/renderers/action/action-menu.tsx` at the pin). Read
  * points, per key:
  *
- * - `actions` — `:335`; members are read at `:80`, `:108-147` and `:401`, run
- *   through `ActionAutoTrigger` (`:356-363`), and forwarded at
- *   `action-menu.tsx:261-321` first line
+ * - `actions` — `:344`; members are read at `:81`, `:109-156` and `:410`, run
+ *   through `ActionAutoTrigger` (`:365-372`), and forwarded at
+ *   `action-menu.tsx:270-330` first line
  *   `const paramsPayload: ActionDef = Array.isArray(action.params)` (`params`
- *   `:261-263`, no longer joined by the member's own `properties.params`
- *   since objectui#11638; `objectName` `:320`; the member's
+ *   `:270-272`, no longer joined by the member's own `properties.params`
+ *   since objectui#11638; `objectName` `:329`; the member's
  *   `outcomeMessages` too since objectui#11344).
- * - `label` — `:382` (`aria-label`, default: the translated "More actions")
- *   and `:391-392` (trigger text; icon-only when omitted).
- * - `icon` — `:237`, default the `MoreHorizontal` glyph.
- * - `variant` / `size` — `:238` / `:239`, handed to the Button primitive
+ * - `label` — `:391` (`aria-label`, default: the translated "More actions")
+ *   and `:400-401` (trigger text; icon-only when omitted).
+ * - `icon` — `:246`, default the `MoreHorizontal` glyph.
+ * - `variant` / `size` — `:247` / `:248`, handed to the Button primitive
  *   unmapped (defaults `ghost` / `icon`): no `primary`, no `md` here.
- * - `visible` — `:232` + `:329`, fail-closed; the same truthiness note as
+ * - `visible` — `:241` + `:338`, fail-closed; the same truthiness note as
  *   `action:group`'s applies to a literal `false`.
  *
- * The registration's `inputs` (`:428-456`) publish `label`, `icon`,
+ * The registration's `inputs` (`:437-465`) publish `label`, `icon`,
  * `actions`, `variant`, `size`, `visible` and `className` since objectui#11168
  * slice 1, every key this row declares; through `db11afd49` (`:410-419`
  * there) `size` and `visible` were read and unpublished. ⚠️ As on
  * `action:group`, objectui#11182 has the trigger consume the host's evaluated
- * `disabled` verdict (`:219`, `:381`) — at `db11afd49` it already reached the
+ * `disabled` verdict (`:228`, `:390`) — at `db11afd49` it already reached the
  * trigger through the `...rest` spread — so a `properties.disabled` here greys
  * the trigger out while this row refuses it; recorded, not declared.
  */
@@ -4021,21 +4088,21 @@ export type ActionMenuPropsParsed = z.infer<typeof ActionMenuPropsSchema>;
 /**
  * `element:definition-list` — a compact key/value `<dl>`
  * (`components/src/renderers/basic/data-list.tsx` at the pin). Props are read
- * through `readProps` (`data-list.tsx:42-47` first line
+ * through `readProps` (`data-list.tsx:52-57` first line
  * `const props = readProps<{`, `properties` first). Read points: `items`
- * (`:48`), `columns` (`:49`), `inline` (`:63`), and per item `term` (`:66`) and
- * `description` (`:68`).
+ * (`:58`), `columns` (`:59`), `inline` (`:73`), and per item `term` (`:76`) and
+ * `description` (`:78`).
  *
  * - `columns` is compared as the NUMBER `2` (`props.columns === 2`); any other
  *   value renders one column. Declared as the literal pair `1 | 2`, which is
  *   what the Studio designer writes (a `number` control,
- *   `previews/block-config.ts:320`). The registration's enum published the
+ *   `previews/block-config.ts:335`). The registration's enum published the
  *   STRINGS `'1'` / `'2'` until objectui#11168 slice 2, and the string `'2'`
  *   renders one column; it now publishes the numbers `1` and `2`
- *   (`data-list.tsx:99-105`), as this row declares.
+ *   (`data-list.tsx:109-115`), as this row declares.
  * - `items` is optional, as it is read: absent and empty both render the
- *   renderer's own "No details" state (`:51-53`). The registration marked it
- *   required until objectui#11168 slice 2, and no longer does (`:91-97`).
+ *   renderer's own "No details" state (`:61-63`). The registration marked it
+ *   required until objectui#11168 slice 2, and no longer does (`:101-107`).
  * - An item is strict. `term` is required — it is the row's only label, placed
  *   as a React child, so a literal string — and `description` takes any value
  *   (`toText` prints objects as JSON and an absent one as an em dash). The
@@ -4084,39 +4151,54 @@ export type ElementDefinitionListProps = z.input<typeof ElementDefinitionListPro
 /**
  * `element:repeater` — a data-bound, chrome-free list: one line per record
  * (`components/src/renderers/basic/data-list.tsx` at the pin, props through
- * `readProps`, `data-list.tsx:125-135` first line `const props = readProps<{`).
- * Read points: `object` (`:171`, `:183`), `filter`
- * (`:148`, `:180` → `$filter`), `sort` (`:181` → `$orderby`), `limit` (`:182` →
- * `$top`), `emptyText` (`:209`), `divided` (`:214`), `titleField`
- * (`:219-220`) and `fields` (`:156`, `:222-224`).
+ * `readProps`, `data-list.tsx:144-154` first line `const props = readProps<{`).
+ * Read points: `object` (`:195`, then `:234`, `:246`), `filter`
+ * (`:182-183`, then `:210`, `:243` → `$filter`), `sort` (`:196`, `:244` →
+ * `$orderby`), `limit` (`:197-199`, `:245` → `$top`), `emptyText` (`:279`),
+ * `divided` (`:284`), `titleField` (`:289-290`) and `fields` (`:218`,
+ * `:292-294`).
  *
- * - `object` is REQUIRED, as `element:number`'s is: without it the renderer
- *   never queries and shows its "No records" state (`:171-174`, `:209`) —
- *   indistinguishable from an object that really has no rows. The
- *   registration marks it required too.
+ * - `object` is REQUIRED, as `element:number`'s is. At this pin the renderer
+ *   takes the node-level `dataSource.object` first and this key second
+ *   (`:192-195`); with neither it never queries and shows its "No records"
+ *   state (`:234-237`, `:279`) — indistinguishable from an object that really
+ *   has no rows. The registration marks it required too, because this row
+ *   does (`:320-326`). So a node that names its object only through
+ *   `dataSource` renders at this pin while this row refuses it; the
+ *   requirement can follow the renderer only by a schema change, which is
+ *   #11509's (the v18 retirement of this element's flat query keys).
  * - `filter` / `sort` are the family's one orthography from birth —
  *   `ViewFilterRule[]` and `SortItem[]` — and both are delivered:
  *   `ObjectStackAdapter.find` lowers a `{ field, operator, value }` array
  *   through `translateFilterArray` and serializes `{ field, order }` items
- *   through `serializeOrderBy` (`data-objectstack/src/index.ts:5000-5011`,
+ *   through `serializeOrderBy` (`data-objectstack/src/index.ts:5042-5053`,
  *   `:868-894`). Before the query the renderer resolves the rules' context
  *   tokens (`{current_user_id}`, the date macros) through `useResolvedFilter`
- *   (`data-list.tsx:147-148`), so a rule's string `value` may be one. The
+ *   (`data-list.tsx:209-210`), so a rule's string `value` may be one. The
  *   rule-array door here is the bare one `record:related_list` declares, not a
  *   `ruleArrayFilterError` door: that prescription speaks to a door that used
  *   to take the record form, and a door wired to it joins the stored-row
  *   conversion's reach (`conversions/registry.ts`), which is not this row's to
  *   change.
  * - `fields` takes a bare field name or `{ field }`. The renderer reads only
- *   `field` off the object form (`:224`) — a `label` is never rendered (the
+ *   `field` off the object form (`:294`) — a `label` is never rendered (the
  *   list has no header row), so it is refused with that reason. Its TS type
  *   and its registration's description advertised that `label` until
- *   objectui#11168 slice 2; both now name `field` alone (`:115-122`,
- *   `:245-249`).
+ *   objectui#11168 slice 2; both now name `field` alone (`:125-132`,
+ *   `:328-332`).
  *
- * NOT read at the pin, whatever a sibling might suggest: the node-level
- * `dataSource` binding. This renderer is not wrapped in objectui's
- * element-data-source gate, so the query keys above are the only way to aim it.
+ * READ at this pin, since objectui#11880 (objectui `aaba8655a`, the repeater
+ * half): the node-level `dataSource` binding. The renderer resolves it through
+ * `useElementDataSource` (`:172-173`), the hook `element:number` and
+ * `element:record_picker` resolve theirs through, and reads it FIRST, the
+ * query keys above being its fallback. Where a node carries both, the
+ * precedence is the one table `ElementDataSourceGate` applies to every
+ * gate-wrapped block: `object` is the binding's (`:192-195`); `filter` is this
+ * row's AND the binding's (`:180-188`); `sort` and `limit` take the binding's
+ * own value, then this row's key, then the one the binding's saved view
+ * supplies (`:196-199`). The registration is marked with
+ * `elementDataSourceBlock` (`:311`), so objectui publishes the binding input
+ * beside these keys.
  */
 export const ElementRepeaterPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:repeater`',
