@@ -469,11 +469,11 @@ interface RlsFilterOptions {
    *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
    *     floor is `update`/`delete`-only so the read path never carries it, and
    *     the authored-write probe already removes it by provenance;
-   *   • `security/explain`'s record-grained UPDATE verdict sets it on step
-   *     2.7's condition, because explain asks the master gate for that same
-   *     update ({@link SecurityPlugin.checkControlledByParentWrite}) and
-   *     refuses on its refusal; its `delete` verdict asks no master gate and
-   *     does not.
+   *   • `security/explain`'s record-grained UPDATE and DELETE verdicts set it
+   *     on step 2.7's condition, because explain asks the master gate for
+   *     every by-id write it explains
+   *     ({@link SecurityPlugin.checkControlledByParentWrite}) and refuses on
+   *     its refusal.
    *
    * `false`/absent leaves the floor exactly where it is. Never affects Layer 0
    * (the tenant wall) or any app-authored policy.
@@ -5431,14 +5431,14 @@ export class SecurityPlugin implements Plugin {
     // answer the by-id PATCH / DELETE gives:
     //  - Layer 1 carries the pre-image gate's floor decision (step 2.7,
     //    {@link resolvePreImageFloorDrop}).
-    //  - [ADR-0055] For an `update` it also carries step 2.7's coverage vouch,
-    //    `masterGateCoversThisWrite`, on the same condition (not on behalf of
-    //    anyone): explain asks the master gate for every update of a record
-    //    that exists ({@link checkControlledByParentWrite}, wired below), so a
-    //    `controlled_by_parent` record's ownership floor is handed over to that
-    //    check here exactly as the write path hands it over. `delete` keeps
-    //    the floor: explain asks no master gate for it, so it has nothing to
-    //    vouch with.
+    //  - [ADR-0055] It also carries step 2.7's coverage vouch,
+    //    `masterGateCoversThisWrite`, on step 2.7's own condition (not on behalf
+    //    of anyone), for an `update` and a `delete` alike: explain asks the
+    //    master gate for every by-id write of a record that exists
+    //    ({@link checkControlledByParentWrite}, wired below), so a
+    //    `controlled_by_parent` record's ownership floor (`owner_only_writes`,
+    //    `owner_only_deletes`) is handed over to that check here exactly as the
+    //    write path hands it over.
     //  - plugin-sharing's per-record gate is asked with `__writeScope` stamped
     //    as the middleware stamps it (step 2.6), always overwritten, so an
     //    `org` / unit writer is not judged owner-only.
@@ -5462,7 +5462,10 @@ export class SecurityPlugin implements Plugin {
       const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
         engineOp, o, recordId, c, sets, actsOnBehalfOf(c),
       ).catch(() => false);
-      const masterGateCoversThisWrite = engineOp === 'update' && !actsOnBehalfOf(c);
+      // Step 2.7's vouch is `!delegatorSets` for every verb it runs on; the
+      // floor itself comes off only where `masterGateCoversOperation` says the
+      // master gate covers the verb (`update`, `delete`).
+      const masterGateCoversThisWrite = !actsOnBehalfOf(c);
       return { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
     };
     const withWriteScope = async (o: string, c: any): Promise<any> =>
@@ -5546,10 +5549,13 @@ export class SecurityPlugin implements Plugin {
         // the caller-context by-id read, every data middleware included.
         recordAbsentToCaller: (o: string, rid: string, c: any) =>
           absentUnderCallerRead(() => this.readRowById(o, rid, c)),
-        // [ADR-0055] The master-detail write check an update meets at step
-        // 2.8, served as `ISecurityService.checkControlledByParentWrite` and
-        // asked with the EXPLAINED context. Its presence is what licenses the
-        // update's `masterGateCoversThisWrite` vouch above: the two go together.
+        // [ADR-0055] The master-detail write check a by-id update, delete or
+        // transfer meets at step 2.8, served as
+        // `ISecurityService.checkControlledByParentWrite` and asked with the
+        // EXPLAINED context. The update's answer is each of those verbs' answer
+        // (the check judges EDIT of the master whatever the record's verb). Its
+        // presence is what licenses the `masterGateCoversThisWrite` vouch
+        // above: the two go together.
         checkControlledByParentWrite: (o: string, rid: string, c: any) =>
           this.checkControlledByParentWrite(o, rid, c),
       },
