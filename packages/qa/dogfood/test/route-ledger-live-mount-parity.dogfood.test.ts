@@ -399,15 +399,18 @@ describe('route ledger ↔ live mount parity (#7526)', () => {
     expect(server.resolveMountedRoute!('POST', '/api/v1/packages/publish'))
       .toEqual({ method: 'POST', pattern: '/api/v1/packages/publish' });
 
-    // …and on the wire. This boot composes no `package` service, so the honest
-    // answer is the publish route's own 404 naming the surface — never a 405
+    // …and on the wire. [#22301] This boot is the SERVED composition: the
+    // showcase's `requires` names `marketplace`, so `bootStack` composes the
+    // `package` service as `objectstack serve` does, and the honest answer to an
+    // empty body is the publish route's OWN refusal of it — never a 405
     // advertising `DELETE, GET, HEAD, PATCH`, which are `/packages/:id`'s verbs
     // over a package whose id is the literal string `publish`.
+    expect(stack.kernel.hasPlugin('package-service'), 'the showcase requires marketplace').toBe(true);
     const token = await stack.signIn();
     const res = await stack.apiAs(token, 'POST', '/packages/publish', {});
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
     expect(res.headers.get('Allow')).toBeNull();
-    expect((await res.json())?.error?.message).toContain('marketplace publish surface');
+    expect((await res.json())?.error?.code).toBe('MISSING_REQUIRED_FIELD');
   }, 60_000);
 
   // The other two defects, pinned as live-router facts rather than as prose.
