@@ -340,9 +340,11 @@ export type ControlledByParentWriteDenialLeg =
  *   defect (`422 INVALID_METADATA`).
  * - `record_not_found`: the record `(object, recordId)` does not exist
  *   (`404 RECORD_NOT_FOUND`). This is the addressed record, not its master. A
- *   missing master row is not one of these outcomes: on the first hop the legs
- *   judge it as they judge any master row, and above the first hop it is the
- *   `master_chain` leg.
+ *   missing master row is not one of these outcomes: where the master governs
+ *   its own rows the legs judge it as they judge any master row, and where it
+ *   is itself `controlled_by_parent` the walk reads that row to derive the next
+ *   master, so an absent row after the legs is the `master_chain` leg, on the
+ *   first hop or above it.
  * - `master_reference_missing`: the record's stored master reference is empty
  *   (`422 MISSING_REQUIRED_FIELD`).
  */
