@@ -660,7 +660,7 @@ describe('per-option visibleWhen — a faulting predicate REFUSES the write (ADR
 
   it('an unbound ROOT refuses, naming what the option gate binds', () => {
     const entry = goldRefusal("parent.status == 'closed'", {}, { currentUser: AUTHED });
-    expect(entry.constraint.fault).toBe('runtime: Unknown variable: parent');
+    expect(entry.constraint.fault).toBe('type: Unknown variable: parent');
     expect(entry.message).toContain("reads 'parent', which the option gate does not bind");
   });
 
