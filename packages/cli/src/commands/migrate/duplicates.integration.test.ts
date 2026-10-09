@@ -25,12 +25,18 @@
  *  - `crm_case.case_number` — a DECLARED identifier, one value held on both
  *    sides of the organization partition. Reported by the `duplicates` scan,
  *    and reported before this card existed.
- *  - `sys_view_definition` — two ACTIVE shared views under one name, which is
- *    exactly what blocks `ensureViewDefinitionActiveIndex`'s NULL-safe
- *    tightening. Invisible to the drift differ by construction, and therefore
- *    to `os migrate plan`: `isRuntimeManagedIndex` excludes the index once the
- *    partial form exists, and before that the migration reuses the DECLARED
- *    index's name so the name-matched slot reads as filled either way.
+ *  - `sys_metadata` — two ACTIVE package-less overlays for one
+ *    `(type, name, organization_id)`, which is exactly what blocks
+ *    `ensureMetadataOverlayIndexes`' NULL-safe active-row tightening. Invisible
+ *    to the drift differ by construction, and therefore to `os migrate plan`:
+ *    `isRuntimeManagedIndex` excludes the index once the partial form exists,
+ *    and before that the migration reuses the DECLARED index's name so the
+ *    name-matched slot reads as filled either way.
+ *
+ * Until ADR-0131 D13 the runtime half was `sys_view_definition`'s active-row
+ * index. That table retired with its migration, so the fixture now also
+ * carries it, damaged, as the retirement's own control: a pre-flight that
+ * still probed it would report rows nothing will ever refuse.
  *
  * The control is what makes the second assertion mean something. A pre-flight
  * that quietly reported only the declared class — or a fixture that failed to
@@ -145,11 +151,33 @@ beforeAll(async () => {
     { id: 'a1', created_at: '2026-02-01T00:00:00.000Z', organization_id: 'org_x', subject: 'api', case_number: 'CASE-00001' },
   ]);
   // ── The runtime-migration half of the matched control (#8725) ──────────
-  // Two ACTIVE shared views under one name: `owner` NULL and `organization_id`
-  // NULL both fold into their sentinel buckets, so these two rows collide under
-  // `idx_sys_view_def_active`'s NULL-safe key while the declared, NULL-distinct
-  // index admits them. This is what blocks the tightening on the next serving
-  // boot — and what the drift differ cannot report.
+  // Two ACTIVE package-less overlays for one key in one organization:
+  // `package_id` NULL folds into its sentinel bucket, so these two rows collide
+  // under `idx_sys_metadata_overlay_active`'s NULL-safe key while the declared,
+  // NULL-distinct index admits them. This is what blocks the tightening on the
+  // next serving boot — and what the drift differ cannot report. The
+  // organization is NON-NULL on purpose: that key part stays bare in the index
+  // (#6418), so two rows with a NULL organization would not block the CREATE.
+  await k.schema.createTable('sys_metadata', (t: any) => {
+    t.string('id').primary();
+    t.string('type');
+    t.string('name');
+    t.string('organization_id');
+    t.string('package_id');
+    t.string('state');
+  });
+  await k('sys_metadata').insert([
+    { id: 'm1', type: 'view', name: 'crm_case.board', organization_id: 'org_x', package_id: null, state: 'active' },
+    { id: 'm2', type: 'view', name: 'crm_case.board', organization_id: 'org_x', package_id: null, state: 'active' },
+    // Outside the partial index's row scope: the same collision among archived
+    // rows is legal and must not be reported.
+    { id: 'm3', type: 'view', name: 'crm_case.retired', organization_id: 'org_x', package_id: null, state: 'archived' },
+    { id: 'm4', type: 'view', name: 'crm_case.retired', organization_id: 'org_x', package_id: null, state: 'archived' },
+  ]);
+  // ── The retired table, still physically present and still damaged ──────
+  // ADR-0131 D13: schema sync never drops a table, so an upgraded database
+  // keeps `sys_view_definition` and whatever its rows were. Nothing tightens
+  // an index on it any more, so nothing about it may reach the report.
   await k.schema.createTable('sys_view_definition', (t: any) => {
     t.string('id').primary();
     t.string('name');
@@ -160,10 +188,6 @@ beforeAll(async () => {
   await k('sys_view_definition').insert([
     { id: 'v1', name: 'crm_case.all_open', organization_id: null, owner: null, state: 'active' },
     { id: 'v2', name: 'crm_case.all_open', organization_id: null, owner: null, state: 'active' },
-    // Outside the partial index's row scope: the same collision among archived
-    // rows is legal and must not be reported.
-    { id: 'v3', name: 'crm_case.retired', organization_id: null, owner: null, state: 'archived' },
-    { id: 'v4', name: 'crm_case.retired', organization_id: null, owner: null, state: 'archived' },
   ]);
   await k.schema.createTable(ORGANIZATION_TABLE, (t: any) => {
     t.string('id').primary();
@@ -260,31 +284,34 @@ describe('#8928 os migrate duplicates — against a really booted stack', () => 
     // duplicate above was already reported before #8725; a probe that surfaced
     // only that class would satisfy "the report names some duplicate" and still
     // leave the operator with nothing at the moment they are blocked.
-    const viewIndex = produced.runtimeIndexPreflight.find(
-      (entry) => entry.index === 'idx_sys_view_def_active',
+    const overlayIndex = produced.runtimeIndexPreflight.find(
+      (entry) => entry.index === 'idx_sys_metadata_overlay_active',
     );
-    expect(viewIndex, 'the pre-flight must cover sys_view_definition').toBeDefined();
-    expect(viewIndex).toMatchObject({
-      migration: 'ensureViewDefinitionActiveIndex',
-      table: 'sys_view_definition',
+    expect(overlayIndex, 'the pre-flight must cover the sys_metadata overlay index').toBeDefined();
+    expect(overlayIndex).toMatchObject({
+      migration: 'ensureMetadataOverlayIndexes',
+      table: 'sys_metadata',
       rowScope: "state = 'active'",
       status: 'blocked',
       groups: [
         {
-          key: { name: 'crm_case.all_open', organization_id_key: '__global__', owner_key: '' },
+          key: { type: 'view', name: 'crm_case.board', organization_id: 'org_x', package_id_key: '' },
           rowCount: 2,
         },
       ],
     });
-    // The archived pair is outside the partial index and is NOT reported.
-    expect(JSON.stringify(viewIndex!.groups)).not.toContain('crm_case.retired');
+    // The archived pair is outside both partial indexes and is NOT reported.
+    expect(JSON.stringify(produced.runtimeIndexPreflight)).not.toContain('crm_case.retired');
+    // The retired table is NOT probed, damaged as it is (ADR-0131 D13).
+    expect(produced.runtimeIndexPreflight.map((entry) => entry.table)).not.toContain('sys_view_definition');
+    expect(JSON.stringify(produced.runtimeIndexPreflight)).not.toContain('crm_case.all_open');
     // The summary counts it, so an operator scanning the head of the document
     // sees that something is blocked without reading every entry.
     expect(produced.summary.runtimeIndexesBlocked).toBe(1);
     expect(produced.summary.runtimeIndexBlockingRows).toBe(2);
-    // `sys_metadata` exists on this fixture only if the boot made it; whatever
-    // its status, the four indexes are all accounted for.
-    expect(produced.runtimeIndexPreflight).toHaveLength(4);
+    // `sys_setting` is absent on this fixture; whatever each status, the three
+    // indexes are all accounted for.
+    expect(produced.runtimeIndexPreflight).toHaveLength(3);
     expect(produced.reportVersion).toBe(2);
 
     // The whole run — boot included — wrote nothing. If a future change arms a

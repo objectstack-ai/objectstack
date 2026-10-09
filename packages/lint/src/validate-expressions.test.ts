@@ -2005,6 +2005,89 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       });
     });
 
+    /**
+     * ── The option's root verdict (#22157) ──────────────────────────────────
+     *
+     * The server's option check (`evaluateOptionVisibility`) binds `record`,
+     * `previous` and the acting user, and nothing else. A predicate reading any
+     * other root faults on every write that picks the option and is admitted
+     * unchecked, so the build refuses it. The measured body is `parent` on a
+     * detail with exactly one `master_detail`: the object shape on which the
+     * field-rule slots one level up DO bind `parent`, so it is the shape an
+     * author copies from.
+     */
+    describe('a per-option `visibleWhen` root the option check does not bind is refused (#22157)', () => {
+      const detail = (visibleWhen: unknown, readonlyWhen?: unknown) => ({
+        objects: [
+          { name: 'fx_header', fields: { status: { type: 'text' } } },
+          {
+            name: 'fx_line',
+            fields: {
+              hdr: { type: 'master_detail', reference: 'fx_header' },
+              x: { type: 'text', ...(readonlyWhen === undefined ? {} : { readonlyWhen }) },
+              parent_code: { type: 'text' },
+              tier: {
+                type: 'select',
+                options: [{ label: 'Standard', value: 'standard' }, { label: 'Gold', value: 'gold', visibleWhen }],
+              },
+            },
+          },
+        ],
+      });
+      const WHERE = "object 'fx_line' · field 'tier' option 'gold' visibleWhen";
+      const PARENT = "parent.status == 'closed'";
+      /** What `evaluateOptionVisibility` binds, read off its call (`rule-validator.ts`). */
+      const BOUND = ['record', 'previous', 'current_user', 'user', 'ctx', 'os'];
+
+      it('⭐ refuses `parent` at error, located at the option, naming the option, the field and the root', () => {
+        const issues = validateStackExpressions(detail(PARENT));
+        expect(issues, JSON.stringify(issues, null, 2)).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ where: WHERE, severity: 'error', source: PARENT });
+        expect(issues[0]!.message).toContain("option 'gold' on field 'tier' reads `parent`");
+      });
+
+      it('⭐ CONTRAST — the same `parent` read on the field\'s own `readonlyWhen` passes: that slot binds it', () => {
+        expect(validateStackExpressions(detail("record.x == 'a'", PARENT))).toEqual([]);
+      });
+
+      it('⭐ CONTROL — `record`, `previous` and the acting user under every ADR-0068 spelling pass', () => {
+        for (const body of [
+          "record.x == 'a'",
+          "previous.x == 'a'",
+          "'org_admin' in current_user.positions",
+          "'org_admin' in user.positions",
+          "ctx.user.id != ''",
+          "os.user.id != ''",
+          "current_user.can('fx_line', 'edit')",
+          // A `record` member merely spelled like the refused root.
+          "record.parent_code == 'a'",
+        ]) {
+          expect(validateStackExpressions(detail(body)), body).toEqual([]);
+        }
+      });
+
+      /**
+       * An ALLOWLIST read against the real `SCOPE_ROOTS`, never a copy of it:
+       * every platform-wide root outside what the option check binds is
+       * refused, one finding each, so a root added to the baseline later is
+       * covered the day it lands.
+       */
+      it('refuses every `SCOPE_ROOTS` member the option check does not bind, one finding each', () => {
+        const unbound = (SCOPE_ROOTS as readonly string[]).filter((r) => !BOUND.includes(r));
+        expect(unbound).toContain('parent');
+        for (const root of unbound) {
+          const issues = validateStackExpressions(detail(`${root}.k == 'a'`));
+          expect(issues, root).toHaveLength(1);
+          expect(issues[0]!.where, root).toBe(WHERE);
+          expect(issues[0]!.message, root).toContain(`reads \`${root}\``);
+        }
+      });
+
+      it('gives one finding when the predicate reads two unbound roots', () => {
+        expect(validateStackExpressions(detail(`${PARENT} && input.k == 1`))).toHaveLength(1);
+      });
+    });
+
     it('flags a bare-field sharing-rule condition', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'crm_account', fields: { region: { type: 'text' } } }],

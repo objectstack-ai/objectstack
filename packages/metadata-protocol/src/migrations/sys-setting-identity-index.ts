@@ -52,9 +52,9 @@
  * an author can mark a listed column NULL-safe. The ruling is **Route 1 now**,
  * with the vocabulary route deferred to v18 as the ADR-class long-term form. So
  * this module is deliberately the third instance of a paradigm, not a new one:
- * `overlay-index.ts` and `view-definition-active-index.ts` are its two
- * precedents and it borrows their order, their vocabulary and their reporting
- * contract rather than inventing a variant.
+ * `overlay-index.ts` and #5839's `sys_view_definition` migration (retired with
+ * its table, ADR-0131 D13) were its two precedents, and it borrows their order,
+ * their vocabulary and their reporting contract rather than inventing a variant.
  *
  * ## Why the index REUSES the declared name
  *

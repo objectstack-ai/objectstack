@@ -183,7 +183,6 @@ import {
 import {
   SysMetadataObject,
   SysMetadataHistoryObject,
-  SysViewDefinitionObject,
   SysMetadataAuditObject,
 } from '../src/metadata/index.js';
 
@@ -311,7 +310,6 @@ const config: ObjectStackDefinition = defineStack({
     // Metadata
     SysMetadataObject,
     SysMetadataHistoryObject,
-    SysViewDefinitionObject,
     SysMetadataAuditObject,
 
     // System

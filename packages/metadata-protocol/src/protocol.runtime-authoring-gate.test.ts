@@ -2211,6 +2211,150 @@ describe('runtime authoring gate on OBJECT writes — the option visibleWhen ver
 });
 
 /**
+ * [#22157] The object save door refuses a field option's `visibleWhen` that
+ * reads `parent`, as `os build` does.
+ *
+ * The server's option check (`evaluateOptionVisibility` in ObjectQL) binds
+ * `record`, `previous` and the acting user, never `parent`. Measured before
+ * this change: on a detail with exactly one `master_detail` (where the
+ * field-rule slots DO bind `parent`), an option whose `visibleWhen` read
+ * `parent.status` saved through this door with a 200 and landed `active`, and
+ * every write that then picked the option faulted and was admitted unchecked.
+ *
+ * The refusal is in `@objectstack/lint` (the option pass's root verdict); no
+ * code here moves. Pinned through the REAL `saveMetaItem`, the header stored
+ * in the registry so the write is judged against the universe it lands in:
+ *
+ *  (a) the measured body is refused on an active save — a 422
+ *      `INVALID_METADATA` carrying the build's located finding — and nothing
+ *      lands;
+ *  (b) the same body still saves as a DRAFT (drafts are never gated), and the
+ *      draft's promotion and a package's draft publish are refused;
+ *  (c) control: an option reading `record` saves, and the row lands;
+ *  (d) the door's issue and the build's finding are the same finding.
+ *
+ * ⚠️ As in the blocks above: this package reaches `@objectstack/lint` through
+ * its built `dist/`, so an edit to the rule is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — an option visibleWhen reading parent (#22157)', () => {
+    const header = {
+        name: 'fx_header',
+        label: 'Header',
+        sharingModel: 'private',
+        fields: { name: { type: 'text', label: 'Name' }, status: { type: 'text', label: 'Status' } },
+    };
+    const line = (visibleWhen: unknown) => ({
+        name: 'fx_line',
+        label: 'Line',
+        sharingModel: 'private',
+        fields: {
+            hdr: { type: 'master_detail', label: 'Header', reference: 'fx_header' },
+            x: { type: 'text', label: 'X' },
+            tier: {
+                type: 'select',
+                label: 'Tier',
+                options: [{ label: 'Standard', value: 'standard' }, { label: 'Gold', value: 'gold', visibleWhen }],
+            },
+        },
+    });
+    /** The card's measured body. */
+    const PARENT = "parent.status == 'closed'";
+    /** Where the build locates it — the option the author edits. */
+    const WHERE = "object 'fx_line' · field 'tier' option 'gold' visibleWhen";
+
+    /** A protocol whose live registry holds the header — the stored universe. */
+    const hostWithHeader = () => {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? [header] : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    };
+    const lineRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_line');
+    const saveLine = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'object', name: 'fx_line', item, ...extra });
+    const buildFindings = (obj: unknown) => {
+        const stack = { objects: [header, obj] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID);
+    };
+
+    it('(a) REFUSES an active save with a 422 carrying the build\'s located finding, and nothing lands', async () => {
+        const { protocol, rows } = hostWithHeader();
+
+        const err = await saveLine(protocol, line(PARENT)).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the option predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.rulesRun).toContain('validateStackExpressions');
+        const issues = err.issues.filter((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+        expect(issues[0].path).toBe(WHERE);
+        expect(issues[0].severity).toBe('error');
+        // The named subject: the option, the field and the root.
+        expect(issues[0].message).toContain("option 'gold' on field 'tier' reads `parent`");
+        expect(lineRows(rows)).toEqual([]);
+    });
+
+    it('(b) the same body still saves as a DRAFT — drafts are never gated — and its PROMOTION is refused', async () => {
+        const { protocol, rows } = hostWithHeader();
+
+        await expect(saveLine(protocol, line(PARENT), { mode: 'draft' })).resolves.toMatchObject({ success: true });
+        expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
+
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'fx_line' }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe(WHERE);
+        expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
+    });
+
+    it("(b) a PACKAGE's draft publish of the same body is refused — nothing goes live", async () => {
+        const { protocol, rows } = hostWithHeader();
+        await expect(
+            saveLine(protocol, line(PARENT), { mode: 'draft', packageId: 'app.fx' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const res = await protocol.publishPackageDrafts({ packageId: 'app.fx' });
+
+        expect(res.outcome, JSON.stringify(res)).toBe('refused');
+        expect(res.publishedCount).toBe(0);
+        expect(res.failed).toEqual([expect.objectContaining({ type: 'object', name: 'fx_line', code: 'INVALID_METADATA' })]);
+        expect(lineRows(rows).map((r) => r.state)).toEqual(['draft']);
+    });
+
+    it('(c) control: an option reading `record` saves, and the row lands', async () => {
+        const { protocol, rows } = hostWithHeader();
+
+        const result = await saveLine(protocol, line("record.x == 'a'"));
+
+        expect(result.success).toBe(true);
+        expect(lineRows(rows).map((r) => r.state)).toEqual(['active']);
+    });
+
+    it('(d) the door and `os build` give the SAME finding', async () => {
+        const { protocol } = hostWithHeader();
+        const err = await saveLine(protocol, line(PARENT)).catch((e: any) => e);
+        const atDoor = (err.issues ?? []).filter((i: any) => i.rule === EXPRESSION_INVALID);
+
+        const atBuild = buildFindings(line(PARENT));
+
+        // Non-vacuous on both sides.
+        expect(atBuild).toHaveLength(1);
+        expect(atBuild[0]!.severity).toBe('error');
+        expect(atDoor).toHaveLength(1);
+        for (const key of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(atDoor[0][key], `door and build disagree on '${key}'`).toBe(atBuild[0]![key]);
+        }
+        // And the control is clean at the build too, not just at the door.
+        expect(buildFindings(line("record.x == 'a'"))).toEqual([]);
+    });
+});
+
+/**
  * [#22118] The object save door judges a stored sibling's finding against the
  * STORED universe — the registry's objects WITH the written object's stored
  * self — so a label-only save of a master is not refused for a detail the

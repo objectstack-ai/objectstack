@@ -207,7 +207,7 @@ const OWN_TABLES: Record<CommandName, readonly string[]> = {
   resume: ['sys_migration_journal'],
   'recorded-by': ['sys_metadata_history'],
   // The objects with a covered field: the scan walks each.
-  'value-shapes': ['os21529_contact', 'sys_metadata', 'sys_view_definition'],
+  'value-shapes': ['os21529_contact', 'sys_metadata'],
 };
 
 const absentJson = {} as Record<CommandName, Run>;
