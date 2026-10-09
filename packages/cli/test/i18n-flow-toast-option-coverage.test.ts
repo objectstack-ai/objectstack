@@ -113,7 +113,7 @@ describe('the coverage gate demands them (#22507)', () => {
   });
   const zhNew = (config: any) =>
     computeI18nCoverage(config).issues
-      .filter((i) => i.locale === 'zh-CN' && (i.key.includes('.options.') || /Message$/.test(i.key)))
+      .filter((i) => i.locale === 'zh-CN' && i.key.startsWith('flows.') && (i.key.includes('.options.') || /Message$/.test(i.key)))
       .map((i) => [i.key, i.source]);
 
   it('reports each untranslated option and toast in the flow bucket', () => {
