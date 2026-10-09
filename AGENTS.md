@@ -507,7 +507,7 @@ Even inside your own worktree, operate defensively:
    ⛔ **Three classes of PR never enter this path on green alone:** (a) a diff touching any **governed surface**
    (**Prime Directive #14**, which names them and holds the current list — **this file and `CLAUDE.md` are on it**,
    so re-read it rather than recalling it); (b) the **Version Packages** PR, or any PR whose merge performs a
-   release (**Prime Directive #15**); (c) a PR whose **changed lines exceed 5,000** (`additions + deletions`,
+   release (**Prime Directive #15**); (c) a PR whose **changed lines exceed 3,000** (`additions + deletions`,
    generated files included) — it lands the way a Tier H surface does: an authorized APPROVED review and then
    the owning seat, or a human merge. Read the PR's file list (`get_files`), **its author and its size** before
    you arm anything.
