@@ -440,6 +440,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     evidence: [{ in: 'commands/i18n/extract.ts', code: 'extractTranslations(authoringRuleUnionStack(normalized' }],
     why: 'its caller hands it the union (#22238).',
   },
+  'utils/schema-migrate.ts :: stack.requires': {
+    reads: 'top-level',
+    why: 'the `createStandaloneStack` RESULT, not an authored stack: its top-level `requires` is the one the runtime already read off the resolved artifact (`resolveArtifactCollections`, ADR-0130 D4 option B), so on a two-package artifact it is every body\'s tokens. Handed to the auth gate of `os migrate security-catalog-overlays` as the field `serve`\'s merge lays over the config (#22371).',
+  },
   'utils/scaffold-wiring.ts :: config.requires': {
     reads: 'top-level',
     why: 'a presence probe only: `declaredCapabilities` answers `[]` rather than `null` for a stack whose top level declares an empty `requires`, so the printed line says it replaces that key. The tokens come from `stackDeclaredCapabilities` (#22288).',
