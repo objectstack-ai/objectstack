@@ -28,7 +28,7 @@ import {
   SystemOverviewDatasets,
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
-import { PLATFORM_OWNER_EMAIL_ENV, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
+import { PLATFORM_OWNER_EMAIL_ENV, inProcessSessionReadInput, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
 import type { IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
@@ -2461,7 +2461,7 @@ export class AuthPlugin implements Plugin {
         // Platform-admin gate (ADR-0068 D2) — one shared judge for every
         // ObjectStack `/admin/*` mount; see platform-admin-gate.ts.
         const authApi = await this.authManager!.getApi();
-        const session = await authApi.getSession({ headers: c.req.raw.headers });
+        const session = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
         const verdict = judgePlatformAdmin(session);
         if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
 
@@ -2524,7 +2524,7 @@ export class AuthPlugin implements Plugin {
     // spelling instead of accreting per-mount copies.
     const gateAdmin = async (c: any): Promise<PlatformAdminActor | Response> => {
       const authApi = await this.authManager!.getApi();
-      const session = await (authApi as any).getSession({ headers: c.req.raw.headers });
+      const session = await (authApi as any).getSession(inProcessSessionReadInput(c.req.raw.headers));
       const verdict = judgePlatformAdmin(session);
       if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
       return verdict.actor;
@@ -2591,7 +2591,7 @@ export class AuthPlugin implements Plugin {
 
         // Platform-admin gate (ADR-0068 D2) — see platform-admin-gate.ts.
         const authApi = await this.authManager!.getApi();
-        const session = await authApi.getSession({ headers: c.req.raw.headers });
+        const session = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
         const verdict = judgePlatformAdmin(session);
         if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
 
@@ -2909,7 +2909,7 @@ export class AuthPlugin implements Plugin {
       rawApp.post(`${basePath}/admin/has-permission`, async (c: any) => {
         try {
           const authApi = await this.authManager!.getApi();
-          const session = await (authApi as any).getSession({ headers: c.req.raw.headers });
+          const session = await (authApi as any).getSession(inProcessSessionReadInput(c.req.raw.headers));
           const user = (session as { user?: { id?: unknown } } | null | undefined)?.user;
           if (user?.id && isPlatformAdminUser(user)) {
             const { readEvaluatedPermissionQuery, answerPermissionQueryAsAdmin } = await import(
