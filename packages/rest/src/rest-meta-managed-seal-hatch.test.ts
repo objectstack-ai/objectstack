@@ -9,8 +9,15 @@
  * `sys-metadata-repository.package-writability.test.ts` in
  * `@objectstack/metadata-protocol`. This file answers what they cannot: the
  * REST door relays the seal — `403` and `NOT_OVERRIDABLE` — for every type the
- * hatch used to open, under both spellings of the variable, on both kernel
- * shapes, and the sentence that reaches the client names the managed package.
+ * hatch used to open, on both kernel shapes, and the sentence that reaches the
+ * client names the managed package.
+ *
+ * [#22411] Only `OS_METADATA_WRITABLE` opens the hatch. The legacy spelling
+ * `OBJECTSTACK_METADATA_WRITABLE` was removed in 11.0, and the protocol's own
+ * copy of the reader kept honouring it until the protocol read the setting
+ * through the repository's one reader. Under the legacy spelling alone the
+ * hatch is shut at this door: the type listing reports no env override and
+ * every PUT and DELETE answers what it answers with nothing set.
  *
  * Same harness as `rest-meta-packaged-flow-refusal.test.ts`: a REAL
  * `ObjectStackProtocolImplementation` over a REAL `SchemaRegistry`, the
@@ -76,10 +83,22 @@ function boot(environmentId: string | undefined) {
         await route(method).handler({ method, params: { type, name }, query: {}, headers: {}, body } as any, res);
         return { status: res._status, code: res._json?.code, message: String(res._json?.error ?? '') };
     };
-    return { call };
+    /** `GET /api/v1/meta/types` — each named type's hatch reading, as the listing reports it. */
+    const listing = async (types: readonly string[]) => {
+        const found = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/meta/types');
+        if (!found) throw new Error('GET /api/v1/meta/types is not registered');
+        const res = makeRes();
+        await found.handler({ method: 'GET', params: {}, query: {}, headers: {} } as any, res);
+        const entries: any[] = res._json?.entries ?? [];
+        return Object.fromEntries(types.map((t) => {
+            const e = entries.find((x) => x.type === t);
+            return [t, e ? { allowOrgOverride: e.allowOrgOverride, overrideSource: e.overrideSource } : 'absent'];
+        }));
+    };
+    return { call, listing };
 }
 
-function open(variable: 'OS_METADATA_WRITABLE' | 'OBJECTSTACK_METADATA_WRITABLE') {
+function open(variable: 'OS_METADATA_WRITABLE' | 'OBJECTSTACK_METADATA_WRITABLE' = 'OS_METADATA_WRITABLE') {
     process.env[variable] = HATCH;
     ObjectStackProtocolImplementation.resetEnvWritableCache();
     resetEnvWritableMetadataTypes();
@@ -102,35 +121,67 @@ const EDITS: ReadonlyArray<readonly [string, string, Record<string, unknown>]> =
 ];
 
 describe('[ADR-0131 D6] the hatch opens no PUT onto a managed item at the REST door', () => {
-    for (const variable of ['OS_METADATA_WRITABLE', 'OBJECTSTACK_METADATA_WRITABLE'] as const) {
-        for (const environmentId of [undefined, 'env_1']) {
-            const kernel = environmentId ? 'environment' : 'host-config';
-            it(`${variable}=${HATCH}: PUT of each managed item answers 403 NOT_OVERRIDABLE, as with the hatch shut (${kernel} kernel)`, async () => {
-                const shut = boot(environmentId);
-                const sealed = await Promise.all(EDITS.map(([type, name, body]) => shut.call('PUT', type, name, body)));
-                open(variable);
-                const { call } = boot(environmentId);
-                for (const [i, [type, name, body]] of EDITS.entries()) {
-                    const r = await call('PUT', type, name, body);
-                    expect({ status: r.status, code: r.code }, `${type}/${name}`).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
-                    expect(r.message, `${type}/${name}`).toBe(sealed[i].message);
-                    expect(r.message, `${type}/${name}`).toContain('managed package');
-                }
-            });
-        }
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+        it(`OS_METADATA_WRITABLE=${HATCH}: PUT of each managed item answers 403 NOT_OVERRIDABLE, as with the hatch shut (${kernel} kernel)`, async () => {
+            const shut = boot(environmentId);
+            const sealed = await Promise.all(EDITS.map(([type, name, body]) => shut.call('PUT', type, name, body)));
+            open();
+            const { call } = boot(environmentId);
+            for (const [i, [type, name, body]] of EDITS.entries()) {
+                const r = await call('PUT', type, name, body);
+                expect({ status: r.status, code: r.code }, `${type}/${name}`).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
+                expect(r.message, `${type}/${name}`).toBe(sealed[i].message);
+                expect(r.message, `${type}/${name}`).toContain('managed package');
+            }
+        });
     }
 });
 
 describe('[ADR-0131 D6] the hatch opens no removal of a managed item at the REST door', () => {
-    for (const variable of ['OS_METADATA_WRITABLE', 'OBJECTSTACK_METADATA_WRITABLE'] as const) {
-        it(`${variable}=${HATCH}: DELETE of a managed flow and a managed object answers 403 NOT_OVERRIDABLE (environment kernel)`, async () => {
-            open(variable);
-            const { call } = boot('env_1');
-            for (const [type, name] of [['flow', 'pkg_flow'], ['object', 'pkg_invoice']] as const) {
-                const r = await call('DELETE', type, name);
-                expect({ status: r.status, code: r.code }, `${type}/${name}`).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
-                expect(r.message, `${type}/${name}`).toContain('is provided by a managed package and is sealed against removal');
+    it(`OS_METADATA_WRITABLE=${HATCH}: DELETE of a managed flow and a managed object answers 403 NOT_OVERRIDABLE (environment kernel)`, async () => {
+        open();
+        const { call } = boot('env_1');
+        for (const [type, name] of [['flow', 'pkg_flow'], ['object', 'pkg_invoice']] as const) {
+            const r = await call('DELETE', type, name);
+            expect({ status: r.status, code: r.code }, `${type}/${name}`).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
+            expect(r.message, `${type}/${name}`).toContain('is provided by a managed package and is sealed against removal');
+        }
+    });
+});
+
+describe('[#22411] the removed spelling OBJECTSTACK_METADATA_WRITABLE is not read: the hatch is shut at the REST door', () => {
+    const HATCH_TYPES = ['flow', 'object', 'field', 'permission', 'position'] as const;
+    const SHUT = { allowOrgOverride: false, overrideSource: 'registry' };
+
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+        it(`OBJECTSTACK_METADATA_WRITABLE=${HATCH}: the listing reports no env override, and every ${environmentId ? 'PUT and DELETE' : 'PUT'} answers as with nothing set (${kernel} kernel)`, async () => {
+            const shut = boot(environmentId);
+            const shutPuts = await Promise.all(EDITS.map(([type, name, body]) => shut.call('PUT', type, name, body)));
+            // Removals only on an environment kernel, where the removal door is asked before the store
+            // (this harness boots none) — the same scope as the removal pins above.
+            const REMOVALS = environmentId ? EDITS : [];
+            const shutDeletes = await Promise.all(REMOVALS.map(([type, name]) => shut.call('DELETE', type, name)));
+            expect(await shut.listing(HATCH_TYPES)).toEqual(Object.fromEntries(HATCH_TYPES.map((t) => [t, SHUT])));
+
+            open('OBJECTSTACK_METADATA_WRITABLE');
+            const legacy = boot(environmentId);
+            expect(await legacy.listing(HATCH_TYPES)).toEqual(Object.fromEntries(HATCH_TYPES.map((t) => [t, SHUT])));
+            for (const [i, [type, name, body]] of EDITS.entries()) {
+                expect(await legacy.call('PUT', type, name, body), `PUT ${type}/${name}`).toEqual(shutPuts[i]);
             }
+            for (const [i, [type, name]] of REMOVALS.entries()) {
+                expect(await legacy.call('DELETE', type, name), `DELETE ${type}/${name}`).toEqual(shutDeletes[i]);
+            }
+        });
+
+        it(`control — OS_METADATA_WRITABLE=${HATCH}: the listing reports the env override for the same types (${kernel} kernel)`, async () => {
+            open();
+            const { listing } = boot(environmentId);
+            expect(await listing(HATCH_TYPES)).toEqual(
+                Object.fromEntries(HATCH_TYPES.map((t) => [t, { allowOrgOverride: true, overrideSource: 'env' }])),
+            );
         });
     }
 });
