@@ -663,8 +663,9 @@ describe('#6563 — revertCommit restores a runtime-created `object`', () => {
     });
     // The token is asserted on `code` just above; the message carries the
     // human sentence and no longer restates it.
+    // [ADR-0131 D6] The repository's type door throws the managed seal.
     expect(res.failed[0].error).toContain(
-      `'object' is not allowOrgOverride in the registry.`,
+      `Metadata item 'object/myapp_invoice' is provided by a managed package and is sealed against in-place edits`,
     );
     // Refused means refused: the edit the commit made is still the live body.
     expect(storedFields(rows, 'myapp_invoice').fields).toContain('due_date');
@@ -861,8 +862,9 @@ describe('#6620 — revertCommit soft-removes a runtime-CREATED `object`', () =>
     });
     // The token is asserted on `code` just above; the message carries the
     // human sentence and no longer restates it.
+    // [ADR-0131 D6] The repository's type door throws the managed seal.
     expect(res.failed[0].error).toContain(
-      `'object' is not allowOrgOverride in the registry.`,
+      `Metadata item 'object/myapp_invoice' is provided by a managed package and is sealed against removal`,
     );
     // Refused means refused: the artifact-backed row is still there.
     expect(storedRows(rows, 'myapp_invoice')).toHaveLength(1);

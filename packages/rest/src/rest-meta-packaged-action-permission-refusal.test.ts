@@ -99,7 +99,7 @@ function boot(environmentId: string | undefined = 'env_1') {
 const expectRegimeC = (message: unknown, type: string, name: string, operation: 'save' | 'delete') => {
     const text = String(message);
     expect(text.startsWith(
-        `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked `
+        `Metadata item '${type}/${name}' is provided by a managed package and is sealed `
         + (operation === 'delete' ? 'against removal. ' : 'against in-place edits. '),
     )).toBe(true);
     expect(text).not.toContain('OS_METADATA_WRITABLE');

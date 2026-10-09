@@ -372,13 +372,28 @@ for (const { label, environmentId } of KERNELS) {
             expect(rows.size).toBe(1);
         });
 
-        it('[GUARD] the operator hatch opens the lock exactly as before (not this card\'s to move)', async () => {
+        it('[ADR-0131 D6] the operator hatch no longer opens the lock: a code-defined datasource is sealed with it open', async () => {
+            // Was `[GUARD] the operator hatch opens the lock exactly as before`:
+            // the save landed a row. Managed content is sealed now, so the hatch
+            // answers what the shut hatch answers — this door's own verdict and
+            // sentence — and nothing is written. A runtime datasource keeps its
+            // write (the control below).
             process.env.OS_METADATA_WRITABLE = 'datasource';
             ObjectStackProtocolImplementation.resetEnvWritableCache();
             resetEnvWritableMetadataTypes();
             const { protocol, rows } = session();
-            const saved = await protocol.saveMetaItem({ type: 'datasource', name: CODE_DS, item: body(CODE_DS, 'Hatch') });
-            expect(saved).toMatchObject({ success: true });
+            const err: any = await protocol
+                .saveMetaItem({ type: 'datasource', name: CODE_DS, item: body(CODE_DS, 'Hatch') })
+                .then(() => null, (e: unknown) => e);
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect(String(err?.message)).toBe(
+                `Datasource '${CODE_DS}' is code-defined and cannot be edited at runtime: it is read-only. `
+                + 'Edit the *.datasource.ts source that declares it and redeploy. '
+                + 'See docs/adr/0062-external-datasource-runtime.md.',
+            );
+            expect(rows.size).toBe(0);
+            const runtime = await protocol.saveMetaItem({ type: 'datasource', name: RUNTIME_DS, item: body(RUNTIME_DS, 'Hatch') });
+            expect(runtime).toMatchObject({ success: true });
             expect(rows.size).toBe(1);
         });
     });

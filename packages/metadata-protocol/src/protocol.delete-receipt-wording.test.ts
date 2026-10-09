@@ -225,37 +225,32 @@ describe('#5927 — a delete receipt names what actually happened', () => {
         );
     });
 
-    it('an overlay of a packaged ACTION — supportsOverlay:false, and still a real reset', async () => {
-        // The mirror case, and the sharpest one. `action` declares
-        // `supportsOverlay: false` yet is `allowOrgOverride: true`, so a
-        // packaged action really can be overridden at runtime — and then
-        // lifting that overlay really does restore the packaged default. A
-        // receipt decided by `supportsOverlay` would get this exactly
-        // backwards; one decided by artifact backing gets it right.
-        //
-        // The specimen was `flow` until #6283 rolled that type's
-        // `allowOrgOverride` back to `false` (ADR-0005:57), then bare
-        // `action` until commit ee58392e1 rolled back the remaining nine unratified
-        // flags — the premise pin above now holds the population EMPTY. The
-        // pairing stays reachable through `OS_METADATA_WRITABLE` (ADR-0005's
-        // documented operator escape hatch, consulted by both write gates),
-        // and an overlay row minted under the hatch — or under the old flag,
-        // pre-rollback — still exists at delete time, so the reset sentence
-        // this case pins is still a sentence real deployments will read.
+    it('an overlay of a packaged ACTION — supportsOverlay:false: no longer removable through the hatch (ADR-0131 D6)', async () => {
+        // This case used to pin the RESET sentence for the one pairing that
+        // reached it: a packaged item of a `supportsOverlay: false` type whose
+        // overlay row the `OS_METADATA_WRITABLE` hatch let the delete remove.
+        // Managed content is sealed now, so the hatch opens no removal of an
+        // item a managed package ships, and the pairing has no door: the delete
+        // is refused with the seal and the row stays. The reset sentence keeps
+        // its pin on the overlay of a packaged VIEW (the case above), the
+        // regime-O type whose overlay the registry allows.
         process.env.OS_METADATA_WRITABLE = 'action';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
 
-        const { protocol } = tenantProtocol({
+        const { protocol, rows } = tenantProtocol({
             rows: [overlayRow('action', 'rc9_escalate')],
             artifacts: [{ type: 'action', name: 'rc9_escalate' }],
         });
 
-        const result = await protocol.deleteMetaItem({ type: 'action', name: 'rc9_escalate' });
+        const err: any = await protocol.deleteMetaItem({ type: 'action', name: 'rc9_escalate' })
+            .then(() => null, (e: unknown) => e);
 
-        expect(result.message).toBe(
-            `Customization overlay deleted — action/rc9_escalate reset to artifact default. [seq=${result.seq}]`,
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(String(err?.message)).toContain(
+            "Metadata item 'action/rc9_escalate' is provided by a managed package and is sealed against removal.",
         );
+        expect(rows).toHaveLength(1);
     });
 
     afterEach(() => {

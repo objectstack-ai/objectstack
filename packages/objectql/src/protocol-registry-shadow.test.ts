@@ -194,7 +194,10 @@ function findByName(items: any[], name: string): any {
 // amendment table says ❌ for `page`/`app`/`action`), so overriding the
 // PACKAGED app these suites are built around now needs the ONE documented
 // door that remains: the `OS_METADATA_WRITABLE` operator escape hatch, which
-// both write gates consult. The machinery pinned here — envelope-preserving
+// both write gates consult. [ADR-0131 D6] Since the seal, the hatch opens no
+// write onto an app a managed package SHIPS: the overlay row these suites need
+// is written before the package's artifact arrives (`overlayRowThenLockedArtifact`),
+// and a write onto the shipped app is refused by the package door. The machinery pinned here — envelope-preserving
 // hydration, shadow healing, lock-vs-shadow ordering — is exactly what an
 // operator who unlocked a type would exercise, so the cases run behind the
 // hatch rather than re-specimening to `view` and losing the app-switcher
@@ -246,9 +249,11 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
 
     it('GET list while the overlay row exists: overlay content wins, artifact envelope wins', async () => {
         await overlayRowThenLockedArtifact('full');
-        // The lock now holds on this kernel too: a further PUT is refused.
+        // A further PUT is refused. [ADR-0131 D6] By the package door now, ahead
+        // of the item lock: the hatch opens no write onto an app a managed
+        // package ships, so the seal answers before the `_lock` gate is asked.
         await expect(protocol.saveMetaItem({ type: 'app', name: 'setup', item: { ...overlayBody, label: 'Again' } }))
-            .rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
+            .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
         const res = await protocol.getMetaItems({ type: 'app' });
         const setup = findByName((res as any).items, 'setup');
@@ -318,8 +323,9 @@ describe('registry shadow — scoped-kernel lock enforcement is shadow-immune', 
     // Same commit ee58392e1 door as above: with `app` no longer allowOrgOverride, the
     // save would 403 NOT_OVERRIDABLE at the type gate and never reach the
     // L3 lock this case exists to prove is shadow-immune. Behind the hatch
-    // the type gate passes and the LOCK is what refuses — the ordering the
-    // assertion (`ITEM_LOCKED`, not `NOT_OVERRIDABLE`) pins.
+    // the type gate used to pass and the LOCK refused. [ADR-0131 D6] The hatch
+    // no longer opens a managed app, so the save answers the package door
+    // (`NOT_OVERRIDABLE`); the delete still reaches the lock (`ITEM_LOCKED`).
     beforeEach(unlockAppOverridesViaEnvHatch);
     afterEach(resetEnvHatch);
 
@@ -357,10 +363,17 @@ describe('registry shadow — scoped-kernel lock enforcement is shadow-immune', 
             mockEngine, undefined, 'env_prod',
         );
 
+        // [ADR-0131 D6] The SAVE is refused by the package door now, ahead of
+        // the lock: the hatch opens no write onto an app a managed package
+        // ships. That door is shadow-immune for the same reason the lock is —
+        // `isArtifactBacked` reads the composite-key artifact, never the
+        // plain-key shadow — so the save still refuses; the lock's own
+        // shadow-immunity stays pinned on the delete, which the #6960
+        // carve-out (an `app` overlay merges at read) carries to the lock.
         await expect(protocol.saveMetaItem({
             type: 'app', name: 'setup', organizationId: 'org_a',
             item: { ...overlayBody },
-        })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
+        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
         await expect(protocol.deleteMetaItem({
             type: 'app', name: 'setup', organizationId: 'org_a',

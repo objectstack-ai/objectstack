@@ -40,6 +40,10 @@
  *  - **[#8146] the hatch is type-level** — `OS_METADATA_WRITABLE` no longer
  *    unlocks a write that NAMES a read-only base. See that block's own
  *    docblock; it carries the ruling and the measurement NARROW rests on.
+ *  - **[ADR-0131 D6] managed content is sealed** — and since that decision the
+ *    hatch unlocks no `override-artifact` write at all, named base or not: the
+ *    BROAD reading #8146 reserved for a maintainer decision is the one D6
+ *    records. The preservation cases NARROW kept are pinned refused below.
  *
  * ## [#8146] `OS_METADATA_WRITABLE` — from "deliberately uncovered" to pinned
  *
@@ -371,10 +375,12 @@ describe('#7682 — the refusal discriminates on package writability', () => {
    * env-wide, and `{ package_id: null, organization_id: <org> }` under an org
    * kernel — the documented per-org override, intact.
    *
-   * ⛔ The BROADER reading (the hatch never unlocks a write against an item a
-   * read-only package provides, named or not) is NOT implemented and must not
-   * be "completed" here: it retires the hatch's only documented use and needs a
-   * maintainer decision plus a docs/ADR change.
+   * [ADR-0131 D6] The BROADER reading (the hatch never unlocks a write against
+   * an item a read-only package provides, named or not) is the decision D6
+   * records — managed content is sealed — and is implemented: the
+   * preservation cases below are pinned REFUSED, and the docs entry
+   * (`environment-variables.mdx`) says what the hatch no longer opens. This
+   * docblock used to say the broader reading needed exactly that decision.
    *
    * One measurement worth carrying, because it narrows what this card proves:
    * `{ package_id: <read-only>, organization_id: null }` is ALSO what a genuine
@@ -384,7 +390,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
    * is precisely the ruling's own sentence: a type-level unlock reached the
    * package dimension.
    */
-  describe('#8146 — OS_METADATA_WRITABLE does not unlock a read-only package', () => {
+  describe('#8146 → ADR-0131 D6 — OS_METADATA_WRITABLE unlocks no write onto an item a managed package ships', () => {
     /** Open the hatch for `permission`, the type the QA run used. */
     function openHatch(types = 'permission') {
       process.env.OS_METADATA_WRITABLE = types;
@@ -433,6 +439,9 @@ describe('#7682 — the refusal discriminates on package writability', () => {
       // to grant a runtime escape hatch". Emitted while that variable IS set,
       // it prescribes the step the caller already took — the shape that makes
       // an automated client (or an AI agent) retry the same request forever.
+      // [ADR-0131 D6] #8146's hatch-open remedy ("retry without ?package= to
+      // land the overlay the hatch grants") is false too now: no package-less
+      // write lands one. A Regime C type is told its row's sanctioned path.
       openHatch();
       const err = await putWith(repo, {
         type: 'permission', name: 'showcase_contributor',
@@ -440,33 +449,33 @@ describe('#7682 — the refusal discriminates on package writability', () => {
       }) as { message?: string };
       const message = String(err.message);
 
-      expect(message).not.toMatch(/set OS_METADATA_WRITABLE/);
-      // …and it states the true remedy the measurement below proves exists.
-      expect(message).toContain('does not apply here');
-      expect(message).toContain("Retry without '?package='");
+      expect(message).not.toMatch(/OS_METADATA_WRITABLE/);
+      expect(message).not.toContain("Retry without '?package='");
+      expect(message).toContain('Clone it under a new name to customize it');
     });
 
-    // ── PRESERVATION: what NARROW deliberately keeps working ────────────
+    // ── [ADR-0131 D6] SEALED: what NARROW used to keep working ──────────
+    //
+    // These three were NARROW's preservation pins ("if this ever goes red, the
+    // NARROW/BROAD fork goes back to the maintainer"). It went back, and the
+    // maintainer's decision is ADR-0131 D6: managed content is sealed. Each is
+    // now pinned on the far side — refused with the seal, nothing persisted —
+    // with the hatch open, for every base spelling NARROW admitted.
 
-    it('a package-less hatch write still lands the env-wide overlay, bound to NO package', async () => {
-      // THE PREMISE. If this ever goes red, NARROW is preserving nothing and
-      // the fork (NARROW vs BROAD) goes back to the maintainer — it is not a
-      // test to "repair" by relaxing it.
+    it('a package-less hatch write lands NO overlay: NOT_OVERRIDABLE / 403, nothing persisted', async () => {
       openHatch();
       const err = await putWith(repo, {
         type: 'permission', name: 'showcase_contributor', intent: 'override-artifact',
-      });
+      }) as { message?: string };
 
-      expect(err).toBeNull();
-      const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
-      expect(metaRows).toHaveLength(1);
-      expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: null });
+      expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+      expect(String(err.message)).toContain(
+        "Metadata item 'permission/showcase_contributor' is provided by a managed package and is sealed",
+      );
+      expect(Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata')).toEqual([]);
     });
 
-    it('a package-less hatch write under an ORG kernel lands the per-org override the docs promise', async () => {
-      // `environment-variables.mdx:305` — the hatch treats named types "as
-      // `allowOrgOverride: true` … overridden per-org". This is that sentence,
-      // executed: the row binds to the org and to no package.
+    it('a package-less hatch write under an ORG kernel lands no per-org override either', async () => {
       openHatch();
       const orgRepo = new SysMetadataRepository({
         engine: engine as never, organizationId: 'org_acme', orgLabel: 'org_acme',
@@ -475,22 +484,45 @@ describe('#7682 — the refusal discriminates on package writability', () => {
         type: 'permission', name: 'showcase_contributor', intent: 'override-artifact',
       });
 
-      expect(err).toBeNull();
-      const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
-      expect(metaRows).toHaveLength(1);
-      expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: 'org_acme' });
+      expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+      expect(Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata')).toEqual([]);
     });
 
-    it('a hatch write naming a WRITABLE base still lands — the door reads writability, not the hatch', async () => {
+    it('a hatch write naming a WRITABLE base lands nothing — the hatch reaches no managed item on any base', async () => {
       openHatch();
       const err = await putWith(repo, {
         type: 'permission', name: 'showcase_contributor',
         intent: 'override-artifact', packageId: WRITABLE_PKG,
       });
 
+      expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+      expect(Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata')).toEqual([]);
+    });
+
+    it('the legacy spelling (OBJECTSTACK_METADATA_WRITABLE) opens nothing either', async () => {
+      // This reader honours only `OS_METADATA_WRITABLE`, so the legacy spelling
+      // was already shut here; pinned so the seal does not depend on that.
+      process.env.OBJECTSTACK_METADATA_WRITABLE = 'permission';
+      resetEnvWritableMetadataTypes();
+      ObjectStackProtocolImplementation.resetEnvWritableCache();
+      try {
+        const err = await putWith(repo, {
+          type: 'permission', name: 'showcase_contributor', intent: 'override-artifact',
+        });
+        expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+      } finally {
+        delete process.env.OBJECTSTACK_METADATA_WRITABLE;
+      }
+    });
+
+    it('control: the hatch keeps its TYPE-level unlock for an item no managed package ships (runtime-only)', async () => {
+      // `job` has no create channel: the hatch is what admits this write, and
+      // the seal does not reach it — a `runtime-only` intent names no managed
+      // item. Package-less, so no package door is asked.
+      openHatch('job');
+      const err = await putWith(repo, { type: 'job', name: 'nightly', intent: 'runtime-only' });
       expect(err).toBeNull();
-      const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
-      expect(metaRows[0]).toMatchObject({ package_id: WRITABLE_PKG });
+      expect(Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata')).toHaveLength(1);
     });
 
     it('the ADR-0005 overlay is untouched: a registry-allowed type still overlays a read-only package', async () => {
@@ -508,25 +540,25 @@ describe('#7682 — the refusal discriminates on package writability', () => {
       expect(metaRows[0]).toMatchObject({ package_id: READ_ONLY_PKG });
     });
 
-    it('with the hatch CLOSED the refusal still offers it — the prescription is chosen, not deleted', async () => {
-      // The other side of the false-prescription pin: opening the hatch (on a
-      // package-less write) remains a real answer, so the sentence must
-      // survive when the hatch is not already set.
-      //
-      // [#20910] MOVED from `permission` to `page`, a type with no ADR-0126
-      // regime row. ADR-0126 §2 is why the two sentences now differ: a Regime C
-      // type's packaged base is "refused loudly at the write door, the refusal
-      // naming the sanctioned path", and for `flow` / `action` / `permission`
-      // that path is the clone or the switch, never the hatch (the pin beside
-      // this one). For every type with no regime row the hatch is still the
-      // answer this limb offers. Measured to reach the SAME limb: `ITEM_LOCKED`,
-      // `lockSource: 'package'`, the named base echoed back.
-      const err = await putWith(repo, {
-        type: 'page', name: 'crm_landing',
-        intent: 'override-artifact', packageId: READ_ONLY_PKG,
-      }) as { message?: string };
-      expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG });
-      expect(String(err.message)).toContain('set OS_METADATA_WRITABLE=page');
+    it('[ADR-0131 D6] with the hatch CLOSED the refusal no longer offers it — opening it lands nothing', async () => {
+      // This was the other side of the false-prescription pin: under NARROW,
+      // opening the hatch on a package-less write was a real answer, so the
+      // sentence offered it. Managed content is sealed now, so that offer is
+      // the false prescription: the sentence names the seal and says the hatch
+      // does not open a managed item, hatch shut or open, and keeps the source
+      // remedy. A type with no regime row (`page`); the envelope is unchanged.
+      for (const hatch of [undefined, 'page']) {
+        if (hatch) openHatch(hatch);
+        const err = await putWith(repo, {
+          type: 'page', name: 'crm_landing',
+          intent: 'override-artifact', packageId: READ_ONLY_PKG,
+        }) as { message?: string };
+        expect(err, String(hatch)).toMatchObject({ code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG });
+        const message = String(err.message);
+        expect(message, String(hatch)).not.toMatch(/set OS_METADATA_WRITABLE/);
+        expect(message, String(hatch)).toContain('OS_METADATA_WRITABLE does not open a managed item');
+        expect(message, String(hatch)).toContain('Edit the source artifact and redeploy.');
+      }
     });
 
     it('[ADR-0126 §2] …while a Regime C type with the hatch CLOSED is told its sanctioned path, not the hatch', async () => {
@@ -664,10 +696,10 @@ describe('#7682 / #8146 — through saveMetaItem on the host-config topology', (
     expect(metaRows).toEqual([]);
   }, 30_000);
 
-  it('[#8146] the same hatch write WITHOUT ?package= still lands, bound to no package', async () => {
-    // The preservation half, end to end. NARROW refuses the named base and
-    // nothing else; this is the behaviour `environment-variables.mdx` promises
-    // and the reason the broad reading was not taken.
+  it('[ADR-0131 D6] the same hatch write WITHOUT ?package= is refused too: NOT_OVERRIDABLE / 403, nothing persisted', async () => {
+    // Was NARROW's preservation half, end to end ("still lands, bound to no
+    // package"). Managed content is sealed: the protocol's package door
+    // refuses it on this topology before the repository is reached.
     const { engine, protocol } = boot();
     process.env.OS_METADATA_WRITABLE = 'permission';
     resetEnvWritableMetadataTypes();
@@ -677,11 +709,10 @@ describe('#7682 / #8146 — through saveMetaItem on the host-config topology', (
       .saveMetaItem({ type: 'permission', name: 'showcase_contributor', item: permissionBody })
       .then(() => null, (e: unknown) => e);
 
-    expect(err).toBeNull();
+    expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     const metaRows = Array.from((engine as unknown as { rows: Map<string, Row> }).rows.values())
       .filter((r) => r.__table === 'sys_metadata');
-    expect(metaRows).toHaveLength(1);
-    expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: null });
+    expect(metaRows).toEqual([]);
   }, 30_000);
 });
 
@@ -710,12 +741,11 @@ describe('#7682 / #8146 — through saveMetaItem on the host-config topology', (
  * two kernels' answers to EACH OTHER (`the two kernels agree`) rather than
  * asserting a literal twice.
  *
- * **The limb ordering is the rule, here too.** `isOverlayAllowed` folds the
- * registry flag AND the `OS_METADATA_WRITABLE` hatch into one predicate, so
- * this branch is reached only with BOTH closed — the door is therefore below
- * every registry limb (an ADR-0005 overlay never reaches it, pinned) and the
- * hatch-open direction is delivered by the repository door downstream, which
- * this block measures rather than assumes.
+ * **The limb ordering is the rule, here too.** The door is below every
+ * registry limb (an ADR-0005 overlay never reaches it, pinned). [ADR-0131 D6]
+ * The hatch is no longer a limb: the protocol's package door reads the
+ * registry flag alone (`isSealedManagedItem`), so a hatch-open write of a
+ * managed item meets this door and the repository's refuses it the same way.
  */
 describe('#8184 — the scoped kernel answers the same code as the host-config kernel', () => {
   /**
@@ -834,28 +864,26 @@ describe('#8184 — the scoped kernel answers the same code as the host-config k
 
   // ── the hatchOpen remedy selection, BOTH directions, on this kernel ────
 
-  it('with the hatch CLOSED the refusal offers it — the prescription is chosen, not deleted', async () => {
-    const err = await save(boot('env_alpha').protocol, {
+  it('[ADR-0131 D6] the refusal never offers the hatch — hatch shut or open, the same sentence', async () => {
+    // Was two pins: hatch CLOSED, the refusal offered `set OS_METADATA_WRITABLE`;
+    // hatch OPEN, it said the hatch "does not apply here" and to retry
+    // package-less. Both remedies are false under the seal (no package-less
+    // write lands an overlay of a managed item), so the sentence no longer
+    // depends on the hatch at all.
+    const shut = await save(boot('env_alpha').protocol, {
       type: 'object', name: 'showcase_task', item: objectBody, packageId: READ_ONLY_PKG,
-    }) as { message?: string };
-    expect(String(err.message)).toContain('set OS_METADATA_WRITABLE=object');
-  }, 30_000);
-
-  it('with the hatch OPEN the refusal does NOT prescribe the step already taken', async () => {
-    // The false-prescription trap, on the topology this card is about. The
-    // hatch-open write does not reach the protocol branch at all — an open
-    // hatch makes `isOverlayAllowed` true — so this measures that the write
-    // falls through to the repository door and is answered there with the
-    // SAME code and the hatch-aware remedy. That is why the protocol site
-    // passes `hatchOpen: false` rather than recomputing it.
-    openHatch('permission');
-    const err = await save(boot('env_alpha').protocol, {
-      type: 'permission', name: 'showcase_contributor', item: permissionBody, packageId: READ_ONLY_PKG,
+    }) as { code?: string; status?: number; message?: string };
+    openHatch('object');
+    const open = await save(boot('env_alpha').protocol, {
+      type: 'object', name: 'showcase_task', item: objectBody, packageId: READ_ONLY_PKG,
     }) as { code?: string; status?: number; message?: string };
 
-    expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
-    expect(String(err.message)).not.toContain('set OS_METADATA_WRITABLE=permission');
-    expect(String(err.message)).toContain('does not apply here');
+    for (const err of [shut, open]) {
+      expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
+      expect(String(err.message)).not.toMatch(/set OS_METADATA_WRITABLE/);
+      expect(String(err.message)).toContain('OS_METADATA_WRITABLE does not open a managed item');
+    }
+    expect(open.message).toBe(shut.message);
   }, 30_000);
 
   // ── PRESERVATION: the load-bearing pins ───────────────────────────────
@@ -873,47 +901,24 @@ describe('#8184 — the scoped kernel answers the same code as the host-config k
     expect(metaRowsOf(engine)[0]).toMatchObject({ package_id: READ_ONLY_PKG });
   }, 30_000);
 
-  it('a package-less hatch write still lands the env-wide overlay, bound to NO package', async () => {
-    // THE PREMISE of NARROW, on this kernel. Red here means NARROW preserves
-    // nothing and the NARROW/BROAD fork goes back to the maintainer — not a
-    // test to "repair" by relaxing it.
-    openHatch('permission');
-    const { engine, protocol } = boot('env_alpha');
-    const err = await save(protocol, {
-      type: 'permission', name: 'showcase_contributor', item: permissionBody,
-    });
+  // [ADR-0131 D6] NARROW's three preservation pins, on this kernel, now on the
+  // far side: managed content is sealed, so none of them lands a row.
+  for (const [label, extra] of [
+    ['a package-less hatch write', {}],
+    ['a package-less hatch write under an ORG kernel', { organizationId: 'org_acme' }],
+    ['a hatch write naming a WRITABLE base', { packageId: WRITABLE_PKG }],
+  ] as const) {
+    it(`[ADR-0131 D6] ${label} lands no overlay of a managed item: NOT_OVERRIDABLE / 403`, async () => {
+      openHatch('permission');
+      const { engine, protocol } = boot('env_alpha');
+      const err = await save(protocol, {
+        type: 'permission', name: 'showcase_contributor', item: permissionBody, ...extra,
+      });
 
-    expect(err).toBeNull();
-    const rows = metaRowsOf(engine);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ package_id: null, organization_id: null });
-  }, 30_000);
-
-  it('a package-less hatch write under an ORG kernel lands the per-org override the docs promise', async () => {
-    openHatch('permission');
-    const { engine, protocol } = boot('env_alpha');
-    const err = await save(protocol, {
-      type: 'permission', name: 'showcase_contributor',
-      item: permissionBody, organizationId: 'org_acme',
-    });
-
-    expect(err).toBeNull();
-    const rows = metaRowsOf(engine);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ package_id: null, organization_id: 'org_acme' });
-  }, 30_000);
-
-  it('a hatch write naming a WRITABLE base still lands — the door reads writability, not the hatch', async () => {
-    openHatch('permission');
-    const { engine, protocol } = boot('env_alpha');
-    const err = await save(protocol, {
-      type: 'permission', name: 'showcase_contributor',
-      item: permissionBody, packageId: WRITABLE_PKG,
-    });
-
-    expect(err).toBeNull();
-    expect(metaRowsOf(engine)[0]).toMatchObject({ package_id: WRITABLE_PKG });
-  }, 30_000);
+      expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+      expect(metaRowsOf(engine)).toEqual([]);
+    }, 30_000);
+  }
 });
 
 /**
@@ -1282,7 +1287,7 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
       const err = await putWith(repo, { type, name: `pkg_${type}`, intent: 'override-artifact' }) as any;
       expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
       expect(String(err.message)).toBe(
-        `Metadata item '${type}/pkg_${type}' is provided by a code package, and its packaged base is locked `
+        `Metadata item '${type}/pkg_${type}' is provided by a managed package and is sealed `
         + `against in-place edits. ${paths} ${ADR_0126}`,
       );
       expect(Array.from(engine.rows.values())).toEqual([]);
@@ -1298,29 +1303,51 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
         .then(() => null, (e: unknown) => e) as any;
       expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
       expect(String(err.message)).toBe(
-        `Metadata item '${type}/pkg_${type}' is provided by a code package, and its packaged base is locked `
+        `Metadata item '${type}/pkg_${type}' is provided by a managed package and is sealed `
         + `against removal. ${paths} ${ADR_0126}`,
       );
     });
   }
 
-  it('type door, control: a type with no regime row keeps the overlay-allowed list and the hatch, byte for byte', async () => {
+  it('[ADR-0131 D6] type door, control: a type with no regime row reads the managed seal — the protocol\'s own sentence', async () => {
+    // Was the overlay-allowed list and "Set OS_METADATA_WRITABLE to enable
+    // additional types at runtime", byte for byte. That prescription is false
+    // for an `override-artifact` write now, so this door throws the ONE
+    // sentence the protocol's package door throws for the same item.
     const err = await putWith(repo, { type: 'object', name: 'showcase_task', intent: 'override-artifact' }) as any;
     expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     expect(String(err.message)).toBe(
-      "'object' is not allowOrgOverride in the registry. "
-      + 'Overlay-allowed: view, dashboard, report, translation, email_template. '
-      + 'Set OS_METADATA_WRITABLE to enable additional types at runtime.',
+      "Metadata item 'object/showcase_task' is provided by a managed package and is sealed against in-place edits: "
+      + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+      + 'a managed item. Edit the source artifact and redeploy. '
+      + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.',
     );
   });
 
-  it('type door: the hatch still opens a Regime C type exactly as before (NARROW untouched)', async () => {
+  it('[ADR-0131 D6] type door: the hatch no longer opens a Regime C type — the seal, with the row\'s path', async () => {
+    // Was `the hatch still opens a Regime C type exactly as before (NARROW
+    // untouched)`: the write landed a package-less row. Now refused with the
+    // same sentence the shut hatch gets, nothing persisted.
+    const shut = await putWith(repo, { type: 'action', name: 'pkg_action', intent: 'override-artifact' }) as any;
     process.env.OS_METADATA_WRITABLE = 'action';
     resetEnvWritableMetadataTypes();
-    const err = await putWith(repo, { type: 'action', name: 'pkg_action', intent: 'override-artifact' });
-    expect(err).toBeNull();
-    const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
-    expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: null });
+    const open = await putWith(repo, { type: 'action', name: 'pkg_action', intent: 'override-artifact' }) as any;
+    expect(open).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(open.message).toBe(shut.message);
+    expect(Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata')).toEqual([]);
+  });
+
+  it('[ADR-0131 D6] type door, delete: the hatch no longer opens the removal of a managed flow', async () => {
+    process.env.OS_METADATA_WRITABLE = 'flow';
+    resetEnvWritableMetadataTypes();
+    const err = await repo
+      .delete({ org: 'env', type: 'flow', name: 'pkg_flow' }, { parentVersion: 'sha256:whatever', actor: null, intent: 'override-artifact' })
+      .then(() => null, (e: unknown) => e) as any;
+    expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(String(err.message)).toBe(
+      "Metadata item 'flow/pkg_flow' is provided by a managed package and is sealed "
+      + `against removal. ${FLOW_PATHS} ${ADR_0126}`,
+    );
   });
 
   // ── the named-base ITEM_LOCKED limb (a read-only base named, hatch closed) ──
@@ -1339,19 +1366,16 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     });
   }
 
-  it('named base, hatch OPEN: a Regime C type keeps the hatch-open remedy byte for byte', async () => {
+  it('[ADR-0131 D6] named base, hatch OPEN: a Regime C type is told its row\'s path, as with the hatch closed', async () => {
+    // Was `keeps the hatch-open remedy byte for byte` ("retry without
+    // ?package= to land the overlay the hatch grants") — false under the seal.
     process.env.OS_METADATA_WRITABLE = 'flow';
     resetEnvWritableMetadataTypes();
     const err = await putWith(repo, { type: 'flow', name: 'pkg_flow', intent: 'override-artifact', packageId: READ_ONLY_PKG }) as any;
     expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG });
     expect(String(err.message)).toBe(
-      `Cannot overlay 'flow' in package '${READ_ONLY_PKG}': that package is read-only `
-      + '(provided by code or an installed app) and the type has no per-org overlay channel '
-      + '(allowOrgOverride=false), so this item is locked against runtime edits. '
-      + 'OS_METADATA_WRITABLE=flow is set, and it does not apply here: the hatch unlocks the '
-      + "metadata TYPE (treating it as allowOrgOverride), never a package's writability. "
-      + "Retry without '?package=' to land the env-wide / per-org overlay the hatch does grant, "
-      + 'or edit the source artifact and redeploy. See docs/adr/0010-metadata-protection-model.md.',
+      `Cannot overlay 'flow' in package '${READ_ONLY_PKG}': that package is read-only, and its packaged base `
+      + `is locked against in-place edits. ${FLOW_PATHS} ${ADR_0126}`,
     );
   });
 
@@ -1363,7 +1387,7 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     const longPkg = `com.example.${'x'.repeat(52)}`;
     expect(longPkg).toHaveLength(64);
     for (const [type] of PATHS) {
-      const message = String(SysMetadataRepository.readOnlyBaseOverrideError(type, longPkg, false).message);
+      const message = String(SysMetadataRepository.readOnlyBaseOverrideError(type, longPkg).message);
       expect(message.length, type).toBeLessThan(500);
       expect(message.endsWith(ADR_0126), type).toBe(true);
     }
