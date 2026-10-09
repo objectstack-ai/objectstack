@@ -1427,7 +1427,8 @@ export function attachPackageDocs(packages: unknown, sets: readonly PackageDocSe
  * whose manifest fields, `namespace` included, are the artifact manifest's.
  *
  * ⛔ No guess. No `manifest.id`, no entry carrying it, or MORE than one entry
- * carrying it — `os build` does not refuse a duplicate id, the boot does —
+ * carrying it — this collector has no duplicate-id refusal of its own; the
+ * boot's is `resolveArtifactPackageOrder`'s `DUPLICATE_ARTIFACT_PACKAGE` —
  * answers `undefined`, and the flat docs keep the top-level position they have
  * always had. The entry's id is read through {@link docsPackageRefs}, which
  * reads `artifactPackages`; ⛔ it is not re-derived here.
