@@ -123,7 +123,9 @@ describe('#3842 — every dispatcher error exit answers in the declared envelope
         const notAllowed = await makeDispatcher().handleActions('/task/close', 'GET', {}, AUTHED);
         expect(expectConformantError(notAllowed.response).code).toBe('METHOD_NOT_ALLOWED');
 
-        const notImplemented = await makeDispatcher().handleI18n('/labels/account', 'GET', {}, { request: {} });
+        // [#22432] `/i18n` stands on the anonymous-deny floor too, so its 501
+        // is read by the same signed-in caller.
+        const notImplemented = await makeDispatcher().handleI18n('/labels/account', 'GET', {}, AUTHED);
         expect(expectConformantError(notImplemented.response).code).toBe('NOT_IMPLEMENTED');
     });
 
