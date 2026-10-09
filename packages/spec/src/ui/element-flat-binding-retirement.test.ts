@@ -136,7 +136,10 @@ describe('the element tombstones — refused at the key, with the prescription',
     expect(message('element:record_picker', 'limit')).toContain('delete this one, since the binding\'s value always won');
     expect(message('element:number', 'object')).toContain('delete this one, since the binding\'s value always won');
     expect(message('element:number', 'filter')).toContain('append these to it, since the two always AND-combined');
-    expect(message('element:repeater', 'sort')).toContain('keep the value written here, which is the one the list honoured');
+    // The repeater put the binding first only at objectui#11880 and keeps its flat keys as a
+    // fallback, so two console versions applied a disagreeing pair differently: no rule to state.
+    expect(message('element:repeater', 'sort')).toContain('decide which of the two values the list should use');
+    expect(message('element:repeater', 'sort')).not.toContain('reaches no query');
   });
 
   it('refuses by the TOMBSTONE, not by the strict unknown-key arm — the two are different answers', () => {

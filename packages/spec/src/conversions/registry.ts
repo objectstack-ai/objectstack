@@ -7329,7 +7329,10 @@ function isRuleObjectArray(value: unknown): value is Dict[] {
  *   the saved view it names) first, the flat key second
  *   (`composed?.<key> ?? props.<key>`);
  * - `element:number`'s `filter`: AND-combined with the binding's;
- * - `element:repeater`: the flat keys ONLY — the binding was not read at all.
+ * - `element:repeater`: the flat keys ONLY — the binding was not read at all
+ *   (objectui#11880 then put the binding first, keeping the flat keys as a
+ *   fallback, so a value the two disagree on was applied differently by the
+ *   two console versions).
  */
 type FlatBindingDisposition =
   | { kind: 'move' }
@@ -7352,17 +7355,18 @@ function flatBindingDisposition(
       return {
         kind: 'todo',
         reason: `\`dataSource.${key}\` is set to a different value than this flat \`${key}\`. The list read `
-          + 'only its flat keys until it moved onto the binding, so the binding\'s value never applied; now it '
-          + `is the only one read. Keep the value you mean in \`dataSource.${key}\` and delete this key.`,
+          + 'only its flat keys until the console moved it onto the binding, and reads the binding first since, '
+          + 'so which of the two it applied depends on the console version. Keep the value you mean in '
+          + `\`dataSource.${key}\` and delete this key.`,
       };
     }
     if (view !== undefined && key !== 'object') {
       return {
         kind: 'todo',
-        reason: `the binding names the saved view \`${view}\`, which the list did not read until it moved onto `
-          + `the binding. Moved there, this \`${key}\` would combine with the view's own (a filter ANDs, a `
-          + 'sort or a limit overrides it), which the list never did. Decide whether the list should apply the '
-          + `view, then write the \`${key}\` you mean on \`dataSource\` and delete this key.`,
+        reason: `the binding names the saved view \`${view}\`, which the list did not read until the console `
+          + `moved it onto the binding. On the binding, this \`${key}\` combines with the view's own (a filter `
+          + 'ANDs, a sort or a limit overrides it), which an older console never applied. Decide whether the list '
+          + `should apply the view, then write the \`${key}\` you mean on \`dataSource\` and delete this key.`,
       };
     }
     return { kind: 'move' };
@@ -7406,9 +7410,10 @@ function flatBindingDisposition(
  * `element:repeater` `object` / `filter` / `sort` / `limit`. Each was the
  * same query as a key of `ElementDataSourceSchema`, resolved per renderer by
  * three different rules, and objectui#11880 (objectui `5bc55c0c5a1e`) moved
- * all three renderers onto the binding alone — the order the ruling set, so
- * this rewrite never moves a working list's query into a position its
- * renderer does not read.
+ * all three renderers onto the binding — the picker and `element:number` read
+ * it alone, the repeater reads it first and keeps its flat keys as a fallback
+ * — in the order the ruling set, so this rewrite never moves a working list's
+ * query into a position its renderer does not read.
  *
  * Mechanical where the OLD rule decides the answer
  * ({@link flatBindingDisposition}):
@@ -7425,8 +7430,9 @@ function flatBindingDisposition(
  * key the binding lacks beside a `dataSource.view` (whether the view's own key
  * displaced it depends on the view, which no conversion reads); a repeater key
  * the binding sets to a different value, or beside a `view` (the repeater read
- * neither before, so moving it would combine it with what the list never
- * applied); and an `element:number` filter pair that is not two rule arrays. A
+ * neither before objectui#11880 and reads the binding first since, so what it
+ * applied depends on the console version); and an `element:number` filter pair
+ * that is not two rule arrays. A
  * key left as stored no longer reaches a query, and its tombstone refuses it
  * at the next parse with the same prescription.
  *
@@ -7590,7 +7596,8 @@ const elementFlatDataBindingToDataSource: MetadataConversion = {
             },
           ],
         },
-        // The named-slot shape: a repeater, which read its flat keys alone.
+        // The named-slot shape: a repeater, which read its flat keys alone
+        // before the console put its binding first.
         {
           name: 'deal_detail',
           kind: 'slotted',
