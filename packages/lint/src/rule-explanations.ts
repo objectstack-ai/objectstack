@@ -756,6 +756,294 @@ const VISIBILITY_BARE_IDENTIFIER_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Record writes (the body, flow-node and readonly write rules) ────────────
+// Three surfaces write a record's fields by name: an L2 (`language: 'js'`)
+// hook body, an L2 action body, and the `fields` map of a flow
+// `create_record` / `update_record` node. Three families of rules ask the same
+// questions of all three — does the field exist (`validate-hook-body-writes.ts`,
+// `validate-action-body-writes.ts`, `validate-flow-node-writes.ts`), does it
+// have storage, and is it writable through this channel
+// (`validate-readonly-{flow,hook,action}-writes.ts`) — so the reasoning they
+// share is written ONCE, as the constants below that every entry it explains
+// references, and the families cannot drift apart. The rule files share their
+// verdict clauses the same way.
+
+/** Why the engine refuses a write that names an undeclared field — the three undeclared-field ids. */
+const DECLARED_FIELD_DOOR =
+  'The engine\'s declared-field door judges every caller-supplied write payload against the object\'s ' +
+  'declared fields and refuses a key the object does not declare: INVALID_FIELD / 400, identically on ' +
+  'every driver, before any statement is built. The whole payload is refused, so the correctly named ' +
+  'fields beside the bad key never land either. The refusal arrives at run time, on whichever record ' +
+  'first exercises the write and far from the line that made the mistake, which is why the rule ' +
+  'reports it at author time, naming the field, the object and the write.';
+
+/** The cause and the consequence of writing an unprovisioned anchor — the three anchor ids. */
+const UNPROVISIONED_ANCHOR_WRITE: readonly string[] = [
+  'The registry injects system columns — the ownership anchors `owner_id` and `organization_id`, the ' +
+    'audit family — into every object. On an ADR-0015 external object the remote database owns the ' +
+    'schema, so the platform registers these anchors without provisioning a column: the name resolves, ' +
+    'but no storage stands behind it.',
+  'A write naming such an anchor can never land. The anchor exists only in the registered schema, which ' +
+    'is what carries it PAST the write-path validator that refuses an undeclared name outright ' +
+    '(INVALID_FIELD); the remote database is what rejects it. On a SQL remote that is an untyped driver ' +
+    'error (`no such column`) that aborts the whole statement, so the correctly named fields of the same ' +
+    'payload never land either; on a schemaless remote the key is persisted into a column no read ' +
+    'surface returns.',
+  'Only a name that resolved BECAUSE it is injected is judged: an author-declared column of the same ' +
+    'name maps a remote column the author vouches for and is never reported. The finding is a warning ' +
+    'because the rule cannot see the remote table, only that the platform provisions no storage for the ' +
+    'anchor.',
+];
+
+/** What a body that does not parse leaves unchecked — the two body-source ids. */
+const BODY_PARSE_FAILURE: readonly string[] = [
+  'The body is parsed — never executed, never type-checked — so its writes can be checked. A body with ' +
+    'a syntax error is only partially recovered by the parser, so the write set the checks read comes ' +
+    'from that recovered tree: a write in the part the parser could not read is judged by no rule.',
+  'It is reported rather than skipped because the body would otherwise come back with nothing to ' +
+    'report — the same silence the undeclared write itself has at run time, this time wearing the ' +
+    'checker\'s badge. It is a warning: it says what the checker could read, not a second syntax verdict.',
+];
+
+/** The static `readonly` strip — the flow and hook static-readonly ids. */
+const READONLY_STATIC_STRIP =
+  'The engine strips every static `readonly: true` field from a caller-supplied write payload, on ' +
+  'UPDATE and on INSERT alike, unless the write runs in a system context. The strip is silent: the call ' +
+  'or step still reports success, the rest of the payload lands, and on INSERT the column falls back to ' +
+  'the field\'s `defaultValue`; only a run-time warning naming the dropped field records it. `readonly` ' +
+  'governs the end-user and API surface, not trusted system writers, so a system context is the ' +
+  'intended channel for maintaining such a field.';
+
+/** The conditional `readonlyWhen` strip — the three readonlyWhen ids. */
+const READONLY_WHEN_STRIP: readonly string[] = [
+  'A `readonlyWhen` field is locked per record. On an UPDATE the engine strips it from the ' +
+    'caller-supplied payload wherever its predicate is TRUE for the record being written over, and a ' +
+    'bulk update strips it from every matched row once any one of them is locked. The strip is silent, ' +
+    'so whether the write lands depends on the record\'s state, which is why the finding is a warning.',
+  'Unlike the static `readonly` strip, the conditional lock is NOT waived by a system context, so ' +
+    'elevation is no workaround. A value a `beforeUpdate` hook derives is not caller-supplied and does ' +
+    'land, even on a locked record. An INSERT is never judged: there is no prior record for the ' +
+    'predicate to read, and the engine runs no conditional strip there.',
+];
+
+/** How a flow CRUD node's `fields` map reaches the engine — the two flow readonly ids. */
+const FLOW_FIELDS_CALLER_PAYLOAD =
+  'A `create_record` or `update_record` node hands its `fields` map to the engine as a caller-supplied ' +
+  'payload, under the flow\'s run identity: `runAs`, which defaults to \'user\'.';
+
+/** How a hook body's `ctx.api` write reaches the engine — the two hook readonly ids. */
+const HOOK_API_CALLER_PAYLOAD =
+  'A hook\'s `ctx.api` is a scoped handle over the TRIGGERING operation\'s context, so on every ' +
+  'non-system trigger a `ctx.api.object(NAME).update / updateById / insert(…)` payload is an ordinary ' +
+  'caller-supplied one.';
+
+const HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body-write-unknown-field',
+  covers: 'why an undeclared field write is refused',
+  paragraphs: [
+    'A hook body writes a record\'s fields through two channels, and both reach the same door. A ' +
+      '`ctx.input.NAME = …` write mutates the triggering record: the sandboxed script runs clean, the ' +
+      'value is copied back onto the record payload unfiltered, and the declared-field door runs a ' +
+      'second time over the payload the `before*` hooks produced. A ' +
+      '`ctx.api.object(NAME).insert / update / updateById(…)` write is a second, nested engine call: ' +
+      '`ctx.api` is a scoped handle on the running engine, so its payload arrives as an ordinary CALLER ' +
+      'write.',
+    DECLARED_FIELD_DOOR,
+    'What fails depends on the channel. A `ctx.input` write takes the triggering record write down with ' +
+      'it: the record is never written, and the refusal names the field far from the body that wrote it. ' +
+      'A `ctx.api` write lands nothing, and its refusal escapes the body and fails the operation that ' +
+      'triggered the hook.',
+    'A `ctx.input` write is judged against the hook\'s target objects, and a multi-target hook is ' +
+      'reported only when the field is missing on every one of them: the body may branch per object. ' +
+      'What the parser cannot pin down is skipped silently — a dynamic object name, an `object: \'*\'` ' +
+      'hook\'s input, a target another package declares — because a false positive costs an advisory ' +
+      'rule more than a miss. The rule stays a warning: it reads the body through a parser, never by ' +
+      'running it.',
+  ],
+};
+
+const HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body-write-unprovisioned-anchor',
+  covers: 'why a write to an unprovisioned anchor never lands',
+  paragraphs: [
+    ...UNPROVISIONED_ANCHOR_WRITE,
+    'On a hook body both write channels are judged. A `ctx.input` write is judged against the hook\'s ' +
+      'target objects, and a multi-target hook is reported only when the anchor is unprovisioned on ' +
+      'every one of them: the body may branch per object, so an anchor that is real on one target is a ' +
+      'legitimate write there. A `ctx.api.object(NAME)` write is judged against the object it names.',
+  ],
+};
+
+const HOOK_BODY_SOURCE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body-source-unparseable',
+  covers: 'what an unparseable body leaves unchecked',
+  paragraphs: [
+    ...BODY_PARSE_FAILURE,
+    'The gating readonly rule on the same body (`hook-api-update-readonly-field`) skips an unparseable ' +
+      'body rather than guess at what the unread part wrote, so this finding is the one that describes ' +
+      'the problem.',
+  ],
+};
+
+const ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'action-body-write-unknown-field',
+  covers: 'why an undeclared field write is refused',
+  paragraphs: [
+    'An action body persists records only through ' +
+      '`ctx.api.object(NAME).insert / create / update / updateById(…)`. `ctx.api` is a scoped handle on ' +
+      'the running engine, so the payload arrives as an ordinary CALLER write. An action\'s `ctx.input` ' +
+      'is its params bag, validated against the action\'s own `params`, so it is never resolved against ' +
+      'fields.',
+    DECLARED_FIELD_DOOR,
+    'The nested write lands nothing, and its refusal escapes the body and fails the action. Hook bodies ' +
+      'get the same check (`hook-body-write-unknown-field`) through the same extractor, so the two rules ' +
+      'judge the same write shape the same way.',
+  ],
+};
+
+const ACTION_RECORD_WRITE_DISCARDED_EXPLANATION: RuleExplanation = {
+  rule: 'action-record-write-discarded',
+  covers: 'why a ctx.record assignment is discarded',
+  paragraphs: [
+    'The runtime hands an action body a plain snapshot of the record as `ctx.record` and never writes it ' +
+      'back: the handler returns the body\'s value and applies nothing to the record. So ' +
+      '`ctx.record.NAME = …` changes a copy that dies with the sandbox, whether or not NAME is a declared ' +
+      'field, and the action still returns success. The snapshot stays read-only by design: an action\'s ' +
+      'write channel is `ctx.api`.',
+    'This is its own rule id rather than a case of `action-body-write-unknown-field` on purpose: ' +
+      'reporting only the undeclared half would imply that a write to a declared field persists, the ' +
+      'false completion the rule exists to stop.',
+    'It is reported only when the write is provably dead: `ctx.record` never leaves the body as a ' +
+      'value. Handed to anything — an argument, an assignment, a spread, a return — the snapshot may be ' +
+      'a payload under construction, so every write in that body is skipped. An alias ' +
+      '(`const r = ctx.record`) counts as an escape; a property read does not.',
+  ],
+};
+
+const ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
+  rule: 'action-body-source-unparseable',
+  covers: 'what an unparseable body leaves unchecked',
+  paragraphs: [
+    ...BODY_PARSE_FAILURE,
+    'The readonly rule on the same body (`action-api-update-readonly-when-field`) skips an unparseable ' +
+      'body rather than guess at what the unread part wrote, so this finding is the one that describes ' +
+      'the problem.',
+  ],
+};
+
+const ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION: RuleExplanation = {
+  rule: 'action-body-write-unprovisioned-anchor',
+  covers: 'why a write to an unprovisioned anchor never lands',
+  paragraphs: [
+    ...UNPROVISIONED_ANCHOR_WRITE,
+    'On an action body only the `ctx.api.object(NAME)` write is judged: an action\'s `ctx.input` is its ' +
+      'params bag, not a record, and its `ctx.record` is a snapshot the runtime never writes back ' +
+      '(`action-record-write-discarded`).',
+  ],
+};
+
+const FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-write-unknown-field',
+  covers: 'why an undeclared field write is refused',
+  paragraphs: [
+    'A `create_record` or `update_record` node hands its `fields` map to the data engine directly — the ' +
+      'flow executor calls the engine\'s insert or update, not the metadata API — so the map arrives as an ' +
+      'ordinary caller payload.',
+    DECLARED_FIELD_DOOR,
+    'The node folds the refusal into a step failure, so the run fails. On `create_record` the row is ' +
+      'never created at all, so every later node that expected the new record\'s id is working from a ' +
+      'record that does not exist.',
+    'This rule gates where the hook and action body rules advise: nothing here is parsed — the key and ' +
+      'the object name are both literal metadata — so a finding is a certainty. Not judged: a templated ' +
+      'object name (resolved from flow variables at run time), a non-literal `fields` map, a dotted key ' +
+      '(a nested path the document drivers forward verbatim) and an object another package declares. ' +
+      '`runAs` is not consulted: no run identity conjures a column.',
+  ],
+};
+
+const FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-write-unprovisioned-anchor',
+  covers: 'why a write to an unprovisioned anchor never lands',
+  paragraphs: [
+    ...UNPROVISIONED_ANCHOR_WRITE,
+    'On a flow the `fields` map of a `create_record` or `update_record` node is judged against the ' +
+      'node\'s literal object name. This finding is a warning where the node\'s undeclared-field finding ' +
+      'is an error: that one is a certainty about this stack, this one is a claim about a remote schema ' +
+      'the build cannot see.',
+  ],
+};
+
+const FLOW_UPDATE_READONLY_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'flow-update-readonly-field',
+  covers: 'why a readonly field write is silently dropped',
+  paragraphs: [
+    FLOW_FIELDS_CALLER_PAYLOAD,
+    READONLY_STATIC_STRIP,
+    'A `runAs: \'system\'` flow bypasses the static strip and legitimately maintains readonly fields ' +
+      '(users cannot edit them, automation does), so it is never reported here; the same flow is still ' +
+      'judged for `readonlyWhen` fields, whose lock elevation does not waive. A `create_record` on a ' +
+      'platform-internal object (an engine-owned, append-only or better-auth bucket, or a `sys_` name) ' +
+      'is not judged: the engine runs no create-side strip there. The rule gates because a literal ' +
+      'field name against a declared `readonly: true` is a certain no-op.',
+  ],
+};
+
+const FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'flow-update-readonly-when-field',
+  covers: 'why a readonlyWhen field write may not land',
+  paragraphs: [
+    FLOW_FIELDS_CALLER_PAYLOAD,
+    ...READONLY_WHEN_STRIP,
+    'So a `runAs: \'system\'` flow is judged here like any other, and the verdict names the run ' +
+      'identity it was judged under. Only `update_record` is judged.',
+  ],
+};
+
+const HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'hook-api-update-readonly-field',
+  covers: 'why a readonly field write is silently dropped',
+  paragraphs: [
+    HOOK_API_CALLER_PAYLOAD,
+    READONLY_STATIC_STRIP,
+    'Never reported, because it never reaches the strip: a hook that declares `runAs: \'system\'` (its ' +
+      '`ctx.api` gets a system context, so the write lands and the triggering user is still stamped on ' +
+      'the record), and a `ctx.input.NAME = …` stamp in the record\'s own `beforeInsert` / `beforeUpdate` ' +
+      'hook, a server value rather than a caller\'s, which survives the strip. The rule keys on the write ' +
+      'channel, not the field, so that correct stamp is never touched. `ctx.api.sudo()` is no way out ' +
+      'from a body: `sudo()` lives on the in-process scoped context and is not marshalled into the ' +
+      'sandbox, so calling it is a TypeError at run time.',
+    'The rule gates because both halves are declared in this stack: the field\'s `readonly` and the ' +
+      'body\'s literal `ctx.api` write. `id` in an update payload is the write\'s address, not a field ' +
+      'write, and is not judged; a body that does not parse is skipped, and its ' +
+      '`hook-body-source-unparseable` finding describes the problem.',
+  ],
+};
+
+const HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'hook-api-update-readonly-when-field',
+  covers: 'why a readonlyWhen field write may not land',
+  paragraphs: [
+    HOOK_API_CALLER_PAYLOAD,
+    ...READONLY_WHEN_STRIP,
+    'Neither `runAs: \'system\'` nor `ctx.api.sudo()` helps: a system context does not waive the ' +
+      'conditional lock, and `sudo()` is not marshalled into the sandbox in any case.',
+  ],
+};
+
+const ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'action-api-update-readonly-when-field',
+  covers: 'why a readonlyWhen field write may not land',
+  paragraphs: [
+    'An action body\'s `ctx.api` runs elevated by design, in a system context. That exempts its writes ' +
+      'from the STATIC `readonly` strip — a `readonly: true` field written there lands, so this surface ' +
+      'has no static-readonly rule — but NOT from the conditional one.',
+    ...READONLY_WHEN_STRIP,
+    'Only `ctx.api.object(NAME).update / updateById(…)` is judged. `ctx.record` is not a write surface ' +
+      '(`action-record-write-discarded` owns that shape), and `id` in an update payload is the write\'s ' +
+      'address, not a field write.',
+  ],
+};
+
 /**
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
@@ -798,6 +1086,20 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VISIBILITY_PREDICATE_SYNTAX_EXPLANATION.rule]: VISIBILITY_PREDICATE_SYNTAX_EXPLANATION,
   [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION.rule]: VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION,
   [VISIBILITY_BARE_IDENTIFIER_EXPLANATION.rule]: VISIBILITY_BARE_IDENTIFIER_EXPLANATION,
+  [HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
+  [HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
+  [HOOK_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: HOOK_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
+  [ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
+  [ACTION_RECORD_WRITE_DISCARDED_EXPLANATION.rule]: ACTION_RECORD_WRITE_DISCARDED_EXPLANATION,
+  [ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
+  [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
+  [FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION,
+  [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
+  [FLOW_UPDATE_READONLY_FIELD_EXPLANATION.rule]: FLOW_UPDATE_READONLY_FIELD_EXPLANATION,
+  [FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
+  [HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION.rule]: HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION,
+  [HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
+  [ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

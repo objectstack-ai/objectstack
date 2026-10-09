@@ -88,6 +88,19 @@ export interface ReadonlyFlowWriteFinding {
 export const FLOW_UPDATE_READONLY_FIELD = 'flow-update-readonly-field';
 export const FLOW_UPDATE_READONLY_WHEN_FIELD = 'flow-update-readonly-when-field';
 
+/**
+ * [#22161] The clauses the three readonly write rules' one-line verdicts share
+ * — this file's, `validate-readonly-hook-writes.ts` and
+ * `validate-readonly-action-writes.ts` — written once so the three families
+ * cannot drift apart: where a `readonlyWhen` lock strips a write, and what a
+ * stripped INSERT leaves behind. The reasoning each verdict no longer carries
+ * (which strip runs where, what a system context waives and what it does not)
+ * is the ids' `os explain` text, whose shared paragraphs are likewise written
+ * once in `rule-explanations.ts`.
+ */
+export const READONLY_WHEN_STRIP_SCOPE = 'where its predicate is TRUE';
+export const READONLY_INSERT_STRIP_OUTCOME = 'so the row is created WITHOUT this column';
+
 /** The node type whose payload the STATIC branch alone judges (#15394). */
 const CREATE_NODE_TYPE = 'create_record';
 /** The node type both branches judge. */
@@ -297,19 +310,16 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             rule: FLOW_UPDATE_READONLY_FIELD,
             where,
             path: `${nodePath}.config.fields.${fieldName}`,
-            message: isCreate
-              ? // The create-side strip is the 2026-09-03 ruling (#14147): the
-                // same `stripReadonlyFields`, now run by `engine.insert` too. The
-                // id stays in this comment, out of the string an author reads
-                // and cannot resolve (`check:doc-authoring`).
-                `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +
-                `runAs:'${runAs}' the engine silently strips readonly fields from the INSERT payload too ` +
-                `(the same strip the UPDATE path runs), so the row is created WITHOUT this column ` +
-                `(it falls back to the field's defaultValue) — while the create_record step still reports ` +
-                `success, with only a run-time warning naming the dropped field.`
-              : `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +
-                `runAs:'${runAs}' the engine silently strips readonly fields from the UPDATE payload, ` +
-                `so this write never lands — while the step still reports success.`,
+            // The create-side strip is the 2026-09-03 ruling (#14147): the same
+            // `stripReadonlyFields`, now run by `engine.insert` too. The id
+            // stays in this comment, out of the string an author reads and
+            // cannot resolve (`check:doc-authoring`). [#22161] One verdict
+            // sentence naming the verb it was judged on; that the step still
+            // reports success, and what the column falls back to, is
+            // `os explain flow-update-readonly-field`.
+            message:
+              `writes readonly field '${fieldName}' of object '${objectName}', which a runAs:'${runAs}' ` +
+              (isCreate ? `INSERT silently strips, ${READONLY_INSERT_STRIP_OUTCOME}` : 'UPDATE silently strips'),
             hint: isCreate
               ? `Seeding a readonly column at create time is a SYSTEM act: declare the flow runAs:'system' ` +
                 `(the intended channel — readonly governs the end-user/API surface, not trusted system ` +
@@ -331,11 +341,12 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             rule: FLOW_UPDATE_READONLY_WHEN_FIELD,
             where,
             path: `${nodePath}.config.fields.${fieldName}`,
+            // [#22161] One verdict sentence naming the run identity it was
+            // judged under; the bulk-update reach and why elevation does not
+            // waive the lock are `os explain flow-update-readonly-when-field`.
             message:
-              `writes field '${fieldName}', which object '${objectName}' declares readonlyWhen. On records ` +
-              `where that predicate is TRUE, a runAs:'${runAs}' UPDATE strips the field (a bulk update strips ` +
-              `it from every matched row once any one of them is locked), so this write may silently not ` +
-              `land depending on the record's state.`,
+              `writes readonlyWhen field '${fieldName}' of object '${objectName}', which a runAs:'${runAs}' ` +
+              `UPDATE silently strips ${READONLY_WHEN_STRIP_SCOPE}`,
             hint:
               `Elevation is not a workaround here: unlike the static readonly strip, the conditional lock ` +
               `is NOT waived by a system context, so runAs:'system' strips this field on a locked record ` +

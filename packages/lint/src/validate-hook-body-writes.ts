@@ -100,8 +100,8 @@ import {
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
-  unprovisionedAnchorCause,
   unprovisionedAnchorHint,
+  unprovisionedAnchorVerdict,
 } from './system-fields.js';
 import { recordsOf } from './object-graph.js';
 
@@ -370,7 +370,7 @@ const INPUT_ENVELOPE_KEYS: ReadonlySet<string> = new Set(['id', 'options', 'ast'
  * the platform actually provisioned storage for it on the object being written.
  * On an ADR-0015 `external` object the two diverge — the registered anchor has
  * no column behind it — so every consumer pairs this membership test with
- * {@link unprovisionedAnchorWriteConsequence}'s check rather than treating a
+ * {@link unprovisionedAnchorWriteVerdict}'s check rather than treating a
  * hit here as the end of the question. The pairing is why the union may stay
  * generous: over-inclusion here no longer buys silence on a federated object.
  */
@@ -380,10 +380,11 @@ export const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * [commit 192213f66] The CONSEQUENCE clause every unprovisioned-anchor WRITE diagnostic
- * states — one wording across the three write surfaces (hook body, action body,
- * flow node), paired with `unprovisionedAnchorCause` / `unprovisionedAnchorHint`
- * from `system-fields.ts` the way #8340's four read-axis rules pair with them.
+ * [commit 192213f66] [#22161] The verdict every unprovisioned-anchor WRITE finding prints —
+ * one wording across the three write surfaces (hook body, action body, flow
+ * node): the shared one-clause {@link unprovisionedAnchorVerdict} from
+ * `system-fields.ts`, then what it means for the write `write` names (`the
+ * body's update(…) write`, `this update_record write`).
  *
  * Shared rather than re-typed for #8340's reason: the sentence is the finding's
  * evidentiary content, and a rule that re-words it drifts from its siblings and
@@ -392,7 +393,13 @@ export const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
  * that module's own note reserves the per-site consequence to the site, and the
  * "site" for this family is the family, not any one of its three files.
  *
- * ## Every clause below is measured, not inferred (commit 192213f66)
+ * The consequence the finding used to spell out in full — the anchor rides the
+ * registered schema PAST the write-path validator, and the remote database is
+ * what rejects it — is the three ids' `os explain` text, written ONCE in
+ * `rule-explanations.ts` (the paragraphs the three entries share), so the
+ * three families cannot drift apart there either.
+ *
+ * ## Every clause of that explanation is measured, not inferred (commit 192213f66)
  *
  * The card that produced this rule asserted a structural resemblance to the
  * read-axis gap and explicitly declined to guess the runtime behaviour. Measured
@@ -415,14 +422,40 @@ export const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
  * own upstream refusal cannot close — which is why this is a finding and not a
  * duplicate of the unknown-field rule next to it.
  */
-export function unprovisionedAnchorWriteConsequence(): string {
+export function unprovisionedAnchorWriteVerdict(objectName: string, field: string, write: string): string {
+  return `${unprovisionedAnchorVerdict(objectName, field)}, so ${write} can never land`;
+}
+
+/**
+ * [#22161] The refusal clause every undeclared-field WRITE finding ends on —
+ * one wording across the three write surfaces (hook body, action body, flow
+ * node), because all three are refused by the same door: the engine's
+ * declared-field door, `INVALID_FIELD` / 400. Why that door answers, and what
+ * it takes down with it, is the three ids' `os explain` text
+ * (`rule-explanations.ts`, written once there and shared by the three entries).
+ */
+export const UNDECLARED_FIELD_WRITE_REFUSAL = 'so the write is refused (INVALID_FIELD / 400)';
+
+/**
+ * [#22161] The verdict an undeclared `ctx.api` write prints on BOTH body
+ * surfaces — this rule's and `validate-action-body-writes.ts`' — which judge the
+ * identical `api-crud-literal` shape, so one function spells it for both.
+ */
+export function undeclaredApiWriteVerdict(objectName: string, method: string, field: string): string {
   return (
-    `so the value can never land: the anchor exists only in the registered schema, which is what carries ` +
-    `it PAST the write-path validator that refuses an undeclared name outright (INVALID_FIELD). The remote ` +
-    `database is what rejects it — on a SQL remote with an untyped driver error ('no such column') that ` +
-    `aborts the whole statement, so the correctly named fields in the same payload never land either; on a ` +
-    `schemaless remote the key is persisted into a column no read surface returns.`
+    `body calls ctx.api.object('${objectName}').${method}(…) writing undeclared field '${field}', ` +
+    UNDECLARED_FIELD_WRITE_REFUSAL
   );
+}
+
+/**
+ * [#10653] [#22161] The verdict an unparseable L2 body prints on BOTH body
+ * surfaces (`hook-body-source-unparseable`, `action-body-source-unparseable`):
+ * the same extractor, the same parse, so one sentence. What a partially
+ * recovered tree means for the checks is their shared `os explain` text.
+ */
+export function bodyParseFailureVerdict(failure: SourceParseFailure): string {
+  return `L2 body did not parse (${describeParseFailure(failure)}), so writes in its unread part go unchecked`;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -1060,10 +1093,9 @@ export function validateHookBodyWrites(
         rule: HOOK_BODY_SOURCE_UNPARSEABLE,
         where: `hook "${hookName}" › body`,
         path: loc.path,
-        message:
-          `L2 body did not parse (${describeParseFailure(extracted.parseFailure)}), so its write set was ` +
-          `read from a partially recovered tree — an undeclared field write in the unread part is not ` +
-          `reported.${loc.messageSuffix}`,
+        // [#22161] One verdict sentence; what a partially recovered tree means
+        // for the checks is `os explain hook-body-source-unparseable`.
+        message: `${bodyParseFailureVerdict(extracted.parseFailure)}${loc.messageSuffix}`,
         hint: PARSE_FAILURE_HINT,
       });
     }
@@ -1121,8 +1153,7 @@ export function validateHookBodyWrites(
             where,
             path,
             message:
-              `body writes '${w.field}' to its input, and ${unprovisionedAnchorCause(anchorObj, w.field)} — ` +
-              unprovisionedAnchorWriteConsequence() +
+              unprovisionedAnchorWriteVerdict(anchorObj, w.field, `the body's write to its input`) +
               loc.messageSuffix,
             hint: unprovisionedAnchorHint(anchorObj, w.field),
           });
@@ -1142,13 +1173,12 @@ export function validateHookBodyWrites(
           where,
           path,
           message:
-            `body writes '${w.field}' to its input, but ${objDesc} ${declares}. The sandboxed script runs ` +
             // The post-hook declared-field door (commit b003cf2e8) is what refuses it; the
             // id stays in this comment rather than in the string, which reaches
-            // authors and operators who cannot resolve a tracker number.
-            `clean and the value is copied back onto the record payload unfiltered, so the write is then ` +
-            `REFUSED at run time — INVALID_FIELD / 400, identically on every driver. The ` +
-            `record is never written, and the refusal names the field far from the body that wrote it.` +
+            // authors and operators who cannot resolve a tracker number. [#22161]
+            // How the value reaches that door is `os explain hook-body-write-unknown-field`.
+            `body writes '${w.field}' to its input, but ${objDesc} ${declares}, ` +
+            UNDECLARED_FIELD_WRITE_REFUSAL +
             loc.messageSuffix,
           hint: fixHint(w.field, unionCandidates(targetSets)),
         });
@@ -1169,8 +1199,7 @@ export function validateHookBodyWrites(
             where,
             path,
             message:
-              `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', and ` +
-              `${unprovisionedAnchorCause(w.object, w.field)} — ${unprovisionedAnchorWriteConsequence()}` +
+              unprovisionedAnchorWriteVerdict(w.object, w.field, `the body's ${w.method ?? 'update'}(…) write`) +
               loc.messageSuffix,
             hint: unprovisionedAnchorHint(w.object, w.field),
           });
@@ -1183,20 +1212,15 @@ export function validateHookBodyWrites(
           rule: HOOK_BODY_WRITE_UNKNOWN_FIELD,
           where,
           path,
-          message:
-            `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', but ` +
-            // [#13858] ctx.api is a ScopedContext over the running engine
-            // (`ObjectQL.buildHookApi`), so this payload is CALLER-supplied and
-            // the declared-field door (#8682 insert, #8738 update) is what
-            // refuses it. Measured on both families; the ids stay in comments
-            // rather than in the string, which reaches authors and operators
-            // who cannot resolve a tracker number.
-            `object '${w.object}' declares no such field. ctx.api is a scoped handle on the running ` +
-            `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
-            `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver, before ` +
-            `any statement is built. The nested write lands nothing, and the refusal escapes the body ` +
-            `and fails the operation that triggered the hook.` +
-            loc.messageSuffix,
+          // [#13858] ctx.api is a ScopedContext over the running engine
+          // (`ObjectQL.buildHookApi`), so this payload is CALLER-supplied and
+          // the declared-field door (#8682 insert, #8738 update) is what
+          // refuses it. Measured on both families; the ids stay in comments
+          // rather than in the string, which reaches authors and operators
+          // who cannot resolve a tracker number. [#22161] That reasoning is
+          // `os explain hook-body-write-unknown-field`; the verdict names the
+          // refusal.
+          message: undeclaredApiWriteVerdict(w.object, w.method ?? 'update', w.field) + loc.messageSuffix,
           hint: fixHint(w.field, [...known]),
         });
       }

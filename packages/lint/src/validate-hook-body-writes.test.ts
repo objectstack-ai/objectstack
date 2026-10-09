@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateHookBodyWrites,
+  validateHookBodyWrites as validateHookBodyWritesUnrecorded,
   extractHookBodyWrites,
   extractHookBodyWriteSet,
   hookBodyFindingLocation,
@@ -11,7 +11,31 @@ import {
   HOOK_BODY_WRITE_EXCLUSIONS,
   HOOK_BODY_WRITE_UNKNOWN_FIELD,
   HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR,
+  HOOK_BODY_SOURCE_UNPARSEABLE,
 } from './validate-hook-body-writes.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// the lowered-handler suffix included, not a chosen few. Run the whole file:
+// that case reads what the cases above fired.
+const SHORTENED_RULE_IDS: readonly string[] = [
+  HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR,
+  HOOK_BODY_WRITE_UNKNOWN_FIELD,
+  HOOK_BODY_SOURCE_UNPARSEABLE,
+];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateHookBodyWrites: typeof validateHookBodyWritesUnrecorded = (...args) => {
+  const findings = validateHookBodyWritesUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 // Target objects: array-shaped and map-shaped `fields`, plus a second object
 // for cross-object `ctx.api` writes and multi-target hooks.
@@ -107,7 +131,7 @@ describe('validateHookBodyWrites — ctx.input writes', () => {
     expect(findings[0].path).toBe('hooks[0].body.source');
     expect(findings[0].message).toContain("discont_total");
     expect(findings[0].message).toContain('crm_deal');
-    expect(findings[0].message).toContain('INVALID_FIELD / 400, identically on every driver');
+    expect(findings[0].message).toContain('INVALID_FIELD / 400');
     expect(findings[0].hint).toContain("'discount_total'");
   });
 
@@ -288,28 +312,34 @@ describe('validateHookBodyWrites — ctx.api writes', () => {
   // 'stagee' on object 'deal'", the target row was untouched, and the memory
   // family stored no shadow column. Same door the caller-payload half of
   // `undeclared-field-write-driver-split.integration.test.ts` pins.
+  //
+  // [#22161] The verdict names the refusal; the rest of that measured account
+  // is `os explain hook-body-write-unknown-field`, so it is pinned there.
   it('states the measured refusal — INVALID_FIELD / 400 on every driver — and no driver split', () => {
     const [finding] = validateHookBodyWrites(
       stackWith("await ctx.api.object('crm_deal').update({ id, stag: 'won' });"),
     );
+    const explanation = explanationOf(HOOK_BODY_WRITE_UNKNOWN_FIELD);
 
     // What the author actually gets, in the vocabulary #13657 landed for the
     // `ctx.input` sibling one branch over — one door, one phrasing.
     expect(finding.message).toContain('INVALID_FIELD / 400');
-    expect(finding.message).toContain('identically on every driver');
-    expect(finding.message).toContain('before any statement is built');
+    expect(explanation).toContain('identically on every driver');
+    expect(explanation).toContain('before any statement is built');
     // Why it is refused there rather than by a driver: the payload is a
     // CALLER's, which is the fact the whole rewrite turns on.
-    expect(finding.message).toContain('ordinary CALLER write');
+    expect(explanation).toContain('ordinary CALLER write');
     // ...and the blast radius that makes an author-time rule worth having.
-    expect(finding.message).toContain('fails the operation that triggered the hook');
+    expect(explanation).toContain('fails the operation that triggered the hook');
 
     // The retired claim, in both halves. Neither may come back without a
     // measurement saying it should.
-    expect(finding.message).not.toMatch(/driver-level error/);
-    expect(finding.message).not.toMatch(/schemaless/);
-    expect(finding.message).not.toMatch(/is persisted/);
-    expect(finding.message).not.toMatch(/write-path validator skips/);
+    for (const text of [finding.message, explanation]) {
+      expect(text).not.toMatch(/driver-level error/);
+      expect(text).not.toMatch(/schemaless/);
+      expect(text).not.toMatch(/is persisted/);
+      expect(text).not.toMatch(/write-path validator skips/);
+    }
   });
 
   // [#22212] The firing control and the aliased spelling, side by side: the
@@ -518,7 +548,7 @@ describe('[#8663] validateHookBodyWrites — unprovisioned anchor writes', () =>
     expect(findings[0].where).toBe('hook "stamp" › body');
     expect(findings[0].path).toBe('hooks[0].body.source');
     expect(findings[0].message).toContain("'owner_id'");
-    expect(findings[0].message).toContain('external object (ADR-0015)');
+    expect(findings[0].message).toContain("external object 'wh_order'");
     // The measured consequence, not the read-axis one: the value cannot land.
     expect(findings[0].message).toContain('can never land');
     expect(findings[0].hint).toContain("declare it in wh_order's own fields");
@@ -724,5 +754,38 @@ describe('hookBodyFindingLocation / validateHookBodyWrites — #16546: path redi
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('hooks[0].body.source');
     expect(findings[0].message).not.toContain('lowered from the inline handler');
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    // ...and the lowered-handler variant is among them: its location suffix
+    // rides the same message, so it is held to the same bound.
+    expect(firedShortened.some((f) => f.message.includes('lowered from the inline handler'))).toBe(true);
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR]: ['ADR-0015', 'PAST the write-path validator', 'no such column', 'schemaless remote', 'every one of them'],
+    [HOOK_BODY_WRITE_UNKNOWN_FIELD]: ['copied back onto the record payload unfiltered', 'scoped handle on the running engine', 'identically on every driver', 'the record is never written'],
+    [HOOK_BODY_SOURCE_UNPARSEABLE]: ['partially recovered', 'judged by no rule', 'hook-api-update-readonly-field'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

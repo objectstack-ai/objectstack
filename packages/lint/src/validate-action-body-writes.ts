@@ -83,18 +83,16 @@
 
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
-import { describeParseFailure, PARSE_FAILURE_HINT } from './checked-parse.js';
+import { PARSE_FAILURE_HINT } from './checked-parse.js';
+import { indexUnprovisionedAnchors, unprovisionedAnchorHint } from './system-fields.js';
 import {
-  indexUnprovisionedAnchors,
-  unprovisionedAnchorCause,
-  unprovisionedAnchorHint,
-} from './system-fields.js';
-import {
+  bodyParseFailureVerdict,
   extractHookBodyWriteSet,
   indexObjectFields,
   judgeableFieldsOf,
   IMPLICIT_FIELDS,
-  unprovisionedAnchorWriteConsequence,
+  undeclaredApiWriteVerdict,
+  unprovisionedAnchorWriteVerdict,
   HOOK_BODY_WRITE_PATTERNS,
   type BodyWritePatternExclusion,
   type HookBodyWritePattern,
@@ -341,9 +339,8 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
         rule: ACTION_BODY_SOURCE_UNPARSEABLE,
         where,
         path: site.path,
-        message:
-          `L2 body did not parse (${describeParseFailure(parseFailure)}), so its write set was read from a ` +
-          `partially recovered tree — an undeclared field write in the unread part is not reported.`,
+        // [#22161] The hook twin's sentence, from the one function both use.
+        message: bodyParseFailureVerdict(parseFailure),
         hint: PARSE_FAILURE_HINT,
       });
     }
@@ -365,11 +362,13 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
           rule: ACTION_RECORD_WRITE_DISCARDED,
           where,
           path: site.path,
+          // [#22161] One verdict sentence; that the snapshot is read-only by
+          // design whether or not the field is declared, and why only a
+          // provably dead write is reported, is
+          // `os explain action-record-write-discarded`.
           message:
-            `body assigns ctx.record.${w.field}, but an action's ctx.record is a plain snapshot the runtime ` +
-            `never writes back — the action returns success and the assignment is discarded, whether or not ` +
-            `'${w.field}' is a declared field. The snapshot stays read-only by design: an action's ` +
-            `write channel is ctx.api.`,
+            `body assigns ctx.record.${w.field}, but an action's ctx.record is a snapshot the runtime never ` +
+            `writes back, so the assignment is discarded while the action returns success`,
           hint:
             `To persist it, write through the API: ctx.api.object('<object>').updateById(ctx.recordId, ` +
             `{ ${w.field}: … }). Reported only because ctx.record is never passed anywhere in this body — ` +
@@ -408,9 +407,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
           rule: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR,
           where,
           path: site.path,
-          message:
-            `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', and ` +
-            `${unprovisionedAnchorCause(w.object, w.field)} — ${unprovisionedAnchorWriteConsequence()}`,
+          message: unprovisionedAnchorWriteVerdict(w.object, w.field, `the body's ${w.method ?? 'update'}(…) write`),
           hint: unprovisionedAnchorHint(w.object, w.field),
         });
         continue;
@@ -422,16 +419,12 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
         rule: ACTION_BODY_WRITE_UNKNOWN_FIELD,
         where,
         path: site.path,
-        message:
-          `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', but ` +
-          // [#13858] Same door, same measurement as the hook sibling — ctx.api
-          // is a ScopedContext over the running engine, so this payload is
-          // CALLER-supplied and #8682/#8738 refuse it before any driver.
-          `object '${w.object}' declares no such field. ctx.api is a scoped handle on the running ` +
-          `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
-          `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver, before ` +
-          `any statement is built. The write lands nothing, and the refusal escapes the body and ` +
-          `fails the action.`,
+        // [#13858] Same door, same measurement as the hook sibling — ctx.api
+        // is a ScopedContext over the running engine, so this payload is
+        // CALLER-supplied and #8682/#8738 refuse it before any driver.
+        // [#22161] The hook sibling's verdict, from the one function both use;
+        // the reasoning is `os explain action-body-write-unknown-field`.
+        message: undeclaredApiWriteVerdict(w.object, w.method ?? 'update', w.field),
         hint: fixHint(w.field, [...known]),
       });
     }
