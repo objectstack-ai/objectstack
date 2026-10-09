@@ -1843,6 +1843,67 @@ function lookupPageAttr(
 }
 
 /**
+ * Authored text in either `I18nLabel` form: a non-empty string, or the
+ * non-empty entries of an inline locale map. `undefined` when the value
+ * authors no text, which is how a `page:header` with no `title` (or an empty
+ * one) reads: the renderer draws no heading of its own for it either.
+ */
+function authoredLabelText(value: unknown): string | Record<string, string> | undefined {
+  if (typeof value === 'string') return value.length > 0 ? value : undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+/**
+ * Do two authored values say the same text? Strings compare as strings; two
+ * inline locale maps compare as sets of entries (key order is not text).
+ * Mirrors the CLI extractor's `sameAuthored`, which decides whether
+ * `os i18n extract` offers `pages.<name>.title` at all.
+ */
+function sameAuthoredText(a: string | Record<string, string>, b: unknown): boolean {
+  const other = authoredLabelText(b);
+  if (other === undefined) return false;
+  if (typeof a === 'string' || typeof other === 'string') return a === other;
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(other).sort();
+  return aKeys.length === bKeys.length && aKeys.every((k, i) => bKeys[i] === k && a[k] === other[k]);
+}
+
+/**
+ * The ONE header-title resolution for a root-level `page:header`. A region's
+ * entry and a `slots.<slot>` entry both reach it through the same visitor in
+ * {@link translatePage}, so the two roots cannot disagree.
+ *
+ * A bundle translates an attribute. It does not put one attribute in place of
+ * another over text the author wrote. The order:
+ *
+ *  1. the bundle's `pages.<name>.title`, across the locale chain;
+ *  2. the header's AUTHORED title, left as written: a template such as
+ *     `'{name}'`, a plain string, or an inline locale map;
+ *  3. the bundle's `pages.<name>.label`, in two cases only: the header authors
+ *     no title, or its title restates the page's own authored `label`. In the
+ *     second case the label's translation IS a translation of that text, and
+ *     `os i18n extract` offers no `title` key for such a header (it offers the
+ *     label alone), so reading the label here is what translates it.
+ *
+ * `undefined` means "leave the authored title alone".
+ */
+function resolvePageHeaderTitle(
+  bundleTitle: string | undefined,
+  bundleLabel: string | undefined,
+  authoredTitle: unknown,
+  authoredPageLabel: unknown,
+): string | undefined {
+  if (bundleTitle !== undefined) return bundleTitle;
+  if (bundleLabel === undefined) return undefined;
+  const own = authoredLabelText(authoredTitle);
+  if (own === undefined || sameAuthoredText(own, authoredPageLabel)) return bundleLabel;
+  return undefined;
+}
+
+/**
  * The copy keys `pages.<name>.components.<id>` carries (#6080). Measured
  * against `ComponentPropsMap` — see the schema's own note for which component
  * declares which.
@@ -2197,9 +2258,13 @@ export function walkAddressedPageComponents(
  * mutated.
  *
  * Header copy is addressed by **page name** rather than by component id because
- * `page:header` instances carry no stable id in practice. `title` falls back to
- * `pages.<name>.label` so translators need not repeat a string that is normally
- * identical to the page's nav label.
+ * `page:header` instances carry no stable id in practice. The header title is
+ * `pages.<name>.title`; when the bundle omits it, the header keeps its
+ * AUTHORED title, and `pages.<name>.label` stands in only where the header
+ * authors no title or its title restates the page's own `label`, so a
+ * translator need not repeat a string identical to the page's nav label
+ * ({@link resolvePageHeaderTitle}). A label never replaces a header title
+ * that says something else, a dynamic `'{name}'` above all.
  *
  * **One component, one address.** A ROOT-LEVEL `page:header` — an entry of a
  * region's `components[]`, or of a `slots.<slot>` on a `kind: 'slotted'` page
@@ -2283,10 +2348,12 @@ export function translatePage<T extends PageLike>(
   const name = doc.name;
   if (!name || !bundle) return doc;
 
-  const label = lookupPageAttr(bundle, name, 'label', opts) ?? doc.label;
+  const bundleLabel = lookupPageAttr(bundle, name, 'label', opts);
+  const label = bundleLabel ?? doc.label;
   const description = lookupPageAttr(bundle, name, 'description', opts) ?? doc.description;
-  const headerTitle = lookupPageAttr(bundle, name, 'title', opts)
-    ?? lookupPageAttr(bundle, name, 'label', opts);
+  // The header title is decided per header, against what that header authors
+  // (`resolvePageHeaderTitle`); only the bundle half is page-wide.
+  const bundleHeaderTitle = lookupPageAttr(bundle, name, 'title', opts);
   const headerSubtitle = lookupPageAttr(bundle, name, 'subtitle', opts);
 
   // The traversal — roots, descent, depth cap, cycle guard, collision
@@ -2349,6 +2416,11 @@ export function translatePage<T extends PageLike>(
     // root level — nested components are reached by the id route only.
     if (nested) return next;
     if (next.type !== PAGE_HEADER_COMPONENT) return next;
+    // One call for a region root and a slot root alike: both arrive here with
+    // `nested: false`, so the fallback order cannot differ between them.
+    const headerTitle = resolvePageHeaderTitle(
+      bundleHeaderTitle, bundleLabel, next.properties?.title, doc.label,
+    );
     if (headerTitle === undefined && headerSubtitle === undefined) return next;
     return {
       ...next,
@@ -2692,6 +2764,24 @@ export function objectLabelKey(objectName: string): string {
  */
 export function objectValidationMessageKey(objectName: string, ruleName: string): string {
   return `objects.${objectName}._validations.${ruleName}.message`;
+}
+
+/**
+ * Dot-notation i18n key for a refused `end` node's message —
+ * `flows.<flow>.refusals.<node_id>.message` (#22450).
+ *
+ * A sibling of {@link objectValidationMessageKey}, spelled here for the same
+ * reason: its consumer holds an `II18nService` (which takes a key), not a
+ * `TranslationBundle`. Used by the automation engine, which picks the
+ * translated TEMPLATE in the run's locale (`AutomationContext.locale`) before
+ * it renders the `{{ }}` holes. The run stores the refusal already rendered,
+ * so nothing downstream could translate it afterwards.
+ *
+ * `flowName` is `Flow.name` and `nodeId` is the refusing `end` node's
+ * `FlowNode.id`, the same addressing the `screens` group uses.
+ */
+export function flowRefusalMessageKey(flowName: string, nodeId: string): string {
+  return `flows.${flowName}.refusals.${nodeId}.message`;
 }
 
 export function resolveObjectFieldLabels(

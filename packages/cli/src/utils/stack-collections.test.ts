@@ -20,6 +20,7 @@ import {
   resolveStackCollection,
   shouldAutoRegisterObjectQL,
   shouldAutoRegisterStorageDriver,
+  stackBootPlugins,
   stackDeclaresMetadata,
 } from './stack-collections.js';
 
@@ -244,5 +245,26 @@ describe('#15006 — the union author-time rule input', () => {
     const folded = authoringRuleUnionStack(stack as Record<string, unknown>);
     expect((folded.objects as Array<{ name: string }>).map((o) => o.name))
       .toEqual(['probe_account', 'probe_order']);
+  });
+});
+
+describe('#22371 — stackBootPlugins, `os serve`\'s `plugins` and its `--dev` merge', () => {
+  const own = [{ name: 'own' }];
+  const dev = [{ name: 'dev-only' }];
+
+  it('without --dev: the stack\'s own array itself, devPlugins left out', () => {
+    expect(stackBootPlugins({ plugins: own, devPlugins: dev }, false)).toBe(own);
+    expect(stackBootPlugins({ plugins: own, devPlugins: dev }, undefined)).toBe(own);
+  });
+
+  it('with --dev: the devPlugins after the own plugins; none declared, the own array itself', () => {
+    expect(stackBootPlugins({ plugins: own, devPlugins: dev }, true)).toEqual([...own, ...dev]);
+    expect(stackBootPlugins({ devPlugins: dev }, true)).toEqual(dev);
+    expect(stackBootPlugins({ plugins: own }, true)).toBe(own);
+  });
+
+  it('no plugins at all: an empty list', () => {
+    expect(stackBootPlugins({}, false)).toEqual([]);
+    expect(stackBootPlugins(undefined, true)).toEqual([]);
   });
 });

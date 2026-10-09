@@ -232,7 +232,13 @@ const POSITIONS: ReadonlyArray<readonly [string, () => z.ZodType]> = [
   ['ui/component.zod.ts:RecordAlertProps.visible', () => slot(RecordAlertProps, 'visible')],
   ['ui/page.zod.ts:PageComponentSchema.visibleWhen', () => slot(PageComponentSchema, 'visibleWhen')],
   ['ui/page.zod.ts:PageComponentSchema.visibility', () => slot(PageComponentSchema, 'visibility')],
-  ['ui/view.zod.ts:ListViewShapeSchema.condition', () => slot(element(ListViewSchema, 'conditionalFormatting'), 'condition')],
+  // [#22228] The conditional formatting rule element moved out of
+  // `ListViewSchema` into its own module, so the field definition can mount the
+  // same element (`FieldSchema.conditionalFormatting`). One declaring position,
+  // two mounts; it is reached through the list view's mount here, and the
+  // field's mount is the same schema by identity
+  // (`data/field-conditional-formatting.test.ts`).
+  ['shared/conditional-formatting.zod.ts:ConditionalFormattingRuleSchema.condition', () => slot(element(ListViewSchema, 'conditionalFormatting'), 'condition')],
   ['ui/view.zod.ts:FormFieldBaseSchema.visibleWhen', () => slot(FormFieldSchema, 'visibleWhen')],
   ['ui/view.zod.ts:FormFieldBaseSchema.visibleOn', () => slot(FormFieldSchema, 'visibleOn')],
   ['ui/view.zod.ts:FormSectionSchema.visibleWhen', () => slot(FormSectionSchema, 'visibleWhen')],

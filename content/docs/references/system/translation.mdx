@@ -176,7 +176,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
-| **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
+| **flows** | `Record<string, { label?: string; screens?: Record<string, object>; refusals?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
@@ -249,7 +249,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated page label (nav / breadcrumb) |
 | **description** | `string` | optional | Translated page description |
-| **title** | `string` | optional | Translated `page:header` title (defaults to `label`) |
+| **title** | `string` | optional | Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label |
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
 
@@ -259,6 +259,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
 | **screens** | `Record<string, { title?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+| **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 
 ### Nested Shape: `PlatformTranslationData.metadataForms[string]`
 
@@ -375,7 +376,7 @@ Per-app translation data for objects, apps, and UI messages
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
-| **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
+| **flows** | `Record<string, { label?: string; screens?: Record<string, object>; refusals?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 
@@ -447,7 +448,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated page label (nav / breadcrumb) |
 | **description** | `string` | optional | Translated page description |
-| **title** | `string` | optional | Translated `page:header` title (defaults to `label`) |
+| **title** | `string` | optional | Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label |
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
 
@@ -457,6 +458,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
 | **screens** | `Record<string, { title?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+| **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 
 ### Nested Shape: `TranslationData.metadataForms[string]`
 
@@ -524,7 +526,7 @@ One locale of translations — the `translation` metadata type
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
-| **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
+| **flows** | `Record<string, { label?: string; screens?: Record<string, object>; refusals?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
@@ -606,7 +608,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated page label (nav / breadcrumb) |
 | **description** | `string` | optional | Translated page description |
-| **title** | `string` | optional | Translated `page:header` title (defaults to `label`) |
+| **title** | `string` | optional | Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label |
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
 
@@ -616,6 +618,7 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
 | **screens** | `Record<string, { title?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+| **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 
 ### Nested Shape: `TranslationItem.metadataForms[string]`
 

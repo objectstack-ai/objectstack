@@ -17,6 +17,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { checkFieldCompleteness, FIELD_CHOICE_WITHOUT_OPTIONS } from '../kernel/functional-completeness';
 import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
 import { FilterConditionSchema } from './filter.zod';
 import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
 import { DEFAULT_AUTONUMBER_FORMAT } from './autonumber-format';
@@ -1888,6 +1889,32 @@ export const FieldSchema = lazySchema(() => {
    */
   dueLike: z.boolean().optional().describe("Deadline semantic (`date` / `datetime` only): TRUE declares this date a deadline, so a renderer may show relative overdue wording (\"Overdue 3d\") and an overdue colour once it has passed. Absent or FALSE: not a deadline — nothing is inferred from the field's name. Pair with `settledWhen` to say when the deadline is settled for a record. Refused on any other type. Display only: nothing on the write path reads it."),
   settledWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the deadline is SETTLED while TRUE: no overdue wording or colour applies to this record, e.g. P`record.status == 'done'`. Evaluated per record like `visibleWhen`, reading the record's own columns as `record`. Requires `dueLike: true` on a `date` / `datetime` field; refused otherwise. Display only: nothing on the write path reads it."),
+
+  /**
+   * Cell formatting rules (#22228) — presentational rules with no semantic,
+   * such as an amount below zero in red or a priority cell coloured by its
+   * value. The maintainer directed this key on objectui#11815, beside that
+   * card's ruling D, which keeps a deadline's overdue state a declaration
+   * (`dueLike` / `settledWhen` above).
+   *
+   * The element is the list view's own rule (`ConditionalFormattingRuleSchema`,
+   * declared once in `shared/conditional-formatting.zod.ts`, which
+   * `ListViewSchema.conditionalFormatting` mounts too), so there is no second
+   * style vocabulary. Ordered: the first rule whose `condition` holds applies
+   * its `style` map to THIS FIELD'S CELL, wherever the field renders. A row
+   * rule styles the row, and both may apply to one record.
+   *
+   * The condition's scope is `value` (this field's value on the record) and
+   * `record` (the row) — nothing else. `@objectstack/lint`'s
+   * `validate-expressions.ts` judges it at `os build` / `os validate` and at
+   * the object save door (ADR-0049): it must parse, read `record.<field>`
+   * rather than a bare field, name declared fields, and read no root but those
+   * two.
+   *
+   * Display only: nothing on the write path reads it. The consumer is the
+   * renderer's cells (objectui), which read it after the spec publishes.
+   */
+  conditionalFormatting: z.array(ConditionalFormattingRuleSchema).optional().describe("Cell formatting rules for this field — `[{ condition, style }]`, the same rule a list view's `conditionalFormatting` declares. In order, the first rule whose CEL `condition` holds applies its CSS `style` map to THIS FIELD'S CELL wherever the field renders (grid, kanban card, record page, related list, report cell); a list view's row rules style the row, and both may apply. The condition reads `value` (this field's value on the record) and `record` (the row) and no other root, e.g. P`value < 0` with `style: { color: '#b91c1c' }`; `objectstack validate` refuses a condition that does not parse or reads any other root. For presentation only — a semantic state such as a deadline's overdue is declared with `dueLike` / `settledWhen` instead. Display only: nothing on the write path reads it."),
 
   /**
    * Form widget override. Names a registered field/UI component to render this

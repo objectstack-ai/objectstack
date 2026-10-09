@@ -260,7 +260,8 @@
     "src/**/*.zod.ts",
     "CHANGELOG.md",
     "api-surface",
-    "spec-changes.json"
+    "spec-changes.json",
+    "protocol-upgrade-guide.md"
   ],
   "scripts": {
     "build": "pnpm gen:schema && pnpm gen:openapi && tsup && if [ -z \"$OS_SKIP_DTS\" ]; then NODE_OPTIONS=\"--max-old-space-size=6144\" BUILD_DTS=true tsup; fi && node ../../scripts/check-dts-emitted.mjs && node ../../scripts/check-dts-references.mjs && node ../../scripts/check-dev-prereqs.mjs --stamp",

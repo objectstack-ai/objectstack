@@ -5621,11 +5621,41 @@ jobs:
       - name: Check the meta-url-spelling data module is current and spellings agree
         run: pnpm --filter @objectstack/spec check:meta-url-spelling
 
-      - name: Check spec-changes.json is regenerated with the ADR-0087 registries
+      # The two ADR-0087 D4 projections, under the #22449 B′ ruling. They are
+      # generated where they ship — at publish, by scripts/release-spec-changes.sh,
+      # which also verifies the packed copies against a fresh generation — so
+      # these two steps compare NO committed copy. They generate both from the
+      # registries in memory and go red only when generation fails, so a pull
+      # request that only adds a registry entry needs no regeneration commit.
+      # Like their neighbours they read source via tsx and need no build.
+      - name: Check spec-changes.json generates from the ADR-0087 registries
         run: pnpm --filter @objectstack/spec check:spec-changes
 
-      - name: Check the protocol upgrade guide is regenerated with the ADR-0087 registries
+      - name: Check the protocol upgrade guide generates from the ADR-0087 registries
         run: pnpm --filter @objectstack/spec check:upgrade-guide
+
+      # The ruling's condition (1): the review value the committed copies carried
+      # — the generated diff — stays on the pull request. Both sides are generated
+      # by the same `--out` generators the publish lane runs: this checkout's, and
+      # the base's own in a `git archive` of HEAD^1 (on a pull request, the base
+      # tip the merge ref sits on; on every other event, the previous commit). The
+      # diff renders into this job's summary and a notice annotation, which need
+      # no token that can write, and the step below uploads it as an artifact.
+      # Red only when a side cannot be generated; a diff is never red. Measured
+      # locally at ~6 s, no build needed.
+      - name: Render the generated spec-changes and upgrade-guide diff against the base
+        run: >-
+          pnpm --filter @objectstack/spec exec tsx scripts/render-projection-diff.ts
+          --base HEAD^1 --out-dir "$RUNNER_TEMP/spec-projections" --summary "$GITHUB_STEP_SUMMARY"
+
+      # Written only when the diff is non-empty, so an unchanged run uploads nothing.
+      - name: Upload the generated spec-projections diff
+        uses: actions/upload-artifact@v7
+        with:
+          name: spec-projections-diff
+          path: ${{ runner.temp }}/spec-projections/spec-projections.diff
+          if-no-files-found: ignore
+          retention-days: 14
 
       # The #4796 declaration-origin baseline. `export-origins/` records which
       # SOURCE DECLARATION every public entry point exports under every name, and

@@ -180,12 +180,11 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
     // Injected columns come second, de-duplicated by insertion order: a DECLARED
     // `owner_id` is the author's field (the registry lets it win), so the
     // authored spelling keeps its position in the "did you mean?" candidates.
-    // [#22211 ruling A] Declared read attachments come last: a block the
-    // object's service attaches per caller on read is something `record.<x>`
-    // resolves to on a served row, although it is not a field. Its second
-    // segment is judged against the block's own leaves — see
-    // {@link buildAttachedOnReadIndex}.
-    idx.set(name, [...new Set([...names, ...injectedColumnsFor(obj), ...attachedBlockNames(obj)])]);
+    // A declared read attachment is NOT here: it is not a column, so a stored
+    // row never carries it, and this index is what every stored-row site
+    // reads. The sites that bind a served row add the blocks themselves — see
+    // {@link SERVED_ROW_SITES} and {@link withAttachedBlocks}.
+    idx.set(name, [...new Set([...names, ...injectedColumnsFor(obj)])]);
   }
   return idx;
 }
@@ -212,17 +211,14 @@ function attachedOnReadOf(obj: AnyRec): Record<string, string[]> {
   return out;
 }
 
-/** The block names {@link attachedOnReadOf} reads — what joins the field-existence set. */
-function attachedBlockNames(obj: AnyRec): string[] {
-  return Object.keys(attachedOnReadOf(obj));
-}
-
 /**
- * [#22211 ruling A] object name → its declared read attachments (block name →
- * leaf keys), for the shared validator's second-segment judgement of
- * `record.<block>.<leaf>` (`ExprSchemaHint.attachedOnRead`). Only objects that
- * declare at least one block get an entry, so `index.get(name)` is `undefined`
- * — the hint absent — for every other object.
+ * object name → its declared read attachments (block name → leaf keys), for
+ * the served-row sites ({@link SERVED_ROW_SITES}): there each block name joins
+ * the field-existence set, and the shared validator judges the second segment
+ * of `record.<block>.<leaf>` against the block's leaves
+ * (`ExprSchemaHint.attachedOnRead`). Only objects that declare at least one
+ * block get an entry, so `index.get(name)` is `undefined` — the hint absent —
+ * for every other object.
  */
 function buildAttachedOnReadIndex(objects: AnyRec[]): Map<string, Record<string, string[]>> {
   const idx = new Map<string, Record<string, string[]>>();
@@ -233,6 +229,64 @@ function buildAttachedOnReadIndex(objects: AnyRec[]): Map<string, Record<string,
     if (Object.keys(blocks).length > 0) idx.set(name, blocks);
   }
   return idx;
+}
+
+/**
+ * The expression sites whose `record` is a row a service SERVES — the only
+ * sites where a declared read attachment resolves.
+ *
+ * `ObjectSchema.attachedOnRead` declares the blocks a service attaches to the
+ * rows it serves, computed per caller and never stored. A block is therefore
+ * on `record` only where `record` is such a served row, and this list names
+ * those sites:
+ *
+ * - an action's `visible` and `disabled` predicates. The client's action
+ *   runtime evaluates them against the row the surface fetched, and a surface
+ *   that reads the declaring service's own routes holds the row that service
+ *   served — the console reads `sys_approval_request` through the approvals
+ *   routes, whose rows carry the `viewer` block. A surface that fetched the
+ *   row elsewhere has no block, which is why such a predicate guards the
+ *   block with `has()`.
+ *
+ * Every other site binds the STORED row, and judges field existence against
+ * the object's columns alone ({@link buildFieldIndex}):
+ *
+ * - a flow's node and edge conditions: the record-change trigger seeds
+ *   `record` from the write's payload over the stored row, and a flow's
+ *   subject load reads the data engine;
+ * - validation rules, a field's `requiredWhen` / `readonlyWhen` and an
+ *   option's `visibleWhen`: evaluated on the write, against the stored row
+ *   merged with the payload (`rule-validator.ts`);
+ * - field formulas: computed on the stored row;
+ * - sharing-rule and hook conditions: judged against stored rows and the
+ *   write's record.
+ *
+ * A block named at one of those sites is refused as an unknown field, because
+ * at run time it is one: the expression faults on the missing key on every
+ * row. A field's `visibleWhen` is not on the list either — it renders against
+ * whatever row the surface holds, the stored row on an edit form — nor is a
+ * field's cell formatting rule (#22228), for the same reason; no field
+ * predicate reads a block.
+ *
+ * `check` adds the blocks only for a call site that names an entry here, so a
+ * new site is fields-only until its binding is shown to be a served row and it
+ * is listed.
+ */
+const SERVED_ROW_SITES = ['action visible', 'action disabled'] as const;
+type ServedRowSite = (typeof SERVED_ROW_SITES)[number];
+
+/**
+ * The field-existence set at a served-row site: the object's columns, then
+ * each block it declares — last, so a column keeps its place in the
+ * "did you mean?" candidates. `fields` unchanged when the object declares no
+ * block.
+ */
+function withAttachedBlocks(
+  fields: string[] | undefined,
+  blocks: Record<string, string[]> | undefined,
+): string[] | undefined {
+  if (!blocks) return fields;
+  return [...new Set([...(fields ?? []), ...Object.keys(blocks)])];
 }
 
 /**
@@ -1016,6 +1070,67 @@ export function fieldRuleRootIssue(
       `\`${root}\` is unbound here, so ` +
       `${FIELD_RULE_SLOT_CONSEQUENCE[slot] ?? FIELD_RULE_SLOT_CONSEQUENCE_GENERIC}. ` +
       prescription,
+  };
+}
+
+/**
+ * [#22228] The roots a field's cell formatting rule binds — the scope of each
+ * `FieldSchema.conditionalFormatting[].condition`: `value`, this field's value
+ * on the record, and `record`, the row the cell belongs to. Nothing else, by
+ * the card's ruling: the host styling a cell has the row and the cell's value
+ * in hand, and no write is in flight, so there is no `previous`; no inline
+ * grid header, so there is no `parent`; and the field-rule family's user-root
+ * refusal holds here for the same reason it holds there.
+ *
+ * `value` is NOT a platform root (`SCOPE_ROOTS` does not list it) and is not
+ * added there: that list is the published strict-lint accept baseline, and a
+ * root added to it stops every surface that judges bare identifiers from
+ * faulting it. This surface names it to the shared validator instead, through
+ * `ExprSchemaHint.roots` ({@link FIELD_FORMATTING_SURFACE_ROOTS}), which only
+ * ever turns a refusal into an acceptance for this one call.
+ */
+export const FIELD_FORMATTING_BOUND_ROOTS = ['value', 'record'] as const;
+/**
+ * The bound roots this surface mounts BEYOND the platform baseline — what the
+ * `check` closure hands `validateExpression` as `roots`. `record` is already a
+ * `SCOPE_ROOTS` member, so only `value` is listed.
+ */
+const FIELD_FORMATTING_SURFACE_ROOTS: readonly string[] = FIELD_FORMATTING_BOUND_ROOTS.filter(
+  (r) => !(SCOPE_ROOTS as readonly string[]).includes(r),
+);
+
+/**
+ * [#22228] The root verdict for a field's cell formatting rule: a condition
+ * that reads a root this surface does not bind — anything in
+ * {@link FIELD_RULE_JUDGED_ROOTS} other than `record` (`value` is not in that
+ * vocabulary at all). The same membership test as {@link fieldRuleRootIssue},
+ * for the same reasons (an allowlist, judged by membership rather than by
+ * declaredness), over this surface's own allowlist and in its own words: the
+ * family's message names `previous` and `parent` as bound, and here neither is.
+ *
+ * `null` = nothing to report: the source does not parse (the syntax pass owns
+ * that), or every root it reads is bound here.
+ */
+export function fieldFormattingRootIssue(
+  location: string,
+  source: string,
+): { root: string; message: string } | null {
+  const roots = collectCelRootIdentifiers(source);
+  if (!roots.ok) return null;
+  const kept = FIELD_RULE_JUDGED_ROOTS.filter(
+    (r) => !(FIELD_FORMATTING_BOUND_ROOTS as readonly string[]).includes(r) && roots.roots.includes(r),
+  );
+  if (kept.length === 0) return null;
+  // One issue per rule, user roots first (the family's tie-break), then the
+  // judged vocabulary's own order — stable, never AST walk order.
+  const root = FIELD_RULE_USER_ROOTS.find((r) => kept.includes(r)) ?? kept[0]!;
+  return {
+    root,
+    message:
+      `\`${location}\` reads \`${root}\`, but a field's conditional formatting rule binds only ` +
+      `\`value\` (this field's value on the record) and \`record\` (the row the cell belongs to) — ` +
+      `\`${root}\` is unbound where the cell is styled, so the condition faults and the rule never ` +
+      `styles the cell. Rewrite the condition against \`value\` or \`record\`.`,
   };
 }
 
@@ -1859,16 +1974,35 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * on the fail-open seams that means the rule stops enforcing entirely.
      */
     traversalHydration?: boolean,
+    /**
+     * Set only where this site's `record` is a row a service serves — an entry
+     * of {@link SERVED_ROW_SITES}. There the object's declared read
+     * attachments join the field-existence set and their leaves are judged;
+     * absent, the site binds the stored row and resolves the object's columns
+     * alone, which is every site that does not name one.
+     */
+    servedRowSite?: ServedRowSite,
+    /**
+     * [#22228] Roots THIS site binds beyond the platform baseline, handed to
+     * the shared validator as `ExprSchemaHint.roots` so a read of one is not
+     * refused as a bare field. Only a field's cell formatting rule passes one
+     * (`value`, {@link FIELD_FORMATTING_SURFACE_ROOTS}); absent, the call is
+     * byte for byte what it was.
+     */
+    extraRoots?: readonly string[],
   ): void => {
     if (raw == null) return;
-    const fields = objectName ? fieldIndex.get(objectName) : undefined;
+    // Absent unless this is a served-row site on an object that declares a
+    // read attachment.
+    const attachedOnRead = objectName && servedRowSite ? attachedOnReadIndex.get(objectName) : undefined;
+    const fields = objectName ? withAttachedBlocks(fieldIndex.get(objectName), attachedOnRead) : undefined;
     // Field types feed the #1928 tier-4 soundness warning; only consulted for
     // `record`-scoped sites, so it is harmless to pass for flattened ones too.
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
-    // [#22211 ruling A] Absent for an object that declares no read attachment.
-    const attachedOnRead = objectName ? attachedOnReadIndex.get(objectName) : undefined;
+    // Spread only when given, so every other site's hint is unchanged.
+    const roots = extraRoots ? { roots: extraRoots } : {};
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration } : { scope });
+      objectName ? { objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots } : { scope, ...roots });
     for (const e of res.errors) {
       if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_NOWHERE_BOUND_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
@@ -2489,12 +2623,15 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // writes `(record.budget == null ? 0 : record.budget) - …`), so the cost of
         // deciding later is low. Raise it as its own issue rather than widening
         // this call. Ledger: `validate-null-guards.ts`.
+        //
+        // The object's columns alone, never its read attachments: a formula is
+        // computed on the stored row, which carries no block (see
+        // {@link SERVED_ROW_SITES}).
         const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
           objectName
             ? {
                 objectName,
                 fields: fieldIndex.get(objectName),
-                attachedOnRead: attachedOnReadIndex.get(objectName),
                 fieldTypes: fieldTypeIndex.get(objectName),
                 scope: 'record',
               }
@@ -2541,6 +2678,34 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         check(where, raw, objectName, 'record', verdict !== null);
         if (verdict) {
           issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
+        }
+      }
+      // [#22228] The field's cell formatting rules — `conditionalFormatting`,
+      // each `{ condition, style }` (the list view's own rule element). Each
+      // condition is judged by the `record`-scoped `check` with `value` named
+      // as a root this surface binds (it parses, it reads `record.<field>`
+      // and never a bare field, the field exists), plus this surface's own
+      // root verdict: `value` and `record` only. Display only, like
+      // `visibleWhen`, so none of the write-path gates below (the `parent`
+      // gate, the null guard, the traversal refusal) applies. Not fenced on an
+      // object write: the object save door runs this pass too, at this
+      // position.
+      //
+      // `f.conditionalFormatting` is read LITERALLY so #5017's source scan
+      // checks it against `FieldSchema`, and so is each rule's `condition`.
+      // The index is the rule's position as authored — the location names it.
+      const cellRules: readonly unknown[] = Array.isArray(f.conditionalFormatting) ? f.conditionalFormatting : [];
+      for (const [ri, entry] of [...cellRules].entries()) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+        const cellRule = entry as AnyRec;
+        const location = `conditionalFormatting[${ri}].condition`;
+        const where = `object '${objectName}' · field '${fname}' ${location}`;
+        const raw: unknown = cellRule.condition;
+        const ruleSource = celSourceOf(raw);
+        const verdict = ruleSource ? fieldFormattingRootIssue(location, ruleSource) : null;
+        check(where, raw, objectName, 'record', verdict !== null, undefined, undefined, FIELD_FORMATTING_SURFACE_ROOTS);
+        if (verdict) {
+          issues.push({ where, message: verdict.message, source: ruleSource!, severity: 'error' });
         }
       }
       // [commit e9b526597] Per-OPTION `visibleWhen` — a `select`/`multiselect`/`radio`
@@ -2718,9 +2883,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const key = `${obj ?? ''}:${name}`;
     if (seenActions.has(key)) return; // de-dup (actions are merged onto objects AND kept top-level)
     seenActions.add(key);
-    check(`${where} · action '${name}' visible`, action.visible, obj, 'record');
+    // The served-row sites: an action's predicates bind the row the surface
+    // fetched, so a declared read attachment resolves here and nowhere else.
+    check(`${where} · action '${name}' visible`, action.visible, obj, 'record', undefined, undefined, 'action visible');
     if (typeof action.disabled !== 'boolean') {
-      check(`${where} · action '${name}' disabled`, action.disabled, obj, 'record');
+      check(`${where} · action '${name}' disabled`, action.disabled, obj, 'record', undefined, undefined, 'action disabled');
     }
     // No `checkNullGuards` here, and the reason is measured rather than assumed
     // (#4811). These predicates DO reach real CEL — a bare authored string is

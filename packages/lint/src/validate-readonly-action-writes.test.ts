@@ -32,12 +32,27 @@ import { describe, expect, it } from 'vitest';
 
 import { HOOK_BODY_WRITE_PATTERNS } from './validate-hook-body-writes.js';
 import {
-  validateReadonlyActionWrites,
+  validateReadonlyActionWrites as validateReadonlyActionWritesUnrecorded,
   ACTION_API_UPDATE_READONLY_WHEN_FIELD,
   READONLY_ACTION_WRITE_PATTERN_IDS,
   READONLY_ACTION_WRITE_EXCLUSIONS,
   READONLY_ACTION_INSERT_SILENCE,
 } from './validate-readonly-action-writes.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule id this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict to one line of at most 200 characters — so
+// the pin covers every firing variant this suite exercises, not a chosen few.
+// Run the whole file: that case reads what the cases above fired.
+const SHORTENED_RULE_IDS: readonly string[] = [ACTION_API_UPDATE_READONLY_WHEN_FIELD];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateReadonlyActionWrites: typeof validateReadonlyActionWritesUnrecorded = (...args) => {
+  const findings = validateReadonlyActionWritesUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
 
 /**
  * A stack shaped like the shipped showcase invoice (a state lock: once an
@@ -542,5 +557,33 @@ describe('READONLY_ACTION_WRITE_PATTERN_IDS - ledger partition', () => {
       });
       expect(findings, `excluded pattern '${pattern.id}' produced a finding`).toEqual([]);
     }
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule id this file shortened', () => {
+  it('every verdict the cases above fired for that id is one line of at most 200 characters', () => {
+    // The coverage control first: the shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What the verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [ACTION_API_UPDATE_READONLY_WHEN_FIELD]: ['STATIC `readonly` strip', 'NOT from the conditional one', 'bulk update', 'beforeUpdate'],
+  };
+
+  it('covers exactly the shortened id', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

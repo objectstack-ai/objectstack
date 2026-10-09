@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateActionBodyWrites,
+  validateActionBodyWrites as validateActionBodyWritesUnrecorded,
   ACTION_BODY_WRITE_PATTERNS,
   ACTION_BODY_WRITE_PATTERN_IDS,
   ACTION_RECORD_WRITE_PATTERNS,
@@ -18,6 +18,30 @@ import {
   HOOK_BODY_WRITE_PATTERNS,
   IMPLICIT_FIELDS,
 } from './validate-hook-body-writes.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: that case reads what the cases above
+// fired.
+const SHORTENED_RULE_IDS: readonly string[] = [
+  ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR,
+  ACTION_BODY_WRITE_UNKNOWN_FIELD,
+  ACTION_RECORD_WRITE_DISCARDED,
+  ACTION_BODY_SOURCE_UNPARSEABLE,
+];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateActionBodyWrites: typeof validateActionBodyWritesUnrecorded = (...args) => {
+  const findings = validateActionBodyWritesUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 // Target objects: array-shaped and map-shaped `fields`, so both authoring
 // shapes are resolved.
@@ -163,7 +187,7 @@ describe('validateActionBodyWrites — ctx.api writes', () => {
     expect(findings[0].path).toBe('actions[0].body.source');
     expect(findings[0].message).toContain('discont_total');
     expect(findings[0].message).toContain('crm_deal');
-    expect(findings[0].message).toContain('INVALID_FIELD / 400, identically on every driver');
+    expect(findings[0].message).toContain('INVALID_FIELD / 400');
     expect(findings[0].hint).toContain("'discount_total'");
   });
 
@@ -176,24 +200,30 @@ describe('validateActionBodyWrites — ctx.api writes', () => {
   // The old text promised a driver-level error on SQL and a persisted stray
   // key on schemaless — neither happens on this path, and has not since
   // #8682/#8738 put the declared-field door ahead of any statement.
+  //
+  // [#22161] The verdict names the refusal; the rest of the measured account
+  // is `os explain action-body-write-unknown-field`, so it is pinned there.
   it('states the measured refusal — INVALID_FIELD / 400 on every driver — and no driver split', () => {
     const [finding] = validateActionBodyWrites(
       stackWith("await ctx.api.object('crm_deal').update({ discont_total: 0 });"),
     );
+    const explanation = explanationOf(ACTION_BODY_WRITE_UNKNOWN_FIELD);
 
     expect(finding.message).toContain('INVALID_FIELD / 400');
-    expect(finding.message).toContain('identically on every driver');
-    expect(finding.message).toContain('before any statement is built');
+    expect(explanation).toContain('identically on every driver');
+    expect(explanation).toContain('before any statement is built');
     // The reason the door — not a driver — is what answers.
-    expect(finding.message).toContain('ordinary CALLER write');
-    // The action-side blast radius, the one word that differs from the hook
-    // sibling's sentence. Pinned so a future sweep cannot flatten the two.
-    expect(finding.message).toContain('fails the action');
+    expect(explanation).toContain('ordinary CALLER write');
+    // The action-side blast radius, the one sentence that differs from the
+    // hook sibling's explanation. Pinned so a future sweep cannot flatten the two.
+    expect(explanation).toContain('fails the action');
 
-    expect(finding.message).not.toMatch(/driver-level error/);
-    expect(finding.message).not.toMatch(/schemaless/);
-    expect(finding.message).not.toMatch(/is persisted/);
-    expect(finding.message).not.toMatch(/write-path validator skips/);
+    for (const text of [finding.message, explanation]) {
+      expect(text).not.toMatch(/driver-level error/);
+      expect(text).not.toMatch(/schemaless/);
+      expect(text).not.toMatch(/is persisted/);
+      expect(text).not.toMatch(/write-path validator skips/);
+    }
   });
 
   it('checks insert/update payloads (argument 0) and updateById at argument 1', () => {
@@ -203,7 +233,7 @@ describe('validateActionBodyWrites — ctx.api writes', () => {
           "await ctx.api.object('crm_deal').updateById(ctx.recordId, { stag: 'won' });",
       ),
     );
-    expect(findings.map((f) => f.message.match(/writing '(\w+)'/)?.[1])).toEqual(['emial', 'stag']);
+    expect(findings.map((f) => f.message.match(/writing undeclared field '(\w+)'/)?.[1])).toEqual(['emial', 'stag']);
     expect(findings[0].message).toContain("ctx.api.object('crm_contact').insert");
     expect(findings[1].message).toContain('updateById');
   });
@@ -313,7 +343,10 @@ describe('validateActionBodyWrites — discarded ctx.record writes (#4345)', () 
     expect(findings[0].where).toBe('action "close_deal" › body');
     expect(findings[0].path).toBe('actions[0].body.source');
     expect(findings[0].message).toContain('ctx.record.stage');
-    expect(findings[0].message).toContain("The snapshot stays read-only by design: an action's write channel is ctx.api.");
+    // [#22161] Why the snapshot is not a write surface is the id's `os explain` text.
+    expect(explanationOf(ACTION_RECORD_WRITE_DISCARDED)).toContain(
+      "The snapshot stays read-only by design: an action's write channel is `ctx.api`.",
+    );
     expect(findings[0].hint).toContain('updateById');
   });
 
@@ -528,7 +561,7 @@ describe('[#8663] validateActionBodyWrites — unprovisioned anchor writes', () 
     expect(findings[0].where).toBe('action "stamp_owner" › body');
     expect(findings[0].path).toBe('actions[0].body.source');
     expect(findings[0].message).toContain("'owner_id'");
-    expect(findings[0].message).toContain('external object (ADR-0015)');
+    expect(findings[0].message).toContain("external object 'wh_order'");
     expect(findings[0].message).toContain('can never land');
   });
 
@@ -590,5 +623,36 @@ describe('an unparseable action body is reported, not scored clean (#10653)', ()
       const rules = validateActionBodyWrites(actionStackOver(federatedObject, source)).map((f) => f.rule);
       expect(rules, `parseable body gained a parse finding:\n${source}`).not.toContain(ACTION_BODY_SOURCE_UNPARSEABLE);
     }
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR]: ['external object', 'ADR-0015', 'PAST the write-path validator', 'no such column', 'schemaless remote'],
+    [ACTION_BODY_WRITE_UNKNOWN_FIELD]: ['scoped handle on the running engine', 'ordinary CALLER write', 'before any statement is built', 'fails the action'],
+    [ACTION_RECORD_WRITE_DISCARDED]: ['whether or not NAME is a declared field', 'read-only by design', 'provably dead'],
+    [ACTION_BODY_SOURCE_UNPARSEABLE]: ['partially recovered', 'judged by no rule', 'action-api-update-readonly-when-field'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

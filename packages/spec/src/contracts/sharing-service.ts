@@ -291,18 +291,18 @@ export interface ISharingService {
    * [#7144] The write DEPTH in that first sentence is an INPUT this service is
    * handed, never one it resolves — so a caller outside the CRUD middleware
    * (the `sys_comment` and `sys_attachment` PARENT-record gates, which both
-   * reach this service through this method) matches ownership at `own`. That is
-   * the ruled shape, and the fail-open that blocks widening it is written up
-   * once in "Write DEPTH is an input the CALLER supplies" on this interface.
+   * reach this service through {@link checkEdit}) matches ownership at `own`.
+   * That is the ruled shape, and the fail-open that blocks widening it is
+   * written up once in "Write DEPTH is an input the CALLER supplies" on this
+   * interface.
    *
    * [#6428] The two-state PROJECTION of {@link checkEdit}: `true` for every
    * verdict that is not `deny`, i.e. `allow` and `abstain` alike. That
    * collapse is the historical semantics, kept byte-for-byte so existing
    * callers do not drift — it is correct for a caller that only ADDS this gate
    * to whatever else already guards the row (the sharing middleware, the
-   * `sys_attachment` parent gate, the ADR-0055 master check), and WRONG for a
-   * caller that would let this answer override another authority's floor. The
-   * latter must read {@link checkEdit}.
+   * ADR-0055 master check), and WRONG for a caller that would let this answer
+   * override another authority's floor. The latter must read {@link checkEdit}.
    */
   canEdit(
     object: string,

@@ -297,6 +297,29 @@ export const StandaloneStackConfigSchema = z.object({
      * an empty report and reads nothing.
      */
     armLifecycleSweep: z.boolean().optional(),
+    /**
+     * [#22371] Does this boot read `sys_metadata` back into the registry
+     * (`ObjectQLPlugin`'s `hydrateMetadataFromDb`)?
+     *
+     * Defaults to `true`, the answer every serving boot needs (see the note at
+     * the `ObjectQLPlugin` construction below: an object authored at runtime
+     * must survive a restart).
+     *
+     * Set `false` for a boot that must see the deployment's PACKAGES and
+     * nothing the environment stored over them. One caller does today:
+     * `os migrate security-catalog-overlays`, the offline step that lists and
+     * deletes the environment-wide rows the cold boot's catalog check refuses
+     * (ADR-0048 N.3). That check judges what hydration wrote, so a boot of such
+     * a deployment that hydrates is refused before the step can run; one that
+     * hydrates nothing meets an empty environment half and comes up, and the
+     * step reads the rows itself (maintainer ruling letter B on #22371, record
+     * 6074838935: "without a server, without hydration, and without the boot
+     * the refusal stops").
+     *
+     * ⛔ Only `false` changes anything: the option's own caution is about
+     * turning hydration ON, and this function keeps it on unless told.
+     */
+    hydrateMetadataFromDb: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -898,16 +921,21 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         //     a control-plane proxy.
         //
         // Both facts are properties of THIS function, not of its caller, so no
-        // caller can make either clause false — which is why it is a literal
-        // and not a config field. The one-shot `os migrate *` / `os meta *`
+        // caller can make either clause false — which is why turning it ON is
+        // not a caller's choice. The one-shot `os migrate *` / `os meta *`
         // funnel (`bootSchemaStack`) wants it too: those commands diff and scan
         // the object set the serving boot registers, and the hydration read
         // writes nothing (a boot that defers DDL still defers the tables of
         // what it hydrated).
+        //
+        // [#22371] A caller may turn it OFF (`hydrateMetadataFromDb: false`),
+        // which no clause above forbids: the one that does is the offline step
+        // that clears what the cold boot's catalog check refuses, and needs a
+        // boot that check does not stop. See the config key.
         new ObjectQLPlugin({
             environmentId,
             runPlatformMigrations: cfg.runPlatformMigrations ?? true,
-            hydrateMetadataFromDb: true,
+            hydrateMetadataFromDb: cfg.hydrateMetadataFromDb !== false,
             // [#21391] Only a `false` is passed through, so a serving boot
             // hands the plugin exactly the options it always did.
             ...(cfg.armLifecycleSweep === false ? { lifecycle: { enabled: false } } : {}),

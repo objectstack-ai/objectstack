@@ -11,6 +11,7 @@ import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
+import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
 export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
 export type Locale = z.input<typeof LocaleSchema>;
 
@@ -1040,9 +1041,15 @@ const appTranslationDataShape = () => ({
    *   pages.<name>.components.<componentId>.<key>
    *                             → that component's `properties.<key>` (#6080)
    *
-   * `title` falls back to `label` when omitted, since a page's header title
-   * and its nav/breadcrumb label are usually the same string — translators
-   * only author `title` separately when the two genuinely differ.
+   * When `title` is omitted, the header keeps the title its author wrote.
+   * `label` stands in for it only where the header authors no title, or where
+   * its title restates the page's own `label`: a page's header title and its
+   * nav/breadcrumb label are usually the same string, so translators only
+   * author `title` separately when the two genuinely differ (and
+   * `os i18n extract` offers `title` exactly then). A label never replaces a
+   * header title that says something else, such as a dynamic `'{name}'`: a
+   * bundle translates an attribute, it does not swap one attribute for
+   * another over authored text.
    *
    * Header copy lives at the TOP level here rather than under `components`
    * because `page:header` instances carry no stable `id`; the page name is the
@@ -1066,7 +1073,7 @@ const appTranslationDataShape = () => ({
   }, {
     label: z.string().optional().describe('Translated page label (nav / breadcrumb)'),
     description: z.string().optional().describe('Translated page description'),
-    title: z.string().optional().describe('Translated `page:header` title (defaults to `label`)'),
+    title: z.string().optional().describe('Translated `page:header` title. When omitted the header keeps its authored title; `label` stands in only where the header authors no title or its title restates the page label'),
     subtitle: z.string().optional().describe('Translated `page:header` subtitle'),
     /**
      * Per-component copy, keyed by the component's `id`
@@ -1187,6 +1194,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.label
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.placeholder
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.inlineHelpText
+   *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
    *
    * **The hole this closes (#7646).** A `type: 'screen'` flow is a wizard the
    * user reads — a heading, a list of labelled inputs — and the bundle had no
@@ -1243,21 +1251,53 @@ const appTranslationDataShape = () => ({
    * and in the completion toast, falling back to the label the engine serves
    * as `AutomationResult.flowLabel` and then to the flow's API name. Both were
    * measured at the `.objectui-sha` pin `0abd4f9f8`. See the `flows` rows in
-   * `liveness/translation.json`: the group and both its children are `live`.
+   * `liveness/translation.json`: the group and its children are `live`.
+   *
+   * ## `refusals` — a refused `end` node's message (#22450)
+   *
+   *   flows.<flow_name>.refusals.<node_id>.message
+   *
+   * An `end` node declaring `outcome: 'refused'` carries a `message` the user
+   * reads in place of the flow's completion (`EndConfigSchema`), and until this
+   * key the group had nowhere to put it: a first-class refusal rendered in the
+   * source language on every console, beside a translated flow label and
+   * translated screens. Addressed like the screens, by `Flow.name` and
+   * `FlowNode.id` (a refused `end` nested in an ADR-0031 region included).
+   *
+   * **Picked before it is rendered, by the engine.** The run stores the
+   * refusal already rendered (`sys_automation_run.refusal_message`,
+   * `AutomationResult.refusalMessage`), so an overlay on that string could not
+   * work. `AutomationEngine` reads `flowRefusalMessageKey(flow, node)`
+   * (`system/i18n-resolver.ts`) through the `i18n` service, in the run's
+   * `AutomationContext.locale`, and renders the translation in place of the
+   * authored template. With no locale, or no entry, the authored template
+   * renders.
+   *
+   * **The same text slot as the source.** A translation keeps the `{{ }}`
+   * holes of the message it translates, and the one text-slot judge
+   * (`textSlotTemplateRefusal`) refuses a single-brace `{token}` here exactly
+   * as `EndConfigSchema` refuses it on the source. `objectstack validate`
+   * refuses a key over an unknown flow, an unknown node, or a node that is not
+   * a refused `end`, as it does for the screen keys.
    */
   flows: z.record(z.string(), strictObject({
     surface: 'this flow translation',
     history: TRANSLATION_HISTORY,
-    aliases: { name: 'label', title: 'label', nodes: 'screens', steps: 'screens', screen: 'screens', pages: 'screens' },
+    aliases: {
+      name: 'label', title: 'label', nodes: 'screens', steps: 'screens', screen: 'screens', pages: 'screens',
+      refusal: 'refusals', ends: 'refusals',
+    },
     guidance: {
       successMessage:
         '`flow.successMessage` / `flow.errorMessage` are not part of the flows translation surface — '
-        + 'it carries the flow label, per-screen headings and per-screen field copy. The terminal '
-        + 'toast renders the string authored on the flow.',
+        + 'it carries the flow label, per-screen headings, per-screen field copy and the message of '
+        + "each `end` node declaring `outcome: 'refused'` (`refusals.<node_id>.message`). The "
+        + 'terminal toast renders the string authored on the flow.',
       errorMessage:
         '`flow.errorMessage` / `flow.successMessage` are not part of the flows translation surface — '
-        + 'it carries the flow label, per-screen headings and per-screen field copy. The terminal '
-        + 'toast renders the string authored on the flow.',
+        + 'it carries the flow label, per-screen headings, per-screen field copy and the message of '
+        + "each `end` node declaring `outcome: 'refused'` (`refusals.<node_id>.message`). The "
+        + 'terminal toast renders the string authored on the flow.',
     },
   }, {
     label: z.string().optional().describe('Translated flow label'),
@@ -1303,6 +1343,34 @@ const appTranslationDataShape = () => ({
         inlineHelpText: z.string().optional().describe('Translated screen field help text (drawn under the input)'),
       })).optional().describe('Screen field translations keyed by field name (`ScreenFieldConfig.name`)'),
     })).optional().describe('Screen translations keyed by screen node id (`FlowNode.id`, the client\'s `ScreenSpec.nodeId`)'),
+    refusals: z.record(z.string(), strictObject({
+      surface: 'this flow refusal translation',
+      history: TRANSLATION_HISTORY,
+      // The words a refusal arrives spelled in — the same aliases
+      // `EndConfigSchema` renames onto its own `message`.
+      aliases: { text: 'message', reason: 'message', description: 'message' },
+      guidance: {
+        title:
+          'An `end` node has no heading — a runner shows the refusal `message` alone under the flow\'s '
+          + 'label. Translate `message`; a `title` belongs to a screen (`screens.<node_id>.title`).',
+      },
+    }, {
+      // No `.min(1)`, like every sibling leaf: an empty string is the
+      // untranslated slot `os i18n extract` writes into a skeleton, and the
+      // engine reads it as no translation (the authored message renders).
+      message: z.string()
+        // The one text-slot judge, applied to the translation exactly as
+        // `EndConfigSchema` applies it to the message it translates.
+        .superRefine((value, ctx) => {
+          const refusal = textSlotTemplateRefusal(value);
+          if (refusal !== undefined) ctx.addIssue({ code: 'custom', message: refusal });
+        })
+        .optional()
+        .describe(
+          "Translated refusal message of an `end` node declaring `outcome: 'refused'` — a `{{ }}` template like "
+          + 'the message it translates, rendered by the engine in the run\'s locale in place of the authored one',
+        ),
+    })).optional().describe("Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'`"),
   })).optional().describe('Screen-flow translations keyed by flow name'),
 
   /**

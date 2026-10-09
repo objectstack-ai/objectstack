@@ -3344,6 +3344,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'SelectOptionSchema',
     keys: () => Object.keys(SelectOptionSchema.shape),
   },
+  {
+    // [#22228] A field's cell formatting rule — the list view's own rule
+    // element, mounted on `FieldSchema.conditionalFormatting`. `condition` is
+    // the predicate being checked; `style` is never read here.
+    receiver: 'cellRule',
+    expected: ['condition'],
+    declaredBy: 'FieldSchema.conditionalFormatting[]',
+    keys: () => shapeKeysOf(FieldSchema.shape.conditionalFormatting),
+  },
 ];
 
 /**
@@ -3381,7 +3390,9 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     // a LITERAL `f.options` read on purpose, for the same reason the two
     // `*When` slots below are literal: an `(f as AnyRec).options` cast would
     // have hidden the new surface from this very scan.
-    expect(read).toEqual(['expression', 'name', 'options', 'readonlyWhen', 'requiredWhen']);
+    // `conditionalFormatting` joined in #22228 — the cell formatting rules,
+    // read literally for the same reason.
+    expect(read).toEqual(['conditionalFormatting', 'expression', 'name', 'options', 'readonlyWhen', 'requiredWhen']);
     const declared = Object.keys(FieldSchema.shape);
     const tracked = TRACKED_UNDECLARED_READS.filter((t) => t.receiver === 'f').map((t) => t.key);
     expect(tracked).toEqual([]);

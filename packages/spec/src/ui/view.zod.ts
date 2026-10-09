@@ -54,6 +54,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
 import { normalizeVisibleWhen } from '../shared/visibility';
 import { VISIBILITY_STRICT_OPTIONS } from '../shared/visibility-strict-options';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
@@ -2949,24 +2950,15 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     + '`${ctx.selection.ids}` / `${ctx.selection.count}`.',
   ),
 
-  /** Conditional Formatting */
-  conditionalFormatting: z.array(strictObject({
-    surface: 'this conditional formatting rule',
-    history: VIEW_HISTORY,
-    // `visibleWhen` is the ADR-0089 spelling for a predicate on view/page, so
-    // an author borrowing it here is using a neighbouring surface's correct
-    // word — the `visibleWhen → visible` category #3746 named, not a typo.
-    aliases: { when: 'condition', expression: 'condition', visibleWhen: 'condition', rule: 'condition', styles: 'style', css: 'style' },
-    // `rowColor` is a real, DIFFERENT capability on the same view; pointing a
-    // colour-only author at the block that already does it beats making them
-    // hand-write a style map.
-    guidance: {
-      color: 'Row colouring by field value has its own block — see `rowColor` on this list view. To set a CSS colour from a predicate, put it in `style`: `{ condition, style: { color: "#b91c1c" } }`.',
-    },
-  }, {
-    condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL) to evaluate.'),
-    style: z.record(z.string(), z.string()).describe('CSS styles to apply when condition is true'),
-  })).optional().describe('Conditional formatting rules for list rows'),
+  /**
+   * Conditional Formatting — the row rule. [#22228] The rule element is
+   * declared once, in `shared/conditional-formatting.zod.ts`, because a field
+   * definition mounts the same element for its cell rule
+   * (`FieldSchema.conditionalFormatting`) and cannot import it from this
+   * module. The aliases and the `rowColor` guidance this member carried moved
+   * there with it.
+   */
+  conditionalFormatting: z.array(ConditionalFormattingRuleSchema).optional().describe('Conditional formatting rules for list rows'),
 
   /** Inline Edit */
   inlineEdit: z.boolean().optional().describe('Allow inline editing of records directly in the list view'),

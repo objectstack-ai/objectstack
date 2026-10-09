@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { HOOK_BODY_WRITE_PATTERNS } from './validate-hook-body-writes.js';
 import {
-  validateReadonlyHookWrites,
+  validateReadonlyHookWrites as validateReadonlyHookWritesUnrecorded,
   HOOK_API_UPDATE_READONLY_FIELD,
   HOOK_API_UPDATE_READONLY_WHEN_FIELD,
   READONLY_HOOK_WRITE_PATTERN_IDS,
@@ -20,6 +20,22 @@ import {
   READONLY_HOOK_STRIP_SUBJECT_METHODS,
   READONLY_HOOK_METHOD_EXCLUSIONS,
 } from './validate-readonly-hook-writes.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// the lowered-handler suffix included, not a chosen few. Run the whole file:
+// that case reads what the cases above fired.
+const SHORTENED_RULE_IDS: readonly string[] = [HOOK_API_UPDATE_READONLY_FIELD, HOOK_API_UPDATE_READONLY_WHEN_FIELD];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateReadonlyHookWrites: typeof validateReadonlyHookWritesUnrecorded = (...args) => {
+  const findings = validateReadonlyHookWritesUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
 
 /**
  * A stack shaped like the reference app's motivating case (#13653): a derived
@@ -295,7 +311,9 @@ describe('validateReadonlyHookWrites - RED: insert() of a static-readonly field 
     expect(findings[0].message).toContain("ctx.api.object('crm_account').insert(...)");
     // The message says what actually happens to a create — the row is made
     // without the column — and names the verb; it is not the update sentence.
-    expect(findings[0].message).toContain('INSERT payload');
+    // [#22161] That the strip runs on INSERT as on UPDATE is
+    // `os explain hook-api-update-readonly-field`.
+    expect(explainRule(HOOK_API_UPDATE_READONLY_FIELD)?.paragraphs.join('\n')).toContain('on UPDATE and on INSERT alike');
     expect(findings[0].message).toContain('created WITHOUT this column');
     // The remedy names the declared elevation knob and the own-object
     // beforeInsert stamp, and keeps refusing sudo() for the #14010 reason.
@@ -791,5 +809,37 @@ describe('validateReadonlyHookWrites - #16546: path redirect for a lowered hook'
     const findings = validateReadonlyHookWrites(stack, { loweredHookRefs: new Set(['some_other_hook']) });
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('hooks[0].body.source');
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    // ...and the lowered-handler variant is among them: its location suffix
+    // rides the same message, so it is held to the same bound.
+    expect(firedShortened.some((f) => f.message.includes('lowered from the inline handler'))).toBe(true);
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [HOOK_API_UPDATE_READONLY_FIELD]: ['TRIGGERING operation', 'still reports success', 'defaultValue', "runAs: 'system'", 'not marshalled into the sandbox'],
+    [HOOK_API_UPDATE_READONLY_WHEN_FIELD]: ['TRIGGERING operation', 'NOT waived by a system context', 'beforeUpdate', 'not marshalled into the sandbox'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

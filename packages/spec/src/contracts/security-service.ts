@@ -312,9 +312,10 @@ export interface OwnershipFloorAlternate {
  *   ({@link ISecurityService.checkAuthoredRowWrite}).
  * - `master_chain`: the chain itself cannot be walked to a master that governs
  *   its own rows. It re-enters an object it has already visited, it exceeds
- *   the depth bound, or a master ABOVE the record's own master has no relation
- *   to derive from, is not present, or has an empty master reference. Above the
- *   first hop the check answers these as refusals, not as defects of the
+ *   the depth bound, or a master that is itself `controlled_by_parent` (the
+ *   record's own master, or any master above it) has no relation to derive its
+ *   own master from, is not present, or has an empty master reference. Past the
+ *   record itself the check answers these as refusals, not as defects of the
  *   request, so they are a leg here and never `unresolvable`.
  *
  * The first three legs run on every hop, so `object_permission` can name the
@@ -339,9 +340,11 @@ export type ControlledByParentWriteDenialLeg =
  *   defect (`422 INVALID_METADATA`).
  * - `record_not_found`: the record `(object, recordId)` does not exist
  *   (`404 RECORD_NOT_FOUND`). This is the addressed record, not its master. A
- *   missing master row is not one of these outcomes: on the first hop the legs
- *   judge it as they judge any master row, and above the first hop it is the
- *   `master_chain` leg.
+ *   missing master row is not one of these outcomes: where the master governs
+ *   its own rows the legs judge it as they judge any master row, and where it
+ *   is itself `controlled_by_parent` the walk reads that row to derive the next
+ *   master, so an absent row after the legs is the `master_chain` leg, on the
+ *   first hop or above it.
  * - `master_reference_missing`: the record's stored master reference is empty
  *   (`422 MISSING_REQUIRED_FIELD`).
  */
