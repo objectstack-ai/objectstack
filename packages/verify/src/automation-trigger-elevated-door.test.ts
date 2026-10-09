@@ -1,16 +1,27 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The trigger door × a flow declared `runAs: 'system'`, measured per flow type
- * and per caller, through `flows.run` — the in-process twin of
+ * The trigger door × a flow declared `runAs: 'system'`, per flow type and per
+ * caller, through `flows.run` — the in-process twin of
  * `POST /api/v1/automation/:name/trigger` (`handle.ts` drives the runtime's
  * `HttpDispatcher`, so it answers through the same `respondToFlowTrigger`).
  *
- * MEASURE-FIRST STAGE. This file is committed before any fix, and the table
- * below is what the door answers TODAY. It is the before-table the fix is
- * judged against: every row is a measurement through the real kernel —
- * auth, security middleware, the real automation engine — not a scripted
- * service.
+ * The maintainer's ruling (letter B) on the defect class "a self-triggered flow
+ * declared to run as system could be started by any signed-in member through
+ * the trigger door": a caller that is not the system principal may not start a
+ * `runAs: 'system'` flow whose type is `autolaunched`, `record_change` or
+ * `schedule`. `screen` and `api` flows, a parent flow's `subflow` call and the
+ * system principal are unchanged.
+ *
+ * This is the wire half, on the real kernel — auth, security middleware, the
+ * real automation engine — so every row is a measurement, not a scripted
+ * service: the door's answer, the elevated write that did or did not land, and
+ * the run log. The door-side pins, one per arm with a scripted service, are
+ * `packages/runtime/src/domains/automation-trigger-elevated-door.test.ts`.
+ *
+ * The table was MEASURED FIRST, before the door check existed (the branch's
+ * first commit carries it as the assertion); each row's `before` comment is
+ * that reading, so the change the check makes is visible row by row.
  *
  * The fixture is neutral: one object no fresh member is granted (`etd_ledger`;
  * a member's direct create on it is refused, which the first case pins as the
@@ -18,6 +29,10 @@
  * flow per type, each creating a ledger row named after itself. A row
  * appearing is the side effect of the elevated run; the run log is the other
  * witness.
+ *
+ * ⚠️ This suite resolves `@objectstack/runtime` and
+ * `@objectstack/service-automation` through their BUILT `dist/`. Rebuild both
+ * before trusting a run of this file — and especially an ablated one.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -28,6 +43,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import type { Flow } from '@objectstack/spec/automation';
 
 import { bootStack, type VerifyStack } from './harness.js';
+import { isVerifyRefusal } from './handle.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
@@ -234,35 +250,64 @@ describe('control: the member cannot write the ledger directly', () => {
   });
 });
 
+const REFUSED = { answer: 403, code: 'PERMISSION_DENIED', rows: 0, runs: 0 } as const;
+const RAN = { answer: 200, rows: 1, runs: 1 } as const;
+
 /**
- * The before-table: caller × flow → what the door answered and what it caused.
- * Measured on this branch before the door check existed.
+ * Caller × flow → what the door answers and what the request caused. `before`
+ * is the reading taken on this branch before the door check existed.
  */
-const MEASURED: Array<{ caller: Caller; flow: string; rowsOf?: string; outcome: Outcome }> = [
-  // A signed-in member, per type, against `runAs: 'system'` writers.
-  { caller: 'member', flow: AUTO_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  { caller: 'member', flow: CHANGE_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  { caller: 'member', flow: SCHED_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  { caller: 'member', flow: SCREEN_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  { caller: 'member', flow: API_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  // The non-elevated control: the member's own identity is refused the write.
-  { caller: 'member', flow: AUTO_USER, outcome: { answer: 400, code: 'FLOW_FAILED', rows: 0, runs: 1 } },
-  // The sub-flow path: the elevated child writes its own name.
-  { caller: 'member', flow: PARENT_USER, rowsOf: AUTO_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  // The platform admin is a signed-in user too, not the system principal.
-  { caller: 'admin', flow: AUTO_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  { caller: 'admin', flow: CHANGE_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  { caller: 'admin', flow: SCHED_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  // The system principal.
-  { caller: 'system', flow: AUTO_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  { caller: 'system', flow: CHANGE_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
-  { caller: 'system', flow: SCHED_SYS, outcome: { answer: 200, rows: 1, runs: 1 } },
+const TABLE: Array<{ caller: Caller; flow: string; rowsOf?: string; outcome: Outcome; before: string }> = [
+  // REFUSED — a signed-in member, the three self-triggered types.
+  { caller: 'member', flow: AUTO_SYS, outcome: REFUSED, before: '200, elevated row written' },
+  { caller: 'member', flow: CHANGE_SYS, outcome: REFUSED, before: '200, elevated row written' },
+  { caller: 'member', flow: SCHED_SYS, outcome: REFUSED, before: '200, elevated row written' },
+  // REFUSED — the platform admin is a signed-in user too, not the system principal.
+  { caller: 'admin', flow: AUTO_SYS, outcome: REFUSED, before: '200, row written' },
+  { caller: 'admin', flow: CHANGE_SYS, outcome: REFUSED, before: '200, row written' },
+  { caller: 'admin', flow: SCHED_SYS, outcome: REFUSED, before: '200, row written' },
+  // UNCHANGED — the system principal starts each refused type.
+  { caller: 'system', flow: AUTO_SYS, outcome: RAN, before: '200, row written' },
+  { caller: 'system', flow: CHANGE_SYS, outcome: RAN, before: '200, row written' },
+  { caller: 'system', flow: SCHED_SYS, outcome: RAN, before: '200, row written' },
+  // UNCHANGED — `screen` and `api`: doors the author designed.
+  { caller: 'member', flow: SCREEN_SYS, outcome: RAN, before: '200, elevated row written' },
+  { caller: 'member', flow: API_SYS, outcome: RAN, before: '200, elevated row written' },
+  // UNCHANGED — a non-elevated flow: the member's own identity is refused the write.
+  {
+    caller: 'member',
+    flow: AUTO_USER,
+    outcome: { answer: 400, code: 'FLOW_FAILED', rows: 0, runs: 1 },
+    before: '400 FLOW_FAILED, nothing written',
+  },
+  // UNCHANGED — the platform's pattern for an elevated write: the member starts
+  // the non-elevated parent, whose `subflow` node runs the elevated child that
+  // the door now refuses to start directly. The child writes its own name.
+  { caller: 'member', flow: PARENT_USER, rowsOf: AUTO_SYS, outcome: RAN, before: '200, elevated child row written' },
 ];
 
-describe('the trigger door × runAs: system, per type and caller (measured)', () => {
-  for (const row of MEASURED) {
-    it(`${row.caller} starts ${row.flow}`, async () => {
+describe('the trigger door × runAs: system, per type and caller', () => {
+  for (const row of TABLE) {
+    const verdict = row.outcome.answer === 403 ? 'refused 403 PERMISSION_DENIED, nothing ran' : `answers ${row.outcome.answer}`;
+    it(`${row.caller} starts ${row.flow}: ${verdict} (before: ${row.before})`, async () => {
       expect(await startAs(row.caller, row.flow, row.rowsOf)).toEqual(row.outcome);
     });
   }
+});
+
+describe('the refusal envelope at the wire', () => {
+  it('carries the ADR-0112 code and status, and nothing of the flow', async () => {
+    let err: unknown;
+    try {
+      await stack.flows.run(SCHED_SYS, {}, { as: member });
+    } catch (e) {
+      err = e;
+    }
+    expect(isVerifyRefusal(err)).toBe(true);
+    expect(codeOf(err)).toBe('PERMISSION_DENIED');
+    expect(statusOf(err)).toBe(403);
+    const message = (err as Error).message;
+    expect(message).not.toContain(SCHED_SYS);
+    expect(message).not.toMatch(/schedule|runAs|'system'/);
+  });
 });
