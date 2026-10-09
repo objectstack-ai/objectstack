@@ -562,7 +562,7 @@ describe('defineStack - Seed Data Cross-Reference Validation', () => {
   });
 });
 
-describe('defineStack - Mapping Cross-Reference Validation (#2611)', () => {
+describe('defineStack - Mapping Cross-Reference Validation', () => {
   const baseManifest = {
     id: 'com.example.test',
     name: 'test-project',
@@ -1507,7 +1507,7 @@ describe('defineStack — ADR-0087 D2 conversion notices', () => {
   });
 });
 
-describe('defineStack — the RETIRED `type: page` view mount (#17063)', () => {
+describe('defineStack — the RETIRED `type: page` view mount', () => {
   const baseManifest = {
     id: 'com.example.test',
     name: 'test-project',

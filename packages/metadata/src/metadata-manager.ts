@@ -1691,9 +1691,9 @@ export class MetadataManager implements IMetadataService {
    * legacy aggregated container kept under the bare `<object>` key — so callers
    * get exactly one entry per named view. Sorted by `order`, then `name`.
    *
-   * Runtime-authored `shared` / `personal` views (`sys_view_definition`) are
-   * merged in by the REST layer; this method returns the `package` layer that
-   * was registered from source.
+   * This method returns the `package` layer that was registered from source;
+   * runtime-authored views are `view` overlays in `sys_metadata`, served by the
+   * protocol's `getMetaItems`, not by this method.
    *
    * ## [#13913] Aggregated containers are expanded inline, per read
    *

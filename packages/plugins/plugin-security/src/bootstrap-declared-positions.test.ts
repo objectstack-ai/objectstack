@@ -91,8 +91,9 @@ describe('bootstrapDeclaredPositions (#2909 T2 — seed-only semantics locked)',
     expect(r.seeded).toBe(1);
     const row = ql.rows[0];
     expect(row).toMatchObject({ name: 'contributor', label: 'Contributor', active: true, is_default: false });
-    // Provenance is NOT stamped by the declared seeder (bootstrapBuiltinRoles
-    // owns the built-in anchors; declared positions carry the object default).
+    // No code package holds this name (the list registry names none), so the
+    // row gets no provenance stamp and carries the object default. The stamp
+    // a package-held name gets is pinned in the #22360 block below.
     expect(row.managed_by).toBeUndefined();
   });
 
@@ -295,5 +296,115 @@ describe('bootstrapDeclaredPositions — one catalog read, both sources (ADR-013
     const failure = await bootstrapDeclaredPositions(ql, null).then(() => undefined, (e: unknown) => e);
     expect(failure).toBeInstanceOf(TypeError);
     expect(ql.rows).toEqual([]);
+  });
+});
+
+/**
+ * [#22360] The row of a position a code package holds carries the package's
+ * provenance, so the system-row write gate refuses an admin-door edit of it —
+ * as the metadata door already refuses one (ADR-0131 D6). Before this the row
+ * carried the object default (`admin`): a data-door label edit answered 200
+ * and the next boot wrote the declaration back over it.
+ *
+ * The registry is the real `SchemaRegistry`, so "a package holds the name" is
+ * the registry's own artifact lookup — the one the metadata door refuses a
+ * save from — not a fixture's opinion.
+ */
+describe('bootstrapDeclaredPositions — package provenance on a package-held name (#22360)', () => {
+  const PKG = 'com.example.pkg';
+  const packaged = (...items: Array<Record<string, unknown>>) => {
+    const registry = new SchemaRegistry();
+    for (const item of items) registry.registerItem('position', { ...item }, 'name', PKG);
+    return registry;
+  };
+  /** The payloads the pass handed to `update`, as it handed them. */
+  const recordUpdates = (ql: ReturnType<typeof makeQl>) => {
+    const sent: any[] = [];
+    const update = ql.update.bind(ql);
+    ql.update = async (object: string, data: any) => { sent.push({ object, data: { ...data } }); return update(object, data); };
+    return sent;
+  };
+
+  it('stamps a new row package-managed', async () => {
+    const ql = makeQl([], packaged({ name: 'field_rep', label: 'Field Rep' }));
+    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
+    expect(ql.rows.map((row) => [row.name, row.managed_by])).toEqual([['field_rep', 'package']]);
+    expect(r).toEqual({ seeded: 1, updated: 0, unchanged: 0, unreadable: 0 });
+  });
+
+  it('corrects an upgraded deployment\'s admin-stamped row in place: managed_by and nothing else', async () => {
+    const ql = makeQl([], packaged({ name: 'field_rep', label: 'Field Rep', description: 'In the field' }));
+    // The row a pre-fix boot wrote, with the columns an administrator set since.
+    const before = {
+      id: 'pos_1', name: 'field_rep', label: 'Field Rep', description: 'In the field',
+      managed_by: 'admin', active: false, is_default: true, delegatable: true,
+    };
+    ql.rows.push({ ...before });
+    const sent = recordUpdates(ql);
+    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
+    expect(sent).toEqual([{ object: 'sys_position', data: { id: 'pos_1', managed_by: 'package' } }]);
+    expect(ql.rows).toEqual([{ ...before, managed_by: 'package' }]);
+    expect(r).toEqual({ seeded: 0, updated: 1, unchanged: 0, unreadable: 0 });
+  });
+
+  it('refreshes drifted display text and corrects the stamp in one write', async () => {
+    const ql = makeQl([], packaged({ name: 'field_rep', label: 'Field Rep v2' }));
+    ql.rows.push({ id: 'pos_1', name: 'field_rep', label: 'Field Rep', description: null, managed_by: 'admin' });
+    const sent = recordUpdates(ql);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
+    expect(sent.map((s) => s.data)).toEqual([
+      { id: 'pos_1', label: 'Field Rep v2', description: null, managed_by: 'package' },
+    ]);
+  });
+
+  it('a stamped row is left alone by the next pass', async () => {
+    const ql = makeQl([], packaged({ name: 'field_rep', label: 'Field Rep' }));
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
+    const sent = recordUpdates(ql);
+    const again = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
+    expect(sent).toEqual([]);
+    expect(again).toEqual({ seeded: 0, updated: 0, unchanged: 1, unreadable: 0 });
+  });
+
+  it('a row the write gate already treats as managed keeps its value', async () => {
+    const names = ['kept_platform', 'kept_system', 'kept_config'];
+    const ql = makeQl([], packaged(...names.map((name) => ({ name, label: name }))));
+    ql.rows.push(
+      { id: 'pos_p', name: 'kept_platform', label: 'kept_platform', description: null, managed_by: 'platform' },
+      { id: 'pos_s', name: 'kept_system', label: 'kept_system', description: null, managed_by: 'system' },
+      { id: 'pos_c', name: 'kept_config', label: 'kept_config', description: null, managed_by: 'config' },
+    );
+    const sent = recordUpdates(ql);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
+    expect(sent).toEqual([]);
+    expect(ql.rows.map((row) => row.managed_by)).toEqual(['platform', 'system', 'config']);
+  });
+
+  // Control: a position the environment authored through the metadata door is
+  // hydrated into the registry with no package, and that door lets its author
+  // edit it — so its row stays unmanaged, exactly as before.
+  it('control: an environment-authored definition keeps an unmanaged row', async () => {
+    const registry = new SchemaRegistry();
+    registry.registerItem('position', { name: 'door_authored', label: 'Door Authored' }, 'name');
+    registry.registerItem('position', { name: 'door_kept', label: 'Door Kept' }, 'name');
+    const ql = makeQl([], registry);
+    ql.rows.push({ id: 'pos_k', name: 'door_kept', label: 'Door Kept', description: null, managed_by: 'admin' });
+    const sent = recordUpdates(ql);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
+    expect(sent).toEqual([]);
+    const byName = Object.fromEntries(ql.rows.map((row) => [row.name, row.managed_by]));
+    expect(byName).toEqual({ door_kept: 'admin', door_authored: undefined });
+  });
+
+  // A registry without the artifact lookup is asked the way the metadata door
+  // asks one: the definition names a package, and not the rehydration sentinel.
+  it('a registry without the artifact lookup: a named package stamps, the sys_metadata sentinel does not', async () => {
+    const ql = makeQl([
+      { name: 'shipped', label: 'Shipped', _packageId: PKG },
+      { name: 'rehydrated', label: 'Rehydrated', _packageId: 'sys_metadata' },
+    ]);
+    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
+    const byName = Object.fromEntries(ql.rows.map((row) => [row.name, row.managed_by]));
+    expect(byName).toEqual({ shipped: 'package', rehydrated: undefined });
   });
 });

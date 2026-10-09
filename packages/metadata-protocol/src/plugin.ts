@@ -29,12 +29,7 @@ import {
     SysMetadataHistoryObject,
     SysMetadataCommitObject,
     SysMetadataAuditObject,
-    SysViewDefinitionObject,
 } from '@objectstack/metadata-core';
-import {
-    ensureViewDefinitionActiveIndex,
-    resolveIndexExec,
-} from './migrations/view-definition-active-index.js';
 import {
     ensureSysSettingIdentityIndex,
     resolveSysSettingIndexSeam,
@@ -200,8 +195,8 @@ export function assembleMetadataProtocol(
     environmentId?: string,
     options: AssembleMetadataProtocolOptions = {},
 ): ObjectStackProtocolImplementation {
-            // Metadata-storage platform objects (sys_metadata + history/audit
-            // siblings + sys_view_definition). Same `environmentId === undefined`
+            // Metadata-storage platform objects (sys_metadata + its history,
+            // commit and audit siblings). Same `environmentId === undefined`
             // gate as the historical assembly: platform / standalone kernels own
             // their local sys_metadata; per-project (cloud) kernels source
             // metadata from the control plane and must NOT provision these
@@ -212,13 +207,13 @@ export function assembleMetadataProtocol(
             // `runPlatformMigrations` gate below, even though the two blocks
             // share a comment and a history. Measured: `MetadataPlugin` already
             // registers `com.objectstack.metadata-objects` with EXACTLY these
-            // five objects (`queryableMetadataObjects` in
+            // four objects (`queryableMetadataObjects` in
             // `packages/metadata/src/plugin.ts`, gated on
             // `registerSystemObjects !== false`, whose own note says it is
             // registered there "not only in the ObjectQLPlugin
             // `environmentId === undefined` standalone path"). So on a
             // standalone boot this block is redundant, not missing — flipping
-            // it on would put five more registrations into a registry that
+            // it on would put four more registrations into a registry that
             // already has them, and would show up as new pending schema work in
             // `os migrate plan`'s output for no gain. Arming the migrations is
             // this card's surface; provisioning is not.
@@ -234,7 +229,6 @@ export function assembleMetadataProtocol(
                         SysMetadataHistoryObject,
                         SysMetadataCommitObject,
                         SysMetadataAuditObject,
-                        SysViewDefinitionObject,
                     ],
                 });
             }
@@ -257,67 +251,55 @@ export function assembleMetadataProtocol(
             ctx.registerService('protocol', protocolShim);
             ctx.logger.info('Protocol service registered (MetadataProtocolPlugin)');
 
-            // #5839 — `sys_view_definition`'s "unique among ACTIVE rows" was
-            // never delivered by anything: the declaration's `partial` key was
-            // DDL-inert (and is now retired, #5248 / #4943), and unlike
-            // `sys_metadata` this table had no runtime migration behind it, so
-            // an archived view kept occupying its (name, organization_id,
-            // owner) slot and the user could not re-create a view they had
-            // just thrown away. Same paradigm as the protocol's own
-            // `ensureOverlayIndex`, armed from THIS assembly because this is
-            // the one seam both mounts share (MetadataProtocolPlugin's
-            // delegated mode AND ObjectQLPlugin's built-in
-            // `registerProtocol !== false` convenience mode) — a hook on the
-            // delegated plugin alone would miss the default mount entirely.
+            // The `kernel:ready` platform-table repairs this assembly arms: #8629
+            // (`sys_setting`'s row identity) and #8686 (the seed/API tenancy
+            // backfill). They ride THIS assembly because it is the one seam both
+            // mounts share (MetadataProtocolPlugin's delegated mode AND
+            // ObjectQLPlugin's built-in `registerProtocol !== false` convenience
+            // mode) — a hook on the delegated plugin alone would miss the default
+            // mount entirely. (#5839's `sys_view_definition` active-row index
+            // rode here first; it retired with its table, ADR-0131 D13.)
             //
             // Gated for exactly the reason the registerApp block above is:
             // per-project (cloud) kernels do not provision these tables
-            // locally, so there is no index of ours to tighten there.
+            // locally, so there is nothing of ours to repair there.
             //
-            // [#9380] The gate is now DECLARED (`runPlatformMigrations`) rather
+            // [#9380] The gate is DECLARED (`runPlatformMigrations`) rather
             // than deduced from `environmentId === undefined`. The deduction was
             // wrong in the direction that mattered: the standalone stack stamps
             // `'env_local'`, so this whole block never armed on a self-hosted
-            // boot and the three migrations below reached no self-hosted
-            // install. The registerApp block above keeps the old predicate on
-            // purpose — see the note there.
+            // boot and the migrations below reached no self-hosted install. The
+            // registerApp block above keeps the old predicate on purpose — see
+            // the note there.
             //
-            // Deferred to `kernel:ready` because the table has to EXIST first —
-            // ObjectQLPlugin creates it in `start()` via `syncRegisteredSchemas`,
+            // Deferred to `kernel:ready` because the tables have to EXIST first —
+            // ObjectQLPlugin creates them in `start()` via `syncRegisteredSchemas`,
             // which runs after every plugin's `init()`.
             //
             // Wrapped so it can NEVER fail a bootstrap: `kernel:ready` handlers
             // propagate, and an index we could not tighten is not a reason to
             // refuse to boot. (`ensureOverlayIndex` gets this by wrapping its
             // whole body in a swallow-everything try/catch; the same guarantee,
-            // stated once here, keeps the migration itself readable.)
-            // #8629 rides the SAME seam and the same gate, for the same reasons
-            // — `sys_setting`'s declared row identity
+            // stated once here, keeps each migration itself readable.)
+            //
+            // #8629: `sys_setting`'s declared row identity
             // (`namespace, key, scope, user_id`) is NULL-distinct on `user_id`,
             // which is NULL on every row that is not `scope='user'`, so the
             // constraint is void on exactly the tenant and global layers.
             //
-            // Two differences from its sibling, both handled inside the
-            // migration rather than here: `sys_setting` is registered by the
-            // OPTIONAL `service-settings`, so the table may legitimately not
-            // exist on this kernel (probed for, and its absence is a silent
-            // no-op); and the tightening can be REFUSED by existing duplicate
-            // rows, which per the 2026-08-14 ruling leaves the previous index in
-            // place and hands the operator the list — never a keep-one rule.
+            // Two properties of it, both handled inside the migration rather
+            // than here: `sys_setting` is registered by the OPTIONAL
+            // `service-settings`, so the table may legitimately not exist on
+            // this kernel (probed for, and its absence is a silent no-op); and
+            // the tightening can be REFUSED by existing duplicate rows, which
+            // per the 2026-08-14 ruling leaves the previous index in place and
+            // hands the operator the list — never a keep-one rule.
             //
             // Separate try/catch per migration, deliberately: they protect
             // different tables and one that could not be armed must not skip the
             // other.
             if (shouldRunPlatformMigrations(environmentId, options.runPlatformMigrations)) {
                 (ctx as any)?.hook?.('kernel:ready', async () => {
-                    try {
-                        await ensureViewDefinitionActiveIndex(resolveIndexExec(ql), ctx.logger);
-                    } catch (e: unknown) {
-                        ctx.logger.warn(
-                            '[metadata-protocol] sys_view_definition active-row index migration skipped — the index that keeps a view name unique among ACTIVE rows only (an archived view frees its name) was not ensured this boot',
-                            { error: e instanceof Error ? e.message : String(e) },
-                        );
-                    }
                     try {
                         // [#17175] The SEAM, not the bare exec: the presence
                         // probe compiles a catalog statement for the connected
@@ -336,7 +318,7 @@ export function assembleMetadataProtocol(
                         );
                     }
                     // #8686 rides the same seam and the same gate, with one
-                    // difference worth stating: its two siblings above tighten an
+                    // difference worth stating: its sibling above tightens an
                     // INDEX, while this one moves stored ROWS. That is why it is
                     // guarded on the install being single-tenant and on there
                     // being exactly one organization to adopt — where the owner is

@@ -34,6 +34,26 @@
  *    `_packageId`;
  *  - **a built-in** — {@link BUILT_IN_SECURITY_CATALOG_NAMES}.
  *
+ * ## The cold boot
+ *
+ * At a cold boot every package registers (the kernel's first phase) BEFORE the
+ * environment catalog hydrates from `sys_metadata` (`ObjectQLPlugin.start`), so
+ * neither door above can see an environment-held name then: the stored row
+ * arrives second, in the bare slot. Once hydration has run and before any other
+ * plugin starts, the engine plugin asks the registry for every package-held
+ * position and permission-set name the environment catalog also holds
+ * ({@link ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES}), and one such name refuses the
+ * boot with this rule's envelope, naming both holders. So a cold boot, a hot
+ * install and an artifact boot answer alike. (Maintainer ruling, letter A on
+ * #22307, record 6063176077; ADR-0048 addendum N.3.)
+ *
+ * The environment's item is read as what it is — a bare-slot item, whatever
+ * package envelope hydration grafted onto it. At a cold boot the stored row is
+ * hydrated after the package registered, so the protocol's artifact-protection
+ * merge stamps it with that package's `_packageId`, and a stamp alone would read
+ * it as the package's own definition. Only a registration with no package ever
+ * writes the bare slot.
+ *
  * ## What it deliberately does not judge
  *
  *  - ⛔ An environment-catalog save over a package-held name. The ruling covers
@@ -41,7 +61,8 @@
  *    path keeps its own answers (a packaged permission set is already locked
  *    against an in-place edit, `403`). A bare-slot registration — what every
  *    `sys_metadata` hydration and write-through performs — carries no package
- *    and is never refused here.
+ *    and is never refused here: the hydration write stays unjudged as a write,
+ *    and the boot check above judges the PACKAGE's claim against it.
  *  - ⛔ A downgrade. `OS_METADATA_COLLISION=warn` softens the ADR-0048 Phase 1
  *    namespace gate only; no ruling extends it to this refusal.
  *  - The same package registering its own name again — an idempotent reload, a
@@ -103,6 +124,19 @@ export const BUILT_IN_SECURITY_CATALOG_NAMES: Readonly<Record<SecurityCatalogTyp
   permission: new Set<string>(),
   capability: new Set<string>(PLATFORM_CAPABILITY_NAMES),
 });
+
+/**
+ * The catalog types the environment catalog can hold, which are the ones the
+ * cold-boot check reads (module doc, "The cold boot"): the metadata-type registry
+ * declares `position` and `permission` `allowRuntimeCreate: true`, so an
+ * environment can author either. A `capability` is code-only
+ * (`allowRuntimeCreate: false`): the runtime metadata API refuses to create one,
+ * so the environment catalog holds none.
+ */
+export const ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES: readonly SecurityCatalogType[] = Object.freeze([
+  'position',
+  'permission',
+]);
 
 /** Who holds a security catalog name (module doc, "The holders"). */
 export type SecurityCatalogHolder =

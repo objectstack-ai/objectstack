@@ -173,9 +173,11 @@ describe('checkViewCompleteness — layout bindings', () => {
     expect(f.message).toContain('ObjectCalendar.tsx');
     // ⛔ The half the correction had to PRESERVE: a warning an author meets at
     // authoring time earns its place by naming the key to declare, not by
-    // reporting that something is missing.
-    expect(f.message).toContain('calendar.startDateField');
-    expect(f.fix).toContain('startDateField');
+    // reporting that something is missing. [#22161] The verdict is one
+    // sentence now, so the key rides the `fix:` line printed under it; that
+    // `startDateField` is the block's one REQUIRED key is the rule's
+    // `os explain` entry (pinned in @objectstack/lint).
+    expect(f.fix).toContain('calendar: { startDateField:');
     // Severity is untouched because it is already RULED, not because the
     // question is open: #16577 ruled B (comment `5634033966`, card closed
     // `completed` 2026-09-11) — a `calendar` route that refuses BY NAME
@@ -206,9 +208,15 @@ describe('checkViewCompleteness — layout bindings', () => {
     expect(f.message).toContain(screen);
     expect(f.message).toContain(component);
     // ⛔ The half the correction had to PRESERVE: the prescription. Each key
-    // the renderer's refusal screen names is the key the body tells the
-    // author to declare.
-    for (const key of keys) expect(f.message).toContain(key);
+    // the renderer's refusal screen names is a key the author is told to
+    // declare — [#22161] on the `fix:` line now, which prints directly under
+    // the one-sentence verdict (`gantt.startDateField` is spelled
+    // `gantt: { startDateField: … }` there).
+    for (const key of keys) {
+      const [block, prop] = key.split('.');
+      expect(f.fix.startsWith(`${block}: {`)).toBe(true);
+      expect(f.fix).toContain(`${prop}:`);
+    }
     // Severity is untouched and CONSISTENT with #16577's ruling B (comment
     // `5634033966`): a route that refuses BY NAME stays warning-class under
     // ADR-0078 §1 because both doors are loud. These rows now measure that
@@ -682,6 +690,34 @@ describe('registry hygiene', () => {
     for (const f of all) {
       expect(f.fix.length).toBeGreaterThan(8);
       expect(f.message.length).toBeGreaterThan(60);
+    }
+  });
+
+  // [#22161] `os validate` / `os build` / `os dev` print a finding on every
+  // run, so its message is ONE verdict sentence: what is inert and the runtime
+  // site that makes it so (ADR-0078 §6 keeps the citation here). The long
+  // reasoning is the rule id's `os explain` entry in `@objectstack/lint`,
+  // whose own suite pins that every id below has one. Every firing variant of
+  // every rule, so a long body cannot come back on one branch.
+  it('every firing variant prints one verdict line of at most 200 characters', () => {
+    const object = { name: 'unit', fields: { name: { type: 'text' } } };
+    const variants = [
+      ...['summary', 'formula', 'lookup', 'master_detail', 'select', 'radio', 'checkboxes']
+        .flatMap((type) => checkFieldCompleteness({ type })),
+      ...['kanban', 'calendar', 'gantt', 'timeline', 'map', 'tree'].flatMap((type) => checkViewCompleteness({ type })),
+      ...checkViewCompleteness({ type: 'map', map: {} }),
+      ...checkViewCompleteness({ type: 'tree', tree: {} }, object),
+      ...checkViewCompleteness({ type: 'grid', rowColor: { field: 'status' } }),
+      // One offending value: the list the verdict closes on is the author's data.
+      ...checkViewCompleteness({ type: 'grid', rowColor: { field: 'status', colors: { open: '#0f0' } } }),
+      ...checkWebhookCompleteness({}),
+    ];
+    expect(new Set(variants.map((f) => f.rule))).toEqual(new Set(FUNCTIONAL_COMPLETENESS_RULES));
+    expect(variants).toHaveLength(18);
+    for (const f of variants) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+      expect(f.fix, f.rule).not.toContain('\n');
     }
   });
 });

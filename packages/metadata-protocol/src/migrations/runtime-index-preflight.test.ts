@@ -15,7 +15,6 @@ import {
     buildSysSettingDuplicateProbeSqlMysql,
     buildSysSettingPresenceSql,
 } from './sys-setting-identity-index.js';
-import { buildDuplicateProbeSql as buildViewActiveDuplicateProbeSql } from './view-definition-active-index.js';
 import type { IndexExec } from './partial-index-probe.js';
 
 /**
@@ -63,11 +62,13 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         db = new DatabaseSync(':memory:');
         exec = async (sql: string) => db.prepare(sql).all();
 
-        // ── sys_view_definition: two ACTIVE shared views under one name ────
-        // The #5839/#6417 tightening's live conflict — `owner` NULL and
-        // `organization_id` NULL both fold into their sentinel buckets, so the
-        // two rows collide under the NULL-safe key while the declared,
-        // NULL-distinct index admits them.
+        // ── A RETIRED table, still physically present and still damaged ────
+        // `sys_view_definition` retired under ADR-0131 D13 together with its
+        // `kernel:ready` tightening. Schema sync never drops a table, so an
+        // existing database keeps it — rows, colliding ones included. Nothing
+        // will ever tighten an index on it again, so a pre-flight that probed
+        // it would send an operator to resolve rows nothing is refusing. The
+        // absence is pinned below against exactly this fixture.
         db.exec(`CREATE TABLE sys_view_definition (
             id TEXT PRIMARY KEY, name TEXT, organization_id TEXT, owner TEXT, state TEXT
         );`);
@@ -76,12 +77,6 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         );
         view.run('v1', 'crm_case.all_open', null, null, 'active');
         view.run('v2', 'crm_case.all_open', null, null, 'active');
-        // The control for the ROW SCOPE: the same collision among ARCHIVED rows
-        // is legal — the index is partial — and must not be reported.
-        view.run('v3', 'crm_case.retired', null, null, 'archived');
-        view.run('v4', 'crm_case.retired', null, null, 'archived');
-        // A personal view that collides with nothing.
-        view.run('v5', 'crm_case.mine', 'org_x', 'usr_1', 'active');
 
         // ── sys_metadata: two ACTIVE package-less overlays for one key ─────
         db.exec(`CREATE TABLE sys_metadata (
@@ -97,6 +92,11 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         // back clear — the two states are independent indexes and a run that
         // conflated them would report this as blocked too.
         meta.run('m3', 'view', 'crm_case.board', null, null, 'draft');
+        // The control for the ROW SCOPE: the same collision among ARCHIVED rows
+        // is legal — both overlay indexes are partial — and must not be
+        // reported by either of them.
+        meta.run('m4', 'view', 'crm_case.retired', null, null, 'archived');
+        meta.run('m5', 'view', 'crm_case.retired', null, null, 'archived');
 
         // ⛔ `sys_setting` is deliberately NOT created: it is registered by the
         // OPTIONAL `service-settings`, so an ordinary kernel reaches
@@ -120,19 +120,7 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         expect(results.map((entry) => `${entry.index}:${entry.status}`)).toEqual([
             'idx_sys_metadata_overlay_active:blocked',
             'idx_sys_metadata_overlay_draft:clear',
-            'idx_sys_view_def_active:blocked',
             'uniq_sys_setting_organization_id_namespace_key_scope_user_id:table-absent',
-        ]);
-
-        // The view-definition conflict, named row-for-row. Both NULL columns are
-        // reported through their own sentinel bucket, which is what the index
-        // actually keys on: `organization_id_key = '__global__'` reads as
-        // "organization_id IS NULL", `owner_key = ''` as "owner IS NULL".
-        expect(by('idx_sys_view_def_active', results).groups).toEqual([
-            {
-                key: { name: 'crm_case.all_open', organization_id_key: '__global__', owner_key: '' },
-                rowCount: 2,
-            },
         ]);
 
         // The overlay conflict — and here `organization_id` is BARE, because
@@ -149,11 +137,17 @@ describe('kernel:ready index pre-flight (#8725)', () => {
             },
         ]);
 
-        // ⭐ The archived pair is NOT reported. The index is partial, those rows
-        // are outside it, and a pre-flight that flagged them would send an
-        // operator to delete data nothing is refusing.
-        const viewKeys = JSON.stringify(by('idx_sys_view_def_active', results).groups);
-        expect(viewKeys).not.toContain('crm_case.retired');
+        // ⭐ The archived pair is NOT reported. Both indexes are partial, those
+        // rows are outside them, and a pre-flight that flagged them would send
+        // an operator to delete data nothing is refusing.
+        const overlayKeys = JSON.stringify(results.map((entry) => entry.groups));
+        expect(overlayKeys).not.toContain('crm_case.retired');
+
+        // ⭐ The retired table is NOT probed, though it is present and damaged
+        // (ADR-0131 D13): no entry names it, and its colliding view name appears
+        // nowhere in the report.
+        expect(results.map((entry) => entry.table)).not.toContain('sys_view_definition');
+        expect(JSON.stringify(results)).not.toContain('crm_case.all_open');
 
         expect(by('idx_sys_metadata_overlay_draft', results).groups).toEqual([]);
         expect(by('uniq_sys_setting_organization_id_namespace_key_scope_user_id', results).groups).toEqual([]);
@@ -162,11 +156,11 @@ describe('kernel:ready index pre-flight (#8725)', () => {
     it('carries the row scope and key parts each migration actually builds', async () => {
         const results = await collectRuntimeIndexPreflight(exec);
 
-        expect(by('idx_sys_view_def_active', results)).toMatchObject({
-            migration: 'ensureViewDefinitionActiveIndex',
-            table: 'sys_view_definition',
+        expect(by('idx_sys_metadata_overlay_active', results)).toMatchObject({
+            migration: 'ensureMetadataOverlayIndexes',
+            table: 'sys_metadata',
             rowScope: "state = 'active'",
-            keyParts: ['name', "COALESCE(organization_id, '__global__')", "COALESCE(owner, '')"],
+            keyParts: ['type', 'name', 'organization_id', "COALESCE(package_id, '')"],
         });
         expect(by('idx_sys_metadata_overlay_draft', results)).toMatchObject({
             migration: 'ensureMetadataOverlayIndexes',
@@ -178,13 +172,26 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         expect(by('uniq_sys_setting_organization_id_namespace_key_scope_user_id', results).rowScope).toBeNull();
     });
 
+    it('probes exactly the indexes a kernel:ready migration still tightens — the retired view-definition one is gone (ADR-0131 D13)', () => {
+        // Every dialect, because the one arm that takes a dialect must not be
+        // the place a retired probe survives.
+        for (const client of [undefined, 'better-sqlite3', 'pg', 'mysql2']) {
+            expect(
+                runtimeIndexProbes({ client }).map((probe) => `${probe.migration}:${probe.table}:${probe.index}`),
+            ).toEqual([
+                'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_active',
+                'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_draft',
+                'ensureSysSettingIdentityIndex:sys_setting:uniq_sys_setting_organization_id_namespace_key_scope_user_id',
+            ]);
+        }
+    });
+
     it('issues the OWNING migration\'s own statements, never a second spelling of the key', () => {
         const probes = runtimeIndexProbes();
         const sql = Object.fromEntries(probes.map((probe) => [probe.index, probe.duplicateSql]));
 
         expect(sql['idx_sys_metadata_overlay_active']).toBe(buildOverlayDuplicateProbeSql('active'));
         expect(sql['idx_sys_metadata_overlay_draft']).toBe(buildOverlayDuplicateProbeSql('draft'));
-        expect(sql['idx_sys_view_def_active']).toBe(buildViewActiveDuplicateProbeSql());
         expect(sql['uniq_sys_setting_organization_id_namespace_key_scope_user_id']).toBe(
             buildSysSettingDuplicateProbeSql(),
         );
@@ -223,8 +230,8 @@ describe('kernel:ready index pre-flight (#8725)', () => {
     it('a seam that accepts every statement and answers none is unreadable, never absent', async () => {
         // `InMemoryDriver.execute()` shape (#10677): it neither throws nor is
         // missing, it just returns `null`. Read through the per-index presence
-        // question alone that would be four `table-absent` entries — a clean
-        // bill of health from a probe that never ran.
+        // question alone that would be a `table-absent` entry per index — a
+        // clean bill of health from a probe that never ran.
         const noop: IndexExec = async () => null;
         const results = await collectRuntimeIndexPreflight(noop);
 
@@ -234,14 +241,14 @@ describe('kernel:ready index pre-flight (#8725)', () => {
 
     it('reports a probe that throws as unreadable, with the driver\'s own message', async () => {
         const failing: IndexExec = async (sql: string) => {
-            if (sql.includes('sys_view_definition') && sql.includes('GROUP BY')) {
+            if (sql.includes('sys_metadata') && sql.includes("state = 'draft'") && sql.includes('GROUP BY')) {
                 throw new Error('database is locked');
             }
             return db.prepare(sql).all();
         };
         const results = await collectRuntimeIndexPreflight(failing);
 
-        expect(by('idx_sys_view_def_active', results)).toMatchObject({
+        expect(by('idx_sys_metadata_overlay_draft', results)).toMatchObject({
             status: 'unreadable',
             detail: 'database is locked',
             groups: [],

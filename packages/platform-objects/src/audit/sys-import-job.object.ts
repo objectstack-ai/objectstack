@@ -104,8 +104,8 @@ export const SysImportJob = ObjectSchema.create({
     //     other actor column on a platform object is `Field.lookup('sys_user')`,
     //     which driver-sql emits at `DEFAULT_STRING_VARCHAR_CHARS` = 255;
     //   - the landed text declarations for the same value class:
-    //     `sys_metadata_audit.actor`, `sys_metadata_commit.actor` and
-    //     `sys_view_definition.owner` all declare `maxLength: 255`.
+    //     `sys_metadata_audit.actor` and `sys_metadata_commit.actor` both
+    //     declare `maxLength: 255`.
     // [#16410] There is no fixed "floor" to clear, because an id has no fixed
     // width. `driver-sql` mints `nanoid(DEFAULT_ID_LENGTH)` — a per-driver
     // constant — and `driver-memory` mints no fixed width at all, while a

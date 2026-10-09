@@ -48,7 +48,8 @@
 // Since that walk, the seven `sys_account._actions.link_social` provider-brand
 // rows (Google through Discord) left this ledger together with the action,
 // retired under ADR-0049 enforce-or-remove (#21849): the bundle no longer
-// carries those leaves, so the ledger below holds 36 echoes.
+// carries those leaves, so the ledger held 36 echoes. Then `sys_view_definition`
+// retired as inert (ADR-0131 D13) and took its bare `ID` leaf with it: 35.
 //
 // ## What this file deliberately does NOT assert
 //
@@ -187,7 +188,6 @@ const DECISIONS: readonly Decision[] = [
     'sys_email_template',
     'sys_metadata',
     'sys_metadata_history',
-    'sys_view_definition',
     'sys_metadata_audit',
     'sys_secret',
     'sys_setting_audit',
@@ -216,10 +216,10 @@ function undeclaredEchoes(rows: readonly Decision[]): string[] {
 }
 
 describe('#20493 ja-JP — the ledger itself (controls before verdicts)', () => {
-  it('is the size it claims: 3 pinned translations and 36 declared echoes, no path twice', () => {
-    expect(DECISIONS.length).toBe(39);
+  it('is the size it claims: 3 pinned translations and 35 declared echoes, no path twice', () => {
+    expect(DECISIONS.length).toBe(38);
     expect(DECISIONS.filter((d) => d.verdict === 'translate').length).toBe(3);
-    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(36);
+    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(35);
     expect(new Set(DECISIONS.map((d) => d.path)).size).toBe(DECISIONS.length);
   });
 
