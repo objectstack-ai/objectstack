@@ -61,6 +61,16 @@ import { raceWithTimeout } from './timeout-guard.js';
 const DEGRADED_CAPABILITIES_SERVICE = 'kernel.degraded-capabilities';
 
 /**
+ * The three hooks `bootstrap()` dispatches once every plugin's `init()` and
+ * `start()` has run, in this order — the hooks
+ * {@link ObjectKernelConfig.bootPhaseHooks} withholds. Read only to NAME them in
+ * the line a withholding boot logs; the dispatch sites in `bootstrap()` keep
+ * their string literals, which is what `scripts/check-kernel-hook-pairs.mjs`
+ * reads.
+ */
+const BOOT_PHASE_HOOKS = ['kernel:ready', 'kernel:bootstrapped', 'kernel:listening'] as const;
+
+/**
  * Enhanced Kernel Configuration
  */
 export interface ObjectKernelConfig {
@@ -85,6 +95,51 @@ export interface ObjectKernelConfig {
     
     /** Whether to skip strict system requirement validation (Critical for testing) */
     skipSystemValidation?: boolean;
+
+    /**
+     * Whether `bootstrap()` dispatches the three BOOT-PHASE hooks —
+     * `kernel:ready`, `kernel:bootstrapped` and `kernel:listening` — once every
+     * plugin's `init()` and `start()` has run. Default `true`: the boot is
+     * exactly what it has always been. Only an explicit `false` withholds them;
+     * absent or `undefined` is the default.
+     *
+     * `false` is for a host that needs a kernel's registered DEFINITIONS and
+     * its started services, and nothing the boot phase does — for example a
+     * repair kernel built for an environment whose normal boot cannot finish,
+     * because a boot-phase handler throws, never settles, or outlasts the
+     * host's own timeout.
+     *
+     * **What `false` withholds:** the kernel's dispatch of those three hooks,
+     * and nothing else. `PluginContext.hook` still accepts a handler for them;
+     * the handler is never called. So whatever a plugin does in such a handler
+     * does not happen on this kernel: a definition it registers there is
+     * ABSENT, the seeds, heals, reconciles, replays, schedulers and audits it
+     * runs there do not run, and an HTTP server that opens its socket on
+     * `kernel:listening` never listens. The boot logs one `warn` naming each
+     * withheld hook and how many registered handlers it left uncalled, and its
+     * completion line says the hooks were withheld.
+     *
+     * **What it guarantees:** the rest of `bootstrap()` runs unchanged —
+     * dependency ordering, every plugin's `init()`, the core-service
+     * fallbacks, every plugin's `start()` under the same timeout and rollback
+     * rules, and the system-requirement check. So every service and every
+     * definition a plugin registers in `init()` or `start()` is present, a
+     * driver it connects there included, and the kernel is `running`.
+     * `shutdown()` is unchanged: `kernel:shutdown` is dispatched, and every
+     * plugin's `destroy()` and every `onShutdown()` handler runs. The kernel
+     * itself waits on nothing a withheld hook would have done.
+     *
+     * **What it does NOT guarantee:** that the definitions equal a full boot's.
+     * A plugin may register a definition in a boot-phase handler, and that
+     * definition is absent here. That no handler does so on a given set of
+     * plugins is a reading of that set, not a property of this option —
+     * measure it for the plugins you compose. A `destroy()` or
+     * `kernel:shutdown` handler that assumes its boot-phase handler ran must
+     * tolerate that it did not. And it withholds the KERNEL's dispatch, not
+     * the names: a plugin that calls `PluginContext.trigger` with one of them
+     * itself still runs that hook's handlers.
+     */
+    bootPhaseHooks?: boolean;
 }
 
 /**
@@ -507,6 +562,17 @@ export class ObjectKernel {
 
             // Phase 3: Trigger kernel:ready hook
             this.validateSystemRequirements(); // Final check before ready
+
+            // Phases 3 to 4 are the boot-phase hooks, and nothing follows them
+            // but the completion line, so a host that asked for them withheld
+            // stops here. What that does and does not guarantee is stated on
+            // `ObjectKernelConfig.bootPhaseHooks`.
+            if (this.config.bootPhaseHooks === false) {
+                this.reportWithheldBootPhaseHooks();
+                this.logger.info('✅ Bootstrap complete (boot-phase hooks withheld: bootPhaseHooks is false)');
+                return;
+            }
+
             this.logger.debug('Triggering kernel:ready hook');
             await this.context.trigger('kernel:ready');
 
@@ -540,6 +606,29 @@ export class ObjectKernel {
             this.releaseShutdownSignals();
             throw error;
         }
+    }
+
+    /**
+     * The one line a `bootPhaseHooks: false` boot owes: which boot-phase hooks
+     * this kernel did not dispatch, and how many registered handlers each one
+     * left uncalled. A boot that skips work silently reads as a full boot to
+     * whoever reads its log, so it says so once, here.
+     *
+     * `warn`, not `error`: what is missing is functional (handlers not run),
+     * visible in this very line, and asked for by the host.
+     */
+    private reportWithheldBootPhaseHooks(): void {
+        const withheldHandlers: Record<string, number> = {};
+        for (const hook of BOOT_PHASE_HOOKS) {
+            withheldHandlers[hook] = this.hooks.get(hook)?.length ?? 0;
+        }
+        const counts = BOOT_PHASE_HOOKS.map((hook) => `${hook}: ${withheldHandlers[hook]}`).join(', ');
+        this.logger.warn(
+            `Boot-phase hooks withheld (bootPhaseHooks is false); registered handlers not called: ${counts}. `
+            + 'Nothing a plugin does in those hooks ran on this kernel, so a definition registered there is absent '
+            + 'and a server that listens on kernel:listening is not listening.',
+            { withheldHandlers },
+        );
     }
 
     /**
