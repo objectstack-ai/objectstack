@@ -650,6 +650,25 @@ describe('per-option visibleWhen — a faulting predicate REFUSES the write (ADR
     expect(entry.constraint.fault).toBe('runtime: No such key: statsu');
   });
 
+  it.each([
+    ["current_user.positions.x == 'a'", 'x'],
+    ["ctx.user.organizationId.y == 'a'", 'y'],
+  ])('a read one hop BELOW a bound member (%s) faults on the write path and refuses', (source, key) => {
+    // The first member is bound, so the build's member verdict passes it; the
+    // hop below it is a key the acting user's value does not carry.
+    const entry = goldRefusal(source, {}, { currentUser: AUTHED });
+    expect(entry.constraint.fault).toBe(`runtime: No such key: ${key}`);
+    expect(entry.constraint).not.toHaveProperty('missingKey');
+    expect(entry.message).not.toContain('does not declare');
+  });
+
+  it('control: `has()` over the same hop does not fault — it is a clean FALSE (`invalid_option`)', () => {
+    const err = refusalOf(() =>
+      evaluateValidationRules(gated('has(current_user.positions.x)'), { tier: 'gold' }, 'insert', { currentUser: AUTHED }),
+    );
+    expect(err.fields).toEqual([expect.objectContaining({ field: 'tier', code: 'invalid_option', value: 'gold' })]);
+  });
+
   it('a read THROUGH a reference refuses with the repair that is true for it', () => {
     const entry = goldRefusal("record.account.tier == 'enterprise'", { account: 'acc_1' }, { currentUser: AUTHED });
     expect(entry.message).toContain("reads 'tier' through 'account', a reference to 'crm_account'");
