@@ -301,41 +301,28 @@ describe('#5265 — a save receipt names what was actually written', () => {
         );
     });
 
-    it('an overlay of a packaged ACTION — supportsOverlay:false, and still an override', async () => {
-        // The mirror of the first block, and the sharpest case in this file:
-        // when an overlay-less type IS overridden over a packaged artifact,
-        // the overlay sentence is the true one. A receipt decided by
-        // `supportsOverlay` would get this exactly backwards; one decided by
-        // artifact backing gets it right.
-        //
-        // (`object` cannot stand in here: it is `allowOrgOverride: false`, so
-        // `SysMetadataRepository.assertAllowed` refuses an `override-artifact`
-        // write with `[NOT_OVERRIDABLE]` before any receipt is built. Measured,
-        // not assumed — this case was written against `object` first.)
-        //
-        // The specimen was `flow` until #6283 rolled its `allowOrgOverride`
-        // back to `false` (ADR-0005:57), then bare `action` until commit ee58392e1
-        // rolled back the remaining nine unratified flags — no statically
-        // registered type pairs overlay-less with overridable anymore (the
-        // premise pin above holds the population empty). The pairing is
-        // still REACHABLE, through the ONE documented door that remains:
-        // `OS_METADATA_WRITABLE` (ADR-0005's operator escape hatch), which
-        // both `isOverlayAllowed` and the repository's `assertAllowed`
-        // consult. So this case runs `action` behind that hatch — the
-        // receipt wording it pins is exactly what an operator who unlocked
-        // a type would see.
+    it('an overlay of a packaged ACTION — supportsOverlay:false: no longer reachable through the hatch (ADR-0131 D6)', async () => {
+        // This case used to pin the OVERLAY receipt for the one pairing that
+        // still reached it: a packaged item of an overlay-less type, written
+        // behind the `OS_METADATA_WRITABLE` hatch. No statically registered
+        // type pairs overlay-less with overridable (the premise pin above holds
+        // that population empty), and managed content is sealed now, so the
+        // hatch no longer opens the pairing either: the save is refused with
+        // the seal and no receipt is built. The overlay receipt keeps its pin
+        // on the packaged VIEW (the regime-O overlay) above.
         process.env.OS_METADATA_WRITABLE = 'action';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
 
         const { protocol } = makeProtocol([{ type: 'action', name: 'rc5_acct' }]);
 
-        const result = await protocol.saveMetaItem({
+        const err: any = await protocol.saveMetaItem({
             type: 'action', name: 'rc5_acct', item: OVERLAYLESS_PROBES.action,
-        });
+        }).then(() => null, (e: unknown) => e);
 
-        expect(result.message).toBe(
-            `Saved customization overlay (env-wide, state=active) — type=action, name=rc5_acct [seq=${result.seq}]`,
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(String(err?.message)).toContain(
+            "Metadata item 'action/rc5_acct' is provided by a managed package and is sealed against in-place edits.",
         );
     });
 

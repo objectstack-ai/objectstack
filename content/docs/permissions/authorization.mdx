@@ -479,11 +479,13 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
   pre-persistence `registerAuthoringGate` seam): the packaged-baseline rule
   no lint rule can judge, enforced on every runtime-authored object body —
   Studio drafts, REST saves, AI builders. An environment overlay of a
-  **packaged** object may only *tighten* `sharingModel` /
-  `externalSharingModel`, never widen them beyond the packaged declaration
-  (`403 owd_widening_forbidden` — widen it in the package source and
-  publish instead; this closes the `OS_METADATA_WRITABLE=object` escape
-  hatch as an unvalidated widening path, ADR-0086 D1). Write-path only:
+  **packaged** object is refused outright, whether it tightens or widens
+  `sharingModel` / `externalSharingModel`, and with `OS_METADATA_WRITABLE`
+  set or not (`403 NOT_OVERRIDABLE` — managed content is sealed, ADR-0131
+  D6): change the posture in the package source and publish instead. The
+  package door answers ahead of this gate, so its packaged-baseline rule
+  (`403 owd_widening_forbidden`, ADR-0086 D1) is not reached through the
+  metadata API. Write-path only:
   stored metadata keeps loading unchanged. The gate's former second rule
   (`403 owd_external_wider`, external ≤ internal) was **retired as a
   duplicate** when the lint block crossed to the runtime door (#8310
