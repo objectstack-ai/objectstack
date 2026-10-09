@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ChartTypeSchema } from '@objectstack/spec/ui';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import {
-  validateWidgetBindings,
+  validateWidgetBindings as validateWidgetBindingsUnrecorded,
   MARK_MIXING_CHART_TYPES,
   METRIC_WIDGET_TYPES,
   TABULAR_WIDGET_TYPES,
@@ -27,6 +27,34 @@ import {
   WIDGET_FILTER_FIELD_NOT_INCLUDED,
   WIDGET_SORTBY_UNSELECTED,
 } from './validate-widget-bindings.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: that case reads what the cases above
+// fired.
+const SHORTENED_RULE_IDS: readonly string[] = [
+  WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
+  DASHBOARD_FILTER_FIELD_UNKNOWN,
+  DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
+  DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  WIDGET_FILTER_FIELD_UNKNOWN,
+  WIDGET_FILTER_FIELD_NOT_INCLUDED,
+  WIDGET_SORTBY_UNSELECTED,
+  CHART_FIELD_UNKNOWN,
+  CHART_MEASURES_MISSING,
+  WIDGET_MEASURES_MISSING,
+  CHART_DIMENSIONS_MISSING,
+];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateWidgetBindings: typeof validateWidgetBindingsUnrecorded = (...args) => {
+  const findings = validateWidgetBindingsUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
 
 /** The downstream repro from issue #1719 — dataset with a count AND a sum
  *  measure plus a dimension; the widget selects only the count, no dims. */
@@ -164,10 +192,11 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     expect(findings[0].rule).toBe(CHART_FIELD_UNKNOWN);
     expect(findings[0].where).toContain('spend_by_category');
     expect(findings[0].message).toContain('chartConfig.yAxis[0].field "amount"');
-    expect(findings[0].message).toContain('declared measures: sum_amount, ticket_count');
+    expect(findings[0].message).toContain('is not a measure of dataset "expense_line_metrics"');
     // The TRUE consequence: the axis `field` is stripped, not queried and missed.
+    // [#22161] That it is a silent no-op is `os explain chart-field-unknown`'s
+    // (pinned at the foot of this file), not the one-line verdict's.
     expect(findings[0].message).toContain('ignores an authored axis `field`');
-    expect(findings[0].message).toContain('silent no-op');
     expect(findings[0].message).not.toContain('will not contain');
     expect(findings[0].hint).toContain('Did you mean "sum_amount"?');
     expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_FIELD_UNKNOWN}']`);
@@ -208,8 +237,10 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     expect(findings[0].message).toContain('chartConfig.series[0].name "value"');
     // A series entry is matched BY NAME, so an unmatched entry is dropped
     // WHOLE — its presentation lands on nothing. That is a different sentence
-    // from the axis positions, and the difference is the point.
-    expect(findings[0].message).toContain('matches an authored entry BY NAME');
+    // from the axis positions, and the difference is the point. [#22161] The
+    // BY-NAME mechanism is the `os explain` entry's; the verdict keeps the
+    // outcome.
+    expect(findings[0].message).toContain('pairs with no series');
     expect(findings[0].message).toContain('lands on nothing');
     expect(findings[0].message).not.toContain('will not contain');
     // The shape sentence now says DELETE rather than describing what the key
@@ -856,9 +887,10 @@ describe('validateWidgetBindings (dashboard-filter-field-unprovisioned, issue #8
     expect(f.where).toContain('federation_dashboard');
     expect(f.where).toContain('total_customers');
     expect(f.message).toContain('owner_id');
-    expect(f.message).toContain('ext_customer');
-    expect(f.message).toContain('external object (ADR-0015)');
-    expect(f.message).toContain('constant-false');
+    expect(f.message).toContain("external object 'ext_customer'");
+    expect(f.message).toContain('injected column with no storage');
+    // [#22161] The SQLite constant-false degradation is the `os explain` entry's.
+    expect(f.message).toContain('the widget renders empty');
     expect(f.hint).toContain("columnMap");
     expect(f.path).toBe('dashboards[0].widgets[0]');
     // The existence rule is UNCHANGED — the name still resolves.
@@ -950,8 +982,8 @@ describe('validateWidgetBindings (dashboard-filter-field-unprovisioned, issue #8
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning');
     // The cause names ext_customer — the LEAF's object — not crm_order.
-    expect(findings[0].message).toContain('ext_customer');
-    expect(findings[0].message).toContain('external object (ADR-0015)');
+    expect(findings[0].message).toContain("external object 'ext_customer'");
+    expect(findings[0].message).not.toContain('crm_order');
     expect(unknownOnly(validateWidgetBindings(federated))).toHaveLength(0);
   });
 });
@@ -1103,7 +1135,7 @@ describe('dashboard-filter-field-not-included — the include clause (#14275)', 
     expect(f.message).toContain('deal_metrics');
     // The consequence that makes this a p2 rather than the widget-level twin:
     // the filter reaches every widget on the board.
-    expect(f.message).toContain('EVERY bound widget');
+    expect(f.message).toContain('the whole board renders empty');
     expect(f.hint).toContain('(none)');
   });
 
@@ -1558,8 +1590,8 @@ describe('chart-measures-missing / chart-dimensions-missing (#15462)', () => {
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].rule).toBe(CHART_DIMENSIONS_MISSING);
     expect(findings[0].path).toBe('dashboards[0].widgets[0]');
-    // The pinned expression, quoted, and the consequence it produces.
-    expect(findings[0].message).toContain('METRIC_TYPES.has(widgetType) || dimensions.length === 0');
+    // The consequence. [#22161] The pinned `isMetric` expression that produces
+    // it is quoted by `os explain chart-dimensions-missing` (foot of this file).
     expect(findings[0].message).toContain('draws a single KPI number');
     expect(findings[0].hint).toContain('declared dimensions: category');
     // The honest alternative repair: declare the family that actually renders.
@@ -1740,7 +1772,7 @@ describe('widget-measures-missing (#15508)', () => {
     expect(findings[0].path).toBe('dashboards[0].widgets[0]');
     // The PINNED placeholder string, quoted — not an inferred consequence.
     expect(findings[0].message).toContain('Pick measures (values) for this dataset widget.');
-    expect(findings[0].message).toContain('the single KPI number this tile is for is not drawn at all');
+    expect(findings[0].message).toContain('its KPI number is not drawn at all');
     // ...and NOT the chart family's consequence, which would be false here.
     expect(findings[0].message).not.toContain('no chart is drawn');
     expect(findings[0].hint).toContain('declared measures: sum_amount, ticket_count');
@@ -1931,4 +1963,42 @@ describe('#15463 acceptance — the refused chartConfig binding keys advise, nev
       expect(advisories.map((f) => f.rule)).toContain(CHART_FIELD_UNKNOWN);
     });
   }
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [WIDGET_LEGACY_ANALYTICS_UNRENDERABLE]: ['single-form cutover', 'DatasetWidget', '`xAxisField`', 'widget-legacy-analytics-shape'],
+    [DASHBOARD_FILTER_FIELD_UNKNOWN]: ['EVERY bound widget', '`created_at`', 'filterBindings: { NAME: false }', 'broken query'],
+    [DASHBOARD_FILTER_FIELD_NOT_INCLUDED]: ['`assertDeclared`', '`runtimeFilter`', 'EVERY bound widget', 'whole board renders empty'],
+    [DASHBOARD_FILTER_FIELD_UNPROVISIONED]: ['ADR-0015', 'remote database owns the schema', 'constant-false', 'HTTP 200, zero rows, no error'],
+    [WIDGET_FILTER_FIELD_UNKNOWN]: ['`runtimeFilter`', 'widens the scope', 'nothing reports the miss', 'filter-token-unknown'],
+    [WIDGET_FILTER_FIELD_NOT_INCLUDED]: ['`assertDeclared`', '`runtimeFilter`', 'joins ONLY'],
+    [WIDGET_SORTBY_UNSELECTED]: ['`resolveOrdering`', 'DATASET_INVALID', 'query RESULT', 'DashboardWidgetOptionsSchema.sortBy'],
+    [CHART_FIELD_UNKNOWN]: ['`axisPresentation`', 'BY NAME', 'silent no-op', 'os migrate meta --from 17'],
+    [CHART_MEASURES_MISSING]: ['DatasetWidget.tsx', 'widget-measures-missing', 'chart-dimensions-missing'],
+    [WIDGET_MEASURES_MISSING]: ['`solid-gauge`', '`pivot`', 'one KPI number the tile exists to show'],
+    [CHART_DIMENSIONS_MISSING]: ['METRIC_TYPES.has(widgetType) || dimensions.length === 0', 'declared chart family is simply gone', '`metric` or `kpi`'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
 });

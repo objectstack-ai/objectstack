@@ -1113,7 +1113,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           rule: WIDGET_SORTBY_UNSELECTED,
           path: `${path}.options.sortBy`,
           message: declaredButUnselected
-            ? `options.sortBy "${sortBy}" is declared by dataset "${dsName}" but not selected by ` +
+            ? `options.sortBy "${sortBy}" is declared by dataset "${dsName}" but is not selected by ` +
               `this widget (selects: ${list(selected)}), so the authored order cannot be applied`
             : `options.sortBy "${sortBy}" is neither a \`dimensions\` nor a \`values\` entry of ` +
               `this widget (selects: ${list(selected)}), so the authored order cannot be applied`,
@@ -1185,7 +1185,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           // `field` is this id's `os explain` entry.
           const nameClause = declaredButUnselected
             ? `chartConfig.${label} "${field}" is a measure of dataset "${dsName}" ` +
-              `not selected in this widget's values (${list(values)})`
+              `not selected in the widget's values (${list(values)})`
             : `chartConfig.${label} "${field}" is not a measure of dataset "${dsName}"`;
           const consequence = kind === 'series'
             ? `so it pairs with no series and its presentation lands on nothing`
@@ -1271,7 +1271,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             rule: CHART_MEASURES_MISSING,
             message:
               `'${w.type}' widget selects no measures (\`values\` is empty), so the renderer ` +
-              `shows the "Pick measures (values) for this dataset widget." placeholder and no chart`,
+              `shows the "Pick measures (values) for this dataset widget." placeholder and no chart is drawn at all`,
             hint:
               `Select at least one measure of dataset "${dsName}" BY NAME — ` +
               `values: ['<measure>'] (declared measures: ${list(measures.keys())}).` +
@@ -1287,7 +1287,9 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           // single-value families lose the NUMBER the tile exists to show, the
           // tabular ones lose the grid. The placeholder is the same one, and
           // it is quoted from the pin rather than paraphrased.
-          const drawn = METRIC_WIDGET_TYPES.has(w.type as string) ? 'no KPI number' : 'no table';
+          const drawn = METRIC_WIDGET_TYPES.has(w.type as string)
+            ? 'its KPI number is not drawn at all'
+            : 'no table is rendered at all';
           push({
             severity: 'warning',
             rule: WIDGET_MEASURES_MISSING,
