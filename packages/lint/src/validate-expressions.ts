@@ -1003,8 +1003,8 @@ const FIELD_TRAVERSAL_CONSEQUENCE: Record<FieldTraversalSlot, string> = {
     'write rather than dropping the value (ADR-0137 D2) — so the field can never be changed once the ' +
     'record exists',
   'option visibleWhen':
-    'The server evaluates an option predicate fail-OPEN: it faults on every write that picks this ' +
-    'option, the fault is logged, and the value is admitted — so the gate is never enforced',
+    'The server REFUSES every write by an acting user that picks this option — an option gate it ' +
+    'cannot evaluate refuses the write, naming the option, the field and the fault (ADR-0137 D2)',
 };
 
 /**
@@ -1018,8 +1018,8 @@ const FIELD_TRAVERSAL_CONSEQUENCE: Record<FieldTraversalSlot, string> = {
  * hydrated (ObjectQL's `rule-validator.ts`: "the field level is not hydrated at
  * all"). A reference field there holds the related record's bare ID, so every
  * read through it faults — on every row, whatever the data — and the runtime
- * can then only refuse the write (the two field-rule slots, ADR-0137 D2) or
- * wave the value through unchecked (an option, fail-open). Hydrating the field
+ * can then only refuse the write (ADR-0137 D2: the two field-rule slots, and
+ * since #22402 the option gate on the write path). Hydrating the field
  * level would be a capability of its own; until one exists, the predicate
  * cannot mean what it says, and `objectstack validate` is where the author
  * should hear it (NORTH-STAR priority rule 4) rather than from the first
@@ -1132,7 +1132,8 @@ const OPTION_VISIBLE_WHEN_BOUND_ROOTS: readonly string[] = ['record', 'previous'
  * is bound at other sites (a `formula` field, an expression `defaultValue`, a
  * seed value) and `os.env` at the seed loader. Measured through the built
  * `evaluateValidationRules` with an authenticated caller, each faults
- * (`No such key: org` / `env` / `locale`) and the value is admitted.
+ * (`No such key: org` / `env` / `locale`), and the write is refused (ADR-0137
+ * D2; until #22402 the value was admitted).
  *
  * Only `ctx` and `os` are listed. `current_user` and `user` ARE the `EvalUser`;
  * their members are that object's own fields, the same at every site that
@@ -1167,11 +1168,14 @@ function celMemberPath(root: string, member: string): string {
  *
  * The evaluator faults on an unbound root (`Unknown variable: parent`,
  * measured through the real `evaluateValidationRules` with an authenticated
- * caller), and a faulting option predicate is fail-OPEN: the fault is logged
- * and the value admitted, so the gate is never enforced. A declared gate the
- * runtime cannot enforce must not pass a door (ADR-0049), and nothing else
- * refused it: every root judged here is in `SCOPE_ROOTS`, which the strict env
- * declares, so the bare-reference check stays silent on it. The case that made
+ * caller), and a faulting option predicate refuses every write by an acting
+ * user that picks the option (ADR-0137 D2, since #22402 — it was fail-OPEN
+ * until then: the value admitted and the gate never enforced). Either way the
+ * declared gate never answers, and a gate the runtime cannot evaluate must not
+ * pass a door (ADR-0049): the author hears it here, not from the first refused
+ * write in production. Nothing else refused it: every root judged here is in
+ * `SCOPE_ROOTS`, which the strict env declares, so the bare-reference check
+ * stays silent on it. The case that made
  * the hole credible is `parent`, which the field-rule slots one level up accept
  * on an object with exactly one `master_detail`.
  *
@@ -1384,8 +1388,9 @@ export interface StackExpressionOptions {
    *    gives both verdicts as the build gives them. The same sentence of
    *    `formulas.mdx` covers it, and the door gave none of it either: an
    *    option whose `visibleWhen` read a bare `amount` saved with a 200, and
-   *    the server's option check cannot evaluate it and fails open (logged,
-   *    allowed through), so the gate it declares is never enforced. Since
+   *    the server's option check cannot evaluate it, so every write that picks
+   *    the option is refused (ADR-0137 D2; until #22402 it failed open and the
+   *    gate it declares was never enforced). Since
    *    #22157 the pass also refuses a root that option check does not bind
    *    (`parent` above all), at both doors through this same call;
    *  - [#22032, pass 4] the object's own `actions[]` pass — each action's
@@ -2279,8 +2284,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           issues.push({ where: optionWhere, message: verdict.message, source: optionSource!, severity: 'error' });
         }
         // [#20078] An option's predicate is evaluated against the record as
-        // stored — a read through a reference faults, and the server admits the
-        // value unchecked. `current_user` (and `current_user.can(…)`) is NOT a
+        // stored — a read through a reference faults, and the server refuses
+        // the write (ADR-0137 D2). `current_user` (and `current_user.can(…)`) is NOT a
         // record traversal and is not judged here.
         refuseFieldTraversal(optionWhere, 'option visibleWhen', opt.visibleWhen, optionHolders);
       }

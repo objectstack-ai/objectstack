@@ -2010,11 +2010,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
      *
      * The server's option check (`evaluateOptionVisibility`) binds `record`,
      * `previous` and the acting user, and nothing else. A predicate reading any
-     * other root faults on every write that picks the option and is admitted
-     * unchecked, so the build refuses it. The measured body is `parent` on a
-     * detail with exactly one `master_detail`: the object shape on which the
-     * field-rule slots one level up DO bind `parent`, so it is the shape an
-     * author copies from.
+     * other root faults on every write that picks the option, which the server
+     * then refuses (ADR-0137 D2), so the build refuses it first. The measured
+     * body is `parent` on a detail with exactly one `master_detail`: the object
+     * shape on which the field-rule slots one level up DO bind `parent`, so it
+     * is the shape an author copies from.
      */
     describe('a per-option `visibleWhen` root the option check does not bind is refused (#22157)', () => {
       const detail = (visibleWhen: unknown, readonlyWhen?: unknown) => ({
@@ -2097,7 +2097,8 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
      * mounts `os.org` / `os.env` only from an `org` / `env` in that context.
      * Measured through the built `evaluateValidationRules` with an
      * authenticated caller, `os.org.id`, `os.env` and `ctx.locale` each fault
-     * (`No such key`) and the value is admitted, so the build refuses them.
+     * (`No such key`) and the write is refused (ADR-0137 D2), so the build
+     * refuses them first.
      */
     describe('a per-option `visibleWhen` member of `ctx` / `os` the option check does not bind is refused (#22274)', () => {
       const detail = (visibleWhen: unknown, extra: Record<string, unknown> = {}) => ({
@@ -4784,7 +4785,7 @@ describe('node config an executor requires (#20316)', () => {
  * The field level is never hydrated (ObjectQL `rule-validator.ts`), so a
  * reference there holds the related record's bare id and every read through it
  * faults: since ADR-0137 D2 the two field-rule slots then REFUSE the write,
- * and an option's `visibleWhen` — fail-open — admits the value unchecked.
+ * and since #22402 so does an option's `visibleWhen` on the write path.
  * `packages/objectql/src/engine-field-predicate-fault.test.ts` pins that
  * runtime half end to end; this block pins the authoring half.
  *
@@ -4843,7 +4844,7 @@ describe('field-level predicates refuse a read THROUGH a reference (#20078)', ()
       slot: 'option visibleWhen',
       fields: { plan: premium("record.account.tier == 'enterprise'") },
       where: "object 'trav_order' · field 'plan' option 'premium' visibleWhen",
-      consequence: 'fail-OPEN',
+      consequence: 'The server REFUSES every write by an acting user that picks this option',
     },
   ])('$slot reading `record.account.tier`', ({ slot, fields, where, consequence }) => {
     it('is ONE error, located at the slot, naming the slot, the reference and the related field', () => {
@@ -4857,6 +4858,9 @@ describe('field-level predicates refuse a read THROUGH a reference (#20078)', ()
     it("carries this slot's consequence and the `validations[]` `script` prescription", () => {
       const [issue] = errorsOf(order(fields));
       expect(issue.message).toContain(consequence);
+      // Every server slot now refuses a faulting predicate (ADR-0137 D2): no
+      // slot's consequence may still describe an admission.
+      expect(issue.message).not.toMatch(/fail-OPEN|is admitted|never enforced/);
       expect(issue.message).toContain('Express the check as a `validations[]` `script` rule');
     });
   });
