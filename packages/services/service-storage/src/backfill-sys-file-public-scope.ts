@@ -62,11 +62,20 @@
  * ## Usage
  *
  * An operator step, not a boot hook — the same posture as the organization
- * backfill beside it (`backfill-sys-file-organizations.ts`): not exported from
- * the package index, run server-side from a context that holds an engine, dry
- * run first and by default:
+ * backfill beside it (`backfill-sys-file-organizations.ts`): run server-side
+ * from a context that holds an engine, dry run first and by default. Unlike
+ * that backfill, the four functions and their report types ARE exported from
+ * the package index: until this sweep runs, a copy of a stored `public` row is
+ * refused (above), and a deployment runs the published package, not a source
+ * checkout, so the step has to ship in the release that asks for it:
  *
  * ```ts
+ * import {
+ *   planSysFilePublicScopeBackfill,
+ *   applySysFilePublicScopeBackfill,
+ *   formatSysFilePublicScopeBackfillReport,
+ * } from '@objectstack/service-storage';
+ *
  * const plan = await planSysFilePublicScopeBackfill(engine);
  * console.log(formatSysFilePublicScopeBackfillReport(plan));  // writes nothing
  * // …read it, then:
