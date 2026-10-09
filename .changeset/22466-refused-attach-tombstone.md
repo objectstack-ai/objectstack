@@ -2,7 +2,7 @@
 '@objectstack/service-storage': patch
 ---
 
-fix(service-storage): a refused attach no longer leaves the uploaded file stored forever — the caller's own never-attached file is tombstoned and reclaimed by the sweep
+fix(service-storage): an attach the attachment gate refuses no longer leaves the uploaded file stored forever — the caller's own never-attached file is tombstoned and reclaimed by the sweep
 
 Clause-②: no
 
@@ -12,5 +12,6 @@ Attaching a file is two writes: the upload commits a `sys_file` (scope `attachme
 - **Only the caller's own unheld upload:** the file must be an `attachments`-scope, `committed` file. The refused caller must be its uploader (`sys_file.owner_id`). It must have no attachment and no field owner (`ref_*`). A refused attach that names someone else's file, a file another record still holds, or a field file changes nothing.
 - **It survives a rollback:** the tombstone is written after the refusal, outside the refused write's transaction. If the attach ran inside a caller's own transaction, an `atomic` batch for example, rolling that transaction back does not undo the tombstone.
 - **Unchanged:** the refusal itself (status, code, message), which does not depend on the file and says nothing about it; an admitted attach; and a retry. Retrying the same `file_id` within the 30 days is admitted or refused like any attach. An admitted retry attaches the file and brings it back to `committed`, as re-attaching a detached file always has.
+- **Not covered:** an attach refused before the attachment gate runs still leaves the uploaded file `committed`. That is an attach with no `sys_attachment` create grant (`403 PERMISSION_DENIED`), or one to a parent with `enable.files` off (`403 FILES_DISABLED`). This is tracked in #22547.
 
-What changes for you: nothing to do. A refused upload no longer uses storage indefinitely.
+What changes for you: nothing to do. When the attachment gate refuses an attach, the uploaded file no longer uses storage indefinitely.
