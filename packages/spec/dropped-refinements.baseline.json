@@ -102,6 +102,7 @@
         "manifest.reports.element.runtimeFilter.lazy",
         "manifest.sharingRules.element.sharedWith",
         "manifest.skills.element.triggerConditions.element",
+        "manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "manifest.views.element.form",
         "manifest.views.element.form.sections.element.in",
         "manifest.views.element.form.submitBehavior.options[1].url",
@@ -233,6 +234,11 @@
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
+    "api/GetTranslationsResponse": {
+      "sites": [
+        "translations.flows.valueType.refusals.valueType.message"
+      ]
+    },
     "api/GetUiViewResponse": {
       "sites": [
         "form",
@@ -306,6 +312,7 @@
         "options[1].manifest.reports.element.runtimeFilter.lazy",
         "options[1].manifest.sharingRules.element.sharedWith",
         "options[1].manifest.skills.element.triggerConditions.element",
+        "options[1].manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "options[1].manifest.views.element.form",
         "options[1].manifest.views.element.form.sections.element.in",
         "options[1].manifest.views.element.form.submitBehavior.options[1].url",
@@ -1153,6 +1160,16 @@
         "buckets.element.lifecyclePolicy.rules.element"
       ]
     },
+    "system/PlatformTranslationBundle": {
+      "sites": [
+        "valueType.flows.valueType.refusals.valueType.message"
+      ]
+    },
+    "system/PlatformTranslationData": {
+      "sites": [
+        "flows.valueType.refusals.valueType.message"
+      ]
+    },
     "system/Schedule": {
       "sites": [
         "options[0].timezone"
@@ -1191,6 +1208,21 @@
     "system/StackServerSecurity": {
       "sites": [
         "rateLimit"
+      ]
+    },
+    "system/TranslationBundle": {
+      "sites": [
+        "valueType.flows.valueType.refusals.valueType.message"
+      ]
+    },
+    "system/TranslationData": {
+      "sites": [
+        "flows.valueType.refusals.valueType.message"
+      ]
+    },
+    "system/TranslationItem": {
+      "sites": [
+        "flows.valueType.refusals.valueType.message"
       ]
     },
     "ui/Action": {
