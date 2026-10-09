@@ -164,10 +164,19 @@ describe('sys_file public-scope backfill (#22443 ruling B) — a real ObjectQL o
 
     const plan = await planSysFilePublicScopeBackfill(engine as any);
     const applied = await applySysFilePublicScopeBackfill(engine as any, plan);
-    expect(applied).toMatchObject({ dryRun: false, scanned: 1, planned: 1, written: 1, failures: [] });
 
-    const rewritten = await sysFile('f_pub');
-    expect(rewritten).toMatchObject({
+    // The pin: the copy the un-swept row refuses (the case above) now lands.
+    const record = await copyBySecondReference('p1', 'f_pub');
+    const copyId = (record as any).image;
+    expect(copyId).not.toBe('f_pub');
+    expect(storage.download).toHaveBeenCalledWith('public/f_pub.png');
+    const copy = await sysFile(copyId);
+    expect(copy).toMatchObject({ scope: REWRITTEN_SYS_FILE_SCOPE, ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
+    expect(String(copy?.key)).toMatch(/^user\//);
+
+    // One column moved on the source row; the key, the acl and ownership did not.
+    expect(applied).toMatchObject({ dryRun: false, scanned: 1, planned: 1, written: 1, failures: [] });
+    expect(await sysFile('f_pub')).toMatchObject({
       scope: REWRITTEN_SYS_FILE_SCOPE,
       key: 'public/f_pub.png',
       ref_object: 'product',
@@ -176,14 +185,6 @@ describe('sys_file public-scope backfill (#22443 ruling B) — a real ObjectQL o
       acl: 'private',
       status: 'committed',
     });
-
-    const record = await copyBySecondReference('p1', 'f_pub');
-    const copyId = (record as any).image;
-    expect(copyId).not.toBe('f_pub');
-    expect(storage.download).toHaveBeenCalledWith('public/f_pub.png');
-    const copy = await sysFile(copyId);
-    expect(copy).toMatchObject({ scope: REWRITTEN_SYS_FILE_SCOPE, ref_object: 'product', ref_id: 'p1', ref_field: 'image' });
-    expect(String(copy?.key)).toMatch(/^user\//);
   });
 
   it('a second run writes zero', async () => {
