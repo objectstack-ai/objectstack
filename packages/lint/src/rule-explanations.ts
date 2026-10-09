@@ -903,7 +903,7 @@ const ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
 
 const ACTION_RECORD_WRITE_DISCARDED_EXPLANATION: RuleExplanation = {
   rule: 'action-record-write-discarded',
-  covers: 'why a ctx.record assignment is discarded',
+  covers: 'why an assignment to the record snapshot is discarded',
   paragraphs: [
     'The runtime hands an action body a plain snapshot of the record as `ctx.record` and never writes it ' +
       'back: the handler returns the body\'s value and applies nothing to the record. So ' +
