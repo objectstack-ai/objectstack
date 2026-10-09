@@ -95,14 +95,14 @@ describe('expression.zod.ts dialect table === ExpressionDialect', () => {
 });
 
 /**
- * [#22081] The `tmpl` docblock says which renderers read which braces.
+ * [#22081, #22110] The `tmpl` docblock says which renderers read which braces.
  *
- * `tmpl` is the helper an author reaches for on every template slot, and its
- * docblock used to call the envelope "Mustache-template" and show only
- * `{{record.x}}` — the spelling a notify node's `title` / `message` renderer
- * (the flow interpolator) leaves inside a stray pair of braces, and the build's
- * `flow-double-brace-interpolation` rule flags. The helper judges no spelling,
- * so its docblock has to name the renderer for each one.
+ * `tmpl` is the helper an author reaches for on every template slot, and the
+ * helper judges no spelling, so its docblock has to name the renderer for each
+ * one. Since protocol 18 every renderer it names for a single-spelling slot
+ * reads `{{record.x}}` — the notify node's `title` / `message` included, where
+ * a single-brace token is refused — so no bullet may still prescribe
+ * `{record.x}` on its own; `titleFormat` is the one slot that takes either.
  *
  * ⛔ Scope: the relation, not the wording — which spelling is listed against
  * which renderer. Rewording a bullet is free.
@@ -124,19 +124,19 @@ describe('the `tmpl` docblock names the renderer behind each brace spelling', ()
 
   const bullets = tmplBullets();
   const doubled = bullets.find((b) => b.startsWith('`{{record.x}}`'));
-  const single = bullets.find((b) => b.startsWith('`{record.x}`'));
+  const either = bullets.find((b) => b.startsWith('either'));
 
-  it('finds a bullet for each spelling (anti-vacuity)', () => {
+  it('finds the double-brace bullet and the either bullet (anti-vacuity)', () => {
     expect(bullets.length, 'no `- ` bullets parsed out of the `tmpl` docblock').toBeGreaterThan(0);
     expect(doubled, 'no bullet opens with `{{record.x}}`').toBeDefined();
-    expect(single, 'no bullet opens with `{record.x}`').toBeDefined();
+    expect(either, 'no bullet opens with `either`').toBeDefined();
   });
 
-  it('lists the double-brace renderers against `{{record.x}}`, and the notify slots against `{record.x}`', () => {
-    for (const renderer of ['messaging', 'email']) expect(doubled).toContain(renderer);
-    expect(doubled).not.toContain('notify');
-    expect(single).toContain('notify');
-    expect(single).toContain('`flow-double-brace-interpolation`');
-    for (const renderer of ['messaging', 'email']) expect(single).not.toContain(renderer);
+  it('lists the notify slots with the double-brace renderers, the single brace there as refused, and no `{record.x}`-only bullet', () => {
+    for (const renderer of ['messaging', 'email', 'notify']) expect(doubled).toContain(renderer);
+    expect(doubled).toContain('refused');
+    expect(bullets.filter((b) => b.startsWith('`{record.x}`'))).toEqual([]);
+    expect(either).toContain('titleFormat');
+    expect(either).not.toContain('notify');
   });
 });

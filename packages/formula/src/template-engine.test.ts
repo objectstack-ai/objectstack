@@ -48,6 +48,19 @@ describe('templateEngine', () => {
     expect(r.ok).toBe(false);
   });
 
+  // #22110 — a host scope's `$`-named variable (a flow's engine-set `$error`)
+  // is a path like any other: the hole compiles, resolves, and an unbound one
+  // renders nothing.
+  it('reads a `$`-named variable as a path', () => {
+    const r = templateEngine.evaluate(
+      { dialect: 'template', source: 'Failed: {{ $error.message }}' },
+      { extra: { $error: { nodeId: 'n1', message: 'boom' } } },
+    );
+    expect(r).toEqual({ ok: true, value: 'Failed: boom' });
+    expect(templateEngine.compile('{{ $runId }}').ok).toBe(true);
+    expect(templateEngine.evaluate({ dialect: 'template', source: '[{{ $nope.x }}]' }, {})).toEqual({ ok: true, value: '[]' });
+  });
+
   it('handles bracket notation', () => {
     const r = templateEngine.evaluate(
       { dialect: 'template', source: '{{record.tags[0]}}' },

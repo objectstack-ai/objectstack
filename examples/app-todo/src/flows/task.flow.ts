@@ -99,8 +99,8 @@ export const TaskReminderFlow: Flow = {
                       id: 'send_reminder', type: 'notify', label: 'Send Reminder',
                       config: {
                         recipients: '{currentTask.owner}',
-                        title: 'Task due tomorrow: {currentTask.subject}',
-                        message: 'Due {currentTask.due_date} · priority {currentTask.priority}.',
+                        title: 'Task due tomorrow: {{ currentTask.subject }}',
+                        message: 'Due {{ currentTask.due_date }} · priority {{ currentTask.priority }}.',
                         sourceObject: 'todo_task',
                         sourceId: '{currentTask.id}',
                       },
@@ -211,11 +211,11 @@ export const OverdueEscalationFlow: Flow = {
                       id: 'notify_owner', type: 'notify', label: 'Notify Task Owner',
                       config: {
                         recipients: '{currentTask.owner}',
-                        title: 'URGENT: task overdue — {currentTask.subject}',
+                        title: 'URGENT: task overdue — {{ currentTask.subject }}',
                         // `days_overdue` is the formula field the record
                         // projection carries (#18584); the loop binding this
                         // template reads it from is what #19206 restores.
-                        message: 'Due {currentTask.due_date}, {currentTask.days_overdue} day(s) overdue.',
+                        message: 'Due {{ currentTask.due_date }}, {{ currentTask.days_overdue }} day(s) overdue.',
                         severity: 'critical',
                         sourceObject: 'todo_task',
                         sourceId: '{currentTask.id}',
@@ -494,7 +494,7 @@ export const QuickAddTaskFlow: Flow = {
       // is the declared way to pause on a message-only confirmation screen.
       config: {
         title: 'Task Created',
-        description: 'Task "{subject}" created successfully!',
+        description: 'Task "{{ subject }}" created successfully!',
         waitForInput: true,
       },
     },

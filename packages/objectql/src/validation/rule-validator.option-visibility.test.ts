@@ -7,12 +7,32 @@
  * predicate. Client-side hiding is UX only, so on write the engine re-evaluates
  * the picked value's predicate against the merged record + `current_user` and
  * rejects a clean FALSE — enforcing both cascade integrity (country → province)
- * and role/context gating. Broken/unbound predicates fail-open.
+ * and role/context gating. A predicate that cannot be evaluated REFUSES the
+ * write (ADR-0137 D2, which #22402 ruled reaches this gate on the write path),
+ * with one admitted case: a system write with no acting user whose predicate
+ * reads one.
  */
 import { describe, it, expect } from 'vitest';
 import { toEvalPermissions } from '@objectstack/formula';
 import { evaluateValidationRules, needsPriorRecord, optionVisibilityReadsPermissions } from './rule-validator.js';
 import { ValidationError } from './record-validator.js';
+
+/**
+ * The `ValidationError` a call threw, asserted as the envelope REST serves as
+ * `400 VALIDATION_FAILED` — never a bare `toThrow()`, which an unrelated throw
+ * would satisfy.
+ */
+function refusalOf(run: () => unknown): ValidationError & { fields: any[] } {
+  let caught: unknown;
+  try {
+    run();
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(ValidationError);
+  expect((caught as ValidationError).code).toBe('VALIDATION_FAILED');
+  return caught as ValidationError & { fields: any[] };
+}
 
 // country → province cascade + a role-gated tier option.
 const schema = {
@@ -114,12 +134,14 @@ describe('per-option visibleWhen — role gating', () => {
  *
  * Both branches stay at `warn` (the sink declares only `warn`, and the
  * authenticated fault must not get quieter). What the pins hold is that the two
- * are told apart, that the fail-open ADMISSION is unchanged in both, and that
- * the discriminator needs BOTH facts — no acting user AND a predicate that asks
- * for one. A test that only checked the new wording would pass with the branch
- * still absent, so every case below asserts `meta.reason` too.
+ * are told apart and that the discriminator needs BOTH facts — no acting user
+ * AND a predicate that asks for one. Since #22402 the two also differ in their
+ * VERDICT: `no-acting-user` is still admitted, while `predicate-fault` refuses
+ * the write (ADR-0137 D2). A test that only checked the wording would pass with
+ * the branch still absent, so every case below asserts `meta.reason` and the
+ * verdict too.
  */
-describe('per-option visibleWhen — fail-open diagnostics name their case (#14416)', () => {
+describe('per-option visibleWhen — fault diagnostics name their case (#14416)', () => {
   /** Collect `(msg, meta)` pairs off the declared `{ warn? }` sink. */
   function capture() {
     const warns: Array<{ msg: string; meta: any }> = [];
@@ -158,19 +180,32 @@ describe('per-option visibleWhen — fail-open diagnostics name their case (#144
     expect(warns[0].meta.error).toMatchObject({ kind: expect.any(String) });
   });
 
-  it('authenticated caller + a genuinely faulting predicate ⇒ the loud warn, reason predicate-fault, value admitted', () => {
+  it('authenticated caller + a genuinely faulting predicate ⇒ REFUSED (ADR-0137 D2), the warn says so, reason predicate-fault', () => {
     const { warns, logger } = capture();
-    expect(() =>
+    const err = refusalOf(() =>
       evaluateValidationRules(typoSchema, { grade: 'gold' }, 'insert', {
         currentUser: { id: 'u1', positions: ['admin'] },
         logger,
       }),
-    ).not.toThrow(); // still fail-open — this card changes the log, not the admission
+    );
+    // The field-rule envelope, naming the option, the field and the fault.
+    expect(err.fields).toEqual([
+      {
+        field: 'grade',
+        code: 'rule_violation',
+        value: 'gold',
+        message:
+          "Option 'gold' of field 'grade' visibleWhen could not be evaluated (runtime: No such key: typo_field) — write rejected."
+          + " The predicate reads 'typo_field', which this object does not declare — fix the rule's condition, or declare the field.",
+        constraint: { rule: 'visibleWhen', reason: 'unevaluable', fault: 'runtime: No such key: typo_field', missingKey: 'typo_field' },
+      },
+    ]);
 
     expect(warns).toHaveLength(1);
     expect(warns[0].msg).toContain("option visibleWhen for 'grade=gold' failed to evaluate");
-    expect(warns[0].msg).toContain('(authenticated caller)');
-    expect(warns[0].msg).toContain('the option\'s gate was NOT enforced on this write');
+    expect(warns[0].msg).toContain('(authenticated caller: runtime: No such key: typo_field)');
+    expect(warns[0].msg).toContain('write rejected');
+    expect(warns[0].msg).not.toContain('allowed through');
     expect(warns[0].meta).toMatchObject({
       field: 'grade',
       value: 'gold',
@@ -178,17 +213,26 @@ describe('per-option visibleWhen — fail-open diagnostics name their case (#144
     });
   });
 
-  it('system write + a predicate naming NO user root ⇒ still the LOUD line (the case the user-less test alone would misfile)', () => {
+  it('system write + a predicate naming NO user root ⇒ REFUSED too (the case the user-less test alone would misfile)', () => {
     // This is why the discriminator is not `currentUser === undefined` on its
-    // own: nothing about this write is expected — the predicate is broken and
-    // its gate is not being enforced, acting user or not.
+    // own: nothing about this write is expected — the predicate is broken, so
+    // its gate refuses, acting user or not, exactly as a faulting
+    // `requiredWhen` / `readonlyWhen` refuses a system write (ADR-0137 D2).
     const { warns, logger } = capture();
-    expect(() => evaluateValidationRules(typoSchema, { grade: 'gold' }, 'insert', { logger })).not.toThrow();
+    const err = refusalOf(() => evaluateValidationRules(typoSchema, { grade: 'gold' }, 'insert', { logger }));
+    expect(err.fields).toEqual([
+      expect.objectContaining({
+        field: 'grade',
+        code: 'rule_violation',
+        value: 'gold',
+        constraint: expect.objectContaining({ rule: 'visibleWhen', reason: 'unevaluable', missingKey: 'typo_field' }),
+      }),
+    ]);
 
     expect(warns).toHaveLength(1);
     expect(warns[0].msg).toContain('failed to evaluate');
-    expect(warns[0].msg).toContain('(system write)');
-    expect(warns[0].msg).toContain('Check the predicate.');
+    expect(warns[0].msg).toContain('(system write: ');
+    expect(warns[0].msg).toContain('write rejected');
     expect(warns[0].meta).toMatchObject({ reason: 'predicate-fault' });
   });
 
@@ -476,14 +520,25 @@ describe('per-option visibleWhen — the permission predicate `can` (#18783)', (
     }
   });
 
-  it('NO permission data ⇒ still loudly unevaluable (the named-input warn), NOT a silent denial', () => {
+  it('NO permission data ⇒ REFUSED as unevaluable, naming the missing input — NOT a silent denial, NOT an admission', () => {
     // The member-absent state: the engine passes no map at all, never `{}`.
-    // The evaluator's fail-open branch keeps the value and says why, naming the
-    // input the context lacked — the refusal formula writes for exactly this.
+    // The gate has no verdict, so the write is refused (ADR-0137 D2, #22402)
+    // through the unevaluable envelope — never `invalid_option`, which would
+    // read as a measured denial — and the fault names the input the context
+    // lacked, in the response as in the log.
     const { warns, logger } = capture();
-    expect(() =>
+    const err = refusalOf(() =>
       evaluateValidationRules(canSchema, { stage: 'escalated' }, 'insert', { currentUser: USER, logger }),
-    ).not.toThrow();
+    );
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({
+      field: 'stage',
+      code: 'rule_violation',
+      value: 'escalated',
+      constraint: { rule: 'visibleWhen', reason: 'unevaluable' },
+    });
+    expect(err.fields[0].constraint.fault).toContain('carries no permission data');
+    expect(err.fields[0].message.startsWith("Option 'escalated' of field 'stage' visibleWhen could not be evaluated (")).toBe(true);
     expect(warns).toHaveLength(1);
     expect(warns[0].meta).toMatchObject({ field: 'stage', value: 'escalated', reason: 'predicate-fault' });
     expect(warns[0].meta.error.message).toContain('carries no permission data');
@@ -531,6 +586,188 @@ describe('per-option visibleWhen — the permission predicate `can` (#18783)', (
         },
       };
       expect(optionVisibilityReadsPermissions(quoted, { note_kind: 'q' })).toBe(false);
+    });
+  });
+});
+
+/**
+ * #22402 (ruling A) — ADR-0137 D2 reaches the option gate on the WRITE path.
+ *
+ * The gate is the server's enforcement of who may pick an option (ADR-0124
+ * D1), so a predicate that cannot be evaluated has produced no verdict, and
+ * the write is refused through the field-rule envelope rather than admitted
+ * with one warn line. The pins below are the shapes NO build-time verdict can
+ * judge — a computed key, a computed receiver — plus the shapes the build
+ * judges but a stored row can still carry, the controls that must not move,
+ * and the one arm that stays admitted.
+ */
+describe('per-option visibleWhen — a faulting predicate REFUSES the write (ADR-0137 D2, #22402)', () => {
+  const AUTHED = { id: 'u1', positions: ['org_member'], organizationId: 'org_1' };
+  const gated = (visibleWhen: string, extra: Record<string, unknown> = {}) => ({
+    fields: {
+      country: { type: 'select', options: [{ value: 'cn' }, { value: 'us' }] },
+      account: { type: 'lookup', reference: 'crm_account' },
+      tier: {
+        type: 'select',
+        options: [{ value: 'standard' }, { value: 'gold', visibleWhen }],
+      },
+      ...extra,
+    },
+  });
+  /** The refusal entry for `tier=gold`, asserted on the envelope's facts. */
+  function goldRefusal(source: string, data: Record<string, unknown>, opts: Record<string, unknown> = {}) {
+    const err = refusalOf(() => evaluateValidationRules(gated(source), { tier: 'gold', ...data }, 'insert', opts));
+    expect(err.fields).toHaveLength(1);
+    const entry = err.fields[0];
+    expect(entry).toMatchObject({
+      field: 'tier',
+      code: 'rule_violation',
+      value: 'gold',
+      constraint: { rule: 'visibleWhen', reason: 'unevaluable' },
+    });
+    expect(entry.message.startsWith("Option 'gold' of field 'tier' visibleWhen could not be evaluated (")).toBe(true);
+    expect(entry.message).toContain('— write rejected.');
+    return entry;
+  }
+
+  it('a COMPUTED-KEY predicate that faults refuses — and is not told to "declare the field"', () => {
+    // `os['o' + 'rg']` names no member any build-time verdict can read; the
+    // option check binds no `os.org`, so it faults at run time.
+    const entry = goldRefusal("os['o' + 'rg'].id != ''", { country: 'cn' }, { currentUser: AUTHED });
+    expect(entry.constraint.fault).toBe('runtime: No such key: org');
+    expect(entry.constraint).not.toHaveProperty('missingKey');
+    expect(entry.message).not.toContain('does not declare');
+  });
+
+  it('a COMPUTED-RECEIVER predicate that faults refuses — a comprehension variable', () => {
+    const entry = goldRefusal("[record].exists(r, r.statsu == 'vip')", { country: 'cn' }, { currentUser: AUTHED });
+    expect(entry.constraint.fault).toBe('runtime: No such key: statsu');
+    expect(entry.constraint).not.toHaveProperty('missingKey');
+  });
+
+  it('a COMPUTED-RECEIVER predicate that faults refuses — a ternary', () => {
+    const entry = goldRefusal("(record.country == 'cn' ? record : record).statsu == 'vip'", { country: 'cn' }, { currentUser: AUTHED });
+    expect(entry.constraint.fault).toBe('runtime: No such key: statsu');
+  });
+
+  it.each([
+    ["current_user.positions.x == 'a'", 'x'],
+    ["ctx.user.organizationId.y == 'a'", 'y'],
+  ])('a read one hop BELOW a bound member (%s) faults on the write path and refuses', (source, key) => {
+    // The first member is bound, so the build's member verdict passes it; the
+    // hop below it is a key the acting user's value does not carry.
+    const entry = goldRefusal(source, {}, { currentUser: AUTHED });
+    expect(entry.constraint.fault).toBe(`runtime: No such key: ${key}`);
+    expect(entry.constraint).not.toHaveProperty('missingKey');
+    expect(entry.message).not.toContain('does not declare');
+  });
+
+  it('control: `has()` over the same hop does not fault — it is a clean FALSE (`invalid_option`)', () => {
+    const err = refusalOf(() =>
+      evaluateValidationRules(gated('has(current_user.positions.x)'), { tier: 'gold' }, 'insert', { currentUser: AUTHED }),
+    );
+    expect(err.fields).toEqual([expect.objectContaining({ field: 'tier', code: 'invalid_option', value: 'gold' })]);
+  });
+
+  it('a read THROUGH a reference refuses with the repair that is true for it', () => {
+    const entry = goldRefusal("record.account.tier == 'enterprise'", { account: 'acc_1' }, { currentUser: AUTHED });
+    expect(entry.message).toContain("reads 'tier' through 'account', a reference to 'crm_account'");
+    expect(entry.message).toContain("An option's `visibleWhen` is evaluated against this record alone");
+    expect(entry.message).not.toContain('does not declare');
+    expect(entry.constraint).not.toHaveProperty('missingKey');
+  });
+
+  it('an unbound ROOT refuses, naming what the option gate binds', () => {
+    const entry = goldRefusal("parent.status == 'closed'", {}, { currentUser: AUTHED });
+    expect(entry.constraint.fault).toBe('type: Unknown variable: parent');
+    expect(entry.message).toContain("reads 'parent', which the option gate does not bind");
+  });
+
+  it('a user-root predicate whose OTHER half faults refuses an authenticated caller (the AST reader only spares a system write)', () => {
+    const entry = goldRefusal("'org_admin' in current_user.positions || record.typo == 1", {}, { currentUser: AUTHED });
+    expect(entry.constraint).toMatchObject({ missingKey: 'typo' });
+  });
+
+  it('refuses on UPDATE against the merged record, as on insert', () => {
+    const err = refusalOf(() =>
+      evaluateValidationRules(gated('record.statsu == 1'), { tier: 'gold' }, 'update', {
+        previous: { country: 'cn', tier: 'standard' }, currentUser: AUTHED,
+      }),
+    );
+    expect(err.fields).toEqual([expect.objectContaining({ field: 'tier', code: 'rule_violation', value: 'gold' })]);
+  });
+
+  it('one refusal per faulting PICK of a multi-value field, each naming its option', () => {
+    const multi = {
+      fields: {
+        tags: {
+          type: 'multiselect',
+          options: [{ value: 'a' }, { value: 'b', visibleWhen: 'record.nope == 1' }, { value: 'c', visibleWhen: 'record.gone == 1' }],
+        },
+      },
+    };
+    const err = refusalOf(() => evaluateValidationRules(multi, { tags: ['a', 'b', 'c'] }, 'insert', { currentUser: AUTHED }));
+    expect(err.fields.map((f: any) => [f.field, f.code, f.value, f.constraint.missingKey])).toEqual([
+      ['tags', 'rule_violation', 'b', 'nope'],
+      ['tags', 'rule_violation', 'c', 'gone'],
+    ]);
+  });
+
+  it('joins the call\'s other refusals in ONE ValidationError (nothing is persisted on any of them)', () => {
+    const both = {
+      fields: {
+        tier: { type: 'select', options: [{ value: 'gold', visibleWhen: 'record.nope == 1' }] },
+        note: { type: 'text', requiredWhen: 'record.gone == 1' },
+      },
+    };
+    const err = refusalOf(() => evaluateValidationRules(both, { tier: 'gold' }, 'insert', { currentUser: AUTHED }));
+    expect(err.fields.map((f: any) => [f.field, f.constraint.rule])).toEqual([['note', 'requiredWhen'], ['tier', 'visibleWhen']]);
+  });
+
+  describe('controls — what must NOT move', () => {
+    it('a gated option that is NOT picked is not judged, however broken its predicate', () => {
+      expect(() => evaluateValidationRules(gated('record.nope == 1'), { tier: 'standard' }, 'insert', { currentUser: AUTHED })).not.toThrow();
+    });
+
+    it('a non-faulting FALSE still refuses as `invalid_option`, never as unevaluable', () => {
+      const err = refusalOf(() => evaluateValidationRules(gated("record.country == 'cn'"), { country: 'us', tier: 'gold' }, 'insert', { currentUser: AUTHED }));
+      expect(err.fields).toEqual([expect.objectContaining({ field: 'tier', code: 'invalid_option', value: 'gold' })]);
+      expect(err.fields[0].constraint?.reason).toBeUndefined();
+    });
+
+    it('a non-faulting TRUE admits, with no warn', () => {
+      const warns: unknown[] = [];
+      expect(() =>
+        evaluateValidationRules(gated("record.country == 'cn'"), { country: 'cn', tier: 'gold' }, 'insert', {
+          currentUser: AUTHED, logger: { warn: (m: string) => warns.push(m) },
+        }),
+      ).not.toThrow();
+      expect(warns).toHaveLength(0);
+    });
+
+    it('the `no-acting-user` arm stays ADMITTED and loud — a system write has nobody for the gate to ask about', () => {
+      const warns: Array<{ msg: string; meta: any }> = [];
+      expect(() =>
+        evaluateValidationRules(gated("'org_admin' in current_user.positions"), { tier: 'gold' }, 'insert', {
+          logger: { warn: (msg: string, meta?: any) => warns.push({ msg, meta }) },
+        }),
+      ).not.toThrow();
+      expect(warns).toHaveLength(1);
+      expect(warns[0].meta).toMatchObject({ field: 'tier', value: 'gold', reason: 'no-acting-user' });
+    });
+
+    it('the shipped cascade shape does NOT fault when the payload omits the parent: the record is total', () => {
+      // The census question the ruling asked: `record.country == 'cn'` with no
+      // `country` in the payload. Insert materialises every declared field, so
+      // the predicate reads `null == 'cn'` — a clean FALSE (`invalid_option`),
+      // never an unevaluable refusal. Same on update over a prior row that
+      // lacks the column: `previous` is made total too.
+      const insert = refusalOf(() => evaluateValidationRules(schema, { province: 'zj' }, 'insert', { currentUser: AUTHED }));
+      expect(insert.fields).toEqual([expect.objectContaining({ field: 'province', code: 'invalid_option' })]);
+      const update = refusalOf(() =>
+        evaluateValidationRules(schema, { province: 'zj' }, 'update', { previous: { tier: 'standard' }, currentUser: AUTHED }),
+      );
+      expect(update.fields).toEqual([expect.objectContaining({ field: 'province', code: 'invalid_option' })]);
     });
   });
 });

@@ -1651,7 +1651,9 @@ describe('#5383 — the branch-routing family reads the region’s own edges', (
 describe('#5383 — a recursive config scan does not double-report the container', () => {
   it('moves a nested double-brace finding onto the node carrying it, still exactly once', () => {
     const fnds = lintFlowPatterns(loopBodyFlow({
-      nodes: [{ id: 'send_reminder', type: 'notify', config: { title: 'Reminder: {{lead.name}}' } }],
+      // A single-brace position (`recipients`): the notify `title` reads
+      // `{{ }}` since #22110, so a doubled brace there is no finding.
+      nodes: [{ id: 'send_reminder', type: 'notify', config: { title: 'Reminder: {{ lead.name }}', recipients: ['{{lead.owner}}'] } }],
       edges: [],
     // Scoped to this rule: the body's `notify` also trips the #14394
     // containment warning.
@@ -2422,15 +2424,16 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
     /**
      * [#22081] The round trip an author makes after a refusal: write what it
      * prescribes, then build. A notify node's `title` / `message` refusal
-     * (`NotifyConfigSchema`, `@objectstack/spec`) used to prescribe the shared
-     * template input's `{{record.name}}` — which this rule then flagged on the
-     * same node. Every spelling the refusal prescribes, read out of the refusal
-     * text itself rather than re-spelled here, must parse and draw no finding.
-     * The control is the shared sentence the notify slots used to answer with:
-     * its prescriptions still draw the finding, so this pin can fail.
+     * (`NotifyConfigSchema`, `@objectstack/spec`) must never prescribe a
+     * spelling this rule then flags on the same node. Every spelling the
+     * refusal prescribes, read out of the refusal text itself rather than
+     * re-spelled here, must parse and draw no finding. Since #22110 the two
+     * slots read `{{ }}` and the prescription is a hole; the control is the
+     * same spelling on the node's single-brace `actionUrl`, which still draws
+     * the finding, so this pin can fail.
      */
     describe('a notify slot refusal prescribes only spellings this rule passes', () => {
-      function notifyFlow(key: 'title' | 'message', value: unknown) {
+      function notifyFlow(key: 'title' | 'message' | 'actionUrl', value: unknown) {
         return {
           flows: [{
             name: 'deal_won_notice',
@@ -2453,7 +2456,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         return [bare, envelope === undefined ? undefined : { dialect: 'template', source: envelope }];
       }
 
-      function doubleBraceFindings(key: 'title' | 'message', value: unknown) {
+      function doubleBraceFindings(key: 'title' | 'message' | 'actionUrl', value: unknown) {
         return lintFlowPatterns(notifyFlow(key, value)).filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
       }
 
@@ -2476,13 +2479,13 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         }
       });
 
-      it('control: the shared template sentence\'s prescriptions draw the finding on a notify node', () => {
+      it('control: the same prescribed hole draws the finding on the node\'s single-brace `actionUrl`', () => {
         for (const sentence of [TYPED_EXPRESSION_SOURCE_REQUIRED.template, TYPED_EXPRESSION_DIALECT_ONLY.template]) {
           const prescribed = prescribedIn(sentence);
           expect(prescribed.every((p) => p !== undefined), sentence).toBe(true);
-          for (const spelling of prescribed) {
-            expect(doubleBraceFindings('title', spelling), JSON.stringify(spelling)).toHaveLength(1);
-          }
+          const bare = prescribed[0] as string;
+          expect(doubleBraceFindings('actionUrl', `/deals/${bare}`), bare).toHaveLength(1);
+          expect(doubleBraceFindings('title', bare), bare).toEqual([]);
         }
       });
     });
@@ -2502,6 +2505,34 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         .filter((f) => f.rule === FLOW_BARE_DOLLAR_REF);
       expect(fnds).toHaveLength(1);
       expect(fnds[0].where).toBe("flow 'incident_push' · try_catch 'guard' try · node 'push' (http)");
+    });
+
+    // [#22110] A text slot reads `{{ }}` holes, where `$error.message` is a
+    // hole's correct content; a bare one OUTSIDE a hole is still a literal.
+    describe('in a text slot', () => {
+      function notifyText(title: string) {
+        return lintFlowPatterns({
+          flows: [{
+            name: 'fault_notice', label: 'Fault notice', type: 'autolaunched',
+            nodes: [
+              { id: 'start', type: 'start', label: 'Start' },
+              { id: 'tell', type: 'notify', label: 'Tell', config: { recipients: ['u1'], title } },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'tell' }],
+          }],
+        }).filter((f) => f.rule === FLOW_BARE_DOLLAR_REF || f.rule === FLOW_DOUBLE_BRACE_INTERP);
+      }
+
+      it('raises nothing for a `$`-named variable inside a hole', () => {
+        expect(notifyText('Failed: {{ $error.message }}')).toEqual([]);
+      });
+
+      it('flags a bare `$ref.field` outside the holes, prescribing the hole', () => {
+        const fnds = notifyText('Failed: $error.message ({{ record.name }})');
+        expect(fnds.map((f) => f.rule)).toEqual([FLOW_BARE_DOLLAR_REF]);
+        expect(fnds[0].message).toContain('notify title');
+        expect(fnds[0].hint).toContain('{{ $error.message }}');
+      });
     });
   });
 
