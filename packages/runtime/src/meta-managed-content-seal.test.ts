@@ -140,8 +140,10 @@ function makeEngine() {
             },
             registerObject: () => {},
         },
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
-            return tableOf(table).filter((r) => matches(r, opts?.where));
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+            const rows = tableOf(table).filter((r) => matches(r, opts?.where));
+            // The caller's bound, applied after the filter (`check:objectql-double-limit`).
+            return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
         },
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, opts);
