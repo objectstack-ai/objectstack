@@ -3207,18 +3207,20 @@ export interface EngineReadOptions {
   context?: ExecutionContext;
 }
 
-/** Merge read-path execution context from the query and the trailing options. */
 /**
  * [#22445] Did the read door serve this value AS STORED — can the caller read
  * the stored value in full? The `update`-mode preview keeps a stored column
- * only when this holds for it (see `storedRows` in `ObjectQL.validate`).
+ * only when this holds for it (see `storedRows` in `ObjectQL.validate`), and
+ * [#22474] the preview keeps a master-detail header column only when this
+ * holds for it (see `ObjectQL.resolvePreviewParents`).
  *
  * Both values come off the same driver read shape (`driver.findOne` under the
- * same `buildDriverOptions`), so a column nothing transformed compares equal
- * by construction; what differs is what the read path REWROTE for this caller
- * (a partial mask, a masked secret, a read hook's rewrite). Structural, not
- * identity: the two reads are two driver calls, so a `Date`, an array or a
- * JSON object arrives as two equal objects.
+ * same `buildDriverOptions`; for a header, the read door's `find` under the
+ * caller's context and under the write's elevated one), so a column nothing
+ * transformed compares equal by construction; what differs is what the read
+ * path REWROTE for this caller (a partial mask, a masked secret, a read hook's
+ * rewrite). Structural, not identity: the two reads are two driver calls, so a
+ * `Date`, an array or a JSON object arrives as two equal objects.
  *
  * ⛔ Fails CLOSED: a pair it cannot prove equal — another object kind (a
  * buffer, a class instance), a nesting past the depth bound — answers `false`,
@@ -3247,6 +3249,7 @@ function servedAsStored(served: unknown, stored: unknown, depth = 0): boolean {
     && servedKeys.every((k) => Object.prototype.hasOwnProperty.call(stored, k) && servedAsStored(served[k], stored[k], depth + 1));
 }
 
+/** Merge read-path execution context from the query and the trailing options. */
 function mergeReadContext(
   fromQuery?: ExecutionContext,
   fromOptions?: ExecutionContext,
@@ -8719,6 +8722,106 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#22474] The master-detail headers a `validate()` preview binds, per row:
+   * `parents[i]` is the header row `i` is judged under (`parent`), and
+   * `previousParents[i]` the header its stored row hangs off when the row
+   * REPOINTS it (`previousParent`, for the ADR-0113 pre-check), else
+   * `undefined`, which the evaluator reads as "the same header", as the
+   * write's own `undefined` is read.
+   *
+   * The header ids are read the way the write reads them ({@link masterIdOf}):
+   * `views[i]` is the judged view, the row on an insert and the stored row
+   * merged with the patch on an update, so the patch's FK wins over the stored
+   * one; `storedRows[i]` names the header a repoint leaves.
+   *
+   * ## Read under the caller's access, not elevated
+   *
+   * The write reads the header ELEVATED ({@link resolveMasterDetailParents}):
+   * the caller's right to write the detail was settled by the write's gates
+   * before the header is read. The preview runs none of those gates, so a
+   * header read elevated here would answer a predicate over a row the caller
+   * may not read. Two reads, each answering one question, as the preview's
+   * stored-row read does:
+   *
+   *  1. ⛔ MAY THIS CALLER SEE THE HEADER — the READ DOOR, under the caller's
+   *     own context, one `find` for the whole batch. A header it does not
+   *     return binds as a missing header binds: `null`, so a predicate that
+   *     reads `parent` refuses as unevaluable, whatever the header holds. A
+   *     failed read binds every header as missing, as the write's own failed
+   *     header read does.
+   *  2. WHAT THE WRITE WOULD JUDGE — the write's own header read
+   *     ({@link resolveMasterDetailParents}), for the headers read 1 returned
+   *     only.
+   *
+   * ⛔ A header column is kept only where the read door served this caller
+   * that very value ({@link servedAsStored}); every other column, hidden or
+   * served transformed (a partial mask keeps the key and replaces the value),
+   * is judged as empty: the header is materialised over the master's declared
+   * fields after the columns are kept, so such a column reads `null`. So the
+   * verdict never depends on a header value the caller could not have read in
+   * full.
+   */
+  private async resolvePreviewParents(
+    schema: unknown,
+    views: ReadonlyArray<Record<string, unknown>>,
+    storedRows: ReadonlyArray<Record<string, unknown> | undefined>,
+    context: ExecutionContext | undefined,
+  ): Promise<{
+    parents: Array<Record<string, unknown> | null>;
+    previousParents: Array<Record<string, unknown> | null | undefined>;
+  }> {
+    const rel = resolveMasterDetailRelation(schema as any);
+    const landingIds = views.map((view) => (rel ? masterIdOf(rel.fk, null, view) : undefined));
+    const priorIds = storedRows.map((stored) => (rel && stored ? masterIdOf(rel.fk, null, stored) : undefined));
+    // The write resolves a second header only for a repoint (`repointsMaster`).
+    const repoints = priorIds.map((prior, i) => prior != null && landingIds[i] !== prior);
+    const ids = new Set<string>();
+    landingIds.forEach((id) => { if (id != null) ids.add(String(id)); });
+    priorIds.forEach((id, i) => { if (repoints[i]) ids.add(String(id)); });
+
+    const headers = new Map<string, Record<string, unknown>>();
+    if (rel && ids.size > 0) {
+      // 1. The read door, under the caller's own context.
+      const served = new Map<string, Record<string, unknown>>();
+      try {
+        const rows = await this.find(rel.master, {
+          where: { id: { $in: [...ids] } },
+          context,
+        } as any) as Array<Record<string, unknown>>;
+        for (const row of Array.isArray(rows) ? rows : []) {
+          if (row?.id != null && ids.has(String(row.id))) served.set(String(row.id), row);
+        }
+      } catch (err) {
+        this.logger?.warn?.('validate preview: the caller\'s read of the master-detail header failed — parent stays unbound', {
+          object: rel.master, error: err,
+        });
+      }
+      // 2. The write's own header read, for the headers the caller can read.
+      if (served.size > 0) {
+        const asWritten = await this.resolveMasterDetailParents(
+          schema, null, [...served.keys()].map((id) => ({ [rel.fk]: id })), context,
+        );
+        for (const [id, servedRow] of served) {
+          const header = asWritten({ [rel.fk]: id });
+          if (!header) continue;
+          const kept: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(header)) {
+            if (Object.prototype.hasOwnProperty.call(servedRow, key) && servedAsStored(servedRow[key], value)) {
+              kept[key] = value;
+            }
+          }
+          headers.set(id, this.materializeParentHeader(rel.master, kept));
+        }
+      }
+    }
+    const headerOf = (id: string | number | undefined) => (id == null ? null : (headers.get(String(id)) ?? null));
+    return {
+      parents: landingIds.map(headerOf),
+      previousParents: priorIds.map((id, i) => (repoints[i] ? headerOf(id) : undefined)),
+    };
+  }
+
+  /**
    * [#18682] Resolve the related rows this object's PREDICATE rules read one
    * hop through a reference field, for a whole batch of rows at once.
    *
@@ -13046,10 +13149,24 @@ export class ObjectQL implements IObjectQLEngine {
    * refusal it is. A row with no address, or whose id names no row this
    * caller can read, is judged on the patch alone, as before.
    *
+   * ## The master-detail header is bound as the write binds it (#22474)
+   *
+   * Every write binds the detail row's master-detail header for a field
+   * `requiredWhen` that reads `parent`, and an update that repoints the row
+   * binds the header it leaves as `previousParent` for the ADR-0113
+   * pre-check. A preview that bound neither refused, as unevaluable, rows the
+   * write admits. So the preview binds both, from the same view and under the
+   * same gate as the write (an object with no parent-scoped `requiredWhen`
+   * reads no header). ⛔ Unlike the write, it reads the header under the
+   * caller's own access ({@link resolvePreviewParents}): a header the caller
+   * cannot read binds as a missing one, and a header column the read door
+   * served transformed or not at all is judged as empty.
+   *
    * Nothing is written and no sequence is consumed. Reads do happen: the
-   * stored row above, and the related rows a traversing rule names (see the
-   * `previewRelatedForRow` block below). Validation itself is in-process,
-   * which is what makes row-by-row dry run of a large import affordable.
+   * stored row above, the master-detail headers, and the related rows a
+   * traversing rule names (see the `previewRelatedForRow` block below).
+   * Validation itself is in-process, which is what makes row-by-row dry run
+   * of a large import affordable.
    */
   async validate(
     object: string,
@@ -13090,7 +13207,10 @@ export class ObjectQL implements IObjectQLEngine {
     // (see the `previewRelatedForRow` block below), and [#22445] an
     // `update`-mode row that carries its address issues two READS of the
     // stored row — the read door under the caller's own context, then the
-    // write's own prior-row read (the `storedRows` block below). Nothing is
+    // write's own prior-row read (the `storedRows` block below), and [#22474]
+    // an object with a parent-scoped `requiredWhen` issues two READS of the
+    // master-detail headers its rows name, the same two doors in the same
+    // order (the `previewParents` block below). Nothing is
     // written, no write hook runs (a read through the read door fires its read
     // hooks, as the related read always has), and the
     // RELATED read happens only for a caller who passes the arms the
@@ -13310,6 +13430,30 @@ export class ObjectQL implements IObjectQLEngine {
     // stored row.
     const judgedViews = rows.map((row, i) => (storedRows[i] ? { ...storedRows[i], ...row } : row));
 
+    // [#22474] THE MASTER-DETAIL HEADER a field `requiredWhen` reads as
+    // `parent`, bound as the write binds it and under the write's own gate:
+    // only an object that declares a parent-scoped `requiredWhen` reads a
+    // header (`hasParentScopedRequiredWhen`, the insert's gate and the
+    // update's `requiredWhen` half), so every other object's preview reads
+    // none. The header is named by the judged view, the write's
+    // payload-FK-first reading (`masterIdOf`): the row's own FK on an insert,
+    // and on an update the patch's FK, else the stored row's. A repointing
+    // update also binds the header the stored row hangs off as
+    // `previousParent`, the header the write's ADR-0113 pre-check reads.
+    //
+    // ⛔ Read under the caller's access, unlike the write, which reads the
+    // header elevated: see {@link resolvePreviewParents}. A header the caller
+    // cannot read binds as a missing header binds, and a header column the
+    // read door did not serve this caller as stored is judged as empty.
+    //
+    // Named limit: the update's `readonlyWhen` judgement of the FK itself
+    // (`settleMasterDetailLanding` ①) is not run, the limit `readonlyWhen`
+    // already holds in this preview, so a repoint that lock would take back
+    // out is judged against the header it names.
+    const previewParents = hasParentScopedRequiredWhen(schemaForValidation as any)
+      ? await this.resolvePreviewParents(schemaForValidation, judgedViews, storedRows, options?.context)
+      : undefined;
+
     // [#18682] The preview owes the SAME relationship resolution the real write
     // does. Without it a rule that reads one hop through a reference field
     // reports `valid: false` (unevaluable) against a row `insert()` happily
@@ -13391,6 +13535,11 @@ export class ObjectQL implements IObjectQLEngine {
           // update's `previous: priorRecord`. Absent, the record is the patch.
           ...(storedRows[i] ? { previous: storedRows[i] } : {}),
           logger: this.logger, currentUser, skipStateMachine, messages,
+          // [#22474] The header the write binds: the insert's
+          // `insertParentForRow`, the update's landing header and, for a
+          // repoint, `roWhenPreviousParent`.
+          parent: previewParents?.parents[i],
+          previousParent: previewParents?.previousParents[i],
           related: previewRelatedForRow(judgedViews[i]),
           permissions: previewPermissionsFor(row),
         });
