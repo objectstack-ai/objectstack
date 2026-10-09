@@ -4230,7 +4230,11 @@ export default class Serve extends Command {
               // Host-anchored, NOT a bare `import()`: this specifier comes from
               // the served app's own config, so what the app DECLARES about it is
               // the contract (commit 9cc6777d3). The helper carries the failure wrapper too.
-              importSpecifier: (specifier) => Serve.importConfigPlugin(specifier, hostRoot),
+              // (Spelled as the boot loop's own call: two source pins —
+              // `serve-config-plugin-host-resolution.test.ts` and
+              // `serve-config-plugin-relative-refusal.test.ts` — hold this
+              // loop to routing every string entry through the helper.)
+              importSpecifier: async (plugin) => await Serve.importConfigPlugin(plugin, hostRoot),
               wrapBundle: async (bundle) => {
                 try {
                   const { AppPlugin } = await import('@objectstack/runtime');
