@@ -410,8 +410,13 @@ View customization rides ADR-0005's metadata overlay (opt-in per type via
 overlay axis is retired: the doors carry no organization, so the overlay is
 **environment-wide** (`organization_id` NULL) and served to every organization
 of the deployment, whatever the author's active organization. An overlay row an
-earlier release stored under an organization is not served until the promotion
-ceremony (ADR-0131 C7) carries it to the environment layer. The per-user,
+earlier release stored under an organization is not served by any `/meta` read
+until the promotion ceremony (ADR-0131 C7) carries it to the environment layer.
+Public forms are the one exception: until that ceremony the anonymous form
+doors read a form `view` in the Default Organization and prefer its overlay —
+body and withdrawal alike — so a legacy organization overlay of a public form
+keeps being served there, and a Studio re-save (an environment row) does not
+change what that public form serves. The per-user,
 per-field patch overlay a previous revision of this page taught here was
 removed in #13135 — it was never served by any route.
 
