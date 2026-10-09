@@ -41,6 +41,9 @@ import {
     FLOW_NOT_FOUND_STATUS,
     type FlowRefusalCode,
 } from './flow-dispatch-status.js';
+// Who may START a flow by name — the one rule the trigger door, this door and
+// the declared endpoint share (the maintainer's ruling, letters B and A).
+import { ELEVATED_START_REFUSAL, refusesElevatedSelfTriggeredStart } from './flow-start-admission.js';
 import type { FlowRunSummary } from '@objectstack/spec/automation';
 // [#5138] The ONE 404 envelope a single-record path answers. Imported rather
 // than re-spelled so `callData`'s ObjectQL fallback and the protocol service it
@@ -997,6 +1000,27 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         const err: any = new Error(flowNotFoundMessage(action.target));
         err.status = FLOW_NOT_FOUND_STATUS;
         throw err;
+    }
+    // The caller × flow check (the maintainer's ruling, letter A: the trigger
+    // door's type × caller rule binds every door that starts a flow by name).
+    // A caller that is not the system principal may not start a flow declared
+    // `runAs: 'system'` whose type is self-triggered (`autolaunched`,
+    // `record_change`, `schedule`) — those run on their own trigger or as a
+    // sub-flow, so an action that names one is wiring, not an entry. AFTER
+    // existence (an unknown target keeps its 404) and BEFORE dispatch (a refused
+    // start runs nothing). Both entrances reach this one line — REST `/actions`
+    // and MCP `run_action` — and the action's own `requiredPermissions` gate
+    // (ADR-0066 D4) has already answered upstream of it at each. Holding that
+    // capability does not open such a target: an author who wants members to
+    // start elevated logic declares the target `screen` or `api`. Thrown with
+    // `code` + `status` so the ADR-0112 envelope survives both entrances, as
+    // the 409 / 422 rows below do; the words are the trigger door's own
+    // (`flow-start-admission.ts`).
+    if (await refusesElevatedSelfTriggeredStart(automation, action.target, ec)) {
+        throw Object.assign(new Error(ELEVATED_START_REFUSAL.message), {
+            status: ELEVATED_START_REFUSAL.status,
+            code: ELEVATED_START_REFUSAL.code,
+        });
     }
     // Pass a proper AutomationContext (the engine never read the former
     // `triggerData` envelope).

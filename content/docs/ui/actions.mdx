@@ -407,8 +407,10 @@ is a spec proposal for a properly named key, not a values map under this one.
 - **`requiredPermissions: ['can_close_tickets']`** is a **dual-surface gate**
   (one declaration, two enforcement points): the server rejects unauthorized
   calls with 403, and the UI hides or disables the button for the same users.
-  Unset means no gate beyond object CRUD permissions. Referenced capabilities
-  must exist — `os lint` checks that.
+  Unset means no gate beyond object CRUD permissions — except that a `flow`
+  action whose target is an elevated self-triggered flow is refused to every
+  caller but the system principal either way (the `flow` row below). Referenced
+  capabilities must exist — `os lint` checks that.
 - **`visible`** is a CEL predicate evaluated **fail-closed**: an expression
   that throws hides the action silently. Two rules save real debugging time:
 
@@ -544,7 +546,7 @@ The endpoint dispatches on the **declared `type`**, exactly like the MCP
 | `type` | Over REST |
 |:---|:---|
 | `script` | Runs the registered handler / inline body. |
-| `flow` | Runs `target` on the automation engine, with your identity forwarded (a `runAs: 'user'` flow enforces RLS as you). Dispatches the same flow as `POST /api/v1/automation/:target/trigger`, without having to know the flow name — **and answers the same way**: a run that ran and was rejected is **400** `FLOW_FAILED`, while a dispatch that never happened is separated out (**404** unknown flow / **409** `FLOW_DISABLED` / **422** `FLOW_NO_START_NODE` / **422** `FLOW_INPUT_SCHEMA_INVALID`). See [Run a flow via API](/docs/automation/flows#run-a-flow-via-api) for the full table — it is one table, read by both doors. |
+| `flow` | Runs `target` on the automation engine, with your identity forwarded (a `runAs: 'user'` flow enforces RLS as you). Dispatches the same flow as `POST /api/v1/automation/:target/trigger`, without having to know the flow name — **and answers the same way**: a run that ran and was rejected is **400** `FLOW_FAILED`, while a dispatch that never happened is separated out (**404** unknown flow / **409** `FLOW_DISABLED` / **422** `FLOW_NO_START_NODE` / **422** `FLOW_INPUT_SCHEMA_INVALID`). A target declared `runAs: 'system'` whose type is self-triggered (`autolaunched`, `record_change`, `schedule`) is refused **403** `PERMISSION_DENIED` to every caller but the system principal, exactly as at the trigger door, and nothing runs; holding the action's `requiredPermissions` does not open it. See [Run a flow via API](/docs/automation/flows#run-a-flow-via-api) for the full table — it is one table, read by both doors. |
 | `api` | **400** — it dispatches on `target`; call that endpoint directly. |
 | `url` / `modal` / `form` | **400** — client-side navigation; there is nothing for the server to run. |
 

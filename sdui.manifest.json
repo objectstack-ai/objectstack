@@ -17,7 +17,7 @@
         {
           "name": "filter",
           "type": "array",
-          "description": "Filter criteria in JSON-rules form. The canonical spelling — the deprecated `defaultFilters` is only read when this is absent."
+          "description": "Base query filter — the `ViewFilterRule` array `[{ field, operator, value }, ...]`, lowered to `$filter`. The canonical spelling — the deprecated `defaultFilters` is only read when this is absent."
         },
         {
           "name": "label",
@@ -76,7 +76,7 @@
         {
           "name": "resizable",
           "type": "boolean",
-          "description": "Let users drag column borders to resize. The canonical spelling — the deprecated `resizableColumns` is only read when this is absent."
+          "description": "Let users drag column borders to resize. On by default. The only spelling — the legacy `resizableColumns` is retired and refused by name (objectui#6152)."
         },
         {
           "name": "reorderableColumns",
@@ -161,7 +161,7 @@
         {
           "name": "operations",
           "type": "object",
-          "description": "Toggles for the built-in create/read/update/delete/export/import affordances, e.g. `{ delete: false }`."
+          "description": "Toggles for the built-in affordances, `{ create, update, delete, export }`, e.g. `{ delete: false }`. A declared block replaces the default, so an `update` / `delete` it does not name is withheld."
         },
         {
           "name": "exportOptions",
@@ -571,7 +571,7 @@
           "type": "array",
           "of": "object",
           "required": true,
-          "description": "The child collections, one OBJECT per entry, judged by the spec's closed `details` entry: `childObject` (required) names the child object; `relationshipField` is the FK on the child back to the parent, derived from the child's metadata when omitted; `columns` are the line grid's columns as the spec's inline grid column objects (`{ name, … }`, never a bare field name), derived from the child's fields when omitted; `formFields` names the per-row form's fields; `inlineMode` is `grid` (editable cells) or `form` (list + per-row form); `amountField` is the CHILD column summed and `totalField` the PARENT field that sum is saved to; `title`, `minRows`, `maxRows` and `addLabel` dress the section and its grid. An undeclared member key is refused by name. The entry's `sortField` is read by nothing here — the line-position field is derived from the child object (objectui#11070) — and objectstack retires the key on its `main` (objectstack-ai/objectstack#21589, after 17.6.0)."
+          "description": "The child collections, one OBJECT per entry, judged by the spec's closed `details` entry: `childObject` (required) names the child object; `relationshipField` is the FK on the child back to the parent, derived from the child's metadata when omitted; `columns` are the line grid's columns as the spec's inline grid column objects (`{ name, … }`, never a bare field name), derived from the child's fields when omitted; `formFields` names the per-row form's fields; `inlineMode` is `grid` (editable cells) or `form` (list + per-row form); `amountField` is the CHILD column summed and `totalField` the PARENT field that sum is saved to; `title`, `minRows`, `maxRows` and `addLabel` dress the section and its grid. An undeclared member key is refused by name. `sortField` is not a member: the line-position field is derived from the child object (objectui#11070), and since `@objectstack/spec` 17.7.0 the entry refuses an authored `sortField` with the spec's retired-key message (objectstack-ai/objectstack#21589)."
         },
         {
           "name": "recordId",
@@ -659,7 +659,7 @@
         {
           "name": "filter",
           "type": "array",
-          "description": "Filter criteria in JSON-rules form, narrowing the records the board fetches. Lowered to `$filter` on the query."
+          "description": "Base query filter — the `ViewFilterRule` array `[{ field, operator, value }, ...]`, narrowing the records the board fetches. Lowered to `$filter` on the query."
         },
         {
           "name": "limit",
@@ -741,7 +741,7 @@
         {
           "name": "filter",
           "type": "array",
-          "description": "Filter criteria in JSON-rules form, narrowing the records the calendar fetches. Lowered to `$filter` on the query."
+          "description": "Base query filter — the `ViewFilterRule` array `[{ field, operator, value }, ...]`, narrowing the records the calendar fetches. Lowered to `$filter` on the query."
         },
         {
           "name": "sort",
@@ -862,7 +862,7 @@
         {
           "name": "markers",
           "type": "array",
-          "description": "Extra vertical reference lines drawn like the Today marker ({ date, label?, color? }). `date` places the line, and a date outside the chart's range draws none; `label` is the text drawn against it; `color` is its CSS colour, the theme's primary colour when omitted."
+          "description": "Extra vertical reference lines drawn like the Today marker — each `{ date, label?, color? }`: `date` places the line (a date outside the drawn range draws none), `label` is drawn against it, `color` paints it. `color` is a CSS colour, the theme's primary colour when omitted."
         },
         {
           "name": "criticalPath",
@@ -943,7 +943,7 @@
         {
           "name": "items",
           "type": "array",
-          "description": "Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each element is objectui's declared timeline element, `@object-ui/types`'s `TimelineFeedItem` (`variant` absent / `vertical` / `horizontal`) or `TimelineGanttItem` (`variant: 'gantt'`), the arm this node's `variant` selects. They are drawn as written: the `timeline` block’s field bindings, `mapping` and `descriptionField` do not apply to them."
+          "description": "Static inline entries — read ahead of every record source, `data` above included, and bypasses the object query entirely (the renderer becomes a pass-through). Each entry is the kind this node's `variant` selects: a feed entry `{ time?, title, description?, variant?, icon?, content?, className? }` (`variant` absent / `vertical` / `horizontal`), or a gantt row `{ label, items? }` (`variant: 'gantt'`) whose bars are `{ title?, startDate?, endDate?, variant? }`, each date a string or epoch milliseconds. These are `@object-ui/types`'s `TimelineFeedItem` and `TimelineGanttItem`. They are drawn as written: the `timeline` block’s field bindings, `mapping` and `descriptionField` do not apply to them."
         },
         {
           "name": "dateFormat",
@@ -978,7 +978,7 @@
         {
           "name": "mapping",
           "type": "object",
-          "description": "Record-to-entry field mapping ({ title, date, description, variant }) — the objectui-side binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has. On the vertical rail a colour that `timeline.colorField` resolves for an entry outranks that marker colour."
+          "description": "Record-to-entry field mapping `{ title?, date?, description?, variant? }`, each a field name — the binding record read BETWEEN the `timeline` block and the flat fallbacks. Its `variant` member (the field whose value picks each marker colour, renderer default `variant`) is the only spelling that binding has. On the vertical rail a colour that `timeline.colorField` resolves for an entry outranks that marker colour."
         },
         {
           "name": "dataSource",
@@ -2078,11 +2078,9 @@
             "h6",
             "body",
             "caption",
-            "overline",
-            "heading",
-            "subheading"
+            "overline"
           ],
-          "description": "One of the nine text styles ui:text uses: h1-h6 (rendered as that heading level), body, caption or overline. heading and subheading are earlier spellings the contract still accepts and renders as h2 and h3; write h2 or h3 instead."
+          "description": "One of the nine text styles ui:text uses: h1-h6 (rendered as that heading level), body, caption or overline. The earlier spellings heading and subheading are refused; write h2 or h3 instead."
         },
         {
           "name": "align",
@@ -2102,7 +2100,7 @@
         {
           "name": "object",
           "type": "string",
-          "description": "Object the aggregate runs over. Required unless a node-level `dataSource` binding names one; when both are set, `dataSource.object` wins."
+          "description": "NOT READ (objectui#11880): the aggregate runs over the object the node-level `dataSource.object` names, and a node without one shows the \"no object named\" notice. `@objectstack/spec` retires this flat key in v18 (objectstack#11509)."
         },
         {
           "name": "aggregate",
@@ -2124,7 +2122,7 @@
         {
           "name": "filter",
           "type": "array",
-          "description": "Criteria the aggregate is scoped by. When a node-level `dataSource` binding also supplies a filter (its own, or the saved view its `view` names), the two are AND-combined: neither is dropped."
+          "description": "NOT READ (objectui#11880): the aggregate is scoped by the node-level `dataSource.filter`, AND-combined with the filter of the saved view its `view` names. This flat key is not combined with it and never applies; `@objectstack/spec` retires it in v18 (objectstack#11509)."
         },
         {
           "name": "format",
@@ -2248,7 +2246,7 @@
           "name": "object",
           "type": "string",
           "required": true,
-          "description": "Object whose records the list repeats over"
+          "description": "Object whose records the list repeats over; a node-level `dataSource.object` wins"
         },
         {
           "name": "titleField",
@@ -2283,6 +2281,12 @@
           "name": "divided",
           "type": "boolean",
           "description": "Separator between rows"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -2466,6 +2470,11 @@
           "name": "recordIdField",
           "type": "string",
           "description": "For a `script` action run against a single selected row: the row field whose value is sent as the record id (default `id`)"
+        },
+        {
+          "name": "undoable",
+          "type": "boolean",
+          "description": "Offer an Undo affordance after an update action: once an `operation: update` succeeds, its success toast offers Undo, which writes back the values the fields it wrote held on the record in scope (the record page's record, or the row the host binds), provided that record carries each of them. The one limit: a button with no record in scope (standalone, or writing a record other than the one in scope) offers no Undo, because there is no row to restore"
         }
       ]
     },
