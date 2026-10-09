@@ -159,10 +159,13 @@ is a structured spreadsheet — you never hand-write JSON:
 - **Capabilities** — named grants like `manage_users` or `studio.access`.
 
 Prefer the smallest change that works, in this order: **bind an existing set
-to a position** → **clone and adjust** → **author a new set**. Editing a set
-that shipped with an app creates an *environment overlay* — your change wins,
-survives upgrades, and can be reset back to the vendor baseline; the API name
-is immutable after creation. And keep the additive model in mind: author
+to a position** → **clone and adjust** → **author a new set**. A set shipped
+in code — by an app you installed, or as a platform default such as
+`member_default` — can't be edited in the environment (a save answers
+`403 NOT_OVERRIDABLE`): clone it and adjust the clone, which is your own set
+while upgrades keep reaching the original. Sets created here, clones, and sets
+saved into a writable runtime package are edited in place. The API name is
+immutable after creation. And keep the additive model in mind: author
 coherent capability bundles, never "subtraction sets".
 Full model: [Permission Sets](/docs/permissions/permission-sets).
 
@@ -193,7 +196,8 @@ org structure, it's a business unit.
 
 **Can I delete the built-in permission sets?** No — sets like
 `member_default` and `organization_admin` are the platform baseline. Shipped
-sets can be overlaid (Step 5) or simply left unassigned.
+sets can't be edited in place either, but they can be cloned and adjusted
+(Step 5) or simply left unassigned.
 
 ## Where is everything
 

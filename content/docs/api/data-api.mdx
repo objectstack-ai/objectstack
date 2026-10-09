@@ -257,6 +257,16 @@ emptied that way reads back as `[]` — never `null`, so a client that branches 
 `packages/spec/src/data/field.zod.ts`, rendered in the
 [Field reference](/docs/references/data/field)).
 
+A record that the same delete removes never blocks it. Before any refusal is
+judged, the delete collects every record its cascade reaches, the deleted
+record included. A `restrict` held by a record in that set is not a refusal,
+and neither is the `restrict` that a required `set_null` becomes. A `set_null`
+writes nothing to a record in that set. So when an account cascades to its
+contacts and its contracts, and a contract's required lookup points at a
+contact, deleting the account removes all three, whichever object was
+registered first. A `restrict` from any record outside the set still refuses
+with `409 DELETE_RESTRICTED`, and `dependentCount` counts only those records.
+
 ---
 
 ## Batch Operations

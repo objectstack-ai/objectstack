@@ -7,7 +7,7 @@ import { defineStack } from './stack.zod';
 // deprecated `aiStudio`/`aiSeat` aliases were removed in #3308, so those now
 // reject like any other typo — there is no canonicalization step left.
 
-describe('defineStack requires validation (#3265/#3308)', () => {
+describe('defineStack requires validation', () => {
   it('canonical declarations pass through untouched', () => {
     const stack = defineStack({ requires: ['ai', 'ai-studio', 'ai-seat', 'hierarchy-security', 'governance'] });
     expect(stack.requires).toEqual(['ai', 'ai-studio', 'ai-seat', 'hierarchy-security', 'governance']);
@@ -19,7 +19,7 @@ describe('defineStack requires validation (#3265/#3308)', () => {
     );
   });
 
-  it('the removed camelCase aliases now REJECT like any other unknown token (#3308)', () => {
+  it('the removed camelCase aliases now REJECT like any other unknown token', () => {
     expect(() => defineStack({ requires: ['aiStudio'] })).toThrowError(
       /'aiStudio' is not a known platform capability/,
     );
@@ -59,7 +59,7 @@ describe('defineStack requires validation (#3265/#3308)', () => {
 // and never fires. The refusal reuses the automation engine's boot-audit
 // wording (flow name, resolved trigger kind, the exact remedy).
 
-describe('defineStack trigger capability validation (#14153)', () => {
+describe('defineStack trigger capability validation', () => {
   const node = (id: string, type: string, config?: Record<string, unknown>) => ({
     id,
     type,
@@ -222,7 +222,7 @@ describe('defineStack trigger capability validation (#14153)', () => {
 // prescription literally and asserts the result is ACCEPTED — the property
 // the neither-arm exists for.
 
-describe('defineStack trigger capability — the pair: `triggers` without `automation` (#20332)', () => {
+describe('defineStack trigger capability — the pair: `triggers` without `automation`', () => {
   type Envelope = Error & { code?: string; status?: number; issues?: readonly string[] };
   const refusalOf = (stack: Record<string, unknown>): Envelope | null => {
     try {

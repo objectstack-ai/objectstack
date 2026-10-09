@@ -35,6 +35,9 @@ import {
   collectManifestPicklistReferences,
   describeUnresolvedPicklistReferences,
 } from './picklist-resolution.js';
+// [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
+// cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
+import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
 
 export type { Plugin, PluginContext };
 
@@ -934,6 +937,13 @@ export class ObjectQLPlugin implements Plugin {
     } else {
         ctx.logger.info('Project kernel — skipping sys_metadata hydration (metadata sourced from artifact)');
     }
+
+    // [ADR-0048 N.3, ruling letter A on #22307] The environment catalog is in
+    // the registry now, and every package registered before it: a package-held
+    // position or permission-set name the environment already holds refuses the
+    // boot here, before any other plugin starts. See
+    // {@link refuseEnvironmentHeldSecurityCatalogNames}.
+    this.refuseEnvironmentHeldSecurityCatalogNames();
 
     // Phase 3: Sync any new schemas that were just hydrated from the DB
     // (e.g. CRM objects seeded via template — they must have tables before use).
@@ -2104,6 +2114,43 @@ export class ObjectQLPlugin implements Plugin {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+  }
+
+  /**
+   * [ADR-0048 N.3 — maintainer ruling letter A on #22307, record 6063176077]
+   * The cold boot refuses a package-held position or permission-set name the
+   * environment catalog already holds, as a hot install does.
+   *
+   * At a cold boot every package registers in the kernel's first phase, through
+   * the package door, BEFORE `sys_metadata` hydrates into the registry's bare
+   * slot ({@link restoreMetadataFromDb}, just above in `start()`), so the door
+   * could not see the environment's names. The hydration write itself stays
+   * unjudged; this judges each package's claim against what it wrote, with the
+   * door's envelope (`SecurityCatalogNameConflictError`: `422`
+   * `NAMESPACE_CONFLICT`, every conflict listed, both holders named).
+   *
+   * Placed right after hydration and before Phase 3's schema sync, which is
+   * before `kernel:ready` and before every plugin that depends on the engine
+   * starts. A registration made after this point meets the environment's items
+   * at the registry's own package door or item seam, so between them every
+   * package registration of the boot is judged. Called whether or not this
+   * kernel hydrated: without hydration the bare slot holds only what a
+   * package-less registration put there, judged the same way, and usually
+   * nothing.
+   *
+   * The reading is the registry's, kept off the public surface
+   * ({@link findEnvironmentHeldSecurityCatalogNames}: which items are the
+   * environment's, and the built-in carve-out).
+   *
+   * @throws {SecurityCatalogNameConflictError} with `door: 'cold-boot'`, which
+   *   fails `start()` and with it the boot.
+   */
+  private refuseEnvironmentHeldSecurityCatalogNames(): void {
+    const registry = this.ql?.registry;
+    if (!registry) return;
+    const conflicts = findEnvironmentHeldSecurityCatalogNames(registry);
+    if (conflicts.length === 0) return;
+    throw new SecurityCatalogNameConflictError(conflicts, { door: 'cold-boot' });
   }
 
   /**

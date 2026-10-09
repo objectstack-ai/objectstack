@@ -41,7 +41,6 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_metadata_audit',
     'sys_metadata_commit',
     'sys_metadata_history',
-    'sys_view_definition',
   ],
   /** `@objectstack/platform-objects` — identity, org, auth, settings, jobs. */
   'platform-objects': [
