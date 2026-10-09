@@ -192,11 +192,16 @@ const makeQl = () => ({
     if (object === 'sys_user_permission_set') {
       const setId = HOLDS[where.user_id as string];
       return setId
-        ? [{ id: `ups_${where.user_id}`, user_id: where.user_id, permission_set_id: setId, organization_id: null }]
+        ? [{
+          id: `ups_${where.user_id}`, user_id: where.user_id, permission_set_id: setId,
+          permission_set: SETS[setId].name, organization_id: null,
+        }]
         : [];
     }
     if (object === 'sys_permission_set') {
-      const ids: string[] = where.id?.$in ?? [];
+      // By id (a position binding) or by name (a user grant, ADR-0131 D4).
+      const names: string[] = where.name?.$in ?? [];
+      const ids: string[] = where.id?.$in ?? Object.keys(SETS).filter((id) => names.includes(SETS[id].name));
       return ids
         .filter((id) => id in SETS)
         .map((id) => ({

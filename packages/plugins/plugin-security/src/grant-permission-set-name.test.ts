@@ -360,6 +360,80 @@ describe("walled posture, two organizations — the name is read from the WRITER
   });
 });
 
+// ---------------------------------------------------------------------------
+// A name never crosses organizations — judged at write time
+// ---------------------------------------------------------------------------
+
+describe("a name never crosses organizations — the set row must be the grant's own organization's or organization-less", () => {
+  /** A tenant-less system writer: its catalog read is not walled, so it can read every organization's set. */
+  const TENANTLESS = SYS;
+  const B_SET = {
+    id: 'ps_b_only', name: 'qa_b_only', label: 'B only', object_permissions: '{}', field_permissions: '{}', system_permissions: '[]', active: true,
+  };
+  const GLOBAL_SET = {
+    id: 'ps_global', name: 'qa_global', label: 'Global', object_permissions: '{}', field_permissions: '{}', system_permissions: '[]', active: true,
+  };
+  async function walledWithSets() {
+    const h = await boot({ walled: true });
+    await h.engine.insert('sys_permission_set', B_SET, { context: { isSystem: true, tenantId: 'org_b' } } as any);
+    await h.engine.insert('sys_permission_set', GLOBAL_SET, { context: SYS } as any);
+    return h;
+  }
+
+  it('an organization-less grant pointing at another organization’s set is stored UNNAMED', async () => {
+    const h = await walledWithSets();
+    await h.engine.insert('sys_user_permission_set', { user_id: 'u_x1', permission_set_id: 'ps_b_only' }, { context: TENANTLESS } as any);
+    const [row] = await grantsOf(h, 'u_x1');
+    expect(row).toMatchObject({ permission_set_id: 'ps_b_only', organization_id: null });
+    expect(row.permission_set ?? null).toBeNull();
+  });
+
+  it('NEGATIVE — a supplied name of another organization’s set is refused, from a system writer too; nothing is stored', async () => {
+    const h = await walledWithSets();
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { user_id: 'u_x2', permission_set_id: 'ps_b_only', permission_set: 'qa_b_only' }, { context: TENANTLESS } as any,
+    ));
+    expectNameRefusal(err, 'qa_b_only');
+    expect(await grantsOf(h, 'u_x2')).toHaveLength(0);
+  });
+
+  it('CONTROL — the same writer naming an organization-less set, or an organization’s grant its own set, is stamped', async () => {
+    const h = await walledWithSets();
+    await h.engine.insert('sys_user_permission_set', { user_id: 'u_x3', permission_set_id: 'ps_global' }, { context: TENANTLESS } as any);
+    expect((await grantsOf(h, 'u_x3'))[0]).toMatchObject({ permission_set: 'qa_global', organization_id: null });
+    await h.engine.insert(
+      'sys_user_permission_set', { user_id: 'u_x3', permission_set_id: 'ps_b_only', organization_id: 'org_b' }, { context: TENANTLESS } as any,
+    );
+    const own = (await grantsOf(h, 'u_x3')).find((g) => g.organization_id === 'org_b');
+    expect(own).toMatchObject({ permission_set: 'qa_b_only' });
+  });
+
+  it('an update re-pointing an organization-less grant at another organization’s set clears its name', async () => {
+    const h = await walledWithSets();
+    await h.engine.insert('sys_user_permission_set', { id: 'g_x4', user_id: 'u_x4', permission_set_id: 'ps_global' }, { context: TENANTLESS } as any);
+    expect((await grantsOf(h, 'u_x4'))[0]).toMatchObject({ permission_set: 'qa_global' });
+    await h.engine.update('sys_user_permission_set', { id: 'g_x4', permission_set_id: 'ps_b_only' }, { context: TENANTLESS } as any);
+    const [row] = await grantsOf(h, 'u_x4');
+    expect(row.permission_set_id).toBe('ps_b_only');
+    expect(row.permission_set ?? null).toBeNull();
+  });
+
+  it('moving a grant out of the organization its set belongs to clears the name; a name on an organization-less set moves with it', async () => {
+    const h = await walledWithSets();
+    await h.engine.insert('sys_user_permission_set', [
+      { id: 'g_x5', user_id: 'u_x5', permission_set_id: 'ps_b_only', organization_id: 'org_b' },
+      { id: 'g_x6', user_id: 'u_x5', permission_set_id: 'ps_global', organization_id: 'org_b' },
+    ], { context: TENANTLESS } as any);
+    await h.engine.update('sys_user_permission_set', { id: 'g_x5', organization_id: null }, { context: TENANTLESS } as any);
+    await h.engine.update('sys_user_permission_set', { id: 'g_x6', organization_id: null }, { context: TENANTLESS } as any);
+    const rows = await grantsOf(h, 'u_x5');
+    const moved = rows.find((g) => g.id === 'g_x5');
+    expect(moved?.organization_id ?? null).toBeNull();
+    expect(moved?.permission_set ?? null).toBeNull();
+    expect(rows.find((g) => g.id === 'g_x6')).toMatchObject({ permission_set: 'qa_global' });
+  });
+});
+
 describe('registration', () => {
   it('both hooks bind under one package when the plugin starts, and unbind when it is destroyed', async () => {
     const h = await boot();

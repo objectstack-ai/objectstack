@@ -36,7 +36,8 @@
  *   value (`null`, `''`) is not a clear: the derived name is written back, so a
  *   grant can never be left naming nothing while its id resolves.
  * - **UPDATE writing neither column** leaves the name alone. No backfill rides
- *   an unrelated edit.
+ *   an unrelated edit — except that a move to another organization clears a
+ *   name whose set does not belong to it (below).
  *
  * The stamp is assigned IN PLACE on the hook payload, so the engine records it
  * as a hook write (`hookWrittenKeys`). That is what lets it survive the
@@ -54,6 +55,25 @@
  * first write instead of landing a grant whose two halves disagree. A writer
  * that omits the name — the data door, a seed dataset, any caller outside this
  * repository — gets it stamped.
+ *
+ * ## A name never crosses organizations
+ *
+ * The set row the id points at must be one the grant may name: a row of the
+ * grant's OWN organization, or an organization-less row — the grant rule the
+ * authorization resolver applies to every stored grant row, asked of the set
+ * row, and the rule the backfill applies (so an organization-less grant names
+ * only an organization-less set). The grant's organization is the one it is
+ * stored with: on an insert, the row's own value, else the organization the
+ * driver stamps it with (`organizationTheInsertStores`); on an update, the
+ * payload's value when it carries one, else the stored row's.
+ *
+ * A row the writer can read that the grant may not name — another
+ * organization's set, read by a writer whose read is not walled (a tenant-less
+ * system writer) — is never named after: a supplied name is refused, from
+ * every caller, system included, and no name is stamped, so the grant is
+ * stored unnamed and confers nothing through a by-name reader. An update that
+ * re-points the grant there, or moves the grant to an organization its set
+ * does not belong to, clears the name it held.
  *
  * The one place the two contexts part is an id the catalog read cannot
  * resolve (no row, a row outside the writer's organization, a value that is
@@ -75,8 +95,11 @@
  * `sudo()`-shaped elevation the engine's lookup probe uses — never a bare
  * `{ isSystem: true }`. The elevation is about visibility (RBAC, RLS and FLS
  * do not decide which set an id names); the writer's organization still walls
- * the read, so a set in another organization resolves nothing here, and the
- * read joins the writer's transaction. A read that THROWS is not "no such
+ * the read, so a set in another organization resolves nothing here for a
+ * writer that has one, and the read joins the writer's transaction. A writer
+ * with NO organization reads unwalled — which is why the set row's own
+ * organization is judged against the grant's (above), and not left to the
+ * wall. A read that THROWS is not "no such
  * set": it propagates and the write is refused, because a grant landing
  * without its name is the silent half of a dual write. The refusal never
  * echoes the derived name, so it tells a caller nothing about a set it could
@@ -97,6 +120,7 @@ import type { FieldErrorCode } from '@objectstack/spec/api';
 import { classifyFilterToken, isPlainRecord } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
+import { organizationTheInsertStores } from './grant-holder-membership-refusal.js';
 
 /** The grant object this module keeps consistent. */
 export const GRANT_OBJECT = 'sys_user_permission_set';
@@ -313,8 +337,14 @@ export async function readGrantSetRows(
   };
 }
 
+/** The set row an id points at, as far as a grant's name is concerned. */
+interface CatalogRow {
+  name: string;
+  organizationId: string | null;
+}
+
 /** Per-write memo, keyed by the dispatch scope every hook dispatch of one caller write shares. */
-const memoByWrite = new WeakMap<object, Map<string, string | undefined>>();
+const memoByWrite = new WeakMap<object, Map<string, CatalogRow | undefined>>();
 
 interface GrantNameEngine {
   registerHook?: (
@@ -327,11 +357,11 @@ interface GrantNameEngine {
 }
 
 /**
- * The name of the `sys_permission_set` row `id` points at, as the WRITER's
- * catalog read sees it, or `undefined` when nothing resolves. Throws when the
- * read itself fails — see the module note.
+ * The `sys_permission_set` row `id` points at — its name and organization — as
+ * the WRITER's catalog read sees it, or `undefined` when nothing resolves.
+ * Throws when the read itself fails — see the module note.
  */
-async function catalogNameFor(engine: GrantNameEngine, ctx: any, id: unknown): Promise<string | undefined> {
+async function catalogRowFor(engine: GrantNameEngine, ctx: any, id: unknown): Promise<CatalogRow | undefined> {
   const key = idKey(id);
   if (key === undefined) return undefined;
   // A composition without the catalog object has nothing to derive from — the
@@ -339,7 +369,7 @@ async function catalogNameFor(engine: GrantNameEngine, ctx: any, id: unknown): P
   if (typeof engine.getSchema === 'function' && !engine.getSchema(PERMISSION_SET_CATALOG_OBJECT)) return undefined;
 
   const scope = ctx?.dispatch?.scope;
-  let memo: Map<string, string | undefined> | undefined;
+  let memo: Map<string, CatalogRow | undefined> | undefined;
   if (scope && typeof scope === 'object') {
     memo = memoByWrite.get(scope);
     if (!memo) {
@@ -360,11 +390,29 @@ async function catalogNameFor(engine: GrantNameEngine, ctx: any, id: unknown): P
   const rows = await api
     .sudo()
     .object(PERMISSION_SET_CATALOG_OBJECT)
-    .find({ where: { id: key }, fields: ['id', 'name'], limit: 1 });
+    .find({ where: { id: key }, fields: ['id', 'name', 'organization_id'], limit: 1 });
   const row = Array.isArray(rows) ? rows[0] : undefined;
-  const name = row && typeof row.name === 'string' && row.name !== '' ? row.name : undefined;
-  memo?.set(key, name);
-  return name;
+  const found: CatalogRow | undefined =
+    row && typeof row.name === 'string' && row.name !== ''
+      ? { name: row.name, organizationId: grantOrganizationOf(row) }
+      : undefined;
+  memo?.set(key, found);
+  return found;
+}
+
+/**
+ * The grant rule, asked of the set row a grant would name: an
+ * organization-less row applies to every grant, a row of an organization only
+ * to a grant of that same organization.
+ */
+function setRowAppliesToGrant(setOrganizationId: string | null, grantOrganizationId: string | null): boolean {
+  return setOrganizationId === null || setOrganizationId === grantOrganizationId;
+}
+
+/** A stored or written organization value, normalized the way {@link grantOrganizationOf} reads it. */
+function organizationValue(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  return String(value);
 }
 
 /** What the caller supplied for the name column, or `undefined` when it supplied nothing. */
@@ -373,7 +421,8 @@ type Supplied = { value: unknown } | undefined;
 /**
  * Settle `permission_set` on one payload: `decidingId` is the id the name must
  * agree with (the payload's own, or the matched row's stored one), `supplied`
- * the caller's own value for the column.
+ * the caller's own value for the column, `grantOrganizationId` the
+ * organization the grant is stored with once the write lands.
  */
 async function settle(
   engine: GrantNameEngine,
@@ -381,12 +430,20 @@ async function settle(
   data: Record<string, unknown>,
   decidingId: unknown,
   supplied: Supplied,
+  grantOrganizationId: string | null,
 ): Promise<void> {
   const suppliedName = supplied !== undefined && carriesName(supplied.value);
-  const derived = await catalogNameFor(engine, ctx, decidingId);
-  if (derived !== undefined) {
-    if (suppliedName && supplied!.value !== derived) throw grantSetNameMismatchError(supplied!.value);
-    data[GRANT_SET_NAME_FIELD] = derived;
+  const row = await catalogRowFor(engine, ctx, decidingId);
+  if (row !== undefined && setRowAppliesToGrant(row.organizationId, grantOrganizationId)) {
+    if (suppliedName && supplied!.value !== row.name) throw grantSetNameMismatchError(supplied!.value);
+    data[GRANT_SET_NAME_FIELD] = row.name;
+    return;
+  }
+  if (row !== undefined) {
+    // Another organization's set: its name is never carried across. Refused
+    // from every caller when supplied; otherwise the grant is left unnamed.
+    if (suppliedName) throw grantSetNameMismatchError(supplied!.value);
+    data[GRANT_SET_NAME_FIELD] = null;
     return;
   }
   // Unresolvable: a non-system caller's name cannot be shown to agree.
@@ -399,7 +456,11 @@ async function onInsert(engine: GrantNameEngine, ctx: any): Promise<void> {
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
   const supplied: Supplied = hasOwn(data, GRANT_SET_NAME_FIELD) ? { value: data[GRANT_SET_NAME_FIELD] } : undefined;
-  await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD], supplied);
+  const schema = typeof engine.getSchema === 'function' ? engine.getSchema(GRANT_OBJECT) : undefined;
+  const organizationId = organizationValue(
+    organizationTheInsertStores(schema ?? SysUserPermissionSet, data, ctx?.input?.options, ctx?.session?.organizationId),
+  );
+  await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD], supplied, organizationId);
 }
 
 /**
@@ -425,18 +486,33 @@ async function onUpdate(engine: GrantNameEngine, ctx: any): Promise<void> {
       : hasOwn(data, GRANT_SET_NAME_FIELD)
         ? { value: data[GRANT_SET_NAME_FIELD] }
         : undefined;
+  const previous = isPlainRecord(ctx?.previous) ? ctx.previous : undefined;
+  const movesOrganization = hasOwn(data, 'organization_id') || hasOwn(data, 'organizationId');
+  const organizationId = movesOrganization
+    ? organizationValue(hasOwn(data, 'organization_id') ? data.organization_id : data.organizationId)
+    : grantOrganizationOf(previous);
   if (hasOwn(data, GRANT_SET_ID_FIELD)) {
-    await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD], supplied);
+    await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD], supplied, organizationId);
     return;
   }
-  if (supplied === undefined) return;
-  const previous = ctx?.previous;
   // No stored row is the engine's to answer (not found), never a name verdict.
-  if (!isPlainRecord(previous)) return;
-  // Judged against the stored id on every matched row, an echo included: the
-  // stamp is then the same key on every row a predicate write matches, which
-  // is what the engine's per-row key-set rule asks of a batch rewrite.
-  await settle(engine, ctx, data, previous[GRANT_SET_ID_FIELD], supplied);
+  if (!previous) return;
+  if (supplied !== undefined) {
+    // Judged against the stored id on every matched row, an echo included: the
+    // stamp is then the same key on every row a predicate write matches, which
+    // is what the engine's per-row key-set rule asks of a batch rewrite.
+    await settle(engine, ctx, data, previous[GRANT_SET_ID_FIELD], supplied, organizationId);
+    return;
+  }
+  // A move to another organization keeps the name only while the set it names
+  // still belongs to the grant's organization, or to none. No backfill rides
+  // the move: an unnamed grant stays unnamed, and a name that still applies is
+  // left as stored.
+  if (!movesOrganization || grantSetNameOf(previous) === undefined) return;
+  const row = await catalogRowFor(engine, ctx, previous[GRANT_SET_ID_FIELD]);
+  if (row !== undefined && !setRowAppliesToGrant(row.organizationId, organizationId)) {
+    data[GRANT_SET_NAME_FIELD] = null;
+  }
 }
 
 /**

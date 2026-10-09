@@ -95,6 +95,11 @@ function matchesWhere(row: any, where: any): boolean {
             if (!(cond as any).$in.includes(row[field])) return false;
             continue;
         }
+        // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+        if (cond === null) {
+            if ((row[field] ?? null) !== null) return false;
+            continue;
+        }
         if (row[field] !== cond) return false;
     }
     return true;
@@ -103,7 +108,7 @@ function matchesWhere(row: any, where: any): boolean {
 /** The permission store the shared authz resolver reads, in its shipped shapes. */
 const TABLES: Record<string, any[]> = {
     sys_user: [{ id: 'u_admin', email: 'u_admin@example.com' }],
-    sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_pkg' }],
+    sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' }],
     sys_permission_set: [
         { id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] },
     ],

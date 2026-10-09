@@ -94,6 +94,8 @@ function makeRecordingQl(tables: Record<string, Array<Record<string, unknown>>>,
             if ('$nin' in c) return !(c.$nin as unknown[]).includes(raw(row, key));
             if ('$ne' in c) return raw(row, key) !== c.$ne;
           }
+          // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+          if (cond === null) return (raw(row, key) ?? null) === null;
           return raw(row, key) === cond;
         }),
       );
@@ -165,7 +167,7 @@ const VARIANTS: Record<
         {
           id: 'ups_1',
           user_id: 'usr_1',
-          permission_set_id: 'pst_1',
+          permission_set_id: 'pst_1', permission_set: 'admin_full_access',
           organization_id: null,
           valid_from: null,
           valid_until: null,
@@ -241,7 +243,7 @@ const VARIANTS: Record<
         {
           id: 'ups_1',
           user_id: 'usr_1',
-          permission_set_id: 'pst_1',
+          permission_set_id: 'pst_1', permission_set: 'admin_full_access',
           organization_id: 'org_1',
           valid_from: new Date(NOW - HOUR).toISOString(),
           valid_until: new Date(NOW + HOUR).toISOString(),
