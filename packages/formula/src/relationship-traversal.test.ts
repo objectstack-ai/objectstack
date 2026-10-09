@@ -2,9 +2,12 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { parseCelToAst } from './cel-engine';
 import {
   analyzeRelationshipTraversals,
   findTraversalConflicts,
+  readRootMembers,
+  traversalsOf,
 } from './relationship-traversal';
 import { validateExpression } from './validate';
 
@@ -105,6 +108,48 @@ describe('analyzeRelationshipTraversals — which hops an expression names', () 
   it('returns null for a source that does not parse', () => {
     expect(analyzeRelationshipTraversals('record.stage ==')).toBeNull();
     expect(analyzeRelationshipTraversals('')).toBeNull();
+  });
+});
+
+describe('readRootMembers — the one member reader both analyses fold', () => {
+  const readsOf = (source: string, roots: readonly string[]) => {
+    const ast = parseCelToAst(source);
+    expect(ast, source).not.toBeNull();
+    return readRootMembers(ast!, roots);
+  };
+
+  it('reads every member spelling of several roots in one walk, in source order', () => {
+    expect(readsOf(
+      "record['a'] == 1 && previous.?b.orValue(0) == 2 && has(record.c) && record[?'d'].orValue(0) == 3",
+      ['record', 'previous'],
+    )).toEqual([
+      { root: 'record', field: 'a', deeper: false },
+      { root: 'previous', field: 'b', deeper: false },
+      { root: 'record', field: 'c', deeper: false },
+      { root: 'record', field: 'd', deeper: false },
+    ]);
+  });
+
+  it('carries the next segment and whether the read goes deeper', () => {
+    expect(readsOf("record.a['b'] == 1 && record.c.?d.e == 2", ['record'])).toEqual([
+      { root: 'record', field: 'a', leaf: 'b', deeper: false },
+      { root: 'record', field: 'c', leaf: 'd', deeper: true },
+    ]);
+  });
+
+  it('reads no member for a computed key, a method on the root, or a root name in member position', () => {
+    expect(readsOf('record[k] == 1 && record.size() > 0 && vars.record.x == 1', ['record'])).toEqual([]);
+  });
+
+  it('a method call on a member uses the member as a value — no leaf', () => {
+    expect(readsOf("record.name.startsWith('A')", ['record'])).toEqual([
+      { root: 'record', field: 'name', deeper: false },
+    ]);
+  });
+
+  it('analyzeRelationshipTraversals is exactly the fold of its root\'s reads', () => {
+    const source = "record.crm_account.type == 'x' && record.crm_account == 'acc_1' && record.owner.team.lead == 'y'";
+    expect(analyzeRelationshipTraversals(source)).toEqual(traversalsOf(readsOf(source, ['record'])));
   });
 });
 

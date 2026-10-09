@@ -19,7 +19,7 @@ export default defineStack({
     version: '1.0.0',
     type: 'app',
     description: 'The App half of a two-package release artifact (ADR-0130 D4)',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
 
   objects: [

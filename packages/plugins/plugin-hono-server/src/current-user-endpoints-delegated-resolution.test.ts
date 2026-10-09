@@ -89,7 +89,7 @@ const TABLES: Record<string, Row[]> = {
     sys_member: [{ user_id: USER, organization_id: ACTIVE_ORG, role: 'member' }],
     sys_user_position: [],
     sys_user_permission_set: [
-        { id: 'ups1', user_id: USER, permission_set_id: 'ps_ops', organization_id: ACTIVE_ORG },
+        { id: 'ups1', user_id: USER, permission_set_id: 'ps_ops', permission_set: GRANTED, organization_id: ACTIVE_ORG },
     ],
     sys_position: [],
     sys_position_permission_set: [],

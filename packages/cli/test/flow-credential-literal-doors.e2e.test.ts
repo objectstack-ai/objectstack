@@ -42,7 +42,7 @@ const stackOf = (literal: boolean) => ({
     version: '1.0.0',
     type: 'app',
     name: 'Credential door probe',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
   objects: [
     {

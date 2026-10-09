@@ -183,8 +183,8 @@ function makeQl() {
         // reading's discipline. With one shared grant, only the organization
         // claim can separate the arms.
         sys_user_permission_set: [
-            { user_id: 'u_member', permission_set_id: 'ps_shared' },
-            { user_id: 'u_exmember', permission_set_id: 'ps_shared' },
+            { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
+            { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
         ],
         sys_permission_set: [
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },

@@ -178,7 +178,7 @@ const arrange = async () => {
   // The platform operator: an UNSCOPED admin_full_access user grant (the
   // single-posture anchor; no tenancy posture is configured here).
   await engine.insert('sys_permission_set', { id: 'ps_admin', name: 'admin_full_access' });
-  await engine.insert('sys_user_permission_set', { user_id: operatorId, permission_set_id: 'ps_admin', organization_id: null });
+  await engine.insert('sys_user_permission_set', { user_id: operatorId, permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null });
 
   const bearers = {
     owner: bearerFrom(await signIn(manager, 'owner@example.com')),

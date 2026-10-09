@@ -73,7 +73,7 @@ function twoPackageArtifact(): Record<string, unknown> {
       namespace: 'crm',
       version: '1.0.0',
       type: 'app',
-      engines: { protocol: '^17' },
+      engines: { protocol: '^18' },
     },
     objects: [
       {
@@ -118,7 +118,7 @@ function twoPackageArtifact(): Record<string, unknown> {
       namespace: 'crm',
       version: '1.0.0',
       type: 'module',
-      engines: { protocol: '^17' },
+      engines: { protocol: '^18' },
       dependencies: { 'com.example.seam.core': '^1.0.0' },
     },
     objects: [

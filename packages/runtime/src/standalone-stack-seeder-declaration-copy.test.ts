@@ -86,9 +86,11 @@ import '@objectstack/objectql';
 import '@objectstack/service-datasource';
 
 /**
- * The probe artifact. `engines.protocol` sits one minor below the runtime spec
+ * The probe artifact. `engines.protocol`'s floor sits below the runtime spec
  * so the door's ADR-0087 forward-conversion window is open — the same lever
  * commit 317132495's probe uses, and the reason the two copies can differ at all.
+ * It is a `>=` floor, not `^17.1.0`: this boot runs the ADR-0087 D1 handshake,
+ * which refuses a caret on 17 from protocol 18, and only the floor opens the window.
  *
  * Each declaration isolates one axis of triage's question:
  *
@@ -116,7 +118,7 @@ const ARTIFACT = {
     name: 'Seeder Declaration Copy Probe',
     type: 'app',
     version: '3.0.0',
-    engines: { protocol: '^17.1.0' },
+    engines: { protocol: '>=17.1.0' },
   },
   permissions: [
     {

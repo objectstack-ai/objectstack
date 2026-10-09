@@ -75,6 +75,8 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
     Object.entries(where ?? {}).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
+      // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+      if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
   return {
@@ -110,10 +112,10 @@ function authzTables(shape: 'name-only' | 'genuine') {
     // every arm below would be vacuous. It is still `sharing_admin`, never
     // `admin_full_access`, so it cannot be mistaken for the grant that confers
     // standing.
-    { user_id: USER, permission_set_id: PS_SHARING, organization_id: null },
+    { user_id: USER, permission_set_id: PS_SHARING, permission_set: 'sharing_admin', organization_id: null },
   ];
   if (shape === 'genuine') {
-    userSets.push({ user_id: USER, permission_set_id: PS_ADMIN, organization_id: null });
+    userSets.push({ user_id: USER, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: null });
   }
   return {
     sys_user: [{ id: USER, email: 'subject@example.com', email_verified: true }],
@@ -174,6 +176,8 @@ function makeSharingEngine() {
   const matches = (row: Record<string, unknown>, where: any): boolean =>
     Object.entries(where ?? {}).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+      // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+      if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
   return {

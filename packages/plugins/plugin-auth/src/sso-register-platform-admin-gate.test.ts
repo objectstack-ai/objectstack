@@ -115,6 +115,7 @@ const sysUserPermissionSet = {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     user_id: { name: 'user_id', type: 'text' as const },
     permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    permission_set: { name: 'permission_set', type: 'text' as const },
     organization_id: { name: 'organization_id', type: 'text' as const },
   },
 };
@@ -257,6 +258,7 @@ async function grantPlatformAdmin(engine: ObjectQL, userId: string): Promise<voi
       id: 'ups_platform_admin',
       user_id: userId,
       permission_set_id: 'ps_admin_full_access',
+      permission_set: 'admin_full_access',
       organization_id: null,
     },
     SYSTEM as never,
