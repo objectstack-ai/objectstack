@@ -22,6 +22,7 @@ import {
 
 import {
   validateStackExpressions,
+  runStackExpressionPasses,
   FIELD_RULE_BOUND_ROOTS,
   FIELD_RULE_NOWHERE_BOUND_ROOTS,
   FIELD_RULE_JUDGED_ROOTS,
@@ -3406,7 +3407,7 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     const fieldKeys = /for \(const key of \[([^\]]*)\] as const\)/.exec(RULE_CODE);
     expect(fieldKeys, 'the field-predicate loop moved — update this guard').not.toBeNull();
     const slots = [...fieldKeys![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen']);
+    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen', 'settledWhen']);
     expect(slots.filter((k) => !Object.keys(FieldSchema.shape).includes(k))).toEqual([]);
   });
 
@@ -5182,5 +5183,101 @@ describe('field-level predicates refuse a read THROUGH a reference (#20078)', ()
         },
       ))).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * [#22227] `settledWhen` — a `date` / `datetime` deadline's settle predicate
+ * (objectui#11815 ruling D) — joins the field-rule family on the `visibleWhen`
+ * side, and this authoring gate judges it exactly as it judges `visibleWhen`:
+ * the `record`-scoped check (it parses, it reads `record.<field>`, the field
+ * exists) plus the root verdict over FIELD_RULE_BOUND_ROOTS. The spec half —
+ * the type set, and `settledWhen` without `dueLike: true` — is pinned in the
+ * spec's `field-due-like.test.ts`.
+ *
+ * The SCOPE NAMES are pinned as measured, not invented: the family binds
+ * `record` (plus `previous`, and `parent` on a master-detail line item) and no
+ * other root; `today()` is a stdlib FUNCTION available in every CEL env, not a
+ * scope name; and `value` is no root at all at this surface, so it reads as a
+ * bare field reference.
+ */
+describe('[#22227] settledWhen — the deadline settle predicate in the field-rule family', () => {
+  const WHERE = "object 'showcase_task' · field 'due_date' settledWhen";
+  const stackWith = (settledWhen: unknown) => ({
+    objects: [{
+      name: 'showcase_task',
+      fields: {
+        status: { type: 'select', options: [{ label: 'Done', value: 'done' }] },
+        done: { type: 'boolean' },
+        due_date: { type: 'date', dueLike: true, settledWhen },
+      },
+    }],
+  });
+  const at = (issues: ExprIssue[]) => issues.filter((i) => i.where === WHERE);
+  const errorsAt = (issues: ExprIssue[]) => at(issues).filter((i) => (i.severity ?? 'error') === 'error');
+
+  it('control: a record-scoped predicate over a declared field earns no finding', () => {
+    expect(at(validateStackExpressions(stackWith("record.status == 'done'")))).toEqual([]);
+    expect(at(validateStackExpressions(stackWith('record.done == true')))).toEqual([]);
+  });
+
+  it('refuses a settledWhen that does not parse', () => {
+    const errors = errorsAt(validateStackExpressions(stackWith("record.status == 'done' &&")));
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]!.source).toBe("record.status == 'done' &&");
+  });
+
+  it('refuses a bare field reference — the slot is `record`-scoped, like its siblings', () => {
+    const errors = errorsAt(validateStackExpressions(stackWith("status == 'done'")));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toMatch(/`status`/);
+  });
+
+  it('refuses a read of a field the object does not declare', () => {
+    const errors = errorsAt(validateStackExpressions(stackWith("record.state == 'done'")));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toMatch(/`state`/);
+  });
+
+  describe('the scope names the gate gives the family — pinned as measured', () => {
+    it('binds exactly FIELD_RULE_BOUND_ROOTS, the family\'s own set', () => {
+      expect([...FIELD_RULE_BOUND_ROOTS]).toEqual(['record', 'previous', 'parent']);
+    });
+
+    it.each([...FIELD_RULE_BOUND_ROOTS])('admits `%s` — no root verdict on a bound root', (root) => {
+      const source = root === 'record' ? "record.status == 'done'" : `${root}.status == 'done'`;
+      const issues = at(validateStackExpressions(stackWith(source)));
+      expect(issues.filter((i) => /a field-level conditional rule binds only/.test(i.message))).toEqual([]);
+    });
+
+    it('refuses `current_user` with the family\'s root verdict, naming this slot', () => {
+      const errors = errorsAt(validateStackExpressions(stackWith("'admin' in current_user.positions")));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toMatch(/^`settledWhen` reads `current_user`/);
+    });
+
+    it('`today()` is a stdlib function, not a scope name — it applies', () => {
+      const errors = errorsAt(validateStackExpressions(stackWith('record.done == true || today() > timestamp("2020-01-01T00:00:00Z")')));
+      expect(errors).toEqual([]);
+    });
+
+    it('`value` is no scope name here — it reads as a bare field reference and is refused', () => {
+      const errors = errorsAt(validateStackExpressions(stackWith('value == true')));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toMatch(/`value`/);
+    });
+  });
+
+  it('the object save door judges the slot too — the same pass, at the same position', () => {
+    const errors = errorsAt(runStackExpressionPasses(stackWith("status == 'done'"), { runtimeWriteType: 'object' }));
+    expect(errors).toHaveLength(1);
+  });
+
+  it('the server-side gates stay off it, as for `visibleWhen`: no `parent` gate on an object with no master', () => {
+    // `parent` is bound by the family's root verdict; the `parent` GATE (an
+    // object without exactly one master_detail) belongs to the two write-path
+    // slots only, and this slot has no write path.
+    const issues = at(validateStackExpressions(stackWith("parent.status == 'paid'")));
+    expect(issues.filter((i) => /master_detail/.test(i.message))).toEqual([]);
   });
 });
