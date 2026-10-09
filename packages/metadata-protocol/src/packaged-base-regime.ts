@@ -285,7 +285,7 @@ export function isOriginGatedType(type: string): boolean {
  * Kept under the REST door's 500-character client-message bound
  * (`truncateClientMessage`, `packages/rest/src/error-response.ts`), past which
  * the tail is truncated. Characters outside the item's name, save / removal:
- * `flow` CHARS_FLOW, `action` CHARS_ACTION, `permission` CHARS_PERMISSION,
+ * `flow` 395 / 388, `action` 349 / 342, `permission` 301 / 294,
  * `datasource` 192 / 193 — so a name of up to 88 characters arrives whole for
  * every row (pinned). [#21944] A row's `hostOwned` name is a fixed, short name
  * with its own remedy (`default`: under 300 characters whole).
@@ -326,7 +326,7 @@ const MANAGED_SEAL_ADR = 'docs/adr/0131-total-organization-ownership-no-null-org
  * refusal from the regime-O overlay it is not.
  *
  * Kept under the REST door's 500-character client-message bound: the sentence
- * outside the item's type and name is CHARS_GENERIC characters, save / removal.
+ * outside the item's type and name is 321 / 275 characters, save / removal (measured).
  */
 export function managedItemSealedSentence(type: string, name: string, operation: 'save' | 'delete'): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;

@@ -49,7 +49,7 @@ import { RestServer } from './rest-server.js';
 const PACKAGE_ID = 'com.example.pkg';
 const PACKAGED_ACTION = 'pkg_approve';
 const PACKAGED_PERMISSION = 'pkg_perm';
-/** 88 characters — the longest name the flow row (411 before the name) still delivers whole. */
+/** 88 characters — a name the flow row (395 characters outside the name) still delivers whole. */
 const LONG_ACTION = `pkg_${'x'.repeat(84)}`;
 
 function createMockServer() {
