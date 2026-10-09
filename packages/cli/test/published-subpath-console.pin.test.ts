@@ -175,7 +175,7 @@ const RETIRED_RUNTIME_NAMES = [
  * them off the published subpath. Publishing one is the same deliberate act as
  * re-admitting a retired name.
  */
-const INTERNAL_SINCE_RETIREMENT = ['formatConsoleDistMissingWarning'];
+const INTERNAL_SINCE_RETIREMENT = ['createConsoleNotBuiltPlugin', 'formatConsoleDistMissingWarning'];
 
 /**
  * Every subpath the published package resolves, in full. A subpath removed here

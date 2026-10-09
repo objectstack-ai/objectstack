@@ -334,7 +334,10 @@ function findConsoleBuildRoot(consolePath: string): string | null {
 }
 
 /**
- * The boot warning for a resolved console package with no built `dist/`.
+ * What is missing and what fixes it, for a resolved console package with no
+ * built `dist/` — the ONE remedy picker, which both the boot warning and the
+ * HTTP answer render ({@link formatConsoleDistMissingWarning},
+ * {@link createConsoleNotBuiltPlugin}).
  *
  * Two places reach it, and each gets the remedy that works there:
  *
@@ -347,21 +350,33 @@ function findConsoleBuildRoot(consolePath: string): string | null {
  *     remedy is that package install. (An installed `@object-ui/console`,
  *     which this text used to name, is never consulted: that name is matched
  *     only as the workspace package of a sibling `../objectui` checkout.)
+ *
+ * `hostPaths` decides whether the text names absolute paths on this host. The
+ * terminal's reader is the operator, who is told exactly where to look. The
+ * HTTP answer's reader is whoever requests `/_console/`, with no credential, so
+ * that form names no absolute path: the remedy (the script or the package to
+ * reinstall) is the same sentence either way, and the repository-relative
+ * `packages/console/dist` stays because it is the repository's public layout.
  */
-export function formatConsoleDistMissingWarning(consolePath: string): string {
+function describeConsoleDistMissing(consolePath: string, hostPaths: boolean): string {
   const dist = path.join(consolePath, 'dist');
   const buildRoot = findConsoleBuildRoot(consolePath);
   if (buildRoot) {
     return (
-      `  ⚠ Console dist not found at ${path.relative(buildRoot, dist)} — \`pnpm build\` does not produce it. ` +
-      `Build it with \`pnpm ${CONSOLE_BUILD_SCRIPT}\` in ${buildRoot} ` +
+      `Console dist not found at ${path.relative(buildRoot, dist)} — \`pnpm build\` does not produce it. ` +
+      `Build it with \`pnpm ${CONSOLE_BUILD_SCRIPT}\` in ${hostPaths ? buildRoot : 'the root of the ObjectStack checkout this server runs from'} ` +
       `(uses a ../objectui checkout if present, else clones objectui at the pinned commit — needs network).`
     );
   }
   return (
-    `  ⚠ Console dist not found at ${dist} — the Console ships prebuilt in \`${CONSOLE_PACKAGE}\`, ` +
+    `Console dist not found${hostPaths ? ` at ${dist}` : ''} — the Console ships prebuilt in \`${CONSOLE_PACKAGE}\`, ` +
     `a dependency of \`@objectstack/cli\`; reinstall it at the same version as the CLI.`
   );
+}
+
+/** The boot warning for a resolved console package with no built `dist/`. */
+export function formatConsoleDistMissingWarning(consolePath: string): string {
+  return `  ⚠ ${describeConsoleDistMissing(consolePath, true)}`;
 }
 
 // ─── objectui-SHA Drift Guard (dev monorepo only) ───────────────────
@@ -788,6 +803,56 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
 
       // Suppress unused-parameter lint when isDev isn't needed.
       void options;
+    },
+  };
+}
+
+/**
+ * What `/_console/` answers when the console package resolved but has no built
+ * `dist/` — mounted by `os serve` in place of {@link createConsoleStaticPlugin},
+ * on the boot that prints {@link formatConsoleDistMissingWarning}.
+ *
+ * Without it nothing was mounted, so `GET /_console/` got the router's bare
+ * `ENDPOINT_NOT_FOUND` and `GET /` an empty 404: a missing build read exactly
+ * like a wrong URL, and only the terminal said why (AGENTS.md, Route & surface
+ * ownership rule 3, "Absence must be loud"). It mounts the same three routes the
+ * static plugin would, so who owns each path does not change with the build:
+ *
+ *   - `GET /` and `GET /_console` redirect to `/_console/`, as they do once the
+ *     Console is built — so `/` keeps one owner and one answer, the Console's;
+ *   - `GET /_console/*` answers `503` with a short `text/plain` body saying the
+ *     Console is not built, then the remedy {@link describeConsoleDistMissing}
+ *     picked for the warning, rendered without host paths.
+ *
+ * `503`, not `404`: the address is right and the server is missing a build it
+ * needs, which the operator fixes and a caller cannot — and a caller reading
+ * only the status still tells it apart from a wrong URL. Plain text rather than
+ * a JSON envelope: these are the Console's static-asset routes, not API
+ * surface (`console-route-ledger.ts`), read by a browser or by `curl`.
+ * `no-store`, so a browser never keeps the answer past the restart that serves
+ * the real Console.
+ */
+export function createConsoleNotBuiltPlugin(consolePath: string) {
+  const answer =
+    `The ObjectStack Console is not built, so this server has no Console to serve at ${CONSOLE_PATH}/.\n\n` +
+    `${describeConsoleDistMissing(consolePath, false)}\n\n` +
+    'Then restart the server. The API is served either way.\n';
+  return {
+    name: 'com.objectstack.console-not-built',
+
+    init: async () => {},
+
+    start: async (ctx: any) => {
+      const httpServer = await resolveHttpServer(ctx);
+      if (!httpServer?.getRawApp) {
+        ctx.logger?.warn?.('Console not-built answer: http.server service not found — skipping');
+        return;
+      }
+
+      const app = httpServer.getRawApp();
+      app.get('/', (c: any) => c.redirect(`${CONSOLE_PATH}/`));
+      app.get(CONSOLE_PATH, (c: any) => c.redirect(`${CONSOLE_PATH}/`));
+      app.get(`${CONSOLE_PATH}/*`, (c: any) => c.text(answer, 503, { 'cache-control': 'no-store' }));
     },
   };
 }
