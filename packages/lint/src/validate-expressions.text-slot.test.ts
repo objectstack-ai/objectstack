@@ -16,6 +16,10 @@
  *  2. a slot with none is compiled as a `template` — a hole holding logic or an
  *     unknown formatter is an `error` too.
  *
+ * And #22477: a `{{ }}` hole whose root is a `$` name the flow engine does not
+ * bind (`{{ $User.Id }}`, which rendered a blank fragment) is refused by the
+ * same judge — same door, same finding — with the remedy `{$User.Id}` gets.
+ *
  * Every other notify / screen string keeps the single-brace dialect and gets
  * nothing here. The `end` message is refused one door earlier, at the flow
  * parse (`EndConfigSchema`), so it is pinned on `validateStackExpressions`
@@ -115,6 +119,22 @@ describe('`objectstack validate` — a flow text slot reads `{{ }}` holes (#2211
       message: 'Failed: {{ $error.message }}',
     })).toEqual([]);
     expect(validate('screen', { objectName: 'deal', mode: 'edit', recordId: '{record.id}', title: 'Edit {{ record.name }}' })).toEqual([]);
+  });
+
+  it('refuses `By {{ $User.Id }}` in a text slot at `error`, with the remedy `{$User.Id}` gets (#22477)', () => {
+    for (const [nodeType, config, where] of [
+      ['notify', { recipients: ['u1'], title: 'Closed', message: 'By {{ $User.Id }}' }, 'notify message at config.message'],
+      ['screen', { waitForInput: true, title: 'By {{ $User.Id }}' }, 'screen title at config.title'],
+    ] as const) {
+      const findings = validate(nodeType, config);
+      expect(findings, JSON.stringify(config)).toHaveLength(1);
+      expect(findings[0]!.severity).toBe('error');
+      expect(findings[0]!.where).toContain(where);
+      expect(findings[0]!.message).toContain("assignments: { v: '{$User.Id}' }");
+      expect(findings[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(false);
+    }
+    // Control: the engine-bound `$error` and an ordinary hole stay clean at the same door.
+    expect(validate('notify', { recipients: ['u1'], title: 'Deal {{ record.name }}', message: 'Failed: {{ $error.message }}' })).toEqual([]);
   });
 
   it('judges an `end` message too, for a stack handed to `validateStackExpressions` with no parse in front of it', () => {

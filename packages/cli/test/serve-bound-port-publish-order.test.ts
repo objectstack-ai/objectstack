@@ -39,6 +39,16 @@
  * The e2e keeps its own job — proving the three channels agree with the socket
  * (#13062). This file proves they cannot be announced before they are true.
  *
+ * ## The second constraint on the same sequence (#22410)
+ *
+ * The banner comes BEFORE the IPC message. The `os dev` parent prints its MCP
+ * connect block when `objectstack:listening` arrives, into the terminal the
+ * child prints its banner to; sent first, the message let the two processes
+ * write that terminal at once, and the block's rows came out interleaved with
+ * the banner's. The full order is therefore state-file → banner → IPC, and
+ * what a person sees under a pty is pinned by
+ * `dev-boot-output-order.integration.test.ts`.
+ *
  * ## ⛔ Why the real IPC leg is never CALLED here
  *
  * `runtimeBoundPortChannels().announceListening` is `process.send`, and under
@@ -112,7 +122,7 @@ function withHome<T>(home: string, fn: () => T): T {
 }
 
 describe('#13193 — `os serve` writes the state file BEFORE it announces the port', () => {
-  it('drives the three channels in the order state-file → IPC → banner', () => {
+  it('drives the three channels in the order state-file → banner → IPC', () => {
     const order: string[] = [];
 
     publishBoundPort(45671, {
@@ -125,7 +135,7 @@ describe('#13193 — `os serve` writes the state file BEFORE it announces the po
     // announcing would satisfy that, and losing a channel is the defect in the
     // opposite direction — the one #13062 was filed for.
     expect(order, 'all three channels must fire, in this exact order').toEqual([
-      'state-file', 'ipc', 'banner',
+      'state-file', 'banner', 'ipc',
     ]);
   });
 
@@ -223,7 +233,7 @@ describe('#13193 — `os serve` writes the state file BEFORE it announces the po
     });
 
     expect(order, 'a failed write must not swallow the announcements').toEqual([
-      'state-file', 'ipc', 'banner',
+      'state-file', 'banner', 'ipc',
     ]);
     expect(existsSync(join(home, RUNTIME_FILE)), 'the write really did fail').toBe(false);
   });

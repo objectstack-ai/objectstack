@@ -23,7 +23,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { MetadataManager } from '@objectstack/metadata';
 import { createSecurityCatalogReader, ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
-import { SchemaRegistry, NAMESPACE_CONFLICT_CODE } from './registry.js';
+import { SchemaRegistry, NAMESPACE_CONFLICT_CODE, findPackageHeldSecurityCatalogNames } from './registry.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 import { ObjectQLPlugin } from './plugin.js';
@@ -458,5 +458,50 @@ describe('cold boot — a package-held catalog name the environment catalog hold
         });
         expect(refusal).toBeUndefined();
         expect(ql.registry.getItem<{ label?: string }>('position', 'org_admin')?.label).toBe('saved in the environment');
+    });
+
+    /**
+     * [#22371, ruling letter B, record 6074838935] The package half of the
+     * reading, exported for `os migrate security-catalog-overlays`, which boots
+     * without hydration and meets it with the stored rows instead of the bare
+     * slot. One reading, so the step lists what the cold boot refuses.
+     */
+    describe('the package half of the reading, exported (findPackageHeldSecurityCatalogNames)', () => {
+        it('lists every package-held name with its holder, positions first; built-ins and the environment\'s own names are not in it', async () => {
+            const { refusal, ql } = await boot(
+                pkgOf({ position: ['coldboot_held_position'], permission: ['coldboot_held_set_b', 'coldboot_held_set_a'] }),
+                [storedRow('permission', 'coldboot_env_only_set')],
+                (engine) => {
+                    engine.registry.registerItem('position', { name: 'org_admin', label: 'Organization Admin' }, 'name', 'com.objectstack.plugin-security');
+                },
+            );
+            expect(refusal).toBeUndefined();
+            expect(findPackageHeldSecurityCatalogNames(ql.registry)).toEqual([
+                { catalogType: 'position', name: 'coldboot_held_position', packageIds: [PKG] },
+                { catalogType: 'permission', name: 'coldboot_held_set_a', packageIds: [PKG] },
+                { catalogType: 'permission', name: 'coldboot_held_set_b', packageIds: [PKG] },
+            ]);
+        });
+
+        it('the cold boot\'s conflicts are exactly that list met with the stored names, no more and no fewer', async () => {
+            const stored = [
+                storedRow('permission', 'coldboot_meet_set'),
+                storedRow('position', 'coldboot_meet_position', PKG),
+                storedRow('permission', 'coldboot_meet_env_only'),
+            ];
+            const { refusal, ql } = await boot(
+                pkgOf({ position: ['coldboot_meet_position'], permission: ['coldboot_meet_set', 'coldboot_meet_unstored'] }),
+                stored,
+            );
+            const storedNames = new Set(stored.map((r) => `${r.type}|${r.name}`));
+            const met = findPackageHeldSecurityCatalogNames(ql.registry)
+                .filter((h) => storedNames.has(`${h.catalogType}|${h.name}`))
+                .flatMap((h) => h.packageIds.map((packageId) => ({
+                    catalogType: h.catalogType, name: h.name, incomingPackageId: packageId, existingHolder: { kind: 'environment' },
+                })));
+            expect(met).toHaveLength(2);
+            expect(refusal?.code).toBe(NAMESPACE_CONFLICT_CODE);
+            expect(refusal?.conflicts).toEqual(met);
+        });
     });
 });

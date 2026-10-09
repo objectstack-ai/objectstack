@@ -22,6 +22,12 @@
 // derivation, so step 2.7 answers not-found first), both faces still refuse —
 // the member answers the master check alone, which the contract says.
 //
+// The last block runs `security/explain` for EVERY by-id write verb step 2.8
+// runs on (update, delete, transfer) beside that verb's own door through the
+// same middleware: explain asks this one member for each, because the check
+// judges EDIT of the master whatever the record's verb. A verb whose door's
+// master check stopped matching the member's update answer turns it red.
+//
 // ## The fixture
 //
 //   cbpm_account   public_read + owner_id   — read by all, edited by its owner
@@ -41,7 +47,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
 import { SharingService, type SharingEngine } from '@objectstack/plugin-sharing';
 import { matchesFilterCondition } from '@objectstack/formula';
-import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
+import { ExplainOperationSchema, PermissionSetSchema, type ExplainOperation, type PermissionSet } from '@objectstack/spec/security';
 import type { ControlledByParentWriteOutcome, ISecurityService } from '@objectstack/spec/contracts';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
@@ -98,7 +104,9 @@ const SCHEMAS: Record<string, unknown> = {
   sys_user: { name: 'sys_user', isSystem: true, fields: { id: text('id'), name: text('name') } },
 };
 
-const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+// `allowTransfer` lets a transfer through the object gate, so its record-level
+// gates (step 2.7, step 2.8) are what answer it.
+const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true };
 const READ = { allowRead: true };
 const DETAILS = ['cbpm_contact', 'cbpm_region_note', 'cbpm_quote', 'cbpm_line', 'cbpm_orphan'];
 
@@ -247,15 +255,37 @@ async function boot(options: { faultOn?: string } = {}) {
       return e;
     }
   };
+  /**
+   * A by-id write of any verb through the engine middleware, shaped as the
+   * write path builds it (a delete or a purge carries no data). Resolves
+   * `'admitted'` or the refusal it threw.
+   */
+  const write = async (operation: string, context: any, object: string, id: string): Promise<'admitted' | any> => {
+    const opCtx: any = {
+      object,
+      operation,
+      ...(operation === 'delete' || operation === 'purge' ? {} : { data: { id, name: 'edited' } }),
+      options: { where: { id } },
+      context,
+    };
+    try {
+      await middleware(opCtx, async () => {});
+      return 'admitted';
+    } catch (e) {
+      return e;
+    }
+  };
   const member = (context: any, object: string, id: string) => serve(object, id, context);
   /**
    * [ADR-0055] `security/explain`'s record-grained update verdict through the
    * registered service (`explainAccessForCaller`). `userId` explains another
    * user, as the REST route does; the caller is the second argument.
    */
+  const explainAs = (operation: ExplainOperation, callerContext: any, object: string, recordId: string, userId?: string) =>
+    security.explain({ object, operation, recordId, ...(userId ? { userId } : {}) }, callerContext);
   const explainUpdate = (callerContext: any, object: string, recordId: string, userId?: string) =>
-    security.explain({ object, operation: 'update', recordId, ...(userId ? { userId } : {}) }, callerContext);
-  return { store, ctx, patch, member, explainUpdate };
+    explainAs('update', callerContext, object, recordId, userId);
+  return { store, ctx, patch, write, member, explainAs, explainUpdate };
 }
 
 const rep = () => ({ userId: REP, tenantId: 'org-1', positions: [], permissions: ['cbpm_rep'] });
@@ -418,4 +448,81 @@ describe('[ADR-0055] security/explain answers an update as the PATCH does, from 
     expect(d.record).toEqual({ recordId: 'c_own', visible: false, decidedBy: 'sharing' });
     expect(sharingDetailOf(d)).toContain("refuses this update on its 'object_permission' leg");
   });
+});
+
+/**
+ * Every operation `security/explain` answers, classified against step 2.8 of
+ * the write path. Total by construction, and checked against the spec's
+ * vocabulary below, so a verb added there without a row here fails.
+ *
+ *  - `by_id_master_checked`: a by-id write the object gate lets through for a
+ *    principal holding the grant, on which step 2.8 runs the master check.
+ *  - `object_gate_refused`: step 2.8 lists it, but the object gate refuses it
+ *    to every principal (its grant is retired until the lifecycle batch).
+ *  - `no_by_id_write`: a read, or an insert, whose master step 2.8 reads off
+ *    the request body an explanation does not carry.
+ */
+const VERB_ROWS: Record<ExplainOperation, 'by_id_master_checked' | 'object_gate_refused' | 'no_by_id_write'> = {
+  update: 'by_id_master_checked',
+  delete: 'by_id_master_checked',
+  transfer: 'by_id_master_checked',
+  restore: 'object_gate_refused',
+  purge: 'object_gate_refused',
+  create: 'no_by_id_write',
+  read: 'no_by_id_write',
+  export: 'no_by_id_write',
+};
+const verbsOf = (row: (typeof VERB_ROWS)[ExplainOperation]) =>
+  (Object.keys(VERB_ROWS) as ExplainOperation[]).filter((v) => VERB_ROWS[v] === row);
+
+describe('[ADR-0055] security/explain answers every by-id write verb as its door does, from this same check', () => {
+  const sharingDetailOf = (d: any): string => String(d.layers.find((l: any) => l.layer === 'sharing')?.record?.detail ?? '');
+
+  it('the classification is total: every operation explain answers has a row', () => {
+    expect([...ExplainOperationSchema.options].sort()).toEqual(Object.keys(VERB_ROWS).sort());
+  });
+
+  for (const verb of verbsOf('by_id_master_checked')) {
+    it(`${verb}: refused on the leg its door refuses on; admitted where its door admits`, async () => {
+      const h = await boot();
+      for (const [context, object, id, leg] of [
+        [rep(), 'cbpm_contact', 'c_other', 'record_sharing'],
+        [rep(), 'cbpm_region_note', 'rn_eu', 'row_level_security'],
+        [viewer(), 'cbpm_contact', 'c_own', 'object_permission'],
+        [rep(), 'cbpm_line', 'line_above_dangling', 'master_chain'],
+      ] as const) {
+        const refused = await h.write(verb, context, object, id);
+        expect(refused, `${verb} ${object}/${id} by ${context.userId}`).not.toBe('admitted');
+        expect(refused).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(String(refused.message)).toMatch(/requires edit access to its master record/);
+        if (LEG_REASON[leg]) expect(String(refused.message)).toMatch(LEG_REASON[leg]);
+        const d = await h.explainAs(verb, context, object, id);
+        expect(d.record, `explain ${verb} ${object}/${id} by ${context.userId}`).toEqual({
+          recordId: id,
+          visible: false,
+          decidedBy: 'sharing',
+        });
+        expect(sharingDetailOf(d)).toContain(`refuses this ${verb} on its '${leg}' leg`);
+      }
+      for (const [object, id] of [['cbpm_contact', 'c_own'], ['cbpm_contact', 'c_shared'], ['cbpm_region_note', 'rn_us'], ['cbpm_line', 'line_ok']] as const) {
+        const d = await h.explainAs(verb, rep(), object, id);
+        expect(d.record, `explain ${verb} ${object}/${id}`).toMatchObject({ recordId: id, visible: true });
+        expect(sharingDetailOf(d)).not.toContain('master-detail write check');
+        expect(await h.write(verb, rep(), object, id), `${verb} ${object}/${id}`).toBe('admitted');
+      }
+    });
+  }
+
+  for (const verb of verbsOf('object_gate_refused')) {
+    it(`${verb}: the object gate refuses its door for every principal, and explain says the object gate decided`, async () => {
+      const h = await boot();
+      for (const [context, object, id] of [[rep(), 'cbpm_contact', 'c_own'], [rep(), 'cbpm_contact', 'c_other']] as const) {
+        const refused = await h.write(verb, context, object, id);
+        expect(refused, `${verb} ${object}/${id}`).not.toBe('admitted');
+        expect(String(refused.message)).not.toMatch(/requires edit access to its master record/);
+        const d = await h.explainAs(verb, context, object, id);
+        expect(d.record, `explain ${verb} ${object}/${id}`).toEqual({ recordId: id, visible: false, decidedBy: 'object_crud' });
+      }
+    });
+  }
 });

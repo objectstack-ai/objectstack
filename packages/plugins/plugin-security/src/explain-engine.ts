@@ -374,19 +374,24 @@ export interface ExplainEngineDeps {
    * [ADR-0055] The master-detail write check's own answer for a by-id UPDATE
    * of `recordId` by `context`: `ISecurityService.checkControlledByParentWrite`,
    * the composition step 2.8 of the write path runs. On a
-   * `controlled_by_parent` record the per-record sharing gate above abstains
-   * (the object's effective model is `public`), so it cannot be the update's
+   * `controlled_by_parent` record the per-record sharing gates above abstain
+   * (the object's effective model is `public`), so they cannot be a write's
    * verdict there: this check is, and the door refuses on every outcome but
    * `allow` and `not_applicable`.
    *
-   * Asked for every `update` of a record that exists, with the context being
-   * EXPLAINED. The member holds the `controlled_by_parent` predicate, so the
-   * engine keeps no second copy of it: `not_applicable` leaves the report
-   * exactly as it was. A rejection (a context the write path refuses, or a
-   * store fault) is a dependency fault, reported fail-closed.
+   * Asked for every by-id write step 2.8 runs the check on
+   * ({@link MASTER_CHECKED_BY_ID_WRITES}: `update`, `delete`, `transfer`,
+   * `restore`, `purge`) of a record that exists, with the context being
+   * EXPLAINED. The update's answer is each of those writes' answer: the check
+   * judges EDIT access to the master whatever the record's own verb, and reads
+   * the verb only to pick its `insert` branch. The member holds the
+   * `controlled_by_parent` predicate, so the engine keeps no second copy of it:
+   * `not_applicable` leaves the report exactly as it was. A rejection (a
+   * context the write path refuses, or a store fault) is a dependency fault,
+   * reported fail-closed.
    *
-   * Optional: a deps bag wired without it explains the update from the sharing
-   * gate alone, as before, and claims nothing about a master.
+   * Optional: a deps bag wired without it explains each write from the sharing
+   * gates alone, as before, and claims nothing about a master.
    */
   checkControlledByParentWrite?: (
     object: string,
@@ -907,23 +912,56 @@ const MASTER_DENIAL_LEG_DETAIL: Record<ControlledByParentWriteDenialLeg, string>
   master_chain: 'the controlled_by_parent chain cannot be walked to a master that governs its own rows',
 };
 
-/** [ADR-0055] Why the master-detail write check reached no verdict, and what the update answers instead. */
-const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, string> = {
-  master_detail_relation_missing:
-    'the object declares controlled_by_parent with no master_detail relation to derive access from, and the ' +
-    'update answers 422 INVALID_METADATA',
-  record_not_found: 'the record does not exist, and the update answers 404 RECORD_NOT_FOUND',
-  master_reference_missing: "the record's master reference is empty, and the update answers 422 MISSING_REQUIRED_FIELD",
+/**
+ * [ADR-0055] Why the master-detail write check reached no verdict, and what the
+ * write answers instead. The answer is the same for every by-id write the check
+ * runs on: each condition throws one error class whatever the verb.
+ */
+const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, { condition: string; answer: string }> = {
+  master_detail_relation_missing: {
+    condition: 'the object declares controlled_by_parent with no master_detail relation to derive access from',
+    answer: '422 INVALID_METADATA',
+  },
+  record_not_found: { condition: 'the record does not exist', answer: '404 RECORD_NOT_FOUND' },
+  master_reference_missing: { condition: "the record's master reference is empty", answer: '422 MISSING_REQUIRED_FIELD' },
 };
 
 const MASTER_DERIVED = 'Write access to this record derives from its master (controlled_by_parent, ADR-0055)';
 
 /**
- * [ADR-0055] The sharing layer's record attribution for an update the
- * master-detail write check REFUSES — the check that decides an update of a
- * `controlled_by_parent` record — or `undefined` where it does not refuse.
+ * [ADR-0055] The record-grained writes whose verdict on a `controlled_by_parent`
+ * record the master-detail write check decides: every write step 2.8 of the
+ * write path runs that check on (the guard of step 2.8 in `security-plugin.ts`)
+ * that addresses one existing record by id.
  *
- * The mapping is the door's: the update proceeds on `allow` and on
+ * `insert` is the one verb step 2.8 runs on that is not here. Its master is read
+ * off the request BODY, which an explanation does not carry, and it addresses
+ * no existing record, so a record-grained `create` has no master check to ask.
+ *
+ * One answer serves every verb here. Whatever the record's own verb, the check
+ * judges EDIT access to the master (the object-level `update` grant, the
+ * master's write row-level security and record sharing, on every hop up the
+ * chain) and reads the verb only to pick its `insert` branch.
+ * `masterGateCoversOperation` states the same fact for the ownership floor's
+ * hand-over: deleting a child does not delete its master. So the answer the
+ * served member computes for an update is the answer step 2.8 gives each of
+ * these writes, and the engine asks it for each.
+ *
+ * `restore` and `purge` are refused at the object gate for every principal
+ * until their grants return, so the object-level CRUD layer decides their
+ * record verdict first. They are listed because step 2.8 lists them, so the
+ * report stays the door's on the day they can be granted.
+ */
+const MASTER_CHECKED_BY_ID_WRITES: ReadonlySet<string> = new Set(['update', 'delete', 'transfer', 'restore', 'purge']);
+
+/**
+ * [ADR-0055] The sharing layer's record attribution for a by-id write the
+ * master-detail write check REFUSES — the check that decides such a write of a
+ * `controlled_by_parent` record — or `undefined` where it does not refuse.
+ * `verb` is the write being explained (one of
+ * {@link MASTER_CHECKED_BY_ID_WRITES}), named in the prose.
+ *
+ * The mapping is the door's: the write proceeds on `allow` and on
  * `not_applicable`, and is refused on every other outcome, one outside the
  * vocabulary included (fail closed). A proceeding outcome leaves the report
  * exactly as the rest of the pipeline computes it. ⛔ It does not name the
@@ -933,6 +971,7 @@ const MASTER_DERIVED = 'Write access to this record derives from its master (con
  */
 function masterWriteCheckRefusal(
   outcome: ControlledByParentWriteOutcome,
+  verb: string,
 ): { outcome: ExplainRecordAttribution['outcome']; detail: string } | undefined {
   switch (outcome?.outcome) {
     case 'allow':
@@ -941,17 +980,19 @@ function masterWriteCheckRefusal(
     case 'deny':
       return {
         outcome: 'excluded',
-        detail: `${MASTER_DERIVED}: the master-detail write check the by-id update runs refuses this update on its ` +
+        detail: `${MASTER_DERIVED}: the master-detail write check the by-id ${verb} runs refuses this ${verb} on its ` +
           `'${outcome.leg}' leg — ${MASTER_DENIAL_LEG_DETAIL[outcome.leg] ?? 'a leg this report does not describe'}. ` +
-          'The update answers 403 PERMISSION_DENIED.',
+          `The ${verb} answers 403 PERMISSION_DENIED.`,
       };
-    case 'unresolvable':
+    case 'unresolvable': {
+      const unresolved = MASTER_UNRESOLVED_DETAIL[outcome.reason];
       return {
         outcome: 'not_evaluated',
         detail: `${MASTER_DERIVED}, and the master-detail write check reaches no verdict ('${outcome.reason}'): ` +
-          `${MASTER_UNRESOLVED_DETAIL[outcome.reason] ?? 'a reason this report does not describe'}. The record is ` +
-          'reported NOT writable (fail closed), never admitted.',
+          `${unresolved ? `${unresolved.condition}, and the ${verb} answers ${unresolved.answer}` : 'a reason this report does not describe'}. ` +
+          'The record is reported NOT writable (fail closed), never admitted.',
       };
+    }
     default:
       return {
         outcome: 'not_evaluated',
@@ -1431,21 +1472,22 @@ async function applyRecordAttribution(
     : undefined;
   const writeGateFault = canEditOrFault === DEPENDENCY_FAULT;
   const canEdit = canEditOrFault === DEPENDENCY_FAULT ? undefined : canEditOrFault;
-  // [ADR-0055] An update of a `controlled_by_parent` record is judged by the
+  // [ADR-0055] A by-id write of a `controlled_by_parent` record (an update, a
+  // delete, a transfer: {@link MASTER_CHECKED_BY_ID_WRITES}) is judged by the
   // master-detail write check (step 2.8), which the sharing gate above cannot
   // stand in for: it abstains on such a record, and its abstention reads as
-  // `true`. So the check is asked for every update of a record that exists,
+  // `true`. So the check is asked for every such write of a record that exists,
   // with the explained context, and it decides whether it applies: `allow` and
   // `not_applicable` change nothing, every other outcome refuses
   // ({@link masterWriteCheckRefusal}). A rejection is the request failing,
   // exactly as for the gate.
-  const masterOrFault = engineOp === 'update' && recordExists && deps.checkControlledByParentWrite
+  const masterOrFault = MASTER_CHECKED_BY_ID_WRITES.has(engineOp) && recordExists && deps.checkControlledByParentWrite
     ? await settle(deps.checkControlledByParentWrite(object, recordId, context))
     : undefined;
   const masterFault = masterOrFault === DEPENDENCY_FAULT;
   const masterRefusal = masterOrFault === undefined || masterOrFault === DEPENDENCY_FAULT
     ? undefined
-    : masterWriteCheckRefusal(masterOrFault);
+    : masterWriteCheckRefusal(masterOrFault, engineOp);
   // The sharing call THIS operation's row verdict rests on: the read filter for
   // a read (the sharing middleware ANDs it into every find), the per-record gate
   // for a write (the middleware gates every by-id write on it). Either one
@@ -1462,7 +1504,7 @@ async function applyRecordAttribution(
           'writable (fail closed), never admitted.'
         : masterFault
           ? 'The master-detail write check (controlled_by_parent, ADR-0055) could not be evaluated: it rejected — ' +
-            'a refusal of the context or a store fault — and the by-id update fails on the same call, so the ' +
+            `a refusal of the context or a store fault — and the by-id ${engineOp} fails on the same call, so the ` +
             'record is reported NOT writable (fail closed), never admitted.'
           : undefined);
   const anyShareAdmits = shareRules.some((r) => r.effect === 'admits');

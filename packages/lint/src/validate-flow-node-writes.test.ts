@@ -9,13 +9,29 @@ import {
 } from '@objectstack/spec/automation';
 
 import {
-  validateFlowNodeWrites,
+  validateFlowNodeWrites as validateFlowNodeWritesUnrecorded,
   FLOW_NODE_WRITE_UNKNOWN_FIELD,
   FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
   FLOW_WRITE_NODE_TYPES,
   FLOW_WRITE_NODE_TYPES_DEFERRED,
 } from './validate-flow-node-writes.js';
 import { IMPLICIT_FIELDS } from './validate-hook-body-writes.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: that case reads what the cases above
+// fired.
+const SHORTENED_RULE_IDS: readonly string[] = [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR, FLOW_NODE_WRITE_UNKNOWN_FIELD];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateFlowNodeWrites: typeof validateFlowNodeWritesUnrecorded = (...args) => {
+  const findings = validateFlowNodeWritesUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
 
 // Target objects — map-shaped and array-shaped `fields`, so both authoring
 // shapes are resolved by the shared index.
@@ -192,28 +208,35 @@ describe('validateFlowNodeWrites', () => {
   // the node folded that into `create_record(deal) failed: …`, the run failed,
   // and nothing was stored on either family — no row on create, an untouched
   // row and no shadow column on update.
+  //
+  // [#22161] The verdict names the refusal and that the step fails the run;
+  // the rest of that measured account is `os explain flow-node-write-unknown-field`,
+  // so it is pinned there.
   it('states the measured refusal — INVALID_FIELD / 400 on every datasource — and no driver split', () => {
     const [finding] = validateFlowNodeWrites({
       objects: [dealObject],
       flows: [flowWith({ stagee: 'won' })],
     });
+    const explanation = explainRule(FLOW_NODE_WRITE_UNKNOWN_FIELD)?.paragraphs.join('\n') ?? '';
 
     expect(finding.message).toContain('INVALID_FIELD / 400');
-    expect(finding.message).toContain('identically on every datasource');
-    expect(finding.message).toContain('before any statement is built');
+    expect(explanation).toContain('identically on every driver');
+    expect(explanation).toContain('before any statement is built');
     // Why the door answers and not a datasource: the node hands `fields`
     // straight to the data engine, so it is a caller payload.
-    expect(finding.message).toContain('ordinary caller payload');
+    expect(explanation).toContain('ordinary caller payload');
     // The severity's own justification, unchanged by the rewrite and still
     // stated: the refusal is WHOLE, so correctly named siblings are lost too.
-    expect(finding.message).toContain('never land either');
+    expect(explanation).toContain('never land either');
     expect(finding.message).toContain('the step fails the run');
 
     // The retired driver split, both halves.
-    expect(finding.message).not.toMatch(/no such column/);
-    expect(finding.message).not.toMatch(/schemaless/);
-    expect(finding.message).not.toMatch(/is persisted/);
-    expect(finding.message).not.toMatch(/Nothing between the node and storage/);
+    for (const text of [finding.message, explanation]) {
+      expect(text).not.toMatch(/no such column/);
+      expect(text).not.toMatch(/schemaless/);
+      expect(text).not.toMatch(/is persisted/);
+      expect(text).not.toMatch(/Nothing between the node and storage/);
+    }
   });
 
   it('flags every unknown key in one node, and only those', () => {
@@ -369,7 +392,7 @@ describe('validateFlowNodeWrites', () => {
     // The INSERT consequence is strictly worse than the UPDATE one and the
     // message says so: the row never exists, so `{created.id}` downstream is
     // reading from a record that was never written.
-    expect(findings[0].message).toContain('the record is never created at all');
+    expect(findings[0].message).toContain('the record is never created');
   });
 
   it('names only the UPDATE consequence for an update_record node', () => {
@@ -377,7 +400,7 @@ describe('validateFlowNodeWrites', () => {
       objects: [dealObject],
       flows: [flowWith({ stagee: 'won' })],
     });
-    expect(findings[0].message).not.toContain('never created at all');
+    expect(findings[0].message).not.toContain('never created');
   });
 
   it('takes every skip on create_record too', () => {
@@ -560,7 +583,7 @@ describe('[#8663] validateFlowNodeWrites — unprovisioned anchor writes', () =>
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].path).toBe('flows[0].nodes[1].config.fields.owner_id');
     expect(findings[0].where).toBe('flow "stamp_owner" › node "Stamp"');
-    expect(findings[0].message).toContain('external object (ADR-0015)');
+    expect(findings[0].message).toContain("external object 'wh_order'");
     expect(findings[0].message).toContain('can never land');
   });
 
@@ -578,5 +601,34 @@ describe('[#8663] validateFlowNodeWrites — unprovisioned anchor writes', () =>
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(FLOW_NODE_WRITE_UNKNOWN_FIELD);
     expect(findings[0].severity).toBe('error');
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR]: ['ADR-0015', 'PAST the write-path validator', 'no such column', 'a claim about a remote schema'],
+    [FLOW_NODE_WRITE_UNKNOWN_FIELD]: ['ordinary caller payload', 'before any statement is built', 'never land either', 'never created at all'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

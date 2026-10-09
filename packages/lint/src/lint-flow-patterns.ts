@@ -159,6 +159,7 @@ import {
   collectFlowGraphs,
   FLOW_NODE_TEXT_SLOTS,
   flowNodeTextSlotSources,
+  textSlotTemplateRefusal,
 } from '@objectstack/spec/automation';
 import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
 // [#15429] The decision's `mode` contract, parsed here so `os validate` and
@@ -669,6 +670,33 @@ const DOUBLE_BRACE = /\{\{\s*[\w$][\w$.\s]*\}\}/;
 // A `$Ident.field` not immediately inside a `{` (so `{$User.Id}` is NOT flagged).
 // Require a letter/_ after `$` so currency like `$5.00` is never matched.
 const BARE_DOLLAR_REF = /(?:^|[^{])\$[A-Za-z_]\w*\.[A-Za-z_]/;
+// Every such reference, whole (`$error.message`), at the same anchor — what a
+// text slot's hint names, one hole or one remedy per reference.
+const BARE_DOLLAR_REFS = /(?:^|[^{])(\$[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)/g;
+
+/**
+ * [#22477] The hint for bare `$name.path` references in a text slot's text
+ * outside its holes. A reference whose hole the spec's text-slot judge admits
+ * is prescribed that hole; one whose `$` root the flow engine does not bind
+ * (`$User.Id`) would be refused as a hole too, so it gets the judge's own
+ * refusal and remedy instead. The judge is ASKED, never re-listed here: which
+ * `$` roots the engine binds is answered in one place
+ * (`flow-text-slot-template.ts`), and a second list would drift from it.
+ */
+function textSlotBareDollarHint(outsideHoles: string): string {
+  const refs = [...new Set([...outsideHoles.matchAll(BARE_DOLLAR_REFS)].map((m) => m[1]!))];
+  const holes: string[] = [];
+  const refusals: string[] = [];
+  for (const ref of refs) {
+    const refusal = textSlotTemplateRefusal(`{{ ${ref} }}`);
+    if (refusal === undefined) holes.push(`\`{{ ${ref} }}\``);
+    else refusals.push(`\`${ref}\` has no hole either: ${refusal}`);
+  }
+  const parts = ['A text slot renders only `{{ }}` holes, and all other text is literal.'];
+  if (holes.length > 0) parts.push(`Write it as a hole: ${holes.join(', ')}.`);
+  parts.push(...refusals);
+  return parts.join(' ');
+}
 
 /** Config keys whose string values are CEL predicates, not interpolated templates. */
 const CEL_KEYS = new Set(['condition', 'expression', 'conditions']);
@@ -1759,16 +1787,16 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
           }
         }
         // [#22110] The text slots' own bare-`$` check: read OUTSIDE their
-        // `{{ }}` holes, where a `$name.path` is the hole's correct content.
+        // `{{ }}` holes, where a `$name.path` is the hole's correct content —
+        // [#22477] when the engine binds its root; otherwise the hint carries
+        // the judge's remedy, never a hole the judge refuses.
         for (const slot of flowNodeTextSlotSources(String(node.type), node.config)) {
           const outsideHoles = slot.source.replace(/\{\{[^}]*\}\}/g, '');
           if (BARE_DOLLAR_REF.test(outsideHoles)) {
             findings.push({
               where: nodeWhere,
               message: `\`${slot.source.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` in the ${slot.label} is NOT rendered.`,
-              hint:
-                `Write it as a hole: \`{{ $ref.field }}\` (e.g. \`{{ $error.message }}\`) — a text slot renders only ` +
-                `\`{{ }}\` holes, and all other text is literal.`,
+              hint: textSlotBareDollarHint(outsideHoles),
               rule: FLOW_BARE_DOLLAR_REF,
             });
           }

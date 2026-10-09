@@ -816,10 +816,10 @@ export class SharingService implements ISharingService {
    * verdict that is not `deny`. The truth table is byte-for-byte the historical
    * one — `abstain` is where the old `true` for public / owner-less / bypassed
    * objects went — so every existing caller (the sharing middleware, the
-   * `sys_attachment` parent gate, the ADR-0055 master check) keeps its exact
-   * semantics. A caller that would let this answer OVERRIDE another authority
-   * must read {@link checkEdit} instead, because only there is "I permit this"
-   * distinguishable from "I do not enforce here".
+   * ADR-0055 master check) keeps its exact semantics. A caller that would let
+   * this answer OVERRIDE another authority must read {@link checkEdit} instead,
+   * because only there is "I permit this" distinguishable from "I do not
+   * enforce here".
    */
   async canEdit(
     object: string,
