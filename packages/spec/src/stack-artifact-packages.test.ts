@@ -250,7 +250,7 @@ describe('ADR-0130 D4 — each `packages` entry is an OBJECT wrapping its manife
     expect(issueAt(result, ['packages'])?.code).toBe('invalid_type');
   });
 
-  it('refuses `packages: null` — `.optional()` admits `undefined`, not `null` (#19926)', () => {
+  it('refuses `packages: null` — `.optional()` admits `undefined`, not `null`', () => {
     // `null` is a present, non-array `packages`: malformed, not absent. Every
     // reader of the key refuses it too (`INVALID_ARTIFACT_PACKAGES`); the rule
     // is stated once, beside `AssembledPackageBodySchema`.
@@ -322,7 +322,7 @@ describe('ADR-0130 D4 — `packages` has a declared composition rule', () => {
     ]);
   });
 
-  it('refuses `packages: null` on any input when composing two or more stacks (#19926)', () => {
+  it('refuses `packages: null` on any input when composing two or more stacks', () => {
     // The concat pass skips `undefined` alone: `null` is malformed, not
     // absent, and is refused with the strict parse's own envelope rather than
     // composed as if the stack declared no packages. `strict: false` is the
@@ -352,7 +352,7 @@ describe('ADR-0130 D4 — `packages` has a declared composition rule', () => {
     expect(composed.packages.map((p) => p.manifest.id)).toEqual(['com.example.crm.cpq']);
   });
 
-  it('does not warn about an undeclared composition rule (#5005 rule 3)', () => {
+  it('does not warn about an undeclared composition rule', () => {
     composeStacks([
       raw({ manifest: crmManifest, packages: [{ manifest: crmManifest }] }),
       raw({ manifest: cpqManifest }),

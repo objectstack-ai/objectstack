@@ -153,7 +153,7 @@ const rows: Array<{
   },
 ];
 
-describe('#15963 — every defineStack refusal carries an ADR-0112 envelope', () => {
+describe('every defineStack refusal carries an ADR-0112 envelope', () => {
   for (const row of rows) {
     describe(row.site, () => {
       it(`refuses with code ${row.code} and status 422`, () => {
@@ -241,7 +241,7 @@ describe('#15963 — every defineStack refusal carries an ADR-0112 envelope', ()
       }
     });
 
-    it('every code is a member of the closed `ErrorCode` union, registered under @objectstack/spec (#16449)', () => {
+    it('every code is a member of the closed `ErrorCode` union, registered under @objectstack/spec', () => {
       // The #16404 ruling: a code that ships in `dist` is the published face,
       // door or no door — so each refusal's spelling is a ledger row, and a
       // consumer's `switch (e.code)` is exhaustive over the union it ships with.

@@ -3744,6 +3744,59 @@ export interface DatasourceDef {
   };
 }
 
+/**
+ * [#22305] The records ONE by-id cascade delete removes, collected before any
+ * of them is judged — see {@link ObjectQL.cascadeDeleteRelations}.
+ *
+ * Without it, every level of the depth-first walk judged its own `restrict`
+ * refusals with no knowledge of the cascade that called it: a record the same
+ * cascade was about to delete refused the delete of its sibling, and whether
+ * it got the chance depended on which object was registered first. The triage
+ * ruling on #22305 is the rule this set exists to apply: a child that is itself
+ * in the cascade set never restricts a sibling in the same set.
+ *
+ * Engine-internal and never part of a context: it rides
+ * {@link ObjectQL.cascadeDeleteSets}, an `AsyncLocalStorage`, so no request
+ * input can name a record into it, and a caller that passed no context still
+ * passes none.
+ */
+interface CascadeDeleteSet {
+  /**
+   * Object name → ids the cascade deletes, the root included. Collected by a
+   * read-only walk across every CASCADING relation before any write, so it is
+   * complete before the first refusal is judged.
+   */
+  readonly members: Map<string, Set<string>>;
+  /**
+   * Object name → ids whose own referential walk has started, in progress or
+   * done. The walk never re-enters one, which is what makes a cycle in the
+   * data terminate and what keeps a row reached by two paths from being
+   * deleted twice.
+   */
+  readonly entered: Map<string, Set<string>>;
+  /**
+   * The #12166 elevation records already filed, one per deleted record per
+   * referenced object, so the collection walk and the deleting walk, which
+   * read the same relations, file each record once between them.
+   */
+  readonly elevationsFiled: Set<string>;
+}
+
+/** Is `id` of `object` in this index of a {@link CascadeDeleteSet}? */
+function cascadeSetHas(index: Map<string, Set<string>>, object: string, id: unknown): boolean {
+  return id != null && index.get(object)?.has(String(id)) === true;
+}
+
+/** Add `id` of `object`; `true` when it was not there yet. */
+function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unknown): boolean {
+  let ids = index.get(object);
+  if (!ids) { ids = new Set(); index.set(object, ids); }
+  const key = String(id);
+  if (ids.has(key)) return false;
+  ids.add(key);
+  return true;
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -3773,6 +3826,16 @@ export class ObjectQL implements IObjectQLEngine {
      */
     scope?: TransactionScope;
   }>();
+
+  /**
+   * [#22305] The {@link CascadeDeleteSet} of the by-id cascade delete in
+   * progress, ambient for the same reason as {@link txStore}: the cascade
+   * recurses through the public `delete()`, and each level must judge its
+   * refusals against the set its root collected. A context key would be the
+   * other carrier, and it is not used: it would turn a caller's absent context
+   * into a present one on every nested delete.
+   */
+  private readonly cascadeDeleteSets = new AsyncLocalStorage<CascadeDeleteSet>();
 
   private drivers = new Map<string, IDataDriver>();
   private defaultDriver: string | null = null;
@@ -16467,6 +16530,28 @@ export class ObjectQL implements IObjectQLEngine {
    * a row the removal would EMPTY keeps the refusal, and the refusal counts
    * only those rows. Only runs for single-id deletes — multi/predicate
    * deletes skip cascade (logged).
+   *
+   * [#22305] Two phases, so the walk knows its own set before it judges
+   * anything:
+   *   1. {@link collectCascadeDeleteSet} — read-only. Every record the cascade
+   *      deletes, transitively, across every CASCADING relation, the root
+   *      included.
+   *   2. {@link walkReferencingRelations} — the walk above, unchanged in
+   *      order, except that a `restrict` (authored, or the escalated
+   *      required `set_null`) and a `set_null` write consider only rows
+   *      OUTSIDE the set. A row in the set is about to be deleted by this same
+   *      cascade: it cannot be left dangling, so it refuses nothing, and
+   *      clearing its reference would be a write against a row about to go.
+   * Before this, the outcome depended on registration order: with the
+   * contacts registered ahead of the contracts, deleting an account refused
+   * on a contract's required lookup to a contact, a contract the same delete
+   * was about to remove; the other order deleted. A refusal from a row outside
+   * the set is unchanged, and so is the unit of work: the set is collected
+   * inside the transaction that `delete()` opens for the cascade.
+   *
+   * A nested `delete()` the walk makes for a member joins the ambient set
+   * ({@link cascadeDeleteSets}); any other delete reaching here — a hook's,
+   * say — is the root of its own cascade, as before.
    */
   private async cascadeDeleteRelations(
     object: string,
@@ -16495,73 +16580,328 @@ export class ObjectQL implements IObjectQLEngine {
     // raised reaches the caller with its envelope intact, exactly as #8895's
     // probe failure does.
     const objects: ServiceObject[] = this._registry.getAllObjects();
-    // [#12166, ruling constraint 3] Referenced objects this call has already
-    // filed an elevation record for. One record per referenced OBJECT, not per
-    // relation: two lookup fields on the same child pointing at the same parent
-    // are one "the platform read object X as system" fact, and filing it twice
-    // would make the ledger's row count a function of the child's field layout.
-    const elevationRecorded = new Set<string>();
+    // [#22305] A member of a cascade already in progress joins that cascade's
+    // set. Any other delete is the root of its own cascade, and collects the
+    // set first: before one refusal is judged and before one row is written.
+    const inherited = this.cascadeDeleteSets.getStore();
+    if (inherited && cascadeSetHas(inherited.members, object, id)) {
+      await this.walkReferencingRelations(object, id, context, objects, inherited);
+      return;
+    }
+    const cascadeSet = await this.collectCascadeDeleteSet(object, id, context, objects);
+    await this.cascadeDeleteSets.run(cascadeSet, () =>
+      this.walkReferencingRelations(object, id, context, objects, cascadeSet),
+    );
+  }
+
+  /**
+   * [#22305] Phase 1 of {@link cascadeDeleteRelations}: every record a by-id
+   * delete of `object`/`id` removes, the root included, collected READ-ONLY.
+   *
+   * Breadth-first across every relation whose resolved behaviour is
+   * `cascade`, read through the walk's own two readings — which relations
+   * point at an object ({@link cascadeRelationBehavior}) and which rows
+   * reference a record ({@link probeReferencingRows}: system identity, the
+   * same filter, the same missing-table and multi-value handling) — so the
+   * two phases cannot disagree about which rows a cascade reaches. A record
+   * already in the set is not expanded again, so a cycle in the data (a
+   * self-reference, two objects cascading into each other) terminates.
+   *
+   * The cost is one extra probe per CASCADING relation per member, since the
+   * walk probes those relations again as it deletes. `restrict` and
+   * `set_null` relations are not read here. Every probe here is an elevated
+   * read, so it files its #12166 record before it runs, through the
+   * once-per-record ledger the walk shares ({@link fileReferenceCheckElevation}).
+   */
+  private async collectCascadeDeleteSet(
+    object: string,
+    id: string | number,
+    context: ExecutionContext | undefined,
+    objects: ServiceObject[],
+  ): Promise<CascadeDeleteSet> {
+    const set: CascadeDeleteSet = { members: new Map(), entered: new Map(), elevationsFiled: new Set() };
+    cascadeSetAdd(set.members, object, id);
+    // The cascading relations pointing at each object, scanned once per object
+    // rather than once per record: a wide cascade has many records of few
+    // objects.
+    const cascading = new Map<string, Array<{ childName: string; fieldName: string; fdef: any }>>();
+    const cascadingInto = (target: string) => {
+      let relations = cascading.get(target);
+      if (!relations) {
+        relations = [];
+        for (const child of objects) {
+          const childName = (child as any)?.name as string | undefined;
+          const fields = (child as any)?.fields as Record<string, any> | undefined;
+          if (!childName || !fields) continue;
+          for (const [fieldName, fdef] of Object.entries(fields)) {
+            if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'cascade') {
+              relations.push({ childName, fieldName, fdef });
+            }
+          }
+        }
+        cascading.set(target, relations);
+      }
+      return relations;
+    };
+    // A queue the loop appends to while it iterates: an array iterator reads
+    // `length` on every step, so each record pushed below is visited in turn.
+    const queue: Array<{ object: string; id: string | number }> = [{ object, id }];
+    for (const target of queue) {
+      for (const { childName, fieldName, fdef } of cascadingInto(target.object)) {
+        this.fileReferenceCheckElevation(set, target.object, target.id, childName, fieldName, context);
+        const rows = await this.probeReferencingRows(
+          childName, fieldName, fdef, target.id, this.referenceProbeFilter(fieldName, fdef, target.id), context,
+        );
+        for (const row of rows) {
+          const depId = row?.id;
+          if (depId != null && cascadeSetAdd(set.members, childName, depId)) {
+            queue.push({ object: childName, id: depId });
+          }
+        }
+      }
+    }
+    return set;
+  }
+
+  /**
+   * Does `fieldName` on `child` point at `object` as a relation the cascade
+   * walk follows, and with which behaviour? `undefined` when it does not. The
+   * behaviour is the RESOLVED one, before the required-`set_null` escalation,
+   * which also reads the field's `multiple` and, on a multi-value field, the
+   * rows themselves.
+   *
+   * [#22305] Lifted out of the walk so both phases of
+   * {@link cascadeDeleteRelations} read relations one way: the set the first
+   * collects is the set the second deletes.
+   */
+  private cascadeRelationBehavior(
+    object: string,
+    child: ServiceObject,
+    fieldName: string,
+    fdef: any,
+  ): string | undefined {
+    if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) return undefined;
+    // [#18550] Same arbiter, same absence-vs-unreadability split as
+    // {@link ObjectQL.planCascadeAtomicity} states above — and this is the
+    // seam where the silence was measurable end to end: an unreadable
+    // carrier made the relation invisible to the cascade, so `delete()`
+    // removed the parent, left a `master_detail` child behind, and
+    // reported success. No `restrict` refusal, no `set_null`, nothing
+    // logged. Absence still skips the field here exactly as before.
+    const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
+    if (!ref) return undefined;
+    // Match the target object by raw or resolved name.
+    let resolvedRef: string | undefined;
+    try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
+    if (ref !== object && resolvedRef !== object) return undefined;
+
+    // [#21910, #21918] A lookup the registry INJECTED into a federated
+    // object, and the object does not provision, is not a reference to
+    // anything, so it is not a relation to probe. That is the tenant
+    // anchor `organization_id`, the ADR-0117 D1 anchor
+    // `owning_business_unit_id`, and the owner and audit lookups
+    // `owner_id` / `created_by` / `updated_by`. On a federated object each
+    // exists in the registered schema and nowhere else: the probe below
+    // was refused by the driver (`INVALID_FILTER`, no such column), its
+    // catch propagated the refusal as #8895 rules for a missing column,
+    // and deleting the organization, business unit or user it names was
+    // refused on a deployment with a federated object bound.
+    // `buildDriverOptions` and the related-record read already refuse this
+    // reading of the tenant column.
+    // {@link isFederatedUnprovisionedInjectedColumn} reads which columns
+    // those are from the registry's own provenance, never from a list of
+    // names, and {@link ObjectQL.planCascadeAtomicity} asks it too.
+    //
+    // ⛔ The probe's catch ({@link probeReferencingRows}) is deliberately NOT
+    // widened to pass a missing column as benign. That would invert #8895's
+    // discriminate or propagate for every object, not just these injected
+    // columns: a lookup the author declared on a federated object, including
+    // an author's own `organization_id` or `owner_id`, stays in the scan, and
+    // its probe failure still propagates.
+    if (isFederatedUnprovisionedInjectedColumn(child, fieldName)) return undefined;
+
+    // A master-detail parent owns its children: cascade by default (the
+    // child FK is typically required, so set_null would be invalid). Only
+    // an explicit `restrict` deviates. A plain lookup honors its
+    // configured deleteBehavior (default set_null).
+    //
+    // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
+    // every other value a master_detail can declare — including an
+    // explicit `deleteBehavior: 'set_null'` — resolves to `cascade` here,
+    // silently. Measured and pinned (`engine-cascade-delete.test.ts`).
+    return fdef.type === 'master_detail'
+      ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')
+      : (fdef.deleteBehavior || 'set_null');
+  }
+
+  /**
+   * [#12166, ruling constraint 3] File the elevation record for a probe of
+   * `childName` made while deleting `object`/`id` — once. One record per
+   * referenced OBJECT, not per relation: two lookup fields on the same child
+   * pointing at the same parent are one "the platform read object X as
+   * system" fact, and filing it twice would make the ledger's row count a
+   * function of the child's field layout.
+   *
+   * [#22305] The dedupe is the cascade's, not one call's: the collection walk
+   * and the deleting walk probe the same cascading relations, and between
+   * them file one record per deleted record per referenced object, as the
+   * single walk did.
+   */
+  private fileReferenceCheckElevation(
+    set: CascadeDeleteSet,
+    object: string,
+    id: string | number,
+    childName: string,
+    fieldName: string,
+    context: ExecutionContext | undefined,
+  ): void {
+    const key = JSON.stringify([object, String(id), childName]);
+    if (set.elevationsFiled.has(key)) return;
+    set.elevationsFiled.add(key);
+    this.recordReferenceCheckElevation(object, id, childName, fieldName, context);
+  }
+
+  /**
+   * The dependents probe of {@link cascadeDeleteRelations}: the rows of
+   * `childName` whose `fieldName` references `id`, read under SYSTEM identity
+   * and exactly narrowed. [#22305] Both phases read through it, so the set the
+   * collection walk gathers and the rows the deleting walk acts on are one
+   * reading of the same relation.
+   */
+  private async probeReferencingRows(
+    childName: string,
+    fieldName: string,
+    fdef: any,
+    id: string | number,
+    probeWhere: Record<string, unknown>,
+    context: ExecutionContext | undefined,
+  ): Promise<any[]> {
+    let dependents: any[];
+    try {
+      dependents = await this.find(
+        childName,
+        // [#12166] (maintainer ruling 2026-08-26, option A) SYSTEM identity,
+        // unconditionally. This probe is the platform's own referential-
+        // integrity read, not a query the caller asked for, and running it
+        // as the caller made "delete permission" silently mean "delete +
+        // read on EVERY referencing table": a caller with full delete rights
+        // on `object` but no read grant on `childName` got a blanket 403
+        // from the security middleware — whether or not a reference existed,
+        // and with `childName` EMPTY. Measured on a real deployment across
+        // 17 role×object pairs, with the A/B control that granting read-only
+        // on the referencing object (touching NOTHING about delete rights)
+        // turned the identical delete into a 200.
+        //
+        // Referential-integrity actions are engine responsibility executed
+        // under system identity on every mainstream platform — the RDBMS FK
+        // baseline, Salesforce (lookup clearing / cascade delete documented
+        // as bypassing sharing), Dataverse, ServiceNow, Odoo. Caller
+        // identity here was the outlier.
+        //
+        // The elevation is `sudo()`-SHAPED (`{ ...context, isSystem: true }`),
+        // never a bare `{ isSystem: true }` — the same posture
+        // `recomputeSummaries` holds one axis over. Three reasons, and each
+        // one is a defect if dropped:
+        //   - the open transaction handle, `tenantId` and `timezone` must
+        //     survive, or this probe leaves the caller's transaction and
+        //     stops being TENANT-scoped — a bare system context would widen
+        //     the probe across the tenant wall, which is the opposite of
+        //     what this card relaxes;
+        //   - `userId` survives, and that IS the audit ledger's
+        //     "triggered-by" half (ruling constraint 3): the record carries
+        //     triggered-by = the deleting operator and executed-as = system.
+        //     `read-audit.ts` states the same property of `sudo()`;
+        //   - it is a NARROW elevation: nothing else about the delete path
+        //     changes identity (ruling constraint 1). The `set_null` UPDATE
+        //     and the `cascade` DELETE below still run as the caller, byte
+        //     for byte, so this relaxes the reference CHECK and not the
+        //     caller's own authority over the dependent rows.
+        //
+        // [Constraint 4] If the spec later declares per-relationship
+        // on-delete behaviour, BEHAVIOUR follows the declaration; the
+        // identity of this probe stays system, unconditionally. Do not make
+        // this line conditional on `behavior`.
+        { where: probeWhere, context: ObjectQL.referenceCheckContext(context) } as any,
+      );
+    } catch (error) {
+      // [#8895] Discriminate by error TYPE — this probe IS the referential
+      // guard, so an empty answer is only truthful for the one failure that
+      // really means "no dependents".
+      //
+      // The bare `catch { continue }` this replaces reached `continue` on
+      // ANY probe failure, and every consequence of that is silent: the
+      // walk's `restrict` branch never fires, so a delete the integrity
+      // rules say must be REFUSED is allowed through; `set_null`/`cascade`
+      // never run, so child rows that should have been nulled or removed
+      // are left orphaned; nothing is logged and the caller is told the
+      // delete succeeded. Fail-OPEN on an integrity guard — the read did
+      // not happen and the answer "there are none" was invented for it
+      // (ADR-0110 D3: "the probe found nothing" and "the probe could not
+      // run" are different facts with opposite meanings here).
+      //
+      // Benign: the child object is registered but its TABLE was never
+      // provisioned (schema sync not run yet). It cannot hold a row that
+      // references anything, so zero dependents IS the truth and skipping
+      // the relation is correct. Asked through the shared
+      // `isMissingTableError` predicate (`@objectstack/metadata/errors`,
+      // #4825) — the same call `seedAutonumber` and `resolveFileReferences`
+      // make — never a hand-rolled code test.
+      //
+      // Everything else (connection drop, timeout, permission denial, a
+      // query error, a missing COLUMN on a provisioned table) means the
+      // dependents may well exist and simply were not seen. It propagates:
+      // the delete fails loudly and nothing is written, which is the same
+      // disposition the maintainer's 2026-08-15 ruling gives this family —
+      // unprovisioned is truthful emptiness, everything else must surface.
+      // A guard that could not be EVALUATED must not silently pass.
+      //
+      // No new response field and no new error code: the caller receives
+      // the probe's own failure, envelope intact.
+      if (isMissingTableError(error, childName)) return [];
+      throw error;
+    }
+    // [#9362] The multi-value pushdown in the probe filter can be a SUPERSET
+    // (the substring reading, on a backend without the declaration), so the
+    // exact answer is taken here, on the rows themselves. Everything the walk
+    // does with them — the `restrict` count in the 409 envelope, the `cascade`
+    // recursion, the `set_null` write — and the set the collection walk
+    // gathers read this answer, so narrowing anywhere later would leave one of
+    // them acting on a row that never referenced this record.
+    if (declaredMultiValued(fdef) && dependents) {
+      dependents = dependents.filter((row) =>
+        ObjectQL.storedReferenceIncludes(row?.[fieldName], id),
+      );
+    }
+    return dependents ?? [];
+  }
+
+  /**
+   * [#22305] Phase 2 of {@link cascadeDeleteRelations}, for one record of
+   * `cascadeSet`: refuse, clear or cascade each relation that points at it.
+   * Unchanged from the single walk it was, but for three readings of the set:
+   * a `restrict` and a `set_null` consider only rows OUTSIDE it, and a row the
+   * walk has already entered is not cascaded into again.
+   */
+  private async walkReferencingRelations(
+    object: string,
+    id: string | number,
+    context: ExecutionContext | undefined,
+    objects: ServiceObject[],
+    cascadeSet: CascadeDeleteSet,
+  ): Promise<void> {
+    // Entered before the first nested `delete()` can come back here.
+    cascadeSetAdd(cascadeSet.entered, object, id);
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
       if (!childName || !fields) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
-        if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
-        // [#18550] Same arbiter, same absence-vs-unreadability split as
-        // {@link ObjectQL.planCascadeAtomicity} states above — and this is the
-        // seam where the silence was measurable end to end: an unreadable
-        // carrier made the relation invisible to the cascade, so `delete()`
-        // removed the parent, left a `master_detail` child behind, and
-        // reported success. No `restrict` refusal, no `set_null`, nothing
-        // logged. Absence still `continue`s here exactly as before.
-        const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
-        if (!ref) continue;
-        // Match the target object by raw or resolved name.
-        let resolvedRef: string | undefined;
-        try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
-        if (ref !== object && resolvedRef !== object) continue;
-
-        // [#21910, #21918] A lookup the registry INJECTED into a federated
-        // object, and the object does not provision, is not a reference to
-        // anything, so it is not a relation to probe. That is the tenant
-        // anchor `organization_id`, the ADR-0117 D1 anchor
-        // `owning_business_unit_id`, and the owner and audit lookups
-        // `owner_id` / `created_by` / `updated_by`. On a federated object each
-        // exists in the registered schema and nowhere else: the probe below
-        // was refused by the driver (`INVALID_FILTER`, no such column), its
-        // catch propagated the refusal as #8895 rules for a missing column,
-        // and deleting the organization, business unit or user it names was
-        // refused on a deployment with a federated object bound.
-        // `buildDriverOptions` and the related-record read already refuse this
-        // reading of the tenant column.
-        // {@link isFederatedUnprovisionedInjectedColumn} reads which columns
-        // those are from the registry's own provenance, never from a list of
-        // names, and {@link ObjectQL.planCascadeAtomicity} asks it too.
-        //
-        // ⛔ The catch below is deliberately NOT widened to pass a missing
-        // column as benign. That would invert #8895's discriminate or
-        // propagate for every object, not just these injected columns: a
-        // lookup the author declared on a federated object, including an
-        // author's own `organization_id` or `owner_id`, stays in the scan, and
-        // its probe failure still propagates.
-        if (isFederatedUnprovisionedInjectedColumn(child, fieldName)) continue;
-
-        // A master-detail parent owns its children: cascade by default (the
-        // child FK is typically required, so set_null would be invalid). Only
-        // an explicit `restrict` deviates. A plain lookup honors its
-        // configured deleteBehavior (default set_null).
-        //
-        // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
-        // every other value a master_detail can declare — including an
-        // explicit `deleteBehavior: 'set_null'` — resolves to `cascade` here,
-        // silently. Measured and pinned (`engine-cascade-delete.test.ts`).
-        let behavior: string =
-          fdef.type === 'master_detail'
-            ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')
-            : (fdef.deleteBehavior || 'set_null');
+        const resolvedBehavior = this.cascadeRelationBehavior(object, child, fieldName, fdef);
+        if (resolvedBehavior === undefined) continue;
+        let behavior: string = resolvedBehavior;
 
         // [#9689] (maintainer ruling 2026-08-19, Q3 = B): the judgement the
-        // #9625 comment above deferred is now taken — `FieldSchema` REJECTS an
+        // #9625 comment in `cascadeRelationBehavior` deferred is now taken — `FieldSchema` REJECTS an
         // authored `deleteBehavior: 'set_null'` on a `master_detail` at parse
         // time, so the value is meaningful again: one that still reaches this
         // site came in around the parse seam (a raw `registerObject`, or a
@@ -16601,7 +16941,7 @@ export class ObjectQL implements IObjectQLEngine {
         // NOT NULL FK). Authors who want the children gone set
         // deleteBehavior:'cascade' explicitly.
         //
-        // [#9625] The test reads the RESOLVED `behavior`, one statement above,
+        // [#9625] The test reads the RESOLVED `behavior` (`cascadeRelationBehavior`),
         // which no longer records how the value got there. So it escalates
         // BOTH the defaulted set_null and one the author wrote out as
         // `deleteBehavior: 'set_null'` — the two are indistinguishable here by
@@ -16668,108 +17008,10 @@ export class ObjectQL implements IObjectQLEngine {
         // none, refuses the delete, or fails — and a record written only on the
         // success path would be missing exactly the runs an auditor goes
         // looking for.
-        if (!elevationRecorded.has(childName)) {
-          elevationRecorded.add(childName);
-          this.recordReferenceCheckElevation(object, id, childName, fieldName, context);
-        }
+        this.fileReferenceCheckElevation(cascadeSet, object, id, childName, fieldName, context);
 
-        let dependents: any[];
-        try {
-          dependents = await this.find(
-            childName,
-            // [#12166] (maintainer ruling 2026-08-26, option A) SYSTEM identity,
-            // unconditionally. This probe is the platform's own referential-
-            // integrity read, not a query the caller asked for, and running it
-            // as the caller made "delete permission" silently mean "delete +
-            // read on EVERY referencing table": a caller with full delete rights
-            // on `object` but no read grant on `childName` got a blanket 403
-            // from the security middleware — whether or not a reference existed,
-            // and with `childName` EMPTY. Measured on a real deployment across
-            // 17 role×object pairs, with the A/B control that granting read-only
-            // on the referencing object (touching NOTHING about delete rights)
-            // turned the identical delete into a 200.
-            //
-            // Referential-integrity actions are engine responsibility executed
-            // under system identity on every mainstream platform — the RDBMS FK
-            // baseline, Salesforce (lookup clearing / cascade delete documented
-            // as bypassing sharing), Dataverse, ServiceNow, Odoo. Caller
-            // identity here was the outlier.
-            //
-            // The elevation is `sudo()`-SHAPED (`{ ...context, isSystem: true }`),
-            // never a bare `{ isSystem: true }` — the same posture
-            // `recomputeSummaries` holds one axis over. Three reasons, and each
-            // one is a defect if dropped:
-            //   - the open transaction handle, `tenantId` and `timezone` must
-            //     survive, or this probe leaves the caller's transaction and
-            //     stops being TENANT-scoped — a bare system context would widen
-            //     the probe across the tenant wall, which is the opposite of
-            //     what this card relaxes;
-            //   - `userId` survives, and that IS the audit ledger's
-            //     "triggered-by" half (ruling constraint 3): the record carries
-            //     triggered-by = the deleting operator and executed-as = system.
-            //     `read-audit.ts` states the same property of `sudo()`;
-            //   - it is a NARROW elevation: nothing else about the delete path
-            //     changes identity (ruling constraint 1). The `set_null` UPDATE
-            //     and the `cascade` DELETE below still run as the caller, byte
-            //     for byte, so this relaxes the reference CHECK and not the
-            //     caller's own authority over the dependent rows.
-            //
-            // [Constraint 4] If the spec later declares per-relationship
-            // on-delete behaviour, BEHAVIOUR follows the declaration; the
-            // identity of this probe stays system, unconditionally. Do not make
-            // this line conditional on `behavior`.
-            { where: probeWhere, context: ObjectQL.referenceCheckContext(context) } as any,
-          );
-        } catch (error) {
-          // [#8895] Discriminate by error TYPE — this probe IS the referential
-          // guard, so `continue` is only truthful for the one failure that
-          // really means "no dependents".
-          //
-          // The bare `catch { continue }` this replaces reached `continue` on
-          // ANY probe failure, and every consequence of that is silent: the
-          // `restrict` branch below never fires, so a delete the integrity
-          // rules say must be REFUSED is allowed through; `set_null`/`cascade`
-          // never run, so child rows that should have been nulled or removed
-          // are left orphaned; nothing is logged and the caller is told the
-          // delete succeeded. Fail-OPEN on an integrity guard — the read did
-          // not happen and the answer "there are none" was invented for it
-          // (ADR-0110 D3: "the probe found nothing" and "the probe could not
-          // run" are different facts with opposite meanings here).
-          //
-          // Benign: the child object is registered but its TABLE was never
-          // provisioned (schema sync not run yet). It cannot hold a row that
-          // references anything, so zero dependents IS the truth and skipping
-          // the relation is correct. Asked through the shared
-          // `isMissingTableError` predicate (`@objectstack/metadata/errors`,
-          // #4825) — the same call `seedAutonumber` and `resolveFileReferences`
-          // make — never a hand-rolled code test.
-          //
-          // Everything else (connection drop, timeout, permission denial, a
-          // query error, a missing COLUMN on a provisioned table) means the
-          // dependents may well exist and simply were not seen. It propagates:
-          // the delete fails loudly and nothing is written, which is the same
-          // disposition the maintainer's 2026-08-15 ruling gives this family —
-          // unprovisioned is truthful emptiness, everything else must surface.
-          // A guard that could not be EVALUATED must not silently pass.
-          //
-          // No new response field and no new error code: the caller receives
-          // the probe's own failure, envelope intact.
-          if (isMissingTableError(error, childName)) continue;
-          throw error;
-        }
-        // [#9362] The multi-value pushdown above can be a SUPERSET (the
-        // substring reading, on a backend without the declaration), so the
-        // exact answer is taken here, on the rows themselves. Everything below —
-        // the `restrict` count in the 409 envelope, the `cascade` recursion,
-        // the `set_null` write — reads `dependents`, so narrowing anywhere
-        // later would leave one of them acting on a row that never referenced
-        // this record.
-        if (multiValued && dependents) {
-          dependents = dependents.filter((row) =>
-            ObjectQL.storedReferenceIncludes(row?.[fieldName], id),
-          );
-        }
-        if (!dependents || dependents.length === 0) continue;
+        let dependents = await this.probeReferencingRows(childName, fieldName, fdef, id, probeWhere, context);
+        if (dependents.length === 0) continue;
 
         // [#12166] The elevated probe's row IDENTITY, captured here — after the
         // multi-value narrowing and BEFORE the `requiredSetNull && multiValued`
@@ -16780,6 +17022,29 @@ export class ObjectQL implements IObjectQLEngine {
         // emptied count too, while a caller who cannot see them can derive
         // neither. Comparing at the later stage would leak the difference.
         const probedIds: readonly string[] = dependents.map((r: any) => String(r?.id));
+
+        // [#22305] A row the cascade itself deletes refuses nothing and is
+        // cleared of nothing: the triage ruling on #22305 is that a child in the
+        // cascade set never restricts a sibling in the same set. Such a row is
+        // not left dangling, because this same unit of work removes it, and
+        // clearing its reference would be a write against a row about to go.
+        // (The one cascade that is not one unit of work is
+        // `planCascadeAtomicity`'s `'split'`: there a later refusal can strand
+        // such a row, the partial outcome `warnCascadeNotAtomic` already
+        // declares for every row that path deletes.) So `restrict` (authored,
+        // or either half of the required escalation) and `set_null` judge only
+        // the rows OUTSIDE the set, and a relation whose rows are all inside it
+        // is done. `cascade` keeps every row: its rows ARE the set, and the
+        // walk deletes them below.
+        //
+        // After `probedIds`, on purpose: the disclosure check still compares
+        // the caller's own view against every row the elevated probe read, so a
+        // count is disclosed only to a caller who can see the whole relation,
+        // as before; what it counts is the rows that actually refuse.
+        if (behavior !== 'cascade') {
+          dependents = dependents.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id));
+          if (dependents.length === 0) continue;
+        }
 
         // [#9688] The deferred half of the required escalation, decided per
         // ROW now that the rows are read and exactly narrowed — every row
@@ -16896,6 +17161,12 @@ export class ObjectQL implements IObjectQLEngine {
           const depId = dep?.id;
           if (depId == null) continue;
           if (behavior === 'cascade') {
+            // [#22305] Entered already: an ancestor of this delete, still in
+            // progress up the stack (a cycle in the data), or a row an earlier
+            // branch of this cascade has deleted (a row reached by two paths).
+            // Either way this cascade removes it once, and re-entering would
+            // loop forever on the first and answer 404 on the second.
+            if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
             // Recurse via the public delete so the child's own cascade,
             // hooks and events fire.
             await this.delete(childName, { where: { id: depId }, context } as any);

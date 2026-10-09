@@ -127,11 +127,11 @@ const VALIDATION_RULE = "a validation rule's own relation path, which the author
 
 const READERS: Record<string, Row> = {
   // ── The readers this family fixed, and the one decision they ask ─────────
-  'engine.ts#cascadeDeleteRelations :: isFederatedUnprovisionedInjectedColumn()': {
+  'engine.ts#cascadeRelationBehavior :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
-    why: 'the dependents probe never filters a federated object on a column it does not provision',
+    why: 'the dependents probe never filters a federated object on a column it does not provision (both phases of the cascade read relations here)',
   },
-  'engine.ts#cascadeDeleteRelations :: referenceCarrierOf()': {
+  'engine.ts#cascadeRelationBehavior :: referenceCarrierOf()': {
     disposition: 'skips',
     why: 'finds the relations a delete probes; the skip above follows the reference match',
   },
@@ -550,7 +550,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
         .map(([key]) => siteKeyOf(key)),
     );
     expect([...skipping].sort()).toEqual([
-      'engine.ts#cascadeDeleteRelations',
+      'engine.ts#cascadeRelationBehavior',
       'engine.ts#planCascadeAtomicity',
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
     ]);
