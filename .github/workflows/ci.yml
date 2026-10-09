@@ -478,31 +478,40 @@ jobs:
     # margin for a cold Turbo cache; the old 45 left a hung job "running" for
     # half an hour past any plausible healthy finish.
     #
-    # ⚠ RAISED 30 -> 45 (#16173), and the raise is still load-bearing. It was
-    # made because shard 5/6 was being killed at the 30-minute wall (12+
-    # observations at 30:16-30:21 with every other job green; the green band
-    # topped out at 28:56, a ~1 minute margin), and so the tail could be
-    # measured uncensored before anyone re-derived
-    # `scripts/test-shard-timings.json`. Both are done: the dataset was
-    # refreshed (#20388, then #21826) and the split ran the whole CLI alone on
-    # shard 1/6 (#21487) until #22075 cut it into 3 slices. HELD at 45 by that
-    # change: the re-size is owed after it lands, from the measured post-change
-    # Test Core job walls, never from a prediction (#22075 carries it).
+    # History: RAISED 30 -> 45 (#16173) while one shard ran the whole CLI and
+    # was killed at the 30-minute wall; held at 45 until #22075 cut the CLI
+    # into 3 slices (5919483472).
+    #
+    # ⚠ RE-SIZED 45 -> 40 (#22075), from the measured post-change job walls.
+    # Window: every completed, non-cancelled CI run whose tested tree carries
+    # 5919483472, runs 37917885267 to 37956350887 (2026-10-09 10:29Z-16:03Z):
+    # 5 schedule, 6 push, 30 merge_group and 25 pull_request runs, 396
+    # `Test Core (N/6)` jobs; 24 cancelled runs excluded. Slowest job wall per
+    # event, in minutes: schedule 21.0, push 20.9, merge_group 24.1,
+    # pull_request 27.1; p90 of all 396 is 22.0. The slowest is 27m05s, run
+    # 37923333449 `Test Core (3/6)` (70 packages executed, the CLI as all 3
+    # slices). Two measured rules set the value, and the larger answer wins:
+    #   * wall margin, the 80% of the revert condition below: 27.1 is within
+    #     80% of 35 (28.0) and of 40 (32.0);
+    #   * the stall guard speaks first: on that same job "Run this shard's
+    #     tests" ended 26m38s after the job started, so the guard's window
+    #     verdict (+10m) lands at 36m38s -- after a 35 wall, 3m22s inside 40
+    #     (`node scripts/measure-stall-guard-headroom.mjs`). Its cap-deferred
+    #     verdict (+20m) already missed 45 on that job by 1m38s; no value this
+    #     re-size could pick restores it.
+    # So 40, not 35.
     #
     # ⛔ REVERT CONDITION, restated against measured wall time, not a card:
     # back to `30` only when the slowest shard's JOB wall time stays at or
     # under 24 minutes (80% of 30, so the margin the old wall lacked is
-    # there) on every scheduled run for a week. It does not today. On the 16
-    # main runs after the #21826 refresh (37413386379 to 37467882762), shard
-    # 1/6 — the CLI alone — read 6m14s-35m43s of job wall time, over 30
-    # minutes on 9 of them (34m39s run 37415122516, 35m43s run 37453598388,
-    # 34m08s run 37460325624), so the condition as first written ("once
-    # #16173 lands") would now kill that shard; and its slowest reading is
-    # already 79% of this 45. Read the `Test Core (1/6)` job's started and
-    # completed times before touching this value. It carries no other expiry
-    # — a raise with no revert condition beside it becomes permanent by
-    # forgetting — and the stall guard stays the primary hang detector.
-    timeout-minutes: 45
+    # there) on every scheduled run for a week. It does not today: 17 of the
+    # 396 jobs above read over 24 minutes (15 pull_request, 2 merge_group).
+    # Read every `Test Core (N/6)` job's started and completed times, and
+    # re-take the stall guard's headroom, before touching this value. It
+    # carries no other expiry — a raise with no revert condition beside it
+    # becomes permanent by forgetting — and the stall guard stays the primary
+    # hang detector.
+    timeout-minutes: 40
     permissions:
       contents: read
     strategy:
