@@ -312,9 +312,10 @@ export interface OwnershipFloorAlternate {
  *   ({@link ISecurityService.checkAuthoredRowWrite}).
  * - `master_chain`: the chain itself cannot be walked to a master that governs
  *   its own rows. It re-enters an object it has already visited, it exceeds
- *   the depth bound, or a master ABOVE the record's own master has no relation
- *   to derive from, is not present, or has an empty master reference. Above the
- *   first hop the check answers these as refusals, not as defects of the
+ *   the depth bound, or a master that is itself `controlled_by_parent` (the
+ *   record's own master, or any master above it) has no relation to derive its
+ *   own master from, is not present, or has an empty master reference. Past the
+ *   record itself the check answers these as refusals, not as defects of the
  *   request, so they are a leg here and never `unresolvable`.
  *
  * The first three legs run on every hop, so `object_permission` can name the
