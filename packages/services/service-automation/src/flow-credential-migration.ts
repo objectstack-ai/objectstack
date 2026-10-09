@@ -63,7 +63,6 @@ export interface FlowCredentialMigrationProtocol {
         item: unknown;
         mode: 'draft' | 'publish';
         packageId: string | null;
-        organizationId?: string;
         source: string;
     }): Promise<unknown>;
 }
@@ -191,9 +190,23 @@ export async function migrateFlowCredentialsIntoChannel(deps: {
         if (explicit.length === 0) continue;
         const state = row.state === 'draft' ? 'draft' : 'active';
         result.found += 1;
-        const organizationId = typeof row.organization_id === 'string' && row.organization_id !== ''
-            ? row.organization_id
-            : undefined;
+        // [ADR-0131 D6] A legacy organization-scoped row cannot be re-saved:
+        // the protocol writes no organization-scoped row, and re-saving it
+        // environment-wide would move it — the promotion ceremony's job
+        // (ADR-0131 C7). It is reported as not moved, every run, until then.
+        if (typeof row.organization_id === 'string' && row.organization_id !== '') {
+            result.failed.push({ flow: name, state, code: 'NOT_OVERRIDABLE' });
+            logger.error(
+                `[Automation] flow '${name}' (${state}): its stored row is organization-scoped (organization ` +
+                    `'${row.organization_id}'), and no metadata write lands organization-scoped any more, so its ` +
+                    'credential could not be moved into the write-only flow credential store: that row STILL CARRIES ' +
+                    'IT IN CLEARTEXT. The promotion ceremony (ADR-0131 C7) carries the row to the environment layer, ' +
+                    'where the next run moves it. Rotate the credential now.',
+                undefined,
+                { flow: name, state, code: 'NOT_OVERRIDABLE' },
+            );
+            continue;
+        }
         try {
             await protocol.saveMetaItem({
                 type: FLOW_METADATA_TYPE,
@@ -201,7 +214,6 @@ export async function migrateFlowCredentialsIntoChannel(deps: {
                 item: body,
                 mode: state === 'draft' ? 'draft' : 'publish',
                 packageId: typeof row.package_id === 'string' && row.package_id !== '' ? row.package_id : null,
-                ...(organizationId ? { organizationId } : {}),
                 source: 'migrate-stored',
             });
             result.migrated.push(`${name} (${state})`);

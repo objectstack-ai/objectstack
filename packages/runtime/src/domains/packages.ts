@@ -430,70 +430,6 @@ function requireWritablePackage(
 }
 
 /**
- * [#20492] `DELETE /packages/:id` — the ORGANIZATION-SCOPE refusal of the
- * persisted delete, asked by the door before anything is mutated.
- *
- * ## The measurement
- *
- * A caller holding `manage_metadata` with no active organization sent
- * `DELETE /api/v1/packages/:id` through `dispatch()` and was answered
- * `400 TENANT_SCOPE_REQUIRED` — yet the package had ALREADY left the running
- * registry (`GET /packages/:id` 200 before, 404 after; the listing empty), and
- * its stored rows were kept. The door ran `registry.uninstallPackage(id)` first
- * and reached `deletePackage`'s refusal second. A refused request had changed
- * the process for everyone it serves, until a restart re-seeded the registry.
- *
- * ## The rule it mirrors
- *
- * `deletePackage` (`@objectstack/metadata-protocol`) refuses an uninstall
- * whose request names neither `organizationId` nor `allTenants: true` — its
- * declared request type says so ("Omitted together with `allTenants` ⇒
- * refused"). This door never sends `allTenants`, so the request it builds is
- * refused exactly when the caller's vetted organization is absent. That
- * absence is the whole condition: nothing about the package or its rows enters
- * it, so the door can decide it up front, from the SAME value it hands the
- * protocol.
- *
- * ## Shape
- *
- * Same code and status as the protocol's refusal — `TENANT_SCOPE_REQUIRED`,
- * `400` — so no caller sees a second vocabulary for one condition. The sentence
- * is the door's own, for the reason {@link requireWritablePackage}'s is: the
- * protocol's remedy ("pass organizationId … or allTenants: true") names request
- * keys an HTTP caller cannot send. What this caller can do is select an
- * organization; and what the door can now truthfully add is that nothing
- * changed.
- *
- * ⛔ No `isSystem` bypass: the protocol refuses an org-less uninstall whoever
- * asks, so a mirror that exempted anyone would disagree with it. Returns a
- * refusal result to short-circuit on, or `null` to proceed. Callers MUST run
- * it before `uninstallPackage`, and only when `deletePackage` will run.
- *
- * [#21276] The ordering above is the one this refusal was written against.
- * Since then the door withdraws nothing before `deletePackage` answers: the
- * registry withdrawal and the disable-record clear both follow it, so a
- * refusal from the store leaves the running process untouched as well.
- */
-function requireUninstallOrganizationScope(
-    deps: DomainHandlerDeps,
-    id: string,
-    organizationId: string | undefined,
-): HttpDispatcherResult | null {
-    if (organizationId) return null;
-    return {
-        handled: true,
-        response: deps.error(
-            `Refusing to uninstall '${id}' with no organization scope: this request carries no active `
-            + `organization, and an uninstall that names none would delete every organization's rows for `
-            + `this package. Nothing was changed — select an organization you are a member of as your `
-            + `active organization, then retry.`,
-            400,
-            { code: 'TENANT_SCOPE_REQUIRED', packageId: id },
-        ),
-    };
-}
-
-/**
  * [#14451] `POST /packages/:id/duplicate` — the SOURCE must be a BASE.
  *
  * ## The measurement
@@ -1491,10 +1427,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.publishPackageDrafts === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const result = await protocol.publishPackageDrafts({
                         packageId: id,
-                        ...(organizationId ? { organizationId } : {}),
                         ...(body?.actor ? { actor: body.actor } : {}),
                     });
                     // Publishing a `seed` draft is what actually loads its
@@ -1513,7 +1447,6 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             if (seedNames.length > 0) {
                                 (result as any).seedApplied = await applyPublishedSeeds(deps, 
                                     seedNames,
-                                    organizationId,
                                     _context,
                                 );
                             }
@@ -1619,8 +1552,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // `request.type` itself, and the predicate answers
                     // `undefined` for every type the registry declares
                     // non-overridable — `app` among them, rolled back to
-                    // `allowOrgOverride: false` in commit ee58392e1. The `organizationId`
-                    // this route still hands that call is dropped at the gate.
+                    // `allowOrgOverride: false` in commit ee58392e1. [ADR-0131 D6]
+                    // This route hands it no organization at all any more.
                     //
                     // ⛔ Dropping it is the REPAIR, not an oversight to undo.
                     // An org-scoped `app` row is an unhydratable phantom —
@@ -1640,7 +1573,6 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             const appsRes = await protocol.getMetaItems({
                                 type: 'app',
                                 packageId: id,
-                                ...(organizationId ? { organizationId } : {}),
                             });
                             const apps: any[] = Array.isArray(appsRes)
                                 ? appsRes
@@ -1817,10 +1749,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const result = await protocol.discardPackageDrafts({
                         packageId: id,
-                        ...(organizationId ? { organizationId } : {}),
                         ...(body?.actor ? { actor: body.actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
@@ -1840,10 +1770,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.listCommits === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const commits = await protocol.listCommits({
                         packageId: id,
-                        ...(organizationId ? { organizationId } : {}),
                     });
                     return { handled: true, response: deps.success({ commits }) };
                 } catch (e: any) {
@@ -1862,10 +1790,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const result = await protocol.revertCommit({
                         commitId,
-                        ...(organizationId ? { organizationId } : {}),
                         ...(body?.actor ? { actor: body.actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
@@ -1886,10 +1812,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
                 }
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
-                        ...(organizationId ? { organizationId } : {}),
                         ...(body?.actor ? { actor: body.actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
@@ -1918,10 +1842,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertStoredPackage === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
                     const stored = await protocol.revertStoredPackage({
                         packageId: id,
-                        ...(organizationId ? { organizationId } : {}),
                     });
                     if (stored.stored) return { handled: true, response: deps.success({ success: true }) };
                 } catch (e: any) {
@@ -1967,10 +1889,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
             }
             try {
-                const organizationId = await deps.resolveActiveOrganizationId(_context);
                 const result = await protocol.reassignOrphanedMetadata({
                     targetPackageId: id,
-                    ...(organizationId ? { organizationId } : {}),
                     ...(body?.actor ? { actor: body.actor } : {}),
                 });
                 return { handled: true, response: deps.success(result) };
@@ -2007,13 +1927,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // loop, so a refusal any later still leaves the empty shell behind.
             const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
             try {
-                const organizationId = await deps.resolveActiveOrganizationId(_context);
                 const result = await protocol.duplicatePackage({
                     sourcePackageId: id,
                     targetPackageId,
                     ...(typeof body?.targetName === 'string' ? { targetName: body.targetName } : {}),
                     ...(typeof body?.targetNamespace === 'string' ? { targetNamespace: body.targetNamespace } : {}),
-                    ...(organizationId ? { organizationId } : {}),
                     ...(body?.actor ? { actor: body.actor } : {}),
                 });
                 return { handled: true, response: deps.success(result) };
@@ -2118,28 +2036,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // listing (and with it every object the package registers) until
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
-            // [#20492] The persisted delete's organization-scope refusal, taken
-            // HERE, before `uninstallPackage` — the same "refuse before you
-            // mutate" ordering as the gate above. `deletePackage` refuses an
-            // uninstall that names no organization, and it used to be asked
-            // only AFTER the registry had already dropped the package: the
-            // caller got `400 TENANT_SCOPE_REQUIRED` while the package and every
-            // object it registers had left the running process for everyone it
-            // serves, with the stored rows still saying it was installed.
-            //
-            // ONE organization read, and it is the value handed to
-            // `deletePackage` below, so this check and the protocol's cannot
-            // disagree. Asked only when the persisted half will run: with no
-            // `deletePackage` there is no refusal to mirror, and the in-memory
-            // uninstall proceeds exactly as before. ⛔ Not a compensating
-            // re-install after the fact — nothing is touched before this.
-            // The protocol keeps its own refusal as the second line.
+            // [ADR-0131 D6/D12] No organization: an uninstall is environment-wide
+            // by construction, and who may uninstall is the operator gate above.
             const protocol = await resolveProtocol(deps, _context);
-            const organizationId = await deps.resolveActiveOrganizationId(_context);
-            const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');
-            if (persists) {
-                const unscoped = requireUninstallOrganizationScope(deps, id, organizationId); if (unscoped) return unscoped;
-            }
 
             // [#21276] Existence is READ here, never acted on. This line used to
             // be `registry.uninstallPackage(id)`, and the disable-record clear
@@ -2185,15 +2084,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the name, and registrants carrying no `deletePackage` are real in-tree.
             // A capability question, asked as a capability probe — not a cast.
             //
-            // [#20492] `protocol` and `organizationId` are the ones resolved above,
-            // before the registry was touched: the organization this request
-            // carries is the one the scope check already read.
+            // [#20492] `protocol` is the one resolved above, before the registry
+            // was touched.
             if (protocol && typeof protocol.deletePackage === 'function') {
                 try {
                     const keepData = query?.keepData === 'true' || query?.keepData === '1';
                     persisted = await protocol.deletePackage({
                         packageId: id,
-                        ...(organizationId ? { organizationId } : {}),
                         ...(keepData ? { keepData: true } : {}),
                     });
                 } catch (e: any) {
@@ -2360,7 +2257,8 @@ context: HttpProtocolContext,
     const protocol = await resolveProtocol(deps, context);
     if (!protocol || typeof protocol.getMetaItems !== 'function') return null;
 
-    const organizationId = await deps.resolveActiveOrganizationId(context);
+    // [ADR-0131 D6] No organization: a package's manifest is its environment
+    // rows (and its code), the same answer for every caller.
 
     // Provenance / overlay-bookkeeping keys that must never leak into a
     // portable manifest. Stripped at top level only — nested field bodies
@@ -2394,7 +2292,7 @@ context: HttpProtocolContext,
             // getMetaItems applies the packageId filter at the
             // registry/overlay query level, so the returned items are
             // already scoped to this package — no client-side re-filter.
-            const res = await protocol.getMetaItems({ type: singular, packageId, organizationId });
+            const res = await protocol.getMetaItems({ type: singular, packageId });
             items = Array.isArray(res?.items) ? res.items : [];
         } catch {
             // Unknown/unsupported type for this runtime — skip.
@@ -2438,7 +2336,8 @@ context: HttpProtocolContext,
  * Apply just-published `seed` metadata: load each seed's rows into its
  * target object so publishing a seed draft makes the data live (the runtime
  * counterpart to staging it). Reads each seed body via the protocol, then
- * runs the {@link SeedLoaderService} for the active org. Best-effort and
+ * runs the {@link SeedLoaderService} — with no caller organization: a seed
+ * dataset names the organization it populates (ADR-0131 D9, §12). Best-effort and
  * idempotent (upsert) — callers must never let this fail the publish.
  *
  * Lives at the runtime layer (not in the objectql publish primitive)
@@ -2448,7 +2347,6 @@ context: HttpProtocolContext,
 async function applyPublishedSeeds(
 deps: DomainHandlerDeps,
 names: string[],
-organizationId: string | undefined,
 _context: HttpProtocolContext,
 ): Promise<{ success: boolean; inserted?: number; updated?: number; errors?: unknown[]; error?: string }> {
     // [#4127] `protocol` keeps its `any` — no written contract, so this is where
@@ -2574,7 +2472,6 @@ _context: HttpProtocolContext,
         config: {
             defaultMode: 'upsert',
             multiPass: true,
-            ...(organizationId ? { organizationId } : {}),
         },
     });
     if (!parsedRequest.success) throw seedRequestValidationError(parsedRequest.error.issues);

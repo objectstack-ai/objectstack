@@ -301,15 +301,18 @@ function declaresOrganization(config: AnyRec): boolean {
  * answered by ONE authority (`postureEnforcesWall(resolveTenancyPosture())`,
  * ADR-0105 D1) rather than re-derived here.
  *
- * All five limbs must hold; each one's negation is a legitimate publish:
+ * All four limbs must hold; each one's negation is a legitimate publish:
  *
  * | limb | negation passes because |
  * |------|-------------------------|
  * | walled posture | `single` has no organization partition to land outside of |
- * | platform-level write | an org-scoped row already carries its organization |
  * | schedule binding | every other trigger resolves a user or a record, so #6153 stamps |
  * | has `create_record` | nothing is born, so nothing is born unpartitioned |
  * | no `fields.organization_id` | the author answered the question |
+ *
+ * [ADR-0131 D6] Every write is platform-level now — the protocol refuses an
+ * organization-scoped one — so the former fifth limb ("an org-scoped row
+ * already carries its organization") always holds and is gone.
  */
 export function findPlatformScheduleOrgGaps(args: {
     /** Singular metadata type of the item being written. */
@@ -318,16 +321,10 @@ export function findPlatformScheduleOrgGaps(args: {
     name: string;
     /** The body as it will be persisted. */
     body: unknown;
-    /**
-     * The organization partition this write lands in — `saveMetaItem`'s
-     * `organizationId`. Absent/null IS the platform-level write.
-     */
-    organizationId?: string | null;
     /** `postureEnforcesWall(resolveTenancyPosture())`, read by the caller. */
     orgWallEnforced: boolean;
 }): RuntimeAuthoringIssue[] {
     if (!args.orgWallEnforced) return [];
-    if (args.organizationId != null) return [];
     if (args.type !== 'flow') return [];
     if (!isRec(args.body)) return [];
 
@@ -971,15 +968,6 @@ export function evaluateRuntimeAuthoringGate(args: {
      */
     packageScope?: RuntimePackageScope;
     /**
-     * [#6285] The organization partition this write lands in — `saveMetaItem`'s
-     * `organizationId`, absent/null for a platform-level (environment) write.
-     *
-     * One of the two inputs #6155 Q3=A adds. It was always in `saveMetaItem`'s
-     * hand and simply never travelled this far, which is why the guardrail
-     * could not be written before.
-     */
-    organizationId?: string | null;
-    /**
      * [#6285] Does this deployment enforce an organization wall —
      * `postureEnforcesWall(resolveTenancyPosture())` (ADR-0105 D1)?
      *
@@ -1074,7 +1062,6 @@ export function evaluateRuntimeAuthoringGate(args: {
         type: args.type,
         name: args.name,
         body: args.body,
-        ...(args.organizationId !== undefined ? { organizationId: args.organizationId } : {}),
         orgWallEnforced: args.orgWallEnforced === true,
     });
 

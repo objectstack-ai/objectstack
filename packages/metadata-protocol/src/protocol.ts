@@ -107,13 +107,6 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
-    // The one rule for which forms a `view` body opens to anonymous intake —
-    // the same rule the anonymous form doors in `@objectstack/rest` serve by.
-    anonymousFormIntakeSlugs,
-    // A withdrawal is a kill switch: the doors' layer predicate, which the
-    // org-scoped write door asks before accepting a re-opening write.
-    anonymousFormIntakeCandidates,
-    anonymousFormIntakeWithdrawnIn,
     // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
     // the anonymous form doors read it — the runtime authoring gate's input for
     // its public-form intake advisory (see `tenancyPostureInForce()`).
@@ -5080,7 +5073,6 @@ export type PublishMaterializer = (args: {
  */
 export type UninstallCleanup = (args: {
     packageId: string;
-    organizationId?: string;
     actor?: string;
 }) => Promise<{ success: boolean; removed: number; error?: string }>;
 
@@ -5873,7 +5865,7 @@ export class ObjectStackProtocolImplementation implements
      * that door before this existed: the package's object answered 404 after a
      * restart while its `managed_by: package` `sys_permission_set` row and its
      * user grant survived. `deletePackage` itself does not fit that door: it
-     * refuses without a tenant scope, answers `success: false` when it deletes
+     * answers `success: false` when it deletes
      * no `sys_metadata` row, and withdraws the package from the running
      * registry, which that door never did.
      *
@@ -5884,14 +5876,13 @@ export class ObjectStackProtocolImplementation implements
      * does — and never swallows it.
      */
     async runUninstallCleanups(
-        request: Pick<DeletePackageRequest, 'packageId' | 'organizationId' | 'actor'>,
+        request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
     ): Promise<UninstallCleanupOutcome[]> {
         const cleanups: UninstallCleanupOutcome[] = [];
         for (const [name, cleanup] of this.uninstallCleanups) {
             try {
                 const r = await cleanup({
                     packageId: request.packageId,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 cleanups.push({
@@ -17558,7 +17549,6 @@ export class ObjectStackProtocolImplementation implements
     private async lockWriteRefusal(args: {
         type: string;
         name: string;
-        organizationId?: string;
         /**
          * [#21761] The package the write names (ADR-0048 `?package=`), part of
          * the item's address the gate selects the rows in scope from. It never
@@ -17571,7 +17561,7 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<{ err: Error; audit: MetadataAuditEntry } | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null, args.packageId);
+        const state = await this.getEffectiveLock(args.type, args.name, null, args.packageId);
         const refusal = evaluateLockForWrite(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -17588,7 +17578,7 @@ export class ObjectStackProtocolImplementation implements
             audit: {
                 type: args.type,
                 name: args.name,
-                organizationId: args.organizationId ?? null,
+                organizationId: null,
                 operation: args.operation,
                 outcome: 'denied',
                 // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -17617,7 +17607,6 @@ export class ObjectStackProtocolImplementation implements
     private async assertLockAllowsWrite(args: {
         type: string;
         name: string;
-        organizationId?: string;
         /** [#21761] See {@link lockWriteRefusal}. */
         packageId?: string;
         operation: 'save' | 'publish' | 'rollback';
@@ -17638,12 +17627,11 @@ export class ObjectStackProtocolImplementation implements
     private async assertLockAllowsDelete(args: {
         type: string;
         name: string;
-        organizationId?: string;
         actor?: string;
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null);
+        const state = await this.getEffectiveLock(args.type, args.name, null);
         const refusal = evaluateLockForDelete(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -17658,7 +17646,7 @@ export class ObjectStackProtocolImplementation implements
         await this.recordMetadataAudit({
             type: args.type,
             name: args.name,
-            organizationId: args.organizationId ?? null,
+            organizationId: null,
             operation: 'delete',
             outcome: 'denied',
             // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -17695,7 +17683,6 @@ export class ObjectStackProtocolImplementation implements
     private async recordOptimisticConflictAudit(args: {
         type: string;
         name: string;
-        organizationId?: string | null;
         operation: 'save' | 'publish' | 'rollback' | 'delete';
         actor?: string;
         source: string;
@@ -17892,7 +17879,6 @@ export class ObjectStackProtocolImplementation implements
     private static optimisticConflictAuditEntry(args: {
         type: string;
         name: string;
-        organizationId?: string | null;
         operation: 'save' | 'publish' | 'rollback' | 'delete';
         actor?: string;
         source: string;
@@ -17903,7 +17889,7 @@ export class ObjectStackProtocolImplementation implements
         return {
             type: args.type,
             name: args.name,
-            organizationId: args.organizationId ?? null,
+            organizationId: null,
             operation: args.operation,
             outcome: 'denied',
             // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -20934,7 +20920,6 @@ export class ObjectStackProtocolImplementation implements
         await this.recordOptimisticConflictAudit({
             type: request.type,
             name: request.name,
-            organizationId: null,
             operation: 'save',
             ...(request.actor ? { actor: request.actor } : {}),
             source: writeSource,
@@ -22125,7 +22110,6 @@ export class ObjectStackProtocolImplementation implements
                     ObjectStackProtocolImplementation.optimisticConflictAuditEntry({
                         type: request.type,
                         name: request.name,
-                        organizationId: null,
                         operation: 'publish',
                         ...(request.actor ? { actor: request.actor } : {}),
                         source: 'protocol.publishMetaItem',
@@ -22706,17 +22690,6 @@ export class ObjectStackProtocolImplementation implements
             name: string;
             error: string;
             code: PreflightViolationCode;
-            /**
-             * [#8595] The DRAFT's own scope, captured at detection — the same
-             * rule the promoted rows follow (`PromotedDraft.draftOrgId`) and for
-             * the same reason: `listDrafts` surfaces env-wide drafts
-             * (`organization_id IS NULL`) to a non-null-org caller, so an audit
-             * row keyed on the caller's active org would record the refusal
-             * against a partition the item never lived in. Internal to this
-             * method — deliberately NOT part of `failed[]`, which is a wire
-             * shape; the projection at the refusal site drops it.
-             */
-            organizationId: string | null;
         }> = [];
         if (pkgNamespace) {
             for (const d of drafts) {
@@ -22728,7 +22701,6 @@ export class ObjectStackProtocolImplementation implements
                         name: d.name,
                         error: err,
                         code: 'NAMESPACE_PREFIX',
-                        organizationId: d.organizationId ?? null,
                     });
                 }
             }
@@ -22785,7 +22757,6 @@ export class ObjectStackProtocolImplementation implements
                     + `POST /meta/_migrate-stored does NOT rewrite a stored type spelling — it canonicalizes `
                     + `bodies, and reports rows of this class as 'skipped' with that same reason.`,
                 code: 'STORED_TYPE_NOT_CANONICAL',
-                organizationId: d.organizationId ?? null,
             });
         }
 
@@ -22885,8 +22856,7 @@ export class ObjectStackProtocolImplementation implements
                     // `failed[].error`, where it is the actionable fact.
                     type: canonicalMetaType(v.type),
                     name: v.name,
-                    // The draft's OWN scope — see the violation type above.
-                    organizationId: v.organizationId,
+                    organizationId: null,
                     operation: 'publish',
                     outcome: 'denied',
                     // The violation's own verdict, in the audit column's
@@ -23049,17 +23019,6 @@ export class ObjectStackProtocolImplementation implements
              * then carries no `advisories` key at all.
              */
             advisories: RuntimeAuthoringIssue[];
-            /**
-             * [#8400] The scope the draft was PROMOTED IN — `d.organizationId`,
-             * not the request's active org. `listDrafts` surfaces env-wide
-             * (`organization_id IS NULL`) drafts to a non-null-org caller and
-             * the promote above targets the draft's own scope (#3115), so the
-             * audit row must be keyed the same way or it records the publish
-             * against a partition the active row never entered. Captured here
-             * rather than re-derived in Phase 2 because `d` is narrowed to
-             * `{ type, name }` by the type above.
-             */
-            draftOrgId: string | null;
         };
         const promoted: PromotedDraft[] = [];
         // (assigned inside the transaction closure — keep the wide type)
@@ -23076,9 +23035,6 @@ export class ObjectStackProtocolImplementation implements
             await inTxn(async () => {
                 for (const d of ordered) {
                     try {
-                        // The draft's own scope — environment-wide, the only
-                        // scope `listDrafts` surfaces to this request.
-                        const draftOrgId = d.organizationId ?? null;
                         if (d.type === 'seed') {
                             // Capture the body BEFORE promote (the draft row is
                             // deleted by the promote, and reading the draft is
@@ -23138,7 +23094,6 @@ export class ObjectStackProtocolImplementation implements
                             version: result.version,
                             seq: result.seq,
                             advisories,
-                            draftOrgId,
                         });
                         if (typeof result.seq === 'number') publishedSeqs.push(result.seq);
                     } catch (e: unknown) {
@@ -23266,7 +23221,7 @@ export class ObjectStackProtocolImplementation implements
                     // (`__batchItem`), so its `type` is the STORED spelling.
                     type: canonicalMetaType(causal.type),
                     name: causal.name,
-                    organizationId: causal.organizationId ?? null,
+                    organizationId: null,
                     operation: 'publish',
                     outcome: 'denied',
                     // adr0112-ok: D6b — persisted audit column, its own
@@ -23361,8 +23316,7 @@ export class ObjectStackProtocolImplementation implements
                 // #8858 as a provable no-op).
                 type: canonicalMetaType(p.d.type),
                 name: p.d.name,
-                // The draft's OWN scope — see `PromotedDraft.draftOrgId`.
-                organizationId: p.draftOrgId,
+                organizationId: null,
                 operation: 'publish',
                 outcome: 'allowed',
                 code: 'ok',
@@ -25559,7 +25513,6 @@ export class ObjectStackProtocolImplementation implements
                 await this.recordOptimisticConflictAudit({
                     type: request.type,
                     name: request.name,
-                    organizationId: orgId,
                     operation: 'rollback',
                     ...(request.actor ? { actor: request.actor } : {}),
                     source: 'protocol.rollbackMetaItem',
@@ -26255,7 +26208,6 @@ export class ObjectStackProtocolImplementation implements
                     await this.recordOptimisticConflictAudit({
                         type: request.type,
                         name: request.name,
-                        organizationId: orgId,
                         operation: 'delete',
                         ...(request.actor ? { actor: request.actor } : {}),
                         source: 'protocol.deleteMetaItem',
