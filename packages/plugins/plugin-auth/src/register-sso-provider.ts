@@ -22,6 +22,8 @@
  * (per-environment runtime) — mirroring `runSetInitialPassword`.
  */
 
+import { inProcessRedispatchUrl } from './in-process-redispatch.js';
+
 export interface RegisterSsoFormResult {
   /** HTTP status to return to the caller. */
   status: number;
@@ -57,7 +59,9 @@ async function resolveActiveOrganizationId(
     if (cookie) h.set('cookie', cookie);
     const authz = headers.get('authorization');
     if (authz) h.set('authorization', authz);
-    const resp = await handle(new Request(sessionUrl, { method: 'GET', headers: h }));
+    // [#22398] A cookie request reads without renewal: this response's cookie
+    // is never sent (`in-process-redispatch.ts`).
+    const resp = await handle(new Request(inProcessRedispatchUrl(sessionUrl, h), { method: 'GET', headers: h }));
     if (!resp.ok) return undefined;
     const data: any = await resp.json().catch(() => null);
     const org = data?.session?.activeOrganizationId ?? data?.activeOrganizationId;
@@ -201,7 +205,9 @@ export async function runRegisterSsoProviderFromForm(
   // regression) when no active org is set.
   const organizationId = await resolveActiveOrganizationId(handle, innerUrl, headers);
 
-  const innerReq = new Request(innerUrl, {
+  // [#22398] `/sso/register` reads the session too (the ADR-0135 D6 before-hook
+  // and `sessionMiddleware`), and only status and body come back from here.
+  const innerReq = new Request(inProcessRedispatchUrl(innerUrl, headers), {
     method: 'POST',
     headers,
     body: JSON.stringify({ providerId, issuer, domain, oidcConfig, ...(organizationId ? { organizationId } : {}) }),
@@ -298,7 +304,8 @@ export async function runRegisterSamlProviderFromForm(
   // can manage the provider — see the OIDC helper above.
   const organizationId = await resolveActiveOrganizationId(handle, innerUrl, headers);
 
-  const innerReq = new Request(innerUrl, {
+  // [#22398] Same rule as the OIDC bridge's inner `/sso/register`.
+  const innerReq = new Request(inProcessRedispatchUrl(innerUrl, headers), {
     method: 'POST',
     headers,
     body: JSON.stringify({ providerId, issuer, domain, samlConfig, ...(organizationId ? { organizationId } : {}) }),
@@ -401,7 +408,9 @@ export async function runRequestDomainVerification(
   if (!rw) return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
   const headers = forwardAuthHeaders(request, rw.origin);
 
-  const resp = await handle(new Request(rw.innerUrl, { method: 'POST', headers, body: JSON.stringify({ providerId }) }));
+  // [#22398] The inner route reads the session (`sessionMiddleware`); only its
+  // status and body come back from here.
+  const resp = await handle(new Request(inProcessRedispatchUrl(rw.innerUrl, headers), { method: 'POST', headers, body: JSON.stringify({ providerId }) }));
   let parsed: any = {};
   try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
   if (!resp.ok) {
@@ -451,7 +460,9 @@ export async function runVerifyDomain(
   if (!rw) return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
   const headers = forwardAuthHeaders(request, rw.origin);
 
-  const resp = await handle(new Request(rw.innerUrl, { method: 'POST', headers, body: JSON.stringify({ providerId }) }));
+  // [#22398] The inner route reads the session (`sessionMiddleware`); only its
+  // status and body come back from here.
+  const resp = await handle(new Request(inProcessRedispatchUrl(rw.innerUrl, headers), { method: 'POST', headers, body: JSON.stringify({ providerId }) }));
   let parsed: any = {};
   try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
   if (resp.ok) {
