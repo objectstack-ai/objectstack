@@ -795,7 +795,8 @@ export async function selfTest() {
   console.log(
     `✓ fleet-write/validate self-test: ${cases.length} cases pass across ${declared.length} batteries — a closed envelope, one organization, ` +
       'closed keys per op with typed values, the platform\'s own client_payload ceilings pinned with their source, no row that can reach a refused family, ' +
-      'and a token list of ONE repository for every op but transfer, whose second is one governed target.',
+      'a token list of ONE repository for every op but transfer, whose second is one governed target, and actions write reaching one dispatch call on one allowlisted file, ' +
+      'minted for that stroke alone.',
   );
   selfTestReachedVerdict = true;
   return 0;
