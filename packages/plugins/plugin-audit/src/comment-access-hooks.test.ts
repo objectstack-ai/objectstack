@@ -7,6 +7,7 @@ import {
   installCommentAccessHooks,
   parseCommentThreadId,
   type CommentAccessEngine,
+  type CommentSecurityLike,
   type CommentSharingLike,
 } from './comment-access-hooks.js';
 
@@ -35,10 +36,33 @@ function readableParentFind(readable: string[], reads: Array<{ object: string; o
   };
 }
 
+/**
+ * A two-state sharing double, as the suites below were written against: `true`
+ * (may edit) or `false`. The gate reads the TRI-STATE `checkEdit` since the
+ * `controlled_by_parent` fix, and these doubles stand for its two verdicts
+ * whose meaning did not move — `true` is `allow` (admits), `false` is `deny`
+ * (refuses). `abstain` never comes out of one; the suite that pins it (end of
+ * file) hands the gate a tri-state double directly.
+ */
+type TwoStateSharingDouble = {
+  canEdit: (object: string, recordId: string, context: any) => Promise<boolean>;
+};
+
+function asTriState(sharing: CommentSharingLike | TwoStateSharingDouble | null | undefined) {
+  if (!sharing || !('canEdit' in sharing)) return sharing;
+  const { canEdit } = sharing;
+  return {
+    checkEdit: async (object: string, recordId: string, context: any) =>
+      (await canEdit(object, recordId, context)) ? ('allow' as const) : ('deny' as const),
+  } satisfies CommentSharingLike;
+}
+
 /** Capture the three registered hooks so tests can drive them directly. */
 function install(opts: {
   comments?: Array<Record<string, unknown>>;
-  sharing?: CommentSharingLike | null;
+  sharing?: CommentSharingLike | TwoStateSharingDouble | null;
+  /** The security service, for its master-detail write check (#22455). */
+  security?: CommentSecurityLike | null;
   /** Parents the CALLER can read through the engine, keyed `object/id`. */
   readable?: string[];
   messageTranslator?: () => ((key: string, locale: string, params?: Record<string, unknown>) => string) | undefined;
@@ -62,7 +86,8 @@ function install(opts: {
         Object.entries(options?.where ?? {}).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
       ) ?? null,
   };
-  installCommentAccessHooks(engine, () => opts.sharing, silentLogger(), opts.messageTranslator);
+  const sharing = asTriState(opts.sharing);
+  installCommentAccessHooks(engine, () => sharing, silentLogger(), opts.messageTranslator, () => opts.security);
   return {
     beforeInsert: hooks.get('beforeInsert')!,
     beforeUpdate: hooks.get('beforeUpdate')!,
@@ -704,7 +729,7 @@ function makeWiredDriver() {
 async function bootWired(opts: {
   comments?: Array<Record<string, unknown>>;
   opportunities?: Array<Record<string, unknown>>;
-  sharing?: CommentSharingLike | null;
+  sharing?: CommentSharingLike | TwoStateSharingDouble | null;
 } = {}) {
   const ql = new ObjectQL();
   const driver = makeWiredDriver();
@@ -713,7 +738,8 @@ async function bootWired(opts: {
   ql.registry.registerObject(sysCommentObject as any, 'app:test');
   ql.registry.registerObject(crmOpportunityObject as any, 'app:test');
   // `engine as any` mirrors the production wiring in audit-plugin.ts.
-  installCommentAccessHooks(ql as any, () => opts.sharing ?? null, silentLogger());
+  const sharing = asTriState(opts.sharing) ?? null;
+  installCommentAccessHooks(ql as any, () => sharing, silentLogger());
   if (!driver.stores.get('sys_comment')) driver.stores.set('sys_comment', new Map());
   for (const r of opts.comments ?? []) driver.stores.get('sys_comment')!.set(String(r.id), { ...r });
   for (const r of opts.opportunities ?? []) {
@@ -1259,5 +1285,108 @@ describe('a refusal on a parent the caller cannot read names nothing', () => {
       seen.ql.delete('sys_comment', { where: { id: 'c1' }, context: { userId: 'reader' } } as any),
     ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: 'crm_opportunity' });
     expect(seen.remaining()).toBe(1);
+  });
+});
+
+// ── [ADR-0055] a controlled_by_parent parent is judged through its master ──
+//
+// `checkEdit` ABSTAINS on every `controlled_by_parent` parent (plugin-sharing
+// maps the model to `public`), and the moderation limb used to read `canEdit`,
+// which folds that abstention into `true`: any member holding the `sys_comment`
+// delete bit removed other people's comments from every master-detail child
+// record. These pin the composition the limb now runs — the attachment kit's.
+describe('[ADR-0055] moderation on a controlled_by_parent parent — checkEdit, then the master-detail write check', () => {
+  type Verdict = 'allow' | 'abstain' | 'deny';
+  type Outcome = Awaited<ReturnType<NonNullable<CommentSecurityLike['checkControlledByParentWrite']>>>;
+
+  const triState = (verdict: Verdict) => {
+    const checkEdit = vi.fn(async (_o: string, _r: string, _c: any) => verdict);
+    return { checkEdit, sharing: { checkEdit } satisfies CommentSharingLike };
+  };
+  const masterCheck = (answer: Outcome | Error) => {
+    const checkControlledByParentWrite = vi.fn(async (_o: string, _r: string, _c?: any): Promise<Outcome> => {
+      if (answer instanceof Error) throw answer;
+      return answer;
+    });
+    return { checkControlledByParentWrite, security: { checkControlledByParentWrite } satisfies CommentSecurityLike };
+  };
+  const ownersComment = { id: 'c1', thread_id: 'cbp_contract:k1', author_id: 'owner', body: 'executed by legal' };
+  const deleteByMember = () => writeCtx('beforeDelete', { id: 'c1' }, { userId: 'member' });
+
+  // The truth table, on the delete limb. `null` for the member column = never asked.
+  const TABLE: Array<{ verdict: Verdict; member: Outcome | null; admits: boolean }> = [
+    { verdict: 'allow', member: null, admits: true },
+    { verdict: 'deny', member: null, admits: false },
+    { verdict: 'abstain', member: { outcome: 'allow' }, admits: true },
+    { verdict: 'abstain', member: { outcome: 'not_applicable' }, admits: true },
+    { verdict: 'abstain', member: { outcome: 'deny', leg: 'record_sharing' }, admits: false },
+    { verdict: 'abstain', member: { outcome: 'deny', leg: 'master_chain' }, admits: false },
+    { verdict: 'abstain', member: { outcome: 'unresolvable', reason: 'master_detail_relation_missing' }, admits: false },
+    { verdict: 'abstain', member: { outcome: 'unresolvable', reason: 'record_not_found' }, admits: false },
+    { verdict: 'abstain', member: { outcome: 'unresolvable', reason: 'master_reference_missing' }, admits: false },
+  ];
+  for (const row of TABLE) {
+    const label = `checkEdit ${row.verdict}${row.member ? ` × member ${JSON.stringify(row.member)}` : ''}`;
+    it(`delete of another user's comment: ${label} → ${row.admits ? 'admits' : 'refuses 403 RECORD_NOT_ACCESSIBLE'}`, async () => {
+      const { sharing } = triState(row.verdict);
+      const { security, checkControlledByParentWrite } = masterCheck(row.member ?? { outcome: 'deny', leg: 'record_sharing' });
+      const { beforeDelete } = install({ comments: [ownersComment], sharing, security, readable: ['cbp_contract/k1'] });
+      const run = beforeDelete(deleteByMember());
+      if (row.admits) await expect(run).resolves.toBeUndefined();
+      else await expect(run).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: 'cbp_contract' });
+      expect(checkControlledByParentWrite).toHaveBeenCalledTimes(row.member ? 1 : 0);
+    });
+  }
+
+  it('the member is asked about the parent the thread names, with the caller envelope the sharing gate gets', async () => {
+    const { sharing, checkEdit } = triState('abstain');
+    const { security, checkControlledByParentWrite } = masterCheck({ outcome: 'allow' });
+    const { beforeDelete } = install({ comments: [ownersComment], sharing, security });
+    await beforeDelete(deleteByMember());
+    expect(checkControlledByParentWrite).toHaveBeenCalledWith('cbp_contract', 'k1', checkEdit.mock.calls[0]![2]);
+    expect(checkControlledByParentWrite.mock.calls[0]![2]).toMatchObject({ userId: 'member' });
+  });
+
+  it('the author deletes their own comment without the parent being asked', async () => {
+    const { sharing, checkEdit } = triState('abstain');
+    const { security, checkControlledByParentWrite } = masterCheck({ outcome: 'deny', leg: 'record_sharing' });
+    const { beforeDelete } = install({ comments: [{ ...ownersComment, author_id: 'member' }], sharing, security });
+    await expect(beforeDelete(deleteByMember())).resolves.toBeUndefined();
+    expect(checkEdit).not.toHaveBeenCalled();
+    expect(checkControlledByParentWrite).not.toHaveBeenCalled();
+  });
+
+  it('a caller who cannot read the parent gets the not-visible refusal, as on any other parent (#21755)', async () => {
+    const { sharing } = triState('abstain');
+    const { security } = masterCheck({ outcome: 'deny', leg: 'record_sharing' });
+    const { beforeDelete } = install({ comments: [ownersComment], sharing, security, readable: [] });
+    await expect(beforeDelete(deleteByMember())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('the update limb runs the same rule (the same function)', async () => {
+    const { sharing } = triState('abstain');
+    const { security } = masterCheck({ outcome: 'deny', leg: 'record_sharing' });
+    const { beforeUpdate } = install({ comments: [ownersComment], sharing, security, readable: ['cbp_contract/k1'] });
+    await expect(
+      beforeUpdate(writeCtx('beforeUpdate', { id: 'c1', data: { body: 'rewritten' } }, { userId: 'member' })),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+  });
+
+  it('a store fault from the master check propagates unchanged — its 503 is never an admit or a 403', async () => {
+    const outage = Object.assign(new Error('datasource unavailable'), { code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503 });
+    const { sharing } = triState('abstain');
+    const { security } = masterCheck(outage);
+    const { beforeDelete } = install({ comments: [ownersComment], sharing, security, readable: ['cbp_contract/k1'] });
+    await expect(beforeDelete(deleteByMember())).rejects.toBe(outage);
+  });
+
+  it("a kernel without the member keeps the abstention's admit — no security service, or one that does not serve it", async () => {
+    const { sharing } = triState('abstain');
+    await expect(
+      install({ comments: [ownersComment], sharing, security: null }).beforeDelete(deleteByMember()),
+    ).resolves.toBeUndefined();
+    await expect(
+      install({ comments: [ownersComment], sharing, security: {} as CommentSecurityLike }).beforeDelete(deleteByMember()),
+    ).resolves.toBeUndefined();
   });
 });
