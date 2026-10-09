@@ -3468,6 +3468,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // `grammar` excuse #19938 added here left with the import it excused:
       // this file no longer imports `'./flow-template-grammar.js'`.)
       'templateRefusal',
+      // [#22110] The spec's text-slot locator, one slot at a time. Its keys are
+      // that helper's own `{ path, label, source }` — never metadata keys: the
+      // metadata keys it reads (`title`, `message`, `description`) are named in
+      // the spec's `FLOW_NODE_TEXT_SLOTS`, not by name here.
+      'slot',
       // [#22394] The acting user's member allowlist, derived in this file from
       // `EvalUserSchema` and `buildScope`, and the message helpers around it.
       // Every one is a `string[]` of member NAMES whose keys are Array methods,

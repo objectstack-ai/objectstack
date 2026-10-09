@@ -50,10 +50,9 @@ export interface TypedExpressionRefusals {
  * The accept set is fixed by the dialect alone; `refusals` moves only the text.
  * That is the point of taking them as an argument: a refusal is the one place
  * an author is told exactly what to write, so it must prescribe the spelling
- * the slot's renderer reads. The shared `template` sentence prescribes
- * `{{record.name}}`, which the notify executor's single-brace interpolator
- * would leave inside a stray pair of braces, so the notify `title` / `message`
- * pass sentences prescribing `{record.name}` instead.
+ * the slot's renderer reads, and may name the slot. The notify `title` /
+ * `message` pass sentences that name the key; since protocol 18 (#22110) they
+ * prescribe the same `{{ }}` hole the shared `template` sentence does.
  *
  * The refusal shape is measured, not assumed (zod 4.4): a union reports the
  * one arm that did not abort, else `invalid_union`. Both arms abort on a
@@ -109,7 +108,7 @@ export function cronExpressionInput(expression: typeof ExpressionSchema, refusal
  * The template-typed input, refusing with `refusals` —
  * `TemplateExpressionInputSchema` is this with the shared `{{record.name}}`
  * sentences, and a notify node's `title` / `message` are this with sentences
- * prescribing `{record.name}`.
+ * naming the key.
  *
  * @param expression - `ExpressionSchema` (see the module note for why it is passed in).
  */

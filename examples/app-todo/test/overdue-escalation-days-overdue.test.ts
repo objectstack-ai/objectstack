@@ -122,7 +122,7 @@ describe('#18584 — the overdue escalation projection carries a day count', () 
     expect(cfg.objectName).toBe('todo_task');
   });
 
-  it('every `{currentTask.…}` token in the escalation body names a key the row carries', async () => {
+  it('every `{{ currentTask.… }}` hole in the escalation body names a key the row carries', async () => {
     const data = await bootTodoData();
     const due = daysAgoIso(5);
     await data.insert('todo_task', {
@@ -146,11 +146,12 @@ describe('#18584 — the overdue escalation projection carries a day count', () 
     // notify body's tokens are resolved against this row, so a token naming a
     // key the row does not carry renders as a blank — no error, no refusal.
     const message = String(node('notify_owner').config?.message ?? '');
-    const tokens = [...message.matchAll(/\{currentTask\.([a-z_]+)\}/g)].map((m) => m[1]);
+    // A text slot's holes are `{{ currentTask.<key> }}` since #22110.
+    const tokens = [...message.matchAll(/\{\{\s*currentTask\.([a-z_]+)\s*\}\}/g)].map((m) => m[1]);
     expect(tokens).toContain('days_overdue');
     for (const token of tokens) {
-      expect(row, `notify body names {currentTask.${token}}`).toHaveProperty(token);
-      expect(String(row[token] ?? ''), `{currentTask.${token}} renders blank`).not.toBe('');
+      expect(row, `notify body names {{ currentTask.${token} }}`).toHaveProperty(token);
+      expect(String(row[token] ?? ''), `{{ currentTask.${token} }} renders blank`).not.toBe('');
     }
 
     // And the value is the real span, not merely "something present".
