@@ -6,7 +6,7 @@ fix(metadata-protocol)!: one reader of `OS_METADATA_WRITABLE` — the legacy `OB
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) the change narrows which spelling of an operator environment variable the runtime reads; no spec key, stored metadata shape or export changes, every stored row loads and serves unchanged, and objectstack migrate meta has nothing to rewrite -->
+<!-- adr-0087: not-required (no-migration-prescription) nothing authorable is removed, renamed or narrowed: no spec key, no metadata spelling, no export and no stored row changes shape, so there is nothing for `os migrate meta` to rewrite and no ledger entry to make. The operator action below is a deployment-environment rename, which the ADR-0087 ledger does not carry; 11.0 already published it, and this change makes the last reader honour it. -->
 
 **BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
 
@@ -16,8 +16,4 @@ This finishes 11.0's removal at the reader that kept it. The 11.0 release remove
 
 **What does not change.** `OS_METADATA_WRITABLE` behaves exactly as before.
 
-| removed legacy name | use |
-| --- | --- |
-| `OBJECTSTACK_METADATA_WRITABLE` | `OS_METADATA_WRITABLE` |
-
-A deployment that still sets the legacy name: set `OS_METADATA_WRITABLE` to the same comma-separated type list instead.
+**Operator action.** A deployment that still sets `OBJECTSTACK_METADATA_WRITABLE` sets `OS_METADATA_WRITABLE` in its place, with the same comma-separated type list. This is the rename 11.0 already published; nothing else changes.
