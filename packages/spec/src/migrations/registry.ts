@@ -15972,11 +15972,12 @@ const step18: MigrationStep = {
         + 'any /meta read (the environment row or the code definition is), nor projected by the '
         + 'email-template boot sweep; it stays in sys_metadata untouched until the promotion '
         + 'ceremony (ADR-0131 C7) carries it to the environment layer. Re-save such an item in '
-        + 'Studio to make the edit live on the /meta doors now. Public forms are the one exception: '
+        + 'Studio to make the edit live on the /meta doors now. Public forms are the exception: '
         + 'until that ceremony the anonymous form doors read a form view in the Default Organization '
-        + 'and prefer its overlay, body and withdrawal alike, fail-closed, so a legacy organization '
-        + 'overlay of a public form keeps being served there, and a Studio re-save (an environment '
-        + 'row) does not change what that public form serves.',
+        + 'and prefer its overlay for the form\'s body, while a withdrawal in either layer closes the '
+        + 'form, fail-closed. So a legacy organization overlay of a public form keeps serving its '
+        + 'body there: a Studio re-save of that body (an environment row) does not change the body '
+        + 'the public form serves, and a Studio withdrawal (an environment row) still closes it.',
     },
     {
       id: 'metadata-changed-event-payload-retired',
