@@ -718,10 +718,15 @@ export interface BoundPortChannels {
    * either announcement below: it is the file both of them send a consumer to.
    */
   writeRuntimeState: (published: { port: number; url: string }) => void;
-  /** Sends {@link ListeningMessage}, when an IPC channel is open. */
-  announceListening: (message: ListeningMessage) => void;
-  /** Prints the ready banner, whose `API:` row names the same address. */
+  /**
+   * Prints the ready banner, whose `API:` row names the same address, and the
+   * boot diagnostics under it. ⛔ Must COMPLETE before the IPC message below:
+   * the `os dev` parent prints its MCP connect block on that message, into the
+   * same terminal (#22410).
+   */
   printBanner: () => void;
+  /** Sends {@link ListeningMessage}, when an IPC channel is open. LAST — see above. */
+  announceListening: (message: ListeningMessage) => void;
 }
 
 /**
@@ -757,6 +762,25 @@ export interface BoundPortChannels {
  * into every consumer forever and hides it from the one place that can fix it.
  * The producer owns the ordering: **write the file, THEN announce it.**
  *
+ * ## The second race: two processes, one terminal (#22410)
+ *
+ * The IPC message is not only a fact for a program. The `os dev` parent prints
+ * its MCP connect block (`🤖 MCP server — connect a coding agent:` and its
+ * Endpoint / Skill / Connect / Disable rows) the moment the message arrives,
+ * into the terminal this process writes its banner to. Sent BEFORE the banner,
+ * the two processes wrote that terminal at once: measured under a pty on the
+ * Build-with-Claude-Code tutorial project, 6 of 7 boots printed the block
+ * above or inside the banner, 2 of them with banner rows inside the block, and
+ * one probe boot printed the whole credential and plugin section between
+ * `Skill` and `Connect`.
+ *
+ * So the banner comes SECOND and the message LAST. That makes the order
+ * causal, not timed: the banner is written synchronously (a terminal is
+ * synchronous stdio on POSIX, and `keepStderrNonBlocking` leaves a TTY
+ * alone), so every banner byte is in the terminal before the message is sent,
+ * and the parent prints only on receipt. ⛔ No sleep or timer orders anything
+ * here. The message's shape is unchanged; it arrives a banner's print later.
+ *
  * ## Why the channels are injected rather than called inline
  *
  * The ORDER is the contract here, and an order is only pinned by a test that
@@ -783,11 +807,12 @@ export function publishBoundPort(
   const url = `${boundProtocol}://localhost:${boundPort}`;
   // 1 ─ THE FILE FIRST. Both announcements below send a consumer to it.
   channels.writeRuntimeState({ port: boundPort, url });
-  // 2 ─ IPC: the `os dev` parent learns the real port without polling.
-  channels.announceListening({ type: 'objectstack:listening', port: boundPort, url });
-  // 3 ─ The banner: a human, or a supervisor tailing stdout, reads the same
+  // 2 ─ The banner: a human, or a supervisor tailing stdout, reads the same
   //     address — and by now the state file it names is on disk.
   channels.printBanner();
+  // 3 ─ IPC LAST: the `os dev` parent learns the real port without polling,
+  //     and prints its MCP connect block under a banner that has finished (#22410).
+  channels.announceListening({ type: 'objectstack:listening', port: boundPort, url });
 }
 
 /**
@@ -5312,14 +5337,16 @@ export default class Serve extends Command {
       // one so supervisors and the `os dev` parent never have to guess:
       //   • runtime.json: a small state file under OS_HOME for external
       //     supervisors / health checks (pid + port + url).
+      //   • the ready banner, whose `API:` row names the same address.
       //   • IPC: when spawned with an 'ipc' channel (as `os dev` does), the
       //     parent learns the real port without polling.
-      //   • the ready banner, whose `API:` row names the same address.
       //
       // ⭐ That list is in ORDER, and the order is the whole point (commit faff497fd):
       // the file is written BEFORE either channel announces the address that
-      // sends a consumer to it. {@link publishBoundPort} carries the race the
-      // old order lost, and the reason the repair is not reader-side polling.
+      // sends a consumer to it, and the banner is printed whole BEFORE the
+      // message that makes the `os dev` parent print into the same terminal
+      // (#22410). {@link publishBoundPort} carries both races the old orders
+      // lost, and the reason neither repair is a reader-side poll or a timer.
       publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);
 
       // ── …and one beat later, whether the APP is ready too (#17329) ──

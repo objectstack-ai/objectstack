@@ -79,7 +79,12 @@ const ALL_BOOTS_TIMEOUT_MS = BOOTS * (BOOT_TIMEOUT_MS + BLOCK_GRACE_MS + 30_000)
 
 const SCAFFOLD = {
   manifest: { id: 'com.example.order', namespace: 'order', version: '1.0.0', type: 'app', name: 'order' },
-  objects: [{ name: 'order_item', label: 'Item', fields: { title: { type: 'text', label: 'Title' } } }],
+  objects: [{
+    name: 'order_item',
+    label: 'Item',
+    sharingModel: 'private',
+    fields: { title: { type: 'text', label: 'Title' } },
+  }],
 };
 
 const ESC = String.fromCharCode(27);
@@ -217,40 +222,72 @@ function recorded(): BootReading[] {
   return readings as BootReading[];
 }
 
-/** Where the block's header is, and what printed in the four lines under it. */
-function blockOf(r: BootReading): { header: number; under: string[] } {
+/** One boot's reading of the screen: where the block starts and ends, and what printed inside it. */
+interface ScreenReading {
+  boot: number;
+  /** The block header's line, or -1. */
+  header: number;
+  /** The block's last row (`Disable`), or -1. */
+  disable: number;
+  /** Lines between the header and the last row that are not the block's own rows. */
+  foreign: string[];
+  /** The `🔑 Dev admin` line, or -1. */
+  credential: number;
+  /** The banner's last row (`Press Ctrl+C to stop`), or -1. */
+  tail: number;
+}
+
+function readScreen(r: BootReading): ScreenReading {
   const header = r.lines.findIndex((l) => l.includes(BLOCK_HEADER));
-  expect(header, `boot ${r.boot}: no MCP connect block on the screen`).toBeGreaterThan(-1);
-  return { header, under: r.lines.slice(header + 1, header + 1 + BLOCK_ROWS.length) };
+  const disable = header < 0 ? -1 : r.lines.findIndex((l, i) => i > header && BLOCK_ROWS[3].test(l));
+  const foreign = header < 0 || disable < 0
+    ? []
+    : r.lines.slice(header + 1, disable).filter((l) => !BLOCK_ROWS.some((row) => row.test(l))).map((l) => l.trim());
+  return {
+    boot: r.boot,
+    header,
+    disable,
+    foreign,
+    credential: r.lines.findIndex((l) => l.includes(CREDENTIAL)),
+    tail: r.lines.findIndex((l) => l.includes(BANNER_TAIL)),
+  };
+}
+
+/**
+ * Every boot's reading, after the control: each boot printed the whole block,
+ * its banner tail and its credential line, so every verdict below is a reading
+ * of something that is there rather than of an absence.
+ */
+function screens(): ScreenReading[] {
+  const all = recorded().map(readScreen);
+  const absent = all.flatMap((s) => [
+    ...(s.header < 0 || s.disable < 0 ? [`boot ${s.boot}: no whole MCP connect block on the screen`] : []),
+    ...(s.tail < 0 ? [`boot ${s.boot}: no banner tail`] : []),
+    ...(s.credential < 0 ? [`boot ${s.boot}: no credential line — the boot did not seed its dev admin`] : []),
+  ]);
+  expect(absent, 'the control: every boot prints the block, the banner and the credential line').toEqual([]);
+  return all;
 }
 
 describe('#22410 — `os dev` prints the banner, then the MCP block, each block whole', () => {
   it('the MCP block\'s rows are contiguous on every boot', () => {
-    for (const r of recorded()) {
-      const { under } = blockOf(r);
-      under.forEach((line, i) => {
-        expect(line, `boot ${r.boot}: row ${i + 1} under the block header is not the block's own`).toMatch(BLOCK_ROWS[i]);
-      });
-    }
+    const split = screens()
+      .filter((s) => s.disable - s.header !== BLOCK_ROWS.length || s.foreign.length > 0)
+      .map((s) => `boot ${s.boot}: ${s.foreign.length} foreign line(s) inside the block: ${JSON.stringify(s.foreign)}`);
+    expect(split, `${split.length} of ${BOOTS} boots split the block`).toEqual([]);
   });
 
   it('the dev admin credential line sits outside the block on every boot', () => {
-    for (const r of recorded()) {
-      const { header } = blockOf(r);
-      const credential = r.lines.findIndex((l) => l.includes(CREDENTIAL));
-      // Present, so "outside" is a reading and not an absence.
-      expect(credential, `boot ${r.boot}: no credential line — the boot did not seed its dev admin`).toBeGreaterThan(-1);
-      const inside = credential > header && credential <= header + BLOCK_ROWS.length;
-      expect(inside, `boot ${r.boot}: the credential line printed inside the MCP block`).toBe(false);
-    }
+    const inside = screens()
+      .filter((s) => s.credential > s.header && s.credential < s.disable)
+      .map((s) => `boot ${s.boot}: the credential line printed inside the MCP block`);
+    expect(inside, `${inside.length} of ${BOOTS} boots printed the credential inside the block`).toEqual([]);
   });
 
   it('the block comes after the whole banner on every boot — one fixed order', () => {
-    for (const r of recorded()) {
-      const { header } = blockOf(r);
-      const tail = r.lines.findIndex((l) => l.includes(BANNER_TAIL));
-      expect(tail, `boot ${r.boot}: no banner tail`).toBeGreaterThan(-1);
-      expect(header, `boot ${r.boot}: the MCP block started before the banner finished`).toBeGreaterThan(tail);
-    }
+    const early = screens()
+      .filter((s) => s.header < s.tail)
+      .map((s) => `boot ${s.boot}: the MCP block started before the banner finished`);
+    expect(early, `${early.length} of ${BOOTS} boots printed the block inside or above the banner`).toEqual([]);
   });
 });
