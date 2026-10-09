@@ -251,7 +251,11 @@ import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 // `./builtin/` is safe in this direction: `template.ts` imports only
 // `../guard-refusal.js` and package-external contracts, so nothing it pulls in
 // reaches back here.
-import { renderTextSlot } from './builtin/template.js';
+import { renderTextSlot, FlowTextTemplateError } from './builtin/template.js';
+// [#22450] The one bundle-locale negotiation rule (exact → case-insensitive →
+// base language → variant expansion), asked about the locales the i18n service
+// holds — the same question objectql's `negotiatedMessageLocale` asks it.
+import { flowRefusalMessageKey, resolveBundleLocale } from '@objectstack/spec/system';
 
 /**
  * Does this `decision` take EVERY out-edge whose condition holds (#15429)?
@@ -1287,6 +1291,44 @@ class FlowRefusalSignal {
 
 function isRefusalSignal(err: unknown): err is FlowRefusalSignal {
     return typeof err === 'object' && err !== null && (err as FlowRefusalSignal).__flowRefused === true;
+}
+
+/**
+ * [#22450] The slice of `II18nService` (`@objectstack/spec/contracts`) a
+ * refusing `end` node reads: `t()` for the translated template, and
+ * `getLocales()`, when the service offers it, to negotiate the run's locale.
+ */
+export interface RefusalI18nService {
+    t(key: string, locale: string, params?: Record<string, unknown>): string;
+    getLocales?(): string[];
+}
+
+/**
+ * [#22450] The locale `service` can actually ANSWER in, for the locale the run
+ * asked for. `AutomationContext.locale` is the door's `ExecutionContext.locale`,
+ * whose header leg is the request's tag verbatim, so a bare `zh` has to reach a
+ * `zh-CN` bundle the way the document translators reach it.
+ *
+ * ⛔ No rule of its own: `resolveBundleLocale` is the one negotiation rule, asked
+ * about what `getLocales()` reports, exactly as objectql's
+ * `negotiatedMessageLocale` asks it. The requested tag passes through untouched
+ * whenever there is nothing to negotiate against (no `getLocales`, a throwing or
+ * empty answer, no match).
+ */
+function negotiatedServiceLocale(service: RefusalI18nService, requested: string): string {
+    if (typeof service.getLocales !== 'function') return requested;
+    let available: unknown;
+    try {
+        available = service.getLocales();
+    } catch {
+        return requested;
+    }
+    if (!Array.isArray(available) || available.length === 0) return requested;
+    const offered: Record<string, true> = {};
+    for (const code of available) {
+        if (typeof code === 'string' && code.length > 0) offered[code] = true;
+    }
+    return resolveBundleLocale(offered, requested) ?? requested;
 }
 
 /**
@@ -2445,6 +2487,8 @@ export class AutomationEngine implements IAutomationService {
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
     private connectorPullSource?: (request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>;
+    /** [#22450] The lazy `i18n` service reader — see {@link setI18nServiceSource}. */
+    private i18nServiceSource?: () => RefusalI18nService | undefined;
     /**
      * Re-entrancy guard for record-triggered flows (complements the intra-run
      * {@link MAX_NODE_REENTRIES} back-edge guard, which cannot see a self-trigger
@@ -4794,6 +4838,21 @@ export class AutomationEngine implements IAutomationService {
      * materialized, which the engine does not hold, so the plugin hands the
      * engine the call rather than the map.
      */
+    /**
+     * [#22450] Attach a reader of the `i18n` service, through which a refusing
+     * `end` node picks its translated message
+     * (`flows.<flow>.refusals.<node_id>.message`) in the run's locale. The
+     * automation plugin calls this at `init()` with a reader that asks the
+     * kernel at QUESTION time, the bridge objectql takes for its validation
+     * messages made lazy: the `i18n` provider may register after this plugin
+     * starts, and a reading taken at boot would record its absence for good.
+     * With none attached (a bare engine), or one that answers nothing, every
+     * refusal renders its authored message.
+     */
+    setI18nServiceSource(source: (() => RefusalI18nService | undefined) | undefined): void {
+        this.i18nServiceSource = source;
+    }
+
     setConnectorPullSource(
         source: ((request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>) | undefined,
     ): void {
@@ -10967,6 +11026,93 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#22450] A refusing `end` node's message, rendered in the run's language.
+     *
+     * The run stores the refusal already rendered
+     * (`sys_automation_run.refusal_message`, `AutomationResult.refusalMessage`),
+     * so the translation has to be picked HERE, as a template, before its
+     * `{{ }}` holes are filled. This is the validation-message precedent
+     * (objectql's `authoredRuleMessage`) on the automation side:
+     *
+     *  - the address is `flowRefusalMessageKey` (`@objectstack/spec/system`);
+     *  - the channel is the existing `i18n` service, reached through
+     *    {@link setI18nServiceSource} — no second i18n path;
+     *  - the locale is `AutomationContext.locale`, the door's already-resolved
+     *    `ExecutionContext.locale`, negotiated against the locales the service
+     *    holds by `resolveBundleLocale`, the one bundle-locale rule.
+     *
+     * The authored template renders whenever no translation is picked: no
+     * locale on the run (a record-change or schedule trigger, code calling
+     * `execute` directly), no service, no entry (`t()` echoes the key on a
+     * miss), or a service that throws. A resumed leg renders in the locale the
+     * run was STARTED in — the context is persisted with the suspended run and a
+     * resume carries none of its own.
+     *
+     * A translation is a text slot like the message it translates: the
+     * single-brace `{token}` is refused at every door that reads the bundle
+     * (`TranslationDataSchema`, the one text-slot judge). If one still fails to
+     * compile here, it is a translator's defect, not the run's: the refusal
+     * must not become a failure, so the authored message renders and the line
+     * below names the key and the reason.
+     */
+    private renderRefusalMessage(
+        flowName: string,
+        nodeId: string,
+        authored: string | undefined,
+        variables: Map<string, unknown>,
+        context: AutomationContext,
+    ): string | undefined {
+        const translated = this.translatedRefusalTemplate(flowName, nodeId, context.locale);
+        if (translated !== undefined) {
+            try {
+                return renderTextSlot(translated.template, variables);
+            } catch (err: unknown) {
+                if (!(err instanceof FlowTextTemplateError)) throw err;
+                this.logger.warn(
+                    `[automation] flow '${flowName}' refused at node '${nodeId}': the '${translated.locale}' translation ` +
+                    `at '${translated.key}' does not compile (${err.message}), so the refusal shows the authored ` +
+                    `message instead. Fix the translation's holes to match the authored message.`,
+                );
+            }
+        }
+        return renderTextSlot(authored, variables);
+    }
+
+    /**
+     * [#22450] The translated refusal TEMPLATE for `locale`, or `undefined` when
+     * none is picked — see {@link renderRefusalMessage} for every reason.
+     */
+    private translatedRefusalTemplate(
+        flowName: string,
+        nodeId: string,
+        requested: string | undefined,
+    ): { template: string; key: string; locale: string } | undefined {
+        if (typeof requested !== 'string' || requested.length === 0) return undefined;
+        let service: RefusalI18nService | undefined;
+        try {
+            service = this.i18nServiceSource?.();
+        } catch {
+            return undefined;
+        }
+        if (!service || typeof service.t !== 'function') return undefined;
+        const locale = negotiatedServiceLocale(service, requested);
+        const key = flowRefusalMessageKey(flowName, nodeId);
+        try {
+            const template = service.t(key, locale);
+            // II18nService echoes the key back on a miss.
+            if (typeof template === 'string' && template.length > 0 && template !== key) {
+                return { template, key, locale };
+            }
+        } catch (err: unknown) {
+            this.logger.warn(
+                `[automation] flow '${flowName}' refused at node '${nodeId}': the i18n service threw reading ` +
+                `'${key}' (${err instanceof Error ? err.message : String(err)}), so the refusal shows the authored message.`,
+            );
+        }
+        return undefined;
+    }
+
+    /**
      * Execute a node with timeout support, fault edge handling, and step logging.
      */
     private async executeNode(
@@ -11002,7 +11148,10 @@ export class AutomationEngine implements IAutomationService {
                     // Rendered HERE, against the live variable map, because
                     // that is what makes the text per-record; a template on the
                     // wire would put the rendering in every runner.
-                    renderTextSlot(endConfig.message, variables),
+                    // [#22450] …in the run's language: the TEMPLATE is picked
+                    // before it is rendered, because the run stores the
+                    // rendered text and nothing downstream can translate it.
+                    this.renderRefusalMessage(flow.name, node.id, endConfig.message, variables, context),
                 );
             }
             return;

@@ -94,9 +94,15 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   timezone: z.string().optional(),
 
   /**
-   * Active locale (BCP-47, e.g. `en-US`), resolved from the `localization`
-   * settings alongside `timezone`. Drives message catalogs and number/date
-   * formatting. When unset, consumers treat it as `en-US`.
+   * Active locale (BCP-47, e.g. `en-US`). The request's own `Accept-Language`
+   * wins (its highest-priority tag, `preferredLocaleFromHeader`); without one,
+   * it is resolved from the `localization` settings alongside `timezone`. The
+   * precedence lives in the shared assembler (`assembleExecutionContextOrGuest`
+   * in `@objectstack/core`), so the REST and MCP faces cannot disagree. Unset
+   * for an anonymous caller.
+   * Drives message catalogs and number/date formatting, and a flow run started
+   * by this request carries it as `AutomationContext.locale`. When unset,
+   * consumers treat it as `en-US`.
    */
   locale: z.string().optional(),
 
