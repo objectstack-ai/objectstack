@@ -204,6 +204,28 @@
  *   - a stroke carrying no body (labels, assignees, state, a transfer, the
  *     GraphQL ops) reads nothing back and its outcome is unchanged.
  *
+ * ## The started run — the one outcome only the seat can name
+ *
+ * A `workflow_dispatch` action's request is answered 204 with no body, so the
+ * executor cannot report the run it started and no annotation carries it.
+ * After a `success` run `sendFleetWrite` reads it back here, for every action
+ * whose op names a `workflow` (`RUN_OPS`, derived from `ops.mjs`):
+ * `GET /repos/{repo}/actions/workflows/{file}/runs?event=workflow_dispatch&branch={ref}`
+ * — readable from a seat container as every `/actions/runs` read is — taking
+ * the newest run created since the dispatch (`READ_BACK_SLACK_MS` before it,
+ * the clock slack the body read-back allows). The platform creates that run
+ * seconds after the POST and the relay run completes after the POST, so it is
+ * usually listed on the first read; a list that does not carry it yet is
+ * re-read every poll interval for `RUN_READ_BACK_WINDOW_MS` from the first
+ * read — reads only, ⛔ never a re-send. The row names the run's id, url,
+ * actor and how many runs created since the dispatch were candidates (more
+ * than one is SAID, never chosen between silently). Found is `landed`, and
+ * the result's `runs` carries it (`--json`: `runs`); a list that cannot be
+ * read is `unverified` (`unread`); none within the window is `unverified`
+ * (`unfound`) — exit `EXIT_UNCONFIRMED` (6) either way: the dispatch was
+ * accepted and the run may exist, so go READ the workflow's runs, ⛔ never
+ * dispatch again blind.
+ *
  * ## The no-run conformance — every sender, one answer
  *
  * The rule above lives in each caller's own control flow, where a later edit
@@ -266,8 +288,8 @@
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
- *   0   the run completed with conclusion `success`, and every body it wrote
- *       reads back as the bytes sent.
+ *   0   the run completed with conclusion `success`, every body it wrote
+ *       reads back as the bytes sent, and every run it started is listed.
  *   2   usage, or the packed payload was refused by the validator (nothing sent).
  *   3   PREREQUISITE NOT MET — no token, no session in dispatch mode, the
  *       dispatch route dead (401/407/0), or the run list unreadable.
@@ -276,8 +298,9 @@
  *       Go READ it; ⛔ do not retry.
  *   5   the platform REFUSED the dispatch (403/404/422), or the run FAILED.
  *   6   UNCONFIRMED — no run in the start window, no completion within the
- *       ceiling, or a body the read-back could not find or read. The run URL
- *       (when any) is printed. Go READ it; ⛔ do not retry blind.
+ *       ceiling, a body the read-back could not find or read, or a started
+ *       run the workflow's run list did not carry within its window. The run
+ *       URL (when any) is printed. Go READ it; ⛔ do not retry blind.
  *  10   the write throttle refused the dispatch.
  */
 
@@ -574,6 +597,11 @@ export const ISSUE_CREATE_RELIST_DELAYS_MS = Object.freeze([3_000, 7_000, 15_000
 /** Every op the table lets carry a `body` — derived from `ops.mjs`, never listed, so a new body op is read back the day it lands. */
 export const BODY_OPS = Object.freeze(OP_NAMES.filter((op) => [...OPS[op].required, ...OPS[op].optional].includes('body')));
 
+/** Every op the table lets name a `workflow` — derived from `ops.mjs`, never listed — read back as the run it started (header). */
+export const RUN_OPS = Object.freeze(OP_NAMES.filter((op) => OPS[op].required.includes('workflow')));
+/** How long, from its first read, the started-run read-back re-reads a run list that does not carry the run yet. */
+export const RUN_READ_BACK_WINDOW_MS = 60_000;
+
 /**
  * Where each body op's stored body is read from, and how it is FOUND — which
  * decides what a missing match may mean. `address`: the action named the
@@ -683,11 +711,11 @@ export function notStoredText(result, tool = 'fleet-write') {
   );
 }
 
-/** What the CLI prints when the run succeeded and a body could not be read back. */
+/** What the CLI prints when the run succeeded and a body, or a started run, could not be read back. */
 export function unverifiedText(result, tool = 'fleet-write') {
-  const open = (result.readBack?.rows ?? []).filter((r) => r.verdict === 'unverified');
+  const open = [...(result.readBack?.rows ?? []), ...(result.runs?.rows ?? [])].filter((r) => r.verdict === 'unverified');
   return (
-    `${tool}: UNCONFIRMED — run ${result.run?.id ?? '?'} concluded success, but ${open.length} body/bodies could not be read back: ` +
+    `${tool}: UNCONFIRMED — run ${result.run?.id ?? '?'} concluded success, but ${open.length} outcome(s) — a body, or a started run — could not be read back: ` +
     `${open.map((r) => `action ${r.action} (${r.op}) — ${r.why ?? r.cls}`).join('; ')}.${result.run?.url ? ` Run: ${result.run.url}` : ''}\n` +
     `  Go READ the target; ⛔ do not re-run blind — a second dispatch is a second write. Exit ${EXIT_UNCONFIRMED}.`
   );
@@ -983,6 +1011,77 @@ export async function readBackStroke(payload, { dispatchedAt, annotations = [] }
   return { state: strokeReadBackState(rows), rows };
 }
 
+/** Every action in a judged payload that starts a workflow run, with the file and ref it named. Pure. */
+export function runReadBackTargets(payload) {
+  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+  return actions.map((a, i) => ({ action: i + 1, op: a?.op, workflow: a?.workflow, ref: a?.ref })).filter((x) => RUN_OPS.includes(x.op) && typeof x.workflow === 'string');
+}
+
+/**
+ * Read back the run each `RUN_OPS` action started (header). Returns `{ state,
+ * rows }` — `state` is `none` when the stroke starts no run, else
+ * `strokeReadBackState` over rows whose verdict is `landed` (the run found, in
+ * `run`: id, url, status, conclusion, created_at, actor; `candidates` counts
+ * the runs created since the dispatch) or `unverified` (`cls` `unread`: the
+ * list did not answer, the call in `why`; `unfound`: no run created since the
+ * dispatch within `windowMs`). Reads only; never throws on a status; ⛔ never
+ * re-sends.
+ */
+export async function readBackRuns(payload, { dispatchedAt }, deps = {}) {
+  const targets = runReadBackTargets(payload);
+  if (!targets.length) return { state: 'none', rows: [] };
+  const api = deps.api ?? DEFAULT_API;
+  const t = { fetch: deps.fetch, token: deps.token };
+  const now = deps.now ?? (() => Date.now());
+  const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const log = deps.log ?? ((line) => console.error(line));
+  const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
+  const windowMs = deps.windowMs ?? RUN_READ_BACK_WINDOW_MS;
+  const since = dispatchedAt - READ_BACK_SLACK_MS;
+  const repo = payload.repo;
+  const rows = [];
+  for (const target of targets) {
+    const path = `/repos/${repo}/actions/workflows/${encodeURIComponent(target.workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(String(target.ref))}&per_page=5`;
+    const where = `${repo} ${target.workflow}@${target.ref}`;
+    const base = { action: target.action, op: target.op, workflow: target.workflow, where };
+    const first = now();
+    let reads = 0;
+    let row = null;
+    while (row === null) {
+      const r = await rest(api, path, {}, t);
+      reads += 1;
+      if (r.status !== 200 || !Array.isArray(r.json?.workflow_runs)) {
+        row = { ...base, verdict: 'unverified', cls: 'unread', run: null, candidates: 0, reads, why: `${r.call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}` };
+        break;
+      }
+      const candidates = r.json.workflow_runs.filter((run) => Date.parse(run?.created_at ?? '') >= since).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+      if (candidates.length) {
+        const hit = candidates[0];
+        row = { ...base, verdict: 'landed', cls: 'found', candidates: candidates.length, reads, run: { id: hit.id, url: hit.html_url ?? null, status: hit.status ?? null, conclusion: hit.conclusion ?? null, created_at: hit.created_at ?? null, actor: hit.actor?.login ?? null } };
+        break;
+      }
+      if (now() - first >= windowMs) {
+        row = { ...base, verdict: 'unverified', cls: 'unfound', run: null, candidates: 0, reads, why: `no workflow_dispatch run of ${target.workflow} on ${target.ref} created since the dispatch was listed within ${windowMs} ms (${reads} read(s)); the dispatch was accepted, so the run may still appear — read ${repo}'s Actions, ⛔ do not dispatch again blind` };
+        break;
+      }
+      log(`fleet-write: read-back action ${target.action} ${target.op} ${where}: no run created since the dispatch is listed yet — re-read in ${pollMs} ms (reads only; ⛔ the dispatch is not re-sent).`);
+      await sleep(pollMs);
+    }
+    rows.push(row);
+  }
+  return { state: strokeReadBackState(rows), rows };
+}
+
+/** The transcript line for one started-run read-back row. Pure. */
+export function runReadBackLine(row) {
+  const head = `fleet-write: read-back action ${row.action} ${row.op} ${row.where}`;
+  if (row.verdict === 'landed') {
+    const more = row.candidates > 1 ? ` — ⚠️ ${row.candidates} runs were created since the dispatch; the newest is named, read the others before acting on it` : '';
+    return `${head}: run ${row.run.id}${row.run.url ? ` ${row.run.url}` : ''} (${row.run.status ?? '?'}${row.run.conclusion ? `, ${row.run.conclusion}` : ''}) created ${row.run.created_at ?? '?'} by ${row.run.actor ?? '?'}${more}.`;
+  }
+  return `${head}: ⚠️ UNVERIFIED — ${row.why}.`;
+}
+
 /**
  * Send one packed payload and wait for its run.
  *
@@ -1056,15 +1155,18 @@ export async function sendFleetWrite(payload, deps = {}) {
   // ── read it back — the run's success is the executor's, not the write's ─────
   const readBack = await readBackStroke(payload, { dispatchedAt, annotations: annotations.rows }, { api, fetch: deps.fetch, token: deps.token, judge: deps.judge, sleep, log });
   for (const row of readBack.rows) log(readBackLine(row));
+  // ── the run(s) it started — the executor's answer carries none, so the seat lists them (header) ─────
+  const runs = await readBackRuns(payload, { dispatchedAt }, { api, fetch: deps.fetch, token: deps.token, now, sleep, log, pollMs });
+  for (const row of runs.rows) log(runReadBackLine(row));
   if (readBack.state === 'not-stored') {
     const first = readBack.rows.find((r) => r.verdict === 'not-stored');
-    return { ...done, state: 'failure', ok: false, notStored: true, readBack, annotations, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
+    return { ...done, state: 'failure', ok: false, notStored: true, readBack, runs, annotations, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
   }
-  if (readBack.state === 'unverified') {
-    const first = readBack.rows.find((r) => r.verdict === 'unverified');
-    return { ...done, state: 'unverified', ok: false, readBack, annotations, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
+  if (readBack.state === 'unverified' || runs.state === 'unverified') {
+    const first = [...readBack.rows, ...runs.rows].find((r) => r.verdict === 'unverified');
+    return { ...done, state: 'unverified', ok: false, readBack, runs, annotations, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
   }
-  return { ...done, state: 'success', ok: true, readBack, annotations, detail: `conclusion ${run.conclusion}` };
+  return { ...done, state: 'success', ok: true, readBack, runs, annotations, detail: `conclusion ${run.conclusion}` };
 }
 
 /** The exit a tool takes from a result that is not `success`. */
@@ -1141,8 +1243,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 5,
   'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses': 11,
   'the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen': 27,
+  "the started run: an action naming a workflow is read back as the newest workflow_dispatch run of that file created since the dispatch — the target repo's run list, read after the relay run completed and re-read within a bounded window; found is success naming id, url and actor; none in the window or an unreadable list is UNCONFIRMED (6) after ONE dispatch; a stroke naming no workflow reads none": 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 19;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1714,6 +1817,55 @@ export async function selfTest() {
       t('…and the same stroke read back intact exits 0, its row landed', [cliGood.code, cliGood.json?.read_back?.[0]?.verdict], [EXIT_OK, 'landed']);
     }
 
+    // ── the started run ─────────────────────────────────────────────────────
+    battery("the started run: an action naming a workflow is read back as the newest workflow_dispatch run of that file created since the dispatch — the target repo's run list, read after the relay run completed and re-read within a bounded window; found is success naming id, url and actor; none in the window or an unreadable list is UNCONFIRMED (6) after ONE dispatch; a stroke naming no workflow reads none");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const FILE = 'shard-timings-refresh.yml';
+      const WF_RUNS = `GET /repos/${REPO}/actions/workflows/${FILE}/runs`;
+      const OK_RUN = { runs: () => [RUN('completed', 'success')] };
+      const started = packRequest({ repo: REPO, session: SESSION, actions: [{ op: 'workflow_dispatch', workflow: FILE, ref: 'main' }], requestId: 'fw-test-1' }).payload;
+      const wfRun = (id, ms, extra = {}) => ({ id, html_url: `https://github.test/${REPO}/actions/runs/${id}`, status: 'queued', conclusion: null, event: 'workflow_dispatch', head_branch: 'main', created_at: at(ms), actor: { login: 'objectstack-fleet[bot]' }, ...extra });
+      t('RUN_OPS is derived from the table: exactly the ops that name a workflow — workflow_dispatch', [...RUN_OPS], ['workflow_dispatch']);
+      const found = await drive({ ...OK_RUN, store: { [WF_RUNS]: { status: 200, json: { total_count: 2, workflow_runs: [wfRun(9001, 12_000), wfRun(8000, -400_000, { status: 'completed', conclusion: 'success' })] } } } }, { stroke: started });
+      t('a success run whose started run is listed is success: its row landed naming the run id, url and actor, exit 0', [found.state, found.ok, found.runs?.state, found.runs?.rows?.[0]?.verdict, found.runs?.rows?.[0]?.run?.id, found.runs?.rows?.[0]?.run?.url, found.runs?.rows?.[0]?.run?.actor, exitForResult(found)], ['success', true, 'landed', 'landed', 9001, `https://github.test/${REPO}/actions/runs/9001`, 'objectstack-fleet[bot]', EXIT_OK], found.logs.join(' | '));
+      const listRead = found.seen.find((s) => s.call === WF_RUNS);
+      t("…read from the TARGET repo's workflow run list, filtered to workflow_dispatch on the ref sent, once, AFTER the relay run completed", [listRead?.query.includes('event=workflow_dispatch') && listRead?.query.includes('branch=main'), found.seen.filter((s) => s.call === WF_RUNS).length, found.seen.findIndex((s) => s.call === WF_RUNS) > found.seen.findIndex((s) => s.call === RUNS)], [true, 1, true]);
+      t('…a run created BEFORE the dispatch (outside the slack) is never taken for this one: ONE candidate, and the transcript names the run and its actor', [found.runs?.rows?.[0]?.candidates, found.logs.some((l) => l.includes('run 9001') && l.includes('objectstack-fleet[bot]'))], [1, true]);
+      const late = await drive({ ...OK_RUN, store: { [WF_RUNS]: (q, ms) => ({ status: 200, json: { total_count: ms >= 40_000 ? 1 : 0, workflow_runs: ms >= 40_000 ? [wfRun(9002, 38_000)] : [] } }) } }, { stroke: started });
+      t('a list that lags the start is re-read on the poll interval within the window and the run is found — reads only, ONE dispatch, each re-read said', [late.state, late.runs?.rows?.[0]?.run?.id, late.runs?.rows?.[0]?.reads > 1, late.seen.filter((s) => s.call === DISPATCH).length, late.logs.some((l) => l.includes('re-read in'))], ['success', 9002, true, 1, true]);
+      const none = await drive({ ...OK_RUN, store: { [WF_RUNS]: { status: 200, json: { total_count: 1, workflow_runs: [wfRun(8000, -400_000)] } } } }, { stroke: started });
+      t('⛔ no run created since the dispatch within the window is UNVERIFIED (unfound): exit 6, the sentence says UNCONFIRMED and never re-run blind, exactly ONE dispatch sent', [none.state, none.ok, none.runs?.rows?.[0]?.cls, exitForResult(none), unverifiedText(none).includes('UNCONFIRMED') && unverifiedText(none).includes('do not re-run blind') && unverifiedText(none).includes(`Exit ${EXIT_UNCONFIRMED}`), none.seen.filter((s) => s.call === DISPATCH).length], ['unverified', false, 'unfound', EXIT_UNCONFIRMED, true, 1]);
+      t('…after exactly the window of re-reads, the reason naming the window and the workflow', [none.runs?.rows?.[0]?.reads, none.runs?.rows?.[0]?.why?.includes(`${RUN_READ_BACK_WINDOW_MS} ms`) && none.runs?.rows?.[0]?.why?.includes(FILE)], [RUN_READ_BACK_WINDOW_MS / 5_000 + 1, true]);
+      const down = await drive({ ...OK_RUN, store: { [WF_RUNS]: { status: 503, json: { message: 'down' } } } }, { stroke: started });
+      t('a run list that does not answer is UNVERIFIED (unread) naming the call, exit 6 — never success', [down.state, down.runs?.rows?.[0]?.cls, down.runs?.rows?.[0]?.why?.includes('HTTP 503'), exitForResult(down)], ['unverified', 'unread', true, EXIT_UNCONFIRMED]);
+      const comment = await drive(OK_RUN, { file: paceFile });
+      t('a stroke naming no workflow reads no run list: runs none, no such GET', [comment.runs?.state, comment.seen.some((s) => s.call.includes('/actions/workflows/'))], ['none', false]);
+      // The CLI, end to end: --json carries the started run, and the exit a seat reads.
+      writeFileSync(join(dir, 'start.json'), JSON.stringify([{ op: 'workflow_dispatch', workflow: FILE, ref: 'main' }]), 'utf8');
+      const cliStart = async (store) => {
+        let nowMs = T0;
+        const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+        const out = [];
+        const [log, err] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = () => {};
+        try {
+          const code = await main(['--repo', REPO, '--actions-file', join(dir, 'start.json'), '--request-id', 'fw-test-1', '--json'], {
+            env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+            send: { fetch: platform({ ...OK_RUN, store }, [], clock), pace: paceFor(join(dir, `pace-cli-run-${paceCase++}.jsonl`)), now: clock.now, sleep: async (ms) => { nowMs += ms; }, log: () => {}, ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+          });
+          return { code, json: out.length ? JSON.parse(out[out.length - 1]) : null };
+        } finally {
+          [console.log, console.error] = [log, err];
+        }
+      };
+      const cliFound = await cliStart({ [WF_RUNS]: { status: 200, json: { total_count: 1, workflow_runs: [wfRun(9003, 9_000)] } } });
+      t("the CLI: --json carries runs with the started run's id and url, exit 0", [cliFound.code, cliFound.json?.runs?.[0]?.run?.id, cliFound.json?.runs?.[0]?.run?.url, cliFound.json?.runs?.[0]?.verdict], [EXIT_OK, 9003, `https://github.test/${REPO}/actions/runs/9003`, 'landed']);
+      const cliNone = await cliStart({ [WF_RUNS]: { status: 200, json: { total_count: 0, workflow_runs: [] } } });
+      t('…and a start whose run never lists exits 6 with runs unfound', [cliNone.code, cliNone.json?.state, cliNone.json?.runs?.[0]?.class], [EXIT_UNCONFIRMED, 'unverified', 'unfound']);
+    }
+
     // ── the issue_create re-list ────────────────────────────────────────────
     battery('the issue_create re-list: a list that lags the create reads back IDENTICAL on a bounded re-list; a real miss is still unfound (exit 6) after exactly the declared window; an unreadable re-list is unread; the create is never re-sent');
     {
@@ -2104,9 +2256,9 @@ const USAGE = [
   `  ${CONTAINER_SESSION_ENV} (cse_<id> → session_<id>); ${SESSION_ENV} overrides the container (a local checkout, a test).`,
   `  ⛔ Never as a prefix on the command line: the seats' allow rules are literal command prefixes. The dispatch always`,
   `  goes to ${RELAY_REPO}; --repo names the target.`,
-  `  Exits: ${EXIT_OK} run succeeded and every body reads back as sent · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
+  `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
-  `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, or a body not read back) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
+  `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
 ].join('\n');
 
 function rearmThroughProxy(args) {
@@ -2209,6 +2361,7 @@ export async function main(argv, deps = {}) {
         dispatched_at: new Date(result.dispatchedAt).toISOString(),
         read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null, found_by: r.foundBy ?? null })),
         annotations: (result.annotations?.rows ?? []).map((a) => ({ action: a.action, op: a.op, number: a.number, url: a.url })),
+        runs: (result.runs?.rows ?? []).map((r) => ({ action: r.action, op: r.op, workflow: r.workflow, verdict: r.verdict, class: r.cls, candidates: r.candidates ?? 0, run: r.run ? { id: r.run.id, url: r.run.url, status: r.run.status, conclusion: r.run.conclusion, created_at: r.run.created_at, actor: r.run.actor } : null })),
       }),
     );
   }

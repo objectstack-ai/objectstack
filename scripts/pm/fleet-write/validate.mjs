@@ -36,16 +36,25 @@
  *   - a stroke carrying a `transfer` carries transfers alone, to ONE target
  *     from `TRANSFER_TARGETS` that is not `repo`, each card once — so the
  *     token list below is `repo` alone for every other stroke and exactly
- *     `repo` + that target for a transfer stroke.
+ *     `repo` + that target for a transfer stroke;
+ *   - a stroke carrying a `workflow_dispatch` carries exactly that one action
+ *     (the row's `alone`): its token carries `actions: write`, and that grant
+ *     serves one request and nothing beside it. `workflow` is judged against
+ *     the closed allowlist and `ref` against the one ref, as enums — an
+ *     off-list file, a path, a glob or another ref is refused by name.
  *
- * ## The token list — the one place a second repository enters
+ * ## The token list and the token's grants — where a stroke widens either
  *
  * `--github-output` writes `repositories=<name>[,<name>]`, the list the
  * workflow's mint step narrows the App token to (`tokenRepositoriesOf`): the
  * payload's repository, plus the `secondRepo` a row declares — `transfer`'s
- * target, the only such row. The workflow reads that output and never the
- * payload, and `--self-test` pins the list to ONE name for every other op,
- * two for a transfer, and the workflow line that reads it.
+ * target, the only such row. It also writes one `permission_<name>=` line per
+ * grant in `STROKE_SCOPED_PERMISSIONS` (`tokenPermissionsOf`): the level when
+ * an action in the stroke spends it, empty otherwise — `permission_actions=write`
+ * for a `workflow_dispatch` stroke, `permission_actions=` for every other. The
+ * workflow reads those outputs and never the payload, and `--self-test` pins
+ * the list to ONE name for every other op, two for a transfer, the grant to
+ * the one row, and the workflow lines that read both.
  *
  * A refusal is the WHOLE list of reasons, not the first one: a seat fixing a
  * payload reads every problem in one pass, and the runner's step summary
@@ -83,9 +92,13 @@ import {
   RELAY_FILES,
   REQUEST_ID_SHAPE,
   SESSION_SHAPE,
+  STROKE_SCOPED_PERMISSIONS,
   TARGET_OWNER,
   TARGET_REPO_SHAPE,
   TRANSFER_TARGETS,
+  WORKFLOW_DISPATCH_ALLOWLIST,
+  WORKFLOW_DISPATCH_PATH_SHAPE,
+  WORKFLOW_DISPATCH_REF,
 } from './ops.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -162,13 +175,27 @@ export function validateAction(action, index) {
 }
 
 /**
- * The rules that span actions — today, the one row whose token reaches a
- * second repository (`secondRepo`, `transfer`'s alone): such a stroke carries
- * that op alone, names ONE second repository, never `repo` itself, and each
- * card once. Runs only over actions that passed `validateAction`. Pure.
+ * The rules that span actions — the two rows that widen the token. The one
+ * whose token reaches a second repository (`secondRepo`, `transfer`'s alone):
+ * such a stroke carries that op alone, names ONE second repository, never
+ * `repo` itself, and each card once. The one whose token carries a grant no
+ * other row spends (`alone`, `workflow_dispatch`'s): such a stroke carries
+ * exactly that one action. Runs only over actions that passed
+ * `validateAction`. Pure.
  */
 export function strokeErrors(repo, actions) {
   const errors = [];
+  const solo = actions.map((a, i) => ({ a, i })).filter(({ a }) => OPS[a.op].alone);
+  if (solo.length && actions.length > 1) {
+    const op = solo[0].a.op;
+    for (const [i, a] of actions.entries()) {
+      errors.push(
+        a.op === op
+          ? `actions[${i}]: a stroke carries exactly ONE \`${op}\` and nothing else (this stroke carries ${actions.length} actions) — its token carries ${OPS[op].permission} write for that one request; send each in its own dispatch`
+          : `actions[${i}] is \`${a.op}\` in a stroke that carries a \`${op}\` — its token carries ${OPS[op].permission} write, so that stroke carries the \`${op}\` alone; send \`${a.op}\` in its own dispatch`,
+      );
+    }
+  }
   const widening = actions.map((a, i) => ({ a, i })).filter(({ a }) => OPS[a.op].secondRepo);
   if (widening.length === 0) return errors;
   const op = widening[0].a.op;
@@ -208,6 +235,21 @@ export function tokenRepositoriesOf(payload) {
   for (const a of payload.actions) {
     const key = OPS[a.op].secondRepo;
     if (key && !out.includes(a[key])) out.push(a[key]);
+  }
+  return out;
+}
+
+/**
+ * The grants the relay's token must carry for a JUDGED payload: every entry of
+ * `PERMISSIONS` but the stroke-scoped ones, plus each stroke-scoped grant some
+ * action's op spends. `{ …four grants }` for every stroke but a
+ * `workflow_dispatch` one, which adds `actions: write`. Pure.
+ */
+export function tokenPermissionsOf(payload) {
+  const spent = new Set(payload.actions.map((a) => OPS[a.op].permission));
+  const out = {};
+  for (const [name, level] of Object.entries(PERMISSIONS)) {
+    if (!STROKE_SCOPED_PERMISSIONS.includes(name) || spent.has(name)) out[name] = level;
   }
   return out;
 }
@@ -325,10 +367,17 @@ export function readPayloadSource(opts, { env = process.env, read = (p) => readF
   }
 }
 
-/** The `$GITHUB_OUTPUT` lines the workflow's later steps read. Values are single-line by construction of the validator. */
+/**
+ * The `$GITHUB_OUTPUT` lines the workflow's later steps read. Values are
+ * single-line by construction of the validator. One `permission_<name>=` line
+ * per stroke-scoped grant: its level when this stroke spends it, EMPTY
+ * otherwise — the mint action skips an empty `permission-*` input.
+ */
 export function githubOutputLines(payload) {
   const repositories = tokenRepositoriesOf(payload).map((r) => r.split('/')[1]).join(',');
-  return [`repositories=${repositories}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`].join('\n') + '\n';
+  const grants = tokenPermissionsOf(payload);
+  const scoped = STROKE_SCOPED_PERMISSIONS.map((name) => `permission_${name.replace(/-/g, '_')}=${grants[name] ?? ''}`);
+  return [`repositories=${repositories}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`, ...scoped].join('\n') + '\n';
 }
 
 const USAGE = [
@@ -397,8 +446,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: a file, the environment, GitHub outputs, and the exit ladder': 10,
   'the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created': 12,
   'the token scope: ONE repository for every op but transfer, source + target for a transfer stroke, and the workflow mints from that list': 8,
+  'the workflow_dispatch row: a closed allowlist of one file matched whole, ref main alone, no inputs, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call the ONLY actions path any row reaches': 18,
 });
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -511,6 +561,7 @@ export async function selfTest() {
       automerge_enable: { pull: 1 },
       automerge_disable: { pull: 1 },
       transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
     };
     t('every op in the table has a minimal shape this validator accepts', OP_NAMES.filter((op) => !validatePayload(one({ op, ...minimal[op] })).ok), []);
     t('…and the minimal-shape ledger names every op, no more and no less', Object.keys(minimal).sort(), [...OP_NAMES].sort());
@@ -535,6 +586,7 @@ export async function selfTest() {
   {
     const sample = {
       issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', target_repo: `${TARGET_OWNER}/objectui`,
+      workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF,
     };
     const everyRequest = OP_NAMES.flatMap((op) => {
       const spec = OPS[op];
@@ -553,17 +605,23 @@ export async function selfTest() {
     // The permission map, pinned entry by entry: the auto-merge mutations need `contents: write` on the
     // App token (measured live: without it, "Resource not accessible by integration"), and NOTHING else may
     // spend it — the table has no contents op, so the grant reaches exactly two mutations.
-    t('the map is exactly issues/pull-requests/contents write and metadata read', PERMISSIONS, { issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read' });
+    t('the map is exactly issues/pull-requests/contents/actions write and metadata read', PERMISSIONS, { issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read', actions: 'write' });
     t('the two auto-merge rows spend contents', [OPS.automerge_enable.permission, OPS.automerge_disable.permission], ['contents', 'contents']);
     t('⛔ …and no other row does: contents reaches the two auto-merge mutations and nothing else', OP_NAMES.filter((op) => OPS[op].permission === 'contents').sort(), ['automerge_disable', 'automerge_enable']);
     t('every row spending contents is a GraphQL auto-merge mutation, never a REST path', OP_NAMES.filter((op) => OPS[op].permission === 'contents').every((op) => OPS[op].requests({ op, pull: 1 }).every((r) => r.graphql && /PullRequestAutoMerge$/.test(r.graphql.mutation))));
     const repoRoot = resolve(SELF_PATH, '../../../..');
     t('the relay files the table declares are on disk, repo-relative, and this file is one of them', [RELAY_FILES.filter((f) => !existsSync(resolve(repoRoot, f))), RELAY_FILES.includes('scripts/pm/fleet-write/validate.mjs')], [[], true]);
-    // The workflow's mint step declares the SAME map, spelled as `permission-<name>: <level>` inputs — read
-    // from the file on disk, so a grant added on one side without the other reds here.
+    // The workflow's mint step declares the SAME map: every grant outside `STROKE_SCOPED_PERMISSIONS` as a literal
+    // `permission-<name>: <level>` input, and every stroke-scoped grant as an input reading the validator's
+    // `permission_<name>` output — both read from the file on disk, so a grant added on one side without the
+    // other, or a scoped grant spelled as a literal (minted for every stroke), reds here.
     const workflowPath = resolve(repoRoot, '.github/workflows/fleet-write.yml');
-    const declared = existsSync(workflowPath) ? Object.fromEntries([...readFileSync(workflowPath, 'utf8').matchAll(/^\s+permission-([a-z-]+):\s*(read|write)\s*$/gm)].map((m) => [m[1], m[2]])) : null;
-    t('the workflow mint step declares exactly PERMISSIONS as its permission-* inputs', declared, { ...PERMISSIONS });
+    const workflowText = existsSync(workflowPath) ? readFileSync(workflowPath, 'utf8') : '';
+    const declared = existsSync(workflowPath) ? Object.fromEntries([...workflowText.matchAll(/^\s+permission-([a-z-]+):\s*(read|write)\s*$/gm)].map((m) => [m[1], m[2]])) : null;
+    const literal = Object.fromEntries(Object.entries(PERMISSIONS).filter(([name]) => !STROKE_SCOPED_PERMISSIONS.includes(name)));
+    t('the workflow mint step declares exactly the non-scoped grants of PERMISSIONS as literal permission-* inputs', declared, literal);
+    const scopedInputs = [...workflowText.matchAll(/^\s+permission-([a-z-]+):\s*\$\{\{\s*steps\.validate\.outputs\.permission_([a-z_]+)\s*\}\}\s*$/gm)].map((m) => [m[1], m[2]]);
+    t('…and each stroke-scoped grant as an input reading the validator\'s permission_<name> output, and nothing else that way', scopedInputs, STROKE_SCOPED_PERMISSIONS.map((name) => [name, name.replace(/-/g, '_')]));
   }
 
   // ── the normalised payload ────────────────────────────────────────────────
@@ -604,7 +662,7 @@ export async function selfTest() {
     t('a file that is not JSON is exit 3', (await drive(['--file', 'notjson.json'])).code, EXIT_PREREQUISITE);
     t('--from-env with the variable absent is exit 3 naming the variable', (await drive(['--from-env'], {})).err.includes(PAYLOAD_ENV) && (await drive(['--from-env'], {})).code === EXIT_PREREQUISITE);
     const env = await drive(['--from-env', '--github-output'], { [PAYLOAD_ENV]: good, GITHUB_OUTPUT: '/out.txt' });
-    t('--from-env --github-output writes repositories, request_id, action_count and session to $GITHUB_OUTPUT', [env.code, env.appended[0]?.file, env.appended[0]?.text], [EXIT_OK, '/out.txt', 'repositories=objectstack\nrequest_id=fw-20260922T090000Z-abc123\naction_count=1\nsession=session_01ABCDEFGHJKMNPQRSTVWXYZ\n']);
+    t('--from-env --github-output writes repositories, request_id, action_count, session and an EMPTY permission_actions to $GITHUB_OUTPUT for a comment', [env.code, env.appended[0]?.file, env.appended[0]?.text], [EXIT_OK, '/out.txt', 'repositories=objectstack\nrequest_id=fw-20260922T090000Z-abc123\naction_count=1\nsession=session_01ABCDEFGHJKMNPQRSTVWXYZ\npermission_actions=\n']);
     t('--github-output without GITHUB_OUTPUT is exit 3', (await drive(['--from-env', '--github-output'], { [PAYLOAD_ENV]: good })).code, EXIT_PREREQUISITE);
     t('--json prints the normalised payload as one line after the OK line', JSON.parse((await drive(['--file', 'good.json', '--json'])).out.split('\n')[1]).request_id, 'fw-20260922T090000Z-abc123');
   }
@@ -643,13 +701,13 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
     };
     const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
     t('transfer is the ONLY row that reaches a second repository', OP_NAMES.filter((op) => OPS[op].secondRepo), ['transfer']);
     t('…and every other op is exercised here, no more and no less', Object.keys(minimal).sort(), [...narrow].sort());
     t('⛔ every other op\'s stroke mints for exactly ONE repository — the payload\'s own', narrow.map((op) => tokenRepositoriesOf(validatePayload(one({ op, ...minimal[op] })).payload)).filter((list) => list.length !== 1 || list[0] !== `${TARGET_OWNER}/objectstack`), []);
-    t('…and so does a mixed stroke of them all', tokenRepositoriesOf(validatePayload(fixturePayload({ actions: narrow.map((op) => ({ op, ...minimal[op] })) })).payload), [`${TARGET_OWNER}/objectstack`]);
+    t('…and so does a mixed stroke of them all (but the one row that travels alone)', tokenRepositoriesOf(validatePayload(fixturePayload({ actions: narrow.filter((op) => !OPS[op].alone).map((op) => ({ op, ...minimal[op] })) })).payload), [`${TARGET_OWNER}/objectstack`]);
     const moves = validatePayload(fixturePayload({ actions: [{ op: 'transfer', issue: 1, target_repo: `${TARGET_OWNER}/objectui` }, { op: 'transfer', issue: 2, target_repo: `${TARGET_OWNER}/objectui` }] })).payload;
     t('a transfer stroke mints for its source and its one target — two, never more', tokenRepositoriesOf(moves), [`${TARGET_OWNER}/objectstack`, `${TARGET_OWNER}/objectui`]);
     t('the GitHub output spells that list as names: one for a comment, two for a transfer', [githubOutputLines(fixturePayload()).split('\n')[0], githubOutputLines(moves).split('\n')[0]], ['repositories=objectstack', 'repositories=objectstack,objectui']);
@@ -657,6 +715,53 @@ export async function selfTest() {
     const repoInputs = [...workflow.matchAll(/^\s+repositories:\s*(.*?)\s*$/gm)].map((m) => m[1]);
     t('the workflow\'s mint reads that list — the validate step\'s output, never the payload — and nothing else names one', repoInputs, ['${{ steps.validate.outputs.repositories }}']);
     t('…under the one organization, as owner', /^\s+owner:\s*objectstack-ai\s*$/m.test(workflow) && TARGET_OWNER === 'objectstack-ai');
+  }
+
+  // ── the workflow_dispatch row ─────────────────────────────────────────────
+  battery('the workflow_dispatch row: a closed allowlist of one file matched whole, ref main alone, no inputs, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call the ONLY actions path any row reaches');
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const FILE = WORKFLOW_DISPATCH_ALLOWLIST[0];
+    const start = (extra = {}) => ({ op: 'workflow_dispatch', workflow: FILE, ref: WORKFLOW_DISPATCH_REF, ...extra });
+    const one = (action) => fixturePayload({ actions: [action] });
+    const spec = OPS.workflow_dispatch;
+    t('the row: workflow and ref required, nothing optional, spending actions, travelling alone, reaching no second repository', [spec.required, spec.optional, spec.permission, spec.alone, spec.secondRepo ?? null], [['workflow', 'ref'], [], 'actions', true, null]);
+    t('the allowlist is exactly ONE file name — the shard-timings refresh — and the ref is exactly main', [[...WORKFLOW_DISPATCH_ALLOWLIST], WORKFLOW_DISPATCH_REF, FIELDS.workflow.values, FIELDS.ref.values], [['shard-timings-refresh.yml'], 'main', ['shard-timings-refresh.yml'], ['main']]);
+    const repoRoot = resolve(SELF_PATH, '../../../..');
+    const onDisk = WORKFLOW_DISPATCH_ALLOWLIST.map((f) => {
+      const p = resolve(repoRoot, '.github/workflows', f);
+      return [f, existsSync(p) && /^\s*workflow_dispatch:/m.test(readFileSync(p, 'utf8')), /^[A-Za-z0-9._-]+\.ya?ml$/.test(f)];
+    });
+    t('every allowlisted entry is a bare file name of a workflow on disk under .github/workflows/ that declares a workflow_dispatch trigger', onDisk, WORKFLOW_DISPATCH_ALLOWLIST.map((f) => [f, true, true]));
+    const req = spec.requests(start(), REPO);
+    t('its one request is POST /repos/{repo}/actions/workflows/{file}/dispatches with the body { ref: main } and NO inputs', [req.length, req[0].verb, req[0].path, req[0].body, 'inputs' in req[0].body], [1, 'POST', `/repos/${REPO}/actions/workflows/${FILE}/dispatches`, { ref: 'main' }, false]);
+    t('…a path the dispatch shape names, and the only actions path the whole table reaches', [WORKFLOW_DISPATCH_PATH_SHAPE.test(req[0].path), REFUSED_PATH_FAMILIES.some((re) => re.test(req[0].path))], [true, false]);
+    t('the minimal stroke is accepted', validatePayload(one(start())).ok, true, validatePayload(one(start())).errors.join(' | '));
+    t('a workflow outside the allowlist is refused, naming the list', refuses(one(start({ workflow: 'release.yml' })), `actions[0].workflow must be one of "${FILE}"`));
+    t('…and so are a path, a dot-dot path and a glob that would name the same file', [`.github/workflows/${FILE}`, `../${FILE}`, 'shard-timings-*.yml'].every((workflow) => refuses(one(start({ workflow })), 'actions[0].workflow must be one of')));
+    t('a ref other than main is refused, naming main', [refuses(one(start({ ref: 'develop' })), 'actions[0].ref must be one of "main"'), refuses(one(start({ ref: 'refs/heads/main' })), 'actions[0].ref must be one of "main"')], [true, true]);
+    t('a missing ref is refused — the ref is spelled on every request, never defaulted', refuses(one({ op: 'workflow_dispatch', workflow: FILE }), 'actions[0].ref is required'));
+    t('an inputs key is refused BY NAME — the op sends none', refuses(one(start({ inputs: { reason: 'x' } })), 'actions[0].inputs is not a key `workflow_dispatch` takes'));
+    t('⛔ a workflow_dispatch beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ actions: [start(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
+    t('⛔ two workflow_dispatch in one stroke are refused too', refuses(fixturePayload({ actions: [start(), start()] }), 'a stroke carries exactly ONE `workflow_dispatch` and nothing else'));
+    t('the only rows that travel alone or widen the token: workflow_dispatch (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['workflow_dispatch'], ['transfer']]);
+    t('…and actions is spent by the workflow_dispatch row and NOTHING else', OP_NAMES.filter((op) => OPS[op].permission === 'actions'), ['workflow_dispatch']);
+    const plain = validatePayload(fixturePayload()).payload;
+    const run = validatePayload(one(start())).payload;
+    t('the token grants: a comment stroke carries the four literal grants and no actions; a workflow_dispatch stroke adds actions write', [tokenPermissionsOf(plain), tokenPermissionsOf(run)], [{ issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read' }, { issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read', actions: 'write' }]);
+    t('…and the GitHub output spells that as permission_actions=write for the run stroke, EMPTY for every other — the mint action skips an empty input', [githubOutputLines(run).split('\n').at(-2), githubOutputLines(plain).split('\n').at(-2), [...STROKE_SCOPED_PERMISSIONS]], ['permission_actions=write', 'permission_actions=', ['actions']]);
+    // The fence on the grant: every path every row can spell, against the actions families — the dispatch call is the ONE
+    // actions path reached; and a POSITIVE CONTROL that the families would catch what actions: write otherwise reaches.
+    const filled = { issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', target_repo: `${TARGET_OWNER}/objectui`, workflow: FILE, ref: WORKFLOW_DISPATCH_REF };
+    const everyPath = OP_NAMES.flatMap((op) => {
+      const a = { op };
+      for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = filled[k];
+      return OPS[op].requests(a, REPO).map((r) => r.path);
+    });
+    const actionsPaths = everyPath.filter((p) => p.includes('/actions/'));
+    t('⛔ the ONLY actions/* path any row reaches is the dispatch call on an allowlisted file', [actionsPaths, actionsPaths.every((p) => WORKFLOW_DISPATCH_PATH_SHAPE.test(p))], [[`/repos/${REPO}/actions/workflows/${FILE}/dispatches`], true]);
+    const forbidden = ['runs/1/cancel', 'runs/1/rerun', 'runs/1/rerun-failed-jobs', 'runs/1', 'runs/1/logs', 'runs/1/approve', 'runs/1/pending_deployments', 'jobs/1/rerun', 'caches', 'caches/1', 'artifacts/1', `workflows/${FILE}/enable`, `workflows/${FILE}/disable`, `workflows/${FILE}`, 'secrets/X', 'variables/X', 'permissions', 'runners/1', `workflows/${FILE}/dispatches/x`];
+    t('positive control: every cancel / re-run / delete / log / approve / cache / artifact / enable / disable / secret / variable / runner path under actions/* is caught by a refused family', forbidden.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/actions/${tail}`))), []);
   }
 
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────

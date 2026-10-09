@@ -7,7 +7,6 @@
 - 出口代理按设计只放 repo-scoped 路径(`/repos/{o}/{r}/...`)加 `/rate_limit`;org 级端点未实测。
 - ✓ 按席位类别限定:每个 ✓ = 会话门开着的席位实调通过,⛔ 无 ✓ 不当已验证事实。
 - 403 后 `/rate_limit` 判凭据形态:15000/时 = 凭据活被 repo-scoping 拒;60/时或 auth 错 = 无凭据。
-- 两只桶:MCP 记链接用户 5000/时,兄弟会话共享同桶;REST/CCR 记 App 安装 15000/时。
 - `objectstack-fleet[bot]` 经 `fleet-write` 中继:五个写工具与 `with-fleet.sh --via auto` 共一选择器。
 - 三条件全立才 `dispatch`:`CCR_AGENT_PROXY_ENABLED=1`、会话 id、中继活着;否则 `direct`,印一行。
 - 会话 id 由容器 `CLAUDE_CODE_REMOTE_SESSION_ID` 派生;`OS_FLEET_SESSION` 只覆盖本地检出与测试。
@@ -49,6 +48,7 @@
 - ✓ `origin/main` 合进 PR head:`PUT .../pulls/{n}/update-branch`,PM 席位、零文件写、真合并提交。
 - `expected_head_sha` 须完整 40 字符 SHA(短 SHA 回 422);base 未动回 422 = 无事可做,不是失败。
 - ✓ 落地经中继 `node scripts/pm/fleet-write/dispatch.mjs --repo O/N --actions-file F`;`--via dispatch` 同载。
+- ✓ 启动 run 走 op `workflow_dispatch`:解锁物是白名单 run 才启;入表只经 workflow 自己的 PR。
 - ⛔ 裸 `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 零改;状态码不作数,`GET /pulls/{n}` 才作数。
 - 线程自己建:`POST .../pulls/{n}/comments` 带 `commit_id`·`path`·`line`,回读看 `review_threads`。
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
