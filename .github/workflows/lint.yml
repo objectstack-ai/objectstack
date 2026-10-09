@@ -4369,6 +4369,16 @@ jobs:
       - name: Test-timing parser self-test
         run: node scripts/report-test-timings.mjs --self-test
 
+      # The per-package suite-duration ratchet's own instrument (#16468). The
+      # gate runs in ci.yml's `Test Core` aggregator, where a clean tree with
+      # every suite under its ceiling reads OK whether or not the over-ceiling,
+      # absent-package and summed-slice rules still work -- so its self-test,
+      # which feeds those shapes in, runs here with teeth. Invoked as `node` for
+      # the GATE INVOCATION IDIOM reason at the top of this file. In-process
+      # fixtures, no IO, milliseconds.
+      - name: Suite-duration ceiling check self-test
+        run: node scripts/check-test-suite-ceilings.mjs --self-test
+
       # Hand-written `.d.mts` mirrors (#10549). `scripts/js-comment-mask.mjs`
       # and `scripts/check-regen-pending.mjs` are untyped `.mjs` that each ship
       # a hand-written declaration beside them, and both files say "keep this in
