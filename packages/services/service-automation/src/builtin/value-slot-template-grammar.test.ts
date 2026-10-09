@@ -149,6 +149,13 @@ describe('the remedy a refused path prints reads, through CEL, the value the int
     expectReadingsAgree(`{${name}}`, variables, value);
     expectReadingsAgree(`{${name}.0}`, variables, 'first');
     expectReadingsAgree(`{${name}.1.key}`, variables, 'second');
+    expectReadingsAgree(`{${name}.tags}`, new Map<string, unknown>([[name, { tags: 'T' }]]), 'T');
+  });
+
+  it('the guard is read off the refusal too, so each row above evaluates it where one is printed', () => {
+    expect(printedSpellings('{list.tags}')).toEqual(['vars["list"].tags', 'has(vars.list.tags) ? vars.list.tags : null']);
+    expect(printedSpellings('{list}')).toEqual(['vars["list"]', 'has(vars.list) ? vars.list : null']);
+    expect(printedSpellings('{null.tags}')).toEqual(['vars["null"].tags']);
   });
 
   it('a later keyword segment, and an index in the middle of a path', () => {
