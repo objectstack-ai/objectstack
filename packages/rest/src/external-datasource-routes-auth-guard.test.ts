@@ -240,12 +240,14 @@ async function bootFederation(
       }
       if (object === 'sys_user_permission_set') {
         return query?.where?.user_id === 'u_federation' && grants.length > 0
-          ? [{ id: 'ups_1', user_id: 'u_federation', permission_set_id: GRANT_SET_ID, organization_id: null }]
+          ? [{ id: 'ups_1', user_id: 'u_federation', permission_set_id: GRANT_SET_ID, permission_set: 'federation_caller', organization_id: null }]
           : [];
       }
       if (object === 'sys_permission_set') {
+        // By id (a position binding) or by name (a user grant, ADR-0131 D4).
         const ids: string[] = query?.where?.id?.$in ?? [];
-        return ids.includes(GRANT_SET_ID)
+        const names: string[] = query?.where?.name?.$in ?? [];
+        return ids.includes(GRANT_SET_ID) || names.includes('federation_caller')
           ? [{
               id: GRANT_SET_ID,
               name: 'federation_caller',

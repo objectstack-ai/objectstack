@@ -93,6 +93,8 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
         Object.entries(where ?? {}).every(([k, v]) => {
             if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
             if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
+            // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+            if (v === null) return (row[k] ?? null) === null;
             return row[k] === v;
         });
     return {
@@ -110,10 +112,10 @@ function authzTables(shape: Shape) {
         // The ORG-scoped authoring capability every shape holds, so the
         // `manage_metadata` tier above always passes and this gate is the only
         // thing under test. Scoped to the org, never unscoped.
-        { user_id: ACTOR, permission_set_id: PS_METADATA, organization_id: TENANT_ORG },
+        { user_id: ACTOR, permission_set_id: PS_METADATA, permission_set: 'metadata_author', organization_id: TENANT_ORG },
     ];
     if (shape === 'genuine') {
-        userSets.push({ user_id: ACTOR, permission_set_id: PS_ADMIN, organization_id: null });
+        userSets.push({ user_id: ACTOR, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: null });
     }
     return {
         sys_user: [{ id: ACTOR, email: 'tenant-admin@example.com', email_verified: true }],
