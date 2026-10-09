@@ -168,10 +168,10 @@ describe('execute-time config parse (#4277)', () => {
     expect(result.error).toContain('config.title');
   });
 
-  it('string slots parse RAW templates — a `{token}` recipients/title passes', async () => {
+  it('string slots parse RAW templates — a `{token}` recipient and a `{{ }}` title pass', async () => {
     const engine = engineWith();
     engine.registerFlow('f', flowWith('notify', {
-      recipients: '{who}', title: 'Hi {who}',
+      recipients: '{who}', title: 'Hi {{ who }}',
     }, { variables: [{ name: 'who', type: 'text', isInput: true }] }));
 
     // No messaging service wired → the node degrades to a skipped success;

@@ -55,8 +55,8 @@ function pluginCtx() {
 
 /** The parent's own completion toast — it must never ride a child's refusal. */
 const PARENT_TOAST = 'Parent completed!';
-/** The authored refusal template. `{kind}` is what makes the text per-record. */
-const REFUSAL_TEMPLATE = 'Refused: {kind} is not eligible';
+/** The authored refusal template. `{{ kind }}` is what makes the text per-record. */
+const REFUSAL_TEMPLATE = 'Refused: {{ kind }} is not eligible';
 /** …rendered in the CHILD against the value the screen collected. */
 const RENDERED_REFUSAL = 'Refused: vip is not eligible';
 /**

@@ -80,5 +80,9 @@ export * from './flow-node-config-refusals';
 // judge `FlowValueSlotSchema`, `registerFlow`, `objectstack validate` and the
 // executors share.
 export * from './flow-value-slot-template';
+// [#22110] ADR-0032 §3's `{{ }}` delimiter in the flow TEXT slots — the one
+// judge of the single-brace `{…}` tokens they still carry, shared by the three
+// node contracts, `registerFlow` and `objectstack validate`.
+export * from './flow-text-slot-template';
 export * from './bpmn-interop.zod';
 export * from './bpmn-mapping';

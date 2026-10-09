@@ -1,12 +1,18 @@
 # ADR-0138: The guest model — one anonymous principal, a closed list of doors, one grants channel, one organization rule, and a fate for every declared guest key
 
-**Status**: Proposed (2026-10-08). The eight answers are ruled; this record transcribes them into
-contracts, each with its enforcement point. It becomes **Accepted** only when every item under
-[Acceptance criteria](#acceptance-criteria) holds: the maintainer's approval of this record and the
-G2 sweep recorded. The one letter the first ruling left open, [D2b](#d2b--the-anonymous-door--elevated-flow-combination-a-publish-refusal),
-is ruled R by the supplement, and D1 is revised to A′ by the same supplement. ⛔ Nothing in
-`packages/**`, `content/docs/**` or `skills/**` changes before acceptance; the execution cards are
-cut after it ([Execution plan](#execution-plan-after-acceptance)).
+**Status**: Proposed (2026-10-08; revised 2026-10-09 under the G2 ruling). The eight answers are
+ruled; this record transcribes them into contracts, each with its enforcement point. It becomes
+**Accepted** only when every item under [Acceptance criteria](#acceptance-criteria) holds: the
+maintainer's approval of this record and the G2 sweep answering as D2 states. The one letter the
+first ruling left open, [D2b](#d2b--the-anonymous-door--elevated-flow-combination-a-publish-refusal),
+is ruled R by the supplement, and D1 is revised to A′ by the same supplement. The G2 sweep was
+measured on 2026-10-09: classes 1 to 5 matched D2, and the everything-else class did not. The G2
+ruling adds a sixth class to D2, the `acl: 'public_read'` file download, and holds acceptance until
+three defect cards have closed the everything-else class and a re-measurement answers 401
+throughout ([criterion 2](#acceptance-criteria)). ⛔ No change this record decides lands in
+`packages/**`, `content/docs/**` or `skills/**` before acceptance; the execution cards are cut after
+it ([Execution plan](#execution-plan-after-acceptance)). The three defect cards land before it: they
+enforce ADR-0056 D2 and ADR-0104, which are already Accepted, and the G2 ruling orders them first.
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -18,8 +24,11 @@ from ruling A on [#22147](https://github.com/objectstack-ai/objectstack/issues/2
 The ruling supplement
 [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963)
 (2026-10-08, maintainer 「D1 A′ D2b R」) revises D1 to A′, under which the platform declares no
-default owner, and rules D2b R, a publish refusal with a prescription. D9 records the maintainer's ruling of 2026-08-08 (Option A, landed as commit
-`f586f1a89`).
+default owner, and rules D2b R, a publish refusal with a prescription. The G2 ruling
+[`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686)
+(2026-10-09, decision batch #300 item 1, letter A, maintainer 「同意」) answers the measured sweep:
+D2 gains class 6, and the everything-else class is closed and re-measured before acceptance. D9
+records the maintainer's ruling of 2026-08-08 (Option A, landed as commit `f586f1a89`).
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove: every
 declared thing below names its enforcer), [ADR-0056](./0056-permission-model-landing-verification.md)
 D2 (anonymous default-deny), [ADR-0073](./0073-automation-execution-identity.md) D2/D3/D5 and M2
@@ -33,18 +42,23 @@ disposition vocabulary), [ADR-0090](./0090-permission-model-v2-concept-convergen
 endpoints carry an armed rate limit), [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
 D3/D9 (the catalog is environment-level; a write's organization is derived or refused),
 [ADR-0041](./0041-flow-trigger-family.md) (the signed inbound-hook channel),
-[ADR-0046](./0046-package-docs-as-metadata.md) §6.7 (the public book audience gate).
+[ADR-0046](./0046-package-docs-as-metadata.md) §6.7 (the public book audience gate),
+[ADR-0104](./0104-field-runtime-value-shape-contract.md) D3 wave 2 (the anonymous capability URL
+demoted to the opt-in `acl: 'public_read'`, D2's class 6).
 **Amends, on acceptance**: ADR-0090 D9 (the `guest` anchor's bindings become enforced — D3 and D4
 here) and ADR-0056 D2 (its explicit exposures become a closed list — D2 here). **Leaves unchanged**:
-ADR-0106 D7, ADR-0121 D6, ADR-0096 D5 and E1, ADR-0135. The back-pointer lines are written out under
+ADR-0104 (D2 names its `public_read` door as class 6 and changes nothing in it), ADR-0106 D7,
+ADR-0121 D6, ADR-0096 D5 and E1, ADR-0135. The back-pointer lines are written out under
 [Acceptance criteria](#acceptance-criteria) and land with the accepting change, not before it.
 **Consumers**: `@objectstack/core` (`security/`), `@objectstack/plugin-security`,
 `@objectstack/runtime`, `@objectstack/rest`, `@objectstack/metadata-core` (the form doors' rule),
-`@objectstack/plugin-sharing` (D8), `@objectstack/service-automation` (D2b), and `@objectstack/spec`
-for the contract changes the cards carry after acceptance (D2b's publish refusal, D8's retirement).
-**Card**: [#22146](https://github.com/objectstack-ai/objectstack/issues/22146) (round 3 of 3: measurement,
-decision, this draft). ⛔ Classes, positions and functions only: door-level readings that would
-work as an exploit recipe stay private, as [#21158](https://github.com/objectstack-ai/objectstack/issues/21158)'s did.
+`@objectstack/plugin-sharing` (D8), `@objectstack/service-automation` (D2b),
+`@objectstack/service-storage` (D2's class 6), and `@objectstack/spec` for the contract changes the
+cards carry after acceptance (D2b's publish refusal, D8's retirement).
+**Card**: [#22146](https://github.com/objectstack-ai/objectstack/issues/22146) (rounds 1 to 3:
+measurement, decision, the draft; then the G2 sweep and this revision under its ruling). ⛔ Classes,
+positions and functions only: door-level readings that would work as an exploit recipe stay
+private, as [#21158](https://github.com/objectstack-ai/objectstack/issues/21158)'s did.
 
 ---
 
@@ -60,7 +74,7 @@ enforced, one only in a code comment, and one never answered. This record puts t
 | | Question | Ruled | Contract in this record | Enforced by |
 |:--|:--|:--|:--|:--|
 | [D1](#d1--identity-and-ownership-the-guest-is-a-principal-never-an-owner) | identity and ownership | A′ (supplement) | the guest never owns a record and a forged owner is refused; who owns a guest-written row is the business scenario's own metadata; the platform stamps nothing and declares no default | the guest branch of the owner-anchor stamp in `SecurityPlugin` (card E3) |
-| [D2](#d2--the-closed-list-of-doors) | the doors | A, plus a must-answer | five door classes; everything else answers 401, decided per domain | `shouldDenyAnonymous` at each domain's entry; the conformance matrix (card E2) |
+| [D2](#d2--the-closed-list-of-doors) | the doors | A, plus a must-answer; class 6 added by the G2 ruling | six door classes; everything else answers 401, decided per domain | `shouldDenyAnonymous` at each domain's entry; the conformance matrix (card E2) |
 | [D2b](#d2b--the-anonymous-door--elevated-flow-combination-a-publish-refusal) | anonymous door × elevated flow | R (supplement) | publish refuses an anonymous flow endpoint whose target runs as `system`, in both directions, with a prescription; no door triggers an elevated flow directly | the publish path, in both directions (card E2) |
 | [D3](#d3--the-grants-channel-adr-0090-d9-enforced) | the grants channel | A | the `guest` anchor's bindings resolve for the guest; an empty set denies all; no second channel | the anonymous branch of `resolveAuthzContext` (card E1) |
 | [D4](#d4--the-organization-a-guest-acts-in) | organization | A, with the form doors kept as they are | resolved only when the organization is unique; refused on a multi-organization deployment until D5 exists | the guest entry's organization step, sharing ADR-0131 D9's predicate (card E1) |
@@ -83,6 +97,13 @@ acceptance precondition of the ADR's third round, run in an environment that per
 The supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963) then ruled the two letters the draft asked for, verbatim
 「D1 A′ D2b R」: D1 keeps its invariant and loses the organization-level default owner, and D2b is a
 publish refusal with a prescription.
+
+The G2 ruling [`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686)
+(maintainer 「同意」) answered the measured sweep: classes 1 to 5 match D2, and the everything-else
+class does not. D2 gains a sixth class, the `acl: 'public_read'` file download that ADR-0104 already
+rules, and acceptance waits until three defect cards have closed the everything-else class and a
+re-measurement answers 401 throughout ([criterion 2](#acceptance-criteria)). The first ruling's
+summary above still says five door classes, because it is quoted as it was ruled.
 
 ---
 
@@ -137,7 +158,8 @@ re-checked at the same head, shape the decisions:
 - **G2 — the booted sweep was not run.** The round's booted per-door-class anonymous sweep stopped
   at the environment's safety check, and nothing was worked around. The static door-class reading
   shows every class answering a denial or a narrow door. The maintainer ruled G2: that reading
-  suffices to rule, and the booted sweep is an acceptance precondition of this record.
+  suffices to rule, and the booted sweep is an acceptance precondition of this record. The sweep
+  was run on 2026-10-09; its class-level result is recorded under [criterion 2](#acceptance-criteria).
 
 ### How the mainstream platforms model it
 
@@ -210,9 +232,10 @@ as it does today. **Card**: E3.
 
 ### D2 — The closed list of doors
 
-*Ruled: Q2 A, plus the must-answer that D2b states.*
+*Ruled: Q2 A, plus the must-answer that D2b states. Class 6 added by the G2 ruling
+[`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686).*
 
-An unauthenticated request is served by exactly these five door classes. Each derives its own
+An unauthenticated request is served by exactly these six door classes. Each derives its own
 narrow authorization from a declaration; none derives it from a deployment posture.
 
 | # | Door class | What admits the request | What it runs as | Enforced by |
@@ -222,6 +245,7 @@ narrow authorization from a declaration; none derives it from a deployment postu
 | 3 | the public book and doc metadata reads | `book.audience: 'public'` | reachability only; the ADR-0046 §6.7 gate authorizes the read | `packages/rest/src/meta-item-read-gate.ts#isPublicAudienceRead` |
 | 4 | `authRequired: false` endpoints of `type: 'object_operation'` | the endpoint declaration, with the armed rate limit ADR-0121 D6 requires | the guest envelope (D9), under the guest's grants (D3) | `packages/runtime/src/security/resolve-execution-context.ts#resolveExecutionContext`; the CRUD gate |
 | 5 | `authRequired: false` endpoints of `type: 'flow'` | the same | the guest envelope at the door; inside, the flow's own declared `runAs`, which publish never lets be `system` behind this door (D2b) | the same, then `@objectstack/service-automation` |
+| 6 | the `acl: 'public_read'` file download (ADR-0104 D3 wave 2) | the file's own `acl: 'public_read'` (`packages/services/service-storage/src/objects/system-file.object.ts#acl`), an explicit opt-in: the upload routes create a file `private` | a read of that one file's bytes, nothing else; no principal is evaluated | `packages/services/service-storage/src/storage-routes.ts#registerStorageRoutes`, at the download gate `#authorizeDownload` that both download routes call |
 
 **Everything else answers 401** (`UNAUTHENTICATED`). The decision is taken once per **domain**, as the
 domain's first statement, never surface by surface:
@@ -242,12 +266,20 @@ envelope does not carry, so the envelope the runtime face assembles for every se
 
 **The adoption rule of D9, closed.** D9's ruling lets a surface adopt the guest entry only when its
 product semantics serve anonymous principals. D2 turns that sentence into a list: classes 4 and 5
-take the guest envelope; classes 1 to 3 take their own declared grant; nothing else serves a guest.
+take the guest envelope; classes 1 to 3 and 6 take their own declaration; nothing else serves a
+guest.
 
 **Enforced by**: `shouldDenyAnonymous` at each domain's entry, today; and the authorization
 conformance matrix (`packages/qa/dogfood/test/authz-conformance.matrix.ts#AUTHZ_CONFORMANCE`), whose
-rows already fail on a deleted deny call or an unclassified route. Card E2 records the five classes
+rows already fail on a deleted deny call or an unclassified route. Card E2 records the six classes
 there. ⛔ No new gate script. **Card**: E2.
+
+**Measured, and not yet held (G2, 2026-10-09).** The booted sweep found three families outside this
+list that served an anonymous caller instead of answering 401: the `/i18n` dispatcher domain, the
+API-description endpoints, and storage download of a file with no scope and no field owner. Each has
+its own defect card, and acceptance waits on all three ([criterion 2](#acceptance-criteria)). The
+same sweep found `acl: 'public_read'` files served anonymously; that is ADR-0104's ruled opt-in,
+listed above as class 6.
 
 ### D2b — The anonymous door × elevated flow combination: a publish refusal
 
@@ -481,10 +513,10 @@ that card lands; no row is declared without an enforcer.
 
 | Declared | Where | Enforced by | Status |
 |:--|:--|:--|:--|
-| anonymous default-deny | ADR-0056 D2; D2 | `shouldDenyAnonymous`, at each domain's entry | enforced |
+| anonymous default-deny | ADR-0056 D2; D2 | `shouldDenyAnonymous`, at each domain's entry | enforced, except in the three families the G2 sweep found; their defect cards land before acceptance (criterion 2) |
 | the guest envelope | D9 | `assembleExecutionContextOrGuest` (through `entryFields`) | enforced |
 | the fail-closed default entry | D9 | `assembleExecutionContext` | enforced |
-| the five door classes | D2 | the enforcer named in each row of D2's table | enforced per door |
+| the six door classes | D2 | the enforcer named in each row of D2's table | enforced per door |
 | the list itself | D2 | the conformance matrix, `AUTHZ_CONFORMANCE` | card E2 records it |
 | no `system` flow behind an anonymous flow door | D2b | the publish path, in both directions | card E2 |
 | the guest's grants, and deny-all when none | D3 | the anonymous branch of `resolveAuthzContext` | card E1 |
@@ -520,9 +552,14 @@ that card lands; no row is declared without an enforcer.
 - **The guest is one principal on one pipeline.** No guest special case enters the row-level
   evaluator, the CRUD gate or the masker; what differs for the guest is what it holds (D3) and where
   it acts (D4), both resolved before any gate runs.
-- **Not measured, and named:** the booted per-class sweep (G2, an acceptance precondition); the
-  guest's row scope for each sharing model (E1's pins); the anonymous surfaces of the cloud
-  repository, which this round did not read.
+- **Class 6 changes nothing that serves today.** `authorizeDownload` already honours ADR-0104's
+  opt-in. Listing it in D2 makes the re-measurement read a `public_read` download as a door and
+  not as a gap, and [#22431](https://github.com/objectstack-ai/objectstack/issues/22431), the defect
+  card for files with no scope and no field owner, keeps that door anonymous.
+- **Measured since the draft, and not met yet:** the booted per-class sweep (G2, 2026-10-09;
+  [criterion 2](#acceptance-criteria)). **Not measured, and named:** the guest's row scope for each
+  sharing model (E1's pins), and the anonymous surfaces of the cloud repository, which no round has
+  read.
 
 ## What the ruling did not settle
 
@@ -537,8 +574,9 @@ Stated so that approving this record approves these readings knowingly.
 
 ## Alternatives considered
 
-The letters the ruling did not take, from the decision request
-([`6052740067`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6052740067)):
+The letters the rulings did not take, from the decision requests
+([`6052740067`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6052740067),
+and for the G2 result [`6074404262`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074404262)):
 
 - **Q1 B — the guest as owner.** Rows that nobody inside the organization can manage, and an owner
   column holding a principal that never signs in.
@@ -568,17 +606,52 @@ The letters the ruling did not take, from the decision request
   ruled words, refused until M2 lands, is R's interim exactly.
 - **G1 — run the booted sweep before ruling.** One more round of waiting, against a static reading
   whose failure direction is safe: every door class reads as a denial or a narrow door.
+- **G2 result B — accept now, and close the three families under E2** (not taken by the G2 ruling
+  [`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686)).
+  In the ruling's words, *"an Accepted record with a known, measured gap empties the word, and sets
+  the precedent for the next record"*.
+- **G2 result C — as A, without public cards** (not taken by the same ruling). In the ruling's words,
+  *"the code is open source and the three families read from it, so function-level cards add little
+  exposure and keep the fixes in the ordinary queue"*.
 
 ## Acceptance criteria
 
-This record moves from Proposed to Accepted when all four hold; the third is met:
+This record moves from Proposed to Accepted when all four hold. The third is met; the second was
+measured on 2026-10-09 and is not met yet:
 
 1. **The maintainer approves this record** (`docs/adr/**` is a Tier H surface, Prime Directive #14).
 2. **G2 — the booted per-door-class anonymous sweep**, run in an environment that permits the probe.
-   For each of D2's five classes, and for the everything-else class, a booted reference deployment's
+   For each of D2's six classes, and for the everything-else class, a booted reference deployment's
    anonymous answer (its status class, and what is served) matches D2's table. The readings stay
    private, as #21158's did; the card records a class-level result only. ⛔ This record names no
    driver and no probe.
+   - **Measured on 2026-10-09, not met.** One reference deployment, the showcase, was booted from
+     `origin/main` `abd254508b` (the report
+     [`6074331185`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074331185),
+     reviewed in [`6074404262`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074404262)):
+     - **Classes 1 to 5 match D2's table.** Class 4 is denied with no grant bound: D3's empty
+       state, reached today as a side effect of E1 being unbuilt. Class 5 matches in admission and
+       narrowness; D2b's refusal is not built yet (E2, the record's own interim).
+     - **The `acl: 'public_read'` file download** was served anonymously, as ADR-0104 rules, while
+       D2 did not yet name it. The G2 ruling adds it as class 6.
+     - **The everything-else class does not match.** Three families outside the list served an
+       anonymous caller instead of answering 401:
+       - the `/i18n` dispatcher domain: `packages/runtime/src/domains/i18n.ts#handleI18nRequest`
+         makes no `shouldDenyAnonymous` call, unlike every other dispatcher domain (ADR-0056 D2);
+       - the API-description endpoints, `packages/rest/src/rest-server.ts#RestServer.registerOpenApiEndpoints`;
+       - storage download of a file with no scope and no field owner, through the download routes of
+         `packages/services/service-storage/src/storage-routes.ts#registerStorageRoutes`.
+   - **What remains, by the G2 ruling
+     [`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686).**
+     Three defect cards, public and at function level:
+     [#22432](https://github.com/objectstack-ai/objectstack/issues/22432) (the `/i18n` dispatcher
+     domain, with an objectui companion for the Console's sign-in page),
+     [#22430](https://github.com/objectstack-ai/objectstack/issues/22430) (the API-description
+     endpoints) and [#22431](https://github.com/objectstack-ai/objectstack/issues/22431) (storage
+     download of a file with no scope and no field owner; an `acl: 'public_read'` file stays
+     anonymous). Then, verbatim: *"When the three cards have landed, the everything-else class is
+     re-measured on a booted reference deployment; when it answers 401 throughout, the acceptance PR
+     opens, with acceptance criterion 4's two back-references. ADR-0138 stays Proposed until then."*
 3. **D2b is chosen — met.** The supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963) ruled R, and D2b records it.
 4. **The back-pointers land with the accepting change**, one status-line continuation each, in the
    form ADR-0042 and ADR-0046 use for a decision amended in part:
@@ -589,22 +662,24 @@ This record moves from Proposed to Accepted when all four hold; the third is met
      requests, in the organization ADR-0138 D4 resolves; an empty set denies all.
 
    ADR-0056 status line:
-   · **Amended** (DATE, ADR-0138 D2) — D2's explicit public exposures are a closed list of five
+   · **Amended** (DATE, ADR-0138 D2) — D2's explicit public exposures are a closed list of six
      door classes; every other surface answers 401, decided per domain.
    ```
 
-   No line is added to ADR-0106, ADR-0121, ADR-0096 or ADR-0135: this record leaves their decisions
-   as they are.
+   No line is added to ADR-0104, ADR-0106, ADR-0121, ADR-0096 or ADR-0135: this record leaves their
+   decisions as they are.
 
 ## Execution plan (after acceptance)
 
 The seat cuts these cards from the accepted record. ⛔ None is filed before acceptance, and ⛔ none
-changes `packages/spec` before it.
+changes `packages/spec` before it. The three defect cards the G2 ruling ordered (#22432, #22430,
+#22431; [criterion 2](#acceptance-criteria)) are not execution cards of this record: they enforce
+ADR-0056 D2 and ADR-0104, which are already Accepted, and they land before acceptance.
 
 | Card | Decisions | What lands | Pins | ADR-0087 disposition | Order |
 |:--|:--|:--|:--|:--|:--|
 | **E1** — the grants channel | D3, D4 | the guest entry resolves D4's organization, then the `guest` anchor's bindings; the located refusal where D4 refuses | no binding: denied on class 4; a bound read set: that object only; the baseline, `everyone` and the name fold never reach the guest; a multi-organization deployment: the located refusal; the form doors unchanged; the guest's row scope for each sharing model; the bindings that start granting, counted on the reference apps | none: no authorable key, accept set or stored shape moves; the changeset names the bindings that start granting | first |
-| **E2** — the closed list and denial by domain, and D2b | D2, D2b, D9's pointer | the five classes recorded in the conformance matrix; any face of a listed domain that still decides per face moved to the domain-level deny; D2b's publish refusal in both directions, with its prescription; the module doc of `assemble-execution-context.ts` cites this record | a new route in a governed domain answers 401; each class's admission; D2b refused in both directions (an anonymous flow endpoint naming a `system` flow, and a flow set to `system` while an anonymous endpoint names it), each refusal carrying the prescription | `registered`, one new semantic entry: the publish refusal narrows the accept set, and no conversion can choose a posture for the author | after acceptance |
+| **E2** — the closed list and denial by domain, and D2b | D2, D2b, D9's pointer | the six classes recorded in the conformance matrix; any face of a listed domain that still decides per face moved to the domain-level deny; D2b's publish refusal in both directions, with its prescription; the module doc of `assemble-execution-context.ts` cites this record | a new route in a governed domain answers 401; each class's admission; D2b refused in both directions (an anonymous flow endpoint naming a `system` flow, and a flow set to `system` while an anonymous endpoint names it), each refusal carrying the prescription | `registered`, one new semantic entry: the publish refusal narrows the accept set, and no conversion can choose a posture for the author | after acceptance |
 | **E3** — the stamp's guest branch | D1 | the owner-anchor stamp's guest branch: never the guest, never the system principal, a forged owner refused, the owner unset unless the scenario sets it | a guest insert with nothing in the scenario setting an owner leaves it unset; an owner set by a hook, flow or assignment rule stands; a guest-supplied owner refused at an endpoint and stripped at the form doors; the owner column never holds the guest or the system principal | none: no new key, and nothing moves | after E1, which opens guest inserts at the endpoint doors |
 | **E4** — retire `sys_record_share`'s `guest` recipient | D8 | the select option and the contract's union member removed, translations regenerated, following the `spec-property-retirement` playbook where it applies | the value refused with its prescription; a census showing no stored row carries it | expected `not-required (no-migration-prescription)`; `registered` if the census finds a stored metadata surface carrying the value | independent |
 
@@ -625,7 +700,16 @@ changes `packages/spec` before it.
   the pointers ([`6052731596`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6052731596),
   [`6053819337`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6053819337)),
   the ruling ([`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537)),
-  and its supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963) (D1 A′, D2b R).
+  and its supplement [`6056614963`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6056614963) (D1 A′, D2b R);
+  the G2 sweep ([`6074331185`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074331185)),
+  its review and decision request
+  ([`6074404262`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074404262)),
+  and the G2 ruling ([`6074960686`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6074960686)).
+- The defect cards the G2 ruling ordered:
+  [#22432](https://github.com/objectstack-ai/objectstack/issues/22432), the `/i18n` dispatcher domain
+  (with an objectui companion); [#22430](https://github.com/objectstack-ai/objectstack/issues/22430),
+  the API-description endpoints; [#22431](https://github.com/objectstack-ai/objectstack/issues/22431),
+  storage download of a file with no scope and no field owner.
 - [#22147](https://github.com/objectstack-ai/objectstack/issues/22147): ruling C
   ([`6051299672`](https://github.com/objectstack-ai/objectstack/issues/22147#issuecomment-6051299672)),
   the guest at `authRequired: false` endpoints; ruling A
