@@ -20,8 +20,8 @@
 // authz-row: scope-depth
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 // [#6139] The reference resolver is typed against the REAL contract, not `any`.
@@ -58,7 +58,7 @@ interface World { stack: VerifyStack; tokens: Record<Who, string>; }
 // Build a BU world: bu_parent ⊃ bu_child (sibling bu_other is separate).
 // alice+carol ∈ bu_parent, bob ∈ bu_child, dave ∈ bu_other. Each owns one note.
 async function bootScopeWorld(scope: 'unit' | 'unit_and_below' | 'own_and_reports', withResolver = true): Promise<World> {
-  const stack = await bootStack(showcaseStack, {
+  const stack = await bootShowcase({
     security: new SecurityPlugin({
       defaultPermissionSets: [...securityDefaultPermissionSets, scopeProfile(scope)],
     }),

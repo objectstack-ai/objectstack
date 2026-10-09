@@ -49,6 +49,25 @@ const TARGET_OBJECT = 'sched_org_target';
 const SWEEP_FLOW = 'sched_org_sweep';
 const SWEEP_JOB = `flow-time-relative:${SWEEP_FLOW}`;
 
+/**
+ * [#22301] The fixture's `requires: ['automation', 'triggers', 'messaging']` is
+ * now honoured by `bootStack`, as `objectstack serve` honours it, so the boot
+ * mounts the real trigger plugins — `TimeRelativeTriggerPlugin` among them. That
+ * real trigger would bind this file's sweep flow to the REAL job service at
+ * `registerFlow`, before the trigger this file registers by hand (over its fake
+ * job service) ever saw it. A caller-held instance under a provider's identity
+ * takes precedence (`serve`'s "an explicit instance wins"), so this stand-in —
+ * registered under the time-relative provider's `name` and doing nothing —
+ * keeps the fixture's `requires` as authored and leaves the time-relative
+ * trigger to the one this file registers.
+ */
+class TimeRelativeTriggerStandIn {
+  readonly name = 'com.objectstack.trigger.time-relative';
+  readonly version = '0.0.0';
+  readonly type = 'standard';
+  async init(): Promise<void> {}
+}
+
 /** A job service the test fires by hand — the sweep's cadence is not the subject. */
 function fakeJobService(): {
   service: JobServiceSurface;
@@ -133,7 +152,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
         // it off: with the outbox + dispatcher on, `sys_inbox_message` is
         // written by a background dispatcher on its own schedule, so a count
         // taken right after the tick reads empty whatever the sweep selected.
-        extraPlugins: [new MessagingServicePlugin({ reliableDelivery: false })],
+        extraPlugins: [new MessagingServicePlugin({ reliableDelivery: false }), new TimeRelativeTriggerStandIn()],
       });
       await stack.signIn();
       ql = await stack.kernel.getServiceAsync('objectql');

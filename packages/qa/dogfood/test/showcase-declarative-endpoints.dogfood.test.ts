@@ -51,7 +51,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { ConnectorRestPlugin } from '@objectstack/connector-rest';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
@@ -125,7 +126,7 @@ beforeAll(async () => {
   writeBuildShapedArtifact(showcaseStack as Record<string, unknown>, artifactPath);
   artifactOnDisk = JSON.parse(readFileSync(artifactPath, 'utf8')) as Record<string, unknown>;
 
-  stack = await bootStack(showcaseStack, {
+  stack = await bootShowcase({
     // The `flow`-typed endpoint delegates to `IAutomationService.execute`;
     // without the service the honest answer is a 501, not a flow run.
     automation: true,
@@ -180,11 +181,26 @@ describe('[#6293] the stand-in artifact carries what a built one carries', () =>
     ).toEqual({ handler: 'sweepProjectHealth', effect: 'writes' });
   });
 
+  /**
+   * [#22301] The showcase configuration as `JSON.stringify` reads it, minus its
+   * `plugins`. `bootStack` now mounts the app's own plugin instances, as
+   * `objectstack serve` does, and a mounted instance holds a reference into its
+   * kernel — so after the boot above the whole configuration no longer
+   * serializes (`Converting circular structure to JSON`). The plugins are live
+   * instances, not declarations, and no part of what the two cases below
+   * measure (the `functions` map), so the copy leaves them out rather than
+   * cloning a kernel.
+   */
+  const serializableShowcase = (): Record<string, unknown> => ({
+    ...(showcaseStack as Record<string, unknown>),
+    plugins: undefined,
+  });
+
   it('the substitute it replaced still drops them — the trap, pinned', () => {
     // Not a test of `JSON.stringify`: a test of why the helper above exists,
     // executable at the one call site that was bitten. If this ever stops
     // holding, the helper's whole premise is up for re-reading.
-    const naive = JSON.parse(JSON.stringify(showcaseStack)) as Record<string, unknown>;
+    const naive = JSON.parse(JSON.stringify(serializableShowcase())) as Record<string, unknown>;
     expect(
       naive.functions,
       'the bare entry vanishes key and all; the declared one is left a headless husk',
@@ -203,7 +219,7 @@ describe('[#6293] the stand-in artifact carries what a built one carries', () =>
     // and the SPEC refuses it, here and in `objectstack build` alike. The
     // reconciliation stays as the backstop for a producer that starts dropping
     // again.
-    const residue = JSON.parse(JSON.stringify(showcaseStack)) as Record<string, unknown>;
+    const residue = JSON.parse(JSON.stringify(serializableShowcase())) as Record<string, unknown>;
     expect(() => buildShapedArtifact(residue))
       .toThrowError(/does not satisfy ObjectStackDefinitionSchema[\s\S]*functions/);
   });

@@ -365,6 +365,25 @@ export const SysApprovalRequest = ObjectSchema.create({
     updated_at: Field.datetime({ label: 'Updated At', required: false, group: 'System' }),
   },
 
+  // [#22211 ruling A] The per-caller `viewer` block (#3310), declared as a read
+  // attachment: `ApprovalService.attachViewers` computes it from the CALLER's
+  // identity and sets it on every row `listRequests` / `getRequest` serve. It
+  // is not a field — no column, and never stored — so the rows the data engine
+  // itself returns (the generic data door, a record-change flow's `record`, a
+  // flow action's subject load) never carry it.
+  //
+  // Two readers hold this declaration to the truth:
+  //  - the shared build validator judges the `visible` predicates below
+  //    against it: `record.viewer` resolves, and `record.viewer.<leaf>` only
+  //    to a leaf declared here (`sys-approval-request-attached-on-read.test.ts`);
+  //  - the conformance test pins that the keys `attachViewers` emits, and the
+  //    runtime type of each value, equal this block, for every caller shape it
+  //    serves (`sys-approval-request-viewer.conformance.test.ts`). A leaf added
+  //    to the service without this block, or here without the service, is red.
+  attachedOnRead: {
+    viewer: { can_act: 'boolean', can_override: 'boolean', is_submitter: 'boolean' },
+  },
+
   indexes: [
     // Look up "is there a pending request for this record?" — common
     // guard on submit and on edit-while-locked checks.
@@ -398,7 +417,8 @@ export const SysApprovalRequest = ObjectSchema.create({
   // (the lever that releases the record without recording a decision nobody
   // made). `viewer` is
   // attached by getRequest/listRequests; where it is absent the predicate fails
-  // closed.
+  // closed. Its leaves are declared under `attachedOnRead` above, which is what
+  // the build validator judges these predicates against.
   //
   // Every predicate below is guarded for the SPARSE action face (#8990). This
   // binding is a list row or a record read carrying only what the caller

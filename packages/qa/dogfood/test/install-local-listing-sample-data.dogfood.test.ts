@@ -29,9 +29,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
 import crmStack from '@objectstack/example-crm';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { LocalManifestSource, MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -86,7 +86,7 @@ describe('dogfood: the install-local listing answers withSampleData per organiza
   const beforeRestart: Record<'A' | 'B', View> = {} as never;
   const afterRestart: Record<'A' | 'B', View> = {} as never;
 
-  const boot = (databaseFile: string) => bootStack(showcaseStack, {
+  const boot = (databaseFile: string) => bootShowcase({
     // `posture-only` requests the `isolated` posture — the wall is ACTIVE —
     // without the organizations runtime; the memberships are written by hand.
     multiTenant: 'posture-only',

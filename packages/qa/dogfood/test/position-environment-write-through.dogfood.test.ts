@@ -31,22 +31,18 @@
 //    boot changes nothing.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { createSecurityCatalogReader } from '@objectstack/core';
-import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/** Package-relative refs resolve against the cwd — see the sibling cold-boot files. */
-const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
 const SYS = { context: { isSystem: true } } as const;
 /** The backfill's ledger row (`position-environment-backfill.ts`). */
 const LEDGER_ID = 'adr-0131-position-environment-backfill';
 
 describe('[ADR-0131 D3] Setup positions reach the environment ledger under single (showcase)', () => {
-  let prevCwd: string;
   let dir: string;
   let db: string;
   let stack: VerifyStack | undefined;
@@ -68,14 +64,12 @@ describe('[ADR-0131 D3] Setup positions reach the environment ledger under singl
     return entry !== undefined && entry.name === name;
   };
   const start = async () => {
-    stack = await bootStack(showcaseStack, { databaseFile: db });
+    stack = await bootShowcase({ databaseFile: db });
     token = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
   };
 
   beforeAll(async () => {
-    prevCwd = process.cwd();
-    process.chdir(SHOWCASE_DIR);
     dir = mkdtempSync(join(tmpdir(), 'dogfood-15196-s7-'));
     db = join(dir, 'showcase.db');
     await start();
@@ -83,7 +77,6 @@ describe('[ADR-0131 D3] Setup positions reach the environment ledger under singl
 
   afterAll(async () => {
     await stack?.stop();
-    if (prevCwd) process.chdir(prevCwd);
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 

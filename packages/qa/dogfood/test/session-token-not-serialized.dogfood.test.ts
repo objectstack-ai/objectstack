@@ -49,8 +49,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const MEMBER_EMAIL = 'session-token-member@verify.test';
 
@@ -82,7 +82,7 @@ describe('#7823: sys_session.token (a live bearer) never serializes on the gener
   };
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     adminToken = await stack.signIn();
     memberToken = await stack.signUp(MEMBER_EMAIL);
 

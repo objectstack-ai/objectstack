@@ -42,7 +42,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
 import { ExternalDatasourceServicePlugin } from '@objectstack/service-datasource';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,7 +63,7 @@ function recordsOf(json: unknown): Array<Record<string, unknown>> {
 }
 
 async function boot(databaseFile: string): Promise<VerifyStack> {
-  return bootStack(showcaseStack, { databaseFile, extraPlugins: [new ExternalDatasourceServicePlugin()] });
+  return bootShowcase({ databaseFile, extraPlugins: [new ExternalDatasourceServicePlugin()] });
 }
 
 describe('Import as Object persists like the metadata door (showcase, cold boot)', () => {

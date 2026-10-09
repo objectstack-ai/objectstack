@@ -63,8 +63,8 @@
 
 import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { assertArmed, authSettingArmed } from './armed.js';
 
 // Must be on before the AuthPlugin builds its plugin list (kernel.use during
@@ -150,7 +150,7 @@ describe('#8102: the D5.1 /oauth2/authorize env-access gate runs on every creden
   let gateCalls: GateCall[] = [];
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
 
     // Seed the OAuth client the way cloud's seedPlatformSsoClient does.
     // `skip_consent` matters: without it a fall-through would stop at a consent

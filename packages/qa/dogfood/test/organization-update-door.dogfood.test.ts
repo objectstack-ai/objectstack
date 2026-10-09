@@ -70,8 +70,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 describe('#15873: sys_organization platform-owned columns through PATCH /data/sys_organization/{id}', () => {
   let stack: VerifyStack;
@@ -102,7 +102,7 @@ describe('#15873: sys_organization platform-owned columns through PATCH /data/sy
     // WALL (`BootOptions.multiTenant` states the limit), and nothing below
     // asserts isolation. It is the same fixture `org-create-default-team
     // .dogfood.test.ts` opens the route with.
-    stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
+    stack = await bootShowcase({ multiTenant: 'posture-only' });
     token = await stack.signIn();
 
     // better-auth's `organization/create` — the `create_organization` row

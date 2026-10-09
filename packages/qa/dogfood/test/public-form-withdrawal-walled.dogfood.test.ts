@@ -10,16 +10,17 @@
 // it could not show the published side accepting intake.
 //
 // On a walled posture the anonymous form doors read the env-wide form
-// definition, so an organization-scoped change to a form's anonymous intake is
-// refused at the save door, naming the env-wide save as the remedy. Pinned:
+// definition. Before ADR-0131 D6 an administrator with an active organization
+// saved an organization overlay, and the save door refused one that changed
+// the form's anonymous intake. The per-organization overlay axis is retired:
+// the `/meta` doors carry no organization into a write, so that admin's save
+// is ENVIRONMENT-WIDE and takes effect on the anonymous doors. Pinned:
 //
-//   - the organization-scoped withdrawal answers `403 NOT_OVERRIDABLE` and
-//     nothing is saved (the organization still reads the published form, and
-//     both doors still serve it);
-//   - an organization-scoped edit that leaves the sharing alone still saves;
-//   - the env-wide withdrawal is accepted and both anonymous doors answer
-//     `404 FORM_NOT_FOUND`, with no row landing; republishing env-wide restores
-//     both doors.
+//   - a withdrawal by an admin WITH an active organization is accepted
+//     environment-wide and both anonymous doors answer `404 FORM_NOT_FOUND`,
+//     with no row landing; republishing restores both doors;
+//   - an edit that leaves the sharing alone lands environment-wide too;
+//   - the same with no active organization (unchanged).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -168,27 +169,30 @@ describe('walled posture: withdrawing a public form from anonymous intake', () =
     expect((await read())._diagnostics?.warnings).toBeUndefined();
   });
 
-  it('withdrawn in an organization: refused 403 NOT_OVERRIDABLE naming the env-wide save, and nothing is saved', async () => {
+  it('[ADR-0131 D6] withdrawn by an admin WITH an active organization: accepted environment-wide, both doors 404 and nothing lands; republishing restores them', async () => {
     await setActive(orgId);
-    const res = await put(withAnonymous(false));
-    expect(res.status, JSON.stringify(res.json)).toBe(403);
-    const error = (res.json.error ?? res.json) as Record<string, any>;
-    expect(error.code ?? res.json.code).toBe('NOT_OVERRIDABLE');
-    expect(JSON.stringify(res.json)).toMatch(/Save it env-wide instead/);
+    const off = await put(withAnonymous(false));
+    expect(off.status, JSON.stringify(off.json)).toBe(200);
+    expect(String(off.json.message ?? '')).toMatch(/env-wide/);
+    const closed = await probe();
+    expect([closed.get, closed.getCode, closed.submit, closed.submitCode])
+      .toEqual([404, 'FORM_NOT_FOUND', 404, 'FORM_NOT_FOUND']);
+    expect(closed.landed).toHaveLength(0);
 
-    expect((await read()).config?.sharing?.allowAnonymous, 'the organization still reads the published form').toBe(true);
-    const p = await probe();
-    expect([p.get, p.submit]).toEqual([200, 201]);
-    expect(p.landed).toHaveLength(1);
+    const on = await put(withAnonymous(true));
+    expect(on.status, JSON.stringify(on.json)).toBe(200);
+    const open = await probe();
+    expect([open.get, open.submit]).toEqual([200, 201]);
+    expect(open.landed).toHaveLength(1);
   });
 
-  it('an organization-scoped edit that leaves the sharing alone still saves (control)', async () => {
+  it('[ADR-0131 D6] an edit by an org-active admin that leaves the sharing alone lands environment-wide (control)', async () => {
     await setActive(orgId);
     const body = structuredClone(published);
     body.label = `${String(published.label ?? 'Intake')} (tenant)`;
     const res = await put(body);
     expect(res.status, JSON.stringify(res.json)).toBe(200);
-    expect(String(res.json.message ?? '')).toContain(`org=${orgId}`);
+    expect(String(res.json.message ?? '')).toMatch(/env-wide/);
   });
 
   it('withdrawn env-wide: both doors answer 404 FORM_NOT_FOUND and nothing lands; republishing restores them', async () => {
@@ -208,16 +212,18 @@ describe('walled posture: withdrawing a public form from anonymous intake', () =
     expect(open.landed).toHaveLength(1);
   });
 
-  it('withdrawn through `sharing.enabled: false` alone: refused org-scoped; env-wide both doors 404 and nothing lands', async () => {
+  it('withdrawn through `sharing.enabled: false` alone, by an org-active admin and env-wide: both doors 404 and nothing lands', async () => {
     const withEnabled = (enabled: boolean): Record<string, any> => {
       const body = withAnonymous(true);
       body.config.sharing.enabled = enabled;
       return body;
     };
+    // [ADR-0131 D6] An org-active admin's withdrawal is environment-wide too.
     await setActive(orgId);
-    const refused = await put(withEnabled(false));
-    expect(refused.status, JSON.stringify(refused.json)).toBe(403);
-    expect(JSON.stringify(refused.json)).toMatch(/NOT_OVERRIDABLE/);
+    const orgActive = await put(withEnabled(false));
+    expect(orgActive.status, JSON.stringify(orgActive.json)).toBe(200);
+    expect(String(orgActive.json.message ?? '')).toMatch(/env-wide/);
+    expect((await probe()).get).toBe(404);
 
     await setActive(null);
     const off = await put(withEnabled(false));

@@ -43,8 +43,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 
 const SYSTEM_CTX = { isSystem: true };
 
@@ -70,7 +70,7 @@ describe('ADR-0108: the membership-role vocabulary is closed; capability goes th
   let ownerToken: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    stack = await bootShowcase({});
     ownerToken = await stack.signIn(); // the seeded dev admin
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 

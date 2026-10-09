@@ -19,8 +19,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { backfillMemberships, reconcileMembership } from '@objectstack/plugin-auth';
 
 const SYSTEM_CTX = { isSystem: true };
@@ -36,7 +36,7 @@ describe('ADR-0093: membership lifecycle (single-org, real stack)', () => {
   let defaultOrgId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {}); // single-org (no OS_MULTI_ORG_ENABLED)
+    stack = await bootShowcase({}); // single-org (no OS_MULTI_ORG_ENABLED)
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
     // [ADR-0131 D3] The Default Organization is a boot invariant under

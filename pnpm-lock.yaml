@@ -1597,6 +1597,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../../lint
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../../metadata-protocol
@@ -3025,24 +3028,42 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../core
+      '@objectstack/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../platform-objects
+      '@objectstack/plugin-approvals':
+        specifier: workspace:*
+        version: link:../plugins/plugin-approvals
+      '@objectstack/plugin-audit':
+        specifier: workspace:*
+        version: link:../plugins/plugin-audit
       '@objectstack/plugin-auth':
         specifier: workspace:*
         version: link:../plugins/plugin-auth
+      '@objectstack/plugin-email':
+        specifier: workspace:*
+        version: link:../plugins/plugin-email
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
+      '@objectstack/plugin-pinyin-search':
+        specifier: workspace:*
+        version: link:../plugins/plugin-pinyin-search
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security
       '@objectstack/plugin-sharing':
         specifier: workspace:*
         version: link:../plugins/plugin-sharing
+      '@objectstack/plugin-webhooks':
+        specifier: workspace:*
+        version: link:../plugins/plugin-webhooks
       '@objectstack/rest':
         specifier: workspace:*
         version: link:../rest
@@ -3055,15 +3076,48 @@ importers:
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../services/service-automation
+      '@objectstack/service-cache':
+        specifier: workspace:*
+        version: link:../services/service-cache
       '@objectstack/service-datasource':
         specifier: workspace:*
         version: link:../services/service-datasource
+      '@objectstack/service-job':
+        specifier: workspace:*
+        version: link:../services/service-job
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../services/service-messaging
+      '@objectstack/service-package':
+        specifier: workspace:*
+        version: link:../services/service-package
+      '@objectstack/service-queue':
+        specifier: workspace:*
+        version: link:../services/service-queue
+      '@objectstack/service-realtime':
+        specifier: workspace:*
+        version: link:../services/service-realtime
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../services/service-settings
+      '@objectstack/service-sms':
+        specifier: workspace:*
+        version: link:../services/service-sms
+      '@objectstack/service-storage':
+        specifier: workspace:*
+        version: link:../services/service-storage
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
+      '@objectstack/trigger-api':
+        specifier: workspace:*
+        version: link:../triggers/trigger-api
+      '@objectstack/trigger-record-change':
+        specifier: workspace:*
+        version: link:../triggers/trigger-record-change
+      '@objectstack/trigger-schedule':
+        specifier: workspace:*
+        version: link:../triggers/trigger-schedule
       '@objectstack/types':
         specifier: workspace:*
         version: link:../types

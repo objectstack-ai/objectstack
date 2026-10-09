@@ -25,8 +25,8 @@
 // @proof: showcase-scope-depth-write
 
 import { describe, it, expect, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 
@@ -64,7 +64,7 @@ interface World {
 // Each owns one note. Reference hierarchy resolver as in showcase-scope-depth
 // (test fixture for the enterprise seam) — only the 'unit' branch is needed.
 async function bootWriteWorld(tag: string, opts: { writeScope?: 'unit'; withResolver?: boolean }): Promise<World> {
-  const stack = await bootStack(showcaseStack, {
+  const stack = await bootShowcase({
     security: new SecurityPlugin({
       defaultPermissionSets: [...securityDefaultPermissionSets, writeProfile(tag, opts.writeScope)],
     }),

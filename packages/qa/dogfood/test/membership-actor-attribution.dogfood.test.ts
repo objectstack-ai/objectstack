@@ -34,8 +34,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { AUTO_ORG_ADMIN_GRANT_REASON_PREFIX } from '@objectstack/plugin-security';
 
@@ -114,7 +114,7 @@ describe('#4586: the better-auth actor reaches sys_member history and the grant'
   let memberRowId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, { extraPlugins: [new AuditPlugin()] });
+    stack = await bootShowcase({ extraPlugins: [new AuditPlugin()] });
     adminToken = await stack.signIn(); // the seeded dev admin
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 

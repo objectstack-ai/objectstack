@@ -23,7 +23,8 @@ import { join } from 'node:path';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
-import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { type VerifyStack } from '@objectstack/verify';
+import { bootShowcase } from './showcase-boot.js';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { writeBuildShapedArtifact } from './build-shaped-artifact.js';
 
@@ -46,7 +47,7 @@ describe('dogfood: /meta/:type/:name/published and /meta/object/:name/state/:fie
     // none of what it advertises (commit c39a911ae).
     writeBuildShapedArtifact(showcaseStack as unknown as Record<string, unknown>, artifactPath);
 
-    stack = await bootStack(showcaseStack, {
+    stack = await bootShowcase({
       extraPlugins: [
         new MetadataPlugin({
           rootDir: tempDir,

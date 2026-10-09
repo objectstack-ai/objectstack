@@ -48,7 +48,7 @@
  * ({@link createMetaItemAnswer}), the book tree ({@link createMetaBookTreeAnswer}),
  * the list's unknown-type refusal ({@link refuseUnknownMetaListType}), the
  * object mask's cache posture ({@link projectMetaObjectSchema}) and the
- * organization a caller's read is scoped to ({@link metaReadOrganizationId}).
+ * caller's vetted organization ({@link metaCallerOrganizationId}).
  * [#20478] So does the layered view, on both of its spellings
  * ({@link createMetaLayeredAnswer}, {@link wantsMetaItemLayers},
  * {@link metaItemLayersDeprecationHeaders}).
@@ -65,7 +65,6 @@ import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } f
 import {
     ObjectSchemaMaskEvaluationError,
     applyObjectSchemaMask,
-    organizationIdForMetaRead,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaRuntimeView,
     type ObjectSchemaMaskPosture,
@@ -156,11 +155,9 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
  * organization at all (the fail-closed state every other layer reads). The
  * runtime dispatcher's `/meta` doors used to read the claim straight off the
  * auth service, so a member removed from an organization kept its metadata
- * partition there for the rest of the session: its org-scoped overlays were
- * served to them by the item read, the list, `/published` and `?state=draft`,
- * `GET /meta/_drafts` listed its pending drafts, and `PUT` wrote into it —
- * while `RestServer`, which reads `ctx.tenantId`, answered the same caller the
- * env-wide rows. One source, both transports.
+ * partition there for the rest of the session. One source, both transports.
+ * Since ADR-0131 D6 no `/meta` read or write carries it; the dispatcher's
+ * `/packages` doors still do.
  *
  * `undefined` for an anonymous caller, a caller with no active organization,
  * and one whose claim was dropped — which are one fact to every consumer.
@@ -168,25 +165,6 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
 export function metaCallerOrganizationId(caller: unknown): string | undefined {
     const tenantId = caller && typeof caller === 'object' ? (caller as { tenantId?: unknown }).tenantId : undefined;
     return typeof tenantId === 'string' ? tenantId : undefined;
-}
-
-/**
- * [#9454 · #20408] The organization a `/meta` READ of `type` carries:
- * `organizationIdForMetaRead` over the FOLDED segment (folded-type commit
- * 26f3588fb, whose card no longer resolves: the raw plural would miss the
- * registry's override flag) and the caller's vetted
- * organization ({@link metaCallerOrganizationId}). An organization reaches the
- * read only for a type the registry declares `allowOrgOverride`, so a
- * non-overridable type never resurrects a pre-#6190 phantom org row.
- *
- * `RestServer`'s list and item reads and the runtime dispatcher's ask this, so
- * the partition a caller reads cannot differ by transport.
- */
-export function metaReadOrganizationId(type: unknown, caller: unknown): string | undefined {
-    return organizationIdForMetaRead(
-        canonicalMetaUrlType(typeof type === 'string' ? type : ''),
-        metaCallerOrganizationId(caller),
-    );
 }
 
 // ── The verdict ───────────────────────────────────────────────────────────────
@@ -2858,11 +2836,9 @@ export type MetaLayeredAnswer =
  * `meta-list-projection-parity.test.ts` in `@objectstack/runtime` drives both
  * spellings through both transports.
  *
- * The read stays each transport's, in the caller's VETTED partition
- * ({@link metaReadOrganizationId} over the folded type — the partition the plain
- * read reads, [#9454] so an author who has just saved an org overlay is not
- * shown `overlay: null`) and its `?package=` scope (ADR-0048), exactly as the
- * item read's does ({@link createMetaItemAnswer}).
+ * The read stays each transport's, environment → code (ADR-0131 D6: the
+ * `/meta` doors name no organization) with its `?package=` scope (ADR-0048),
+ * exactly as the item read's ({@link createMetaItemAnswer}).
  *
  * Not translated and not cached, both deliberately: this is a diagnostic view of
  * what is STORED at each layer, so locale-collapsing it (or serving it from the

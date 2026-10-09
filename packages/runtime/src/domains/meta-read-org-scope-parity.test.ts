@@ -1,9 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20408] The dispatcher's `/meta` doors scope a caller's metadata to the
- * organization `RestServer` scopes it to — the VETTED active organization on
- * the caller's execution context, never the raw session claim.
+ * [#20408 · ADR-0131 D6] The dispatcher's `/meta` doors answer a caller what
+ * `RestServer` answers it. Since the per-organization overlay axis retired,
+ * NEITHER transport names an organization on a metadata read: a CURRENT member
+ * of an organization that holds a LEGACY org-scoped overlay is served the
+ * environment row on both (environment → code), which the controls below pin;
+ * the history of the vetted-organization defect is kept as it was measured.
  *
  * ## The defect
  *
@@ -275,15 +278,20 @@ afterEach(() => { warnSpy.mockRestore(); });
 
 // ── Controls: the rig separates the organizations, and the resolver drops the claim ──
 
-describe('[#20408] controls: the rig can tell the organizations apart', () => {
-    it('a CURRENT member reads its own organization\'s overlay on both transports', async () => {
+describe('[#20408 · ADR-0131 D6] controls: no transport reads a legacy organization overlay', () => {
+    it('⭐ a CURRENT member is served the environment row on both transports — its organization\'s legacy overlay is not', async () => {
         for (const boot of [bootDispatcher, bootRest]) {
-            const { call } = boot();
+            const { call, protocol } = boot();
             const item = await call('GET', 'member', '/meta/view/lead_all');
-            expect({ status: item.status, label: item.data?.item?.label }).toEqual({ status: 200, label: 'Alpha pipeline' });
-            expect(labelOf((await call('GET', 'member', '/meta/view')).data, 'lead_all')).toBe('Alpha pipeline');
+            expect({ status: item.status, label: item.data?.item?.label }).toEqual({ status: 200, label: 'All leads' });
+            expect(labelOf((await call('GET', 'member', '/meta/view')).data, 'lead_all')).toBe('All leads');
             const published = await call('GET', 'member', '/meta/view/lead_all/published');
-            expect({ status: published.status, label: published.data?.label }).toEqual({ status: 200, label: 'Alpha pipeline' });
+            expect({ status: published.status, label: published.data?.label }).toEqual({ status: 200, label: 'All leads' });
+            // The organization each read asked for: none, though the member has one.
+            for (const fn of ['getMetaItem', 'getMetaItems', 'getMetaItemLayered'] as const) {
+                const asked = (protocol as any)[fn]?.mock?.calls?.map(([req]: any[]) => req?.organizationId) ?? [];
+                expect(asked.every((o: unknown) => o === undefined), `${boot.name} ${fn} named an organization`).toBe(true);
+            }
         }
     });
 
@@ -294,12 +302,12 @@ describe('[#20408] controls: the rig can tell the organizations apart', () => {
         }
     });
 
-    it('the ex-member, switched to an organization they ARE in, reads that organization on both transports', async () => {
+    it('the ex-member, switched to an organization they ARE in, is served the environment row too', async () => {
         for (const boot of [bootDispatcher, bootRest]) {
             const sessions = makeSessions();
             sessions.sid_exmember.activeOrganizationId = 'org_beta';
             const { call } = boot(sessions);
-            expect((await call('GET', 'exmember', '/meta/view/lead_all')).data?.item?.label).toBe('Beta pipeline');
+            expect((await call('GET', 'exmember', '/meta/view/lead_all')).data?.item?.label).toBe('All leads');
         }
     });
 });
@@ -377,10 +385,11 @@ describe('[#20478] the layered view scopes a caller to the organization RestServ
     const layers = (a: Answer) => ({ status: a.status, overlay: a.data?.overlay?.label, effective: a.data?.effective?.label });
 
     for (const [spelling, path, query] of SPELLINGS) {
-        it(`${spelling}: a CURRENT member reads its own organization's overlay on both transports (control)`, async () => {
+        it(`${spelling}: [ADR-0131 D6] a CURRENT member reads the environment overlay on both transports, never its organization's legacy one`, async () => {
             for (const boot of [bootDispatcher, bootRest]) {
-                const { call } = boot();
-                expect(layers(await call('GET', 'member', path, query))).toEqual({ status: 200, overlay: 'Alpha pipeline', effective: 'Alpha pipeline' });
+                const { call, protocol } = boot();
+                expect(layers(await call('GET', 'member', path, query))).toEqual({ status: 200, overlay: 'All leads', effective: 'All leads' });
+                expect(protocol.getMetaItemLayered.mock.calls.map(([req]: any[]) => req.organizationId)).toEqual([undefined]);
             }
         });
 
