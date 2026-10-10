@@ -247,8 +247,9 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 //     `objectstack.json` (`_parseAndRegisterArtifact` below);
 //   - the CONFIG door — `os serve objectstack.config.ts`, whose `AppPlugin`
 //     hands the stack to the `manifest` service, which registers the package
-//     bodies and never the top level (`resolveArtifactPackageOrder` answers
-//     `packages[]` alone when the key is present). Before this rule had a
+//     bodies (`resolveArtifactPackageOrder` answers `packages[]` alone when
+//     the key is present) and, of the top level, only the residual's objects
+//     (the engine half, below). Before this rule had a
 //     second caller, a config boot served such an item through no door and
 //     said nothing, while an artifact boot of the same project served it
 //     under `manifest.id` and warned.
@@ -256,6 +257,14 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 // Both call {@link MetadataPlugin.registerUnclaimedTopLevel}, so which items
 // are residual, which id they take, how each is registered and what the boot
 // says are decided here and nowhere else. ⛔ Never a second copy at a door.
+//
+// The ENGINE half reads the same answer. Both doors hand the whole stack to
+// the `manifest` service (`@objectstack/objectql`), which registers the bodies
+// and then, from {@link unclaimedTopLevel}, the residual's OBJECTS under the
+// same id, so the data door serves the objects this rule lists. An object it
+// cannot register without refusing the boot (a name another package already
+// owns, a field naming a picklist no body declares) stays listed here and
+// unserved there, and the engine names it at boot.
 
 /**
  * Where one door's registrations land. The artifact door writes its in-memory
@@ -366,7 +375,8 @@ export interface UnclaimedTopLevel {
  * residual rule, with nothing registered and nothing thrown.
  *
  * {@link MetadataPlugin.registerUnclaimedTopLevel} registers exactly these, in
- * this order, through either boot door. `os validate` / `os build`
+ * this order, through either boot door, and the engine's `manifest` service
+ * registers the objects among them under the same id. `os validate` / `os build`
  * (`@objectstack/cli`'s view-container walk) read the same answer to judge what
  * that registration will judge, so an author-time door and a boot door cannot
  * disagree about which items are residual. ⛔ Never re-derived by a caller.
@@ -1410,8 +1420,9 @@ export class MetadataPlugin implements Plugin {
      *
      * Called by this plugin's artifact door on a compiled `objectstack.json`,
      * and by `AppPlugin` (`@objectstack/runtime`) on a config boot, whose
-     * `manifest` service registers the package bodies and never the top level
-     * of a stack that carries `packages[]`. The two doors differ only in where
+     * `manifest` service registers the package bodies and, of the top level of
+     * a stack that carries `packages[]`, only the residual's objects (from
+     * {@link unclaimedTopLevel}, this rule's own answer). The two doors differ only in where
      * their `sink` stores and in the words of the line; the decision — which
      * items, keyed how, owned by whom — is this method's.
      *

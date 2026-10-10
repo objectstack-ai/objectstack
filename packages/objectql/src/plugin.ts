@@ -5,6 +5,10 @@ import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
+// [ADR-0130 D4] The residual rule's decision half — which top-level items of a
+// multi-package stack no body declares, and the id they take. See
+// `unclaimedTopLevelObjects` below.
+import { unclaimedTopLevel } from '@objectstack/metadata';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
@@ -38,6 +42,9 @@ import {
 // [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
 // cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
+// [ADR-0029 D3] The registry's own refusal of a second owner — read, never
+// re-derived, when a residual object's name is already owned.
+import { ObjectOwnershipConflictError } from './registry.js';
 
 export type { Plugin, PluginContext };
 
@@ -75,6 +82,35 @@ function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
     service !== null &&
     typeof (service as Record<string, unknown>)['loadMetaFromDb'] === 'function'
   );
+}
+
+/**
+ * The OBJECTS of a multi-package stack's residual, and the id they are owned
+ * by — the residual rule's own answer (ADR-0130 D4), read through
+ * `unclaimedTopLevel` (`@objectstack/metadata`), the one copy both boot doors
+ * and `os validate` read. ⛔ Never re-derived here: which top-level items are
+ * residual and which id they take is that function's decision, and a second
+ * derivation would let this door and the metadata door disagree about it.
+ *
+ * Why the engine needs them: the `manifest` service registers the BODIES of a
+ * stack that carries `packages[]` and never its top level, while the metadata
+ * door registers the residual under the stack's `manifest.id` and the boot
+ * says every door reports that id as their owner. Without this, a residual
+ * object was listed by `GET /meta/object` and answered `404` on
+ * `/data/<name>`, through both boot doors.
+ *
+ * @returns `undefined` when the stack has no residual object — every stack
+ *   without `packages[]`, and every normally composed one.
+ */
+function unclaimedTopLevelObjects(
+  stack: unknown,
+): { ownerId: string | undefined; objects: ServiceObject[] } | undefined {
+  const residual = unclaimedTopLevel(stack);
+  if (!residual) return undefined;
+  const objects = residual.items
+    .filter((entry) => entry.type === 'object')
+    .map((entry) => entry.item as ServiceObject);
+  return objects.length > 0 ? { ownerId: residual.ownerId, objects } : undefined;
 }
 
 /**
@@ -561,8 +597,12 @@ export class ObjectQLPlugin implements Plugin {
       // same one register followed by the same one bridge as before (D7).
       register: (artifact: any) => {
         const ordered = resolveArtifactPackageOrder(artifact) as any[];
+        // [ADR-0130 D4] The objects of the stack's RESIDUAL — top-level objects
+        // no package body declares — as the residual rule answers it. See
+        // {@link unclaimedTopLevelObjects}.
+        const residual = unclaimedTopLevelObjects(artifact);
 
-        if (ordered.length === 0) {
+        if (ordered.length === 0 && residual === undefined) {
           // An artifact that declared `packages: []` registers nothing. Said out
           // loud rather than returning quietly: "the install did nothing" is not
           // a state anyone should have to infer from an absence.
@@ -615,6 +655,14 @@ export class ObjectQLPlugin implements Plugin {
             id: manifest.id || manifest.name
           });
         }
+        // [ADR-0130 D4] The residual's objects, AFTER every body — the order
+        // the metadata door registers the same stack in — under the id the
+        // residual rule names, through the registry verb a body's own objects
+        // take (`registerApp` step 2). There is no package record for that id:
+        // the residual is not a package, and when the id names one of the
+        // bodies (a composed stack keeps one member's manifest) that body's
+        // record must not be replaced.
+        if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
         // Manifests registered AFTER start() (marketplace install / ledger
         // rehydrate arrive on `kernel:ready` or an HTTP request) land in the
         // SchemaRegistry only — the one-shot startup bridge already ran — so
@@ -622,8 +670,13 @@ export class ObjectQLPlugin implements Plugin {
         // No-op until start() arms it, so boot-time registrations keep the
         // single startup bridge. The promise never rejects; async callers
         // (marketplace install) await it so metadata reads right after
-        // install are deterministic, sync callers may ignore it.
-        return this.bridgeArtifactObjectsToMetadataService(ctx, ordered);
+        // install are deterministic, sync callers may ignore it. The residual's
+        // owner is bridged with them, so a late artifact's residual objects
+        // reach the metadata door as well as the data door.
+        const bridged = residual?.ownerId !== undefined && !scope.packageIds.includes(residual.ownerId)
+          ? [...ordered, { id: residual.ownerId }]
+          : ordered;
+        return this.bridgeArtifactObjectsToMetadataService(ctx, bridged);
       }
     });
 
@@ -2228,6 +2281,65 @@ export class ObjectQLPlugin implements Plugin {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+  }
+
+  /**
+   * [ADR-0130 D4] Register the objects of a stack's residual in the engine —
+   * the half the metadata door cannot reach — so the data door serves what
+   * `GET /meta/object` lists, under the same owner.
+   *
+   * Two classes are NOT registered, because registering them would refuse a
+   * boot the residual rule accepts (both measured on a kernel):
+   *
+   *  - an object whose name another package already owns: the registry's
+   *    ADR-0029 D3 refusal (`ObjectOwnershipConflictError`) would fail the
+   *    boot, and the data door keeps serving that package's object;
+   *  - an object whose field names a picklist none of the stack's package
+   *    bodies declares: the boot's picklist audit at `kernel:ready` would fail
+   *    it, because the residual's own picklists are registered as metadata
+   *    only. Judged off the stack's bodies, never off the registry, which is
+   *    still filling while this runs.
+   *
+   * Each such object is LISTED (the metadata door registered it) and NOT
+   * served, and the boot says so once, naming each object and why. Any other
+   * refusal the registry raises — a field with no valid `type` — propagates,
+   * as a body's does.
+   */
+  private registerUnclaimedTopLevelObjects(
+    ctx: PluginContext,
+    residual: { ownerId: string | undefined; objects: ServiceObject[] },
+    bodies: unknown[],
+  ): void {
+    const ql = this.ql;
+    if (!ql) return;
+    const bodyPicklists = new Set<string>();
+    for (const body of bodies) for (const name of collectManifestPicklistNames(body)) bodyPicklists.add(name);
+    const unserved: string[] = [];
+    for (const object of residual.objects) {
+      const dangling = collectManifestPicklistReferences({ objects: [object] }, residual.ownerId)
+        .find((ref) => !bodyPicklists.has(ref.picklist));
+      if (dangling) {
+        unserved.push(
+          `'${object.name}' (field '${dangling.field}' names picklist '${dangling.picklist}', which no package body declares)`,
+        );
+        continue;
+      }
+      try {
+        ql.registry.registerObject(object, residual.ownerId, undefined, 'own');
+      } catch (e) {
+        if (!(e instanceof ObjectOwnershipConflictError)) throw e;
+        unserved.push(`'${object.name}' (package '${e.existingPackageId}' already owns that name)`);
+      }
+    }
+    if (unserved.length === 0) return;
+    const owner = residual.ownerId ?? '<none>';
+    ctx.logger.warn(
+      `[ObjectQLPlugin] ${unserved.length} top-level object(s) of stack '${owner}' that no package body `
+      + `declares are listed by the metadata door under that id but NOT served by the data door: `
+      + `${unserved.join(', ')}. Declare each one inside the \`packages[]\` entry of the package that owns it, `
+      + 'together with every picklist its fields name; to add fields to an object another package owns, '
+      + 'use `objectExtensions` instead of declaring it again.',
+    );
   }
 
   /**

@@ -19,9 +19,8 @@
  *    (`ObjectCapabilities.apiEnabled`, "Expose object via automatic APIs").
  *    `apiExposureDenialReason` judges it FIRST and for every operation, so the
  *    REST door, the dispatcher and MCP all refuse every verb, for every caller,
- *    with `404 OBJECT_API_DISABLED`; and it is the one flag the cross-object
- *    search reads (`searchAll` skips `apiEnabled === false`), which never
- *    consults `apiMethods` at all.
+ *    with `404 OBJECT_API_DISABLED`; and the cross-object search asks the same
+ *    decision for `search` before it sweeps an object (`searchAll`, #22640).
  *  - `apiMethods: []` — `deny-all` in the three-state table of
  *    `api-derivation.ts` (`undefined` = fully open, `[]` = fully closed). The
  *    read methods are retired rather than the key dropped: an ABSENT whitelist
