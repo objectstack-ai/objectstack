@@ -56,6 +56,7 @@ import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { hasPlatformAdminStanding, resolveUserAuthzGrants } from '@objectstack/core';
 import { SharingRuleService } from './sharing-rule-service.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 const USER = 'usr_subject';
 const OTHER_ORG = 'org_victim';
@@ -79,12 +80,12 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
       if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
-  return {
+  return bindCatalogFromTables({
     async find(object: string, opts: any) {
       const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
       return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },
-  };
+  }, tables);
 }
 
 /** The permission set that carries the ORG-scoped `manage_sharing` capability. */
