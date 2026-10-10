@@ -12004,8 +12004,8 @@ export class ObjectQL implements IObjectQLEngine {
     } catch (error) {
       // [#6116] Fail-open is deliberate and UNCHANGED — a file-metadata read
       // that fails must not take down the record read that asked for it, so the
-      // ids pass through un-hydrated on BOTH branches below. What changes is
-      // that the two reasons stop being the same silence.
+      // ids pass through un-hydrated on EVERY branch below. What changes is
+      // that the reasons stop being the same silence.
       //
       // Benign: `sys_file` is registered but its TABLE was never provisioned
       // (storage plugin present, schema sync not run yet). There are genuinely
@@ -12017,11 +12017,12 @@ export class ObjectQL implements IObjectQLEngine {
       // Refused: the security layer refused THIS CALLER's read of `sys_file`
       // (ADR-0112 `PERMISSION_DENIED` — measured to arrive here as a throw,
       // never as a short result: the object-level CRUD gate refuses the whole
-      // sub-read). The rows exist; this reader may not see their metadata.
+      // sub-read). The rows may well exist; this reader may not see them.
       // Leaving the bare id made the refusal read exactly like an id with no
-      // committed row — "no file" to every consumer — so each id is marked
-      // `{ id, metadataRefused: true }` instead (`FileRefusedValueSchema`):
-      // the refusal reaches the reader as a refusal, in the value itself.
+      // committed row, or an outage — one value for three facts — so each id
+      // is marked `{ id, metadataRefused: true }` instead
+      // (`FileRefusedValueSchema`): the refusal reaches the reader as a
+      // refusal, in the value itself.
       // Still fail-open — the record read that asked succeeds — and still no
       // `name`/`size`/`mimeType`/`url`, because none was read. The download
       // door judges bytes by the record that owns the file, on its own.
