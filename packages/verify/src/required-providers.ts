@@ -1,25 +1,34 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#22301] The providers an app's `requires` names, constructed for the
-// verification boot by `objectstack serve`'s own lookup.
+// [#22301] The capability providers `objectstack serve` mounts for a
+// configuration, constructed for the verification boot by `serve`'s own rules.
 //
 // `serve` turns each `requires` token into its provider plugin (its capability
-// resolver, step 5). `bootStack` booted a fixed plugin set instead, so an app's
-// tests ran without the services the same app gets on a real server — no
-// record-change trigger fired on a write, no approval node had a service — and
-// an app named the plugins by hand in `extraPlugins`. Under the maintainer's B′
-// ruling an app's tests reach the real engine through this handle and nothing
-// hand-built, so that list was a local stand-in for a platform gap.
+// resolver, step 5), appends the always-on slate to every app, and builds each
+// provider from the app's configuration. `bootStack` booted a fixed plugin set
+// instead, then the providers `requires` names built with their own defaults;
+// so an app's tests ran without the services, the cubes and the mail settings
+// the same app gets on a real server, and an app named plugins by hand in
+// `extraPlugins`. Under the maintainer's B′ ruling an app's tests reach the
+// real engine through this handle and nothing hand-built, and under ruling A
+// (#22301) `bootStack` composes what `serve` composes for one configuration.
 //
-// ## What is `serve`'s, read from where `serve` reads it
+// ## What is `serve`'s, read from where `serve` reads it (`@objectstack/core`)
 //
-//   · WHICH tokens: `stackDeclaredCapabilities` (`@objectstack/core`) — the top-
-//     level `requires` when the stack carries one, otherwise each package
-//     body's. One reader for both boots, so a multi-package app boots one set
-//     of providers under `serve` and under its tests.
-//   · WHICH provider: `CAPABILITY_PROVIDERS` (`@objectstack/core`), the table
+//   · WHICH tokens: `resolveServedCapabilities` — the tokens the app declares
+//     (the top-level `requires` when the stack carries one, otherwise each
+//     package body's), `email` for a declared `auth`, the always-on slate
+//     (`PLATFORM_ALWAYS_ON_CAPABILITIES`), and `job` / `queue` ahead of the
+//     tokens that schedule background work. No preset: `bootStack` takes none,
+//     so the slate is always mounted, as on a `serve` with no `--preset`.
+//   · WHICH provider: `CAPABILITY_PROVIDERS`, the table
 //     `Serve.CAPABILITY_PROVIDERS` is a handle over — main provider, then its
 //     `extras`.
+//   · WITH WHAT: `resolveCapabilityArgument` — `automation` the app's root
+//     (`hostRoot` here), `analytics` the app's cubes, `email` / `sms` the
+//     deployment's mail and SMS configuration (from the configuration and the
+//     `OS_EMAIL_*` / `OS_SMS_*` environment, by the readers their packages
+//     export), `storage` its local root. An extra takes no argument.
 //   · WHEN NOT: `providesCapability`'s exact identity match against what this
 //     boot already holds — the harness's own settings / analytics / sharing
 //     services, `opts.automation`, every `opts.extraPlugins` entry, and every
@@ -33,128 +42,124 @@
 //
 // ## What is this boot's own
 //
-//   · CONSTRUCTION. `serve` reads mail, SMS and storage transports from the app
-//     and the environment; a verification boot never sends mail or SMS from a
-//     test, so every provider is constructed with its own defaults — the way
-//     `bootStack({ automation: true })` has always constructed the automation
-//     service. The one argument kept is `automation`'s `packageRoot`, the
-//     app's root, which `serve` passes for the same token (`hostRoot` here).
-//   · THE HARD DEPENDENCIES of what it mounts. `serve` mounts its always-on
-//     slate (`queue`, `job`, `messaging`, …) on every boot, and some providers
-//     hard-depend on one of them: `triggers`' schedule extras on `job`, its API
-//     trigger on `queue`, `webhooks` on `messaging`. This boot does not mount
-//     the slate, so it mounts exactly the slate providers a mounted plugin
-//     hard-depends on — a provider it constructs, or a plugin of the app's own
-//     `plugins` array — found in the same table, among the tokens a served boot
-//     of this app would have mounted (its `requires` and the slate). A
-//     dependency no such token supplies is left to the kernel, whose refusal
-//     names it, as `serve`'s would.
+//   · THE HOST DEFAULTS. `serve` also mounts MCP (`OS_MCP_SERVER_ENABLED`, on
+//     by default) and pinyin search (`OS_SEARCH_PINYIN_ENABLED`, which `serve`
+//     stamps into its process environment from the stack's locales). Both are
+//     decisions about a server process, not about the configuration, and this
+//     boot passes none: a suite that exercises either passes the provider in
+//     `extraPlugins` (the MCP and pinyin dogfood suites do).
 //   · FAILURE. A provider this boot set out to construct and could not is a
-//     thrown boot error naming the token and the package — every package in the
-//     table is a dependency of `@objectstack/verify` (pinned), so a failure here
-//     is a broken install or a provider that refuses to start, never an absence
-//     to scroll past.
+//     thrown boot error naming the token and the package, whether the app
+//     declared the token or the slate appended it — `serve` logs a slate
+//     provider it cannot build and boots on, and a test boot that went on
+//     without it would pass green on a composition production does not run.
+//     Every package in the table is a dependency of `@objectstack/verify`
+//     (pinned), so an import failure is a broken install; a configuration the
+//     mail or SMS reader refuses names its own remedy.
 
-import { CAPABILITY_PROVIDERS, providesCapability, stackDeclaredCapabilities } from '@objectstack/core';
-import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
+import {
+  CAPABILITY_PROVIDERS,
+  providesCapability,
+  resolveCapabilityArgument,
+  resolveServedCapabilities,
+} from '@objectstack/core';
 
-/** A plugin's registered `name`, as the kernel keys it. */
-function pluginName(plugin: unknown): string | undefined {
-  const name = (plugin as { name?: unknown } | null | undefined)?.name;
-  return typeof name === 'string' ? name : undefined;
+/** Why this boot constructs a provider, as a refusal names it. */
+function reasonFor(token: string, declared: ReadonlySet<string>): string {
+  return declared.has(token)
+    ? `requires: ['${token}']`
+    : `the always-on '${token}' capability (objectstack serve mounts it for every app)`;
 }
 
-/** A plugin's HARD dependencies, as the kernel orders them. */
-function hardDependencies(plugin: unknown): string[] {
-  const deps = (plugin as { dependencies?: unknown } | null | undefined)?.dependencies;
-  return Array.isArray(deps) ? deps.filter((d): d is string => typeof d === 'string') : [];
-}
-
-/** One provider of the table, constructed with this boot's argument for its token. */
-async function constructProvider(
-  token: string,
-  pkg: string,
-  exportName: string,
-  arg: unknown,
-): Promise<unknown> {
+/** One provider of the table, loaded and constructed with this configuration's argument. */
+async function constructProvider(opts: {
+  reason: string;
+  pkg: string;
+  exportName: string;
+  /** The constructor argument, read off the loaded module; absent ⇒ no argument. */
+  argumentFor?: (mod: Record<string, unknown>) => unknown;
+}): Promise<unknown> {
+  const { reason, pkg, exportName } = opts;
+  type ProviderClass = new (arg?: unknown) => unknown;
+  let loaded: { mod: Record<string, unknown>; Ctor: ProviderClass };
   try {
     const mod = (await import(/* webpackIgnore: true */ pkg)) as Record<string, unknown>;
-    const Ctor = mod[exportName] as (new (arg?: unknown) => unknown) | undefined;
+    const Ctor = mod[exportName];
     if (typeof Ctor !== 'function') throw new Error(`${pkg} does not export ${exportName}`);
+    loaded = { mod, Ctor: Ctor as ProviderClass };
+  } catch (e) {
+    throw new Error(
+      `verify: ${reason} names ${exportName} (${pkg}), and this boot could not load it: ` +
+        `${(e as Error).message}. Every provider in the capability table is a dependency of @objectstack/verify, ` +
+        'so this is a broken install — the boot does not continue without a service objectstack serve mounts ' +
+        'for this configuration.',
+    );
+  }
+  const { mod, Ctor } = loaded;
+  let arg: unknown;
+  try {
+    arg = opts.argumentFor?.(mod);
+  } catch (e) {
+    throw new Error(
+      `verify: ${reason} names ${exportName} (${pkg}), and this configuration cannot build it: ` +
+        `${(e as Error).message} objectstack serve refuses or skips the same configuration; the boot does not ` +
+        'continue without the service.',
+    );
+  }
+  try {
     return arg === undefined ? new Ctor() : new Ctor(arg);
   } catch (e) {
     throw new Error(
-      `verify: requires: ['${token}'] names ${exportName} (${pkg}), and this boot could not construct it: ` +
-        `${(e as Error).message}. Every provider in the capability table is a dependency of @objectstack/verify, ` +
-        'so this is a broken install or a provider that refuses to start — the boot does not continue without ' +
-        'a service the app declares.',
+      `verify: ${reason} names ${exportName} (${pkg}), and it refused to construct: ${(e as Error).message}. ` +
+        'The boot does not continue without a service objectstack serve mounts for this configuration.',
     );
   }
 }
 
 /**
- * The provider plugins the app's `requires` names that this boot does not
- * already hold, plus the always-on providers they hard-depend on — in the order
- * to register them (dependencies first). Constructed, not registered: the
- * caller registers them in its own slot.
+ * The provider plugins `objectstack serve` mounts for this configuration that
+ * this boot does not already hold — the app's `requires` and the always-on
+ * slate, in `serve`'s mount order, each built from the configuration as
+ * `serve` builds it. Constructed, not registered: the caller registers them in
+ * its own slot.
  *
  * @param held - Every plugin instance this boot mounts on its own or was handed
  *   (`opts.extraPlugins`, `opts.automation`'s instance, the harness's services,
  *   the app's own `plugins`).
- * @param dependents - The other plugins this boot mounts that are not providers
- *   it constructs — the app's own `plugins` array. Their hard dependencies are
- *   searched like a mounted provider's, as `serve`'s always-on slate would
- *   supply them.
- * @param isRegistered - Whether a plugin of that name is already registered on
- *   the kernel (a dependency the boot itself satisfies).
  * @param packageRoot - The app's root, handed to `automation` as `serve` does.
  */
-export async function constructRequiredProviders(opts: {
+export async function constructServedProviders(opts: {
   config: unknown;
   held: readonly unknown[];
-  dependents?: readonly unknown[];
-  isRegistered: (name: string) => boolean;
   packageRoot: string;
 }): Promise<unknown[]> {
-  const declared = [...new Set(stackDeclaredCapabilities(opts.config))];
-  const named: unknown[] = [];
-  const dependencies: unknown[] = [];
-  const all = (): unknown[] => [...opts.held, ...dependencies, ...named];
+  const { tokens, declared } = resolveServedCapabilities(opts.config);
+  const constructed: unknown[] = [];
+  const all = (): unknown[] => [...opts.held, ...constructed];
 
-  for (const token of declared) {
+  for (const token of tokens) {
     const spec = CAPABILITY_PROVIDERS[token];
     if (!spec) continue;
     if (providesCapability(all(), spec.identities)) continue;
-    const arg = token === 'automation' ? { packageRoot: opts.packageRoot } : undefined;
-    named.push(await constructProvider(token, spec.pkg, spec.export, arg));
+    const reason = reasonFor(token, declared);
+    constructed.push(
+      await constructProvider({
+        reason,
+        pkg: spec.pkg,
+        exportName: spec.export,
+        argumentFor: (mod) =>
+          resolveCapabilityArgument(token, {
+            stack: opts.config,
+            packageRoot: opts.packageRoot,
+            providerModule: mod,
+          }).argument,
+      }),
+    );
     for (const extra of spec.extras ?? []) {
       if (providesCapability(all(), extra.identities)) continue;
-      named.push(await constructProvider(token, extra.pkg, extra.export, undefined));
+      constructed.push(await constructProvider({ reason, pkg: extra.pkg, exportName: extra.export }));
     }
   }
 
-  // The hard dependencies of what this boot mounts, to a fixed point (a
-  // dependency's own dependencies included), searched among the tokens a
-  // served boot of this app would have mounted.
-  const searched = [...new Set([...declared, ...PLATFORM_ALWAYS_ON_CAPABILITIES])];
-  for (;;) {
-    const present = new Set(all().map(pluginName).filter((n): n is string => n !== undefined));
-    let next: string | undefined;
-    for (const plugin of [...(opts.dependents ?? []), ...named, ...dependencies]) {
-      for (const dependency of hardDependencies(plugin)) {
-        if (present.has(dependency) || opts.isRegistered(dependency)) continue;
-        next = searched.find((t) => {
-          const spec = CAPABILITY_PROVIDERS[t];
-          return spec !== undefined && spec.identities.includes(dependency) && !providesCapability(all(), spec.identities);
-        });
-        if (next) break;
-      }
-      if (next) break;
-    }
-    if (!next) break;
-    const spec = CAPABILITY_PROVIDERS[next]!;
-    dependencies.push(await constructProvider(next, spec.pkg, spec.export, undefined));
-  }
-
-  return [...dependencies, ...named];
+  return constructed;
 }

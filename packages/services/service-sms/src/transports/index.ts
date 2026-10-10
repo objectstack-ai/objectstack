@@ -12,7 +12,8 @@ export { TwilioSmsTransport, type TwilioSmsTransportOptions } from './twilio.js'
  * The provider vocabulary — every tag `makeSmsTransport` below can build, and
  * nothing else. It is the **one** literal: the `SmsProviderTag` type is derived
  * from it, the `switch` is exhaustive over it, and callers that have to judge an
- * operator-supplied provider string (the CLI's `sms` capability arm, #5713) read
+ * operator-supplied provider string (`resolveSmsCapabilityArg` in
+ * `../capability-arg.ts`, #5713 — written in the CLI until #22301) read
  * it from here rather than restating the list.
  *
  * Two literals describing one vocabulary is how the mail settings dropdown and
@@ -31,8 +32,8 @@ export type SmsProviderTag = (typeof SMS_TRANSPORT_PROVIDERS)[number];
 
 /**
  * Narrow an unknown value to a buildable provider tag. The counterpart of
- * `isEmailTransportProvider` in `@objectstack/plugin-email`, and used by the CLI
- * for the same reason: a provider that cannot deliver must be refused where the
+ * `isEmailTransportProvider` in `@objectstack/plugin-email`, and used by
+ * `resolveSmsCapabilityArg` for the same reason: a provider that cannot deliver must be refused where the
  * operator declared it, not silently downgraded where it is materialised.
  */
 export function isSmsTransportProvider(value: unknown): value is SmsProviderTag {

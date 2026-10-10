@@ -25,6 +25,11 @@ export * from './artifact-packages.js';
 // both already depend on this package.
 export * from './stack-collections.js';
 export * from './capability-providers.js';
+// [#22301] And which tokens a served boot mounts providers for (the always-on
+// slate appended to `requires`) and what it constructs each provider with
+// (the app's cubes, its mail and SMS configuration, the storage root). Same
+// reason.
+export * from './capability-composition.js';
 // [#22301] And the rule for the app's own `plugins` array, which both boots
 // mount: what a string, bundle or instance entry becomes. Same reason.
 export * from './stack-plugins.js';

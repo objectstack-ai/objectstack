@@ -14,8 +14,14 @@
  * One case per branch of the reader's rule — the top-level list, the package
  * bodies when there is none, and the top level winning when both are present —
  * plus the control (no `requires`), the explicit-wins rule, and the hard
- * dependencies a mounted provider brings (`triggers` → `job` / `queue`, which
- * `serve` mounts through its always-on slate).
+ * dependencies a mounted provider has (`triggers` → `job` / `queue`, which
+ * `serve` mounts through its always-on slate, and so does `bootStack` since the
+ * slate stage of #22301 — `harness.served-composition.test.ts` pins the slate
+ * itself and the configuration each provider is built from).
+ *
+ * The tokens these cases name are OFF the always-on slate (`approvals`,
+ * `realtime`), so mounting one is evidence of the `requires` reader and never
+ * of the slate.
  */
 
 import { readFileSync } from 'node:fs';
@@ -25,6 +31,7 @@ import { composeStacks, defineStack } from '@objectstack/spec';
 import { bootStack, type VerifyStack } from './harness.js';
 
 const APPROVALS = 'com.objectstack.service.approvals';
+const REALTIME = 'com.objectstack.service.realtime';
 
 const svcManifest = { id: 'com.example.rqp.svc', name: 'RQP Service', namespace: 'rqp', version: '1.0.0', type: 'module' };
 const appManifest = { id: 'com.example.rqp.app', name: 'RQP App', namespace: 'rqp', version: '1.0.0', type: 'app' };
@@ -79,15 +86,15 @@ describe('bootStack mounts what `requires` names, by serve\'s reader', () => {
   }, 120_000);
 
   it('the top-level list wins over the bodies when present', async () => {
-    stack = await bootStack({ ...twoPackages({ requires: ['approvals'] }), requires: ['cache'] });
-    expect(stack.kernel.hasPlugin('com.objectstack.service.cache')).toBe(true);
+    stack = await bootStack({ ...twoPackages({ requires: ['approvals'] }), requires: ['realtime'] });
+    expect(stack.kernel.hasPlugin(REALTIME)).toBe(true);
     expect(approvalsMounted(stack)).toEqual({ plugin: false, object: false });
   }, 120_000);
 
   it('control — an app that requires nothing gets none of them', async () => {
     stack = await bootStack(onePackage());
     expect(approvalsMounted(stack)).toEqual({ plugin: false, object: false });
-    expect(stack.kernel.hasPlugin('com.objectstack.service.cache')).toBe(false);
+    expect(stack.kernel.hasPlugin(REALTIME)).toBe(false);
   }, 120_000);
 });
 
@@ -105,7 +112,7 @@ describe('serve\'s other two rules', () => {
     expect(approvalsMounted(stack)).toEqual({ plugin: true, object: false });
   }, 120_000);
 
-  it('a mounted provider\'s hard dependencies come with it: `triggers` brings `job` and `queue`', async () => {
+  it('a mounted provider\'s hard dependencies are mounted with it: `triggers` has `job` and `queue`', async () => {
     stack = await bootStack(onePackage({ requires: ['automation', 'triggers'] }));
     for (const name of [
       'com.objectstack.service-automation',
