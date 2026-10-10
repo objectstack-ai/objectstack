@@ -5,7 +5,7 @@
 
 feat(spec)!: `PageSchema` refuses a page that authors both `slots.details` and `slots.tabs`; the `sys_user` record page carries its details grid as its first tab
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered page-slots-details-beside-tabs-refused -->
 
