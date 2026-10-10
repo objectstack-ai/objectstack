@@ -591,7 +591,7 @@ describe('PageSchema with page types', () => {
         {
           name: 'main',
           components: [
-            { type: 'element:number', properties: { object: 'order', aggregate: 'count' } },
+            { type: 'element:number', dataSource: { object: 'order' }, properties: { aggregate: 'count' } },
           ],
         },
       ],
@@ -774,27 +774,29 @@ describe('ElementDataSourceSchema `filter` — one filter orthography platform-w
   it('shares the array orthography with the props-map `filter` doors — one value, two keys, the same verdicts', () => {
     // `element:record_picker` was the node that carried two orthographies at
     // two keys (`properties.filter` the array, `dataSource.filter` the record)
-    // resolved through one `??` in the renderer. Each key is asked at ITS
-    // door: the binding through the real `PageComponentSchema` (which parses
-    // `dataSource` and leaves `properties` a bag — the props-map dispatch is
-    // the lint's, warning tier), and the props key through the picker's own
-    // `ComponentPropsMap` entry. The same rule array raises no issue at either;
-    // the same record is refused at both with the same code.
+    // resolved through one `??` in the renderer; since v18 (#11509) its flat
+    // `filter` is retired and the binding is its one door. Each key is asked
+    // at ITS door: the binding through the real `PageComponentSchema` (which
+    // parses `dataSource` and leaves `properties` a bag — the props-map
+    // dispatch is the lint's, warning tier), and a live props-map door —
+    // `object-grid`'s `filter` — through its own `ComponentPropsMap` entry.
+    // The same rule array raises no issue at either; the same record is
+    // refused at both with the same code.
     const binding = PageComponentSchema.safeParse({
       type: 'element:record_picker',
-      properties: { object: 'account', filter: RULES },
+      properties: { labelField: 'name' },
       dataSource: { object: 'account', filter: RULES },
     });
     expect(binding.success).toBe(true);
     const bindingRecord = PageComponentSchema.safeParse({
       type: 'element:record_picker',
-      properties: { object: 'account', filter: RULES },
+      properties: { labelField: 'name' },
       dataSource: { object: 'account', filter: RECORD_FORM },
     });
     expect(issuesAt(bindingRecord, 'dataSource.filter').map((i) => i.code)).toEqual(['invalid_type']);
-    const picker = ComponentPropsMap['element:record_picker'];
-    expect(issuesAt(picker.safeParse({ object: 'account', filter: RULES }), 'filter')).toEqual([]);
-    expect(issuesAt(picker.safeParse({ object: 'account', filter: RECORD_FORM }), 'filter').map((i) => i.code))
+    const grid = ComponentPropsMap['object-grid'];
+    expect(issuesAt(grid.safeParse({ objectName: 'account', filter: RULES }), 'filter')).toEqual([]);
+    expect(issuesAt(grid.safeParse({ objectName: 'account', filter: RECORD_FORM }), 'filter').map((i) => i.code))
       .toEqual(issuesAt(bindingRecord, 'dataSource.filter').map((i) => i.code));
   });
 });
@@ -806,7 +808,7 @@ describe('PageComponent dataSource integration', () => {
   it('should accept component with dataSource', () => {
     const component = PageComponentSchema.parse({
       type: 'element:number',
-      properties: { object: 'order', aggregate: 'sum', field: 'total' },
+      properties: { aggregate: 'sum', field: 'total' },
       dataSource: {
         object: 'order',
         filter: [{ field: 'status', operator: 'equals', value: 'completed' }],
@@ -867,9 +869,10 @@ describe('PageVariableSchema record_id type', () => {
               type: 'element:record_picker',
               // The binding is carried by the VARIABLE's `source` above, not by
               // any picker prop — `displayField` (#5775) and `targetVariable`
-              // (#9198) are both retired.
+              // (#9198) are both retired. Its object is the node-level binding
+              // (the flat `object` retired in v18, #11509).
+              dataSource: { object: 'account' },
               properties: {
-                object: 'account',
                 labelField: 'name',
               },
             },
@@ -904,12 +907,12 @@ describe('Page end-to-end', () => {
             },
             {
               type: 'element:number',
-              properties: { object: 'order', aggregate: 'count' },
+              properties: { aggregate: 'count' },
               dataSource: { object: 'order', filter: [{ field: 'status', operator: 'equals', value: 'pending' }] },
             },
             {
               type: 'element:number',
-              properties: { object: 'order', aggregate: 'sum', field: 'total', format: 'currency', prefix: '$' },
+              properties: { aggregate: 'sum', field: 'total', format: 'currency', prefix: '$' },
               dataSource: { object: 'order', filter: [{ field: 'status', operator: 'equals', value: 'completed' }] },
             },
             {

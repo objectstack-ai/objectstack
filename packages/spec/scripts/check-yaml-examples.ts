@@ -590,23 +590,24 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
 const joinKey = (base: string, key: string) => (base ? `${base}.${key}` : key);
 
 /**
- * The one prop whose absence is NOT reported when the component carries a
- * per-element `dataSource` — ported deliberately from
- * `validate-component-props.ts`, which carries the full reasoning: the props
- * schemas declare `object` as the flat shorthand, objectui's element renderers
- * read `dataSource.object` first (`const object = ds.object ?? props.object`),
- * and a component that binds through the richer sibling has omitted nothing.
- * `content/docs/ui/pages.mdx` and `deployment/validating-metadata.mdx` both
- * teach that precedence, so this is a shape the tagged corpus can grow at any
- * time — and reporting it would be a WRONG verdict, not a strict one.
+ * The elements whose query is the node-level `dataSource` binding ONLY — the
+ * twin of `validate-component-props.ts`'s `DATA_SOURCE_BOUND_ELEMENT_TYPES`,
+ * which carries the full reasoning, turned with it (#11509, ruling A-narrow):
+ * their flat binding keys retired in v18, so one of these nodes with no
+ * `dataSource.object` names no object and is reported here at that path,
+ * where this gate used to WAIVE the flat `object` for any type whose binding
+ * named one. The self-test holds this set equal to the rows of
+ * `ComponentPropsMap` whose flat `object` is a tombstone pointing at
+ * `dataSource.object`, so it cannot drift from the spec on its own.
  */
-const DATASOURCE_SUPPLIED_PROP = 'object';
+const DATA_SOURCE_BOUND_ELEMENT_TYPES: ReadonlySet<string> = new Set([
+  'element:record_picker',
+  'element:number',
+  'element:repeater',
+]);
 
-function suppliedByDataSource(
-  issue: { path: ReadonlyArray<PropertyKey> },
-  node: Record<string, unknown>,
-): boolean {
-  if (issue.path.length !== 1 || issue.path[0] !== DATASOURCE_SUPPLIED_PROP) return false;
+/** Does this node's own `dataSource` binding name an object? */
+function namesBoundObject(node: Record<string, unknown>): boolean {
   const dataSource = isPlainRecord(node.dataSource) ? node.dataSource : undefined;
   return typeof dataSource?.object === 'string' && dataSource.object.length > 0;
 }
@@ -649,11 +650,16 @@ function collectComponentPropsFindings(
         stats.skipped += 1;
       } else {
         stats.dispatched += 1;
+        if (DATA_SOURCE_BOUND_ELEMENT_TYPES.has(type) && !namesBoundObject(value)) {
+          out.push(
+            `    · at ${joinKey(basePath, 'dataSource.object')}: \`${type}\` reads its records from the `
+              + 'node-level `dataSource` binding only, and this node names no object there',
+          );
+        }
         const parsed = schema.safeParse(props);
         if (!parsed.success) {
           const propsPath = joinKey(basePath, 'properties');
           for (const issue of parsed.error.issues) {
-            if (suppliedByDataSource(issue, value)) continue;
             const at = issue.path.length === 0 ? propsPath : joinKey(propsPath, formatPath(issue.path));
             out.push(`    · at ${at}: ${issue.message}`);
           }
@@ -1181,26 +1187,65 @@ function selfTest(): never {
     );
     check('an unregistered SDUI block type is skipped, not refused', sdui.length === 0 && sduiStats.skipped === 1, sdui.join(' | '));
 
-    // `dataSource.object` supplies the flat `object` prop — reporting it would
-    // be a wrong verdict, not a strict one (see DATASOURCE_SUPPLIED_PROP).
+    // The binding an element reads (#11509): the three data-source-bound
+    // elements owe `dataSource.object`, where this gate once WAIVED the flat
+    // `object` for any type whose binding named one.
     const boundStats = freshStats();
     const bound = checkBlock(
       block(
-        'type: element:record_picker\ndataSource:\n  object: showcase_project\nproperties:\n  limit: 50\n',
+        'type: element:record_picker\ndataSource:\n  object: showcase_project\n  limit: 50\nproperties:\n  labelField: name\n',
         'PageComponentSchema',
       ),
       NAMESPACES,
       boundStats,
     );
-    check('a component binding through `dataSource` is not refused for the flat `object` prop',
+    check('a data-source-bound element that names its object on the binding is not refused',
       bound.length === 0 && boundStats.dispatched === 1, bound.join(' | '));
     const unbound = checkBlock(
-      block('type: element:record_picker\nproperties:\n  limit: 50\n', 'PageComponentSchema'),
+      block('type: element:record_picker\nproperties:\n  labelField: name\n', 'PageComponentSchema'),
       NAMESPACES,
       freshStats(),
     );
-    check('…while the same node with no binding at all still reports the missing prop',
-      unbound.some((f) => f.includes('properties.object')), unbound.join(' | '));
+    check('…while the same node with no binding is refused AT `dataSource.object`',
+      unbound.some((f) => f.includes('dataSource.object')), unbound.join(' | '));
+    // The repeater trap, from the docs side: a repeater bound only through
+    // `dataSource` is the clean shape now, and a flat `object` is refused twice
+    // over — the tombstone at the key, and the missing binding.
+    const repeaterBound = checkBlock(
+      block('type: element:repeater\ndataSource:\n  object: deal_note\nproperties:\n  titleField: subject\n', 'PageComponentSchema'),
+      NAMESPACES,
+      freshStats(),
+    );
+    check('a repeater bound only through `dataSource` is not refused', repeaterBound.length === 0, repeaterBound.join(' | '));
+    const repeaterFlat = checkBlock(
+      block('type: element:repeater\nproperties:\n  object: deal_note\n', 'PageComponentSchema'),
+      NAMESPACES,
+      freshStats(),
+    );
+    check('a repeater aimed by a flat `object` is refused at the tombstone and at the missing binding',
+      repeaterFlat.some((f) => f.includes('properties.object') && f.includes('was removed'))
+        && repeaterFlat.some((f) => f.includes('dataSource.object')),
+      repeaterFlat.join(' | '));
+    // Control: a type outside the set owes no binding.
+    const plain = checkBlock(
+      block('type: element:text\nproperties:\n  content: Hi\n', 'PageComponentSchema'),
+      NAMESPACES,
+      freshStats(),
+    );
+    check('an element outside the data-source-bound set owes no binding', plain.length === 0, plain.join(' | '));
+    // The set is the spec's, not a recollection: every `ComponentPropsMap` row
+    // whose flat `object` is a tombstone pointing at `dataSource.object`.
+    const derived = Object.keys(COMPONENT_PROPS_SCHEMAS)
+      .filter((type) => {
+        const parsed = COMPONENT_PROPS_SCHEMAS[type]!.safeParse({ object: 'probe' });
+        return !parsed.success && parsed.error.issues.some((i) =>
+          i.path.length === 1 && i.path[0] === 'object'
+          && i.message.includes('was removed') && i.message.includes('`dataSource.object`'));
+      })
+      .sort();
+    check('the data-source-bound set equals the spec rows whose flat `object` is retired onto the binding',
+      JSON.stringify(derived) === JSON.stringify([...DATA_SOURCE_BOUND_ELEMENT_TYPES].sort()),
+      JSON.stringify(derived));
 
     // Sequencing: the declared schema's verdict is never buried under a second one.
     const shortCircuit = checkBlock(

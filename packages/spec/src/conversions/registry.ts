@@ -5183,12 +5183,12 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
             {
               name: 'main',
               components: [
-                { type: 'element:record_picker', properties: { object: 'showcase_project', displayField: 'title' } },
+                { type: 'element:record_picker', dataSource: { object: 'showcase_project' }, properties: { displayField: 'title' } },
                 // Both spellings, SAME value: the redundant twin goes (#4923).
-                { type: 'element:record_picker', properties: { object: 'a', labelField: 'name', displayField: 'name' } },
+                { type: 'element:record_picker', dataSource: { object: 'a' }, properties: { labelField: 'name', displayField: 'name' } },
                 // Both spellings, DIFFERENT fields: kept, so the author reconciles
                 // the two rather than the loader picking a column.
-                { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
+                { type: 'element:record_picker', dataSource: { object: 'b' }, properties: { labelField: 'name', displayField: 'title' } },
                 // `displayField` is a live LOOKUP-FIELD key elsewhere on the
                 // surface — a different component's business, untouched here.
                 // (The neighbor was `element:form` until #9249 retired that
@@ -5202,7 +5202,7 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
                   properties: {
                     title: 'Link a project',
                     children: [
-                      { type: 'element:record_picker', properties: { object: 'd', displayField: 'code' } },
+                      { type: 'element:record_picker', dataSource: { object: 'd' }, properties: { displayField: 'code' } },
                     ],
                   },
                 },
@@ -5217,7 +5217,7 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
           regions: [],
           slots: {
             details: [
-              { type: 'element:record_picker', properties: { object: 'e', displayField: 'label' } },
+              { type: 'element:record_picker', dataSource: { object: 'e' }, properties: { displayField: 'label' } },
             ],
           },
         },
@@ -5231,16 +5231,16 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
             {
               name: 'main',
               components: [
-                { type: 'element:record_picker', properties: { object: 'showcase_project', labelField: 'title' } },
-                { type: 'element:record_picker', properties: { object: 'a', labelField: 'name' } },
-                { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
+                { type: 'element:record_picker', dataSource: { object: 'showcase_project' }, properties: { labelField: 'title' } },
+                { type: 'element:record_picker', dataSource: { object: 'a' }, properties: { labelField: 'name' } },
+                { type: 'element:record_picker', dataSource: { object: 'b' }, properties: { labelField: 'name', displayField: 'title' } },
                 { type: 'element:text', properties: { displayField: 'title' } },
                 {
                   type: 'page:card',
                   properties: {
                     title: 'Link a project',
                     children: [
-                      { type: 'element:record_picker', properties: { object: 'd', labelField: 'code' } },
+                      { type: 'element:record_picker', dataSource: { object: 'd' }, properties: { labelField: 'code' } },
                     ],
                   },
                 },
@@ -5254,7 +5254,7 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
           regions: [],
           slots: {
             details: [
-              { type: 'element:record_picker', properties: { object: 'e', labelField: 'label' } },
+              { type: 'element:record_picker', dataSource: { object: 'e' }, properties: { labelField: 'label' } },
             ],
           },
         },
@@ -5306,7 +5306,8 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
               components: [
                 {
                   type: 'element:record_picker',
-                  properties: { object: 'showcase_project', searchFields: ['name', 'code'], multiple: true },
+                  dataSource: { object: 'showcase_project' },
+                  properties: { searchFields: ['name', 'code'], multiple: true },
                 },
                 // `multiple` is a live FIELD key (lookup fields) — a different
                 // surface entirely, and not this entry's business. (The
@@ -5324,7 +5325,7 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
                       {
                         label: 'Pick one',
                         children: [
-                          { type: 'element:record_picker', properties: { object: 'b', multiple: true } },
+                          { type: 'element:record_picker', dataSource: { object: 'b' }, properties: { multiple: true } },
                         ],
                       },
                     ],
@@ -5340,7 +5341,7 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
           kind: 'slotted',
           regions: [],
           slots: {
-            details: { type: 'element:record_picker', properties: { object: 'c', searchFields: ['name'] } },
+            details: { type: 'element:record_picker', dataSource: { object: 'c' }, properties: { searchFields: ['name'] } },
           },
         },
       ],
@@ -5353,7 +5354,7 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
             {
               name: 'main',
               components: [
-                { type: 'element:record_picker', properties: { object: 'showcase_project' } },
+                { type: 'element:record_picker', dataSource: { object: 'showcase_project' }, properties: {} },
                 { type: 'element:text', properties: { multiple: true } },
                 {
                   type: 'page:tabs',
@@ -5363,7 +5364,7 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
                       {
                         label: 'Pick one',
                         children: [
-                          { type: 'element:record_picker', properties: { object: 'b' } },
+                          { type: 'element:record_picker', dataSource: { object: 'b' }, properties: {} },
                         ],
                       },
                     ],
@@ -5378,7 +5379,7 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
           kind: 'slotted',
           regions: [],
           slots: {
-            details: { type: 'element:record_picker', properties: { object: 'c' } },
+            details: { type: 'element:record_picker', dataSource: { object: 'c' }, properties: {} },
           },
         },
       ],
@@ -6809,7 +6810,7 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
                   type: 'element:text_input',
                   properties: { inputType: 'email', targetVariable: 'contact_email' },
                 },
-                { type: 'element:record_picker', properties: { object: 'showcase_project', targetVariable: 'selected_id' } },
+                { type: 'element:record_picker', dataSource: { object: 'showcase_project' }, properties: { targetVariable: 'selected_id' } },
                 // Negative control: a `targetVariable` on a type OUTSIDE this
                 // conversion's dispatch proves the strip is scoped by the
                 // component TYPE, not by the key name. It was originally an
@@ -6826,7 +6827,7 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
                   properties: {
                     title: 'Pick one',
                     children: [
-                      { type: 'element:record_picker', properties: { object: 'b', targetVariable: 'picked' } },
+                      { type: 'element:record_picker', dataSource: { object: 'b' }, properties: { targetVariable: 'picked' } },
                     ],
                   },
                 },
@@ -6863,14 +6864,14 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
                   type: 'element:text_input',
                   properties: { inputType: 'email' },
                 },
-                { type: 'element:record_picker', properties: { object: 'showcase_project' } },
+                { type: 'element:record_picker', dataSource: { object: 'showcase_project' }, properties: {} },
                 { type: 'custom:legacy_input', properties: { targetVariable: 'active_filter' } },
                 {
                   type: 'page:card',
                   properties: {
                     title: 'Pick one',
                     children: [
-                      { type: 'element:record_picker', properties: { object: 'b' } },
+                      { type: 'element:record_picker', dataSource: { object: 'b' }, properties: {} },
                     ],
                   },
                 },
@@ -7219,11 +7220,13 @@ const elementFilterRemoved: MetadataConversion = {
                   },
                 },
                 // Key overlap on a DIFFERENT type rides through untouched —
-                // `object` is also a live `element:record_picker` prop, and
-                // the strip dispatches on the component type, not the key
-                // name. (The neighbor was `element:form` until #9249 retired
-                // that element whole; its own strip would now touch the node.)
-                { type: 'element:record_picker', properties: { object: 'order' } },
+                // `object` is also a live `element:metadata_viewer` prop (its
+                // metadata owner), and the strip dispatches on the component
+                // type, not the key name. (The neighbor was `element:form`
+                // until #9249 retired that element whole, then
+                // `element:record_picker` until #11509 retired its flat
+                // `object`; either one's own conversion would now touch it.)
+                { type: 'element:metadata_viewer', properties: { type: 'state_machine', name: 'order_status', object: 'order' } },
                 // Nested one container down (#6775) — the walk descends.
                 {
                   type: 'page:card',
@@ -7263,7 +7266,7 @@ const elementFilterRemoved: MetadataConversion = {
               name: 'main',
               components: [
                 { type: 'element:filter', properties: {} },
-                { type: 'element:record_picker', properties: { object: 'order' } },
+                { type: 'element:metadata_viewer', properties: { type: 'state_machine', name: 'order_status', object: 'order' } },
                 {
                   type: 'page:card',
                   properties: {
@@ -7290,8 +7293,421 @@ const elementFilterRemoved: MetadataConversion = {
       ],
     },
     // One per stripped key: 5 on the top-level node, 2 on the nested one,
-    // 3 on the slotted one. The `element:record_picker` neighbor is untouched.
+    // 3 on the slotted one. The `element:metadata_viewer` neighbor is untouched.
     expectedNotices: 10,
+  },
+};
+
+/**
+ * The element layer's retired flat data-binding keys, per element type — the
+ * keys {@link elementFlatDataBindingToDataSource} moves onto the node-level
+ * `dataSource`. Declared here rather than imported from
+ * `ui/component.zod.ts`, whose list is module-private (exporting it would widen
+ * a retirement that only narrows) and which this module is kept free of, so
+ * the page-component schemas are not dragged into every bundle of the
+ * `./shared` entry (see {@link CONVERSIONS_BY_MAJOR}).
+ * `element-flat-data-binding-to-data-source.test.ts` holds this list equal to
+ * the tombstones `ComponentPropsMap` carries.
+ */
+const ELEMENT_FLAT_BINDING_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
+  'element:record_picker': ['object', 'filter', 'sort', 'limit'],
+  'element:number': ['object', 'filter'],
+  'element:repeater': ['object', 'filter', 'sort', 'limit'],
+};
+
+/** A rule array, as far as a mechanical append can tell: an array of plain objects. */
+function isRuleObjectArray(value: unknown): value is Dict[] {
+  return Array.isArray(value) && value.every(isDict);
+}
+
+/**
+ * What {@link elementFlatDataBindingToDataSource} does with one flat key, by
+ * the element's OLD resolution of it — the rule each renderer applied before
+ * objectui#11880 moved all three onto `dataSource` alone:
+ *
+ * - `element:record_picker`, and `element:number`'s `object`: the binding (or
+ *   the saved view it names) first, the flat key second
+ *   (`composed?.<key> ?? props.<key>`);
+ * - `element:number`'s `filter`: AND-combined with the binding's;
+ * - `element:repeater`: the flat keys ONLY — the binding was not read at all
+ *   (objectui#11880 then put the binding first, keeping the flat keys as a
+ *   fallback, so a value the two disagree on was applied differently by the
+ *   two console versions).
+ */
+type FlatBindingDisposition =
+  | { kind: 'move' }
+  | { kind: 'drop' }
+  | { kind: 'append'; rules: Dict[] }
+  | { kind: 'todo'; reason: string };
+
+function flatBindingDisposition(
+  type: string,
+  key: string,
+  value: unknown,
+  binding: Dict | undefined,
+): FlatBindingDisposition {
+  const bound = binding !== undefined && binding[key] !== undefined;
+  const view = binding && typeof binding.view === 'string' && binding.view.length > 0 ? binding.view : undefined;
+
+  if (type === 'element:repeater') {
+    if (bound) {
+      if (deepEqualAuthored(binding![key], value)) return { kind: 'drop' };
+      return {
+        kind: 'todo',
+        reason: `\`dataSource.${key}\` is set to a different value than this flat \`${key}\`. The list read `
+          + 'only its flat keys until the console moved it onto the binding, and reads the binding first since, '
+          + 'so which of the two it applied depends on the console version. Keep the value you mean in '
+          + `\`dataSource.${key}\` and delete this key.`,
+      };
+    }
+    if (view !== undefined && key !== 'object') {
+      return {
+        kind: 'todo',
+        reason: `the binding names the saved view \`${view}\`, which the list did not read until the console `
+          + `moved it onto the binding. On the binding, this \`${key}\` combines with the view's own (a filter `
+          + 'ANDs, a sort or a limit overrides it), which an older console never applied. Decide whether the list '
+          + `should apply the view, then write the \`${key}\` you mean on \`dataSource\` and delete this key.`,
+      };
+    }
+    return { kind: 'move' };
+  }
+
+  if (type === 'element:number' && key === 'filter') {
+    if (!bound) return { kind: 'move' };
+    if (isRuleObjectArray(binding!.filter) && isRuleObjectArray(value)) {
+      return { kind: 'append', rules: [...binding!.filter, ...value] };
+    }
+    return {
+      kind: 'todo',
+      reason: 'this flat `filter` and `dataSource.filter` both carry rules, and the element AND-combined '
+        + 'them; one of the two is not a rule array, so they cannot be appended mechanically. Write the rules '
+        + 'of both into `dataSource.filter` (they AND) and delete this key.',
+    };
+  }
+
+  // `element:record_picker`, and `element:number`'s `object`.
+  if (bound) return { kind: 'drop' };
+  if (view !== undefined && key !== 'object') {
+    return {
+      kind: 'todo',
+      reason: `this flat \`${key}\` sits beside \`dataSource.view: '${view}'\`, and the binding sets no \`${key}\` `
+        + 'of its own. It was read only when that view supplied none, so whether it ever applied depends on '
+        + `the view, which no conversion reads. If the view sets no \`${key}\`, move this one to `
+        + `\`dataSource.${key}\`; if it does, delete it.`,
+    };
+  }
+  return { kind: 'move' };
+}
+
+/**
+ * The element layer's flat data-binding keys move onto the node-level
+ * `dataSource` binding (protocol 18, #11509 — ruling A-narrow: in v18 an
+ * element binds data through `dataSource` only, so one node carries one door
+ * with one precedence).
+ *
+ * Ten keys on three elements: `element:record_picker` `object` / `filter` /
+ * `sort` / `limit`, `element:number` `object` / `filter`, and
+ * `element:repeater` `object` / `filter` / `sort` / `limit`. Each was the
+ * same query as a key of `ElementDataSourceSchema`, resolved per renderer by
+ * three different rules, and objectui#11880 (objectui `5bc55c0c5a1e`) moved
+ * all three renderers onto the binding — the picker and `element:number` read
+ * it alone, the repeater reads it first and keeps its flat keys as a fallback
+ * — in the order the ruling set, so this rewrite never moves a working list's
+ * query into a position its renderer does not read.
+ *
+ * Mechanical where the OLD rule decides the answer
+ * ({@link flatBindingDisposition}):
+ *
+ * - the binding lacks the key → the value MOVES there, unchanged;
+ * - the record picker (and `element:number`'s `object`) where the binding
+ *   already sets the key → the flat key is DELETED: the binding always won,
+ *   so the flat value never applied;
+ * - `element:number`'s `filter` beside the binding's → APPENDED to it: the
+ *   renderer AND-combined the two, and a rule array is an AND;
+ * - the repeater where the binding already holds the SAME value → deleted.
+ *
+ * Left as stored, and reported as a TODO, where it does not: a record-picker
+ * key the binding lacks beside a `dataSource.view` (whether the view's own key
+ * displaced it depends on the view, which no conversion reads); a repeater key
+ * the binding sets to a different value, or beside a `view` (the repeater read
+ * neither before objectui#11880 and reads the binding first since, so what it
+ * applied depends on the console version); and an `element:number` filter pair
+ * that is not two rule arrays. A
+ * key left as stored no longer reaches a query, and its tombstone refuses it
+ * at the next parse with the same prescription.
+ *
+ * Runs BEFORE `page-component-filter-record-to-rule-array` (order 35.5, below
+ * its 36): a flat `filter` in the retired record form moves onto
+ * `dataSource.filter`, where that entry converts it like any other binding
+ * filter — so neither entry carries an element-layer `properties.filter` arm.
+ *
+ * Retired from the load path: an author writing a flat key is refused at the
+ * parse with the prescription; stored rows, artifacts and
+ * `os migrate meta --from 17` replay it. Idempotent by construction — a node
+ * with no flat key left is returned by reference.
+ */
+const elementFlatDataBindingToDataSource: MetadataConversion = {
+  id: 'element-flat-data-binding-to-data-source',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface:
+    'page.component.element:record_picker.object / page.component.element:record_picker.filter / '
+    + 'page.component.element:record_picker.sort / page.component.element:record_picker.limit / '
+    + 'page.component.element:number.object / page.component.element:number.filter / '
+    + 'page.component.element:repeater.object / page.component.element:repeater.filter / '
+    + 'page.component.element:repeater.sort / page.component.element:repeater.limit',
+  summary:
+    "the element layer's flat data-binding keys removed — 'object' / 'filter' / 'sort' / 'limit' on "
+    + "element:record_picker and element:repeater, 'object' / 'filter' on element:number — each the "
+    + "same query as a key of the node-level 'dataSource' binding, the one door the element reads: a "
+    + 'key the binding lacks moves there unchanged, one the binding already set is deleted where the '
+    + "binding always won (and element:number's filter is appended to the binding's, since the two "
+    + "always AND-combined); a key whose effect depended on a saved 'dataSource.view', or that "
+    + "disagrees with a binding the repeater never read, is left as stored and reported as a TODO",
+  apply(stack, emit, context) {
+    return mapPageComponents(stack, (component, path) => {
+      const type = component.type;
+      if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(ELEMENT_FLAT_BINDING_KEYS_BY_TYPE, type)) return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const keys = ELEMENT_FLAT_BINDING_KEYS_BY_TYPE[type]!.filter((key) => key in properties);
+      if (keys.length === 0) return component;
+
+      const original = isDict(component.dataSource) ? component.dataSource : undefined;
+      let binding = original;
+      let props: Dict = properties;
+      const block = describeBlock(component);
+
+      for (const key of keys) {
+        const value = props[key];
+        const disposition = value === undefined
+          ? ({ kind: 'drop' } as const)
+          : flatBindingDisposition(type, key, value, binding);
+        switch (disposition.kind) {
+          case 'todo':
+            context?.reportTodo?.({
+              path: `${path}.properties.${key}`,
+              from: JSON.stringify(value),
+              reason: `On ${block}, ${disposition.reason} Left as stored, this key reaches no query.`,
+            });
+            continue;
+          case 'drop':
+            props = stripKeys(props, [key], emit, `${path}.properties`);
+            continue;
+          case 'append': {
+            const { [key]: _appended, ...rest } = props;
+            props = rest;
+            binding = { ...binding, filter: disposition.rules };
+            emit({ from: `properties.${key}`, to: `dataSource.${key} (rules appended; they AND)`, path: `${path}.dataSource.${key}` });
+            continue;
+          }
+          case 'move': {
+            const { [key]: _moved, ...rest } = props;
+            props = rest;
+            binding = { ...binding, [key]: value };
+            emit({ from: `properties.${key}`, to: `dataSource.${key}`, path: `${path}.dataSource.${key}` });
+            continue;
+          }
+        }
+      }
+
+      if (props === properties) return component;
+      return binding === original
+        ? { ...component, properties: props }
+        : { ...component, dataSource: binding, properties: props };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'deal_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // No binding: all four flat keys move onto a new one.
+                {
+                  type: 'element:record_picker',
+                  id: 'p1',
+                  properties: {
+                    object: 'deal',
+                    labelField: 'name',
+                    filter: [{ field: 'stage', operator: 'equals', value: 'open' }],
+                    sort: [{ field: 'amount', order: 'desc' }],
+                    limit: 20,
+                  },
+                },
+                // The binding already names the object: the flat one never
+                // applied (the binding won) and is deleted; the binding lacks a
+                // limit, so the flat one moves.
+                {
+                  type: 'element:record_picker',
+                  id: 'p2',
+                  dataSource: { object: 'deal' },
+                  properties: { object: 'lead', limit: 10 },
+                },
+                // Beside a saved view the binding sets no filter of its own:
+                // whether the flat filter ever applied depends on the view, so
+                // it is left as stored — a TODO, no notice.
+                {
+                  type: 'element:record_picker',
+                  id: 'p3',
+                  dataSource: { object: 'deal', view: 'hot_deals' },
+                  properties: { filter: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }] },
+                },
+                {
+                  type: 'page:card',
+                  properties: {
+                    children: [
+                      // Nested, no binding: `object` and `filter` move.
+                      {
+                        type: 'element:number',
+                        id: 'n1',
+                        properties: {
+                          object: 'deal',
+                          aggregate: 'count',
+                          filter: [{ field: 'stage', operator: 'equals', value: 'won' }],
+                        },
+                      },
+                      // Both filters set: the element AND-combined them, so the
+                      // flat rules are appended to the binding's.
+                      {
+                        type: 'element:number',
+                        id: 'n2',
+                        dataSource: { object: 'deal', filter: [{ field: 'stage', operator: 'equals', value: 'won' }] },
+                        properties: {
+                          aggregate: 'sum',
+                          field: 'amount',
+                          filter: [{ field: 'amount', operator: 'greater_than', value: 0 }],
+                        },
+                      },
+                    ],
+                  },
+                },
+                // `object` on an element outside the family (the metadata
+                // owner of a viewer) is not this entry's key.
+                {
+                  type: 'element:metadata_viewer',
+                  properties: { type: 'state_machine', name: 'deal_stage', object: 'deal' },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape: a repeater, which read its flat keys alone
+        // before the console put its binding first.
+        {
+          name: 'deal_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            side: {
+              type: 'element:repeater',
+              id: 'r1',
+              properties: {
+                object: 'deal_note',
+                titleField: 'subject',
+                filter: [{ field: 'pinned', operator: 'equals', value: true }],
+                sort: [{ field: 'created_at', order: 'desc' }],
+                limit: 5,
+              },
+            },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'deal_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'element:record_picker',
+                  id: 'p1',
+                  properties: { labelField: 'name' },
+                  dataSource: {
+                    object: 'deal',
+                    filter: [{ field: 'stage', operator: 'equals', value: 'open' }],
+                    sort: [{ field: 'amount', order: 'desc' }],
+                    limit: 20,
+                  },
+                },
+                {
+                  type: 'element:record_picker',
+                  id: 'p2',
+                  dataSource: { object: 'deal', limit: 10 },
+                  properties: {},
+                },
+                {
+                  type: 'element:record_picker',
+                  id: 'p3',
+                  dataSource: { object: 'deal', view: 'hot_deals' },
+                  properties: { filter: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }] },
+                },
+                {
+                  type: 'page:card',
+                  properties: {
+                    children: [
+                      {
+                        type: 'element:number',
+                        id: 'n1',
+                        properties: { aggregate: 'count' },
+                        dataSource: {
+                          object: 'deal',
+                          filter: [{ field: 'stage', operator: 'equals', value: 'won' }],
+                        },
+                      },
+                      {
+                        type: 'element:number',
+                        id: 'n2',
+                        dataSource: {
+                          object: 'deal',
+                          filter: [
+                            { field: 'stage', operator: 'equals', value: 'won' },
+                            { field: 'amount', operator: 'greater_than', value: 0 },
+                          ],
+                        },
+                        properties: { aggregate: 'sum', field: 'amount' },
+                      },
+                    ],
+                  },
+                },
+                {
+                  type: 'element:metadata_viewer',
+                  properties: { type: 'state_machine', name: 'deal_stage', object: 'deal' },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'deal_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            side: {
+              type: 'element:repeater',
+              id: 'r1',
+              properties: { titleField: 'subject' },
+              dataSource: {
+                object: 'deal_note',
+                filter: [{ field: 'pinned', operator: 'equals', value: true }],
+                sort: [{ field: 'created_at', order: 'desc' }],
+                limit: 5,
+              },
+            },
+          },
+        },
+      ],
+    },
+    // One per flat key moved, deleted or appended: 4 on `p1`, 2 on `p2`, 0 on
+    // `p3` (its TODO), 2 on `n1`, 1 on `n2`, 4 on `r1`.
+    expectedNotices: 13,
   },
 };
 
@@ -7373,9 +7789,12 @@ const elementFormRemoved: MetadataConversion = {
                   },
                 },
                 // Key overlap on a DIFFERENT type rides through untouched —
-                // `object` is also a live `element:record_picker` prop, and
-                // the strip dispatches on the component type, not the key name.
-                { type: 'element:record_picker', properties: { object: 'lead' } },
+                // `object` is also a live `element:metadata_viewer` prop (its
+                // metadata owner), and the strip dispatches on the component
+                // type, not the key name. (The neighbor was
+                // `element:record_picker` until #11509 retired its flat
+                // `object`; that retirement's conversion would now touch it.)
+                { type: 'element:metadata_viewer', properties: { type: 'state_machine', name: 'lead_status', object: 'lead' } },
                 // Nested one container down (#6775) — the walk descends.
                 {
                   type: 'page:card',
@@ -7415,7 +7834,7 @@ const elementFormRemoved: MetadataConversion = {
               name: 'main',
               components: [
                 { type: 'element:form', properties: {} },
-                { type: 'element:record_picker', properties: { object: 'lead' } },
+                { type: 'element:metadata_viewer', properties: { type: 'state_machine', name: 'lead_status', object: 'lead' } },
                 {
                   type: 'page:card',
                   properties: {
@@ -7442,7 +7861,7 @@ const elementFormRemoved: MetadataConversion = {
       ],
     },
     // One per stripped key: 5 on the top-level node, 2 on the nested one,
-    // 3 on the slotted one. The `element:record_picker` neighbor is untouched.
+    // 3 on the slotted one. The `element:metadata_viewer` neighbor is untouched.
     expectedNotices: 10,
   },
 };
@@ -9230,6 +9649,267 @@ const pageComponentResponsiveRemoved: MetadataConversion = {
     // Two notices: one per stripped key site (the region-level component and
     // the nested one).
     expectedNotices: 2,
+  },
+};
+
+/**
+ * A `filter` value the grid's lowering reads as NOTHING — absent, `null`, an
+ * empty rule array or an empty record — which is exactly when `object-grid`
+ * read `defaultFilters` instead.
+ */
+function gridFilterIsEmpty(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  return isDict(value) && Object.keys(value).length === 0;
+}
+
+/** A `filter` value with rules (or record keys) in it — the grid read it, and never `defaultFilters`. */
+function gridFilterHasContent(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return isDict(value) && Object.keys(value).length > 0;
+}
+
+/**
+ * `object-grid`'s legacy base-filter fallback leaves the contract (protocol 18,
+ * #11509, ruling A-narrow, sub-question 1: "retires with a conversion in the
+ * shape `defaultSort`'s took").
+ *
+ * `defaultFilters` was the second spelling of `filter`: the same rules, read by
+ * the grid only when `filter` lowered to nothing. #19514 narrowed it to the
+ * rule array and said, in as many words, that refusing it outright needed its
+ * own ruling; #11509 is that ruling. Its narrowing's D3 entry
+ * (`object-grid-default-filters-rule-array`, unreleased in any major) is
+ * absorbed into this retirement's, and so is the narrowing's D2 arm: the
+ * `properties.defaultFilters` reach of `page-component-filter-record-to-rule-array`
+ * is gone, because this entry runs BEFORE that one (order 35.5, below its 36)
+ * and leaves no `defaultFilters` for it to see — a record-form fallback it
+ * moves lands on `filter`, where that entry converts it like any other.
+ *
+ * The renderer's own precedence decides the rewrite, as it did for
+ * {@link objectGridDefaultSortRemoved}:
+ *
+ * - `filter` EMPTY (absent, `null`, `[]` or `{}`) — the fallback WAS the
+ *   grid's filter, so it moves onto `filter`, unchanged;
+ * - `filter` WITH CONTENT — the fallback was never read, so it is deleted (a
+ *   pure lossless delete), and so is an empty fallback beside anything;
+ * - `filter` a value no lowering reads (a bare string, a number, a boolean) —
+ *   the grid fell back to `defaultFilters` there too, but moving the fallback
+ *   would overwrite what the author wrote at `filter`, so the site is left as
+ *   stored and reported as a TODO.
+ *
+ * Zero authored occurrences in this repository (the showcase pins it at zero),
+ * so the entry exists for stored `sys_metadata` rows and for authors outside
+ * the repo. Retired from the load path: an author writing the key is refused
+ * at the parse with the prescription.
+ */
+const objectGridDefaultFiltersRemoved: MetadataConversion = {
+  id: 'object-grid-default-filters-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.component.object-grid.defaultFilters',
+  summary:
+    "object-grid component prop 'defaultFilters' removed (the legacy second spelling of 'filter', read "
+    + "only when 'filter' lowered to nothing; its rules move onto an empty 'filter', and the key is "
+    + "deleted beside a 'filter' that has content, which the grid always read instead)",
+  apply(stack, emit, context) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'object-grid') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !('defaultFilters' in properties)) return component;
+      const fallback = properties.defaultFilters;
+      const filter = properties.filter;
+      if (gridFilterIsEmpty(fallback) || gridFilterHasContent(filter)) {
+        // Nothing to carry, or `filter` won: a lossless delete.
+        return { ...component, properties: stripKeys(properties, ['defaultFilters'], emit, `${path}.properties`) };
+      }
+      if (gridFilterIsEmpty(filter)) {
+        // The fallback WAS the filter: it moves, unchanged.
+        const { defaultFilters, ...rest } = properties;
+        emit({ from: 'defaultFilters', to: 'filter', path: `${path}.properties.filter` });
+        return { ...component, properties: { ...rest, filter: defaultFilters } };
+      }
+      context?.reportTodo?.({
+        path: `${path}.properties.defaultFilters`,
+        from: JSON.stringify(fallback),
+        reason: `On ${describeBlock(component)}, \`filter\` is ${JSON.stringify(filter)}, a value no filter `
+          + 'lowering reads, so the grid fell back to `defaultFilters`; moving the fallback onto `filter` '
+          + 'would overwrite what was written there. Write the rules the grid should apply at `filter` and '
+          + 'delete `defaultFilters`. Left as stored, it no longer reaches the query.',
+      });
+      return component;
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'work_queue',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // No `filter`: the fallback WAS the filter, so it moves.
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: {
+                    objectName: 'crm_task',
+                    defaultFilters: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
+                  },
+                },
+                // `filter` has rules: the fallback was never read — deleted.
+                {
+                  type: 'object-grid',
+                  id: 'g2',
+                  properties: {
+                    objectName: 'crm_task',
+                    filter: [{ field: 'status', operator: 'equals', value: 'open' }],
+                    defaultFilters: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
+                  },
+                },
+                // `filter: []` lowers to nothing: the grid read the fallback.
+                {
+                  type: 'object-grid',
+                  id: 'g3',
+                  properties: {
+                    objectName: 'crm_task',
+                    filter: [],
+                    defaultFilters: [{ field: 'priority', operator: 'equals', value: 'high' }],
+                  },
+                },
+                // `defaultFilters` on a component that is not an object-grid —
+                // not this entry's key (scoped by component type, never by key
+                // name).
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: {
+                    objectName: 'crm_task',
+                    defaultFilters: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
+                  },
+                },
+                // Nested one container down: still a component.
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-grid',
+                        id: 'g4',
+                        properties: {
+                          objectName: 'crm_lead',
+                          defaultFilters: [{ field: 'status', operator: 'equals', value: 'new' }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape: `filter: {}` (an empty record) lowers to
+        // nothing too, so the fallback moves onto it.
+        {
+          name: 'work_queue_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-grid',
+              id: 'g5',
+              properties: {
+                objectName: 'crm_task',
+                filter: {},
+                defaultFilters: [{ field: 'status', operator: 'not_equals', value: 'done' }],
+              },
+            },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'work_queue',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: {
+                    objectName: 'crm_task',
+                    filter: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
+                  },
+                },
+                {
+                  type: 'object-grid',
+                  id: 'g2',
+                  properties: {
+                    objectName: 'crm_task',
+                    filter: [{ field: 'status', operator: 'equals', value: 'open' }],
+                  },
+                },
+                {
+                  type: 'object-grid',
+                  id: 'g3',
+                  properties: {
+                    objectName: 'crm_task',
+                    filter: [{ field: 'priority', operator: 'equals', value: 'high' }],
+                  },
+                },
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: {
+                    objectName: 'crm_task',
+                    defaultFilters: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
+                  },
+                },
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-grid',
+                        id: 'g4',
+                        properties: {
+                          objectName: 'crm_lead',
+                          filter: [{ field: 'status', operator: 'equals', value: 'new' }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'work_queue_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-grid',
+              id: 'g5',
+              properties: {
+                objectName: 'crm_task',
+                filter: [{ field: 'status', operator: 'not_equals', value: 'done' }],
+              },
+            },
+          },
+        },
+      ],
+    },
+    // One per grid that carried the key: g1, g2, g3, g4, g5. The kanban
+    // neighbour is untouched.
+    expectedNotices: 5,
   },
 };
 
@@ -13424,16 +14104,13 @@ const RULE_ARRAY_FILTER_BLOCK_TYPES: ReadonlySet<string> = new Set([
   'object-gantt',
   'object-tree',
   'object-timeline',
-  'element:number',
-  'element:record_picker',
 ]);
-
-/**
- * The one component type whose `properties.defaultFilters` is a rule-array
- * door of the same family (`object-grid-default-filters-rule-array`). Held
- * against the schema by the same test.
- */
-const RULE_ARRAY_DEFAULT_FILTERS_BLOCK_TYPES: ReadonlySet<string> = new Set(['object-grid']);
+// `element:number` and `element:record_picker` left this list, and the
+// `object-grid` `properties.defaultFilters` arm left this entry, with #11509:
+// those three flat keys retired in v18, and the two entries that remove them
+// (`element-flat-data-binding-to-data-source`, `object-grid-default-filters-removed`)
+// run before this one, so a record form they carry reaches this entry at the
+// door it moved to — `dataSource.filter`, or the grid's own `filter`.
 
 /** One rule a legacy filter maps to — the rule array's authored element. */
 interface MappedFilterRule {
@@ -13763,7 +14440,7 @@ function describeBlock(component: Dict): string {
  * refusal lands differs by door, measured through `saveMetaItem`
  * (`protocol.stored-migration.test.ts`): `dataSource.filter` is a declared key
  * of the strict page-component schema, so the row's next save is refused
- * there; `properties.filter` / `properties.defaultFilters` sit in the open
+ * there; `properties.filter` sits in the open
  * `properties` bag the runtime save does not refuse by component type, so there
  * the refusal is the component-props gate's (`@objectstack/lint`, advisory),
  * and a re-save goes through.
@@ -13784,10 +14461,14 @@ function describeBlock(component: Dict): string {
  *
  * Every page component `mapPageComponents` visits (regions, slots, nested
  * containers): `dataSource.filter` on any component (`ElementDataSourceSchema`),
- * `properties.filter` on {@link RULE_ARRAY_FILTER_BLOCK_TYPES}, and
- * `properties.defaultFilters` on {@link RULE_ARRAY_DEFAULT_FILTERS_BLOCK_TYPES}.
- * The `filter` of any other component type is not this entry's surface and is
- * never touched.
+ * and `properties.filter` on {@link RULE_ARRAY_FILTER_BLOCK_TYPES}. The `filter`
+ * of any other component type is not this entry's surface and is never
+ * touched. Until #11509 the reach also took the `properties.filter` of
+ * `element:number` and `element:record_picker` and the `properties.defaultFilters`
+ * of `object-grid`; those keys retired in v18, and the entries that move them
+ * (`element-flat-data-binding-to-data-source`, `object-grid-default-filters-removed`)
+ * run first, so their values arrive here at `dataSource.filter` or at the
+ * grid's `filter`.
  *
  * Where a component's rows come from does not move the verdict. A block whose
  * rows ride on the node (`data: { provider: 'value' }`, a `data` array,
@@ -13818,9 +14499,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
   retiredFromLoadPath: true,
   retiredAfter: '17.4.0',
   surface:
-    'page.component.dataSource.filter / page.component.properties.filter (the object-* blocks, '
-    + 'element:number, element:record_picker) / page.component.properties.defaultFilters '
-    + '(object-grid) — the record and single-level AST filter forms',
+    'page.component.dataSource.filter / page.component.properties.filter (the object-* blocks) '
+    + '— the record and single-level AST filter forms',
   summary:
     'a record-form or single-level AST filter at a converged rule-array door becomes the '
     + '`[{ field, operator, value }]` rule array wherever the mapping is lossless (flat keys → '
@@ -13871,9 +14551,6 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
         if (RULE_ARRAY_FILTER_BLOCK_TYPES.has(type)) {
           props = rewrite(props, 'filter', `${path}.properties`);
         }
-        if (RULE_ARRAY_DEFAULT_FILTERS_BLOCK_TYPES.has(type)) {
-          props = rewrite(props, 'defaultFilters', `${path}.properties`);
-        }
         if (props !== properties) next = { ...next, properties: props };
       }
 
@@ -13890,8 +14567,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
             {
               name: 'main',
               components: [
-                // The binding and both grid doors at once: a flat record with
-                // two keys, an operator object, and an AST tuple array.
+                // The binding and the grid door at once: a flat record with
+                // two keys, and an operator object.
                 {
                   type: 'object-grid',
                   dataSource: {
@@ -13901,7 +14578,16 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                   properties: {
                     objectName: 'deal',
                     filter: { amount: { $gt: 100, $lte: 5000 } },
-                    defaultFilters: [['owner_id', '=', '{current_user_id}']],
+                  },
+                },
+                // An AST tuple array, at another block door. (It sat on the
+                // grid's `defaultFilters` until #11509 retired that key in v18
+                // and took its door out of this entry's reach.)
+                {
+                  type: 'object-calendar',
+                  properties: {
+                    objectName: 'deal',
+                    filter: [['owner_id', '=', '{current_user_id}']],
                   },
                 },
                 // A combinator is never flattened: left byte-identical.
@@ -13931,18 +14617,20 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                   },
                 },
                 // Nested inside a container: reached, and a legacy shorthand
-                // operator lands on its canonical spelling.
+                // operator lands on its canonical spelling — at the element's
+                // binding, the one door an element carries since #11509
+                // retired its flat `filter`.
                 {
                   type: 'page:card',
                   properties: {
                     children: [
                       {
                         type: 'element:number',
-                        properties: {
+                        dataSource: {
                           object: 'deal',
-                          aggregate: 'count',
                           filter: { stage: { $nin: ['lost', 'void'] } },
                         },
+                        properties: { aggregate: 'count' },
                       },
                     ],
                   },
@@ -13977,9 +14665,13 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                       { field: 'amount', operator: 'greater_than', value: 100 },
                       { field: 'amount', operator: 'less_than_or_equal', value: 5000 },
                     ],
-                    defaultFilters: [
-                      { field: 'owner_id', operator: 'equals', value: '{current_user_id}' },
-                    ],
+                  },
+                },
+                {
+                  type: 'object-calendar',
+                  properties: {
+                    objectName: 'deal',
+                    filter: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
                   },
                 },
                 {
@@ -14010,11 +14702,11 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                     children: [
                       {
                         type: 'element:number',
-                        properties: {
+                        dataSource: {
                           object: 'deal',
-                          aggregate: 'count',
                           filter: [{ field: 'stage', operator: 'not_in', value: ['lost', 'void'] }],
                         },
+                        properties: { aggregate: 'count' },
                       },
                     ],
                   },
@@ -14025,8 +14717,9 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
         },
       ],
     },
-    // One per converted door: the binding, the grid filter, the grid
-    // defaultFilters, the inline-row map's filter, the nested element:number.
+    // One per converted door: the grid's binding, the grid filter, the
+    // calendar's AST filter, the inline-row map's filter, the nested
+    // element:number's binding.
     expectedNotices: 5,
   },
 };
@@ -15043,6 +15736,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: datasetCountMeasureEmptyFieldRemoved, order: 54 },
   { conversion: declaredIndexUniqueScope, order: 61 },
   { conversion: elementFilterRemoved, order: 4 },
+  { conversion: elementFlatDataBindingToDataSource, order: 35.5 },
   { conversion: elementFormRemoved, order: 5 },
   { conversion: elementInputTargetVariableRemoved, order: 3 },
   { conversion: elementTextVariantHeadingLevels, order: 59 },
@@ -15061,6 +15755,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: mappingLookupParamsRemoved, order: 11 },
   { conversion: memoryPersistenceAutoSaveIntervalToMs, order: 27 },
   { conversion: metricFiltersRemoved, order: 7 },
+  { conversion: objectGridDefaultFiltersRemoved, order: 35.5 },
   { conversion: objectGridDefaultSortRemoved, order: 14 },
   { conversion: objectGridResizableColumnsRemoved, order: 57 },
   { conversion: objectKanbanQuickAddRemoved, order: 15 },

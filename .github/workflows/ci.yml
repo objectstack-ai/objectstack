@@ -2240,8 +2240,19 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # `actions: read` + `checks: read` (#22606) pay for ONE question, asked
+    # only when `dogfood-verify` — a single-leg roster, which has no sibling
+    # shard to show the leg ran — reads `cancelled` with zero attestations
+    # while the dogfood matrix attested: was that leg KILLED by its own
+    # `timeout-minutes`, or SUPERSEDED by a newer push? The aggregate word is
+    # `cancelled` either way, so the verdict reads the cause the platform
+    # records on the leg's own check run (this attempt's jobs list, then that
+    # check run's annotations). Both are reads; an unspecified permission is
+    # `none`, so neither is reachable without naming it here.
     permissions:
       contents: read
+      actions: read
+      checks: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -2266,6 +2277,9 @@ jobs:
           OS_VERIFY_RESULT: ${{ needs['dogfood-verify'].result }}
           OS_FILTER_RESULT: ${{ needs.filter.result }}
           OS_DOWNLOAD_OUTCOME: ${{ steps.attestations.outcome }}
+          # Read ONLY on the cancelled-single-leg path above, never otherwise;
+          # without it that path fails closed (red, naming the missing token).
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           node scripts/check-shard-attestation.mjs --verify \
             --gate 'Dogfood Regression Gate' \

@@ -5544,6 +5544,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'toolbar\'s filter builder.',
   },
   {
+    id: 'element-flat-data-binding-retired',
+    order: 90,
+    text:
+      'It also retires the element layer\'s second data door (#11509, ruling A-narrow): the flat '
+      + '`object` / `filter` / `sort` / `limit` keys of `element:record_picker` and '
+      + '`element:repeater` and the flat `object` / `filter` of `element:number`, each the same query '
+      + 'as a key of the node-level `dataSource` binding, resolved per element by three contradictory '
+      + 'rules. The console moved all three elements onto the binding first, so from this major an '
+      + 'element binds data through `dataSource` only; the keys are retiredKey tombstones, and the '
+      + 'component-props gate requires `dataSource.object` on the three instead of waiving the flat '
+      + 'key for them — which also closes the repeater that passed validation bound only through a '
+      + 'binding it did not read. The D2 conversion `element-flat-data-binding-to-data-source` follows '
+      + 'each element\'s old rule (move where the binding lacks the key, delete where the binding won, '
+      + 'append `element:number`\'s filter, which AND-combined) and runs before the record-form filter '
+      + 'conversion, which then converts a moved record form at `dataSource.filter`; what the old rule '
+      + 'leaves undecided is a TODO, judged by the D3 entry.',
+  },
+  {
     id: 'element-form-retired',
     order: 8,
     text:
@@ -6051,6 +6069,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'registering an item of that kind.',
   },
   {
+    id: 'object-grid-default-filters-retired',
+    order: 90,
+    text:
+      'It also retires `object-grid`\'s `defaultFilters` (#11509, ruling A-narrow, in the shape '
+      + 'of the `defaultSort` retirement): the legacy second spelling of `filter`, read only when '
+      + '`filter` lowered to nothing, which an earlier narrowing in this major had shaped as the rule '
+      + 'array and this retirement absorbs. The mechanical conversion moves the rules onto an empty '
+      + '`filter` and deletes the key beside a `filter` with content (the renderer never read it '
+      + 'there); it runs before the record-form filter conversion, which then converts a moved record '
+      + 'form at `filter`.',
+  },
+  {
     id: 'object-grid-default-sort-retired',
     order: 17,
     text:
@@ -6165,9 +6195,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'spelling platform-wide, the rule array) its '
       + 'mechanical half at rest (ruled 2026-09-12): the D2 conversion '
       + '`page-component-filter-record-to-rule-array` rewrites a record-form or single-level '
-      + 'AST `filter` at the converged rule-array doors — `dataSource.filter`, the '
-      + '`object-*` / `element:number` / `element:record_picker` `filter` props and '
-      + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
+      + 'AST `filter` at the converged rule-array doors — `dataSource.filter` and the '
+      + '`object-*` `filter` props — to the rule array wherever the mapping is lossless, '
       + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
       + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
       + 'a page selects. It is retired from the load path, so authors are still refused at '
@@ -11572,6 +11601,61 @@ const step18: MigrationStep = {
         + '`schemaValid: true` in `--json`, and the run closes with the schema-valid line '
         + 'rather than the manual-changes warning',
     },
+    // #11509 (v18, ruling A-narrow) — the D3 entry of the
+    // `element-flat-data-binding-to-data-source` family: one entry for the ten
+    // keys, because they are one retirement (the element layer's second data door)
+    // and an upgrader moves them together. It absorbs the two protocol-18
+    // narrowings of the element flat `filter` to the rule array
+    // (`element-number-filter-rule-array`, `element-record-picker-filter-rule-array`):
+    // the key they narrowed is gone in the same major, and the rule array they
+    // prescribed is the binding's own form. The conversion follows each element's
+    // old rule, so what it cannot follow is listed as a TODO and judged here.
+    {
+      id: 'element-flat-data-binding-retired',
+      surface:
+        'page.component properties of element:record_picker (object, filter, sort, limit), '
+        + 'element:number (object, filter) and element:repeater (object, filter, sort, limit) — the flat '
+        + 'data-binding keys beside the node-level dataSource',
+      replacement:
+        '`dataSource` on the component node — `{ object, view?, filter?, sort?, limit? }`, a sibling of '
+        + '`type` rather than a key inside `properties` — the one binding each of the three elements reads. '
+        + 'Each key moves unchanged: `properties: { object: \'deal\', limit: 20 }` becomes '
+        + '`dataSource: { object: \'deal\', limit: 20 }`, and a filter keeps its rule-array form '
+        + '`[{ field, operator, value }, ...]`. `element:number` reads `object` and `filter` only. With a '
+        + '`view`, the view supplies the baseline, an explicit binding key overrides it, and the binding '
+        + 'filter AND-combines with the view\'s.',
+      reason:
+        'One node carried two doors onto one query, resolved by three different rules: the record picker '
+        + 'let the binding win (its flat key was read only when the binding, or the saved view the binding '
+        + 'named, supplied none), `element:number` resolved `object` binding-first and AND-combined the two '
+        + 'filters, and the repeater read its flat keys alone and ignored the binding — while the '
+        + 'component-props gate waived a missing flat `object` whenever `dataSource.object` was present, '
+        + 'so a repeater bound only through `dataSource` passed validation and drew an empty list. The '
+        + 'console moved all three elements onto the binding first, and in v18 the flat keys are '
+        + 'refused. The D2 conversion `element-flat-data-binding-to-data-source` follows each element\'s '
+        + 'old rule: a key the binding lacks moves there, a key the binding already set is deleted where '
+        + 'the binding won, and `element:number`\'s filter is appended to the binding\'s. Three cases are '
+        + 'left as stored and listed as TODOs, because only the author can decide them: a record-picker '
+        + 'key beside a `dataSource.view` the binding sets no such key of its own for (the flat value '
+        + 'applied only if the view supplied none, and no conversion reads the view); a repeater key the '
+        + 'binding sets to a DIFFERENT value, or beside a `view` (the repeater read neither until the console '
+        + 'put its binding first, so what it applied depends on the console version); and an `element:number` filter pair that is not '
+        + 'two rule arrays. A repeater that carried a `dataSource` its list ignored now applies it — '
+        + 'compare it with what the list showed. A flat filter in the retired record form moves to '
+        + '`dataSource.filter` and is then converted there by `page-component-filter-record-to-rule-array` '
+        + 'wherever the mapping is lossless; that entry lists the rest. Code that builds these props — a '
+        + 'host, a generator, a designer — must write the binding, which no conversion reaches. And the '
+        + 'gate now requires `dataSource.object` on all three elements: a node with none names no object '
+        + 'and is reported.',
+      acceptanceCriteria:
+        'No `element:record_picker`, `element:number` or `element:repeater` node carries `object`, '
+        + '`filter`, `sort` or `limit` inside `properties`; the parse refuses each. Every such node has '
+        + '`dataSource.object`, and `os validate` reports no missing-binding finding for it. In the running '
+        + 'page each picker offers, each number aggregates and each repeater lists the records the author '
+        + 'intends — checked first on every node the migration listed as a TODO, and on every repeater '
+        + 'that already carried a `dataSource`.',
+      conversionIds: ['element-flat-data-binding-to-data-source'],
+    },
     // #9198 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `element-input-target-variable-removed` family. Every retirement family
     // carries one D3 entry even when a lossless D2 conversion repairs its data
@@ -11604,116 +11688,6 @@ const step18: MigrationStep = {
         + 'declared, typing into the input (or picking a record) and then reading the variable — from '
         + 'whatever consumes it on the page — returns the value entered. No component authors '
         + '`targetVariable`; the parse refuses it by name.',
-    },
-    {
-      id: 'element-number-filter-rule-array',
-      surface:
-        "`element:number` component props — `filter` (the FORM: the MongoDB-style "
-        + '`FilterConditionSchema` record vs the `ViewFilterRule` array)',
-      replacement:
-        '`z.array(ViewFilterRuleSchema)` — the rule array `[{ field, operator, value }, ...]` '
-        + 'every other `filter` input in `ComponentPropsMap` already declares '
-        + '(`record:related_list` and its Add-affordance picker). A record-form filter '
-        + "`{ status: 'won' }` becomes `[{ field: 'status', operator: 'equals', value: 'won' }]`; "
-        + "an operator object `{ amount: { $gt: 100 } }` becomes "
-        + "`[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys become "
-        + 'several rules (they AND). Legacy operator shorthands (`eq`, `gt`, `notIn`, …) are '
-        + 'accepted and normalized on parse',
-      reason:
-        'One filter orthography platform-wide (the maintainer\'s 2026-08-25 ruling, option B: '
-        + 'align the element to the `ViewFilterRule` array rather than keep it the record-shaped '
-        + "exception). `ComponentPropsMap['element:number'].filter` "
-        + 'was the one `filter` input in the map declared as the MongoDB-style record '
-        + '(`FilterConditionSchema`) while its siblings declared the `ViewFilterRule` array, so '
-        + 'the filter a list view stores and renders was refused by the KPI element beside it, '
-        + 'and the objectui parity gate had to carry a reasoned exemption to look away. The '
-        + 'convergence was sequenced consumer-first (ruling recorded 2026-08-25, Option A): '
-        + 'the console adapter was changed so `ObjectStackAdapter.aggregate()` runs the same '
-        + '`translateFilterArray` '
-        + 'its `find()` path runs, and the objectui pin carrying it was re-measured before this '
-        + 'entry moved — but that measurement named the wrong hop, and the runtime route\'s refusal '
-        + 'of the array corrects it here. '
-        + '`translateFilterArray` yields AST tuples, which are still a `FilterArray` — input-only '
-        + 'sugar — so the real path is: authored array → `translateFilterArray` → lowered by '
-        + '`parseFilterAST` (`@objectstack/spec/data`, the single sink the `FilterArray` docblock '
-        + 'names, since the maintainer\'s 2026-08-04 ruling C declared the array input-only sugar '
-        + 'with one lowering seam) in the adapter, BEFORE the wire → a `FilterCondition` on the '
-        + 'body. The hop that decides it is the runtime route `POST /analytics/query`, which '
-        + 'parses `where` with `AnalyticsQueryRequestSchema` — a `FilterCondition` and nothing '
-        + 'else — so an un-lowered array is refused there before any service code runs. '
-        + '`lowerAnalyticsWhere` (`service-analytics`), where that earlier measurement stopped, '
-        + 'is the IN-PROCESS door (added when an array `where` was found silently dropped on the '
-        + 'analytics path) for callers reaching `analyticsService.query` '
-        + "directly, not the wire's; it too still refuses a RAW rule-object array by design. "
-        + 'The adapter-side lowering lands in the console\'s own repository. '
-        + 'The ruled migration check ran with the change: the '
-        + 'sweep of first-party corpora (examples/, skills/, create-objectstack, content/docs/, '
-        + 'packages/apps/, spec fixtures) found ONE `element:number` author writing a record-form '
-        + '`filter` — a spec test fixture, rewritten to the array form in the same change — and '
-        + 'zero outside the spec package; this entry carries the prescription for authors outside '
-        + 'the repo.',
-      acceptanceCriteria:
-        "`ComponentPropsMap['element:number'].safeParse({ object, aggregate, filter: [{ field: "
-        + "'status', operator: 'equals', value: 'won' }] })` succeeds and the parsed `filter` is "
-        + "the same rule array; a record-form `filter: { status: 'won' }` is refused at the "
-        + '`filter` path (`invalid_type`, expected array). At runtime the element renders its '
-        + 'aggregate on an analytics-capable deployment with the array filter applied — the same '
-        + 'filter a list view renders. Downstream (objectui, after a released spec version reaches '
-        + "the pin): the `element:number.filter:array` entry in `OFF_SPEC_ARM_EXEMPTIONS` "
-        + '(`registry-inputs-spec-parity.test.ts`) becomes deletable, which is what closes '
-        + 'the console-side half of this convergence.',
-    },
-    {
-      id: 'element-record-picker-filter-rule-array',
-      surface:
-        "`element:record_picker` component props — `filter` (the FORM: the MongoDB-style "
-        + '`FilterConditionSchema` record vs the `ViewFilterRule` array)',
-      replacement:
-        '`z.array(ViewFilterRuleSchema)` — the rule array `[{ field, operator, value }, ...]` '
-        + "the map's array-declared `filter` doors already carry (`record:related_list`, its nested "
-        + 'Add-affordance picker, `element:number`; the four `object-*` blocks declare `filter` as '
-        + '`z.unknown()`, a gap measured on its own). A record-form filter '
-        + "`{ status: 'active' }` becomes `[{ field: 'status', operator: 'equals', value: 'active' }]`; "
-        + "an operator object `{ amount: { $gt: 100 } }` becomes "
-        + "`[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys become "
-        + 'several rules (they AND). Legacy operator shorthands (`eq`, `gt`, `notIn`, …) are '
-        + 'accepted and normalized on parse. The binding-level `dataSource.filter` on the same node '
-        + 'is a different key (`ElementDataSourceSchema`) and is not moved by this entry',
-      reason:
-        'One filter orthography platform-wide (the maintainer\'s 2026-08-25 ruling, option B: '
-        + 'every `filter` door takes the `ViewFilterRule` array rather than keeping record-shaped '
-        + "exceptions). `ComponentPropsMap['element:record_picker'].filter` "
-        + 'was the LAST `filter` input in the map still declared as the MongoDB-style record '
-        + '(`FilterConditionSchema`) after `element:number` converged: the three '
-        + 'array-declared doors (`record:related_list`, its nested Add-affordance picker, '
-        + '`element:number`) carried the `ViewFilterRule` array and the four `object-*` doors '
-        + 'declare `z.unknown()`, so the filter a list view stores and renders was refused '
-        + 'by the picker beside them, and a lone holdout is the state where the next author copies '
-        + 'the wrong form. Sequenced measurement-first, as that convergence had to be (the 2026-08-25 '
-        + 'Option-A ordering ruling: measure the consumer\'s read path before the contract moves): '
-        + 'at the objectui pin `00d3f09c` the renderer hands '
-        + '`filter` to `query.$filter` and calls `adapter.find()` '
-        + '(`components/src/renderers/basic/record-picker.tsx`); `ObjectStackAdapter.convertQueryParams` '
-        + 'lowers an ARRAY `$filter` through `translateFilterArray` into filter AST tuples '
-        + '(`data-objectstack/src/index.ts`), the same door every list view\'s stored rule array '
-        + 'already takes, and the engine lowers the tuples before the driver '
-        + '(`engine-filter-array-lowering.test.ts`); nothing on that path parses `properties` '
-        + 'against the installed spec. The pin and objectui `main` (`f7cf7e8`) are byte-identical on '
-        + 'every read-path file. The ruled migration check ran with the change: the sweep of '
-        + 'first-party corpora (examples/, skills/, content/docs/, docs/, packages/**, .changeset/) '
-        + 'found ONE `element:record_picker` author writing a record-form `filter` — a spec test '
-        + 'fixture, rewritten to the array form in the same change — and zero outside the spec '
-        + 'package; this entry carries the prescription for authors outside the repo.',
-      acceptanceCriteria:
-        "`ComponentPropsMap['element:record_picker'].safeParse({ object, filter: [{ field: "
-        + "'status', operator: 'equals', value: 'active' }] })` succeeds and the parsed `filter` is "
-        + "the same rule array; a record-form `filter: { status: 'active' }` is refused at the "
-        + '`filter` path (`invalid_type`, expected array). At runtime the picker offers exactly the '
-        + 'rows the array selects — the same filter a list view renders. Downstream (objectui, after '
-        + "a released spec version reaches the pin): the registry's `inputs.filter` entry for "
-        + "`element:record_picker` (`type: 'object'`, `record-picker.tsx`) flips to the array arm and "
-        + 'the `record-picker-inputs-spec-parity.test.ts` pins that assert the record form follow — '
-        + 'a console-side change filed in the objectui repository, blocked on that release.',
     },
     // #21015 — release 2 of objectui#7450's ruling B: `element:text` `variant`
     // refuses the pre-convergence spellings `heading` and `subheading` by name
@@ -13792,6 +13766,45 @@ const step18: MigrationStep = {
         + 'runs only where the run parses it after interpolation (`http`) or where the slot takes a string; in a '
         + 'number or boolean slot of any other builtin it fails at its first run exactly as it did, so write a '
         + 'literal there.',
+    },
+    // A flow CEL expression's record root is the record the run was handed, or
+    // unbound. The flow engine used to bind record to the run's own variables
+    // whenever the run held no record, so record.assignee silently read a flow
+    // variable named assignee. That spelling now fails the run with an unknown-
+    // variable fault on record. Semantic-only: whether a run holds a record depends
+    // on the entrances that start the flow (a trigger, an action, a parent flow, a
+    // map item), which are not visible from the flow alone, so no D2 conversion can
+    // rewrite the source mechanically.
+    {
+      id: 'flow-cel-record-variables-alias-retired',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'flows[].nodes[].config.condition, flows[].edges[].condition, a decision node\'s conditions[].expression, a '
+        + 'screen node\'s fields[].visibleWhen, and the CEL value envelopes of an assignment node\'s assignments and of '
+        + 'a create_record or update_record node\'s fields — a CEL source reading record.X, or record bare, on a run '
+        + 'that holds no record, where X names a flow variable',
+      replacement:
+        'the variable by its name, or through the vars namespace: record.assignee becomes assignee, or vars.assignee. '
+        + 'A record.X read on a run that was handed a record is unchanged, and reads that record\'s field X',
+      reason:
+        'Flow CEL binds record to the record the run was handed: a record-change trigger\'s row, a time-relative '
+        + 'sweep\'s row, the inbound hook\'s request body, a flow action\'s record (the loaded row, or an empty record '
+        + 'carrying at most the id it was given), a subflow or map parent\'s record, or a map item that carries an id. '
+        + 'A flow can also bind a variable named record itself. A run with none of these, one started through the REST '
+        + 'trigger route, a declared endpoint or a cron schedule, or a child of such a run, used to see record bound to '
+        + 'its own variables map, so record.X answered a flow variable named X instead of failing: a second spelling of '
+        + 'every variable, which hid the author\'s mistake. Such a run now fails the expression with an unknown-variable '
+        + 'fault on record, carrying the source, as every other unbound root does. No D2 conversion exists: whether a '
+        + 'run holds a record depends on the entrances that start the flow, which the flow alone does not show, so '
+        + 'only the author can tell a variable read from a record field read. Measured at the change: 0 flows in this '
+        + 'repository\'s example apps, platform objects and dogfood suites, and 0 in objectstack-ai/hotcrm, read record '
+        + 'with no record entrance.',
+      acceptanceCriteria:
+        'For each flow whose CEL reads record, list the entrances that start it. Where any of them hands no record, '
+        + 'replace each record.X that names a flow variable with the variable\'s name or vars.X. Re-run each flow path '
+        + 'started with no record and confirm every expression evaluates instead of failing with an unknown-variable '
+        + 'fault on record; re-run a path started with a record and confirm record.X still reads that record\'s field.',
     },
     // A flow CEL expression is refused when it reads a root the flow does not bind.
     // Formulas, row-level security and the client bind the run's user as user,
@@ -16770,82 +16783,40 @@ const step18: MigrationStep = {
         + '`registry-inputs-spec-parity.test.ts` becomes deletable, which is what closes the '
         + 'objectui finding that the two authorities disagreed.',
     },
-    // The key the one-filter-orthography convergence did not name. Its sibling
-    // entry element-data-source-and-object-block-filter-rule-array says so in as
-    // many words — 「object-grid.defaultFilters is a different key and is not named
-    // by the ruling this entry records」 — so this is the entry that names it.
+    // #11509 (v18, ruling A-narrow, sub-question 1) — the D3 entry of the
+    // `object-grid-default-filters-removed` family, in the shape the
+    // `object-grid-default-sort-retired` entry beside it took. It absorbs the
+    // protocol-18 narrowing of the same key (`object-grid-default-filters-rule-array`,
+    // never released in a major): #19514 narrowed `defaultFilters` to the rule array
+    // and left its removal to a ruling of its own, which this is.
     {
-      id: 'object-grid-default-filters-rule-array',
-      // No backticks in `surface` — build-upgrade-guide renders it inside a code
-      // span already, and a nested backtick would close it.
+      id: 'object-grid-default-filters-retired',
       surface:
-        'the object-grid page block\'s defaultFilters property — the legacy base-filter fallback '
-        + 'in ComponentPropsMap, which was z.unknown and therefore accepted a bare string, a '
-        + 'number, a MongoDB-style record, an ObjectQL AST tuple array and a list of malformed '
-        + 'rules alike',
+        'page.component.object-grid.defaultFilters — the legacy second spelling of the grid base filter',
       replacement:
-        'the same ViewFilterRule array form its sibling filter takes — '
-        + '[{ field, operator, value }, ...]. A record-form fallback { status: "active" } becomes '
-        + '[{ field: "status", operator: "equals", value: "active" }] and several record keys '
-        + 'become several rules, which AND; an operator object { amount: { $gt: 100 } } lifts the '
-        + 'operator into the rule, becoming '
-        + '[{ field: "amount", operator: "greater_than", value: 100 }]; an AST tuple array '
-        + '[["owner_id", "=", "{current_user_id}"]] becomes '
-        + '[{ field: "owner_id", operator: "equals", value: "{current_user_id}" }], value '
-        + 'placeholders and date macros unchanged. Legacy operator shorthands are accepted and '
-        + 'normalized on parse. Better still, write the rules on filter and delete this key: it '
-        + 'is read only when filter is absent, and its own description has prescribed filter all '
-        + 'along',
+        '`filter: [{ field, operator, value }, ...]` — the one base-filter key every read path honours; '
+        + 'the same rules, unchanged.',
       reason:
-        'The protocol half of the maintainer\'s ruling C-prime of 2026-09-20 on objectui\'s '
-        + 'render-time filter converter — the protocol is the only refusal set, so a document it '
-        + 'accepts never throws at render time — verbatim, untranslated: 「the differences are the '
-        + 'protocol\'s to close」. This is the SAME value '
-        + 'in the SAME role as filter — the key\'s own description says it is read only when '
-        + 'filter is absent — and the consumer reads it through the SAME lowering sink, so every '
-        + 'refusal that sink can give was reachable from a document the protocol had just '
-        + 'accepted. filter converged on the rule array with the rest of its family; this key was '
-        + 'not named by that ruling and kept the pre-convergence read-point shape, which left the '
-        + 'block with one declared door and one undeclared door onto one seam. The parse receipt '
-        + 'said nothing about what the grid would then do with the value, and in the objectui '
-        + 'version this release pins that depended on the shape: ObjectGrid lowers defaultFilters '
-        + 'through toFilterNode whenever filter lowers to nothing, so a record form and an AST '
-        + 'tuple array were lowered and applied as declared; a bare string or a number was '
-        + 'dropped without a word, so the grid sent no filter and listed its rows unfiltered; and '
-        + 'a list of malformed rules was refused — on the wire with 400 INVALID_FILTER, or by the '
-        + 'client before any request for the value shapes it judges itself. '
-        + '⛔ This entry is a NARROWING and deliberately not a retirement. Refusing the key '
-        + 'outright — the other arm the finding offered — removes an accepted shape and needs its '
-        + 'own ruling; the deprecation already stated in the description is unchanged and still '
-        + 'says to prefer filter. '
-        + 'Metadata AT REST: the record form and the AST tuple array at this key are rewritten to '
-        + 'the rule array by the same D2 conversion as its sibling filter, '
-        + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
-        + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
-        + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
-        + 'combinator, a null value, an operator the rule vocabulary does not spell, or the bare '
-        + 'string or number this key also took — and '
-        + 'its door refuses such a value only as the component-props gate\'s advisory finding '
-        + '(os validate, os build, os lint), since a re-save through the metadata API is not '
-        + 'refused there: a record form with the message the filter door gives, a worked rewrite '
-        + 'computed from the author\'s own keys and a pointer to this entry\'s conversion table, '
-        + 'and a bare string or number or an AST tuple array with the schema\'s plain type '
-        + 'refusal. ADR-0049 / ADR-0087.',
+        'The grid read `defaultFilters` only when `filter` lowered to nothing, so one intent had two '
+        + 'spellings on one block. The D2 conversion `object-grid-default-filters-removed` follows that '
+        + 'precedence: where `filter` was empty (absent, null, `[]` or `{}`) the fallback WAS the grid\'s '
+        + 'filter, so its rules move onto `filter`; where `filter` had rules the fallback was never read, '
+        + 'so it is deleted. Both preserve what the grid showed, and the second is where the judgment '
+        + 'sits: a grid that authored both keys has always listed the rows `filter` selects, while its '
+        + 'author may believe `defaultFilters` applied. The conversion keeps the rows users have been '
+        + 'seeing and discards the rules that were written; only the author can say which were meant. '
+        + 'A `filter` that is neither empty nor rules (a bare string, a number) is left as stored and '
+        + 'listed as a TODO: the grid fell back to `defaultFilters` there too, and moving it would '
+        + 'overwrite what was written at `filter`. A fallback in the retired record form moves to `filter` '
+        + 'and is then converted there by `page-component-filter-record-to-rule-array` wherever the mapping '
+        + 'is lossless; that entry lists the rest. Code that builds object-grid props (a host, a '
+        + 'generator) must also stop emitting the key, which no conversion reaches.',
       acceptanceCriteria:
-        'Every object-grid node in your pages either omits defaultFilters or carries a '
-        + 'ViewFilterRule array on it. The parse of an object-grid node whose defaultFilters is '
-        + 'that array raises no issue at the key; a record form is refused AT defaultFilters with '
-        + 'the conversion table and a worked rewrite built from the keys that were written, and '
-        + 'an AST tuple array is refused one level in, at the first element. What to re-check '
-        + 'depends on the shape that was there, as the objectui version this release pins treats '
-        + 'it. A record form or an AST tuple array was lowered and applied, so for those the '
-        + 'rewrite is a spelling change. A bare string or a number was dropped by that lowering, '
-        + 'so the grid has been listing its rows unfiltered — decide which rows it is supposed to '
-        + 'show before writing the rule that selects them. A list of malformed rules was refused '
-        + 'when the grid loaded. Where both keys are authored, that grid reads defaultFilters only '
-        + 'when filter lowers to nothing: beside a non-empty filter, deleting defaultFilters is '
-        + 'the whole migration; beside filter: [] the grid reads defaultFilters, so move those '
-        + 'rules onto filter rather than deleting them.',
+        'No `object-grid` component carries `defaultFilters`; the parse refuses it. Each grid\'s `filter` '
+        + 'holds the rules the author intends, and the grid lists exactly the rows they select. For every '
+        + 'grid that had authored both keys, the author has compared the discarded `defaultFilters` rules '
+        + 'with the kept `filter` and confirmed the kept one.',
+      conversionIds: ['object-grid-default-filters-removed'],
     },
     // #11805 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `object-grid-default-sort-removed` family (ruling B on #17152: one D3 entry
@@ -23413,6 +23384,42 @@ const step18: MigrationStep = {
         + 'fixture and docs example at the pin above (13 occurrences); in the cloud repo none '
         + 'exist.',
     },
+    // #22470 — the upload requests' `scope` (presigned and chunked,
+    // api/storage.zod.ts) closed from an open string to the new `UploadScope` enum,
+    // the one list the `sys_file.scope` select is now built from, and the
+    // `service-storage` upload doors refuse any other value with
+    // `400 INVALID_REQUEST` naming the allowed values. Semantic only: no metadata
+    // type carries the upload request, so there is no authored source for a D2
+    // conversion to rewrite — what moves is caller code, and which scope a file
+    // belongs under is a judgement only the caller can make. Nothing stored moves:
+    // no upload naming another scope ever reached a stored file record.
+    {
+      id: 'upload-request-scope-closed',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'the scope of an upload request, presigned or chunked (GetPresignedUrlRequest.scope and '
+        + 'InitiateChunkedUploadRequest.scope) — an open string, now the UploadScope enum',
+      replacement:
+        'one of the upload scopes `user`, `tenant`, `private`, `temp` or `attachments` (`UploadScope`, '
+        + 'exported from `@objectstack/spec/api`), or no scope for the default `user`',
+      reason:
+        'The upload requests declared scope an open string, while the stored file record only ever took '
+        + 'the five values of the scope select of sys_file: any other value was refused by the data engine '
+        + 'and answered 500 INTERNAL, with a message that sent the operator to restore the data engine. The '
+        + 'request, the select and the upload doors now read one list. A literal outside it fails tsc, a '
+        + 'parse of either request refuses it on the scope key, and both upload doors answer it with 400 '
+        + 'INVALID_REQUEST naming the allowed values, before a file record, an upload URL or a backend '
+        + 'upload exists. A scope is the lifecycle a file is filed under, not a free folder name, so a '
+        + 'caller that sent one as a key prefix (avatars, logos, a record path) owes a choice no rewrite '
+        + 'can make: `attachments` only for a file whose referrers are record attachment rows, since that '
+        + 'scope is what orphan tombstoning reads; `temp` for a scratch file; otherwise `user` or `tenant`. '
+        + 'No stored file record moves: no upload naming another scope ever succeeded.',
+      acceptanceCriteria:
+        'Every upload call names one of the five upload scopes or none, and is answered 200; a caller '
+        + 'that passes a scope through types it as UploadScope and compiles. An upload naming any other '
+        + 'scope is answered 400 INVALID_REQUEST naming the five, and creates no sys_file record.',
+    },
     // The D3 entry for the list-view chart-binding check (#22491): the enforce arm
     // of ADR-0049 enforce-or-remove, applied to the ADR-0021 single form the list
     // chart block already required. It narrows a list view's accept set; no key is
@@ -27891,6 +27898,48 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
     // component.
     'ui/ElementFormProps:submitLabel',
+    // #11509 (v18, ruling A-narrow) — `filter` on `element:number` was a flat second
+    // spelling of the node-level `dataSource.filter` binding (the element resolved `object` binding-first and AND-combined the two filters).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementNumberProps:filter',
+    // #11509 (v18, ruling A-narrow) — `object` on `element:number` was a flat second
+    // spelling of the node-level `dataSource.object` binding (the element resolved `object` binding-first and AND-combined the two filters).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementNumberProps:object',
+    // #11509 (v18, ruling A-narrow) — `filter` on `element:record_picker` was a flat second
+    // spelling of the node-level `dataSource.filter` binding (the picker resolved `dataSource.<key> ?? properties.<key>`, so the binding always won).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementRecordPickerProps:filter',
+    // #11509 (v18, ruling A-narrow) — `limit` on `element:record_picker` was a flat second
+    // spelling of the node-level `dataSource.limit` binding (the picker resolved `dataSource.<key> ?? properties.<key>`, so the binding always won).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementRecordPickerProps:limit',
+    // #11509 (v18, ruling A-narrow) — `object` on `element:record_picker` was a flat second
+    // spelling of the node-level `dataSource.object` binding (the picker resolved `dataSource.<key> ?? properties.<key>`, so the binding always won).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementRecordPickerProps:object',
+    // #11509 (v18, ruling A-narrow) — `sort` on `element:record_picker` was a flat second
+    // spelling of the node-level `dataSource.sort` binding (the picker resolved `dataSource.<key> ?? properties.<key>`, so the binding always won).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementRecordPickerProps:sort',
     // #9198 — ADR-0049 enforce-or-remove. `targetVariable` on
     // `element:record_picker` was a declarative hint with zero readers: the picker
     // writes the selected record id through the reverse binding — the page
@@ -27910,6 +27959,34 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Sources are rewritten by the D2 conversion
     // `element-input-target-variable-removed`.
     'ui/ElementRecordPickerProps:targetVariable',
+    // #11509 (v18, ruling A-narrow) — `filter` on `element:repeater` was a flat second
+    // spelling of the node-level `dataSource.filter` binding (the list read the flat keys alone, and only objectui#11880 moved it onto the binding).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementRepeaterProps:filter',
+    // #11509 (v18, ruling A-narrow) — `limit` on `element:repeater` was a flat second
+    // spelling of the node-level `dataSource.limit` binding (the list read the flat keys alone, and only objectui#11880 moved it onto the binding).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementRepeaterProps:limit',
+    // #11509 (v18, ruling A-narrow) — `object` on `element:repeater` was a flat second
+    // spelling of the node-level `dataSource.object` binding (the list read the flat keys alone, and only objectui#11880 moved it onto the binding).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementRepeaterProps:object',
+    // #11509 (v18, ruling A-narrow) — `sort` on `element:repeater` was a flat second
+    // spelling of the node-level `dataSource.sort` binding (the list read the flat keys alone, and only objectui#11880 moved it onto the binding).
+    // In v18 an element binds data through `dataSource` only: one node, one
+    // door, one precedence. Sources are rewritten by the D2 conversion
+    // `element-flat-data-binding-to-data-source`; the judgment an upgrader
+    // still owes is the D3 entry `element-flat-data-binding-retired`.
+    'ui/ElementRepeaterProps:sort',
     // #9198 — ADR-0049 enforce-or-remove. `targetVariable` on `element:text_input`
     // was a declarative hint with zero readers: its own describe text said the
     // live binding "resolves via the variable whose `source` equals this component
@@ -28008,6 +28085,14 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // stripped key does not record. So the prescription reaches consumers as that
     // semantic TODO plus this tombstone.
     'ui/NavigationConfig:view',
+    // #11509 (v18, ruling A-narrow, sub-question 1) — `defaultFilters` on
+    // `object-grid` was the legacy second spelling of `filter`, read only when
+    // `filter` lowered to nothing; #19514 narrowed it to the rule array and left
+    // the removal to its own ruling, which this is. Retired in the shape
+    // `defaultSort`'s took (`ui/ObjectGridProps:defaultSort`, beside this entry):
+    // the D2 conversion `object-grid-default-filters-removed` moves the rules onto
+    // an empty `filter` and deletes the key beside a `filter` that has content.
+    'ui/ObjectGridProps:defaultFilters',
     // #11805 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-25,
     // decision-inbox batch 4: 「#11805 退役 defaultSort,不需要major」; the producer
     // half of objectui#5861, under the objectui#4869 「接受所有」 direction).
