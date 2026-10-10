@@ -82,6 +82,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 // `direct-mount-introspection.test.ts`): under `moduleResolution: nodenext` an
 // extension-less one does not resolve and every symbol it names becomes `any`.
 import { createRestApiPlugin } from './rest-api-plugin.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const BASE = '/api/v1';
 const DS = 'pg_main';
@@ -262,6 +263,9 @@ async function bootFederation(
       return [];
     },
   };
+
+  // [ADR-0131 D3/D4] The set's definition, which the resolver reads its body from.
+  bindTestSecurityCatalog(engine, { permissions: [{ name: 'federation_caller', systemPermissions: [...grants] }] });
 
   const services: Record<string, unknown> = {
     'http.server': server,

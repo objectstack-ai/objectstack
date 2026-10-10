@@ -37,6 +37,7 @@ import {
     metaTypeWriteRefusal,
 } from './meta-item-read-gate.js';
 import { FEDERATION_WRITE_CAPABILITY } from './external-datasource-routes.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -314,7 +315,7 @@ const GRANT_TABLES: Record<string, any[]> = {
     })),
 };
 
-const grantsEngine = {
+const grantsEngine = bindCatalogFromTables({
     async find(object: string, opts: any) {
         const rows = GRANT_TABLES[object] ?? [];
         const where = opts?.where ?? {};
@@ -329,7 +330,7 @@ const grantsEngine = {
         );
         return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
     },
-};
+}, GRANT_TABLES);
 
 const authService = {
     api: {

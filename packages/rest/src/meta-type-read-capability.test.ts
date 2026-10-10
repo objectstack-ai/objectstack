@@ -30,6 +30,7 @@ import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 // Explicit `.js` extension: NodeNext resolution (see the sibling meta tests).
 import { RestServer } from './rest-server.js';
 import { META_TYPE_READ_CAPABILITIES, metaTypeReadRefusal } from './meta-item-read-gate.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -357,7 +358,7 @@ function bounded<T>(rows: T[], opts: any): T[] {
     return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
 }
 
-const grantsEngine = {
+const grantsEngine = bindCatalogFromTables({
     async find(object: string, opts: any) {
         const rows = GRANT_TABLES[object] ?? [];
         const where = opts?.where ?? {};
@@ -374,7 +375,7 @@ const grantsEngine = {
             opts,
         );
     },
-};
+}, GRANT_TABLES);
 
 const authService = {
     api: {
