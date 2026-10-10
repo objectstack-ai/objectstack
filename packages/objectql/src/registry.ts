@@ -2610,7 +2610,11 @@ export class SchemaRegistry {
    * @param ownership - 'own' (single owner) | 'overlay' (tenant layer that
    *   REPLACES the base at resolution; ADR-0029 D9) | 'extend' (additive merge)
    * @param priority - Merge priority (lower applied first, higher wins on conflict)
-   * 
+   * @param packageVersion - The owning package's version, stamped beside
+   *   `packageId` as `_packageVersion` — the same pair the artifact loader
+   *   stamps. Passed only by a caller holding the package's manifest
+   *   (`ObjectQL.registerApp`); every other caller omits it.
+   *
    * @throws {ObjectOwnershipConflictError} ADR-0112 envelope (`code` +
    *   `status: 422`) if trying to 'own' an object that already has a PACKAGED
    *   owner from another package
@@ -2628,7 +2632,8 @@ export class SchemaRegistry {
       ? DEFAULT_OWNER_PRIORITY
       : ownership === 'overlay'
         ? DEFAULT_OVERLAY_PRIORITY
-        : DEFAULT_EXTENDER_PRIORITY
+        : DEFAULT_EXTENDER_PRIORITY,
+    packageVersion?: string,
   ): string {
     // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
     // its position is the whole point.
@@ -2798,7 +2803,7 @@ export class SchemaRegistry {
     // into the private `_lock` envelope and stamp package provenance
     // on the schema before it lands in the contributor list. Mirrors
     // registerItem() so object schemas surface lock fields on GET.
-    applyProtection(schema as any, { packageId });
+    applyProtection(schema as any, { packageId, packageVersion });
 
     // Add new contributor
     const contributor: ObjectContributor = {
@@ -4144,8 +4149,17 @@ export class SchemaRegistry {
 
   /**
    * Universal Register Method for non-object metadata.
+   *
+   * @param packageVersion - The owning package's version, stamped beside
+   *   `packageId` as `_packageVersion` (see the `applyProtection` call below).
    */
-  registerItem<T>(type: string, item: T, keyField: keyof T = 'name' as keyof T, packageId?: string) {
+  registerItem<T>(
+    type: string,
+    item: T,
+    keyField: keyof T = 'name' as keyof T,
+    packageId?: string,
+    packageVersion?: string,
+  ) {
     if (!this.metadata.has(type)) {
       this.metadata.set(type, new Map());
     }
@@ -4194,9 +4208,14 @@ export class SchemaRegistry {
 
     // ADR-0010 §3.7 — translate the author-facing `protection` block
     // into the private `_lock` envelope and stamp package provenance.
-    // Centralised with the artifact loader path in metadata/plugin.ts
-    // so both load paths produce identical lock state.
-    applyProtection(item as any, { packageId });
+    // The artifact loader path (metadata/plugin.ts) makes this same call
+    // with the same `(packageId, packageVersion)` pair, so the two load paths
+    // produce identical lock state and an identical package envelope for a
+    // caller that holds the package's manifest (`ObjectQL.registerApp` passes
+    // `manifest.version`). A caller that knows only a package id — the
+    // metadata-service re-sync, the security catalog's built-ins — stamps the
+    // id alone; `applyProtection` never invents a version.
+    applyProtection(item as any, { packageId, packageVersion });
 
     // A picklist's own values must not repeat any value its extensions
     // already add — refused before anything is stored, like the extension
@@ -5244,8 +5263,8 @@ export class SchemaRegistry {
   // App Helpers
   // ==========================================
 
-  registerApp(app: any, packageId?: string) {
-    this.registerItem('app', app, 'name', packageId);
+  registerApp(app: any, packageId?: string, packageVersion?: string) {
+    this.registerItem('app', app, 'name', packageId, packageVersion);
   }
 
   getApp(name: string, currentPackageId?: string): any {
