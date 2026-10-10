@@ -2,8 +2,8 @@
   "number": 22577,
   "kind": "issue",
   "title": "core: put the exact approvals act path on the ADR-0069 auth-gate allow-list, token-only as ADR-0043 sets it and as the self-hosted mount already serves it (segment 3 of ruling A on #22438)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:access",
     "domain:engine",
     "enhancement",
-    "pm:queue",
     "priority:p2",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T02:11:53Z",
-  "updated_at": "2026-10-10T02:11:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T05:39:17Z",
+  "closed_at": "2026-10-10T05:38:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22577",
   "body": "Filing gate ③: a task the maintainer directed. The maintainer ruled **A + sweep** on objectstack-ai/objectstack#22438 (director record `6079645593`, verbatim 「A + 扫类」). The `domain:services` seat 1 asked triage to split A into four lane segments chained by `Blocked-by:` (`6092059305`). Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). ⛔ Not a claim.\n\n**Segment 3 of 4.** Parent: #22438. It is independent of segments 1, 2 and 4.\n\n## The change\n\n- `packages/core/src/security/auth-gate.ts` `isAuthGateAllowlisted` (about `:196` on `main` `96e4be4829`) takes the approvals act path.\n- **Why this is not a loosening:** ADR-0043 authenticates the action page by the e-mail token alone, and the self-hosted raw-app mount already serves it without a session. This entry gives the dispatcher path the same authentication, nothing more.\n  - The maintainer ruled it as part of A (`6079645593`).\n  - ⛔ The exact path only. No prefix or wildcard entry, and no other approvals path.\n  - Anything wider than the self-hosted mount's authentication is a loosening of a security boundary. It stops and goes to the maintainer.\n- The PR states the boundary in one line: what the allow-list now admits, and that it matches the self-hosted mount.\n\n## Pins\n\n- The exact act path is allow-listed.\n- A sibling path (another `/approvals/…` path, or a prefix extension of the act path) is not.\n- Ablation: remove the entry and the first pin goes red."

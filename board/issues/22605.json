@@ -1,0 +1,35 @@
+{
+  "number": 22605,
+  "kind": "issue",
+  "title": "spec: `ListView.userActions.editInline` defaults to true in v18 and `editInline: false` is the opt-out; objectui reads an absent key as on (maintainer ruling 2026-10-10, after objectui#5144)",
+  "state": "open",
+  "state_reason": "reopened",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1",
+    "target:v18"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T04:06:59Z",
+  "updated_at": "2026-10-10T07:38:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22605",
+  "body": "Filing gate ②: a decision only the maintainer can take, taken. Filed by the director seat (summon #35, seat post #12708, `session_01VYToj6PQehTEKNrjGM9akg`) on the maintainer's ruling in that session, verbatim: 「乙 v18 把 spec 默认翻成 true,editInline: false 变成关法。」 (2026-10-10). ⛔ Not a claim, ⛔ not a dispatch; triage grades and routes it (`domain:spec` by its landing).\n\n## The ruling, in one line\n\nA list view is editable in place by default, under the permission gate that already exists. The author who wants a read-only list declares `userActions: { editInline: false }`. The declared value flips; the rule of objectui#5144 (one vocabulary, the `inlineEdit` fold, declared = enforced) stands.\n\n## Why (the assessment the maintainer ruled on)\n\n- `ListView.userActions.editInline` is declared `.default(false)` (\"Off by default: the list is read-only unless the author opts in\", `packages/spec/src/ui/view.zod.ts:1535`). objectstack-ai/objectui#12036 (objectui#5144, merged 2026-10-09) made the console read it that way, so a grid view that declares neither `userActions.editInline` nor `inlineEdit` offers no inline-edit toggle.\n- Measured reach of the opt-in default: HotCRM (`objectstack-ai/hotcrm` `main` `f0afcbd`) has 40 `grid` and 1 `list` views in 14 view files, none declaring either key; objectstack's own examples have 18 files declaring grid or list views and at most 2 touch an inline-edit key; the UI skill and the CLI view scaffold teach nothing about the key, so an AI-built or scaffolded table is read-only in its cells too.\n- Mainstream practice splits. CRM and record-list products (Salesforce list views, ServiceNow list editing, HubSpot, Pipedrive, Zoho) are on by default, gated by field and record permissions, with an admin switch. Metadata app builders (Odoo list `editable`, Power Apps model-driven grids, Oracle APEX interactive grids, AppSheet, Retool) are opt-in per view. The maintainer chose the first posture for this platform: the permission gate already does the protecting, and the per-view key is the exception, not the rule.\n- The permission gate is untouched: objectui offers the toggle only when the object is editable in place (ADR-0103 bucket, `userActions.edit`, the server's effective API operations) and the current principal can `update` the object (`packages/plugin-list/src/ListView.tsx:2007`).\n\n## Spec half (this card, `@objectstack/spec`)\n\n- `packages/spec/src/ui/view.zod.ts:1535`: `editInline: z.boolean().default(true)`, with the `describe` text rewritten: on by default; a user who may update the object edits a cell in place with the field's type-aware widget; declare `editInline: false` to make the list read-only in place.\n- The reference pages (`content/docs/references/ui/view.mdx`, `page.mdx`) regenerate through their generator.\n- Changeset: `Clause-②: yes (widening)` (a view declaring nothing gains an affordance it did not have); the launch-window BREAKING banner names the author who relied on the documented default for a read-only list and the remedy `editInline: false`; the ADR-0087 disposition marker as `check:adr-0087-registration` demands. Measured in-repo reach of the remedy: cloud `packages/service-tenant/src/pages/sys-package.page.ts:105` already declares `editInline: false` explicitly; no objectstack example declares `false`.\n- `skills/objectstack-ui/rules/list-views.md` (\"Configuring a List View\"): one paragraph. Inline editing is on by default under the permission gate; a list whose records are read-only by nature (log, audit, history, report roll-up) declares `userActions: { editInline: false }`. `skills/**` is Tier H, so the PR takes the maintainer's APPROVED review.\n\n## Consumer half (objectui, filed by the claiming seat as the consumer card of this contract-first split)\n\n- `packages/plugin-list/src/ListView.tsx` `inlineEditOffered` and `packages/app-shell/src/views/InterfaceListPage.tsx:571` read an absent key as the spec default, on: `editInline !== false`. The fold in `packages/core/src/utils/normalize-list-view.ts` is unchanged (`inlineEdit: true` reads on and opens in edit mode; `inlineEdit: false` reads off; an explicit `editInline` wins).\n- The table in `content/docs/plugins/plugin-view.mdx` gains the row \"neither key: offered, opens out of edit mode\". The pins flip: `ListView.permissions.test.tsx`, `normalize-list-view.inlineEditFold-5144.test.ts`, the interface-page tests. The console's toggle stays session-only (objectui#5144, ruling E).\n- The ADR-0047 interface page gains the toggle by default, as the maintainer accepted in the assessment.\n- Sequence: this card lands first; objectui follows. In the window objectui still reads an absent key as off, so nothing regresses against today.\n\n## Acceptance\n\n- A grid view that declares nothing offers the inline-edit toggle to a user with `update` on the object and not to a user without it; `userActions: { editInline: false }` removes it; `inlineEdit: true` still opens the grid in edit mode.\n- HotCRM's 41 undeclared views regain cell editing after both packages upgrade, with no metadata change in that repo.\n\n## Not taken\n\n- Declaring `userActions.editInline: true` on every existing view (the cards filed under that premise in the same session, objectstack-ai/hotcrm#2048 and #22604, are superseded by this ruling).\n- An app-level default between the spec default and the view (a new surface with one pull today).\n\n## Related\n\n- objectstack-ai/objectui#5144 (the 2026-08-18 B-fold ruling; its spec-default convergence stands, with the default's value changed here), objectstack-ai/objectui#12036.\n\n---\n_Filed by the director seat; generated by [Claude Code](https://claude.ai/code)_"
+}

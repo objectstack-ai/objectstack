@@ -1,0 +1,34 @@
+{
+  "number": 22611,
+  "kind": "issue",
+  "title": "spec (17.7.0): a list view or dashboard cannot be limited to an audience, and `requiredPermissions` has no any-of form — an app cannot show each audience only its own views and boards",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T05:06:14Z",
+  "updated_at": "2026-10-10T07:45:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22611",
+  "body": "Ruled: 6095014058 · letter A · 2026-10-10T07:14Z\n\nFiling class: ① product defect (capability gap with a user-visible cost) — reach: public door, measured on `@objectstack/*` 17.7.0 (spec, console, rest). Maintainer instruction for platform problems found in testing, verbatim, 2026-10-10: 「你遇到的平台问题应该提交issue」.\n\n**Reader:** objectstack triage → the spec lane (`ListViewSchema` / `DashboardSchema` / navigation `requiredPermissions`), with an objectui half for the view switcher.\n\nSource: objectstack-ai/hotclm#99 (draft PR objectstack-ai/hotclm#104; report on #99), after the full browser pass objectstack-ai/hotclm#87 (finding 19).\n\n## 1. No audience gate on a list view or a dashboard\n\n- As a business requester, the Console view switcher on the contract list shows every list view of the object — \"Awaiting Intake · My Reviews · 7 more\" (legal, finance and records queues). `GET /api/v1/meta/view` as that user returns all 11 `clm_contract` views. A dashboard whose navigation row is not served still renders at its direct URL (`/_console/apps/clm/dashboard/legal_workbench`).\n- No data leaks — every list and widget is row-scoped — but each audience is shown the other audiences' queues and boards, which are empty or irrelevant to it.\n- `ListViewSchema` (50 top-level keys) has nothing audience-shaped beyond `sharing { type, lockedBy }`; `DashboardSchema` has no `requiredPermissions` / `visible`; the Console's `ViewTabBar` renders `listViews()` unfiltered.\n- **Expected:** a server-enforced audience gate on a list view and a dashboard (e.g. `requiredPermissions` as navigation items have), honoured by `/meta/view` and the view switcher.\n\n## 2. `requiredPermissions` has no any-of form\n\n- Navigation pruning (`filterAppForUserWithReason`, `@objectstack/rest` 17.7.0) checks `requiredPermissions` with `every`, at every level. So a row cannot be served to \"legal **or** admin\": gating Legal Workbench on `clm_legal.access` removes it from the administrator's tree (measured: CLM Admin 1 lost it), and the only alternative is no gate at all.\n- **Expected:** an any-of spelling (e.g. `requiredPermissions: { anyOf: [...] }`), or documented guidance for the OR case.\n\n## Dedupe\n\nMCP `search_issues` on this repo: `list view audience gate requiredPermissions view switcher dashboard requiredPermissions any-of OR navigation` → 0 hits; `list view visible only to some users permission gate view tabs` → 0 hits; control `requiredPermissions any of OR semantics navigation` → 27 hits (instrument reaches the subject), none on these: nearest #15135 (closed — nav `visible` CEL inert), #20193 (closed — `/meta` item reads), #18159 (closed — record blocks' `requiredPermissions`).\n\n---\n_Filed by the `repo:hotclm` PM seat from a measured dev finding._"
+}

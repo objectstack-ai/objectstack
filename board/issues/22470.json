@@ -14,18 +14,20 @@
     "area:files",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T11:18:21Z",
-  "updated_at": "2026-10-10T02:15:32Z",
+  "updated_at": "2026-10-10T07:41:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22470",
   "body": "Blocked-by: #22443\n\nFiling gate: **① a product defect with `reach:`** (class a). Measured by the #22443 dev (`os-dev-report` `6079733604`, `out_of_scope_findings[0]`) and filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`. ⛔ Not a claim. ⛔ Class and function level only.\n\n## What happens\n\n- The upload request schema's `scope` (`packages/spec/src/api/storage.zod.ts`, the presigned upload request) is an open `z.string()`.\n- The two upload-starting handlers in `service-storage`'s `registerStorageRoutes` pass the caller's value straight through to the `sys_file` insert.\n- `sys_file.scope` is a closed select: user, tenant, public, private, temp, attachments. So an off-vocabulary value is refused by the data engine (`ValidationError`, `invalid_option`). The store relays that as an internal fault: **500 `INTERNAL`**, with the message \"StorageMetadataStore: sys_file insert failed against the data engine … Restore the data engine\".\n- **Reach:** measured in-process over a real ObjectQL plus `SqlDriver` (sqlite memory) with the real `SystemFile`, `scope: 'avatars'` → 500. Not driven over a live server.\n- **Named producer of off-vocabulary scopes:** objectui's `createObjectStackUploadAdapter` (`packages/providers/src/UploadProvider.tsx`, objectui `main` `2063f7a`) documents `scope` as a free \"logical key prefix (e.g. avatars, logos, attachments/case)\". No caller at the current objectui pin passes one.\n\n## Expected\n\nA caller error answers as a caller error. The upload start refuses an unknown scope with a 400 that names the allowed values, before any row, URL or backend upload, the way PR #22469 refuses `scope: 'public'`. The 500 path stays for real engine faults.\n\n## Seam\n\n`spec:` upload request `scope` (open string) → `runtime:` the `registerStorageRoutes` upload-start handlers → the `sys_file.scope` select (engine `invalid_option`). Whether the spec request schema should close the vocabulary, or the door alone refuses, is triage's call. objectui's adapter docblock teaches free prefixes either way.\n\n## Related\n\n- #22443 (the `public` scope retirement; PR #22469 adds a `scope: 'public'` refusal at the same two handlers).\n- ADR-0112 (one error envelope, caller errors are not internal faults).\n\nDedupe: REST listings of open and closed issues, newest 200, titles grepped for scope, upload, presign, sys_file, invalid_option, 500, and open `area:files`: no hit names this. Dedupe words: upload scope 500 INTERNAL · sys_file scope invalid_option upload · presigned scope key prefix\n"

@@ -1,0 +1,36 @@
+{
+  "number": 22621,
+  "kind": "issue",
+  "title": "[Decision] 切换后谁能在 Setup 里新建/编辑岗位和权限集：保持今天的权限（持 manage_metadata 者），还是放开给组织管理员（安全边界）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:services",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T06:06:06Z",
+  "updated_at": "2026-10-10T07:11:53Z",
+  "closed_at": "2026-10-10T07:10:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22621",
+  "body": "Ruled: 6094985249 · letter A · 2026-10-10T07:11Z\n\nFiling gate ②：只有维护者能做的决定。这是一条安全边界，放宽必须由维护者裁。分诊席（seat post #6015，`session_01AavokzJ5DndAwitDXvKy4U`）立卡。起因是总监记录 `6094171670`（objectui#7611，batch #310 第 1 项）里的一个前提，与代码实测不符。~~⛔ 不是认领。读者：总监席呈报。~~ Ruled A (6094985249); carriers objectui#7611, #15204, #22619.\n\n## 维护者速读\n\n你上一小时问「以后岗位、权限集是不是就不能在界面上添加了？」，总监答「组织管理员照旧能在 Setup 里新建和编辑」。实测今天的情况是：**组织管理员从来不能改岗位和权限集**，它们对这几张表只读，这是专门防止组织管理员给自己挂上「全权管理员」权限集的防提权规则。今天能在 Setup 里建岗位的是平台管理员，切换后平台管理员照样能建，服务端不用改。\n\n所以问题变成：切换后要不要**新放开**给组织管理员？\n- A：不放开，保持今天的权限；\n- B：新增一个窄权限，可以授给指定的安全管理员；\n- C：在单租户下直接放开给组织管理员。\n\n推荐 A。选 A、B 还是 C？\n\n## 背景（实测：objectstack `origin/main` `e22315238f`，hotcrm、cloud `main`）\n\n- **组织管理员今天是只读：** `packages/plugins/plugin-security/src/objects/default-permission-sets.ts:426-431` 注明 RBAC 表禁止写入，「Allowing them would let an org admin bind `admin_full_access` … to themselves」。`:475-477` 把 `sys_position`、`sys_permission_set`、`sys_position_permission_set` 都设为只读。单租户下组织管理员拿到的是派生变体 `organization_admin_no_bypass`，它照抄这几条（`auto-org-admin-grant.ts:84-90`）。组织管理员也不持有 `manage_metadata`（`:418`）。\n- **平台管理员今天能写：** `admin_full_access` 持有 `manage_metadata`（`packages/spec/src/identity/eval-user.zod.ts`，`ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions`），元数据门的写闸 `metaWriteCapabilityVerdict`（`metadata-core/src/meta-write-capability.ts:79-93`）只放行系统调用和持有 `manage_metadata` 的人。\n- **撤表之后：** 「对目录对象的增删改授权」随四张表一起消失，写入只剩元数据门这一条路，闸就是 `manage_metadata`。\n- **影响面实测为 0：** objectstack、hotcrm、cloud 里没有任何声明的权限集授予这四个对象的新建或编辑权限（只有上面那几条只读）。运行时在 Studio 里建的自定义权限集无法从代码测量。\n\n## Governing text\n\n- ADR-0131 D2：Setup「keeps the security-administration authority an organization admin holds today (the object grants on the catalog)」。今天组织管理员持有的授权就是只读。\n- 防提权注释（上引 `:426-431`）。\n- 规矩：安全边界由维护者定，放宽一律升级。\n\n## 选项 × 真实代价 × 开发工作量\n\n| 选项 | 做什么 | 客户能感知的后果 | 工作量 |\n|---|---|---|---|\n| **A 保持今天的权限** | 切换后只有持 `manage_metadata` 的人（平台管理员）能在 Setup 和 Studio 写岗位、权限集、能力；组织管理员只读 | 与今天一致，无人感知变化 | 0 行服务端代码；C9 的对等验收按此改写 |\n| **B 新增窄权限** | 新增一个只管安全目录的系统权限，元数据门对这三类元数据接受它；平台管理员默认持有，可授给指定人 | 可以设立不碰 Studio 的「安全管理员」 | spec 新增一个系统权限，元数据门闸加一类，约 300–600 行；新增公开面 |\n| **C 单租户下放开给组织管理员** | 元数据门在单租户下接受组织管理员对这三类的写入 | 组织管理员可以给自己挂上全权管理员权限集，等于提权 | 约 200–400 行；⛔ 推翻防提权规则 |\n\n## 四轴（从业务看）\n\n- **项目长远合理性：** A 保持一条规则：定义由元数据作者管。B 多一个窄权限，属于真实的权限分层，但目前没有人在用。C 打破防提权边界。\n- **实际业务拉动：** 声明面实测为 0，今天没有任何应用把目录写权交给非平台管理员。\n- **防 AI 犯错：** A 和 B 都是响亮拒绝（403 并说明需要的权限）。C 会让 AI 生成的组织管理员角色悄悄拿到提权路径。\n- **创业阶段不扩散：** A 什么都不加。B 加一个永久权限。C 最危险。\n\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 项目长远合理性：A 一条规则，不增生；B 增生一个窄权限；C 打破防提权边界。\n- ② 实际业务拉动：声明面实测为 0，今天没人把目录写权交给非平台管理员。\n- ③ 防 AI 犯错：A、B 响亮拒绝；C 静默提权。\n- ④ 创业阶段不扩散：A 不加东西；B 加一个永久权限；C 不可取。\n\nPrior rulings read: ADR-0131 D2/D3/D7; `6094171670`（objectui#7611 的对等验收文字）; `6094045326`（#22601 B）; 防提权注释 `default-permission-sets.ts:426-431`; thread: none.\n\n**推荐：A**，回退 B（有具名用户需要「不碰 Studio 的安全管理员」时再加）。\n- 自检：只看①选 A；②③④ 是否翻转：否。\n- 置信缺口：已部署环境里在 Studio 建的自定义权限集是否授予了目录对象的写权，代码测不到。切换的升级仪式（C7）可以在 `--plan` 里点名列出这类授权。\n\n## 裁后执行\n\n- **选 A：**\n  - objectui#7611 的对等验收改写为：单租户下平台管理员（持 `manage_metadata` 者）在 Setup 新建、编辑、停用和重新启用岗位与权限集，与今天一致；组织管理员只读，界面说明原因。\n  - 切换计划（#15204）里不再有「元数据门对组织管理员放行」这一项。\n  - C7a（#22617）的 `--plan` 列出授予目录对象写权的自定义权限集。\n- **选 B：** 立 spec 卡加这个窄权限，并入切换批次。\n- **选 C：** 先立 ADR 修订卡，写明防提权规则的例外与守卫。\n\n**相关：** objectui#7611、#15204、#22601、#22617、ADR-0131 D2。"
+}

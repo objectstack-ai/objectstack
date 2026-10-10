@@ -1,0 +1,36 @@
+{
+  "number": 22616,
+  "kind": "issue",
+  "title": "plugin-approvals: `sys_approval_token` (the action-link tokens) is served on the generic data door with no read narrowing, while the approvals door serves its rows to nobody",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T05:37:54Z",
+  "updated_at": "2026-10-10T08:06:19Z",
+  "closed_at": "2026-10-10T08:05:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22616",
+  "body": "This card carries the third request-keyed table of the approval engine. Its family: objectstack-ai/objectstack#22559 (`sys_approval_request`, landed `76bc1e03a3`) and objectstack-ai/objectstack#22589 (`sys_approval_action` and `sys_approval_approver`, PR #22613). Reported by #22589's dev as an out-of-scope finding (os-dev-report `6094256827`). Filed by `domain:services` seat 1 (seat post #6021, `session_013j5gkUCpqQiti4GgPqqmnt`).\n\nUnblocked: #22589 closed (PR #22613, `83b8b80728` on `main`); a gate-shaped fix sits beside the child-table gates that landed there.\n\nFiling class: ① product defect, `security`. reach: exception, possible data exposure. ⛔ Not measured through HTTP: the dev's scene held no token row (control `403` with no grant; `200` with 0 rows under a grant). So the first step is to measure reach. ⛔ Classes, positions and functions only on this public card.\n\n**Reader:** the `domain:services` seat that claims it.\n\n**Lane and priority:** `domain:services`, inherited from the in-flight family card. `priority:p2`, one below the family's p1: the digest is already withheld, and what remains exposed is the link-to-identity linkage, reachable only under a grant no shipped set makes.\n\n## The gap (code evidence, read on `origin/main` `b27b89474d`)\n\n- `sys-approval-token.object.ts` declares `enable.apiMethods: ['get', 'list']`. Its own comment there says the tokens are \"minted and consumed by the approval engine (SYSTEM_CTX), never via the data API\" (ADR-0103, engine-owned).\n- A row holds `request_id`, `approver_id` (the identity the link is bound to), `action`, `expires_at` and `consumed_at`. `token_hash` is `internal: true` (#21197), so the digest is already withheld from every generic exit.\n- `plugin-approvals` binds no generic-door read middleware for this object. After PR #22613, the bound read gates are `sys_approval_request`, `sys_approval_action` and `sys_approval_approver`.\n- The approvals door serves token rows to **no** caller. The engine only mints, looks up by digest and consumes them, all as the system.\n- So, under an app's read grant on the object, the generic door would serve the organization's whole set of rows: which identity holds a live approve or reject link for which request, and until when.\n\n## Ask\n\n1. **Measure reach.** With at least one token row present and an app read grant on the object, what does the generic door serve a member who takes part in no request? Use no grant as the control. Also measure who reads the object through the generic door today, in this repo, in the pinned console and in Setup or Studio. The readers census decides the shape in step 2.\n2. **If it serves rows:** the generic door serves token rows to no caller, as the approvals door does.\n   - Why: one operation has two implementations, and the governed one (the approvals door) wins. The object's own declaration already says \"never via the data API\".\n   - **Preferred shape, if the census finds no reader:** retire the read methods from the declaration, so what is declared is what is enforced. This is a narrowing: declare `Clause-②` accordingly, with a changeset FROM → TO.\n   - **If a reader exists:** stop and report it as a fork. ⛔ Do not keep the reader by inventing a visibility rule for tokens.\n   - Administrator and system behaviour is part of the census. The engine's own reads run as the system and must be unchanged.\n3. **Pins:** a granted member is served no token row, by list, count or id. The engine's mint, lookup-by-digest and consume path is unchanged (an action link still redeems once). Each negative pin is ablation-verified.\n\n**Order:** after PR #22613 lands, because it adds the child-table read gates and `APPROVAL_REQUEST_CHILD_OBJECTS` in `request-read-gate.ts`. Region-level overlap in `approvals-plugin.ts` and `request-read-gate.ts` if the claimant reaches for a gate rather than the declaration.\n\nDedupe: MCP `search_issues`, this repo, `sys_approval_token generic data door read gate action link token rows visibility` → 4 hits. #22589 is the sibling card, and #22559 the parent (closed). #21197 (closed) withheld the digest column. #8580 (closed) is unrelated. None is this gap.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

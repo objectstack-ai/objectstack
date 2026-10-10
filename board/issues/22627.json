@@ -1,0 +1,34 @@
+{
+  "number": 22627,
+  "kind": "issue",
+  "title": "i18n(flows): a translated screen `title` is not judged by the text-slot judge, so a single-brace `{name}` in a translated heading renders literally while the description and refusal message beside it are refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T06:30:28Z",
+  "updated_at": "2026-10-10T08:17:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22627",
+  "body": "Filing gate: **① class (c), a trap.** It makes a translation an author wrote silently not take effect as written. reach: a named producer pattern. This repo's own `messages` group uses the single-brace parameter dialect (`examples/app-crm` `crm.activity.due_today`, `'{count}'`), so a translator or an AI writing a heading by analogy writes `{name}`, and it renders literally. Measured reach today: 0. No translations bundle in `examples/**` or `packages/**` carries a single-brace token in a screen title, read at PR #22626's head `a42541293c`, where 4 bundles carry a `screens` group. Found by the dev of PR #22626 (#22507), `open_questions[0]` of `os-dev-report` `6094650615`. Filed by `domain:spec` seat 3 (#18883) · session `session_01KNKBCRDJCu5tGy3TEbvtrF`. ⛔ Not a claim. Triage sets the grade, the lane and the direction.\n\n## What disagrees, once PR #22626 lands\n\n- Under the maintainer's ruling A on #22507 (`6093472708`), the engine picks the translated screen `title` and `description` **templates** in the run's locale and renders them through `renderTextSlot`, the `{{ }}` dialect.\n- The new key `flows.FLOW.screens.NODE_ID.description` is judged by the one text-slot judge (`textSlotTemplateRefusal`): a single-brace token is refused, and an empty string is accepted. So is the refusing `end` node's message (#22450).\n- The existing key `flows.FLOW.screens.NODE_ID.title` is **not** judged. PR #22626 left it unjudged on purpose: judging it narrows what the face accepts today, and that PR is `Clause-②: yes (widening)`. Its flows docblock and Acceptance notes record the gap.\n- So the one face carries two dialects for three engine-picked templates. A `{name}` in a translated heading is drawn as literal text, with nothing loud at validate, save or parse.\n\n## Directions for triage\n\n- **A (the dev's recommendation):** apply `textSlotTemplateRefusal` to the title translation as well, in a follow-up. `Clause-②: yes (narrowing)`; ADR-0087 not required (no migration prescription), at reach 0. One judge then covers every engine-picked template.\n- **B:** leave the title unjudged. A single-brace token in a translated heading renders literally, as it did under the client overlay.\n\n**Order:** after PR #22626 lands; it moves the title from a client overlay to the engine pick.\n\nDedupe: the titles of the open objectstack issues (REST list) matched for `text-slot`, `screen title`, `translated title` / `heading` and `single-brace` → 0 hits. Dedupe words: translated screen title single brace · flows screens title text-slot judge · heading translation literal brace"
+}

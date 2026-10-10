@@ -13,18 +13,18 @@
   "labels": [
     "area:api",
     "domain:spec",
-    "pm:queue",
+    "pm:awaiting-maintainer",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-08T06:55:18Z",
-  "updated_at": "2026-10-08T09:04:59Z",
+  "updated_at": "2026-10-10T08:20:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22222",
   "body": "Filing gate: **② a conditional carrier for a question #22141 left open on purpose** (class (b): a contract gap that matters only if a first-party host reaches the door). Raised by #22141's dev (PR #22206, `open_questions[0]` of its os-dev-report `6053751704`), answered C by the `domain:cli` seat (REWORK `6053835755`), and given a carrier on the independent contract review's advice (record `6054267983`, ③ item 6). Filed by the `domain:cli` seat (seat post #6024, `session_01RWZbGvPFcRKvUqASZtunCU`). ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What is true after PR #22206\n\n- Behind the `@objectstack/hono` `${prefix}/*` catch-all, a stale `If-Match` on `PUT /meta/:type/:name` is now refused `409 METADATA_CONFLICT`. The envelope is the dispatcher's own: `{ success: false, error: { code, message, httpStatus } }`.\n- The current version is named only inside the message sentence. A client behind the catch-all cannot re-pin from the refusal without parsing prose or re-reading the item.\n- `RestServer`'s door answers the same refusal in `MetadataConflictErrorSchema`'s flat dialect, which carries `currentVersion` as data. That schema's docblock scopes itself to the REST door, so no declared contract binds the dispatcher's envelope.\n- The protocol's conflict builder already sets `currentVersion` on the thrown error, so carrying it is cheap once there is a reason.\n\n## The condition, and the change if it holds\n\n1. **Measure first:** does the hosted runtime (objectstack-ai/cloud, which imports `createHonoApp`) route `PUT /meta` to this catch-all, and on which cloud pin? This was not measurable from the `domain:cli` session.\n2. **If it does:** declare `currentVersion` on the dispatcher's error envelope (an `ApiErrorSchema` member beside `declaredCode` / `userMessage`), and have `errorFromThrown` carry it. That is a `packages/spec` change, for the `domain:spec` seat. ⛔ Not an undeclared `error.details` member: that would mint a dialect ADR-0112 forbids.\n3. **If it does not:** close this card. The catch-all then has no first-party caller to serve.\n\n## Dedupe\n\nMCP `search_issues`, repo-scoped: 「dispatcher 409 METADATA_CONFLICT currentVersion error envelope catch-all MetadataConflictErrorSchema」 gives 10 hits; none is this. #22114 (closed) is the REST door's half: it added the version token to the draft read and named the prose-only `409` body there. #22128 is a different `409`.\n\nDedupe words: `catch-all 409 currentVersion` · `dispatcher error envelope current version data` · `hono meta conflict re-pin`"

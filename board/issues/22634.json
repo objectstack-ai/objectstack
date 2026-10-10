@@ -1,0 +1,35 @@
+{
+  "number": 22634,
+  "kind": "issue",
+  "title": "security(analytics): the ad-hoc analytics query serves objects that declare `apiEnabled: false` and columns declared `internal: true`, which every other generic exit refuses or withholds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T07:29:52Z",
+  "updated_at": "2026-10-10T07:32:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22634",
+  "body": "Derived from the in-flight objectstack-ai/objectstack#22616 (PR #22633), reported by its dev as an out-of-scope finding (os-dev-report `6095111901`). Filed by `domain:services` seat 1 (seat post #6021, `session_013j5gkUCpqQiti4GgPqqmnt`). It inherits that card's lane.\n\nFiling class: ① product defect, `security`. reach: measured once on a real stack, at the analytics door's ad-hoc query, after #22616's fix. Class `exception: security`, possible data exposure. ⛔ Classes, positions and functions only on this public card: no request body, no step sequence.\n\n**Reader:** the `domain:services` seat that claims it.\n\n**Why p1:** key material declared `internal: true` reaches an administrator, and a withheld digest reaches a member holding read. #21197 (closed, `security`) treated an administrator served key material through a generic exit as a security defect, and withheld the column for exactly that reason.\n\n## The gap, as measured and as read (on `origin/main` `f368b7e980`)\n- **Two declarations, enforced everywhere else.**\n  - `enable.apiEnabled: false` is the declared off switch. `apiExposureDenialReason` (`packages/spec/src/data/api-derivation.ts` about `:434`) is the one decision the REST data routes, the dispatcher and the MCP data tool judge, and the cross-object search reads it too.\n  - A field's `internal: true` withholds it from every generic exit (#21197; the data door and the compliance ledger strip it).\n  - After #22616, the data door answers `404 OBJECT_API_DISABLED` for the token object, to every caller.\n- **The analytics ad-hoc query reads neither.** `service-analytics` (`analytics-service.ts`; the ad-hoc path that mints a cube with `inferCubeFromQuery`, about `:3138`) has no reference to `apiEnabled` or to a field's `internal` flag. Measured classes:\n  - a member holding read on `sys_approval_token` (an `apiEnabled: false` object after #22616) was answered `200` with the object's rows, including the withheld digest column;\n  - an administrator was answered the same;\n  - an administrator was answered the `internal` key-material column of another `apiEnabled: false` credential store.\n- So one door serves what the declaration says no generic exit serves: two facets, object-level and field-level, at one door.\n\n## Ask\n1. **Measure first.**\n   - On `main`, for each analytics entry (the ad-hoc query, the SQL face, the cube and dataset doors, and both strategies, ObjectQL and native SQL), record whether an `apiEnabled: false` object is served and whether an `internal: true` column is served.\n   - Census which platform objects declare either, so the pins can name real subjects.\n2. **Fix at the door.**\n   - The analytics door consults the same exposure decision every other door does. ⛔ No second rule.\n   - An `apiEnabled: false` object is refused with the same code the data door answers.\n   - An `internal: true` field is never served, as a measure, a dimension, a filter operand or a raw column. Decide refused or withheld, and state which the data door's precedent implies.\n   - It fails closed.\n   - Authored cubes over such objects or columns: measure whether any exist in this repo or the examples. If one does, report it before choosing its answer.\n3. **Pins.**\n   - Per facet and per strategy: a granted member and an administrator are not served the object's rows, and not served the column.\n   - Control: an ordinary object and an ordinary column are served as before.\n   - Each negative pin is ablation-verified.\n\n**Order:** independent of PR #22633, which closes the data door for the token object. This card closes the analytics door for every such object.\n\nDedupe: MCP `search_issues`, this repo:\n- `analytics ad-hoc query inferCubeFromQuery apiEnabled false internal field withheld column exposure` → 20 hits, all closed analytics cards on other gaps. The nearest are #21080 (native SQL skipped read middlewares), #20917 (field-level read on native SQL), #21177 and #21156 (withheld security cards) and #4467 (row scope).\n- `analytics query door serves rows of objects the data API refuses …` → the same family, plus #21061 (object admission skipped for an unresolved caller).\n- None names `apiEnabled: false` or `internal: true` at the analytics door.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

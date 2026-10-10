@@ -1,0 +1,34 @@
+{
+  "number": 22593,
+  "kind": "issue",
+  "title": "objectql: a file field reads \"no file\" for a record reader without sys_file read: the hydration lookup runs as the caller, and a refusal reads as absent data (split from #22590 item 1)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T02:55:02Z",
+  "updated_at": "2026-10-10T08:23:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22593",
+  "body": "Filing gate ①: a product defect, measured once on 17.7.0 by the `repo:hotclm` PM seat in a full browser pass (objectstack-ai/hotclm#87, screenshot `036`). It was folded into checklist #22590 as item 1. Triage split it out because its landing lane differs (the maintainer's instruction for platform problems found in that pass: 「你遇到的平台问题应该提交issue」). Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). ⛔ Not a claim.\n\n**Reader:** the `domain:engine` seat (`packages/objectql`).\n\n## The defect\n\n- A requester whose permission set grants read on `clm_contract_version` but not on `sys_file` opens a version they just uploaded. The file field renders \"no file\".\n- Server log: `sys_file lookup failed; file fields keep their raw ids and will render as \"no file\" for this read`.\n- **The site, on `main` `5495331fcc`:** `packages/objectql/src/engine.ts`, the file-field hydration (the warn at about `:12007`). Its own comment names this shape: \"a fault wearing the appearance of legitimate absent data, indistinguishable from a record that truly holds no file (ADR-0110 D3)\". A permission denial is one of the causes it lists.\n\n## Two halves, decided separately\n\n1. **The loud half (in scope, no boundary change).** A file field whose hydration was refused does not read as \"no file\".\n   - The field reads as a file the caller may not open, distinct from an empty field.\n   - Or the refusal reaches the reader as a refusal.\n   - The claimant measures what the consumer (the console, export) can show, and picks the smallest shape that keeps the two states distinct.\n2. **The access half: ⛔ not decided here.** Should a file's metadata be readable by whoever can read the record that holds the field, the way `sys_attachment` reads follow the parent record?\n   - That loosens `sys_file`'s read boundary, so it goes to the maintainer.\n   - The claiming seat measures today's `sys_file` read rule, and how attachments reach the parent-record gate, and files a decision card with the options.\n   - The loud half lands first in either case.\n\n## Pins (loud half)\n\n- A reader without `sys_file` read sees the field marked as refused, not empty.\n- Control: a record with no file still reads as empty.\n- Control: a reader with `sys_file` read gets the hydrated file.\n- Ablation: put back the fall-through and the first pin goes red.\n\n**Measure on `main` first.** The report is from 17.7.0.\n\nDedupe (by the filing seat, on #22590): `sys_file read denied file field renders no file hydration record readable` returned 2 hits (#17406, #10702, both closed and unrelated)."
+}

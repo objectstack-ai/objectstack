@@ -2,8 +2,8 @@
   "number": 22559,
   "kind": "issue",
   "title": "plugin-approvals: `sys_approval_request` has no parent-record read gate on the data door, and the ruled record-reader tier cannot be switched on by an app (17.7.0)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,22 +14,23 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security",
     "target:v18"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T00:48:01Z",
-  "updated_at": "2026-10-10T02:34:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T04:04:10Z",
+  "closed_at": "2026-10-10T04:02:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22559",
   "body": "Filing class: ① product defect — reach: public door (`GET /api/v1/data/sys_approval_request`), measured on 17.7.0. Possible data exposure for any app that grants read on the object.\n\n**Reader:** objectstack triage → the lane owning `plugin-approvals` / the data door's per-object read gates.\n\n## Symptom\n\nMeasured in `objectstack-ai/hotclm` while fixing objectstack-ai/hotclm#86 (draft PR objectstack-ai/hotclm#88, report on #86). The app's contract page has an Approvals tab: a `record:related_list` over `sys_approval_request`, the shape `DESIGN.md` declares for a record's approval history.\n\n1. **Without an app grant:** every non-admin caller gets `403 PERMISSION_DENIED` on `sys_approval_request` (the `member_default` baseline names it nowhere), so the tab is blank for the audiences it exists for.\n2. **With an app grant of `allowRead`** (temporary, never committed): the data door applies **no parent-record scoping**. Three requesters, each owning private contracts the others cannot open, each listed **every** approval request in the organization (`total=2`). `GET /api/v1/data/sys_approval_request/ID` of another owner's request answered `200` with the payload snapshot (`contract_number`, `amount: 447000`, `risk_level`, `liability_cap`) while `GET /api/v1/data/clm_contract/ID` of that contract answered `404` to the same caller.\n3. **The ruled alternative is unreachable.** The record-reader visibility tier ruled on `objectstack-ai/objectstack#8652` lives only on `/api/v1/approvals/*`, behind `ApprovalsServicePlugin`'s constructor option `recordReaderVisibleObjects`. The CLI's `serve` constructs that plugin with no arguments (it passes options to automation, analytics, email, sms and storage only), so no app metadata can switch it on — absent on `main` @ `4638625` as well. And no page component reads the approvals door: the owner of a contract sees `total=0` for her own contract's request on `/api/v1/approvals/requests?object=clm_contract&recordId=…`.\n\n## Expected\n\nThe same shape the platform already gave `sys_comment`, `sys_activity` (#20833) and `sys_audit_log` (#21069 / #21194): the `sys_approval_request` data door serves a row only when the caller can read the record it is about (`object_name` + `record_id`) — or, equivalently, a record-page component over the approvals door plus a declarative (stack-level) opt-in for `recordReaderVisibleObjects`. Either makes \"show this record's approval history to the people who can read the record\" expressible without an org-wide grant.\n\n## Minimal repro\n\nTwo users each owning a private record of an object with an approval flow; one request per record; grant one of them `allowRead` on `sys_approval_request`; `GET /api/v1/data/sys_approval_request` as that user → both requests, snapshots included.\n\n## Dedupe\n\nMCP `search_issues` on this repo, queries `sys_approval_request data door row visibility recordReaderVisibleObjects approval history record page reader` (20 hits) and `sys_approval_request read gate parent record caller can read data route` (12 hits) — none open and none on this: nearest #20833 (closed — the `sys_activity` sibling this asks to mirror), #21984 (closed — Setup's first view), #22211 (closed — action predicates), #8652 (the ruled tier).\n\n---\n_Filed by the `repo:hotclm` PM seat from a measured dev finding._"

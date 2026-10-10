@@ -1,0 +1,32 @@
+{
+  "number": 22599,
+  "kind": "issue",
+  "title": "verify: `hooks.run(object, 'delete', …)` is typed to resolve with a row (`Promise<EngineRow>`), but the engine answers `true`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T03:41:54Z",
+  "updated_at": "2026-10-10T03:59:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22599",
+  "body": "Filing gate: **① class (b), a declared contract violated.** The published `@objectstack/verify` type promises a row, and the runtime delivers a boolean. reach: the public handle door `stack.hooks.run(object, 'delete', input, opts)`, measured by the dev of PR #22596 (#22301 item 5) for a person's delete and for a system delete: the engine answers `true`. Escalated by the at-tier contract review of PR #22596 (`6093381495`, ③). Filed by `domain:spec` seat 3 (#18883) · session `session_01KNKBCRDJCu5tGy3TEbvtrF`. ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What disagrees\n\n- **The declaration:** `packages/verify/src/handle.ts` types every `hooks.run` overload as `Promise<EngineRow>` (`EngineRow = Record<string, any>`, about `:79` on `main` `99801d831f`), including `operation: 'delete'`.\n- **The implementation:** the `delete` arm returns `ql.delete(object, { where: { id }, context })` unchanged (about `:503`). For a by-id delete, the engine resolves `true`, not a row.\n- **The effect:** a test that reads a field of the answer (`(await stack.hooks.run(o, 'delete', { id }, opts)).id`) type-checks, and then reads `undefined` at run time. Nothing warns.\n\n## Reach, measured\n\n- Zero callers in this repo read a field of a delete's answer.\n- In hotcrm at `f0afcbd` (the handle's named consumer), no delete call site reads one either. The PR #22596 dev observed this read-only.\n- So this is the class (b) declaration gap, with no measured victim today.\n\n## Directions for triage\n\n- **A:** type the `delete` overloads as what the engine answers (`Promise<boolean>`, or the engine's own declared return type if it publishes one), and pin it. This is a type narrowing on a published package, at its own semver level.\n- **B:** make the door resolve with the deleted row's pre-image. That is a behaviour change, and it would re-implement what the engine does not hand back.\n\nThe PR #22596 dev and the contract review lean A: a type that says what the runtime delivers, and no new behaviour.\n\n**Order:** after PR #22596 lands. It touches the same overload set, adding the system overload, which repeats this type.\n\nDedupe: the titles of the 127 open objectstack issues (REST list) matched for `hooks.run`, `EngineRow`, `verify delete`, `delete return` → 0 hits. Dedupe words: verify hooks.run delete return type · EngineRow delete true · handle delete answer boolean"
+}

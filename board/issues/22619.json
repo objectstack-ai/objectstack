@@ -1,0 +1,33 @@
+{
+  "number": 22619,
+  "kind": "issue",
+  "title": "docs(adr-0131): §8/D14 execution-plan note — C2's remainder and C3 land as one cutover, C7 splits into C7a/C7b, and C12 moves to the 18.x line (rulings 6094045326, 6094175435, 6094183024)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p1",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T05:56:43Z",
+  "updated_at": "2026-10-10T07:16:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22619",
+  "body": "Filing gate ③: a task the maintainer directed. These are the three rulings it records, all by the maintainer on 2026-10-10:\n- #22601 ruled **B**, 「同意」 (director record `6094045326`);\n- batch #310 items 2 and 5, 「cloud 冻结在 v17 没问题，其他同意你的建议。」 (records `6094175435` on #15211, and `6094183024` on #15213).\n\nEach record names this card as owed: one Tier H paragraph in ADR-0131 §8 / D14. Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). ⛔ Not a claim.\n\n**Reader:** the `domain:skills` seat. `docs/adr/**` is governed, so the PR lands with the maintainer's APPROVED review.\n\n## What the note records (one paragraph; ⛔ no decision is changed)\n\n1. **The cutover (`6094045326`).** C2's remaining reader switch (S8a, S8b, S9) and C3 land as **one cutover batch**: a sequence of PRs merged in a short window, each green and leaving `main` usable, with no transition piece for an intermediate state the batch removes. It still lands before C7. Under `single`, a position name is unique per deployment (sub-question Q (a)); the migration reports an existing same-name pair as `conflicting` (D10, fate 4).\n2. **The C7 split (`6094175435`).** C7a (the inventory, the read-only `--plan`, the completion-marker design) starts now (#22617). C7b (`--apply`, the post-check, the boot refusal) keeps the dependency on the cutover, C4 and C5. The §8 row keeps its substance: nothing is applied before the data shape is final.\n3. **The C12 move (`6094183024`).** D6's template install mode (C12, #15213) leaves the v18.0 release-blocking set and lands on the 18.x line. ⛔ D6 itself is unchanged: both install modes stay decided, and only when the second one is built moves.\n\n## Done when\n\n- ADR-0131 §8 / D14 carries the paragraph, citing the three record ids.\n- After it lands, triage moves #15213's `target:v18` to the 18.x target, as `6094183024` says.\n\nDedupe: this card is named by the three records. An open-issue title search for `adr-0131 execution-plan note` found none before filing."
+}

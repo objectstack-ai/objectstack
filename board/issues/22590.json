@@ -1,0 +1,32 @@
+{
+  "number": 22590,
+  "kind": "issue",
+  "title": "runtime (17.7.0): file fields read \"no file\" for a record reader without sys_file read, flow run summaries report acted 0 while notifying, and the activity read pre-scan caps at 2000 rows fail-closed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:services",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T02:42:45Z",
+  "updated_at": "2026-10-10T08:09:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22590",
+  "body": "Filing class: ① product defects — reach: public doors / server log, each measured once on `@objectstack/*` 17.7.0. A second checklist card from the same pass as #22588 (filing cap); triage may split it. Maintainer instruction, verbatim, 2026-10-10: 「你遇到的平台问题应该提交issue」.\n\n**Reader:** objectstack triage.\n\n**Source:** `objectstack-ai/hotclm` full browser pass objectstack-ai/hotclm#87 (`main` @ `c31c7e2` and `46e65f0`); `qa/browser-test-17-7/REPORT.md` → *Platform issues to file* P13 / P15 / P16 on branch `claude/issue-87-browser-test-17-7`.\n\n## Checklist\n\n- [ ] **1. A file field renders \"no file\" for a user who can read the record but not `sys_file`.** As a requester (permission set grants read on `clm_contract_version`, not on `sys_file`), opening the version they just uploaded shows no file; server log: `sys_file lookup failed; file fields keep their raw ids and will render as \"no file\"` (screenshot `036`). Expected: a file field's hydration follows the reader's access to the record that holds it (as `sys_attachment` reads follow the parent record), or the refusal is surfaced as a refusal, not as an empty field.\n- [ ] **2. A flow run's summary reports `acted: 0` while the run sent notifications.** `POST /api/v1/automation/legal_review_sla/trigger` → `summary.acted 0`; the assignees' `sys_inbox_message` then holds the new messages (five of the app's six daily flows read the same way). A scheduled flow that did its job is indistinguishable from one that had nothing to do — the problem #4354 set out to remove. Nearest prior: #7747 (closed — the opposite case, `acted: 1` on a dead-letter).\n- [ ] **3. The activity read visibility pre-scan stops at 2,000 candidate rows and fails closed.** Server log on any non-admin page load: `[audit] activity read visibility: candidate pre-scan hit the 2000-row cap … fail-closed and may omit visible rows`. On a demo-sized database (640+ activity rows for one user's readable records) a reader can silently miss activity they may see. (The Console half — the header widget calling the global, unscoped `sys_activity` list — is item 8 of objectstack-ai/objectui#12081.)\n\nThe fourth new item of that pass — every activity row attributed to \"System\" — is added as evidence on #22510 (the open actor-attribution card), not filed separately.\n\n## Dedupe\n\nMCP `search_issues` on this repo: `sys_file read denied file field renders no file hydration record readable` → 2 hits (#17406, #10702 — closed, unrelated) · `flow run summary acted 0 notifications sent trigger` → 4 hits (#22073, #7747, #4354, #3481 — closed, none this) · `activity read visibility candidate pre-scan 2000-row cap fail-closed omit visible rows` → 3 hits (#22402, #21829, #7217 — closed, unrelated).\n\n---\n_Filed by the `repo:hotclm` PM seat from a measured browser pass._"
+}

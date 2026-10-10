@@ -2,8 +2,8 @@
   "number": 22568,
   "kind": "issue",
   "title": "ui(pages): a slotted page that authors both `details` and `tabs` loses its `details` slot in the console — `sys_user_detail` authors both, so its sections and `hideFields` (incl. `ban_reason`) never apply",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:records",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T01:32:16Z",
-  "updated_at": "2026-10-10T02:11:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T06:02:43Z",
+  "closed_at": "2026-10-10T05:59:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22568",
   "body": "Filing gate: ① a product defect, `finding` class (c), a seam disagreement between the spec's slot contract and the renderer. reach: a named real producer (`packages/platform-objects/src/pages/sys-user.page.ts`), read from source on both sides and not driven in a browser. Found by the dev of #22473 (PR #22567, report `6092186396` on #22473, `out_of_scope_findings[0]`) and re-read by the filing seat. Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** objectstack triage (seat post #6015) routes it. The producer is `platform-objects` (objectstack), the slot contract is `packages/spec` (objectstack), and the dropping rule is objectui's `plugin-detail` synthesizer, so the fix may land in one, two or all three. Triage decides which side owns it.\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created):\n- objectstack: `slotted page details slot dropped when tabs slot authored sys_user detail page` → 0 hits.\n- objectstack-ai/objectui: `buildDefaultPageSchema tabs slot wins over details slot details override ignored` → 11 hits, all closed. None is this; the nearest is objectstack-ai/objectui#2257 (tab-state reset), which is unrelated.\n\n## The defect\n\n**The renderer** (objectstack-ai/objectui `main` `d758f2f`, `packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`):\n- Its own doc (about `:297`–`:301`): \"`details` — replaces the Details tab body … `tabs` — replaces the entire `page:tabs` node. **Wins over `details` when both are provided.**\"\n- The code (about `:1072`–`:1075`): `if ('tabs' in slots …) components.push(...slots.tabs) else if ('details' in slots …)`. When `tabs` is authored, the `details` slot is never read.\n\n**The contract** (`packages/spec/src/ui/page.zod.ts`, the slot map about `:1282`–`:1302`): `details` and `tabs` are independent optional slots, each \"a full replacement at the slot boundary\". Nothing says `details` is dropped beside `tabs`, and no lint (`os validate` / `os lint`) flags a page that authors both.\n\n**The producer** (`packages/platform-objects/src/pages/sys-user.page.ts`):\n- It authors `details` (about `:129`): Identity and Audit sections, and `hideFields` that include `id`, `banned`, `ban_reason`, `ban_expires`, plus the fields it promoted to highlights.\n- It also authors `tabs` (about `:162`), four curated related lists with no Details item.\n- Read together: on the console's `sys_user` record page, the authored sections and `hideFields` never apply. By the renderer's rule, the body is the four related-list tabs alone. This is a reading of both sources, not a browser measurement; the claimant measures it first.\n\nThe other two platform pages (`sys-organization.page.ts`, `sys-position.page.ts`) author `tabs` only, so they are not affected. PR #22567's new `sys_approval_request_detail` authors `tabs` only, with `record:details` as its first tab item, for exactly this reason.\n\n## Direction (for triage; not decided here)\n\n- **(a)** The renderer honours both slots: an authored `details` replaces the Details body inside whatever tab strip `tabs` builds, or is placed before it. This touches objectui only.\n- **(b)** The contract makes the pair loud: the slot doc states the precedence, and lint refuses (or warns on) a page that authors both. Then `sys-user.page.ts` moves its `details` into a Details tab item, as #22473's page does. This touches spec and `platform-objects`.\n\n(b) matches \"declaration is enforcement\" (a silent drop is the failure mode). (a) keeps every authored slot live. Either way, `sys_user_detail`'s `hideFields` must reach the rendered page.\n\n## Tests\n\n- **Pin:** a slotted page authoring both `details` and `tabs` either renders the authored `details` (a) or is refused by lint with the slot pair named (b). `sys_user_detail` renders without `ban_reason` / `ban_expires` in its body.\n- **Ablation:** the current precedence back turns the pin red."
