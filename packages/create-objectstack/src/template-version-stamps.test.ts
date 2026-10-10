@@ -25,7 +25,10 @@
 // re-found the day a second template ships.
 //
 // The same fixture is deliberately built STALE (pinning ^17 while its
-// scaffolder reads 42.0.0). That makes the import-safety assertion non-vacuous
+// scaffolder reads 42.0.0 and its PROTOCOL_VERSION reads 43.0.0 — two majors,
+// because `engines.protocol` is stamped from the protocol constant and every
+// other surface from the package, and with the two equal a stamp read from the
+// wrong source would pass). That makes the import-safety assertion non-vacuous
 // in the one way that matters: an unguarded module imported against a stale
 // tree REWRITES it, so "the files are byte-identical after import" is evidence
 // only when there was something for a rewrite to do. Byte-identity over an
@@ -62,6 +65,7 @@ type SyncModule = {
   findTemplateDirs: (templateRoot?: string) => string[];
   stampedPaths: (options?: { root?: string }) => string[];
   loadScaffolderVersion: (file?: string) => { version: string; major: string; range: string };
+  loadProtocolMajor: (file?: string) => { source: string; protocolMajor: string };
 };
 
 const loadSync = async (file = SYNC_SCRIPT): Promise<SyncModule> =>
@@ -75,6 +79,11 @@ let fixtureScript: string;
 
 /** Deliberately not the live version, so a stamp that ran is unmistakable. */
 const FIXTURE_VERSION = '42.0.0';
+/**
+ * The fixture's PROTOCOL major — one ahead of its package major, the shape the
+ * pre-mode window leaves in the real tree. `engines.protocol` must move to THIS.
+ */
+const FIXTURE_PROTOCOL_MAJOR = '43';
 /** Deliberately stale: every fixture surface pins this and must move to 42. */
 const STALE_MAJOR = '17';
 
@@ -139,6 +148,11 @@ beforeAll(() => {
   writeFixtureFile(
     path.join(fixture, 'packages', 'create-objectstack', 'package.json'),
     JSON.stringify({ name: 'create-objectstack', version: FIXTURE_VERSION }, null, 2) + '\n',
+  );
+  // The protocol major's one source, in the shape the real constant spells it.
+  writeFixtureFile(
+    path.join(fixture, 'packages', 'spec', 'src', 'kernel', 'protocol-version.ts'),
+    `export const PROTOCOL_VERSION = '${FIXTURE_PROTOCOL_MAJOR}.0.0';\n`,
   );
 
   for (const template of FIXTURE_TEMPLATES) {
@@ -215,6 +229,7 @@ describe('sync-template-versions.mjs is import-safe', () => {
     expect(typeof sync.stampedPaths).toBe('function');
     expect(typeof sync.findTemplateDirs).toBe('function');
     expect(typeof sync.loadScaffolderVersion).toBe('function');
+    expect(typeof sync.loadProtocolMajor).toBe('function');
     expect(Array.isArray(sync.TEXT_STAMPS)).toBe(true);
     expect(sync.TEXT_STAMPS.length).toBeGreaterThan(0);
     expect(sync.TEMPLATE_DIR).toBe('packages/create-objectstack/src/templates');
@@ -249,9 +264,10 @@ describe('the entry-point guard leaves the CLI path working', () => {
         'a non-@objectstack dependency is never touched',
       ).toBe('^6.0.0');
 
-      expect(fs.readFileSync(path.join(dir, 'objectstack.config.ts'), 'utf8')).toContain(
-        "engines: { protocol: '^42' }",
-      );
+      expect(
+        fs.readFileSync(path.join(dir, 'objectstack.config.ts'), 'utf8'),
+        `${template}/objectstack.config.ts engines.protocol moves to the PROTOCOL major, not the package major`,
+      ).toContain(`engines: { protocol: '^${FIXTURE_PROTOCOL_MAJOR}' }`);
 
       const manifest = fs.readFileSync(path.join(dir, 'objectstack.manifest.json'), 'utf8');
       expect(manifest).toContain('"specVersion": "^42.0.0"');

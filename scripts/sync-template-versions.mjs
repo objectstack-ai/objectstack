@@ -35,15 +35,47 @@
 //     skip. A silent skip is indistinguishable from a green run, which is
 //     precisely the invisibility this card was filed about.
 //
-// TWO VALUES, TWO MEANINGS — do not collapse them. `engines.protocol` is the
-// ADR-0087 D1 runtime handshake range and carries the PROTOCOL major (`^17`).
-// `specVersion` is documented by TemplateManifestSchema as the "Compatible
-// @objectstack/spec semver range" and carries the PACKAGE range (`^17.0.0`) —
-// the same value this script writes into the template's own
-// `@objectstack/spec` dependency, so the manifest and the package.json state
-// one fact once. They agree on the major today only because the spec package's
-// major and the protocol major are kept in lockstep; they are still two
-// different declarations and are stamped from two different values.
+// TWO VALUES, TWO MEANINGS, TWO SOURCES — do not collapse them.
+// `engines.protocol` is the ADR-0087 D1 runtime handshake range and carries the
+// PROTOCOL major (`^18`), read from the one place that major is declared:
+// `PROTOCOL_VERSION` in `packages/spec/src/kernel/protocol-version.ts`, the
+// constant the runtime's handshake compares against. `specVersion` is
+// documented by TemplateManifestSchema as the "Compatible @objectstack/spec
+// semver range" and carries the PACKAGE range (`^17.0.0`), read from this
+// scaffolder's own version — the same value this script writes into the
+// template's own `@objectstack/spec` dependency, so the manifest and the
+// package.json state one fact once.
+//
+// The two majors are NOT always equal, which is why the protocol major is read
+// from the constant rather than inferred from the package. The constant is held
+// to the spec package's major with one exception (ruling record 6049734955,
+// Q1 -> B): in Changesets pre mode with a pending `major`, the protocol moves in
+// a reviewed pull request ahead of the version pass. For that whole window the
+// tree carries packages at `17.x` beside `PROTOCOL_VERSION = '18.0.0'`, and a
+// template stamped from the PACKAGE major declares `^17` — a range the runtime
+// it is booted against refuses at the handshake. Read from the constant, the
+// stamp cannot lag the protocol it declares compatibility with.
+//
+// Ordering, on the release path: the root `version` script runs
+// `sync-protocol-version.mjs` BEFORE this script, so outside that exception the
+// constant has already followed the spec package's new major by the time this
+// reads it. The two stamps then agree on the major again — from two sources.
+//
+// The constant is read from SOURCE TEXT, never a build: this script runs under
+// plain `node` on the release path before any build exists, and a `.ts` import
+// needs type stripping the declared `engines.node` floor (>=22.0.0) does not
+// guarantee. It is read HERE, with the expression `check-changeset-no-major.mjs`
+// reads the same declaration with (`protocolMajorIn()`: line-anchored, either
+// quote, so a commented-out declaration declares nothing), and NOT imported
+// from there, because this module is not a leaf: `sync-scaffold-emission-policy.mjs`
+// imports it inside create-objectstack's BUILD, and `template-version-stamps.test.ts`
+// copies its import closure into a fixture inside that package's TEST. An
+// import would pull a 4,600-line changeset gate and its siblings into both,
+// leaving the turbo inputs and the cross-package declaration that name this
+// closure (`scripts/cross-package-test-inputs.mjs`: "the stamper's own import
+// closure") short. The second reader cannot drift silently: a declaration it
+// stops matching is a hard failure naming the file (`loadProtocolMajor()`), and
+// the self-test's Control J pins that.
 //
 // ## THE DECLARATIONS ARE EXPORTED, AND NOTHING RUNS ON IMPORT (#9554)
 //
@@ -70,8 +102,9 @@
 //     ALL template dirs. This is what a consumer wants; deriving it here is
 //     what keeps consumers from re-implementing the walk and the join.
 //   * `TEXT_STAMPS`, `TEMPLATE_DIR`, `TEMPLATE_ROOT`, `findTemplateDirs()`,
-//     `VERSION_SOURCE`, `loadScaffolderVersion()` — the raw declarations, for
-//     a consumer that needs the keys and patterns rather than the paths.
+//     `VERSION_SOURCE`, `loadScaffolderVersion()`, `loadProtocolMajor()` — the
+//     raw declarations, for a consumer that needs the keys and patterns rather
+//     than the paths.
 //   * nothing executes, reads a file, or exits the process at import. The
 //     version read used to sit at module scope and `process.exit(1)` on an
 //     unparseable version — an import that can kill its host process is a
@@ -125,11 +158,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Control E: a stamp FILE that does not exist exits 1 naming it': 2,
   'Control F: an unparseable template package.json exits 1 naming it': 2,
   'Control H: zero templates refuses a vacuous green': 3,
+  'Control I: engines.protocol is stamped from PROTOCOL_VERSION, never from the package major': 5,
+  'Control J: an unreadable PROTOCOL_VERSION exits 1 naming its source, and stamps nothing': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -141,6 +176,21 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /** Where the scaffolder's own version is read from. Repo-relative. */
 export const VERSION_SOURCE = 'packages/create-objectstack/package.json';
+
+/**
+ * Where the protocol major `engines.protocol` carries is read from: the
+ * declaration of `PROTOCOL_VERSION`, the constant the runtime's ADR-0087 D1
+ * handshake compares against. Repo-relative.
+ */
+export const PROTOCOL_VERSION_SOURCE = 'packages/spec/src/kernel/protocol-version.ts';
+
+/**
+ * `PROTOCOL_VERSION`'s declaration, as `check-changeset-no-major.mjs`'s
+ * `protocolMajorIn()` reads it — the same expression, so the stamper and the
+ * protocol-lockstep gate agree on what counts as the declaration (see "TWO
+ * SOURCES" in the header for why it is not imported).
+ */
+const PROTOCOL_DECLARATION = /^export const PROTOCOL_VERSION = (['"])(\d+)\.\d+\.\d+\1;/m;
 
 /**
  * Where the bundled templates live, repo-relative. A DIRECTORY, walked, never a
@@ -179,10 +229,12 @@ export const TEXT_STAMPS = [
     key: 'engines.protocol',
     // ADR-0087 D1 — the runtime refuses an incompatible package at the boundary
     // with the exact migration command. Scaffolds populate it by default; this
-    // is the ratchet that closes grandfathering. Carries the PROTOCOL major.
+    // is the ratchet that closes grandfathering. Carries the PROTOCOL major,
+    // read from `PROTOCOL_VERSION` (`loadProtocolMajor()`), never the package
+    // major — see "TWO SOURCES" in the header.
     pattern: /engines:\s*\{\s*protocol:\s*'[^']*'\s*\}/,
-    value: ({ major }) => `^${major}`,
-    replacement: ({ major }) => `engines: { protocol: '^${major}' }`,
+    value: ({ protocolMajor }) => `^${protocolMajor}`,
+    replacement: ({ protocolMajor }) => `engines: { protocol: '^${protocolMajor}' }`,
   },
   {
     file: 'objectstack.manifest.json',
@@ -271,17 +323,53 @@ export function loadScaffolderVersion(file = join(root, VERSION_SOURCE)) {
   };
 }
 
+/**
+ * The PROTOCOL major `engines.protocol` is stamped from: `PROTOCOL_VERSION`'s
+ * major, read from its declaration's source text (see "TWO SOURCES" in the
+ * header for why the source and not a build, and why this reader).
+ *
+ * THROWS when the file cannot be read or carries no declaration, for the same
+ * reason `loadScaffolderVersion()` does — and never falls back to the package
+ * major: that fallback is the very reading that stamped `^17` beside a protocol
+ * of 18, and a stamp from it would be indistinguishable from a correct one.
+ *
+ * @param {string} [file] absolute path to `protocol-version.ts`
+ * @returns {{ source: string, protocolMajor: string }}
+ */
+export function loadProtocolMajor(file = join(root, PROTOCOL_VERSION_SOURCE)) {
+  let text;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    throw new Error(`cannot read PROTOCOL_VERSION: ${rel(file)} could not be read (${err.message})`);
+  }
+  const m = PROTOCOL_DECLARATION.exec(text);
+  const protocolMajor = m ? Number.parseInt(m[2], 10) : null;
+  if (!Number.isInteger(protocolMajor) || protocolMajor < 1) {
+    throw new Error(
+      `cannot read PROTOCOL_VERSION: ${rel(file)} carries no \`export const PROTOCOL_VERSION = 'N.x.y';\` ` +
+        'declaration, so the protocol major engines.protocol carries is unknown',
+    );
+  }
+  return { source: rel(file), protocolMajor: String(protocolMajor) };
+}
+
 // ---------------------------------------------------------------------------
 
 function main() {
   let scaffolder;
+  let protocol;
   try {
     scaffolder = loadScaffolderVersion();
+    protocol = loadProtocolMajor();
   } catch (err) {
     console.error(`✗ sync-template-versions: ${err.message}`);
     process.exit(1);
   }
   const { version, major, range } = scaffolder;
+  const { protocolMajor } = protocol;
+  /** Everything a stamp may be a function of — the two sources, side by side. */
+  const values = { version, major, range, protocolMajor };
 
   const templates = findTemplateDirs();
 
@@ -355,7 +443,7 @@ function main() {
     // ── the text stamps ─────────────────────────────────────────────────────
     for (const stamp of TEXT_STAMPS) {
       const path = join(TEMPLATE_ROOT, template, stamp.file);
-      const value = stamp.value({ version, major, range });
+      const value = stamp.value(values);
       let src;
       try {
         src = readFileSync(path, 'utf8');
@@ -379,7 +467,7 @@ function main() {
         continue;
       }
 
-      const stamped = src.replace(stamp.pattern, stamp.replacement({ version, major, range }));
+      const stamped = src.replace(stamp.pattern, stamp.replacement(values));
       if (stamped === src) {
         console.log(`✓ ${template}/${stamp.file} already stamps ${stamp.key} '${value}'`);
       } else {
@@ -402,7 +490,8 @@ function main() {
 
   console.log(
     `\n✓ sync-template-versions: ${templates.length} template(s) in lockstep with ` +
-      `create-objectstack@${version} — deps and specVersion at ${range}, engines.protocol at '^${major}'.`,
+      `create-objectstack@${version} — deps and specVersion at ${range}; engines.protocol at ` +
+      `'^${protocolMajor}', the protocol major of PROTOCOL_VERSION (${protocol.source}).`,
   );
 }
 
@@ -496,6 +585,22 @@ function main() {
 /** The scaffolder version every fixture declares — never a live one, so a stamp that ran is unmistakable. */
 const SELF_TEST_VERSION = '42.0.0';
 
+/** `SELF_TEST_VERSION`'s major: the PACKAGE major, the source of every `@objectstack/*` range and `specVersion`. */
+const SELF_TEST_PACKAGE_MAJOR = '42';
+
+/**
+ * The PROTOCOL major every fixture's `PROTOCOL_VERSION` declares — deliberately
+ * NOT the package major, and one ahead of it, the shape the pre-mode exception
+ * leaves in the real tree (packages at 17.x, protocol 18). With the two equal,
+ * a stamp read from the wrong source would be byte-identical to a correct one,
+ * and every case below would pass either way.
+ */
+const SELF_TEST_PROTOCOL_MAJOR = '43';
+
+/** The declaration a fixture's `protocol-version.ts` carries, in the shape the real file spells it. */
+const protocolDeclaration = (protocolMajor) =>
+  `/** fixture */\nexport const PROTOCOL_VERSION = '${protocolMajor}.0.0';\n`;
+
 /**
  * Fixture file bodies, keyed by `TEXT_STAMPS[].key` rather than by file name.
  *
@@ -503,11 +608,17 @@ const SELF_TEST_VERSION = '42.0.0';
  * stamp row added to `TEXT_STAMPS` with no body here fails the self-test
  * loudly, instead of silently sitting outside every fixture — which is the
  * one-key-one-file blind spot (#9264) reappearing in the test harness.
+ *
+ * Each body names its OWN source by hand — `engines.protocol` the protocol
+ * major, `specVersion` the package major — rather than calling
+ * `stamp.value()`: a fixture built from the script's own reading would agree
+ * with a script that read the wrong source, and Control A would stay green.
  */
 const SELF_TEST_BODIES = {
-  'engines.protocol': (major) =>
-    `export default defineStack({ manifest: { engines: { protocol: '^${major}' } } });\n`,
-  specVersion: (major) => `{\n  "specVersion": "^${major}.0.0",\n  "scaffold": { "variables": [] }\n}\n`,
+  'engines.protocol': ({ protocolMajor }) =>
+    `export default defineStack({ manifest: { engines: { protocol: '^${protocolMajor}' } } });\n`,
+  specVersion: ({ packageMajor }) =>
+    `{\n  "specVersion": "^${packageMajor}.0.0",\n  "scaffold": { "variables": [] }\n}\n`,
 };
 
 function writeFixtureFile(file, contents) {
@@ -516,10 +627,20 @@ function writeFixtureFile(file, contents) {
 }
 
 /**
- * A throwaway checkout shaped like this repo, IN LOCKSTEP unless `major` says
- * otherwise. Returns the path of the copied script to run.
+ * A throwaway checkout shaped like this repo, IN LOCKSTEP unless an option says
+ * otherwise — its PACKAGE major and its PROTOCOL major deliberately different.
+ * `protocolSource` replaces the fixture's `protocol-version.ts` text; `null`
+ * leaves the file out. Returns the path of the copied script to run.
  */
-function buildFixture(dir, { templates = ['blank', 'second'], major = '42' } = {}) {
+function buildFixture(
+  dir,
+  {
+    templates = ['blank', 'second'],
+    packageMajor = SELF_TEST_PACKAGE_MAJOR,
+    protocolMajor = SELF_TEST_PROTOCOL_MAJOR,
+    protocolSource = protocolDeclaration(SELF_TEST_PROTOCOL_MAJOR),
+  } = {},
+) {
   const script = join(dir, 'scripts', 'sync-template-versions.mjs');
   writeFixtureFile(script, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
   // The entry guard is imported, not re-typed (`scripts/invoked-as.mjs`), so the
@@ -533,6 +654,7 @@ function buildFixture(dir, { templates = ['blank', 'second'], major = '42' } = {
     join(dir, VERSION_SOURCE),
     JSON.stringify({ name: 'create-objectstack', version: SELF_TEST_VERSION }, null, 2) + '\n',
   );
+  if (protocolSource !== null) writeFixtureFile(join(dir, PROTOCOL_VERSION_SOURCE), protocolSource);
   // Created even when `templates` is empty: the vacuous-green guard is about an
   // EMPTY templates directory, not a missing one.
   mkdirSync(join(dir, TEMPLATE_DIR), { recursive: true });
@@ -543,15 +665,15 @@ function buildFixture(dir, { templates = ['blank', 'second'], major = '42' } = {
       JSON.stringify(
         {
           name: `template-${template}`,
-          dependencies: { '@objectstack/spec': `^${major}.0.0`, chalk: '^6.0.0' },
-          devDependencies: { '@objectstack/cli': `^${major}.0.0` },
+          dependencies: { '@objectstack/spec': `^${packageMajor}.0.0`, chalk: '^6.0.0' },
+          devDependencies: { '@objectstack/cli': `^${packageMajor}.0.0` },
         },
         null,
         2,
       ) + '\n',
     );
     for (const stamp of TEXT_STAMPS) {
-      writeFixtureFile(join(templateDir, stamp.file), SELF_TEST_BODIES[stamp.key](major));
+      writeFixtureFile(join(templateDir, stamp.file), SELF_TEST_BODIES[stamp.key]({ packageMajor, protocolMajor }));
     }
   }
   return script;
@@ -821,6 +943,83 @@ function selfTest() {
         `a run that stamped nothing must not print the success line\n${output}`,
       );
     }
+
+    // ── Control I: engines.protocol from PROTOCOL_VERSION, never the package ─
+    //
+    // The two-sources contract, executed in the direction that matters: one
+    // template's `engines.protocol` carries the PACKAGE major — exactly what
+    // stamping it from create-objectstack's version used to write — while its
+    // manifest is already clean. The run must move the protocol key to the
+    // fixture's PROTOCOL major and leave `specVersion` on the PACKAGE range.
+    // Control A covers the other half: a corpus clean on both sources is
+    // judged clean, so a script that read the package major for this key would
+    // rewrite `^43` there and fail Control A instead.
+    battery('Control I: engines.protocol is stamped from PROTOCOL_VERSION, never from the package major');
+    {
+      const dir = fixtureDir('two-sources');
+      const script = buildFixture(dir);
+      const engines = TEXT_STAMPS.find((s) => s.key === 'engines.protocol');
+      const spec = TEXT_STAMPS.find((s) => s.key === 'specVersion');
+      const configPath = join(dir, TEMPLATE_DIR, 'blank', engines.file);
+      const manifestPath = join(dir, TEMPLATE_DIR, 'blank', spec.file);
+      writeFixtureFile(configPath, SELF_TEST_BODIES['engines.protocol']({ protocolMajor: SELF_TEST_PACKAGE_MAJOR }));
+      const manifestBefore = readFileSync(manifestPath, 'utf8');
+
+      assert(
+        SELF_TEST_PACKAGE_MAJOR !== SELF_TEST_PROTOCOL_MAJOR,
+        'the fixture\'s package and protocol majors differ, so a stamp from the wrong source is observable',
+      );
+      const { status, output } = runFixture(script);
+      assert(status === 0, `a template stamped from the package major is re-stamped, exit 0 — got ${status}\n${output}`);
+      assert(
+        readFileSync(configPath, 'utf8').includes(`engines: { protocol: '^${SELF_TEST_PROTOCOL_MAJOR}' }`),
+        `blank/${engines.file} now declares the PROTOCOL major ^${SELF_TEST_PROTOCOL_MAJOR}, not the package ` +
+          `major ^${SELF_TEST_PACKAGE_MAJOR}\n${output}`,
+      );
+      assert(
+        readFileSync(manifestPath, 'utf8') === manifestBefore,
+        `blank/${spec.file} keeps specVersion on the PACKAGE range ^${SELF_TEST_PACKAGE_MAJOR}.0.0 — the protocol ` +
+          `major does not leak into it\n${output}`,
+      );
+      assert(
+        output.includes(`'^${SELF_TEST_PROTOCOL_MAJOR}', the protocol major of PROTOCOL_VERSION (${PROTOCOL_VERSION_SOURCE})`),
+        `the success line names the protocol major's source, not only its value\n${output}`,
+      );
+    }
+
+    // ── Control J: an unreadable PROTOCOL_VERSION is a hard failure ─────────
+    //
+    // Missing and undeclared are both exit 1, naming the file, BEFORE anything
+    // is written. ⛔ Never a fall-back to the package major: that reading is the
+    // defect this source replaced, and a stamp from it is indistinguishable
+    // from a correct one. The fixtures are clean on both sources, so a
+    // fall-back run would have work to do (`^43` -> `^42`) and byte-identity
+    // below is not vacuous.
+    battery('Control J: an unreadable PROTOCOL_VERSION exits 1 naming its source, and stamps nothing');
+    for (const [name, protocolSource, why] of [
+      ['protocol-missing', null, 'a missing protocol-version.ts'],
+      [
+        'protocol-undeclared',
+        `// export const PROTOCOL_VERSION = '${SELF_TEST_PROTOCOL_MAJOR}.0.0';\n`,
+        'a protocol-version.ts whose only declaration is commented out',
+      ],
+    ]) {
+      const dir = fixtureDir(name);
+      const script = buildFixture(dir, { protocolSource });
+      const surfaces = fixtureSurfaces(dir);
+      const before = surfaces.map((file) => readFileSync(file, 'utf8'));
+
+      const { status, output } = runFixture(script);
+      assert(status === 1, `${why} exits 1 — got ${status}\n${output}`);
+      assert(
+        output.includes(PROTOCOL_VERSION_SOURCE) && output.includes('cannot read PROTOCOL_VERSION'),
+        `${why}: the failure names the protocol source\n${output}`,
+      );
+      assert(
+        surfaces.every((file, i) => readFileSync(file, 'utf8') === before[i]),
+        `${why}: no template surface is written — no stamp from a fall-back value\n${output}`,
+      );
+    }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -877,6 +1076,8 @@ function selfTest() {
       'A CLEAN corpus is observed REACHED, byte-identical and UNWRITTEN; a missing stamp, a missing file, an ' +
       'unparseable package.json, a template with no @objectstack/* dependency and an empty templates directory ' +
       'are each observed exiting 1 and naming the path; and one run is observed naming EVERY unstamped surface. ' +
+      'engines.protocol is observed stamped from PROTOCOL_VERSION and specVersion from the package, over a fixture ' +
+      'whose two majors differ, and an unreadable PROTOCOL_VERSION is observed exiting 1 with nothing written. ' +
       'The STALE -> rewritten direction and the discovery walk belong to ' +
       'packages/create-objectstack/src/template-version-stamps.test.ts and are deliberately not restated here.',
   );
