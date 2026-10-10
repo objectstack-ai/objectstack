@@ -14,7 +14,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
-import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 // [#17502] The served JSON Schema publishes what an author MAY write, so a
 // property no instance can satisfy — a `retiredKey()` tombstone, rendered
 // `{ not: {} }` — is dropped from it. See the module header for the channels
@@ -12027,6 +12027,37 @@ export class ObjectStackProtocolImplementation implements
         if (names.length === 0) return;
         const gate = this.resolveQueryFields(object);
         if (!gate) return;
+        // [#22646] A field declared `internal: true` is never a search target,
+        // refused FIRST and regardless of whether it resolves into the scanned
+        // set: a non-hidden internal text column (an auth digest, a token)
+        // enters the auto-default, so `$searchFields` naming one would be
+        // ACCEPTED here and a `$search` over it would confirm a guessed prefix
+        // of a withheld credential. The engine already drops internal fields
+        // from the auto-default set it scans (a withhold), but an EXPLICIT
+        // narrowing to one has to be a loud 400 rather than a silent widening
+        // back to the default set — the #4254 posture. Judged by the ONE flag
+        // reader (`@objectstack/core`'s cross-package twin of
+        // `collectInternalReadFields`), the same reader the evaluate refusal uses.
+        const internalSet = new Set(collectInternalWriteResponseFields(gate.schema));
+        const internalNamed = names.filter((n) => internalSet.has(n));
+        if (internalNamed.length > 0) {
+            const first = internalNamed[0] as string;
+            const err: any = new Error(
+                `Field '${first}' on object '${object}' is declared \`internal: true\` and cannot be searched`
+                + (internalNamed.length > 1 ? ` (also: ${internalNamed.slice(1).join(', ')})` : '')
+                + `. Its value is never returned on a generic data exit, so '${param}' may not name it — a `
+                + 'search over it would confirm a guessed value by whether the row comes back. Search '
+                + 'another column instead.',
+            );
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.httpStatus = 400;
+            err.field = first;
+            err.fields = internalNamed;
+            err.object = object;
+            err.param = param;
+            throw err;
+        }
         const { allowed, source } = resolveSearchFieldResolution({
             fields: gate.fields,
             searchableFields: gate.schema?.searchableFields,
@@ -12379,6 +12410,146 @@ export class ObjectStackProtocolImplementation implements
         err.fields = unknown;
         err.object = object;
         err.param = 'aggregations';
+        throw err;
+    }
+
+    /**
+     * [#22646] The data door's EVALUATE refusal for a field declared
+     * `internal: true` — "the value is never returned on a generic data exit"
+     * (#21197), extended from the row position (where it is a withhold — the
+     * engine OMITS the column from every row) to every position that would
+     * reveal the stored value by EVALUATING it. A filter or sort on such a
+     * column is a confirmation oracle — a predicate matches the row only when
+     * the guess is right, an order leaks the comparative value — so it is
+     * REFUSED rather than withheld, the posture this door already takes for the
+     * stored-metadata body/hash family ({@link storedMetadataBodyPredicateRefusal},
+     * {@link storedMetadataHashEvaluateRefusal}) and the analytics door for an
+     * internal member. `INVALID_FIELD` / 400, the family's envelope, located at
+     * the object, the field and the offending position.
+     *
+     * It binds EVERY caller of this generic door, administrators included
+     * (#21197): there is no caller carve-out, the same stance the stored-body
+     * family takes here. The engine's privileged internal consumers (the
+     * API-key verifier's `where: { key }`, the share-link / SCIM / approval-token
+     * lookups) call the engine directly and never reach this door, so the
+     * flag's one legitimate use — a `where` match the engine resolves without
+     * ever returning the value — is untouched, exactly as #7823 kept the engine's
+     * write results whole while the generic-data-path ingress stripped them.
+     *
+     * Positions, with the ONE flag reader ({@link collectInternalWriteResponseFields},
+     * `@objectstack/core`'s cross-package twin of objectql's
+     * `collectInternalReadFields` — identical rule, imported because this package
+     * sits below objectql, as the write-response strip and the analytics door do):
+     *
+     *  - `where` / `filter` and each `aggregations[i].filter` — every column a
+     *    filter READS, by the stricter collector that also walks a cross-field
+     *    `{ $field }` comparand ({@link collectFilterReads}).
+     *  - `orderBy` — the fields a sort names.
+     *  - `groupBy` and `aggregations[].field` — defence in depth; the engine's
+     *    `rejectCredentialAggregation` refuses these for every caller with the
+     *    same code, and this door answers first so the envelope is the door's.
+     *  - a one-level `expand` entry's own `where` / `orderBy`, judged against
+     *    the TARGET object's internal fields: the nested sub-read's row strip
+     *    already withholds the column, but a nested filter is a presence oracle
+     *    on the related record (the expanded object appears only when the guess
+     *    matches), so the evaluate positions are refused there too. Target
+     *    OBJECT exposure is a different axis, filed separately (#22661).
+     */
+    private assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
+        const gate = this.resolveQueryFields(object);
+        if (gate) {
+            const internal = new Set(collectInternalWriteResponseFields(gate.schema));
+            if (internal.size > 0) {
+                // where + the `filter` alias a direct bag may still carry.
+                for (const [slot, where] of [['filter', options.where], ['filter', options.filter]] as const) {
+                    this.refuseInternalReads(object, where, internal, slot);
+                }
+                this.refuseInternalNames(object, this.orderByFieldNames(options.orderBy), internal, 'sort');
+                this.refuseInternalNames(object, this.groupByFieldNames(options.groupBy), internal, 'groupBy');
+                if (Array.isArray(options.aggregations)) {
+                    options.aggregations.forEach((agg: any, i: number) => {
+                        const field = agg?.field;
+                        if (typeof field === 'string' && field !== '*') {
+                            this.refuseInternalNames(object, [field], internal, `aggregations[${i}].field`);
+                        }
+                        this.refuseInternalReads(object, agg?.filter, internal, `aggregations[${i}].filter`);
+                    });
+                }
+            }
+        }
+        // One-level expand: each entry's own evaluate positions, against the
+        // TARGET object's internal fields.
+        const expand = options.expand;
+        if (gate && expand && typeof expand === 'object' && !Array.isArray(expand)) {
+            for (const [rel, entry] of Object.entries(expand as Record<string, any>)) {
+                if (!entry || typeof entry !== 'object') continue;
+                const hasEvaluatePosition = entry.where !== undefined || entry.orderBy !== undefined;
+                if (!hasEvaluatePosition) continue;
+                const sourceField = gate.fields?.[rel];
+                const target = sourceField != null && REFERENCE_VALUE_TYPES.has(sourceField.type)
+                    ? referenceTargetOf(sourceField)
+                    : undefined;
+                if (!target) continue;
+                const targetGate = this.resolveQueryFields(target);
+                if (!targetGate) continue;
+                const targetInternal = new Set(collectInternalWriteResponseFields(targetGate.schema));
+                if (targetInternal.size === 0) continue;
+                this.refuseInternalReads(target, entry.where, targetInternal, `expand['${rel}'].filter`);
+                this.refuseInternalNames(target, this.orderByFieldNames(entry.orderBy), targetInternal, `expand['${rel}'].sort`);
+            }
+        }
+    }
+
+    /** Field heads an `orderBy` names (string or `{ field }`), dotted head only. */
+    private orderByFieldNames(orderBy: unknown): string[] {
+        if (!Array.isArray(orderBy)) return [];
+        return orderBy
+            .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
+            .filter((f): f is string => typeof f === 'string' && f.length > 0)
+            .map((f) => f.split('.')[0] as string);
+    }
+
+    /** Field heads a `groupBy` names (string or `{ field }`), dotted head only. */
+    private groupByFieldNames(groupBy: unknown): string[] {
+        if (!Array.isArray(groupBy)) return [];
+        return groupBy
+            .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
+            .filter((f): f is string => typeof f === 'string' && f.length > 0)
+            .map((f) => f.split('.')[0] as string);
+    }
+
+    /** Refuse when any READ column of `where` (keys and `{ $field }` comparands) is internal. */
+    private refuseInternalReads(object: string, where: unknown, internal: ReadonlySet<string>, param: string): void {
+        if (where == null) return;
+        const reads = new Set<string>();
+        collectFilterReads(isFilterAST(where) ? parseFilterAST(where) : where, reads);
+        this.refuseInternalNames(object, [...reads], internal, param);
+    }
+
+    /** Refuse when any of `names` is an internal field of `object`. */
+    private refuseInternalNames(object: string, names: readonly string[], internal: ReadonlySet<string>, param: string): void {
+        const hit = names.filter((n) => internal.has(n));
+        if (hit.length === 0) return;
+        const first = hit[0] as string;
+        const verb = param.endsWith('sort') ? 'sort' : param === 'groupBy' ? 'group' : param.includes('filter') ? 'filter' : 'query';
+        const err: any = new Error(
+            `Cannot ${verb} '${object}' by '${first}' (${param}): the query was not run. The ${first} field `
+            + 'is declared `internal: true`, so its value is never returned on a generic data exit — the engine '
+            + 'omits it from every row. '
+            + (verb === 'sort'
+                ? 'A sort on it orders by that withheld value'
+                : verb === 'group'
+                    ? 'A group key would be the withheld value, served as the key'
+                    : 'A filter on it confirms a guessed value by whether the row comes back')
+            + ', so it is refused rather than evaluated. Use another field.',
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.httpStatus = 400;
+        err.field = first;
+        err.fields = hit;
+        err.object = object;
+        err.param = param;
         throw err;
     }
 
@@ -12804,6 +12975,20 @@ export class ObjectStackProtocolImplementation implements
             sortFields,
         });
         if (hashEvaluateRefusal) throw hashEvaluateRefusal;
+
+        // [#22646] A field declared `internal: true` is withheld from every
+        // generic exit (#21197) — the engine omits it from every row. The
+        // EVALUATE positions do not follow that by omission: a filter, sort,
+        // group-by, aggregate operand, per-aggregation filter or a one-level
+        // expand's own filter/sort on such a column reveals the stored value by
+        // evaluating it (a filter is a confirmation oracle, a sort leaks order).
+        // So they are refused here, at the generic data door, after the
+        // existence gates and before the engine — the same shape, envelope and
+        // caller-independence as the stored-metadata body/hash family above.
+        // Internal fields in a `$search` set are handled on their own axes: the
+        // auto-default never scans one (engine), an explicit `$searchFields`
+        // naming one is refused (the gate above, #4254 posture).
+        this.assertNoInternalFieldEvaluated(request.object, options);
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
