@@ -7,7 +7,6 @@ import {
     CreateRecordConfigSchema,
     UpdateRecordConfigSchema,
     DeleteRecordConfigSchema,
-    isExpressionEnvelopeShaped,
 } from '@objectstack/spec/automation';
 import type {
     GetRecordConfigParsed,
@@ -30,7 +29,8 @@ import {
     type StoredHashDigest,
 } from '@objectstack/metadata-protocol';
 import type { AutomationEngine } from '../engine.js';
-import { interpolate, interpolateFilter, type VariableMap } from './template.js';
+import { interpolateFilter, type VariableMap } from './template.js';
+import { resolveValueSlotMap } from './value-slot-map.js';
 import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { resolveRunDataContext, stampSystemInsertOwner } from '../runtime-identity.js';
@@ -168,32 +168,20 @@ function writtenRowCount(result: unknown): number {
  * write carries (#11182 ruling D — the executor half of the `fields.*` value
  * slot #19938 declares in the expression ledger).
  *
- * Per field, by SHAPE — the rule the ledger resolver and the spec contract
- * (`FlowValueSlotSchema`) draw with the same predicate, imported rather than
- * re-spelled, so "which values does the validator judge" and "which values
- * does the executor evaluate" cannot drift apart:
+ * The rule — an envelope-shaped top-level value is evaluated by
+ * `AutomationEngine.evaluateValueEnvelope`, every other value is a literal —
+ * is {@link resolveValueSlotMap}'s, shared since #19939 with the other maps
+ * the ledger declares as value slots (a `subflow` / `map` `input`, a
+ * `script`'s `inputs`), so one resolver decides what every value-slot map
+ * hands on. Since #19939 (the C half of #11182 ruling D) a `{token}` of the
+ * retired template dialect never reaches it: the executor's `parseNodeConfig`
+ * refuses it through `FlowValueSlotSchema` (the same judge `registerFlow` and
+ * `objectstack validate` call) — the retirement keeps no spelling, the date
+ * macros included (`isoDate(today())` is their CEL string form). The run's
+ * `context` reaches the envelope too: it is what `current_user` is in the CEL
+ * scope.
  *
- *  - an envelope-shaped TOP-LEVEL value ({@link isExpressionEnvelopeShaped} —
- *    a plain object naming a string `dialect`) is a CEL value envelope, and
- *    is EVALUATED by `AutomationEngine.evaluateValueEnvelope`, the call the
- *    `assignment` executor already makes — one evaluator, one scope
- *    (`celScope`), one notion of malformed (`valueEnvelopeRefusals`, the call
- *    `registerFlow` makes). A malformed envelope throws rather than degrading
- *    to a literal; a value that faults on the live variables throws with its
- *    source (ADR-0032 §1c/§1d). Neither is written.
- *  - every other value is a literal — a string, an array, a plain object, an
- *    envelope-shaped object NESTED inside either — and is written as it is.
- *    Since #19939 (the C half of #11182 ruling D) a `{token}` of the retired
- *    template dialect never reaches this point: the executor's
- *    `parseNodeConfig` refuses it through `FlowValueSlotSchema` (the same
- *    judge `registerFlow` and `objectstack validate` call), so a literal here
- *    carries no token: the retirement keeps no spelling — the date macros
- *    are refused too, naming their CEL string form (`isoDate(today())`) —
- *    and `interpolate()` is the identity on every literal that reaches it.
- *    The run's `context` reaches the envelope too: it is what
- *    `current_user` is in the CEL scope.
- *
- * Before this, the executor handed the whole map to `interpolate()`, which
+ * Before #19938, the executor handed the whole map to `interpolate()`, which
  * recursed into an envelope as plain data: a text or JSON column received the
  * literal `{"dialect":"cel","source":"…"}` with the run reporting success, and
  * a number column was refused by the data engine.
@@ -204,13 +192,7 @@ function resolveFieldValues(
     variables: VariableMap,
     context: AutomationContext,
 ): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(fields ?? {})) {
-        out[key] = isExpressionEnvelopeShaped(value)
-            ? engine.evaluateValueEnvelope(value, variables, `fields.${key}`, context)
-            : interpolate(value, variables, context);
-    }
-    return out;
+    return resolveValueSlotMap(engine, fields, variables, 'fields', context);
 }
 
 /**

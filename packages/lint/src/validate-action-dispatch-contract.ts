@@ -40,9 +40,9 @@
  * ## What this rule refuses — and what it deliberately does not
  *
  * It refuses a **mismatch**: an action that DECLARES `execution` wired by a
- * list view under the other contract. It names the action, the view and BOTH
- * contracts, because the fix is a choice between them and a message naming one
- * is a message that has already chosen.
+ * list view under the other contract. The finding names the action, the view
+ * (its `where`) and BOTH contracts, because the fix is a choice between them and
+ * a message naming one is a message that has already chosen.
  *
  * It says nothing about an action that declares NO `execution`. That is not a
  * gap left open, it is the ruling's 「创业阶段不渐进」 in the one place it
@@ -98,32 +98,22 @@ function contractOf(v: unknown): ActionDispatchContract | undefined {
 }
 
 /**
- * One sentence per contract, written so the pair reads as a choice: each says
- * how many dispatches happen and which of the two builtin keys arrives. Both
- * sentences appear in every finding — the declared one and the wired one —
- * because naming only the one that is "wrong" presumes which end the author
- * meant to change.
+ * What each wiring delivers, in the verdict's words: how many calls, and which
+ * of the two builtin keys arrives. The verdict names BOTH contracts — the
+ * declared one and the wired one — because naming only the one that is "wrong"
+ * presumes which end the author meant to change. [#22161] The long account of
+ * each (the renderer's per-row promotion of a bare-string entry, the aggregate
+ * def's single dispatch) is the id's `os explain` entry.
  */
-const CONTRACT_PROSE: Readonly<Record<ActionDispatchContract, string>> = {
-  perRecord:
-    "`execution: 'perRecord'` (the view's `bulkActions: ['<name>']` bare-string form) — the "
-    + "renderer promotes the action to a def and dispatches it ONCE PER selected row, each call "
-    + "carrying that row's `recordId` and NO `_selectedIds`",
-  aggregate:
-    "`execution: 'aggregate'` (a `bulkActionDefs` entry naming the action) — ONE dispatch for the "
-    + 'whole selection, carrying every selected id in `params._selectedIds` and NO `recordId`',
+const DELIVERS: Readonly<Record<ActionDispatchContract, string>> = {
+  perRecord: 'one call per row: `recordId`, no `_selectedIds`',
+  aggregate: 'one call: `_selectedIds`, no `recordId`',
 };
 
-/** What the body actually sees when it is written for one contract and wired the other. */
+/** What a body written for the DECLARED contract does with the other wiring's input. */
 const MISFIRE: Readonly<Record<ActionDispatchContract, string>> = {
-  perRecord:
-    'a body written per-record finds no `recordId` on the single aggregate call and typically '
-    + 'throws its own "nothing selected" — which reads in the console like a selection bug rather '
-    + 'than a wiring one',
-  aggregate:
-    'a body written for the aggregate call reads `_selectedIds` as `undefined` on every per-row '
-    + 'dispatch, falls through to its single-record branch, and reports success for one row out of '
-    + 'however many were selected',
+  perRecord: 'its body finds no `recordId` and throws',
+  aggregate: 'its body takes its single-record branch',
 };
 
 /**
@@ -205,7 +195,6 @@ export function validateActionDispatchContract(stack: AnyRec): ActionDispatchCon
     wired: ActionDispatchContract,
     where: string,
     path: string,
-    viewLabel: string,
   ) => {
     const declared = declaredBy.get(name);
     if (declared === undefined || declared === wired) return;
@@ -219,12 +208,12 @@ export function validateActionDispatchContract(stack: AnyRec): ActionDispatchCon
       rule: ACTION_DISPATCH_CONTRACT_MISMATCH,
       where,
       path,
+      // [#22161] One verdict sentence; the view is the finding's `where`, and
+      // why no runtime door refuses the mismatch (ADR-0104's builtin params) is
+      // the id's `os explain` entry.
       message:
-        `Action "${name}" declares ${CONTRACT_PROSE[declared]}, but ${viewLabel} wires it as `
-        + `${CONTRACT_PROSE[wired]}. The two contracts deliver opposite input to the same body: `
-        + `${MISFIRE[declared]}. Nothing refuses this at runtime — \`recordId\` and `
-        + '`_selectedIds` are both builtin action params (ADR-0104), so the strict params gate '
-        + 'admits either bag without a word.',
+        `action "${name}" declares execution: '${declared}', wired as execution: '${wired}' `
+        + `(${DELIVERS[wired]}), so ${MISFIRE[declared]}`,
       hint:
         `Pick the contract the body is actually written for and make both ends say it: either `
         + `change the action's declaration to \`execution: '${wired}'\` (if the body was written `
@@ -254,7 +243,7 @@ export function validateActionDispatchContract(stack: AnyRec): ActionDispatchCon
     for (let ai = 0; ai < bare.length; ai++) {
       const name = strName(bare[ai]);
       if (!name) continue;
-      check(name, 'perRecord', `${viewLabel} · bulkActions`, `${path}.bulkActions[${ai}]`, viewLabel);
+      check(name, 'perRecord', `${viewLabel} · bulkActions`, `${path}.bulkActions[${ai}]`);
     }
 
     // Only an `execution: 'aggregate'` def NAMES an action (#4457): an
@@ -275,7 +264,6 @@ export function validateActionDispatchContract(stack: AnyRec): ActionDispatchCon
         'aggregate',
         `${viewLabel} · bulkActionDefs[${di}]`,
         `${path}.bulkActionDefs[${di}]`,
-        viewLabel,
       );
     }
   };
