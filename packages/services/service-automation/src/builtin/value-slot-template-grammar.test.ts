@@ -7,13 +7,18 @@
  *
  * The spec cannot import the interpolator, so it carries a copy of
  * `resolveToken`'s dispatch: date macro, then `$User.`, then a variable path,
- * then an expression. If the two readings drifted, the judge would refuse a
- * spelling the retirement keeps (a run-time capability lost with no remedy),
- * or keep one it should refuse (the dialect surviving in a value slot). So the
- * interpolator itself is driven over the same tokens the judge classifies:
+ * then an expression. If the two readings drifted, the judge would print the
+ * wrong remedy for a spelling (a date macro read as a path, a path read as an
+ * expression), or pass one it should refuse (the dialect surviving in a value
+ * slot). So the interpolator itself is driven over the same tokens the judge
+ * classifies:
  *
- *  - every KEPT spelling resolves through `interpolateString` to a value — the
- *    date macros to ISO text — and the judge refuses none of them;
+ *  - every date macro (refused since #19939 pass 3) resolves through
+ *    `interpolateString` to ISO text, and the judge refuses each with its CEL
+ *    string form (`isoDate(…)` / `isoDatetime(…)`) — read as a date macro,
+ *    never as a path or an expression (that each form writes the same bytes
+ *    over the same instants is the parity pin in
+ *    `crud-fields-value-envelope.test.ts`);
  *  - the run user (`$User`, refused since #19939 pass 2) resolves through the
  *    interpolator to the run's `userId` for `$User.Id` and to nothing for every
  *    other path in a shipped run context, and the remedies the judge prints
@@ -47,18 +52,19 @@ const VARIABLES = new Map<string, unknown>([
 ]);
 const CONTEXT = { userId: 'usr_1', user: { email: 'ada@example.com' } } as never;
 
-describe('a spelling the retirement KEEPS resolves through the interpolator, and is not refused', () => {
+describe('a date macro resolves through the interpolator to ISO text, and is REFUSED as a date macro', () => {
   it.each([
-    ['{NOW()}', /^\d{4}-\d{2}-\d{2}T/],
-    ['{TODAY()}', /^\d{4}-\d{2}-\d{2}$/],
-    ['{TODAY() + 7}', /^\d{4}-\d{2}-\d{2}$/],
-    ['{TODAY() - days}', /^\d{4}-\d{2}-\d{2}$/],
-    ['{NOW() + 2}', /^\d{4}-\d{2}-\d{2}T/],
-  ])('%s — a date macro', (token, shape) => {
+    ['{NOW()}', /^\d{4}-\d{2}-\d{2}T/, 'isoDatetime(now())'],
+    ['{TODAY()}', /^\d{4}-\d{2}-\d{2}$/, 'isoDate(today())'],
+    ['{TODAY() + 7}', /^\d{4}-\d{2}-\d{2}$/, 'isoDate(daysFromNow(7))'],
+    ['{TODAY() - days}', /^\d{4}-\d{2}-\d{2}$/, 'isoDate(addDays(today(), -days))'],
+    ['{NOW() + 2}', /^\d{4}-\d{2}-\d{2}T/, 'isoDatetime(addDays(now(), 2))'],
+  ])('%s — a date macro', (token, shape, source) => {
     expect(String(interpolateString(token, VARIABLES, CONTEXT))).toMatch(shape);
-    expect(valueSlotTemplateRefusals(token)).toEqual([]);
+    const refusals = valueSlotTemplateRefusals(token);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]!.message).toContain(`Write \`${token}\` as { dialect: 'cel', source: '${source}' }`);
   });
-
 });
 
 describe('the run user — `{$User.*}` — is REFUSED, and its remedy reads what the interpolator read', () => {

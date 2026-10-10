@@ -26,14 +26,19 @@
  *     slot-neutral sentence; the evaluator refuses the same set.
  *  4. **Fault loudly** — an envelope that parses but cannot evaluate on the
  *     live values fails the run with its source, and writes nothing.
+ *  5. **The date macros' parity** (#19939 pass 3) — the live cross-dialect
+ *     pin: for each date macro, the 17.x interpolator and the CEL envelope the
+ *     refusal names run over the SAME instants, and the store receives the
+ *     same bytes from both; the edges where they part are pinned as the
+ *     refusal names them.
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { VALUE_ENVELOPE_REFUSAL, VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
+import { VALUE_ENVELOPE_REFUSAL, VALUE_SLOT_TEMPLATE_REFUSAL, valueSlotTemplateRefusals } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
-import { interpolate } from './template.js';
+import { interpolate, interpolateString } from './template.js';
 
 function makeLogger(): any {
   const l: any = { info() {}, warn() {}, error() {}, debug() {}, trace() {}, fatal() {} };
@@ -177,9 +182,9 @@ describe.each(NODE_TYPES)('%s `fields.*` — a CEL value envelope is EVALUATED (
 });
 
 describe.each(NODE_TYPES)('%s `fields.*` — every literal writes exactly what it wrote before', (nodeType) => {
-  it('literals, arrays, nested envelope-shaped JSON and the kept `{…}` spelling: byte-identical to the whole-map `interpolate()`', async () => {
+  it('literals, arrays and nested envelope-shaped JSON: byte-identical to the whole-map `interpolate()`', async () => {
     const fields = {
-      subject: '{TODAY() + 7}',                           // a date macro — kept until CEL can write it
+      subject: '2026-10-17',                              // an ISO date, as it is (a date macro is refused, #19939)
       total: 42,
       payload: {
         note: 'for the record',
@@ -286,6 +291,38 @@ describe.each(NODE_TYPES)('%s `fields.*` — the retired `{…}` template dialec
     // The guarded form sends `null` — on `update_record` that clears the stored value.
     expect(writes0(userless.writes)).toHaveProperty('subject', null);
   });
+
+  // #19939 pass 3 (carry from pass 2): a string NESTED in an object literal sits
+  // where an envelope is data, so the refusal names the whole value built as a
+  // CEL map literal — and that spelling, put back in the slot, writes what the
+  // template wrote. The envelope at the nested position itself is stored as
+  // the object it spells (the reason the remedy names none there).
+  it('a string nested in an object literal: the whole-value CEL literal the refusal names writes what the template wrote', async () => {
+    const fields = { payload: { note: 'for {name}' } };
+    const [refusal] = valueSlotTemplateRefusals(fields.payload);
+    const literal = /for this string alone, \{ dialect: 'cel', source: (?:'([^']*)'|("(?:[^"\\]|\\.)*")) \}/.exec(refusal!.message);
+    expect(literal, refusal!.message).not.toBeNull();
+    const source = literal![1] ?? (JSON.parse(literal![2]!) as string);
+    expect(source).toBe("{'note': 'for ' + name}");
+    expect(refusal!.message).not.toContain(`{ dialect: 'cel', source: "'for ' + name" }`);
+
+    const before = interpolate(fields, new Map(Object.entries(PARAMS)), {} as any);
+    const remedied = await makeStack();
+    remedied.automation.registerFlow('price_quote', writeFlow(nodeType, { payload: { dialect: 'cel', source } }));
+    const res = await run(remedied.automation);
+    expect(res.success, res.error).toBe(true);
+    expect(writes0(remedied.writes).payload).toEqual(before.payload);
+    expect(before.payload).toEqual({ note: 'for ada' });
+
+    // Why the remedy names no envelope at the nested position: one there is data.
+    const nestedEnvelope = await makeStack();
+    nestedEnvelope.automation.registerFlow('price_quote', writeFlow(nodeType, {
+      payload: { note: { dialect: 'cel', source: "'for ' + name" } },
+    }));
+    const res2 = await run(nestedEnvelope.automation);
+    expect(res2.success, res2.error).toBe(true);
+    expect(writes0(nestedEnvelope.writes).payload).toEqual({ note: { dialect: 'cel', source: "'for ' + name" } });
+  });
 });
 
 /** The first row that reached the store. */
@@ -321,7 +358,7 @@ describe.each(NODE_TYPES)('%s `fields.*` — a malformed envelope is refused at 
     registerCrudNodes(automation, { logger: makeLogger(), getService: () => undefined } as any);
     expect(() => automation.registerFlow('price_quote', writeFlow(nodeType, {
       total: { dialect: 'cel', source: 'price * 2' },
-      subject: 'name', due: '{TODAY()}', n: 3, ok: true, nothing: null, payload: { dialect: 1 }, list: [{ dialect: 'cel' }],
+      subject: 'name', due: '2026-10-17', n: 3, ok: true, nothing: null, payload: { dialect: 1 }, list: [{ dialect: 'cel' }],
     }))).not.toThrow();
   });
 });
@@ -337,5 +374,151 @@ describe.each(NODE_TYPES)('%s `fields.*` — a value that cannot be computed fai
     expect(res.error).toContain('fields.subject');
     expect(res.error).toContain('missing_var.subject');
     expect(writes, 'ADR-0032 §1c: no silent default is written in its place').toEqual([]);
+  });
+});
+
+/**
+ * [#19939 pass 3] **The live cross-dialect parity pin.** The date macros are
+ * refused in a value slot with their CEL string form (`isoDate` / `isoDatetime`
+ * in `@objectstack/formula`'s stdlib, UTC). `stdlib-timestamp-text.test.ts`
+ * there measures the CEL half against hand-written bytes; THIS pin is the one
+ * that runs both dialects live, in one test, over the same instants: the 17.x
+ * interpolator (`interpolateString`, the template's own resolver) and the
+ * envelope the spec's refusal names, evaluated by the engine and written
+ * through a real ObjectQL engine to the store. `Date` is frozen per instant,
+ * so both read the same `now`.
+ *
+ * The instants are the cells where a calendar mistake shows: a spring-forward
+ * and a fall-back DST transition day, the last millisecond of a month, a year
+ * end and a leap day.
+ */
+describe('the date macros — the envelope each refusal names writes the bytes the template wrote, over the same instants', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  const INSTANTS = [
+    '2026-03-08T09:30:00.000Z',
+    '2026-10-25T00:30:00.000Z',
+    '2026-01-31T23:59:59.999Z',
+    '2026-12-31T12:00:00.000Z',
+    '2028-02-29T00:00:00.000Z',
+  ];
+  const VARS = { name: 'ada', days: 5 };
+  const CONTEXT = { userId: 'u1', params: VARS } as any;
+
+  /** A `create_record` writing `subject`, with `name` and `days` as inputs. */
+  function macroFlow(subject: unknown) {
+    return {
+      name: 'macro_parity', label: 'Macro parity', type: 'autolaunched',
+      variables: [
+        { name: 'name', type: 'text', isInput: true },
+        { name: 'days', type: 'number', isInput: true },
+      ],
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'w', type: 'create_record', label: 'Write', config: { objectName: 'quote', fields: { subject } } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'w' }, { id: 'e2', source: 'w', target: 'end' }],
+    } as any;
+  }
+
+  /** The envelope source the refusal of `authored` names — read off the refusal itself, never re-spelled. */
+  function remedyOf(authored: string): string {
+    const refusals = valueSlotTemplateRefusals(authored);
+    expect(refusals, authored).toHaveLength(1);
+    const found = /\{ dialect: 'cel', source: (?:'([^']*)'|("(?:[^"\\]|\\.)*")) \}/.exec(refusals[0]!.message.slice(VALUE_SLOT_TEMPLATE_REFUSAL.length));
+    expect(found, refusals[0]!.message).not.toBeNull();
+    return found![1] ?? (JSON.parse(found![2]!) as string);
+  }
+
+  /** What the store receives for `subject` at `instant` — the remedy through the engine. */
+  async function written(subject: unknown, instant: string): Promise<unknown> {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(instant));
+    const { automation, writes } = await makeStack();
+    automation.registerFlow('macro_parity', macroFlow(subject));
+    const res = await automation.execute('macro_parity', CONTEXT);
+    expect(res.success, res.error).toBe(true);
+    return writes0(writes).subject;
+  }
+
+  /** What the 17.x interpolator wrote for `authored` at `instant`. */
+  function templated(authored: string, instant: string): unknown {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(instant));
+    return interpolateString(authored, new Map(Object.entries(VARS)), CONTEXT);
+  }
+
+  it.each([
+    ['{TODAY()}', 'isoDate(today())'],
+    ['{TODAY() + 7}', 'isoDate(daysFromNow(7))'],
+    ['{TODAY() - 3}', 'isoDate(daysAgo(3))'],
+    ['{NOW()}', 'isoDatetime(now())'],
+    ['{NOW() + 2}', 'isoDatetime(addDays(now(), 2))'],
+    ['{NOW() - 1}', 'isoDatetime(addDays(now(), -1))'],
+    ['{TODAY() + days}', 'isoDate(addDays(today(), days))'],
+    ['{TODAY() - days}', 'isoDate(addDays(today(), -days))'],
+    ['{NOW() + days}', 'isoDatetime(addDays(now(), days))'],
+    ['{TODAY() + 1.5}', 'isoDate(addDays(today(), 1.5))'],
+    ['{TODAY() + 3d}', 'isoDate(today())'],
+    ['Due {TODAY() + 7} for {name}', "'Due ' + isoDate(daysFromNow(7)) + ' for ' + name"],
+    ['Due {TODAY()} by {$User.Id}', "'Due ' + isoDate(today()) + ' by ' + current_user.id"],
+  ])('%s → %s', async (authored, source) => {
+    expect(remedyOf(authored)).toBe(source);
+    for (const instant of INSTANTS) {
+      const template = templated(authored, instant);
+      expect(typeof template, `${authored} @ ${instant}`).toBe('string');
+      expect(await written({ dialect: 'cel', source }, instant), `${authored} @ ${instant}`).toBe(template);
+    }
+  });
+
+  // The edges the refusal names, each pinned as it names it.
+  it('a negative fraction: the template truncated the day sum, `addDays` truncates the offset — one day apart past the 1st', async () => {
+    const authored = '{TODAY() - 1.5}';
+    const source = remedyOf(authored);
+    expect(source).toBe('isoDate(addDays(today(), -1.5))');
+    // Past the day of the month the offset exceeds: the template moved 2 days back, `addDays` 1.
+    expect(templated(authored, '2026-03-08T09:30:00.000Z')).toBe('2026-03-06');
+    expect(await written({ dialect: 'cel', source }, '2026-03-08T09:30:00.000Z')).toBe('2026-03-07');
+    // On the 1st the template's sum truncates to 0, the last day of the month before: the two agree.
+    expect(templated(authored, '2026-03-01T09:30:00.000Z')).toBe('2026-02-28');
+    expect(await written({ dialect: 'cel', source }, '2026-03-01T09:30:00.000Z')).toBe('2026-02-28');
+  });
+
+  it('`daysAgo(1.5)` is refused at build — `daysFromNow` / `daysAgo` take a whole number', () => {
+    const automation = new AutomationEngine(makeLogger());
+    registerCrudNodes(automation, { logger: makeLogger(), getService: () => undefined } as any);
+    expect(() => automation.registerFlow('macro_parity', macroFlow({ dialect: 'cel', source: 'isoDate(daysAgo(1.5))' })))
+      .toThrow(VALUE_ENVELOPE_REFUSAL);
+  });
+
+  it('an offset variable the template read as 0 — not a number, or absent — fails the run loudly under CEL, and writes nothing', async () => {
+    const source = remedyOf('{TODAY() + days}');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-03-08T09:30:00.000Z'));
+    for (const params of [{ name: 'ada', days: 'soon' }, { name: 'ada' }]) {
+      // The template moved 0 days, silently.
+      expect(interpolateString('{TODAY() + days}', new Map(Object.entries(params)), CONTEXT)).toBe('2026-03-08');
+      const { automation, writes } = await makeStack();
+      automation.registerFlow('macro_parity', macroFlow({ dialect: 'cel', source }));
+      const res = await automation.execute('macro_parity', { userId: 'u1', params } as any);
+      expect(res.success, JSON.stringify(params)).toBe(false);
+      expect(res.error).toContain(source);
+      expect(writes).toEqual([]);
+    }
+  });
+
+  it('the date macros are refused at registration, located, naming the same form', () => {
+    const automation = new AutomationEngine(makeLogger());
+    registerCrudNodes(automation, { logger: makeLogger(), getService: () => undefined } as any);
+    let thrown: Error | undefined;
+    try {
+      automation.registerFlow('macro_parity', macroFlow('{TODAY() + 7}'));
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown?.message).toContain("node 'w' (create_record) create_record field value at config.fields.subject");
+    expect(thrown?.message).toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+    expect(thrown?.message).toContain("{ dialect: 'cel', source: 'isoDate(daysFromNow(7))' }");
   });
 });
