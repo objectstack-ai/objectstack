@@ -38,11 +38,13 @@ import {
   isExpressionEnvelopeShaped,
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   VALUE_SLOT_TEMPLATE_REFUSAL,
+  flowNodeValueTemplateRefusals,
 } from '@objectstack/spec/automation';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { ExpressionEngine } from '@objectstack/formula';
 import { AutomationEngine } from '../engine.js';
 import { registerLogicNodes } from './logic-nodes.js';
+import { interpolate } from './template.js';
 
 /** The thrown error, so a pin can assert its message substance rather than `toThrow()` alone. */
 function catchError(fn: () => unknown): Error {
@@ -423,5 +425,122 @@ describe('assignment value envelope — the legacy shapes are untouched (#15137 
     expect(() => engine.registerFlow('assign_flow', assignmentFlow({
       assignments: [{ variable: 'digest', value: { dialect: 'template', source: 'Hello {name}' } }],
     }))).toThrow(VALUE_SLOT_TEMPLATE_REFUSAL);
+  });
+});
+
+/**
+ * [#19939 pass 3, carried from pass 2] **Where an envelope is literal data,
+ * the refusal names one that evaluates.** The value-slot judge used to print
+ * `{ dialect: 'cel', source: … }` at whatever position it refused a `{…}`
+ * token — and at an element of the legacy `assignments` ARRAY, at a key of the
+ * bare legacy config, and at a string nested inside an object literal, the
+ * executor reads that envelope as DATA: the prescribed metadata registered and
+ * stored the envelope object (the controls below). The remedy there now moves
+ * the assignment into the canonical map, or builds the whole value as one CEL
+ * literal — and each spelling it names, read off the refusal itself and put
+ * back, writes what the template wrote.
+ *
+ * The judge is fixed rather than the executor: an envelope-shaped object in
+ * those positions is data today (`the legacy shapes are untouched` above, and
+ * the CRUD test's nested-envelope pin), and evaluating it would change what an
+ * existing flow writes.
+ */
+describe('[#19939] where an envelope is literal data, the refusal names a spelling that evaluates', () => {
+  let engine: AutomationEngine;
+  beforeEach(() => {
+    engine = new AutomationEngine(createTestLogger());
+    registerLogicNodes(engine, createCtx());
+  });
+
+  /** `assignmentFlow` with `name` as an input. */
+  function literalFlow(config: Record<string, unknown>, outputs: string[]) {
+    const flow = assignmentFlow(config, outputs);
+    return { ...flow, variables: [{ name: 'name', type: 'text', isInput: true }, ...flow.variables] };
+  }
+  const RUN = { params: { name: 'Ada' } } as any;
+  const VARIABLES = new Map<string, unknown>([['name', 'Ada']]);
+
+  /** The envelope source a refusal message names after `lead` — read off the message, never re-spelled. */
+  function envelopeAfter(message: string, lead: string): string {
+    const at = message.indexOf(lead);
+    expect(at, message).toBeGreaterThanOrEqual(0);
+    const found = /\{ dialect: 'cel', source: (?:'([^']*)'|("(?:[^"\\]|\\.)*")) \}/.exec(message.slice(at));
+    expect(found, message).not.toBeNull();
+    return found![1] ?? (JSON.parse(found![2]!) as string);
+  }
+
+  it.each([
+    ['the legacy `assignments` array', { assignments: [{ variable: 'greeting', value: 'Hello {name}' }] }, 'config.assignments[0].value'],
+    ['the legacy bare config', { greeting: 'Hello {name}' }, 'config.greeting'],
+  ] as const)('%s: the remedy moves it into the canonical map, where the envelope evaluates', async (_label, config, at) => {
+    const message = catchError(() => engine.registerFlow('assign_flow', literalFlow(config, ['greeting']))).message;
+    expect(message).toContain(`assignment value at ${at}`);
+    expect(message).toContain('Move the node\'s assignments into the canonical map');
+    const source = envelopeAfter(message, 'canonical map');
+    expect(source).toBe("'Hello ' + name");
+
+    // Put back where the remedy says — the canonical map — it writes the template's value.
+    engine.registerFlow('assign_flow', literalFlow({ assignments: { greeting: { dialect: 'cel', source } } }, ['greeting']));
+    const result = await engine.execute('assign_flow', RUN);
+    expect(result.success).toBe(true);
+    expect(result.output).toEqual({ greeting: interpolate('Hello {name}', VARIABLES, {} as any) });
+    expect(result.output).toEqual({ greeting: 'Hello Ada' });
+  });
+
+  it.each([
+    ['the legacy `assignments` array', { assignments: [{ variable: 'greeting', value: { dialect: 'cel', source: "'Hello ' + name" } }] }],
+    ['the legacy bare config', { greeting: { dialect: 'cel', source: "'Hello ' + name" } }],
+  ] as const)('control — %s: the envelope the old remedy named there is stored as the object it spells', async (_label, config) => {
+    engine.registerFlow('assign_flow', literalFlow(config, ['greeting']));
+    const result = await engine.execute('assign_flow', RUN);
+    expect(result.success).toBe(true);
+    expect(result.output).toEqual({ greeting: { dialect: 'cel', source: "'Hello ' + name" } });
+  });
+
+  it('a string nested in an object literal: the whole value as one CEL map literal writes the template\'s object', async () => {
+    const value = { who: '{name}', meta: { note: 'for {name}' } };
+    const refusals = flowNodeValueTemplateRefusals('assignment', { assignments: { o: value } });
+    expect(refusals.map((r) => r.path)).toEqual(['assignments.o.who', 'assignments.o.meta.note']);
+    for (const refusal of refusals) {
+      expect(refusal.message).toContain('sits inside an object or list literal, where nothing evaluates');
+      expect(refusal.message).toContain('wrap each one in `dyn(…)`');
+    }
+    // Each refusal's literal holds its own string at its place; the two, side by
+    // side, are the whole value — a string beside a map, so each is wrapped in
+    // `dyn(…)` as the remedy says (unwrapped, CEL refuses the map at registration).
+    expect(envelopeAfter(refusals[0]!.message, 'for this string alone')).toBe("{'who': name}");
+    expect(envelopeAfter(refusals[1]!.message, 'for this string alone')).toBe("{'meta': {'note': 'for ' + name}}");
+    expect(() => engine.registerFlow('assign_flow', literalFlow({
+      assignments: { o: { dialect: 'cel', source: "{'who': name, 'meta': {'note': 'for ' + name}}" } },
+    }, ['o']))).toThrow(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
+    const whole = "{'who': dyn(name), 'meta': dyn({'note': 'for ' + name})}";
+
+    engine.registerFlow('assign_flow', literalFlow({ assignments: { o: { dialect: 'cel', source: whole } } }, ['o']));
+    const result = await engine.execute('assign_flow', RUN);
+    expect(result.success).toBe(true);
+    expect(result.output).toEqual({ o: interpolate(value, VARIABLES, {} as any) });
+    expect(result.output).toEqual({ o: { who: 'Ada', meta: { note: 'for Ada' } } });
+
+    // Control: the envelope the old remedy named at the nested position is data.
+    const control = new AutomationEngine(createTestLogger());
+    registerLogicNodes(control, createCtx());
+    control.registerFlow('assign_flow', literalFlow({ assignments: { o: { who: { dialect: 'cel', source: 'name' } } } }, ['o']));
+    const controlResult = await control.execute('assign_flow', RUN);
+    expect(controlResult.output).toEqual({ o: { who: { dialect: 'cel', source: 'name' } } });
+  });
+
+  it('a map mixing types: the `dyn(…)` the remedy names is what makes it evaluate', async () => {
+    const message = flowNodeValueTemplateRefusals('assignment', { assignments: { o: { who: '{name}', n: 3 } } })[0]!.message;
+    expect(message).toContain('wrap each one in `dyn(…)`');
+    // Without `dyn`, CEL refuses a map whose values differ in type — at registration.
+    expect(() => engine.registerFlow('assign_flow', literalFlow({
+      assignments: { o: { dialect: 'cel', source: "{'who': name, 'n': 3}" } },
+    }, ['o']))).toThrow(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
+    engine.registerFlow('assign_flow', literalFlow({
+      assignments: { o: { dialect: 'cel', source: "{'who': dyn(name), 'n': dyn(3)}" } },
+    }, ['o']));
+    const result = await engine.execute('assign_flow', RUN);
+    expect(result.success).toBe(true);
+    expect(result.output).toEqual({ o: interpolate({ who: '{name}', n: 3 }, VARIABLES, {} as any) });
   });
 });

@@ -7,13 +7,18 @@
  *
  * The spec cannot import the interpolator, so it carries a copy of
  * `resolveToken`'s dispatch: date macro, then `$User.`, then a variable path,
- * then an expression. If the two readings drifted, the judge would refuse a
- * spelling the retirement keeps (a run-time capability lost with no remedy),
- * or keep one it should refuse (the dialect surviving in a value slot). So the
- * interpolator itself is driven over the same tokens the judge classifies:
+ * then an expression. If the two readings drifted, the judge would print the
+ * wrong remedy for a spelling (a date macro read as a path, a path read as an
+ * expression), or pass one it should refuse (the dialect surviving in a value
+ * slot). So the interpolator itself is driven over the same tokens the judge
+ * classifies:
  *
- *  - every KEPT spelling resolves through `interpolateString` to a value — the
- *    date macros to ISO text — and the judge refuses none of them;
+ *  - every date macro (refused since #19939 pass 3) resolves through
+ *    `interpolateString` to ISO text, and the judge refuses each with its CEL
+ *    string form (`isoDate(…)` / `isoDatetime(…)`) — read as a date macro,
+ *    never as a path or an expression (that each form writes the same bytes
+ *    over the same instants is the parity pin in
+ *    `crud-fields-value-envelope.test.ts`);
  *  - the run user (`$User`, refused since #19939 pass 2) resolves through the
  *    interpolator to the run's `userId` for `$User.Id` and to nothing for every
  *    other path in a shipped run context, and the remedies the judge prints
@@ -30,12 +35,15 @@
  *    template — including a head variable named like an identifier CEL claims
  *    for itself (`{list.0}` → `vars["list"][0]`, #22290), or one the flow
  *    scope binds over it (`{vars.0}` → `vars["vars"][0]`), and inside an
- *    EXPRESSION token (`{int * 2}` → `vars["int"] * 2`).
+ *    EXPRESSION token (`{int * 2}` → `vars["int"] * 2`) — and the `has()`
+ *    guard it prints answers `null`, rather than failing the run, where the
+ *    variable itself was never bound (#19939 pass 3).
  */
 
 import { describe, expect, it } from 'vitest';
 import { VALUE_SLOT_TEMPLATE_REFUSAL, valueSlotTemplateRefusals } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
+import { registerLogicNodes } from './logic-nodes.js';
 import { interpolateString } from './template.js';
 
 const VARIABLES = new Map<string, unknown>([
@@ -47,18 +55,19 @@ const VARIABLES = new Map<string, unknown>([
 ]);
 const CONTEXT = { userId: 'usr_1', user: { email: 'ada@example.com' } } as never;
 
-describe('a spelling the retirement KEEPS resolves through the interpolator, and is not refused', () => {
+describe('a date macro resolves through the interpolator to ISO text, and is REFUSED as a date macro', () => {
   it.each([
-    ['{NOW()}', /^\d{4}-\d{2}-\d{2}T/],
-    ['{TODAY()}', /^\d{4}-\d{2}-\d{2}$/],
-    ['{TODAY() + 7}', /^\d{4}-\d{2}-\d{2}$/],
-    ['{TODAY() - days}', /^\d{4}-\d{2}-\d{2}$/],
-    ['{NOW() + 2}', /^\d{4}-\d{2}-\d{2}T/],
-  ])('%s — a date macro', (token, shape) => {
+    ['{NOW()}', /^\d{4}-\d{2}-\d{2}T/, 'isoDatetime(now())'],
+    ['{TODAY()}', /^\d{4}-\d{2}-\d{2}$/, 'isoDate(today())'],
+    ['{TODAY() + 7}', /^\d{4}-\d{2}-\d{2}$/, 'isoDate(daysFromNow(7))'],
+    ['{TODAY() - days}', /^\d{4}-\d{2}-\d{2}$/, 'isoDate(addDays(today(), -days))'],
+    ['{NOW() + 2}', /^\d{4}-\d{2}-\d{2}T/, 'isoDatetime(addDays(now(), 2))'],
+  ])('%s — a date macro', (token, shape, source) => {
     expect(String(interpolateString(token, VARIABLES, CONTEXT))).toMatch(shape);
-    expect(valueSlotTemplateRefusals(token)).toEqual([]);
+    const refusals = valueSlotTemplateRefusals(token);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]!.message).toContain(`Write \`${token}\` as { dialect: 'cel', source: '${source}' }`);
   });
-
 });
 
 describe('the run user — `{$User.*}` — is REFUSED, and its remedy reads what the interpolator read', () => {
@@ -190,9 +199,60 @@ describe('the remedy a refused path prints reads, through CEL, the value the int
   });
 
   it('the guard is read off the refusal too, so each row above evaluates it where one is printed', () => {
-    expect(printedSpellings('{list.tags}')).toEqual(['vars["list"].tags', 'has(vars.list.tags) ? vars.list.tags : null']);
+    expect(printedSpellings('{list.tags}')).toEqual(['vars["list"].tags', 'has(vars.list) && has(vars.list.tags) ? vars.list.tags : null']);
     expect(printedSpellings('{list}')).toEqual(['vars["list"]', 'has(vars.list) ? vars.list : null']);
     expect(printedSpellings('{null.tags}')).toEqual(['vars["null"].tags']);
+  });
+
+  // The guard is for "one that may be absent" — the VARIABLE as well as a key.
+  // A variable the run never bound (an `isInput` one the caller left out, with
+  // no default: `seedDeclaredVariables` sets nothing for it) is absent from the
+  // scope, and `has()` evaluates everything but its last selection, so a guard
+  // on the last key alone, `has(source.id)`, fails the run there. The printed
+  // guard tests each step off `vars`, which holds only the bound variables.
+  it.each([
+    ['{source.id}', 'source', { id: 'r1' }, 'r1'],
+    ['{record.owner.name}', 'record', { owner: { name: 'Ada' } }, 'Ada'],
+    ['{list.tags}', 'list', { tags: 'T' }, 'T'],
+    ['{x}', 'x', 7, 7],
+  ])('the printed guard of %s answers `null` where the variable, or a key on the way, is absent', (token, root, bound, value) => {
+    const guard = printedSpellings(token)[1]!;
+    expect(guard, token).toMatch(/^has\(vars\./);
+    const evaluate = (variables: Map<string, unknown>) =>
+      engine.evaluateValueEnvelope({ dialect: 'cel', source: guard }, variables, token);
+    expect(evaluate(new Map()), `${guard} — ${root} unbound`).toBeNull();
+    expect(evaluate(new Map([[root, null]])), `${guard} — ${root} null`).toBeNull();
+    if (typeof bound === 'object') expect(evaluate(new Map([[root, {}]])), `${guard} — a key absent`).toBeNull();
+    const variables = new Map<string, unknown>([[root, bound]]);
+    expect(interpolateString(token, variables, CONTEXT)).toEqual(value);
+    expect(evaluate(variables), `${guard} — bound`).toEqual(value);
+  });
+
+  it('through a run: an `isInput` variable the caller left out — the printed guard writes `null`, a guard on the last key fails the run', async () => {
+    const guard = printedSpellings('{source.id}')[1]!;
+    expect(guard).toBe('has(vars.source) && has(vars.source.id) ? vars.source.id : null');
+    const run = async (source: string) => {
+      const flowEngine = new AutomationEngine(quiet);
+      registerLogicNodes(flowEngine, { logger: quiet, getService: () => undefined } as never);
+      flowEngine.registerFlow('guarded', {
+        name: 'guarded', label: 'Guarded', type: 'autolaunched',
+        variables: [{ name: 'source', type: 'object', isInput: true }, { name: 'who', type: 'text', isOutput: true }],
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'assign', type: 'assignment', label: 'Assign', config: { assignments: { who: { dialect: 'cel', source } } } },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'assign' }, { id: 'e2', source: 'assign', target: 'end' }],
+      } as never);
+      return flowEngine.execute('guarded', { params: {} } as never);
+    };
+    const guarded = await run(guard);
+    expect(guarded.success, guarded.error).toBe(true);
+    expect(guarded.output).toEqual({ who: null });
+    // Control: the guard the refusal printed before — `has()` on the last key alone.
+    const lastKeyOnly = await run('has(source.id) ? source.id : null');
+    expect(lastKeyOnly.success).toBe(false);
+    expect(lastKeyOnly.error).toContain('Unknown variable: source');
   });
 
   it('a later keyword segment, and an index in the middle of a path', () => {

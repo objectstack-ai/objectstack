@@ -232,10 +232,14 @@ describe('lintFlowPatterns — wrong interpolation syntax (#1315)', () => {
       .toContain(FLOW_BARE_DOLLAR_REF);
   });
   describe('does NOT flag (false-positive guards)', () => {
-    it('correct single-brace interpolation', () => {
+    // A single-brace token is neither a double brace nor a bare `$` reference,
+    // so neither #1315 rule fires on it. In a value slot like this one the
+    // token is refused anyway — by the value-slot judge (#19939), a different
+    // finding (`expression-invalid` at `objectstack validate`), not this rule's.
+    it('a single-brace token draws neither interpolation rule (the value-slot judge refuses it, a different finding)', () => {
       expect(rules(nodeFlow({ objectName: 'm', fields: { body: '{ai_reply}', t: 'Hi {record.name}' } }))).toEqual([]);
     });
-    it('a braced $User reference', () => {
+    it('a braced $User token is not a BARE $ reference (the value-slot judge refuses it, a different finding)', () => {
       expect(rules(nodeFlow({ objectName: 'm', fields: { owner: '{$User.Id}' } }))).toEqual([]);
     });
     it('a currency literal', () => {
@@ -2694,10 +2698,117 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         }
       });
 
+      // #19939 pass 3: the hint asks the judge AT the string's position, so
+      // where an envelope is literal data — a string nested in an object
+      // literal, a legacy `assignment` shape — it names the spelling that
+      // evaluates there, never an envelope at the position.
+      it('a reference nested in an object literal: the whole value built as one CEL literal, not an envelope at the position', () => {
+        const [f] = bareDollar(valueFlow('create_record', { objectName: 'task', fields: { payload: { who: '$source.id' } } }));
+        expect(f!.hint).toContain('sits inside an object or list literal, where nothing evaluates');
+        expect(prescribedSources(f!.hint!)).toEqual(["{'who': source.id}"]);
+        expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { payload: CEL("{'who': source.id}") } })))
+          .toEqual(NONE);
+      });
+
+      it('a reference in the legacy `assignments` array: the canonical map, where the envelope evaluates', () => {
+        const [f] = bareDollar(valueFlow('assignment', { assignments: [{ variable: 'v', value: '$User.Id' }] }));
+        expect(f!.hint).toContain('Move the node\'s assignments into the canonical map');
+        const prescribed = prescribedSources(f!.hint!);
+        expect(prescribed).toEqual(['current_user.id', 'current_user != null ? current_user.id : null']);
+        for (const source of prescribed) {
+          expect(refusalsOf(valueFlow('assignment', { assignments: { v: CEL(source) } })), source).toEqual(NONE);
+        }
+      });
+
+      // #19939 pass 3: the `has()` guard the hint carries for "one that may be
+      // absent" must hold where the VARIABLE is absent too: `has(source.id)`
+      // fails the run when `source` was never bound (an `isInput` variable the
+      // caller left out). The judge's guard tests each step off `vars`, and
+      // the hint carries the judge's words — that the guard answers `null`
+      // there is pinned through the engine in `service-automation`'s
+      // `value-slot-template-grammar.test.ts`.
+      it('the `has()` guard it carries tests each step off `vars`, and passes every judge as an envelope', () => {
+        const [f] = bareDollar(valueFlow('create_record', { objectName: 'task', fields: { who: '$source.id' } }));
+        const guard = 'has(vars.source) && has(vars.source.id) ? vars.source.id : null';
+        expect(f!.hint).toContain(`\`${guard}\``);
+        expect(f!.hint).not.toContain('`has(source.id)');
+        expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { who: CEL(guard) } }))).toEqual(NONE);
+      });
+
       it('control: outside the value and text slots the single brace still resolves, and the hint still names it', () => {
         const [f] = lintFlowPatterns(httpFlow({ ticket: '$source.id' })).filter((x) => x.rule === FLOW_BARE_DOLLAR_REF);
         expect(f!.hint).toContain('Wrap it and bind a variable: `{source.id}`');
         expect(flowNodeValueTemplateRefusals('http', httpPushConfig({ ticket: '{source.id}' }))).toEqual([]);
+      });
+    });
+
+    // #19939 pass 3 (carry from pass 2): `flow-double-brace-interpolation`'s
+    // hint said `Use {var} (e.g. {record.title})` in a value slot too — a
+    // spelling the value-slot judge refuses there. In a value slot it now names
+    // the CEL envelope the judge writes for the string with each `{{ }}` hole
+    // read as the token it means, asked at the string's position; elsewhere the
+    // single brace still resolves and the hint is unchanged.
+    describe('a double brace in a value slot', () => {
+      function valueFlow(type: string, config: Record<string, unknown>) {
+        return {
+          flows: [{
+            name: 'stamp_title', label: 'Stamp title', type: 'autolaunched',
+            nodes: [
+              { id: 'start', type: 'start', label: 'Start' },
+              { id: 'write', type, label: 'Write', config },
+              { id: 'done', type: 'end', label: 'Done' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'write' }, { id: 'e2', source: 'write', target: 'done' }],
+          }],
+        };
+      }
+      const doubleBrace = (stack: ReturnType<typeof valueFlow>) =>
+        lintFlowPatterns(stack).filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
+      function prescribedSources(hint: string): string[] {
+        const out: string[] = [];
+        for (const m of hint.matchAll(/\{ dialect: 'cel', source: (?:'([^']*)'|("(?:[^"\\]|\\.)*")) \}/g)) {
+          const source = m[1] ?? (JSON.parse(m[2]!) as string);
+          if (source !== '…') out.push(source);
+        }
+        return out;
+      }
+      function refusalsOf(stack: ReturnType<typeof valueFlow>) {
+        const node = stack.flows[0]!.nodes[1]!;
+        const parsed = FlowSchema.safeParse(stack.flows[0]);
+        return {
+          valueJudge: flowNodeValueTemplateRefusals(node.type, node.config).length,
+          buildDoor: validateStackExpressions(stack).filter((i) => i.severity === 'error').length,
+          contract: parsed.success ? 0 : parsed.error.issues.length,
+          lint: lintFlowPatterns(stack).filter((f) => f.rule === FLOW_BARE_DOLLAR_REF || f.rule === FLOW_DOUBLE_BRACE_INTERP).length,
+        };
+      }
+      const NONE = { valueJudge: 0, buildDoor: 0, contract: 0, lint: 0 };
+
+      it.each([
+        ['a whole hole', '{{ record.title }}', 'record.title'],
+        ['text with a hole', 'Re: {{ record.title }}', "'Re: ' + record.title"],
+      ])('%s: names the envelope for the hole it means, not `{record.title}`', (_label, text, source) => {
+        const [f] = doubleBrace(valueFlow('create_record', { objectName: 'task', fields: { subject: text } }));
+        expect(f!.message).toContain('the create_record field value reads a CEL value envelope, not a template');
+        expect(f!.hint).not.toContain('Use `{var}`');
+        expect(f!.hint).toContain('the value-slot refusal reads its outer braces as literal text');
+        expect(prescribedSources(f!.hint!)).toEqual([source]);
+        expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { subject: CEL(source) } }))).toEqual(NONE);
+      });
+
+      it('control: the spelling it used to prescribe is refused in the same slot', () => {
+        expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { subject: '{record.title}' } })).valueJudge).toBe(1);
+      });
+
+      it('in an assignment value nested in a literal: the whole value as a CEL literal', () => {
+        const [f] = doubleBrace(valueFlow('assignment', { assignments: { o: { t: '{{ record.title }}' } } }));
+        expect(f!.message).toContain('the assignment value reads a CEL value envelope');
+        expect(prescribedSources(f!.hint!)).toEqual(["{'t': record.title}"]);
+      });
+
+      it('control: outside the value and text slots the single brace still resolves, and the double-brace hint still names it', () => {
+        const [f] = lintFlowPatterns(httpFlow({ title: '{{ record.title }}' })).filter((x) => x.rule === FLOW_DOUBLE_BRACE_INTERP);
+        expect(f!.hint).toContain('Use `{var}` (e.g. `{record.title}`)');
       });
     });
   });
