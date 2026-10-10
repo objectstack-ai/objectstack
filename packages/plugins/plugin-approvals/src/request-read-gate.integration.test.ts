@@ -25,7 +25,8 @@
  *    on a read that names the record, read-only;
  *  - control: an administrator, and the approval engine's own reads as the
  *    system, are unchanged;
- *  - for every caller, the data door's ids equal the approvals door's.
+ *  - for every caller, the data door's ids equal the approvals door's, by
+ *    list and by id (the by-id read is what a request's record page makes).
  *
  * ## The rig
  *
@@ -201,6 +202,26 @@ async function byId(rig: Rig, context: any, id: string): Promise<{ record?: any;
   }
 }
 
+/**
+ * By id, the data door against the approvals door, for every caller and both
+ * requests: the record read a `sys_approval_request` record page makes (its
+ * highlights and details) is served exactly when `getRequest` serves the
+ * request — and a refused one answers as a missing one.
+ */
+async function expectByIdParity(rig: Rig, callers: any[]): Promise<void> {
+  for (const ctx of callers) {
+    for (const id of [rig.ids.requestA, rig.ids.requestB]) {
+      const served = (await rig.svc.getRequest(id, ctx)) !== null;
+      const answer = await byId(rig, ctx, id);
+      expect(answer.record?.id ?? null, `${ctx.userId} ${id}`).toBe(served ? id : null);
+      if (!served) {
+        expect({ code: answer.error?.code, status: answer.error?.status }, `${ctx.userId} ${id}`)
+          .toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
+      }
+    }
+  }
+}
+
 describe('the record-reader tier OFF (the default)', () => {
   it('a non-participant who cannot read the record sees no request: list, a record\'s list, count, grouped count', async () => {
     const rig = await boot();
@@ -270,6 +291,11 @@ describe('the record-reader tier OFF (the default)', () => {
       }
     }
   });
+
+  it('one rule, two doors, by id: a request\'s record page reads it exactly when the approvals door serves it', async () => {
+    const rig = await boot();
+    await expectByIdParity(rig, [asUser(OUTSIDER), asUser(READER), asUser(SUBMITTER_A), asUser(SUBMITTER_B), asUser(APPROVER), ADMIN]);
+  });
 });
 
 describe('the record-reader tier ON for the object', () => {
@@ -316,6 +342,11 @@ describe('the record-reader tier ON for the object', () => {
         expect((await listIds(rig, ctx, forRecord(recordId))).ids, `${ctx.userId} ${recordId}`).toEqual(served);
       }
     }
+  });
+
+  it('one rule, two doors, by id, with the tier on as well', async () => {
+    const rig = await boot(ON);
+    await expectByIdParity(rig, [asUser(OUTSIDER), asUser(READER), asUser(SUBMITTER_A), asUser(SUBMITTER_B), asUser(APPROVER), ADMIN]);
   });
 });
 
