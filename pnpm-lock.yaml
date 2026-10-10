@@ -2901,6 +2901,8 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.3)(@vitest/coverage-v8@4.1.11)(happy-dom@20.10.2)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.14.6(@types/node@26.6.3)(typescript@6.0.3))(vite@8.0.16(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
 
+  packages/skills: {}
+
   packages/spec:
     dependencies:
       pg-connection-string:

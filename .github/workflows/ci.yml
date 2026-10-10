@@ -205,6 +205,11 @@ jobs:
               # touching a `scripts/pm/` tool or a `scripts/check-*` gate.
               - 'turbo.json'
               - 'tsup.config.ts'
+              # `@objectstack/skills#build` copies the repository root's
+              # `skills/**` into its publish tree, so that catalog is a build
+              # input of a task `pnpm build` runs (turbo.json declares it as
+              # `$TURBO_ROOT$/skills/**`; check-ci-filter-parity holds it here).
+              - 'skills/**'
               - 'scripts/build-input-hash.mjs'
               - 'scripts/check-dev-prereqs.mjs'
               - 'scripts/check-dts-emitted.mjs'

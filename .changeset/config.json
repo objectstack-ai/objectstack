@@ -10,6 +10,7 @@
   "fixed": [
     [
       "@objectstack/spec",
+      "@objectstack/skills",
       "@objectstack/cli",
       "@objectstack/console",
       "@objectstack/cloud-connection",
