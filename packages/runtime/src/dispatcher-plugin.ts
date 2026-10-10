@@ -1768,20 +1768,51 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 });
             };
 
+            // ── Security catalog activation (ADR-0126 §3 regime C, ADR-0131 D3/D6) ──
+            // `POST /security/_activation/:type/:name` — switch a position or a
+            // permission set on/off for this deployment
+            // (`domains/catalog-activation.ts`). The rest of `/security` is the
+            // REST server's on the wire; this one door is the dispatcher's,
+            // because the activation gate and the two sibling activation doors
+            // live here. Dispatched through `dispatcher.dispatch()` like the
+            // action door, so the session resolves into `executionContext` and
+            // the per-project kernel is swapped in before the gates read either.
+            // The literal `_activation` segment collides with no REST-mounted
+            // `/security` route (machine names cannot begin with `_`).
+            const registerSecurityActivationRoutes = (base: string) => {
+                server!.post(`${base}/security/_activation/:type/:name`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(
+                            'POST',
+                            `/security/_activation/${req.params.type}/${req.params.name}`,
+                            req.body,
+                            req.query,
+                            { request: req },
+                        );
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+
             const enableProjectScoping = config.scoping?.enableProjectScoping ?? false;
             const projectResolution = config.scoping?.projectResolution ?? 'auto';
 
             if (enableProjectScoping && projectResolution === 'required') {
                 registerAutomationRoutes(`${prefix}/environments/:environmentId`);
                 registerActionRoutes(`${prefix}/environments/:environmentId`);
+                registerSecurityActivationRoutes(`${prefix}/environments/:environmentId`);
                 registerAIRoutes(`${prefix}/environments/:environmentId`);
             } else {
                 registerAutomationRoutes(prefix);
                 registerActionRoutes(prefix);
+                registerSecurityActivationRoutes(prefix);
                 registerAIRoutes(prefix);
                 if (enableProjectScoping) {
                     registerAutomationRoutes(`${prefix}/environments/:environmentId`);
                     registerActionRoutes(`${prefix}/environments/:environmentId`);
+                    registerSecurityActivationRoutes(`${prefix}/environments/:environmentId`);
                     registerAIRoutes(`${prefix}/environments/:environmentId`);
                 }
             }

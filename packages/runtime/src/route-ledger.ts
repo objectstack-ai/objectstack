@@ -277,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 84 rows.
+ * CENSUS (generated): this list holds 85 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -345,6 +345,20 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /security/suggested-bindings', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.list' },
   { route: 'POST /security/suggested-bindings/:id/confirm', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.confirm' },
   { route: 'POST /security/suggested-bindings/:id/dismiss', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.dismiss' },
+  { route: 'POST /security/_activation/:type/:name', domain: '/security', disposition: 'server-only',
+    note: 'ADR-0126 §3 regime C, as ADR-0131 D6 amends it — switch ONE position (`:type` = `position`) or permission set '
+      + '(`:type` = `permission`) on/off for this deployment. Writes one `sys_metadata_activation` row through the engine and '
+      + 'nothing else (⛔ no definition write, ⛔ no catalog row `active`: ADR-0131 D3 moved the switch into the ledger, and '
+      + '`resolveUserAuthzGrants` reads only the ledger for these two types). Body `{ enabled?: boolean }`, the same reader as '
+      + 'the action door. The same two authority tiers as `POST /automation/:name/toggle` and `POST /actions/_activation/:object/:action`: '
+      + '`manage_metadata`, then the ADR-0126 §5 posture rule requiring the platform operator in `group`/`isolated` — one shared '
+      + 'implementation in `domains/activation-gate.ts`. The name must resolve in the security catalog the resolver reads (404 '
+      + 'otherwise, 503 when no catalog is bound); switching `admin_full_access` off is refused 403 by the last-admin guard\'s '
+      + 'ledger hook. The ONE `/security` route the dispatcher mounts on the wire (`registerSecurityActivationRoutes`); the rest '
+      + 'of `/security` is the REST server\'s. NOT JS-SDK surface, for the action door\'s reason: its caller is the Setup console '
+      + '(Deactivate on the position and permission-set pages), which calls the platform API directly; adding a client method '
+      + 'reclassifies this row to `sdk`. Pinned in `domains/catalog-activation-door.test.ts` and '
+      + '`qa/dogfood/test/catalog-activation-door.dogfood.test.ts`' },
 
   // ── keys ──────────────────────────────────────────────────────────────────
   { route: 'POST /keys', domain: '/keys', disposition: 'sdk', client: 'keys.create',
