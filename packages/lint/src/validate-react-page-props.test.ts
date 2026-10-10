@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 import { describe, it, expect } from 'vitest';
 import {
-  validateReactPageProps,
+  validateReactPageProps as validateReactPagePropsUnrecorded,
   REACT_CHART_FIELD_UNKNOWN,
   REACT_CHART_FIELD_UNPROVISIONED,
   REACT_CHART_AGGREGATE_INVALID,
@@ -25,7 +25,31 @@ import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-fi
 // The gate PARSES `ChartAggregateSchema` since #5020, so the function
 // vocabulary lives in the schema and nowhere in the rule. Imported here to pin
 // the test table against it — see the `aggregate` block near the bottom.
-import { ChartAggregateFunctionSchema } from '@objectstack/spec/ui';
+import { ChartAggregateFunctionSchema, ChartAggregateSchema, ChartDrillDownSchema } from '@objectstack/spec/ui';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the five ids below is one verdict sentence; the
+// reasoning it used to carry is the id's `os explain` entry. Every call in this
+// file records what it fired, and the last cases hold each recorded verdict of
+// those ids to one line of at most 200 characters — so the pin covers every
+// firing variant this suite exercises, not a chosen few. Run the whole file:
+// those cases read what the cases above fired.
+const ONE_LINE_IDS: readonly string[] = [
+  REACT_CHART_DRILLDOWN_INVALID,
+  REACT_CHART_AGGREGATE_INVALID,
+  REACT_CHART_FIELD_UNPROVISIONED,
+  REACT_BLOCK_NEEDS_RECORD_CONTEXT,
+  REACT_PAGE_SOURCE_UNPARSEABLE,
+];
+const fired: Array<{ rule: string; message: string }> = [];
+const validateReactPageProps: typeof validateReactPagePropsUnrecorded = (...args) => {
+  const findings = validateReactPagePropsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 const page = (source: string) => ({ pages: [{ name: 'p', kind: 'react', source }] });
 
@@ -791,6 +815,8 @@ describe('validateReactPageProps — record:* blocks need a context this surface
       expect(rejected[0].severity).toBe('error');
       expect(rejected[0].where).toBe(`page "p" › <${tag}>`);
       expect(rejected[0].message).toContain('renders empty');
+      // [#22161] Why binding it does not help is `os explain`'s.
+      expect(explanationOf(REACT_BLOCK_NEEDS_RECORD_CONTEXT)).toContain('does not read its `objectName` or `recordId`');
     }
   });
 
@@ -1002,6 +1028,10 @@ describe('validateReactPageProps — <ObjectChart drillDown> (#5022)', () => {
     expect(hit, 'the unknown key must be reported').toBeTruthy();
     expect(hit!.message).toContain('chart drill-down block');
     expect(hit!.message, 'the schema’s suggester reaches the author through the gate').toContain('`maxrows` → `maxRows`');
+    // [#22161] Cut to its verdict: the key and the rename, not the history after it.
+    expect(hit!.message).toBe(
+      'drillDown: Unrecognized key(s) on this chart drill-down block: `maxrows`. Did you mean `maxrows` → `maxRows`?',
+    );
     expect(hit!.severity).toBe('error');
   });
 
@@ -1027,17 +1057,37 @@ describe('validateReactPageProps — <ObjectChart drillDown> (#5022)', () => {
     expect(hit!.severity).toBe('error');
   });
 
+  // [#22161] The verdict names the key; the schema's reason for a key that is
+  // real on another widget is longer than one line, so `os explain` names it —
+  // and each pin below also holds that the schema still answers the key with a
+  // prescription, so the explanation never describes a dropped guidance entry.
+  const drillRefusal = (block: Record<string, unknown>) => {
+    const parsed = ChartDrillDownSchema.safeParse(block);
+    expect(parsed.success).toBe(false);
+    return parsed.error!.issues.map((i) => i.message).join('\n');
+  };
+
   it('rejects a key that belongs to another widget, with the reason rather than a rename', () => {
     const f = validateReactPageProps(drill(`{ mode: 'record' }`));
     const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
-    expect(hit!.message).toContain('object-data-table');
+    expect(hit!.message).toBe('drillDown: Unrecognized key(s) on this chart drill-down block: `mode`');
+    expect(drillRefusal({ mode: 'record' })).toContain('object-data-table');
+    expect(explanationOf(REACT_CHART_DRILLDOWN_INVALID)).toContain('`mode` is objectui\'s `object-data-table` drill key');
   });
 
   it('rejects the report near-key spelling and names the type difference', () => {
     const f = validateReactPageProps(drill(`{ drilldown: true }`));
     const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
-    expect(hit!.message).toContain('ReportSchema.drilldown');
-    expect(hit!.message).toContain('BOOLEAN');
+    expect(hit!.message).toBe('drillDown: Unrecognized key(s) on this chart drill-down block: `drilldown`');
+    expect(drillRefusal({ drilldown: true })).toContain('ReportSchema.drilldown');
+    expect(explanationOf(REACT_CHART_DRILLDOWN_INVALID)).toContain('`drilldown` (all lowercase) is `ReportSchema.drilldown`, a boolean');
+  });
+
+  it('every other key the explanation names is one the schema answers with a prescription', () => {
+    for (const key of ['report', 'view', 'sort']) {
+      expect(drillRefusal({ [key]: true }), key).toMatch(/\n {2}• /);
+      expect(explanationOf(REACT_CHART_DRILLDOWN_INVALID), key).toContain(`\`${key}\``);
+    }
   });
 
   it('rejects a non-object drillDown and shows the two shapes that work', () => {
@@ -1219,7 +1269,12 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
     const hit = aggFindings(`{ function: 'count', groupBy: 42 }`);
     expect(hit[0].severity).toBe('error');
     expect(hit[0].message).toContain('aggregate.groupBy');
-    expect(hit[0].message).toContain('received 42');
+    // [#22161] Every form's complaint is about the whole value's type here, so
+    // the verdict keeps them all — each naming what it received.
+    expect(hit[0].message).toBe(
+      'aggregate.groupBy matches no accepted form: (1) Invalid input: expected string, received number ' +
+        '(2) Invalid input: expected object, received number',
+    );
   });
 
   // ── The zod-4 union collapse, unpacked ─────────────────────────────────
@@ -1232,9 +1287,14 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
     // can act on, which is the class of diagnostic this gate exists to replace.
     const hit = aggFindings(`{ function: 'count', groupBy: { dateGranularity: 'day' } }`);
     expect(hit[0].severity).toBe('error');
-    expect(hit[0].message).toContain('no accepted form matched');
-    expect(hit[0].message, "the structured arm's own complaint").toContain('field');
-    expect(hit[0].message, 'the bare-field-name arm reports too').toContain('expected string');
+    expect(hit[0].message).toContain('matches no accepted form');
+    // [#22161] The structured arm's own complaint, at its key. The bare-field-
+    // name arm's — "expected string, received object" — says only that the
+    // value is an object, which the author wrote on purpose, so the one-line
+    // verdict keeps the arm that speaks to the content.
+    expect(hit[0].message).toBe(
+      'aggregate.groupBy matches no accepted form: field — Invalid input: expected string, received undefined',
+    );
     expect(hit[0].message, 'the collapsed message must not be the whole report').not.toBe(
       'aggregate.groupBy: Invalid input',
     );
@@ -1265,6 +1325,10 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
     expect(hit[0].message).toContain('Unrecognized key');
     expect(hit[0].message, "the schema's own surface name").toContain('this chart aggregate');
     expect(hit[0].message, 'the rename').toContain('`groupby` → `groupBy`');
+    // [#22161] Cut to its verdict: the history sentence and the echoed value go.
+    expect(hit[0].message).toBe(
+      'aggregate: Unrecognized key(s) on this chart aggregate: `groupby`. Did you mean `groupby` → `groupBy`?',
+    );
 
     // The parse still runs on everything else, and the two findings coexist —
     // the #5046 trap in reverse: a green "it rejects" proves nothing unless the
@@ -1290,7 +1354,7 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
     const hit = aggFindings(`{ function: 'count', groupBy: { field: 'closed_at', dateGranularty: 'month' } }`);
     expect(hit.length).toBe(1);
     expect(hit[0].severity).toBe('error');
-    expect(hit[0].message, 'the collapsed union was unpacked').toContain('no accepted form matched');
+    expect(hit[0].message, 'the collapsed union was unpacked').toContain('matches no accepted form');
     expect(hit[0].message, "the strict arm's surface").toContain('this chart groupBy');
     expect(hit[0].message, 'and its rename').toContain('`dateGranularty` → `dateGranularity`');
     expect(hit[0].message, 'the bare collapsed message must not be the whole report').not.toBe(
@@ -1345,8 +1409,12 @@ describe('validateReactPageProps — unprovisioned injected anchors (#8340)', ()
     expect(warned).toHaveLength(1);
     expect(warned[0].severity).toBe('warning');
     expect(warned[0].message).toContain('aggregate.groupBy "owner_id"');
-    expect(warned[0].message).toContain('external object (ADR-0015)');
-    expect(warned[0].message).toContain('one empty bucket');
+    expect(warned[0].message).toBe(
+      'aggregate.groupBy "owner_id": \'owner_id\' is an injected column with no storage on external object ' +
+        "'ext_customer', so the chart groups everything into one empty bucket",
+    );
+    // [#22161] ADR-0015's federation is `os explain`'s.
+    expect(explanationOf(REACT_CHART_FIELD_UNPROVISIONED)).toContain('ADR-0015 external object');
     expect(warned[0].hint).toContain('columnMap');
   });
 
@@ -1583,5 +1651,55 @@ describe('an unparseable react source is reported, not scored clean (#10653)', (
   it('an empty source is skipped without a parse claim', () => {
     expect(validateReactPageProps(page(''))).toEqual([]);
     expect(validateReactPageProps(page('   \n '))).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — the five react-page ids', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each of the five ids fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    const firedIds = new Set(fired.map((f) => f.rule));
+    for (const id of ONE_LINE_IDS) expect(firedIds.has(id), `${id} fired`).toBe(true);
+    for (const f of fired.filter((x) => ONE_LINE_IDS.includes(x.rule))) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [REACT_CHART_DRILLDOWN_INVALID]: ['ChartDrillDownSchema', 'ignored at click time', 'fully static literal', '`ReportSchema.drilldown`'],
+    [REACT_CHART_AGGREGATE_INVALID]: ['ChartAggregateSchema', 'single ungrouped point', 'whole value is another type', '`dateGranularity` and `alias` go inside', 'object-metric block'],
+    [REACT_CHART_FIELD_UNPROVISIONED]: ['ADR-0015', 'without provisioning a column', 'The query does not fail', 'vouches for'],
+    [REACT_BLOCK_NEEDS_RECORD_CONTEXT]: ['never mounts that context', '`objectName` or `recordId`', 'shadows the injected one'],
+    [REACT_PAGE_SOURCE_UNPARSEABLE]: ['partially recovered', 'Sucrase', '`react-page-syntax`', '`0755`', 'not a second syntax verdict'],
+  };
+
+  it('covers exactly the five ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...ONE_LINE_IDS].sort());
+  });
+
+  it.each([...ONE_LINE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanationOf(rule);
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+
+  it('every wrong-layer key the aggregate explanation names is one the schema answers with a prescription', () => {
+    const refusalOf = (aggregate: Record<string, unknown>) => {
+      const parsed = ChartAggregateSchema.safeParse(aggregate);
+      expect(parsed.success).toBe(false);
+      // A key inside `groupBy` is refused inside the union's object arm.
+      return JSON.stringify(parsed.error!.issues);
+    };
+    const text = explanationOf(REACT_CHART_AGGREGATE_INVALID);
+    for (const key of ['dateGranularity', 'alias', 'filter', 'objectName', 'measures']) {
+      expect(refusalOf({ function: 'count', groupBy: 'status', [key]: 'x' }), key).toContain('•');
+      expect(text, key).toContain(`\`${key}\``);
+    }
+    for (const key of ['function', 'groupBy']) {
+      expect(refusalOf({ function: 'count', groupBy: { field: 'status', [key]: 'x' } }), key).toContain('•');
+      expect(text, key).toContain(`\`${key}\``);
+    }
   });
 });
