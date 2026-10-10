@@ -336,6 +336,72 @@ function claimedArtifactSlots(bodies: readonly unknown[]): (type: string, name: 
     return (type, name) => owned.get(type)?.has(name) === true;
 }
 
+/** One top-level item of a multi-package stack that none of its package bodies declares. */
+export interface UnclaimedTopLevelItem {
+    /** The stack collection the item sits in, e.g. `views`. */
+    field: string;
+    /** Its position in that collection, e.g. `0` for `views[0]`. */
+    index: number;
+    /** The metadata type it registers as, e.g. `view`. */
+    type: string;
+    /** The item itself, as the stack carries it. */
+    item: unknown;
+}
+
+/** A multi-package stack's residual, and the identity it is registered under. */
+export interface UnclaimedTopLevel {
+    /** The stack's own manifest id — the owner of every unclaimed item. */
+    ownerId: string | undefined;
+    /** The stack's own manifest version, stamped beside that id. */
+    ownerVersion: string | undefined;
+    /** How many package bodies the stack carries. */
+    bodyCount: number;
+    /** The unclaimed items, in the order a door registers them. */
+    items: UnclaimedTopLevelItem[];
+}
+
+/**
+ * WHICH top-level items of a stack that carries `packages[]` no package body
+ * declares, and under which id they are registered — the decision half of the
+ * residual rule, with nothing registered and nothing thrown.
+ *
+ * {@link MetadataPlugin.registerUnclaimedTopLevel} registers exactly these, in
+ * this order, through either boot door. `os validate` / `os build`
+ * (`@objectstack/cli`'s view-container walk) read the same answer to judge what
+ * that registration will judge, so an author-time door and a boot door cannot
+ * disagree about which items are residual. ⛔ Never re-derived by a caller.
+ *
+ * An item is unclaimed when it occupies a registry slot (`artifactItemSlot`)
+ * that no package body occupies (`claimedArtifactSlots`): a container is
+ * compared on its own slot, every other item on its name. An item with no
+ * derivable slot is registered by no door, so it is not listed.
+ *
+ * @returns `undefined` for a stack without `packages[]`: its top level IS its
+ *   one package's body, so it has no residual.
+ */
+export function unclaimedTopLevel(stack: unknown): UnclaimedTopLevel | undefined {
+    if (!Array.isArray((stack as any)?.packages)) return undefined;
+    const bodies = resolveArtifactPackageOrder(stack);
+    const claimed = claimedArtifactSlots(bodies);
+    const items: UnclaimedTopLevelItem[] = [];
+    for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
+        const collection = (stack as any)[field];
+        if (!Array.isArray(collection)) continue;
+        collection.forEach((item: unknown, index: number) => {
+            const slot = artifactItemSlot(metaType, item);
+            if (!slot) return;
+            if (claimed(metaType, slot.container ? slot.object : slot.name)) return;
+            items.push({ field, index, type: metaType, item });
+        });
+    }
+    return {
+        ownerId: (stack as any)?.manifest?.id ?? (stack as any)?.id ?? undefined,
+        ownerVersion: (stack as any)?.manifest?.version ?? (stack as any)?.version ?? undefined,
+        bodyCount: bodies.length,
+        items,
+    };
+}
+
 /**
  * Register ONE body's collections through `sink`.
  *
@@ -343,7 +409,7 @@ function claimedArtifactSlots(bodies: readonly unknown[]): (type: string, name: 
  * artifact and its one package are the same object), one entry of
  * `packages[]` (ADR-0130 D4) — an assembled `{ ...manifest, ...collections }`
  * payload carrying the same collection keys the top level does — or a
- * multi-package stack's top level, read for its residual. The loop is
+ * multi-package stack's residual ({@link unclaimedTopLevel}). The loop is
  * identical for all three: there is one ingestion of a collection, not one per
  * shape or per door.
  *
@@ -352,21 +418,19 @@ function claimedArtifactSlots(bodies: readonly unknown[]): (type: string, name: 
  *   the body's OWN identity, never the enclosing artifact's, which is what
  *   makes a multi-package artifact's items agree with the registry and with
  *   `GET /api/v1/packages` about who owns them.
- * @param slots.skip - Consulted before registering each `(type, name)`.
- *   Passed ONLY for the residual, so a package body's copy is never
- *   overwritten by the flattened top-level copy of the same definition — the
- *   overwrite that re-attributed the item to the artifact's manifest.
- *   ⛔ It is never passed while reading the bodies themselves: two items of
- *   one name inside one body still register as they always have (last wins),
- *   because suppressing that would be a behaviour change on the
- *   single-package branch D7 pins.
+ * @param sourceLabel - The words naming the source in a divergent container
+ *   `name` refusal: `artifact` for a compiled artifact; `manifest` for a
+ *   config's residual, the word the config boot's own registrar uses for the
+ *   same stack. Two items of one name inside one body still register as they
+ *   always have (last wins): suppressing that would be a behaviour change on
+ *   the single-package branch D7 pins.
  * @returns How many items this body registered.
  */
 async function registerArtifactBodyCollections(
     sink: ArtifactRegistrationSink,
     body: Record<string, unknown>,
     provenance: { packageId?: string; packageVersion?: string },
-    slots: { skip?: (type: string, name: string) => boolean } = {},
+    sourceLabel: string,
 ): Promise<number> {
     const { packageId, packageVersion } = provenance;
     let totalRegistered = 0;
@@ -389,10 +453,6 @@ async function registerArtifactBodyCollections(
                 // reached the registry at all and `getViewsByObject()` had
                 // nothing to expand.
                 const viewObject = slot.object;
-                // Residual only: a package body already registered this
-                // container, so the flattened copy is the duplicate, not a
-                // second definition.
-                if (slots.skip?.('view', viewObject)) continue;
                 // [#21412] A container whose own `name` disagrees with the
                 // key derived above is refused through the one judge every
                 // door that files a container calls, in its words — and
@@ -401,7 +461,7 @@ async function registerArtifactBodyCollections(
                 // (#7378 row 1, `assertMetadataRegisterContract`), but in the
                 // generic register contract's words and only after the loader
                 // write; row 1 is unchanged for every type.
-                const nameRefusal = viewContainerNameRefusal(item, 'artifact', packageId);
+                const nameRefusal = viewContainerNameRefusal(item, sourceLabel, packageId);
                 if (nameRefusal) throw nameRefusal;
                 applyProtection(item as any, {
                     packageId: packageId,
@@ -444,9 +504,6 @@ async function registerArtifactBodyCollections(
             // it adds there is exactly the leading `object` term this path
             // was missing.
             const name = slot.name;
-            // Residual only — this slot is already owned by one of the
-            // stack's package bodies.
-            if (slots.skip?.(metaType, name)) continue;
             // ADR-0010 §3.7 — translate the author-facing
             // `protection` block into the private `_lock` envelope
             // and stamp package provenance in one call. Strips the
@@ -1326,6 +1383,7 @@ export class MetadataPlugin implements Plugin {
                     // Unchanged single-package branch — the same two values
                     // this method has always stamped (D7).
                     : { packageId: manifestPackageId, packageVersion: manifestVersion },
+                'artifact',
             );
         }
 
@@ -1367,11 +1425,18 @@ export class MetadataPlugin implements Plugin {
      * `composeStacks(…, { manifest: 'preserve' })` is ADDITIVE, so every
      * top-level item is a copy a body already owns.
      *
-     * The bodies' slots are read by the same derivation the registration uses
-     * (`artifactItemSlot`), so "claimed" means exactly "a body registers this
-     * key" on either door. Bodies and their order come from
+     * WHICH items are residual, and the id they take, is
+     * {@link unclaimedTopLevel}'s answer, the pure half `os validate` reads
+     * too: the bodies' slots are read by the same derivation the registration
+     * uses (`artifactItemSlot`), so "claimed" means exactly "a body registers
+     * this key" on either door. Bodies and their order come from
      * `resolveArtifactPackageOrder` (`@objectstack/core`), the one reader of
      * `packages[]` — never re-derived here.
+     *
+     * A residual view container whose own `name` disagrees with its object is
+     * refused, as a body's is: the artifact door names its source `artifact`,
+     * the config door `manifest`, the word the config boot's own registrar and
+     * `os validate` already use for the same stack.
      *
      * @returns How many items the residual registered — `0` for a stack
      *   without `packages[]`, which has no residual: its top level IS its one
@@ -1382,21 +1447,22 @@ export class MetadataPlugin implements Plugin {
         stack: unknown,
         source: UnclaimedTopLevelSource,
     ): Promise<number> {
-        if (!Array.isArray((stack as any)?.packages)) return 0;
-        const bodies = resolveArtifactPackageOrder(stack);
-        const claimed = claimedArtifactSlots(bodies);
-        const manifestPackageId: string | undefined =
-            (stack as any)?.manifest?.id ?? (stack as any)?.id ?? undefined;
-        const manifestVersion: string | undefined =
-            (stack as any)?.manifest?.version ?? (stack as any)?.version ?? undefined;
+        const unclaimed = unclaimedTopLevel(stack);
+        if (!unclaimed) return 0;
+        // The unclaimed items, regrouped per collection in the order the
+        // stack carries them; the registration walks the collections in its
+        // own order, so it meets them exactly as a walk of the whole top level
+        // that skipped every claimed slot would.
+        const body: Record<string, unknown[]> = {};
+        for (const { field, item } of unclaimed.items) (body[field] ??= []).push(item);
         const residual = await registerArtifactBodyCollections(
             sink,
-            stack as Record<string, unknown>,
-            { packageId: manifestPackageId, packageVersion: manifestVersion },
-            { skip: claimed },
+            body,
+            { packageId: unclaimed.ownerId, packageVersion: unclaimed.ownerVersion },
+            source.door === 'artifact' ? 'artifact' : 'manifest',
         );
         if (residual > 0) {
-            sink.warn(unclaimedTopLevelWarning(source, residual, bodies.length, manifestPackageId));
+            sink.warn(unclaimedTopLevelWarning(source, residual, unclaimed.bodyCount, unclaimed.ownerId));
         }
         return residual;
     }

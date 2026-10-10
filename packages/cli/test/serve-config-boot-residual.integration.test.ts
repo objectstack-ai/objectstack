@@ -31,7 +31,12 @@
  *     only: `os build` refuses that shape before an artifact exists, and that
  *     refusal is pinned here too, so the day it stops refusing this row goes
  *     red and the artifact half gets measured.
- *   - ROW 4: a top-level object and view no package owns.
+ *   - ROW 4: a top-level object and view no package owns. And its refusal
+ *     corner: a top-level view container no package owns whose own `name`
+ *     disagrees with its object is refused by `os serve`, and `os validate` /
+ *     `os build` refuse it first, in the same words — while a divergent
+ *     container a body declares and the top level repeats is refused once, as
+ *     the body's.
  *   - CONTROL: a single-package config (no `packages[]`) is unchanged and has
  *     no residual on either door.
  *
@@ -61,6 +66,7 @@ import {
   randomPort,
 } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
+import { viewContainerNameRefusal } from '@objectstack/objectql';
 
 /** The banner's tail — every row above it has printed. */
 const READY = /Press Ctrl\+C to stop/;
@@ -128,6 +134,45 @@ ${OBJECTS}
 export default defineStack({ manifest: app, objects: [accountObj, noteObj], views: [noteView] }, { strict: false });
 `;
 
+/** A view container whose own `name` is not the object it binds to. */
+const DIVERGENT_VIEW = {
+  name: 'account_list',
+  object: 'acme_account',
+  list: { type: 'grid', data: { provider: 'object', object: 'acme_account' }, columns: ['name'] },
+};
+
+/** Row 4's refusal corner: no package declares the divergent container — the stack's residual. */
+const CONFIG_DIVERGENT_RESIDUAL = `
+import { defineStack } from '@objectstack/spec';
+${OBJECTS}
+const divergent = ${JSON.stringify(DIVERGENT_VIEW)};
+export default defineStack({
+  manifest: { ...app, id: '${RELEASE_ID}' },
+  objects: [caseObj, accountObj],
+  views: [divergent],
+  packages: [
+    { manifest: { ...svc, objects: [caseObj] } },
+    { manifest: { ...app, objects: [accountObj] } },
+  ],
+}, { strict: false });
+`;
+
+/** The same container declared by the app body AND repeated at the top level — claimed, not residual. */
+const CONFIG_DIVERGENT_CLAIMED = `
+import { defineStack } from '@objectstack/spec';
+${OBJECTS}
+const divergent = ${JSON.stringify(DIVERGENT_VIEW)};
+export default defineStack({
+  manifest: { ...app, id: '${RELEASE_ID}' },
+  objects: [caseObj, accountObj],
+  views: [divergent],
+  packages: [
+    { manifest: { ...svc, objects: [caseObj] } },
+    { manifest: { ...app, objects: [accountObj], views: [divergent] } },
+  ],
+}, { strict: false });
+`;
+
 const dirs: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
 
@@ -149,10 +194,15 @@ interface Run { code: number; stdout: string; stderr: string }
 
 /** `os build` in `dir`, through the source entry. */
 function build(dir: string): Promise<Run> {
+  return runCli(dir, ['build']);
+}
+
+/** One `os` command in `dir`, through the source entry. */
+function runCli(dir: string, args: string[]): Promise<Run> {
   return new Promise((done) => {
     execFile(
       TSX,
-      [CLI, 'build'],
+      [CLI, ...args],
       // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
       { cwd: dir, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => done({
@@ -327,6 +377,56 @@ async function read(dir: string, args: string[]): Promise<Reading> {
   }
 }
 
+/**
+ * Boot `os serve` in `dir` and expect it to REFUSE: resolves with the child's
+ * output once it exits before the banner's tail, rejects if it ever boots.
+ */
+function bootRefused(dir: string, args: string[]): Promise<{ code: number | null; output: string }> {
+  return new Promise((resolveRefusal, rejectRefusal) => {
+    const port = randomPort();
+    const child = spawn(TSX, [CLI, 'serve', ...args, '-p', port], {
+      cwd: dir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
+      env: childEnv({
+        NO_COLOR: '1',
+        OS_DATABASE_URL: ':memory:',
+        OS_LOG_LEVEL: 'warn',
+        OS_DISABLE_CONSOLE: '1',
+        OS_SECRET_KEY: E2E_SECRET_KEY,
+      }),
+    }) as ChildProcessWithoutNullStreams;
+    children.push(child);
+    const what = `os serve ${args.join(' ')} in ${dir}`;
+    let out = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      rejectRefusal(new Error(`${what} neither booted nor exited\n--- output ---\n${out.slice(-4000)}`));
+    }, 180_000);
+    const onData = (d: unknown) => {
+      out += String(d);
+      if (!settled && READY.test(out)) {
+        settled = true;
+        clearTimeout(timer);
+        rejectRefusal(new Error(`${what} BOOTED; it was expected to refuse\n--- output ---\n${out.slice(-4000)}`));
+      }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveRefusal({ code, output: out });
+    });
+  });
+}
+
+/** How many times `text` occurs in `output`. */
+const occurrences = (output: string, text: string): number => output.split(text).length - 1;
+
 const CONFIG_DEV = ['objectstack.config.ts', '--dev'];
 const CONFIG_PLAIN = ['objectstack.config.ts'];
 const ARTIFACT_DEV = ['--dev'];
@@ -445,5 +545,56 @@ describe('#22521 control: a single-package config has no residual on either door
 
   it('the config boot gives the same answer', () => {
     expect(configDev).toEqual(artifact);
+  });
+});
+
+describe('#22521 row 4, refusal corner: a divergent view container no package owns is refused by every door, in one set of words', () => {
+  // The boot's words, from the one judge (`viewContainerNameRefusal`): the
+  // residual is filed from `manifest`, under the stack's own manifest id.
+  const RESIDUAL_WORDS = viewContainerNameRefusal(DIVERGENT_VIEW, 'manifest', RELEASE_ID)!.message;
+  // The same container as the app body's own: filed under the app package.
+  const BODY_WORDS = viewContainerNameRefusal(DIVERGENT_VIEW, 'manifest', APP_ID)!.message;
+
+  let validate: Run;
+  let built: Run;
+  let builtDir: string;
+  let serve: { code: number | null; output: string };
+  let claimedValidate: Run;
+  let claimedServe: { code: number | null; output: string };
+
+  beforeAll(async () => {
+    validate = await runCli(project('residual-divergent-validate-', CONFIG_DIVERGENT_RESIDUAL, false), ['validate']);
+    builtDir = project('residual-divergent-build-', CONFIG_DIVERGENT_RESIDUAL, false);
+    built = await build(builtDir);
+    serve = await bootRefused(project('residual-divergent-serve-', CONFIG_DIVERGENT_RESIDUAL, false), CONFIG_DEV);
+    claimedValidate = await runCli(project('residual-claimed-validate-', CONFIG_DIVERGENT_CLAIMED, false), ['validate']);
+    claimedServe = await bootRefused(project('residual-claimed-serve-', CONFIG_DIVERGENT_CLAIMED, false), CONFIG_DEV);
+  }, 480_000);
+
+  it('os serve refuses the residual container, in the judge\'s words, under the stack\'s manifest id', () => {
+    expect(serve.code, serve.output.slice(-3000)).not.toBe(0);
+    expect(serve.output, serve.output.slice(-3000)).toContain(RESIDUAL_WORDS);
+  });
+
+  it('os validate refuses it first, in the same words', () => {
+    // Before #22521's walk change: exit 0 on the stack os serve refuses.
+    expect(validate.code, `${validate.stdout}\n${validate.stderr}`).not.toBe(0);
+    expect(`${validate.stdout}\n${validate.stderr}`).toContain(RESIDUAL_WORDS);
+  });
+
+  it('os build refuses it too, and writes no artifact', () => {
+    expect(built.code, `${built.stdout}\n${built.stderr}`).not.toBe(0);
+    expect(`${built.stdout}\n${built.stderr}`).toContain(RESIDUAL_WORDS);
+    expect(existsSync(join(builtDir, 'dist', 'objectstack.json'))).toBe(false);
+  });
+
+  it('a divergent container a body declares and the top level repeats is refused ONCE, as the body\'s, on both doors', () => {
+    const validated = `${claimedValidate.stdout}\n${claimedValidate.stderr}`;
+    expect(claimedValidate.code, validated).not.toBe(0);
+    expect(occurrences(validated, BODY_WORDS), validated).toBe(1);
+    expect(occurrences(validated, RESIDUAL_WORDS), validated).toBe(0);
+    expect(claimedServe.code, claimedServe.output.slice(-3000)).not.toBe(0);
+    expect(claimedServe.output, claimedServe.output.slice(-3000)).toContain(BODY_WORDS);
+    expect(occurrences(claimedServe.output, RESIDUAL_WORDS)).toBe(0);
   });
 });

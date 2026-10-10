@@ -814,7 +814,9 @@ export class AppPlugin implements Plugin {
      *
      * A refusal the rule raises (a residual view container whose own `name`
      * disagrees with its key) is NOT caught: the artifact boot of the same
-     * stack refuses it too, and the config boot answers the same.
+     * stack refuses it too, and the config boot answers the same. `os validate`
+     * reports it before either boot, from the same residual answer
+     * (`unclaimedTopLevel`).
      */
     private async registerUnclaimedTopLevel(ctx: PluginContext, appId: string): Promise<void> {
         if (this.securityMetadataRegistrar === 'artifact-door') return;
