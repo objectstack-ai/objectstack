@@ -6,15 +6,18 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+import { resolveAuthSecret } from '@objectstack/core';
 import { isExitSignal } from '../../utils/format.js';
 import MigratePlan from './plan.js';
 import MigrateApply from './apply.js';
+import MigrateSecurityCatalogOverlays from './security-catalog-overlays.js';
 
 // [#10126] Pay the first transform of the dist-resolved workspace deps the
 // commands reach through dynamic `import()`s at MODULE LOAD, not inside a case.
 import '@objectstack/runtime';
 import '@objectstack/objectql';
 import '@objectstack/plugin-auth';
+import '@objectstack/plugin-security';
 
 /**
  * [#22581] `os migrate` reads the `.env*` files `os serve` / `start` / `dev`
@@ -25,6 +28,9 @@ import '@objectstack/plugin-auth';
  * `OS_DATABASE_URL` served that database and planned
  * `.objectstack/data/objectstack.db`; an `OS_AUTH_SECRET` kept in `.env` left
  * the auth family out of the plan.
+ *
+ * `--dev` (`os migrate security-catalog-overlays`, which composes as `os serve
+ * --dev`) reads the development files, as `serve --dev` does.
  *
  * Driven in-process through each command's own `run()`, from inside the
  * fixture (`chdir`), with `NODE_ENV=production`: `bin/run-dev.js` pins
@@ -209,5 +215,29 @@ describe('os migrate reads the .env files the serving commands read (#22581)', (
     } finally {
       held.close();
     }
+  }, CASE_TIMEOUT_MS);
+
+  it('--dev reads the development .env files, as os serve --dev does: a secret only in .env.development is seen', async () => {
+    const dir = project([]);
+    writeFileSync(join(dir, '.env.development'), [`OS_AUTH_SECRET=${SECRET}`, 'OS_DATABASE_URL=file:from-dev-env.db', ''].join('\n'));
+    enter(dir);
+
+    const run = await runJson(invoke(MigrateSecurityCatalogOverlays), ['--json', '--dev']);
+    expect(run.payload.error, JSON.stringify(run.payload).slice(0, 400)).toBeUndefined();
+    expect(run.payload.database).toBe('from-dev-env.db');
+    // The secret the auth gate reads on this development boot is the file's,
+    // not the development fallback it would read with no secret at all.
+    expect(resolveAuthSecret({ isDev: true })).toBe(SECRET);
+  }, CASE_TIMEOUT_MS);
+
+  it('control: without --dev, the development .env files are not read', async () => {
+    const dir = project([]);
+    writeFileSync(join(dir, '.env.development'), [`OS_AUTH_SECRET=${SECRET}`, 'OS_DATABASE_URL=file:from-dev-env.db', ''].join('\n'));
+    enter(dir);
+
+    const run = await runJson(invoke(MigrateSecurityCatalogOverlays), ['--json']);
+    expect(run.payload.error, JSON.stringify(run.payload).slice(0, 400)).toBeUndefined();
+    expect(run.payload.database).toBe(join(dir, '.objectstack', 'data', 'objectstack.db'));
+    expect(process.env.OS_AUTH_SECRET).toBeUndefined();
   }, CASE_TIMEOUT_MS);
 });

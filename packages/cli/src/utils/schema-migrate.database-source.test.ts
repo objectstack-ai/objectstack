@@ -8,6 +8,7 @@ import { resolveProjectDatabaseUrl } from '@objectstack/runtime';
 import type { DotenvReading } from '../commands/doctor.js';
 import {
   envRungVariable,
+  loadProjectEnvFiles,
   resolveDatabaseSource,
   type ProjectEnvLoad,
 } from './schema-migrate.js';
@@ -108,5 +109,25 @@ describe('resolveDatabaseSource — one name per rung', () => {
       .toEqual({ kind: 'config-datasource', datasource: 'main' });
     expect(resolveDatabaseSource(load({}), { source: 'unified-default' }, undefined)).toEqual({ kind: 'default' });
     expect(resolveDatabaseSource(load({}), { source: 'legacy-file' }, undefined)).toEqual({ kind: 'default' });
+  });
+});
+
+describe('loadProjectEnvFiles — one record per project root and mode', () => {
+  it('a --dev load and a plain one of one root never share a record; the same mode twice does', () => {
+    const root = mkdtempSync(join(tmpdir(), 'os-22581-memo-'));
+    const saved = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const plain = loadProjectEnvFiles(root);
+      const dev = loadProjectEnvFiles(root, { dev: true });
+      expect(plain.reading.nodeEnv).toBe('production');
+      expect(dev.reading.nodeEnv).toBe('development');
+      expect(dev).not.toBe(plain);
+      expect(loadProjectEnvFiles(root)).toBe(plain);
+      expect(loadProjectEnvFiles(root, { dev: true })).toBe(dev);
+    } finally {
+      if (saved === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = saved;
+    }
   });
 });

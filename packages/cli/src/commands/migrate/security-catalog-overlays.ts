@@ -99,11 +99,12 @@ function jsonRow(row: SecurityCatalogOverlayRow, outcome?: SecurityCatalogOverla
  * (`resolveStackTiers`), and `--dev` merges the config's `devPlugins`
  * (`stackBootPlugins`) and makes the boot a development one for the auth
  * secret's fallback (`isDevelopmentBoot`). Pass the flags the deployment boots
- * with. They move the composition only: this boot stays a one-shot boot (no
- * dev schema self-heal, `NODE_ENV` untouched, and the project's `.env*` files
- * picked by `NODE_ENV` as `os start` picks them — `--dev` does not switch them
- * to `os dev`'s, #22581), so the rest of the environment is the operator's to
- * set as the deployment's.
+ * with. They move the composition, and `--dev` moves which of the project's
+ * `.env*` files are read: the development ones, as `os serve --dev` reads them
+ * (#22581; without it, the ones `NODE_ENV` picks, as `os start` does). The boot
+ * stays a one-shot boot otherwise (no dev schema self-heal, `NODE_ENV`
+ * untouched), so the rest of the environment is the operator's to set as the
+ * deployment's.
  *
  * ## The family's conventions
  *
@@ -158,8 +159,8 @@ export default class MigrateSecurityCatalogOverlays extends Command {
       options: Object.keys(STACK_TIER_PRESETS),
     }),
     dev: Flags.boolean({
-      description: 'Compose as `os serve --dev` does: the config\'s devPlugins, and a development boot for the auth '
-        + 'secret\'s fallback. Pass it when the deployment boots with --dev (`os dev`).',
+      description: 'Compose as `os serve --dev` does: the config\'s devPlugins, the development .env files, and a '
+        + 'development boot for the auth secret\'s fallback. Pass it when the deployment boots with --dev (`os dev`).',
     }),
   };
 
@@ -172,7 +173,8 @@ export default class MigrateSecurityCatalogOverlays extends Command {
     // Occupancy gate — probed BEFORE boot (afterwards our own pool is what the
     // probe finds) and before the prompt, so nobody confirms something we then
     // refuse. The same gate `os migrate meta --stored --apply` keeps.
-    const occupancy = await probeMigrationTarget(flags['database-url']);
+    // [#22581] With `--dev`'s `.env*` files, as the boot below reads them.
+    const occupancy = await probeMigrationTarget(flags['database-url'], { dev: flags.dev === true });
     if (occupancy.status === 'busy' && apply && !flags.force) {
       if (flags.json) {
         await emitJson({

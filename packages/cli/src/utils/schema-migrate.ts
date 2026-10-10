@@ -353,7 +353,7 @@ export interface ProjectEnvLoad {
   readonly shellEnv: Readonly<NodeJS.ProcessEnv>;
 }
 
-/** Project root → its load, for this process. See {@link loadProjectEnvFiles}. */
+/** `[project root, mode]` → its load, for this process. See {@link loadProjectEnvFiles}. */
 const projectEnvLoads = new Map<string, ProjectEnvLoad>();
 
 /**
@@ -368,33 +368,46 @@ const projectEnvLoads = new Map<string, ProjectEnvLoad>();
  * ## The serving commands' load, not a second one
  *
  * `dotenvFlow.config({ node_env, silent: true })` is the call `serve` /
- * `start` / `dev` make, with `os start`'s mode rule — `NODE_ENV === 'test' ?
- * 'test' : NODE_ENV || 'production'`, which {@link doctorNodeEnv} spells
- * (a one-shot command takes no `--dev`). dotenv-flow never overrides a
+ * `start` / `dev` make, with `os serve`'s mode rule: `--dev` → `development`,
+ * else `NODE_ENV === 'test' ? 'test' : NODE_ENV || 'production'` — the half
+ * {@link doctorNodeEnv} spells, and all of `os start`'s. `dev` is set only when
+ * the boot composes as `os serve --dev` (`serveFlags.dev`: `os migrate
+ * security-catalog-overlays --dev`), so that command reads the development
+ * files the deployment it names serves with. dotenv-flow never overrides a
  * variable this process already has, so an exported `OS_DATABASE_URL` keeps
  * its precedence over `.env`, exactly as it does for `serve`. The file list and
  * the per-variable origin are dotenv-flow's own (`readDotenvFiles`, the reader
  * `os doctor` reports with), so the source this stack names is the file the
  * load took the value from.
  *
- * ## Once per project root per process
+ * ## Once per project root and mode per process
  *
  * Called by the occupancy probe (`./migrate-occupancy-gate.ts`), which resolves
  * the target BEFORE the boot, and by {@link bootSchemaStack}; the second call
  * returns the first one's record. Not only for cost: after the load every
  * `.env` variable is in `process.env`, so a second snapshot would report all
  * of them as exported.
+ *
+ * The record is keyed by root AND mode, so a `--dev` load and a plain one of the
+ * same root never share one. A real run never makes both: the process runs one
+ * command, and that command's probe and boot are handed the same `dev`. Only a
+ * test driving several commands in one process can, and it restores the
+ * environment between them, as the loads cannot take each other's values back.
  */
-export function loadProjectEnvFiles(projectRoot: string = process.cwd()): ProjectEnvLoad {
+export function loadProjectEnvFiles(
+  projectRoot: string = process.cwd(),
+  opts: { readonly dev?: boolean } = {},
+): ProjectEnvLoad {
   const root = path.resolve(projectRoot);
-  const prior = projectEnvLoads.get(root);
+  const nodeEnv = opts.dev === true ? 'development' : doctorNodeEnv();
+  const key = JSON.stringify([root, nodeEnv]);
+  const prior = projectEnvLoads.get(key);
   if (prior) return prior;
-  const nodeEnv = doctorNodeEnv();
   const shellEnv = { ...process.env };
   const reading = readDotenvFiles(root, nodeEnv);
   dotenvFlow.config({ node_env: nodeEnv, path: root, silent: true });
   const load: ProjectEnvLoad = { reading, shellEnv };
-  projectEnvLoads.set(root, load);
+  projectEnvLoads.set(key, load);
   return load;
 }
 
@@ -624,8 +637,10 @@ export async function bootSchemaStack(
      * composition answers for — `--dev` (the config's `devPlugins`, and a
      * development boot for the auth gate) and `--preset` (the tiers the gate
      * falls back to), with `serve`'s meaning. See `buildSchemaMigrationPlugins`'s
-     * `serveFlags`. Only for the composition: the data stack itself is booted as
-     * every one-shot command boots it — no `dev` key, so no dev schema self-heal.
+     * `serveFlags`. For the composition, and for which `.env*` files are read
+     * (`--dev` reads the development ones, as `serve --dev` does, #22581): the
+     * data stack itself is booted as every one-shot command boots it — no `dev`
+     * key, so no dev schema self-heal.
      */
     serveFlags?: { readonly dev?: boolean; readonly preset?: string };
     /**
@@ -651,7 +666,7 @@ export async function bootSchemaStack(
   // [#22581] The environment the serving commands boot with, before the
   // database, the auth secret or anything else is read from it.
   const projectRoot = opts.projectRoot ?? process.cwd();
-  const envLoad = loadProjectEnvFiles(projectRoot);
+  const envLoad = loadProjectEnvFiles(projectRoot, { dev: opts.serveFlags?.dev === true });
 
   const { createStandaloneStack, Runtime, resolveStandaloneDatabase } = await import('@objectstack/runtime');
   const defer = opts.deferSchemaDdl === true;
