@@ -340,7 +340,7 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     ok({ type: 'image', multiple: true }, ['file_a', 'file_b']);
     bad({ type: 'file' }, 42);
     bad({ type: 'file' }, {});
-    // The inline blob is no longer STORED — it is the expanded read form.
+    // The inline blob is no longer STORED — it is the resolved expanded read form.
     bad({ type: 'file' }, { url: 'https://cdn/f.pdf', name: 'f.pdf', size: 1024 });
     // An external URL was never a managed file; ADR-0104 R7 retires it toward
     // an explicit `url` field. Both of these reach authors as warn-first
