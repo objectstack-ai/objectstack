@@ -1040,6 +1040,10 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
+        // [#22450] The caller's already-resolved language, the trigger door's
+        // twin (`buildAutomationContext`): a refused run's message renders in
+        // it. See `AutomationContext.locale`.
+        ...(typeof ec?.locale === 'string' && ec.locale.length > 0 ? { locale: ec.locale } : {}),
         params: seedFlowActionParams(deps, action, { objectName, record, params, recordId }),
         // [#19846] Which of those keys the CALLER supplied, stated here where it
         // is known rather than inferred downstream from the merged bag.

@@ -39,6 +39,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/security/explain.zod.ts` — [ADR-0090 D6] Access-explanation contract — `explain(principal, object,
 - `node_modules/@objectstack/spec/src/security/permission.zod.ts` — Exports: ObjectAccessScopeSchema, ObjectPermissionSchema, EffectiveObjectPermissionSchema, AdminScopeSchema, FieldPermissionSchema
 - `node_modules/@objectstack/spec/src/security/rls.zod.ts` — Row-Level Security (RLS) Protocol
+- `node_modules/@objectstack/spec/src/shared/conditional-formatting.zod.ts` — The **single declaration** of a conditional formatting rule —
 - `node_modules/@objectstack/spec/src/shared/enums.zod.ts` — Exports: SortDirectionEnum, SortItemSchema, MutationEventEnum, IsolationLevelEnum
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/http.zod.ts` — Shared HTTP Schemas

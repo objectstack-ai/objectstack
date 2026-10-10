@@ -1,0 +1,9 @@
+---
+'@objectstack/plugin-security': patch
+---
+
+`security/explain` composes a transfer's row-level security as the update its door is, and a restore's and a purge's as the write class the by-id write path composes them as.
+
+- **What was wrong.** The by-id write path composes a lifecycle verb's row-level security for its nearest write class: transfer and restore as `update`, purge as `delete`. explain composed it for the verb as asked, which the RLS compiler reads as a read (`select`). So no update-class policy and no ownership floor reached a transfer's verdict. On a row an app-authored update policy excludes, explain answered `record.visible: true`, with "No business RLS policy applies to this record", beside the `PATCH` that writes `owner_id` and answers `403 PERMISSION_DENIED`.
+- **What it does now.** The mapping is declared once, in plugin-security, and both readers read it: the by-id write pre-image gate (byte-identical to the expression it replaces) and explain. explain composes both of its row-level readings for the mapped operation: the record's row story and the object-level `rls` layer. A transfer of a row an update policy excludes is now `visible: false`, decided by `rls`, as an update of that row is. The object-level `allowed` reads the `rls` layer's deny-all verdict, so for a transfer it now reads the update class's. Restore and purge are still refused at the object gate for every principal, so `object_crud` still decides their verdict first; the `rls` layer under it now reports the update and delete classes.
+- **What is unchanged.** Every other operation: `read`, `create`, `update`, `delete` and `export` are composed exactly as before. The RLS compiler's own default for an unlisted operation. The read path's row-level filter injection, which never sees a lifecycle verb. No export is added to the package.

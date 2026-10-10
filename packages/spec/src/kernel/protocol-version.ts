@@ -13,9 +13,13 @@
  * the moment the runtime crosses into `N+1`.
  *
  * Kept in lockstep with the package's own major; `protocol-version.test.ts`
- * asserts it against `package.json` so the two cannot drift.
+ * asserts it against `package.json` so the two cannot drift. One exception, in
+ * Changesets pre mode with a pending `major` for this package: the constant may
+ * already name the major that release is about to publish, so the protocol move
+ * lands in a reviewed pull request with full CI rather than in the version pass
+ * (ruling record 6049734955, Q1 → B).
  */
-export const PROTOCOL_VERSION = '17.0.0';
+export const PROTOCOL_VERSION = '18.0.0';
 
 /** The protocol major as an integer — the value the handshake compares. */
 export const PROTOCOL_MAJOR: number = Number.parseInt(PROTOCOL_VERSION.split('.')[0]!, 10);

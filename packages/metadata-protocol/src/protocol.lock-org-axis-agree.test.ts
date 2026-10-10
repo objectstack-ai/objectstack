@@ -32,6 +32,10 @@
  *
  * It sits above PR #21693's and PR #21715's per-case pins and replaces neither.
  *
+ * [ADR-0131 D6] Every organization-scoped write is now refused first
+ * (`NOT_OVERRIDABLE` / 403), before the `_lock` gate: the door's half of the
+ * agreement is pinned on requests naming no organization.
+ *
  * Every row here is stored under the canonical type spelling — every row a
  * live write can mint. The reads' at-rest tolerance for the other spelling is
  * the one declared difference from the gate (`findServedOverlayRow`'s
@@ -131,10 +135,12 @@ const settle = (run: Promise<unknown>) => run.then(() => null, (e: unknown) => e
 
 type Verdict = { refused: { code: unknown; status: unknown } } | 'admitted';
 const ITEM_LOCKED: Verdict = { refused: { code: 'ITEM_LOCKED', status: 403 } };
+/** [ADR-0131 D6] Every organization-scoped write is refused first, before the `_lock` gate is reached. */
+const NOT_OVERRIDABLE: Verdict = { refused: { code: 'NOT_OVERRIDABLE', status: 403 } };
 
 /**
  * The door, end to end. Refused ⇔ the ADR-0112 `ITEM_LOCKED` / 403 envelope
- * came back. Admitted ⇔ the ADR-0010 `_lock` gate was reached and answered no
+ * came back (or, for an organization-scoped request, `NOT_OVERRIDABLE` / 403). Admitted ⇔ the ADR-0010 `_lock` gate was reached and answered no
  * refusal; whatever the write does after that (validation, a double that
  * persists nothing) is not a lock verdict and is not read as one.
  */
@@ -148,7 +154,7 @@ async function door(
         const outcome: any = await settle(operation === 'save'
             ? protocol.saveMetaItem({ type, name, item: { name, label: name, object: 'account' }, ...scope })
             : protocol.deleteMetaItem({ type, name, ...scope }));
-        if (outcome instanceof Error && (outcome as any).code === 'ITEM_LOCKED') {
+        if (outcome instanceof Error && ['ITEM_LOCKED', 'NOT_OVERRIDABLE'].includes((outcome as any).code)) {
             return { refused: { code: (outcome as any).code, status: (outcome as any).status } };
         }
         expect(gate, `${type}/${name} ${operation}: not refused, yet the _lock gate was never reached`).toHaveBeenCalledTimes(1);
@@ -183,35 +189,29 @@ const OPERATIONS = ['save', 'delete'] as const;
 
 describe('[#21716] pin 2 — an env-wide _lock: full row binds an organization with no row of its own', () => {
     for (const { kernel, environmentId } of TOPOLOGIES) {
-        it(`${kernel} kernel: the org-scoped read says locked, and save / delete are refused ITEM_LOCKED (403)`, async () => {
+        it(`${kernel} kernel: the org-scoped read says locked, and save / delete are refused NOT_OVERRIDABLE (403) before any read`, async () => {
             const { protocol, inserted } = harness(environmentId, [viewRow('v_env_full', null, 'full')]);
             expect(await envelope(protocol, 'v_env_full', ORG)).toMatchObject({
                 lock: 'full', editable: false, deletable: false, served: 'env-wide row',
             });
             for (const operation of OPERATIONS) {
                 const err: any = await settle(operation === 'save'
-                    ? protocol.saveMetaItem({ type: 'view', name: 'v_env_full', item: { name: 'v_env_full', label: 'x', object: 'account' }, organizationId: ORG })
-                    : protocol.deleteMetaItem({ type: 'view', name: 'v_env_full', organizationId: ORG }));
+                    ? protocol.saveMetaItem({ type: 'view', name: 'v_env_full', item: { name: 'v_env_full', label: 'x', object: 'account' }, organizationId: ORG } as any)
+                    : protocol.deleteMetaItem({ type: 'view', name: 'v_env_full', organizationId: ORG } as any));
                 expect(err, operation).toBeInstanceOf(Error);
-                expect({ code: err.code, status: err.status, lock: err.lock }, operation)
-                    .toEqual({ code: 'ITEM_LOCKED', status: 403, lock: 'full' });
+                expect({ code: err.code, status: err.status }, operation)
+                    .toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
             }
-            // The denial is recorded against the organization that asked, as the
-            // ADR-0010 §3.6 trail records every refused write.
-            const denials = inserted.filter((r) => r.table === 'sys_metadata_audit').map((r) => r.values);
-            expect(denials.map((d) => ({ operation: d.operation, outcome: d.outcome, organization_id: d.organization_id, lock_state: d.lock_state })))
-                .toEqual([
-                    { operation: 'save', outcome: 'denied', organization_id: ORG, lock_state: 'full' },
-                    { operation: 'delete', outcome: 'denied', organization_id: ORG, lock_state: 'full' },
-                ]);
+            // [ADR-0131 D6] Refused before the `_lock` gate: nothing is written.
+            expect(inserted).toEqual([]);
         });
 
         it(`${kernel} kernel: an org-scoped publish and rollback are refused the same way (the shared write gate)`, async () => {
             const { protocol } = harness(environmentId, [viewRow('v_env_full', null, 'full')]);
-            const published: any = await settle(protocol.publishMetaItem({ type: 'view', name: 'v_env_full', organizationId: ORG }));
-            expect({ code: published?.code, status: published?.status }).toEqual({ code: 'ITEM_LOCKED', status: 403 });
-            const rolledBack: any = await settle(protocol.rollbackMetaItem({ type: 'view', name: 'v_env_full', toVersion: 1, organizationId: ORG }));
-            expect({ code: rolledBack?.code, status: rolledBack?.status }).toEqual({ code: 'ITEM_LOCKED', status: 403 });
+            const published: any = await settle(protocol.publishMetaItem({ type: 'view', name: 'v_env_full', organizationId: ORG } as any));
+            expect({ code: published?.code, status: published?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+            const rolledBack: any = await settle(protocol.rollbackMetaItem({ type: 'view', name: 'v_env_full', toVersion: 1, organizationId: ORG } as any));
+            expect({ code: rolledBack?.code, status: rolledBack?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
         });
     }
 });
@@ -237,11 +237,12 @@ describe('[#21716] pin 3 — both rows present: the door binds the lock of the r
                         served: q.organizationId ? 'org row' : 'env-wide row',
                         overlayScope: q.organizationId ? 'org' : 'env',
                     });
-                    // …and that row's lock is the one the doors enforce.
+                    // …and that row's lock is the one the doors enforce. [ADR-0131 D6]
+                    // An org-scoped write is refused before the `_lock` gate.
                     expect(await door(protocol, 'v_both', 'save', q.organizationId))
-                        .toEqual(read.editable ? 'admitted' : ITEM_LOCKED);
+                        .toEqual(q.organizationId ? NOT_OVERRIDABLE : read.editable ? 'admitted' : ITEM_LOCKED);
                     expect(await door(protocol, 'v_both', 'delete', q.organizationId))
-                        .toEqual(read.deletable ? 'admitted' : ITEM_LOCKED);
+                        .toEqual(q.organizationId ? NOT_OVERRIDABLE : read.deletable ? 'admitted' : ITEM_LOCKED);
                 });
             }
         }
@@ -252,9 +253,8 @@ describe('[#21716] pin 4 — a type with no per-org channel: neither the read no
     // `page` declares `allowOrgOverride: false`, so an org-scoped row of it is
     // pre-#6190 residue boot hydration walks past. The reads gate the
     // organization away (`organizationIdForMetaRead`) and serve the env-wide
-    // row; the door asks the same gate, so it binds that row's `_lock` too. A
-    // save is refused earlier, by the org-scope door (`NOT_OVERRIDABLE`), so
-    // the removal is the verb that reaches the `_lock` gate with an organization.
+    // row. [ADR-0131 D6] Every org-scoped write — the removal included — is
+    // refused by the org-scope door (`NOT_OVERRIDABLE`) before the `_lock` gate.
     const cases: Array<{ env: Lock; org: Lock }> = [
         { env: 'full', org: 'none' },
         { env: 'none', org: 'full' },
@@ -266,8 +266,7 @@ describe('[#21716] pin 4 — a type with no per-org channel: neither the read no
                 const { protocol } = harness(environmentId, rows);
                 const read = await envelope(protocol, 'p_both', ORG, 'page');
                 expect(read).toMatchObject({ lock: c.env, served: 'env-wide row', overlayScope: 'env' });
-                expect(await door(protocol, 'p_both', 'delete', ORG, 'page'))
-                    .toEqual(read.deletable ? 'admitted' : ITEM_LOCKED);
+                expect(await door(protocol, 'p_both', 'delete', ORG, 'page')).toEqual(NOT_OVERRIDABLE);
             });
         }
     }

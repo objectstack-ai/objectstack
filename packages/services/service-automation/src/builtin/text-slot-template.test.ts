@@ -12,12 +12,17 @@
  * `Date` rendered JSON-quoted, a whole-slot object `[object Object]`), which
  * the renderer pins below hold.
  *
- * The card's three pins are the first describe block.
+ * The card's three pins are the first describe block. #22477's — a hole over
+ * a `$` root the engine does not bind is refused, and the spec judge's list of
+ * the roots it does bind misses none of them — are the last.
  */
 
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { AutomationContext } from '@objectstack/spec/contracts';
-import { TEXT_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
+import { TEXT_SLOT_TEMPLATE_REFUSAL, textSlotTemplateRefusal } from '@objectstack/spec/automation';
 
 import { AutomationEngine } from '../engine.js';
 import { InMemorySuspendedRunStore } from '../suspended-run-store.js';
@@ -260,5 +265,102 @@ describe('#22110 — renderTextSlot, the one text renderer', () => {
 
     it('leaves a single-brace token as literal text — the doors refuse it before a run, so the renderer never reads it', () => {
         expect(renderTextSlot('Hello {record.name}', vars({ record: ACME }))).toBe('Hello {record.name}');
+    });
+});
+
+/** This package's `src` — the runtime whose `$` variables the spec judge lists. */
+const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** A `$`-named variable bound by its literal name: `variables.set('$error', …)`. */
+const DOLLAR_BINDING = /\.set\(\s*(['"`])(\$[A-Za-z_][\w$]*)\1/g;
+
+/** Every `$`-named variable this package's runtime sources bind by literal name, with the file binding it. */
+function engineBoundDollarVariables(): Map<string, string> {
+    const out = new Map<string, string>();
+    const walk = (dir: string) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const path = join(dir, entry.name);
+            if (entry.isDirectory()) walk(path);
+            else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+                for (const match of readFileSync(path, 'utf8').matchAll(DOLLAR_BINDING)) {
+                    if (!out.has(match[2]!)) out.set(match[2]!, path.slice(SRC.length + 1));
+                }
+            }
+        }
+    };
+    walk(SRC);
+    return out;
+}
+
+describe('#22477 — a text-slot hole may root only at a `$` variable the engine binds', () => {
+    const bound = engineBoundDollarVariables();
+
+    // A `$`-named variable this runtime starts binding must be admitted by the
+    // spec's one list (`FLOW_ENGINE_VARIABLES` in `@objectstack/spec`'s
+    // `flow-text-slot-template.ts`), or a text slot could not name it — add it
+    // THERE. And one it stops binding must leave that list too, or a hole over
+    // it would be admitted and render blank: that is what the floor below is
+    // for — it fails on a removal, so delete the name from both places.
+    it('the scan is not vacuous: it finds every `$` variable bound today', () => {
+        expect([...bound.keys()].sort()).toEqual(
+            expect.arrayContaining(['$error', '$flowLabel', '$flowName', '$loopIndex', '$loopItems', '$record', '$runId']),
+        );
+    });
+
+    it('the spec judge admits a hole over every `$` variable this runtime binds — its list misses none', () => {
+        for (const [name, file] of bound) {
+            expect(textSlotTemplateRefusal(`{{ ${name} }}`), `${name}, bound in ${file}`).toBeUndefined();
+        }
+        // Control: the judge is not admitting every `$` hole.
+        expect(bound.has('$User')).toBe(false);
+        expect(textSlotTemplateRefusal('{{ $User.Id }}')).toBeDefined();
+    });
+
+    it('an admitted root renders its value — `$flowName`, `$flowLabel`, `$record` are bound for every run', async () => {
+        const { engine, emitted } = harness();
+        engine.registerFlow('roots', notifyFlow('roots', { title: '{{ $flowName }} / {{ $flowLabel }} / {{ $record.name }}' }) as never);
+        const result = await engine.execute('roots', ctx());
+        expect(result.success, JSON.stringify(result)).toBe(true);
+        expect(emitted[0]!.payload).toMatchObject({ title: 'roots / roots / Acme Corp' });
+    });
+
+    it('registerFlow refuses `By {{ $User.Id }}` in a text slot with the remedy `{$User.Id}` gets — it would render `By `', () => {
+        const { engine } = harness();
+        const refusal = registrationRefusal(engine, 'by_user', notifyFlow('by_user', { title: 'Closed', message: 'By {{ $User.Id }}' }));
+        expect(refusal).toBeDefined();
+        expect(refusal).toContain("node 'notify' (notify) notify message at config.message");
+        expect(refusal).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
+        // The renderer it no longer reaches: the hole resolves to nothing.
+        expect(renderTextSlot('By {{ $User.Id }}', new Map([['userId', 'usr_7']]))).toBe('By ');
+    });
+
+    // #19939 pass 2: the value slots refuse `{$User.Id}`, so the remedy above
+    // computes the run user with the CEL scope's `current_user` — and it
+    // renders the user, and nothing in a run with none (as the template did).
+    it('the remedy renders the run user: an assignment of `current_user.id`, then `By {{ v }}`', async () => {
+        const flow = (source: string) => ({
+            name: 'by_user', label: 'by_user', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'who', type: 'assignment', label: 'Who', config: { assignments: { v: { dialect: 'cel', source } } } },
+                { id: 'notify', type: 'notify', label: 'Notify', config: { recipients: ['user_1'], title: 'Closed', message: 'By {{ v }}' } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'who' },
+                { id: 'e2', source: 'who', target: 'notify' },
+                { id: 'e3', source: 'notify', target: 'end' },
+            ],
+        });
+        const withUser = harness();
+        withUser.engine.registerFlow('by_user', flow('current_user.id') as never);
+        expect((await withUser.engine.execute('by_user', ctx())).success).toBe(true);
+        expect(withUser.emitted[0]!.payload).toMatchObject({ body: 'By usr_7' });
+
+        const userless = harness();
+        userless.engine.registerFlow('by_user', flow('current_user != null ? current_user.id : null') as never);
+        const noUser = { event: 'manual', object: 'account', record: ACME } as unknown as AutomationContext;
+        expect((await userless.engine.execute('by_user', noUser)).success).toBe(true);
+        expect(userless.emitted[0]!.payload).toMatchObject({ body: 'By ' });
     });
 });

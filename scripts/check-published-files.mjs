@@ -289,6 +289,8 @@ const EXTRA_ENTRIES = {
     'api-surface':
       'Export snapshot used by downstream compatibility checks — one file per published entry point since #5837.',
     'spec-changes.json': 'Machine-readable spec change log driving the upgrade guide.',
+    'protocol-upgrade-guide.md':
+      'The protocol upgrade guide, generated from the ADR-0087 registries at publish (it is not in the tree) so an upgrading agent reads the guide for the version it installed, offline. scripts/release-spec-changes.sh --verify refuses an artifact that ships without it.',
   },
 };
 

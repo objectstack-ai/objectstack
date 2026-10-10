@@ -45,6 +45,16 @@
  * > rejected — the review diff of `spec-changes.json` / the upgrade guide is
  * > worth the laps it costs.
  *
+ * ⚠️ That ruling's option-B sentence is SUPERSEDED for the two projections it
+ * names, and stays quoted above because a superseded ruling is still a record.
+ * Ruling `6078203801` on #22449 (letter B′, 2026-10-09, the maintainer's own
+ * re-opening) generates the per-major section of `spec-changes.json` and the
+ * protocol upgrade guide at publish instead of committing them, and keeps this
+ * ruling's reason — the review diff — as its condition (1): every pull request
+ * still renders the generated diff of both. ADR-0087 D4 records it. Nothing in
+ * this file rests on that sentence: these anchor shards stay committed either
+ * way, which is what the note below is about.
+ *
  * ⚠️ Note what this is NOT. No data left version control and no reviewable diff
  * was traded away — that is option B, which the ruling rejected. Every byte of
  * the old file is still committed, one entry per file, and the review diff got

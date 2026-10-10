@@ -38,6 +38,9 @@ type ContractMock<T> = Partial<Record<keyof T, unknown>>;
  *
  * [#21061] `/analytics` joined the same floor, so its routing cases take the
  * same caller; its anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+ *
+ * [#22432] `/i18n` joined it too, so its cases take the same caller; its
+ * anonymity is pinned in `domains/i18n-anonymous-deny.test.ts`.
  */
 const AUTHED_CALLER = () => ({ request: {}, executionContext: { userId: 'u_test', isSystem: false, positions: [], permissions: [], systemPermissions: [] } }) as any;
 
@@ -2593,7 +2596,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should list locales via GET /locales', async () => {
-            const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/locales', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             // Descriptors, not bare codes — the shape `GetLocalesResponseSchema`
@@ -2603,7 +2606,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should get translations via GET /translations/:locale', async () => {
-            const result = await dispatcher.handleI18n('/translations/zh-CN', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/translations/zh-CN', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.locale).toBe('zh-CN');
@@ -2614,7 +2617,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should get translations via GET /translations?locale=zh-CN (query param)', async () => {
-            const result = await dispatcher.handleI18n('/translations', 'GET', { locale: 'zh-CN' }, { request: {} });
+            const result = await dispatcher.handleI18n('/translations', 'GET', { locale: 'zh-CN' }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.locale).toBe('zh-CN');
@@ -2622,14 +2625,14 @@ describe('HttpDispatcher', () => {
         });
 
         it('should return 400 when translations requested without locale', async () => {
-            const result = await dispatcher.handleI18n('/translations', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/translations', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(400);
             expect(result.response?.body?.error?.message).toBe('Missing locale parameter');
         });
 
         it('should get field labels via GET /labels/:object/:locale', async () => {
-            const result = await dispatcher.handleI18n('/labels/account/zh-CN', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/labels/account/zh-CN', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.object).toBe('account');
@@ -2639,7 +2642,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should get field labels via GET /labels/:object?locale=zh-CN (query param)', async () => {
-            const result = await dispatcher.handleI18n('/labels/account', 'GET', { locale: 'zh-CN' }, { request: {} });
+            const result = await dispatcher.handleI18n('/labels/account', 'GET', { locale: 'zh-CN' }, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.object).toBe('account');
@@ -2647,7 +2650,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should return 400 when labels requested without locale', async () => {
-            const result = await dispatcher.handleI18n('/labels/account', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/labels/account', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(400);
             expect(result.response?.body?.error?.message).toBe('Missing locale parameter');
@@ -2668,7 +2671,7 @@ describe('HttpDispatcher', () => {
          * scene of the original pin.
          */
         it('emits an ApiErrorSchema-conformant error body (#3842, was the #3675 pin)', async () => {
-            const result = await dispatcher.handleI18n('/translations', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/translations', 'GET', {}, AUTHED_CALLER());
             const body = result.response?.body as { success?: boolean; error?: unknown };
 
             expect(body.success).toBe(false);
@@ -2718,7 +2721,7 @@ describe('HttpDispatcher', () => {
                 messages: { save: 'Save' },
             });
 
-            const result = await dispatcher.handleI18n('/labels/contact/en', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/labels/contact/en', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             // Entries are objects carrying help/options, per
@@ -2737,7 +2740,7 @@ describe('HttpDispatcher', () => {
                 objects: { contact: { fields: { email: { label: 'Email' } } } },
             });
 
-            const result = await dispatcher.handleI18n('/labels/account/en', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/labels/account/en', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.labels).toEqual({});
@@ -2747,17 +2750,18 @@ describe('HttpDispatcher', () => {
             (kernel as any).getService = vi.fn().mockResolvedValue(null);
             (kernel as any).services = new Map();
 
-            const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/locales', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(501);
         });
 
         it('should return unhandled for non-GET methods', async () => {
-            const result = await dispatcher.handleI18n('/locales', 'POST', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/locales', 'POST', {}, AUTHED_CALLER());
             expect(result.handled).toBe(false);
         });
 
         it('should dispatch /i18n routes via dispatch()', async () => {
+            signInDispatchCaller(dispatcher);
             const result = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, { request: {} });
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'zh-CN', 'ja']);
@@ -2770,7 +2774,7 @@ describe('HttpDispatcher', () => {
                 return {};
             });
 
-            const result = await dispatcher.handleI18n('/translations/zh', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/translations/zh', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             const data = result.response?.body?.data;
@@ -2786,7 +2790,7 @@ describe('HttpDispatcher', () => {
                 return {};
             });
 
-            const result = await dispatcher.handleI18n('/translations/ZH-CN', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/translations/ZH-CN', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             const data = result.response?.body?.data;
@@ -2921,7 +2925,7 @@ describe('HttpDispatcher', () => {
             expect(info.services.i18n.status).toBe('available');
 
             // Handler should also find it
-            const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/locales', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'fr']);
@@ -3455,7 +3459,7 @@ describe('HttpDispatcher', () => {
         it('/i18n — a stub slot answers the not-available 501; a degraded provider serves', async () => {
             const stub = stubbed({ getLocales: vi.fn().mockReturnValue(['xx']) });
             serveOnly('i18n', stub);
-            const stubResult = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            const stubResult = await dispatcher.handleI18n('/locales', 'GET', {}, AUTHED_CALLER());
             expect(stubResult.response?.status).toBe(501);
             expect(stub.getLocales).not.toHaveBeenCalled();
 
@@ -3464,7 +3468,7 @@ describe('HttpDispatcher', () => {
                 getDefaultLocale: vi.fn().mockReturnValue('en'),
             });
             serveOnly('i18n', svc);
-            const okResult = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            const okResult = await dispatcher.handleI18n('/locales', 'GET', {}, AUTHED_CALLER());
             expect(okResult.response?.status).toBe(200);
             expect(svc.getLocales).toHaveBeenCalled();
         });
@@ -3686,7 +3690,7 @@ describe('HttpDispatcher', () => {
             expect(info.locale.supported).toEqual(['en', 'zh-CN']);
 
             // Handler should serve translations
-            const result = await dispatcher.handleI18n('/translations/zh-CN', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/translations/zh-CN', 'GET', {}, AUTHED_CALLER());
             expect(result.response?.status).toBe(200);
             expect(result.response?.body?.data?.translations['o.task.label']).toBe('任务');
         });
@@ -3705,6 +3709,7 @@ describe('HttpDispatcher', () => {
             });
 
             // MSW-style dispatch: full path stripped to relative
+            signInDispatchCaller(dispatcher);
             const localesResult = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, { request: {} });
             expect(localesResult.handled).toBe(true);
             expect(localesResult.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'de']);
@@ -3729,10 +3734,11 @@ describe('HttpDispatcher', () => {
             expect(info.services.i18n.status).toBe('unavailable');
 
             // Handler: 501
-            const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/locales', 'GET', {}, AUTHED_CALLER());
             expect(result.response?.status).toBe(501);
 
             // Dispatch: also 501
+            signInDispatchCaller(dispatcher);
             const dispatchResult = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, { request: {} });
             expect(dispatchResult.response?.status).toBe(501);
         });
@@ -3758,7 +3764,7 @@ describe('HttpDispatcher', () => {
             const info = await dispatcher.getDiscoveryInfo('/api/v1');
             expect(info.services.i18n.enabled).toBe(true);
 
-            const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} });
+            const result = await dispatcher.handleI18n('/locales', 'GET', {}, AUTHED_CALLER());
             expect(result.response?.status).toBe(200);
         });
     });

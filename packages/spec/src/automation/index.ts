@@ -84,5 +84,9 @@ export * from './flow-value-slot-template';
 // judge of the single-brace `{…}` tokens they still carry, shared by the three
 // node contracts, `registerFlow` and `objectstack validate`.
 export * from './flow-text-slot-template';
+// The one key a screen field's option is addressed by as text — read by the
+// option-collision parse refusal, `translateFlow`, the reference lint and the
+// i18n extractor alike.
+export * from './flow-screen-option-key';
 export * from './bpmn-interop.zod';
 export * from './bpmn-mapping';

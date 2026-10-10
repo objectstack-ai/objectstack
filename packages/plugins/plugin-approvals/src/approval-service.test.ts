@@ -13,6 +13,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { ApprovalService, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
+import { celEngine } from '@objectstack/formula';
+import { SysApprovalRequest } from './sys-approval-request.object.js';
 
 interface FakeRow { [k: string]: any }
 
@@ -2048,6 +2050,122 @@ describe('ApprovalService — admin override (#3424)', () => {
   });
 });
 
+// ── approval_comment: the declared reply against the route it posts to ──────
+//
+// `sys_approval_request` declares the thread reply as the action
+// `approval_comment` (POST `/approvals/requests/{id}/comment`, body `comment` +
+// `attachments`, no actor). Its `visible` gate is evaluated on the row the
+// caller is served — `getRequest`, which attaches the `viewer` block — so the
+// gate is only honest if, for every caller shape, "the button shows" is exactly
+// "the route admits the post". This matrix measures both halves against the
+// REAL service for each shape, and the agreement is the pin: a predicate looser
+// than the route is a lever that fails on use, a narrower one a reply nobody
+// can send. The REST route resolves the actor as `body.actorId ?? body.actor_id
+// ?? context.userId`, and the declared action sends no actor, so the service is
+// driven with the caller's own id exactly as the route would drive it.
+describe('approval_comment — its visible gate is the comment route\'s admission', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-01-15T10:00:00Z').getTime();
+
+  const PLATFORM_ADMIN = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+  const SALES_MANAGER = { userId: 'u_sm', tenantId: 't1', positions: ['sales_manager'], permissions: [] } as any;
+
+  type Action = { name: string; visible?: { dialect: string; source: string } | string };
+  const reply = ((SysApprovalRequest as { actions?: Action[] }).actions ?? []).find((a) => a.name === 'approval_comment');
+
+  /** The predicate's verdict on the row this caller is served; no row, no button. */
+  const shown = (row: Record<string, unknown> | null, ctx: any): boolean => {
+    if (!row || !reply?.visible) return false;
+    const source = typeof reply.visible === 'string' ? reply.visible : reply.visible.source;
+    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, user: { id: String(ctx.userId ?? '') } });
+    if (!r.ok) throw new Error(`approval_comment.visible faulted: ${r.error.message}`);
+    return r.value === true;
+  };
+
+  /** The route's verdict: the post as the declared action sends it, or the refusal's code. */
+  const admitted = async (id: string, ctx: any): Promise<true | string> => {
+    try {
+      await svc.comment(id, { actorId: ctx.userId, comment: 'a reply', attachments: ['file_1'] }, ctx);
+      return true;
+    } catch (err: any) {
+      return String(err?.message ?? err).split(':')[0];
+    }
+  };
+
+  async function open(input: ReturnType<typeof openInput>): Promise<string> {
+    const opened = await svc.openNodeRequest(input, CTX); // submitter u1
+    if ('autoApproved' in opened) throw new Error('fixture: the approver slate must not be empty');
+    return opened.id;
+  }
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+  });
+
+  it('the action is declared, and posts to the comment route', () => {
+    expect(reply, 'sys_approval_request declares approval_comment').toBeDefined();
+  });
+
+  it('every caller shape: the button shows exactly when the route admits the post', async () => {
+    const pending = await open(openInput(['u9']));
+    const stuck = await open(openInput([], {
+      recordId: 'opp2', runId: 'run_2',
+      config: { approvers: [{ type: 'position' as const, value: 'sales_manager' }], behavior: 'first_response' as const, lockRecord: true },
+    }));
+    const approved = await open(openInput(['u9'], { recordId: 'opp3', runId: 'run_3' }));
+    await svc.decideNode(approved, { decision: 'approve', actorId: 'u9' }, SYS);
+    const recalled = await open(openInput(['u9'], { recordId: 'opp4', runId: 'run_4' }));
+    await svc.recall(recalled, { actorId: 'u1' }, CTX);
+
+    const cases: Array<[string, string, any, boolean, true | string]> = [
+      ['pending · the submitter', pending, CTX, true, true],
+      ['pending · a pending approver', pending, asUser('u9'), true, true],
+      ['pending · a holder of a position slot', stuck, SALES_MANAGER, true, true],
+      ['pending · an override admin on no slot', pending, PLATFORM_ADMIN, false, 'FORBIDDEN'],
+      ['pending · a stranger', pending, asUser('u_stranger'), false, 'FORBIDDEN'],
+      ['approved · the submitter', approved, CTX, false, 'INVALID_STATE'],
+      ['approved · the approver who decided', approved, asUser('u9'), false, 'INVALID_STATE'],
+      ['recalled · the submitter', recalled, CTX, false, 'INVALID_STATE'],
+    ];
+    const measured: Array<[string, boolean, true | string]> = [];
+    for (const [label, id, ctx] of cases) {
+      const row = (await svc.getRequest(id, ctx)) as Record<string, unknown> | null;
+      measured.push([label, shown(row, ctx), await admitted(id, ctx)]);
+    }
+    expect(measured).toEqual(cases.map(([label, , , show, admit]) => [label, show, admit]));
+    // The agreement itself, stated without the expected table: shown ⇔ admitted.
+    for (const [label, show, admit] of measured) expect([label, show], label).toEqual([label, admit === true]);
+  });
+
+  it('the override admin is a real non-arm, not a reader who cannot see the request', async () => {
+    // Without this the admin row above could pass because the admin is simply
+    // not served the request. The admin IS served it, with the override flag
+    // the decision levers OR in — and the reply deliberately does not.
+    const id = await open(openInput(['u9']));
+    const row = await svc.getRequest(id, PLATFORM_ADMIN);
+    expect(row?.viewer).toMatchObject({ can_act: false, is_submitter: false, can_override: true });
+  });
+
+  it('a reply the route admits is a comment row on the request timeline, attachments included', async () => {
+    const id = await open(openInput(['u9']));
+    await svc.comment(id, { actorId: 'u1', comment: 'Receipts attached.', attachments: ['file_a', 'file_b'] }, CTX);
+    await svc.comment(id, { actorId: 'u9', comment: 'Thanks, reviewing.' }, asUser('u9'));
+    const timeline = await svc.listActions(id, asUser('u9'));
+    const replies = timeline.filter((a) => a.action === 'comment');
+    expect(replies.map((a) => [a.comment, (a.attachments ?? []).map((f) => f.id)])).toEqual([
+      ['Receipts attached.', ['file_a', 'file_b']],
+      ['Thanks, reviewing.', []],
+    ]);
+    // A reply moves nothing: the request is still pending on the same slate.
+    const row = await svc.getRequest(id, SYS);
+    expect([row?.status, row?.pending_approvers]).toEqual(['pending', ['u9']]);
+  });
+});
+
 // #12769 — the read-back after a successful mutation narrows by the CALLER's
 // org (`loadRequest`), so an org-less request row (every schedule /
 // time-relative / api trigger run produces one — #10131, pinned rather than
@@ -3231,17 +3349,15 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     },
   });
 
+  // `manager` is no longer a row here (#22558): it names a PERSON, so resolving
+  // to nobody now adds no slot at all instead of the dead `manager:undefined`
+  // literal this table used to pin — see the `manager` case just below and the
+  // #22558 describe further down.
   it.each([
     ['team', 'team_gone'],
     ['department', 'bu_gone'],
     ['position', 'nobody_holds_this'],
     ['org_membership_level', 'member'],
-    // `manager` is in GRAPH_APPROVER_TYPES like the four above, and the row was
-    // missing from this table. It is the worst of the set, not the mildest: it
-    // authors no `value`, so the dead literal it leaves is `manager:undefined`
-    // — a slot that names a person who does not exist AND reads like a bug in
-    // the platform to whoever finds it in `pending_approvers`.
-    ['manager', undefined],
   ])('%s: the dead literal is logged with its type, value and org', async (type, value) => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
@@ -3252,6 +3368,21 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     expect(hit, `no warning for ${type}`).toBeTruthy();
     expect(String(hit[0])).toContain('cannot advance until someone is added or the approver is re-pointed');
     expect(hit[1]).toMatchObject({ type, value, organizationId: 't1' });
+  });
+
+  // The warning `manager` had as a graph type survives without a slot: an
+  // unset `sys_user.manager_id` is the common cause and nothing else on the
+  // request names it. What it must no longer say is that a slot routes anywhere.
+  it('manager: resolving to nobody adds NO slot, and the warning says so', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput('manager') as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual([]);
+    expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+    const hit = warnings.find(([msg]) => String(msg).includes("approver 'manager' resolved to nobody"));
+    expect(hit, 'no warning for manager').toBeTruthy();
+    expect(hit[1]).toMatchObject({ type: 'manager', value: null, organizationId: 't1' });
   });
 
   it('stays quiet when the graph DOES resolve someone', async () => {
@@ -3276,13 +3407,15 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
 
 // The empty-slate policy that NAMES people. Before it, an empty
 // `{ type: 'manager' }` rung had three endings and all three were bad: open on
-// `manager:undefined` and wait for an admin (`admin_rescue`), kill the run
-// (`fail`), or wave the record through (`auto_approve`). `fallback` adds the
+// a slate nobody can act on and wait for an admin (`admin_rescue`), kill the
+// run (`fail`), or wave the record through (`auto_approve`). `fallback` adds the
 // fourth — open on someone who can actually decide.
 //
-// The rung is not special. Every graph approver type ends at the same literal;
-// `manager` is just the one that reaches it without anybody authoring a wrong
-// value, which is why it is the proving case here.
+// The rung is not special: every approver type can resolve to nobody. `manager`
+// is just the one that gets there without anybody authoring a wrong value,
+// which is why it is the proving case here. Since #22558 it leaves an EMPTY
+// slate rather than the dead `manager:undefined` literal, so the
+// `admin_rescue` degradations below open on `[]`.
 describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named rescue)", () => {
   const svcWithWarnings = (engine: any) => {
     const warnings: any[] = [];
@@ -3309,6 +3442,11 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
   const OWNER_BACKSTOP = { type: 'user' as const, value: 'u_backstop' };
   const said = (warnings: any[], needle: string) =>
     warnings.some(([msg]) => String(msg).includes(needle));
+  // The fallback-FIRED warning. Not the bare policy spelling: the empty
+  // `manager` rung's own warning names `onEmptyApprovers: 'fallback'` as its
+  // remedy (#22558), so that needle would read "the fallback fired" off a
+  // warning that only recommends it.
+  const FALLBACK_FIRED = "per onEmptyApprovers: 'fallback'";
 
   it('opens the request on the declared fallback, never on the manager:undefined literal', async () => {
     const engine = makeFakeEngine();
@@ -3321,7 +3459,7 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     expect(req.status).toBe('pending');
     expect(req.pending_approvers).toEqual(['u_backstop']);
     expect(req.pending_approvers).not.toContain('manager:undefined');
-    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(true);
+    expect(said(warnings, FALLBACK_FIRED)).toBe(true);
     // The request is decidable by a person, so the admin-takeover warning must
     // NOT fire — it would be false about this request.
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(false);
@@ -3375,7 +3513,8 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     }), CTX) as any;
 
     expect(req.status).toBe('pending');
-    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    // The abandoned primary slate: the empty manager rung added no slot.
+    expect(req.pending_approvers).toEqual([]);
     expect(said(warnings, 'resolved to nobody either')).toBe(true);
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
   });
@@ -3388,7 +3527,7 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     const req = await svc.openNodeRequest(managerNode({ onEmptyApprovers: 'fallback' }), CTX) as any;
 
     expect(req.status).toBe('pending');
-    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    expect(req.pending_approvers).toEqual([]);
     expect(said(warnings, 'with no fallbackApprovers')).toBe(true);
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
   });
@@ -3408,7 +3547,7 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     } as any, CTX) as any;
 
     expect(req.pending_approvers).toEqual(['u9']);
-    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(false);
+    expect(said(warnings, FALLBACK_FIRED)).toBe(false);
   });
 
   // ── negative controls ─────────────────────────────────────────────
@@ -3436,15 +3575,198 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     expect(engine._tables['sys_approval_request'] ?? []).toHaveLength(0);
   });
 
-  it("'admin_rescue' still opens on the dead literal and warns", async () => {
+  it("'admin_rescue' still opens — on the empty slate — and warns", async () => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
     const req = await svc.openNodeRequest(managerNode({
       onEmptyApprovers: 'admin_rescue', fallbackApprovers: [OWNER_BACKSTOP],
     }), CTX) as any;
-    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    expect(req.pending_approvers).toEqual([]);
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
-    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(false);
+    expect(said(warnings, FALLBACK_FIRED)).toBe(false);
+  });
+});
+
+// #22558 — a PERSON approver (`manager`, `field`) that resolves to nobody adds
+// NO slot. Measured on 17.7.0 in a downstream app: a `{ type: 'manager' }` step
+// for a record whose owner carries no `manager_id` opened with
+// `pending_approvers: ["manager:undefined"]` on both read doors — a slot that
+// reads as real, interpolates a missing value, and can be taken by nobody (the
+// acting path admits only a user id, the caller's own email, or a held
+// `position:<p>` address). The documented contract
+// (`content/docs/automation/approvals.mdx`) is that an entry resolving to
+// nobody contributes nothing and the node's `onEmptyApprovers` policy decides
+// the empty slate.
+//
+// The directory is REAL here, not absent: the owner has a `sys_user` row whose
+// `manager_id` is null — the exact shape the report measured — beside a second
+// owner who does have one (the control).
+describe('ApprovalService — a person approver that resolves to nobody adds no slot (#22558)', () => {
+  const svcWithWarnings = (engine: any) => {
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    return { svc, warnings };
+  };
+  const said = (warnings: any[], needle: string) =>
+    warnings.some(([msg]) => String(msg).includes(needle));
+
+  const seedDirectory = (engine: any) => {
+    engine._tables['sys_user'] = [
+      { id: 'u_no_mgr', manager_id: null },
+      { id: 'u_has_mgr', manager_id: 'u_boss' },
+      { id: 'u_boss', manager_id: null },
+    ];
+  };
+
+  /** A node on a record owned by `owner`, with the given approvers / config. */
+  const node = (owner: string, approvers: any[], configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    record: { id: 'opp1', amount: 100, owner_id: owner },
+    config: {
+      approvers,
+      behavior: 'first_response' as const,
+      lockRecord: false,
+      ...configExtra,
+    },
+  });
+
+  it('a manager step for an owner with no manager_id opens on an EMPTY pending_approvers, and admin_rescue fires', async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'manager' }]), CTX) as any;
+
+    expect(req.status).toBe('pending');
+    expect(req.pending_approvers).toEqual([]);
+    // The stored row — what both read doors serve — holds no slot either.
+    const stored = String(engine._tables['sys_approval_request'][0].pending_approvers ?? '');
+    expect(stored.split(',').filter(Boolean)).toEqual([]);
+    // `onEmptyApprovers` defaults to admin_rescue, and it fired on this slate.
+    expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
+  });
+
+  it("the same step under onEmptyApprovers: 'fallback' opens on the named people", async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'manager' }], {
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'user', value: 'u_backstop' }],
+    }), CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_backstop']);
+  });
+
+  it("control: an owner WITH a manager gets that manager's slot", async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_has_mgr', [{ type: 'manager' }]), CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_boss']);
+    expect(said(warnings, "approver 'manager' resolved to nobody")).toBe(false);
+    expect(said(warnings, 'decidable only by a privileged admin')).toBe(false);
+  });
+
+  // Beside other entries an empty manager rung contributes nothing, so the
+  // others carry the request — the "second entry that cannot resolve empty"
+  // escape the docs name for an unset manager. Under `unanimous` the dead
+  // literal used to be an unapprovable slot that held the request open after
+  // every real approver had approved.
+  it('beside a concrete approver, an empty manager rung adds nothing and does not hold a unanimous request open', async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node(
+      'u_no_mgr', [{ type: 'manager' }, { type: 'user', value: 'u9' }], { behavior: 'unanimous' },
+    ), CTX) as any;
+    expect(req.pending_approvers).toEqual(['u9']);
+
+    const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(out.finalized).toBe(true);
+    expect(out.request.status).toBe('approved');
+  });
+
+  // `field` is the other person type. On the open path the record is always
+  // present (the live re-read falls back to the trigger snapshot, then `{}`),
+  // so an empty field already contributed nothing; this pins that it still
+  // does, beside the manager change.
+  it('an empty field approver adds no slot either', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'field', value: 'reviewer' }]), CTX) as any;
+    expect(req.pending_approvers).toEqual([]);
+  });
+
+  // The kept half: a GROUP type's literal is untouched. For `position` the
+  // literal IS an acting address — a holder staffed in later decides it.
+  it('kept: an unstaffed position still opens on its position literal', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'position', value: 'cfo' }]), CTX) as any;
+    expect(req.pending_approvers).toEqual(['position:cfo']);
+  });
+
+  // ── stored rows: the disposition of a request opened before this fix ──
+  //
+  // A pending request a pre-fix release opened already holds the dead slot.
+  // Nothing rewrites it. Each pin below takes a request the current code
+  // opened on `[manager, user u9]` and puts the STORED row back into the
+  // pre-fix shape, then drives its next transition.
+
+  /** Open `[manager, user u9]` unanimous, then hand back the stored row. */
+  const openUnanimous = async (svc: ApprovalService, engine: any) => {
+    const req = await svc.openNodeRequest(node(
+      'u_no_mgr', [{ type: 'manager' }, { type: 'field', value: 'reviewer' }, { type: 'user', value: 'u9' }],
+      { behavior: 'unanimous' },
+    ), CTX) as any;
+    return { req, row: engine._tables['sys_approval_request'][0] };
+  };
+
+  it('stored row WITH the open-time slate snapshot keeps its dead slot: not rewritten, still an admin rescue', async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc } = svcWithWarnings(engine);
+    const { req, row } = await openUnanimous(svc, engine);
+    // The pre-fix shape: the literal on the slate AND in the tally snapshot.
+    const cfg = JSON.parse(row.node_config_json);
+    cfg.__approverGroups = { 'manager:undefined': ['#0'], u9: ['#2'] };
+    row.node_config_json = JSON.stringify(cfg);
+    row.pending_approvers = 'manager:undefined,u9';
+
+    const vote = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(vote.finalized).toBe(false);
+    expect(vote.request.pending_approvers).toEqual(['manager:undefined']);
+
+    // The recovery it always had: a privileged override decides it outright.
+    const rescue = await svc.decideNode(req.id, { decision: 'approve', actorId: 'admin_x' }, SYS);
+    expect(rescue.finalized).toBe(true);
+    expect(rescue.request.status).toBe('approved');
+  });
+
+  // A request opened before the tally snapshot existed is re-resolved at its
+  // next approve, against the stored payload — none here, so the person
+  // rungs have no record to read (the one way `field` reaches the no-slot
+  // branch). Both now add nothing, so the dead slots stop counting.
+  it('stored row WITHOUT a snapshot is re-evaluated at its next approve: the dead person slots stop counting', async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc } = svcWithWarnings(engine);
+    const { req, row } = await openUnanimous(svc, engine);
+    const cfg = JSON.parse(row.node_config_json);
+    delete cfg.__approverGroups;
+    row.node_config_json = JSON.stringify(cfg);
+    row.payload_json = null;
+    row.pending_approvers = 'manager:undefined,u9';
+
+    const vote = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(vote.finalized).toBe(true);
+    expect(vote.request.status).toBe('approved');
   });
 });
 

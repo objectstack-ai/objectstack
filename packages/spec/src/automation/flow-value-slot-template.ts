@@ -35,30 +35,44 @@
  *  - arithmetic (`{round(x * 100) / 100}`) — CEL divides two integers as
  *    integers (`123.46` becomes `123`);
  *  - `{NOW()}` / `{TODAY()}` — CEL yields a Timestamp, not the ISO text;
- *  - `{$User.Id}` — the flow CEL scope binds no user.
+ *  - `{$User.Id}` — in a run with no user the template wrote nothing, while
+ *    `current_user` is `null` there, so `current_user.id` fails the run and
+ *    its guarded form writes `null`.
  *
  * So no spelling is converted: each is refused with its remedy, and the author
  * judges the absent case the template used to decide silently. Only a token
  * with no variable in it (`{100}`) maps losslessly, and none is authored.
  *
- * ## Two spellings are KEPT, deliberately — not yet refused
+ * ## The run user — `{$User.<path>}` — is refused too, with two remedies
  *
- * A refusal must name what to write instead, and for two spellings CEL has
- * nothing to name yet:
+ * The flow CEL scope binds `current_user` (ADR-0068's canonical root): the
+ * run's `EvalUser` — `id`, `positions`, `organizationId`, `isPlatformAdmin` —
+ * when the run has a user, and `null` when it has none, never a pseudo-user
+ * (ADR-0118 D1, D4). So `{$User.Id}` is refused, naming `current_user.id`,
+ * and for a flow that can run without a user the guard
+ * `current_user != null ? current_user.id : null`, with what it changes: the
+ * guarded form writes `null` where the template wrote nothing, which on
+ * `update_record` clears a stored value the template left alone.
  *
- *  - the date macros — `{NOW()}`, `{TODAY()}`, with an optional `± N` day
- *    offset. CEL's `now()` / `today()` / `daysFromNow()` / `addDays()` yield a
- *    Timestamp, which reaches the data engine as a `Date` object rather than
- *    the ISO text the macro wrote, and CEL has no `string(timestamp)` to render
- *    one;
- *  - the run user — `{$User.<path>}`. The flow CEL scope binds no user, so
- *    `current_user.id` is an unknown variable in a flow.
+ * Every other `{$User.<path>}` (`{$User.Email}`, `{$User.Name}`, …) read a
+ * user object no run carries, so it never resolved in any shipped run: its
+ * refusal says so, and names the read of the user record by `current_user.id`
+ * for an email or a name. `current_user` carries only what the run holds.
  *
- * A string whose every token is one of these keeps its 17.x meaning; a string
- * that mixes one with any other token keeps it too, because the other half
- * could not be moved without it. Refusing them now would remove a capability
- * with nothing to replace it. Each is retired when CEL can spell it — a string
- * form for a Timestamp, and a user binding in the flow CEL scope.
+ * ## One spelling is KEPT, deliberately — not yet refused
+ *
+ * A refusal must name what to write instead, and for one spelling CEL has
+ * nothing to name yet: the date macros — `{NOW()}`, `{TODAY()}`, with an
+ * optional `± N` day offset. CEL's `now()` / `today()` / `daysFromNow()` /
+ * `addDays()` yield a Timestamp, which reaches the data engine as a `Date`
+ * object rather than the ISO text the macro wrote, and CEL has no
+ * `string(timestamp)` to render one.
+ *
+ * A string whose every token is one keeps its 17.x meaning; a string that
+ * mixes one with any other token keeps it too, because the other half could
+ * not be moved without it. Refusing it now would remove a capability with
+ * nothing to replace it. It is retired when CEL can spell it — a string form
+ * for a Timestamp.
  *
  * ## The token grammar is the interpolator's
  *
@@ -70,9 +84,15 @@
 
 import { isExpressionEnvelopeShaped, resolveFlowNodeValueSlots } from './flow-node-expression-paths';
 import {
+  CEL_KEYWORDS,
+  CEL_RUN_USER_ID,
+  CEL_RUN_USER_ID_GUARDED,
   TEMPLATE_TOKEN,
   celExpression,
+  celHeadReadsThroughVars,
   celPath,
+  isRunUserIdToken,
+  runUserPathNeverResolved,
   templateTokenKind as tokenKind,
   templateTokensOf as tokensOf,
   type TemplateToken as Token,
@@ -90,8 +110,8 @@ export const VALUE_SLOT_TEMPLATE_REFUSAL =
   + '`{…}` token in it is refused rather than stored with its braces. Compute the value with a CEL value envelope, '
   + '`{ dialect: \'cel\', source: \'…\' }`.';
 
-/** The kinds CEL cannot spell yet, kept until it can (see the module docblock). */
-const KEPT_KINDS: ReadonlySet<TokenKind> = new Set<TokenKind>(['date-macro', 'user']);
+/** The kind CEL cannot spell yet, kept until it can (see the module docblock). */
+const KEPT_KINDS: ReadonlySet<TokenKind> = new Set<TokenKind>(['date-macro']);
 
 /** A CEL single-quoted string literal. */
 function celString(text: string): string {
@@ -104,17 +124,44 @@ function envelopeOf(source: string): string {
   return `{ dialect: 'cel', source: ${quoted} }`;
 }
 
-/** A `has()` guard for a path whose last segment is a key — the absent-key remedy. */
+/**
+ * A `has()` guard for a path of keys — the absent-key remedy. `has()` takes a
+ * field selection over names alone: an index anywhere in its argument
+ * (`has(a[0].b)`, `has(vars["$x"].y)`) is refused when it runs, so a path with
+ * a numeric segment, a `$`-named head or a keyword segment gets no guard. A
+ * bare variable, and a path whose head CEL or the flow scope claims
+ * ({@link celHeadReadsThroughVars}), is selected off `vars`
+ * (`has(vars.list.tags)`, `has(vars.vars.tags)`).
+ */
 function guardOf(path: string): string | undefined {
   const segments = path.split('.');
-  const last = segments[segments.length - 1]!;
-  if (segments[0]!.startsWith('$') || /^\d+$/.test(last)) return undefined;
-  const read = segments.length === 1 ? `vars.${path}` : celPath(path);
+  if (segments[0]!.startsWith('$') || segments.some((s) => /^\d+$/.test(s) || CEL_KEYWORDS.has(s))) return undefined;
+  const read = segments.length === 1 || celHeadReadsThroughVars(segments[0]!) ? `vars.${path}` : path;
   return `has(${read}) ? ${read} : null`;
 }
 
 const ABSENT_SENTENCE =
   'CEL refuses an absent variable or key where the template wrote nothing, so guard one that may be absent with `has()`';
+
+/**
+ * The remedy for `{$User.Id}` as a whole value: `current_user.id`, and for a
+ * flow that can run without a user the guard, with what it changes.
+ */
+function runUserIdRemedy(text: string): string {
+  return (
+    `Write \`${text}\` as ${envelopeOf(CEL_RUN_USER_ID)}: \`current_user\` is the run's user. In a flow that can run `
+    + 'without a user (a schedule, or a record change made by a system write) `current_user` is `null` and that '
+    + `read fails the run, so write ${envelopeOf(CEL_RUN_USER_ID_GUARDED)} there. The guarded form writes \`null\` `
+    + 'where the template wrote nothing, which on `update_record` clears a stored value the template left alone.'
+  );
+}
+
+/** How a text-with-holes remedy writes one token, or `undefined` for a hole it leaves out. */
+function holeOf(token: Token): string | undefined {
+  if (token.kind === 'path') return celPath(token.inner);
+  if (token.kind === 'user') return isRunUserIdToken(token.inner) ? CEL_RUN_USER_ID : undefined;
+  return `(${celExpression(token.inner)})`;
+}
 
 /** The remedy for one string — the CEL spelling of what the template computed. */
 function remedyFor(value: string, tokens: readonly Token[]): string {
@@ -133,6 +180,11 @@ function remedyFor(value: string, tokens: readonly Token[]): string {
       + (guard ? `: \`${guard}\` (the guarded form writes \`null\`).` : '.')
     );
   }
+  if (whole?.kind === 'user') {
+    return isRunUserIdToken(whole.inner)
+      ? runUserIdRemedy(whole.text)
+      : runUserPathNeverResolved(whole.text, (path) => envelopeOf(path));
+  }
   if (whole?.kind === 'expression') {
     return (
       `Write \`${whole.text}\` as ${envelopeOf(celExpression(whole.inner))}. Every division keeps a decimal operand: `
@@ -140,23 +192,41 @@ function remedyFor(value: string, tokens: readonly Token[]): string {
       + '`round(x * 100) / 100.0` keeps them. ' + ABSENT_SENTENCE + '.'
     );
   }
-  // Text with holes: one CEL concatenation.
+  // Text with holes: one CEL concatenation. A `$User` path other than the
+  // id rendered nothing in every shipped run, so the concatenation leaves it
+  // out, and a sentence after it says what to read for the value it meant.
   const parts: string[] = [];
   let at = 0;
   for (const match of value.matchAll(TEMPLATE_TOKEN)) {
     const literal = value.slice(at, match.index);
     if (literal) parts.push(celString(literal));
     const inner = match[1]!.trim();
-    parts.push(tokenKind(inner) === 'path' ? celPath(inner) : `(${celExpression(inner)})`);
+    const hole = holeOf({ text: match[0], inner, kind: tokenKind(inner), index: match.index ?? 0 });
+    if (hole !== undefined) parts.push(hole);
     at = (match.index ?? 0) + match[0].length;
   }
   const tail = value.slice(at);
   if (tail) parts.push(celString(tail));
-  return (
-    `\`${value}\` is text with holes: write it as one CEL concatenation, ${envelopeOf(parts.join(' + '))}. Wrap a `
+  const sentences = [
+    `\`${value}\` is text with holes: write it as one CEL concatenation, `
+    + `${envelopeOf(parts.length > 0 ? parts.join(' + ') : "''")}. Wrap a `
     + 'hole that is not a string in `string(…)`, and one that may be null in `coalesce(…, \'\')` — the template '
-    + 'rendered null as nothing, and CEL refuses `+ null`.'
-  );
+    + 'rendered null as nothing, and CEL refuses `+ null`.',
+  ];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    if (token.kind !== 'user' || seen.has(token.text)) continue;
+    seen.add(token.text);
+    sentences.push(
+      isRunUserIdToken(token.inner)
+        ? `\`${token.text}\` is \`${CEL_RUN_USER_ID}\`, the run's user. In a flow that can run without a user `
+          + '`current_user` is `null` and that read fails the run, so write the hole as '
+          + '`(current_user != null ? current_user.id : \'\')` there, which renders nothing where the template did.'
+        : `${runUserPathNeverResolved(token.text, (path) => `\`${path}\``)} The concatenation above leaves it out, `
+          + 'as the template did.',
+    );
+  }
+  return sentences.join(' ');
 }
 
 /** One refused string inside a value slot's value. */
@@ -188,7 +258,7 @@ export interface ValueSlotTemplateOptions {
  * interpolated too). A top-level envelope-shaped value is not judged here: it
  * is an expression, and `FlowValueSlotSchema`'s envelope rule owns it — unless
  * {@link ValueSlotTemplateOptions.envelopeIsLiteral}. A string whose tokens
- * include a kept spelling (a date macro, a `$User` path) is not refused — see
+ * include the kept spelling (a date macro) is not refused — see
  * the module docblock. Cycle-safe: a flow built in code may hold a
  * self-reference.
  */

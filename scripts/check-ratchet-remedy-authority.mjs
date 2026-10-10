@@ -1129,8 +1129,8 @@ const CONTROL = {
   // beside that constant's other mentions. The verdict is right, the route is
   // incidental, and the row says so rather than implying the two agreed.
   'pm/dispatch-gates.mjs': {
-    expect: 'marked',
-    why: 'PR for #15179, the first instance reached from scripts/pm/. The dispatch derivation relays another gate\'s shrink-only ratchet remedy to the landing author; its ROOT-program lead already named the maintainer as that path\'s owner in prose and now carries the token in the same message an author reads. Recorded from the sweep\'s own verdict.',
+    expect: 'excluded',
+    why: 'Was `marked` (PR for #15179, the first instance reached from scripts/pm/): the dispatch derivation relays another gate\'s shrink-only ratchet remedy to the landing author, and the change-kind sentence carrying the token lived in this file. That roster moved out of the engine as DATA (the roster-as-data split, the file dispatch-gates.data.mjs beside this one), so the sentence is no longer in this module and the sweep reaches nothing here. The relayed remedy and its token still reach the author unchanged, verbatim, from the data row; the data file classifies excluded on its own — its predicate is a KEY the engine resolves, not the path constant stage 1 anchors on — and so needs no row.',
   },
 
   // The gate the 2026-09-03 cross-file-move ruling amends, and the reason the

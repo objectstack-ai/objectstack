@@ -877,6 +877,31 @@ jobs:
           fi
 
       # ────────────────────────────────────────────────────────────────────────
+      # ADR-0087 D4 — the two generated projections, under the #22449 B′ ruling.
+      #
+      # spec-changes.json and the protocol upgrade guide are generated from the
+      # registries at publish and nowhere else that ships; no committed copy is
+      # kept current any more. This lane used to pack whatever copy the tree
+      # held, so it now generates both into the package (`--generate`: the
+      # registry projections and NO per-release section — what an rc tarball has
+      # always carried) and refuses a tarball whose copies differ from a fresh
+      # generation (`--verify`), before anything reaches npm. Same order, same
+      # reason as release.yml's publish job: after `changeset publish` the
+      # tarball is immutable.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Generate the ADR-0087 projections into the package (ADR-0087 D4)
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash scripts/release-spec-changes.sh --generate
+
+      - name: Correctness gate — the packed projections must match the registries
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash scripts/release-spec-changes.sh --verify
+
+      # ────────────────────────────────────────────────────────────────────────
       # PUBLISH. `pnpm run release` = build + build-console + release-publish.sh,
       # which is `changeset publish` followed by ONE atomic `git push origin --tags`
       # (#2191: the changesets action's concurrent per-tag pushes raced GitHub's
@@ -928,7 +953,9 @@ jobs:
 
       - name: Attach spec-changes.json to the GitHub Release (ADR-0087 D4)
         # Ordering is load-bearing: `gh release upload` needs the Release the step
-        # above created.
+        # above created. Uploads BOTH projections `--generate` wrote and `--verify`
+        # proved — spec-changes.json and protocol-upgrade-guide.md — so the Release
+        # assets and the tarball are the same bytes.
         if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

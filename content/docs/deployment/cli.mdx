@@ -937,6 +937,7 @@ written.
 | `os migrate apply` | **Refuses** (exit 1, `error: database_busy` under `--json`). Stop the other process, or pass `--force` |
 | `os migrate files-to-references --apply` | **Refuses** likewise — it rewrites rows, so a concurrent writer is at least as dangerous |
 | `os migrate meta --stored --apply` | **Refuses** likewise — it rewrites `sys_metadata` rows, and a live process saving metadata is exactly the collision |
+| `os migrate security-catalog-overlays --apply` | **Refuses** likewise — it deletes `sys_metadata` rows, and a live process saving metadata is exactly the collision |
 
 The check applies to SQLite only: Postgres and MySQL take their own server-side
 locks. Only same-user processes are visible without elevated privileges, and a
@@ -1114,6 +1115,7 @@ where the data lives.
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
+| `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
 | `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes no row and no schema; run it before the boot-time tenancy repair, which overwrites part of the evidence |
 
 **The boot itself writes no row and no schema you did not ask for.** Each of these commands boots
@@ -2474,7 +2476,7 @@ export default defineStack({
     name: 'My App',
     description: 'My ObjectStack application',
     // Protocol major this app is authored against (ADR-0087 load-time check).
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
 
   objects: Object.values(objects),

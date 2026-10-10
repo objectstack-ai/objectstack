@@ -52,7 +52,7 @@ const MANIFEST = {
   version: '1.0.0',
   type: 'app' as const,
   namespace: 'probe',
-  engines: { protocol: '^17' },
+  engines: { protocol: '^18' },
 };
 
 const stackWith = (packages: unknown) => ({ manifest: MANIFEST, packages });

@@ -4396,10 +4396,15 @@ describe("ListViewSchema — the RETIRED `page` view type", () => {
     });
 
   it('keeps every surviving view type accepting exactly as before', () => {
-    const types = ['grid', 'kanban', 'gallery', 'calendar', 'timeline', 'gantt', 'map', 'chart', 'tree'] as const;
+    const types = ['grid', 'kanban', 'gallery', 'calendar', 'timeline', 'gantt', 'map', 'tree'] as const;
     for (const type of types) {
       expect(ListViewSchema.safeParse({ type, columns: ['name'] }).success, type).toBe(true);
     }
+    // [#22491] `chart` survives too, but a chart view binds a dataset: the
+    // block-less body is refused (`view-chart-binding.test.ts`), so the type
+    // is pinned here with the binding it now requires.
+    const chart = { dataset: 'lead_metrics', values: ['amount_sum'] };
+    expect(ListViewSchema.safeParse({ type: 'chart', columns: ['name'], chart }).success, 'chart').toBe(true);
   });
 
   describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {

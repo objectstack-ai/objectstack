@@ -135,7 +135,7 @@ CEL value envelope `{ dialect: 'cel', source }` — evaluated by the expression 
 
 ## AssignmentValue
 
-Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is refused (the template dialect is retired from value slots; the date macros and `$User` paths are kept for now)
+Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is refused (the template dialect is retired from value slots; the date macros are kept for now)
 
 
 ---
@@ -180,7 +180,7 @@ Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` eval
 
 ## FlowValueSlot
 
-A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is refused (the template dialect is retired from value slots; the date macros and `$User` paths are kept for now)
+A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is refused (the template dialect is retired from value slots; the date macros are kept for now)
 
 
 ---
@@ -241,7 +241,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **label** | `string` | optional | Display label |
 | **type** | `string` | optional | Input type |
 | **required** | `boolean` | optional | Whether a value is required to submit |
-| **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field |
+| **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field; option values must stay distinct when read as text |
 | **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
 | **placeholder** | `string` | optional | Input placeholder text |
 | **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
@@ -263,7 +263,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **label** | `string` | optional | Display label |
 | **type** | `string` | optional | Input type |
 | **required** | `boolean` | optional | Whether a value is required to submit |
-| **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field |
+| **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field; option values must stay distinct when read as text |
 | **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
 | **placeholder** | `string` | optional | Input placeholder text |
 | **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
@@ -276,7 +276,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **value** | `any` | ✅ | Stored value |
+| **value** | `any` | ✅ | Stored value; it also addresses the option as text (its label translation key), so it must stay distinct from its siblings as text |
 | **label** | `string` | ✅ | Display label |
 
 

@@ -344,6 +344,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'print',
     why: "planned, not yet rendered — the print declaration's keys (paper, margins, running header and footer, page numbers, page-break hints) are validated at parse and its printable block subset is enforced at the authoring doors, but no renderer applies them until the console's print rendering lands, and the ruling places the authoring UI in the Studio page designer with it. A form control offered today would let an author set a layout nothing prints",
   },
+  // #22228 — a field's cell formatting rules land spec-first the same way:
+  // `planned` in the liveness ledger, read by no renderer until objectui's cell
+  // card. Offering the key in the field form first would be the UI half of
+  // declared-not-enforced.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'conditionalFormatting',
+    why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
+  },
   {
     kind: 'omit',
     type: 'view',
@@ -494,7 +505,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'object',
     path: ROOT_PATH,
     key: 'attachedOnRead',
-    why: "not a form's to offer, by ruling (ruling record 6070963704, #22211 A): the blocks a service attaches to the rows it serves, computed per caller and never stored, which the ruling says no form reads; a block is declared in code beside the service that attaches it (plugin-approvals' `viewer` on `sys_approval_request`), because nothing authored in a designer can make a service attach a block, and its one reader is the shared build validator",
+    why: "not a form's to offer, by ruling (ruling record 6070963704, letter A): the blocks a service attaches to the rows it serves, computed per caller and never stored, which the ruling says no form reads; a block is declared in code beside the service that attaches it (plugin-approvals' `viewer` on `sys_approval_request`), because nothing authored in a designer can make a service attach a block, and its one reader is the shared build validator",
   },
   {
     kind: 'omit',

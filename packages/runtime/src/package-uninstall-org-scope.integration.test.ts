@@ -149,26 +149,33 @@ const viewBody = (name: string) => ({
  * history the real uninstall reads back. Views (not objects) so the assertions
  * stay on row survival rather than on physical-table teardown, which
  * `deleteMetaItem` handles separately and which #7705 is not about.
+ *
+ * [ADR-0131 D6] The protocol refuses every organization-scoped write, so the
+ * legacy organization rows are planted AT REST, the way an older release left
+ * them.
  */
-async function seed(protocol: any) {
-  const save = (name: string, packageId: string, organizationId?: string) =>
+async function seed(protocol: any, engine: any) {
+  const save = (name: string, packageId: string) =>
     protocol.saveMetaItem({
       type: 'view',
       name,
       item: viewBody(name),
       packageId,
-      ...(organizationId ? { organizationId } : {}),
+    });
+  const plantLegacy = (name: string, organizationId: string) =>
+    engine.insert('sys_metadata', {
+      type: 'view', name, organization_id: organizationId, package_id: PKG, state: 'active',
+      metadata: JSON.stringify(viewBody(name)), checksum: 'sha256:legacy', version: 1,
     });
 
   // The suspected — and confirmed — miss: env-wide rows, `organization_id IS NULL`.
   await save('reprob_a', PKG);
   await save('reprob_b', PKG);
   await save('reprob_v', PKG);
-  // Same package, the caller's OWN org: the only rows the strict equality found.
-  await save('reprob_own', PKG, ACTIVE_ORG);
-  // Negative 1 — same package, ANOTHER org. Must survive an org-scoped uninstall.
-  await save('reprob_foreign', PKG, OTHER_ORG);
-  // Negative 2 — ANOTHER package, env-wide. Must survive either way.
+  // Same package, legacy organization rows.
+  await plantLegacy('reprob_own', ACTIVE_ORG);
+  await plantLegacy('reprob_foreign', OTHER_ORG);
+  // Negative — ANOTHER package, env-wide. Must survive.
   await save('other_a', OTHER_PKG);
 }
 
@@ -183,178 +190,53 @@ const namesFor = async (engine: any, packageId: string): Promise<string[]> => {
   return rows.map((r) => r.name).sort();
 };
 
-describe('#7705 — org-scoped uninstall must not orphan env-wide sys_metadata rows', () => {
-  it('removes the env-wide rows too, and counts them (was: found 1 of 4, left 3 orphaned)', async () => {
+const SEEDED = [
+  `other_a[${OTHER_PKG},ENV]`,
+  `reprob_a[${PKG},ENV]`,
+  `reprob_b[${PKG},ENV]`,
+  `reprob_foreign[${PKG},${OTHER_ORG}]`,
+  `reprob_own[${PKG},${ACTIVE_ORG}]`,
+  `reprob_v[${PKG},ENV]`,
+];
+
+describe('#7705 · ADR-0131 D6 — an uninstall is package-wide and orphans no sys_metadata row', () => {
+  it('removes the env-wide rows AND the legacy organization rows, counts them, and leaves another package alone', async () => {
     const { engine, protocol } = await boot();
-    await seed(protocol);
+    await seed(protocol, engine);
 
     // Precondition: the rows the uninstall is supposed to remove really exist,
     // so a passing assertion below cannot be the vacuous "nothing was there".
-    expect(await namesFor(engine, PKG)).toEqual(
-      ['reprob_a', 'reprob_b', 'reprob_foreign', 'reprob_own', 'reprob_v'],
-    );
+    expect(await survivors(engine)).toEqual(SEEDED);
 
-    const res: any = await (protocol as any).deletePackage({
-      packageId: PKG,
-      organizationId: ACTIVE_ORG,
-    });
-
-    // The CONSEQUENCE: no row of this package survives in the caller's scope
-    // (its own org + env-wide). Before the fix `reprob_a`, `reprob_b` and
-    // `reprob_v` were all still here.
-    expect(await namesFor(engine, PKG)).toEqual(['reprob_foreign']);
-
-    // …and the receipt matches what was actually seeded in that scope — 3
-    // env-wide + 1 own-org. It reported 1 before, while claiming success.
-    expect(res.deletedCount).toBe(4);
-    expect(res.failedCount).toBe(0);
-    expect(res.success).toBe(true);
-    expect(res.deleted.map((d: any) => d.name).sort()).toEqual(
-      ['reprob_a', 'reprob_b', 'reprob_own', 'reprob_v'],
-    );
-
-    // The complete post-state, so nothing else moved either way.
-    expect(await survivors(engine)).toEqual([
-      `other_a[${OTHER_PKG},ENV]`,
-      `reprob_foreign[${PKG},${OTHER_ORG}]`,
-    ]);
-  });
-
-  it('does NOT sweep up another organization’s rows', async () => {
-    const { engine, protocol } = await boot();
-    await seed(protocol);
-
-    await (protocol as any).deletePackage({ packageId: PKG, organizationId: ACTIVE_ORG });
-
-    // `reprob_foreign` belongs to a different tenant and was never in scope.
-    // Over-widening the predicate to catch the env-wide rows would delete data
-    // that should have stayed — worse than the bug being closed here.
-    const rows = (await engine.find('sys_metadata', {
-      where: { package_id: PKG, organization_id: OTHER_ORG },
-    })) as any[];
-    expect(rows.map((r: any) => r.name)).toEqual(['reprob_foreign']);
-  });
-
-  it('does NOT sweep up another package’s rows', async () => {
-    const { engine, protocol } = await boot();
-    await seed(protocol);
-
-    await (protocol as any).deletePackage({ packageId: PKG, organizationId: ACTIVE_ORG });
-
-    expect(await namesFor(engine, OTHER_PKG)).toEqual(['other_a']);
-  });
-
-  // [#7780] REWRITTEN, not deleted — and the reason the original existed is
-  // still pinned, in the second half below.
-  //
-  // The old single case pinned that an uninstall with NO org "still clears the
-  // whole package", deliberately, so nobody would narrow the no-org branch to
-  // `organization_id IS NULL` and re-create the #7705 orphan bug on the other
-  // door. That branch is still NOT narrowed. What the maintainer ruled
-  // (2026-08-12, 跨租户卸载必须显式声明,缺省缺参永远不等于「全部租户」) is
-  // that REACHING it now requires saying so. So the one case becomes the two
-  // halves of the ruled contract: the refusal, and the declared cross-tenant
-  // uninstall that still clears exactly what it cleared before.
-  it('an uninstall with NO org and NO explicit flag is REFUSED, and deletes nothing', async () => {
-    const { engine, protocol } = await boot();
-    await seed(protocol);
-
-    await expect(
-      (protocol as any).deletePackage({ packageId: PKG }),
-    ).rejects.toMatchObject({ code: 'TENANT_SCOPE_REQUIRED', status: 400 });
-
-    // A refusal, not a partial delete: the complete post-state is the seed,
-    // untouched — including the foreign org's row, which is the row the old
-    // no-org call took with it.
-    expect(await survivors(engine)).toEqual([
-      `other_a[${OTHER_PKG},ENV]`,
-      `reprob_a[${PKG},ENV]`,
-      `reprob_b[${PKG},ENV]`,
-      `reprob_foreign[${PKG},${OTHER_ORG}]`,
-      `reprob_own[${PKG},${ACTIVE_ORG}]`,
-      `reprob_v[${PKG},ENV]`,
-    ]);
-  });
-
-  it('an uninstall with an explicit allTenants clears the whole package (the other door)', async () => {
-    const { engine, protocol } = await boot();
-    await seed(protocol);
-
-    // The direct-mount REST registrar (`packages/rest/src/package-routes.ts`)
-    // has no organization to resolve — `packages/rest` carries no org plumbing
-    // at all — so of the two doors the ruling allows it declares
-    // `allTenants: true`. Narrowing THIS branch to `organization_id IS NULL`
-    // would orphan every org-scoped row instead, i.e. re-create #7705 on the
-    // other door. This case pins that the declared branch stays package-wide,
-    // at exactly the count the pre-#7780 no-org call produced.
-    const res: any = await (protocol as any).deletePackage({ packageId: PKG, allTenants: true });
+    const res: any = await (protocol as any).deletePackage({ packageId: PKG });
 
     expect(await namesFor(engine, PKG)).toEqual([]);
     expect(res.deletedCount).toBe(5);
-    expect(await namesFor(engine, OTHER_PKG)).toEqual(['other_a']);
-  });
-
-  // [#7780] `organizationId` + `allTenants: true` is CONTRADICTORY, not
-  // redundant: one says "this tenant", the other says "every tenant". Both
-  // silent resolutions are worse than a refusal — resolving narrow-first makes
-  // `allTenants: true` silently inert, resolving explicit-first ignores a named
-  // organization and deletes every tenant's rows (the original defect wearing a
-  // flag). It is also the reading that stays correct when a request is COMPOSED
-  // from two places, which is the accidental composition
-  // `resolveActiveOrganizationId` makes real. Same code and status as the
-  // undeclared case: one contract, two ways to violate it.
-  it('REFUSES when BOTH organizationId and allTenants are supplied, deleting nothing', async () => {
-    const { engine, protocol } = await boot();
-    await seed(protocol);
-
-    await expect(
-      (protocol as any).deletePackage({ packageId: PKG, organizationId: ACTIVE_ORG, allTenants: true }),
-    ).rejects.toMatchObject({ code: 'TENANT_SCOPE_REQUIRED', status: 400 });
-
-    // Names BOTH offending parameters, so the caller is not left guessing which
-    // pair conflicted.
-    await expect(
-      (protocol as any).deletePackage({ packageId: PKG, organizationId: ACTIVE_ORG, allTenants: true }),
-    ).rejects.toThrow(/organizationId.*mutually exclusive|mutually exclusive.*organizationId/s);
-
-    expect(await namesFor(engine, PKG)).toEqual(
+    expect(res.failedCount).toBe(0);
+    expect(res.success).toBe(true);
+    expect(res.deleted.map((d: any) => d.name).sort()).toEqual(
       ['reprob_a', 'reprob_b', 'reprob_foreign', 'reprob_own', 'reprob_v'],
     );
+    expect(await survivors(engine)).toEqual([`other_a[${OTHER_PKG},ENV]`]);
   });
 
-  // [#7780] An EXPLICIT `false` is not the same gesture as an absent flag, but
-  // it must land on the same refusal: `false` is not an affirmative request for
-  // cross-tenant semantics, so it cannot authorise them. Pinned so that a future
-  // `!request.allTenants`-style rewrite (which would treat them identically by
-  // accident rather than by decision) still has to face this case.
-  it('treats an explicit allTenants:false as undeclared — same 400 as absent', async () => {
-    const { engine, protocol } = await boot();
-    await seed(protocol);
+  // The retired request keys are refused whatever their value — an explicit
+  // `false` or `undefined` included — and nothing is removed.
+  for (const keys of [
+    { organizationId: ACTIVE_ORG },
+    { allTenants: true },
+    { allTenants: false },
+    { organizationId: ACTIVE_ORG, allTenants: false },
+    { allTenants: undefined },
+  ]) {
+    it(`REFUSES a request carrying ${JSON.stringify(Object.keys(keys))}, deleting nothing`, async () => {
+      const { engine, protocol } = await boot();
+      await seed(protocol, engine);
 
-    await expect(
-      (protocol as any).deletePackage({ packageId: PKG, allTenants: false }),
-    ).rejects.toMatchObject({ code: 'TENANT_SCOPE_REQUIRED', status: 400 });
-
-    expect(await namesFor(engine, PKG)).toEqual(
-      ['reprob_a', 'reprob_b', 'reprob_foreign', 'reprob_own', 'reprob_v'],
-    );
-  });
-
-  // …while an org-scoped call carrying the same explicit `false` is NOT a
-  // violation — the org states the scope, and `false` agrees with it. This is
-  // the row that keeps the refusal from over-firing on a legitimate caller that
-  // spells its flags out.
-  it('allows an org-scoped uninstall that spells allTenants:false explicitly', async () => {
-    const { engine, protocol } = await boot();
-    await seed(protocol);
-
-    const res: any = await (protocol as any).deletePackage({
-      packageId: PKG,
-      organizationId: ACTIVE_ORG,
-      allTenants: false,
+      await expect(
+        (protocol as any).deletePackage({ packageId: PKG, ...keys }),
+      ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+      expect(await survivors(engine)).toEqual(SEEDED);
     });
-
-    expect(res.deletedCount).toBe(4);
-    expect(await namesFor(engine, PKG)).toEqual(['reprob_foreign']);
-  });
+  }
 });

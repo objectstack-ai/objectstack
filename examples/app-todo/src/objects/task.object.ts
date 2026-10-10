@@ -64,8 +64,14 @@ export const Task = ObjectSchema.create({
     }),
     
     // Dates
+    // A deadline, declared (objectui#11815 ruling D): past it the date reads as
+    // overdue until the task is completed — the app's own overdue definition
+    // below (`due_date` past AND `status` not 'completed'), stated once on the
+    // field so every view that shows the date agrees with it.
     due_date: Field.date({
       label: 'Due Date',
+      dueLike: true,
+      settledWhen: P`record.status == 'completed'`,
     }),
     
     reminder_date: Field.datetime({

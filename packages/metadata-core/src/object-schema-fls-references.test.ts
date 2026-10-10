@@ -292,6 +292,31 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         });
     });
 
+    it('drops a cell formatting rule whose condition reads the denied field WHOLE, keeping the others in order (#22228)', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({
+                conditionalFormatting: [
+                    { condition: 'value == null', style: { color: '#6b7280' } },
+                    { condition: { dialect: 'cel', source: 'record.secret_score > 90' }, style: { color: '#b91c1c' } },
+                    { condition: "record.id != ''", style: { fontWeight: '600' } },
+                ],
+            }),
+        });
+        // Not `{ style }` alone: a rule without its condition would read as
+        // always-on, so the whole rule goes.
+        expect(served.fields.title.conditionalFormatting).toEqual([
+            { condition: 'value == null', style: { color: '#6b7280' } },
+            { condition: "record.id != ''", style: { fontWeight: '600' } },
+        ]);
+
+        const allDenied = mask({
+            name: 'thing',
+            fields: fieldsWith({ conditionalFormatting: [{ condition: 'record.secret_score > 90', style: { color: '#b91c1c' } }] }),
+        });
+        expect(allDenied.fields.title).not.toHaveProperty('conditionalFormatting');
+    });
+
     it('scrubs the inline master-detail grid — its columns are THIS (child) object\'s own fields', () => {
         const served = mask({
             name: 'thing',

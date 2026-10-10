@@ -215,6 +215,8 @@ export const CrmTranslationBundle = defineTranslationBundle({
     flows: {
       crm_convert_lead_wizard: {
         label: '将线索转化为客户和商机',
+        successMessage: '🎉 线索已转化 — 已创建客户和商机。',
+        errorMessage: '线索转化未完成 — 请检查线索后重试。',
         screens: {
           screen_already_converted: { title: '已转化' },
           screen_account: { title: '第 1 步，共 2 步 · 客户' },

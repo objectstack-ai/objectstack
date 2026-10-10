@@ -13,6 +13,10 @@
  *   - `GET /_console/` (and every path under it) answers `503` with the remedy
  *     the boot warning names — the same sentence from the same picker, with
  *     the host's absolute paths left out;
+ *   - the same holds when the console package does not resolve at all
+ *     (`consolePath` is `null`), which used to print nothing and mount nothing:
+ *     the answer says the Console is not installed and names the reinstall
+ *     sentence the picker already gives an install with no `dist/`;
  *   - `GET /` and `GET /_console` redirect to `/_console/`, exactly as they do
  *     once the Console is built (the control below), so neither route changes
  *     owner with the build.
@@ -37,6 +41,10 @@ const ORIGIN = 'http://console.example.test';
 
 /** The first line of the not-built answer, which says what is wrong before saying how to fix it. */
 const NOT_BUILT_HEADLINE = 'The ObjectStack Console is not built, so this server has no Console to serve at /_console/.';
+
+/** The same line when the console package did not resolve at all. */
+const NOT_INSTALLED_HEADLINE =
+  'The ObjectStack Console is not installed, so this server has no Console to serve at /_console/.';
 
 /** The framework repo's remedy. */
 const BUILD_REMEDY = 'pnpm objectui:build';
@@ -169,6 +177,44 @@ describe('an installed CLI whose `@objectstack/console` has no `dist/`', () => {
     expect(body).toContain('@objectstack/console');
     expect(body).not.toContain(BUILD_REMEDY);
     expect(body).not.toContain(project);
+  });
+
+  it('redirects `/` and `/_console` to `/_console/`', async () => {
+    await expectRedirectsToConsole(request);
+  });
+});
+
+describe('an install where `@objectstack/console` does not resolve at all', () => {
+  let request: Request;
+  beforeAll(async () => {
+    request = await serve(createConsoleNotBuiltPlugin(null));
+  });
+
+  it.each(CONSOLE_REQUESTS)('GET %s answers 503 saying the Console is not installed', async (p) => {
+    const res = await request(p);
+    expect(res.status).toBe(503);
+    expect(res.headers.get('content-type')).toMatch(/^text\/plain/);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = await res.text();
+    expect(body.split('\n')[0]).toBe(NOT_INSTALLED_HEADLINE);
+    expect(body).toContain('@objectstack/console');
+    expect(body).not.toContain(BUILD_REMEDY);
+  });
+
+  it('is the boot warning\'s sentence verbatim — it names no host path to leave out', async () => {
+    const warning = formatConsoleDistMissingWarning(null);
+    expect(warning.startsWith(WARNING_PREFIX)).toBe(true);
+    const body = await (await request('/_console/')).text();
+    expect(body).toContain(warning.slice(WARNING_PREFIX.length));
+    expect(body).not.toContain(scratch);
+  });
+
+  it('names the same reinstall sentence as an install whose package has no `dist/`', () => {
+    // One picker: the unresolved arm differs from the installed-without-dist
+    // arm only in what it says is missing, never in the fix.
+    const { consoleDir } = installTree();
+    const tail = (s: string) => s.slice(s.indexOf(' — '));
+    expect(tail(formatConsoleDistMissingWarning(null))).toBe(tail(formatConsoleDistMissingWarning(consoleDir)));
   });
 
   it('redirects `/` and `/_console` to `/_console/`', async () => {

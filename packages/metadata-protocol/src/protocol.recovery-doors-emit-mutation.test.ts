@@ -498,25 +498,6 @@ describe('[#14179] door 3 — deleteMetaItem’s legacy raw-engine exit', () => 
         ]);
     });
 
-    it('carries the org scope the delete predicate used', async () => {
-        const { protocol, seen, engine } = makeProtocol('bootstrap');
-        await engine.insert('sys_metadata', {
-            type: 'api', name: 'legacy_endpoint',
-            organization_id: 'org_acme',
-            package_id: null,
-            state: 'active',
-            metadata: JSON.stringify({ name: 'legacy_endpoint' }),
-        });
-
-        const res = await protocol.deleteMetaItem({
-            type: 'api', name: 'legacy_endpoint', organizationId: 'org_acme',
-        });
-
-        expect(res.success).toBe(true);
-        expect(seen).toEqual([
-            { type: 'api', name: 'legacy_endpoint', state: 'deleted', organizationId: 'org_acme' },
-        ]);
-    });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

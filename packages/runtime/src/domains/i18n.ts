@@ -14,9 +14,20 @@
  *   GET /translations?locale=xx     → getTranslations (locale from query)
  *   GET /labels/:object/:locale     → getFieldLabels  (both from path)
  *   GET /labels/:object?locale=xx   → getFieldLabels  (locale from query)
+ *
+ * Every one of those answers is for an authenticated caller: an anonymous one
+ * is refused before the slot is consulted (ADR-0056 D2, see the first
+ * statement of {@link handleI18nRequest}). The translation bundle carries the
+ * labels of the application's objects, fields, apps and pages, so it stands on
+ * the same floor as the metadata it translates. A client renders its sign-in
+ * page from its own built-in strings and reads this domain once it holds a
+ * session.
  */
 
-import { resolveLocale } from '@objectstack/core';
+import {
+    resolveLocale,
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import { CoreServiceName, resolveObjectFieldLabels, toLocaleDescriptors } from '@objectstack/spec/system';
 import { isServiceServeable } from '../service-serveable.js';
 import type { TranslationData } from '@objectstack/spec/system';
@@ -37,9 +48,40 @@ export async function handleI18nRequest(
     path: string,
     method: string,
     query: any,
-    _context: HttpProtocolContext,
+    context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    const i18nService = await deps.getService(_context, CoreServiceName.enum.i18n);
+    // [#22432] ANONYMOUS BASELINE (ADR-0056 D2) — the FIRST statement, ahead
+    // of the service-availability probe and every route below, in the hoisted
+    // form `domains/analytics.ts` and `domains/security.ts` use. The bundle
+    // this domain serves names every object, field, app, page and dashboard
+    // the application declares, and the metadata read of the same object
+    // already answers an anonymous caller 401; ADR-0138 D2's door classes and
+    // the control-plane allowlist name no translation door.
+    //
+    // Why here and nowhere else: every `/i18n` face (locales, translations,
+    // field labels, both spellings of each) converges on this ONE handler
+    // body, whichever transport delivered it, so a single domain-wide gate
+    // covers them all and a face added later cannot arrive ungated. ⛔ No
+    // second gate at the dispatcher mount.
+    //
+    // Why ahead of the probe: an anonymous caller must not learn from a 501
+    // versus a 401 whether this deployment carries an i18n provider, nor from
+    // a 400 which parameters a route reads.
+    //
+    // The dispatcher hands an unauthenticated request to this handler as the
+    // guest envelope (`assembleExecutionContextOrGuest`), which carries no
+    // `userId`; an unresolved context carries none either. Both are denied.
+    // A client renders its sign-in page from its own built-in strings and
+    // reads this domain once it holds a session.
+    const ec = context?.executionContext;
+    if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem, method })) {
+        return {
+            handled: true,
+            response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+        };
+    }
+
+    const i18nService = await deps.getService(context, CoreServiceName.enum.i18n);
     // [#4058] An empty slot and a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12) are the same amount of i18n. Both
     // in-memory providers of this slot really translate, so both declare

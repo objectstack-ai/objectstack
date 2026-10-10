@@ -112,6 +112,7 @@ import {
   type OwnershipFloorAlternate,
 } from './platform-ownership-policies.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   unresolvedPostureDenialMessage,
@@ -134,6 +135,8 @@ import {
   type SharingWriteVerdict,
   type AuthoredRowWriteVerdict,
   type AuthoredRowWriteOperation,
+  type ControlledByParentWriteDenialLeg,
+  type ControlledByParentWriteOutcome,
   type DelegationNarrowing,
   SEED_SETTLEMENT_SERVICE,
   type ISeedSettlementService,
@@ -466,7 +469,12 @@ interface RlsFilterOptions {
    *     master", which no gate had authorized;
    *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
    *     floor is `update`/`delete`-only so the read path never carries it, and
-   *     the authored-write probe already removes it by provenance.
+   *     the authored-write probe already removes it by provenance;
+   *   • `security/explain`'s record-grained UPDATE and DELETE verdicts set it
+   *     on step 2.7's condition, because explain asks the master gate for
+   *     every by-id write it explains
+   *     ({@link SecurityPlugin.checkControlledByParentWrite}) and refuses on
+   *     its refusal.
    *
    * `false`/absent leaves the floor exactly where it is. Never affects Layer 0
    * (the tenant wall) or any app-authored policy.
@@ -509,6 +517,43 @@ interface RlsFilterOptions {
  * overflow would reintroduce it at depth 9 instead of depth 2.
  */
 const CBP_MAX_CHAIN_DEPTH = 8;
+
+/**
+ * [ADR-0055] Which leg of the master-detail write check a refusal came from,
+ * keyed by the refusal itself. Written at the one place a refusal is built
+ * (`masterEditDenied`, inside {@link SecurityPlugin.assertControlledByParentWrite})
+ * and read only by {@link controlledByParentWriteOutcomeOf}, so the served
+ * member ({@link SecurityPlugin.checkControlledByParentWrite}) names the leg
+ * without parsing the refusal's prose, and the refusal the write path throws
+ * keeps its envelope byte for byte: a weak map adds no property to the error,
+ * so nothing new can reach a response body or a log line.
+ */
+const MASTER_EDIT_DENIAL_LEG = new WeakMap<PermissionDeniedError, ControlledByParentWriteDenialLeg>();
+
+/**
+ * [ADR-0055] The master-detail write check's own outcome, read off what
+ * {@link SecurityPlugin.assertControlledByParentWrite} threw. `null` when the
+ * throw is not one of its outcomes: a store fault, or a refusal of the CONTEXT
+ * rather than of the master. Those are rejections, and the caller rethrows them
+ * unchanged, so a datasource outage keeps its `503` and is never reported as a
+ * verdict about the record (`ControlledByParentWriteOutcome`).
+ *
+ * The three non-verdict classes map one to one onto the `unresolvable` reasons:
+ * each is thrown only for the record the caller addressed, never for a master
+ * above it (an unresolvable ancestor is the `master_chain` leg, a refusal).
+ */
+function controlledByParentWriteOutcomeOf(e: unknown): ControlledByParentWriteOutcome | null {
+  if (e instanceof PermissionDeniedError) {
+    const leg = MASTER_EDIT_DENIAL_LEG.get(e);
+    return leg ? { outcome: 'deny', leg } : null;
+  }
+  if (e instanceof MasterDetailRelationMissingError) {
+    return { outcome: 'unresolvable', reason: 'master_detail_relation_missing' };
+  }
+  if (e instanceof DetailRecordNotFoundError) return { outcome: 'unresolvable', reason: 'record_not_found' };
+  if (e instanceof MasterReferenceMissingError) return { outcome: 'unresolvable', reason: 'master_reference_missing' };
+  return null;
+}
 
 interface CbpRelation {
   /** The detail's master reference field key. */
@@ -2269,6 +2314,14 @@ export class SecurityPlugin implements Plugin {
           operation: AuthoredRowWriteOperation,
           context?: any,
         ) => this.checkAuthoredRowWrite(object, recordId, operation, context),
+        // [ADR-0055] The master-detail write check's answer for a by-id update
+        // of one record — the write path's own composition, served for a gate
+        // outside it (the `sys_attachment` and `sys_comment` parent gates)
+        // that must judge a `controlled_by_parent` parent as its own update is
+        // judged. Served on the typed literal, so the compiler holds it to the
+        // contract's signature and outcome type.
+        checkControlledByParentWrite: (object: string, recordId: string, context?: any) =>
+          this.checkControlledByParentWrite(object, recordId, context),
         // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
         // primitive the REST read layer needs to evaluate a permission-set-
         // gated book/doc audience ({ permissionSet: '…' }). Same resolution
@@ -2388,7 +2441,14 @@ export class SecurityPlugin implements Plugin {
         },
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getQueryableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay, contributeOwnershipFloorAlternates) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7');
+      // The member list is READ OFF the registered object, never typed by hand:
+      // a hand-kept list fell behind the served surface (five served members
+      // never appeared in it), and a boot log that is silent about a member
+      // reads as that member's absence.
+      ctx.logger.info(
+        `[security] registered "security" service (${Object.keys(registeredSecurityService).sort().join(', ')}) ` +
+          '— ADR-0021 D-C / ADR-0055 / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7',
+      );
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2646,62 +2706,18 @@ export class SecurityPlugin implements Plugin {
       const positions = opCtx.context?.positions ?? [];
       const explicitPermissionSets = opCtx.context?.permissions ?? [];
 
-      // [#21908] ADR-0096 D5 strict mode. No position, no explicit permission
-      // set and no user id, on a context that is not a system one: REFUSED,
-      // for every verb, before anything resolves and before the operation
-      // runs. This used to be the hand-off (`return next()`, ADR-0096 E1): no
-      // CRUD gate, no RLS, no FLS mask and no tenant Layer 0. The gates above
-      // still run first and keep their own refusals; the object-admission
-      // probes and the row scope read the same predicate
-      // ({@link isPrincipalLessContext}).
-      if (isPrincipalLessContext(opCtx.context)) {
-        throw principalLessDenial(opCtx.operation, opCtx.object);
-      }
-
-      // 1. Resolve permission sets from BOTH role names and explicit
-      //    permission set names attached to the execution context. The
-      //    resolution (incl. the implicit + post-resolution baseline
-      //    fallback) is shared with the public getReadFilter service via
-      //    resolvePermissionSetsForContext — keeping the find-path RLS and
-      //    the analytics raw-SQL RLS provably in lock-step.
-      let permissionSets: PermissionSet[] = [];
-      try {
-        permissionSets = await this.resolvePermissionSetsForContext(opCtx.context);
-      } catch (e) {
-        // Fail CLOSED. A permission-resolution failure must DENY the request,
-        // never bypass the checks (that would let a degraded metadata service
-        // expose every tenant's data). System/bootstrap operations already
-        // short-circuited above (`opCtx.context?.isSystem`), so reaching here
-        // means an authenticated user request whose RBAC/RLS could not be
-        // resolved — deny it and alert.
-        ctx.logger.error(
-          `[security] permission resolution failed for operation '${opCtx.operation}' on ` +
-          `object '${opCtx.object}' (user ${opCtx.context?.userId ?? 'unknown'}) — ` +
-          `denying request (fail-closed)`,
-          e instanceof Error ? e : new Error(String(e)),
-        );
-        throw new PermissionDeniedError(
-          `[Security] Access denied: permission subsystem unavailable for ` +
-          `operation '${opCtx.operation}' on object '${opCtx.object}'`,
-        );
-      }
-
-      // [ADR-0090 D10 — agent intersection] When this principal acts ON BEHALF
-      // OF a user (an AI agent or a service), its effective permission is the
-      // INTERSECTION of its own grants and the delegator's grants — never the
-      // union (confused-deputy prevention). Resolve the delegator's effective
-      // permission sets ONCE here; every gate below AND-composes the two lists
-      // so the tighter of the two wins at each axis (CRUD, capabilities, FLS,
-      // depth, row-level using/check, VAMA). The whole thing is gated on the
-      // presence of the delegation LINK (not the `principalKind` label — a
-      // service acting for a user is the identical risk): on the ordinary
-      // non-delegated path `delegatorSets` stays null, every combine reduces to
-      // today's expression, no extra `ql` read happens, and behaviour is
-      // byte-identical. A dangling link (delegator deleted) fails CLOSED — see
-      // resolveDelegatorContext for why "empty sets" would be wrong (the
-      // additive baseline would resurrect access for a non-existent user).
-      let delegatorSets: PermissionSet[] | null = null;
-      let delegatorContext: any = null;
+      // [#21908] ADR-0096 D5 strict mode, 1. permission-set resolution, and
+      // [ADR-0090 D10] the delegator's sets: the CONTEXT prologue, refused or
+      // resolved before any gate below runs. One method, because the security
+      // service's master-detail write member (`checkControlledByParentWrite`)
+      // must refuse and resolve a context exactly as this path does — see
+      // {@link SecurityPlugin.resolveOperationPrincipals}, which carries each
+      // step's reasoning.
+      const { permissionSets, delegatorSets, delegatorContext } = await this.resolveOperationPrincipals(
+        opCtx.operation,
+        opCtx.object,
+        opCtx.context,
+      );
       // [ADR-0058 D4] What the by-id pre-image gate (step 2.7) decided about the
       // platform ownership floor for THIS write. The post-image check (step
       // 3.6) reads it so that a USING-only policy set is held, on the new row,
@@ -2712,20 +2728,6 @@ export class SecurityPlugin implements Plugin {
       // floor on exactly the terms its `where` scope does: step 3 composes the
       // bulk scope with no floor options either.
       let preImageFloorOpts: RlsFilterOptions | null = null;
-      if (permissionSets.length > 0 && opCtx.context?.onBehalfOf?.userId) {
-        const del = await resolveDelegatorContext(this.ql, opCtx.context);
-        if (del.kind === 'missing') {
-          throw new PermissionDeniedError(
-            `[Security] Access denied: on-behalf-of principal names delegator ` +
-              `'${del.userId}', who does not exist — refusing to act (ADR-0090 D10 fail-closed)`,
-            { operation: opCtx.operation, object: opCtx.object },
-          );
-        }
-        if (del.kind === 'resolved') {
-          delegatorContext = del.context;
-          delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
-        }
-      }
 
       // [ADR-0066 D2/D3] Resolve the object's security posture (private flag,
       // platform-global flag, capability contract) once for the checks below.
@@ -3168,11 +3170,10 @@ export class SecurityPlugin implements Plugin {
           // RLS policies declare select/insert/update/delete — map the
           // destructive lifecycle class onto its nearest write class so
           // authored policies apply (purge destroys like delete;
-          // transfer/restore mutate like update).
-          const rlsOperation =
-            opCtx.operation === 'purge' ? 'delete'
-            : opCtx.operation === 'transfer' || opCtx.operation === 'restore' ? 'update'
-            : opCtx.operation;
+          // transfer/restore mutate like update). The mapping is declared once
+          // ({@link rlsOperationForVerb}); `security/explain` composes a
+          // lifecycle verb's row-level security through the same one.
+          const rlsOperation = rlsOperationForVerb(opCtx.operation);
           // [#5492] The floor decision. Its clauses and their reasons (floor in
           // play, `allow` only, the on-behalf-of exclusion) live on
           // {@link resolvePreImageFloorDrop}, which `security/explain` asks too.
@@ -4276,7 +4277,8 @@ export class SecurityPlugin implements Plugin {
       //
       // [#7809] `opCtx.operation` is passed RAW here — no `purge -> delete`,
       // `transfer|restore -> update` normalisation like the 2.7 gate above
-      // does at `rlsOperation`. That asymmetry is deliberate and safe, but ONLY
+      // does at `rlsOperation` (through `rlsOperationForVerb`, the one
+      // declaration of that mapping). That asymmetry is deliberate and safe, but ONLY
       // because of an invariant that lives in another package: the engine's
       // middleware dispatch vocabulary (`OperationContext['operation']`) has
       // seven members and none of them is a destructive lifecycle verb, and
@@ -4295,7 +4297,10 @@ export class SecurityPlugin implements Plugin {
       // `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`.
       // If a recycle bin (#3146) ever makes one of those verbs dispatchable,
       // that pin goes red first — and THIS site and the D10 delegator half
-      // below are what must normalise before it can go green again.
+      // below are what must normalise before it can go green again, by
+      // reading `rlsOperationForVerb` (`lifecycle-verb-rls-operation.ts`), the
+      // mapping the 2.7 gate and `security/explain` already read — never a
+      // second inline copy of it.
       if (opCtx.ast) {
         const extra: Record<string, unknown>[] = [];
         // [#15813] The layered split rather than `computeRlsFilter`, composed
@@ -4536,9 +4541,11 @@ export class SecurityPlugin implements Plugin {
     // rename or delete of a position also writes its DEFINITION through the
     // metadata door at environment scope — the row first, then the
     // definition; a refused definition undoes the row. Registered AFTER the
-    // security middleware, so it runs INSIDE it. Stands down for a walled
-    // posture, a name a package or built-in holds, and a kernel without a
-    // capable metadata protocol. See `position-write-through.ts`.
+    // security middleware, so it runs INSIDE it. A create or a rename into a
+    // name a package or built-in holds answers the metadata door's own
+    // refusal (C2 stage S10). Stands down for a walled posture, an edit that
+    // keeps or a delete of such a name, and a kernel without a capable
+    // metadata protocol. See `position-write-through.ts`.
     ql.registerMiddleware(
       createPositionWriteThrough({
         ql,
@@ -5429,9 +5436,15 @@ export class SecurityPlugin implements Plugin {
     // path's own inputs, so `record.visible` for `update` / `delete` is the
     // answer the by-id PATCH / DELETE gives:
     //  - Layer 1 carries the pre-image gate's floor decision (step 2.7,
-    //    {@link resolvePreImageFloorDrop}). Not `masterGateCoversThisWrite`:
-    //    that knob VOUCHES that ADR-0055's master gate runs after the filter,
-    //    and explain runs no master gate, so it has nothing to vouch with.
+    //    {@link resolvePreImageFloorDrop}).
+    //  - [ADR-0055] It also carries step 2.7's coverage vouch,
+    //    `masterGateCoversThisWrite`, on step 2.7's own condition (not on behalf
+    //    of anyone), for an `update` and a `delete` alike: explain asks the
+    //    master gate for every by-id write of a record that exists
+    //    ({@link checkControlledByParentWrite}, wired below), so a
+    //    `controlled_by_parent` record's ownership floor (`owner_only_writes`,
+    //    `owner_only_deletes`) is handed over to that check here exactly as the
+    //    write path hands it over.
     //  - plugin-sharing's per-record gate is asked with `__writeScope` stamped
     //    as the middleware stamps it (step 2.6), always overwritten, so an
     //    `org` / unit writer is not judged owner-only.
@@ -5449,13 +5462,21 @@ export class SecurityPlugin implements Plugin {
       engineOp: string,
       c: any,
     ): Promise<RlsFilterOptions | undefined> => {
+      // [#22550] `engineOp` here is the operation explain composes the verb's
+      // row-level security for (`rlsOperationForVerb`, the 2.7 gate's own
+      // mapping), so a transfer arrives as `update` and meets the floor
+      // decision and the vouch step 2.7 makes for it, on the mapped verb.
       if (!recordId || (engineOp !== 'update' && engineOp !== 'delete')) return undefined;
       // Fail toward the floor: an unanswerable decision keeps it standing,
       // which is what the gate's own verdict does on a failed probe.
       const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
         engineOp, o, recordId, c, sets, actsOnBehalfOf(c),
       ).catch(() => false);
-      return { dropPlatformOwnershipFloor };
+      // Step 2.7's vouch is `!delegatorSets` for every verb it runs on; the
+      // floor itself comes off only where `masterGateCoversOperation` says the
+      // master gate covers the verb (`update`, `delete`).
+      const masterGateCoversThisWrite = !actsOnBehalfOf(c);
+      return { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
     };
     const withWriteScope = async (o: string, c: any): Promise<any> =>
       actsOnBehalfOf(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
@@ -5538,6 +5559,15 @@ export class SecurityPlugin implements Plugin {
         // the caller-context by-id read, every data middleware included.
         recordAbsentToCaller: (o: string, rid: string, c: any) =>
           absentUnderCallerRead(() => this.readRowById(o, rid, c)),
+        // [ADR-0055] The master-detail write check a by-id update, delete or
+        // transfer meets at step 2.8, served as
+        // `ISecurityService.checkControlledByParentWrite` and asked with the
+        // EXPLAINED context. The update's answer is each of those verbs' answer
+        // (the check judges EDIT of the master whatever the record's verb). Its
+        // presence is what licenses the `masterGateCoversThisWrite` vouch
+        // above: the two go together.
+        checkControlledByParentWrite: (o: string, rid: string, c: any) =>
+          this.checkControlledByParentWrite(o, rid, c),
       },
       { object, operation, context: targetContext, recordId },
     );
@@ -9027,6 +9057,160 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * The CONTEXT prologue of the engine middleware: a context the operation may
+   * not run under is refused here, before any gate, and every other context is
+   * resolved to the permission sets every gate below composes with — the
+   * principal's, and on a delegated context the delegator's too.
+   *
+   * Two callers, one prologue: the middleware itself, for every operation, and
+   * {@link checkControlledByParentWrite}, which must refuse and resolve a
+   * context exactly as the by-id update it answers for does.
+   *
+   * - [#21908] ADR-0096 D5 strict mode. No position, no explicit permission set
+   *   and no user id, on a context that is not a system one: REFUSED, for every
+   *   verb, before anything resolves and before the operation runs. This used
+   *   to be the hand-off (`return next()`, ADR-0096 E1): no CRUD gate, no RLS,
+   *   no FLS mask and no tenant Layer 0. The middleware's earlier gates still
+   *   run first and keep their own refusals; the object-admission probes and
+   *   the row scope read the same predicate ({@link isPrincipalLessContext}).
+   * - Permission sets resolve from BOTH role names and explicit permission set
+   *   names attached to the execution context. The resolution (incl. the
+   *   implicit + post-resolution baseline fallback) is shared with the public
+   *   getReadFilter service via resolvePermissionSetsForContext — keeping the
+   *   find-path RLS and the analytics raw-SQL RLS provably in lock-step. A
+   *   resolution failure fails CLOSED: it must DENY the request, never bypass
+   *   the checks (that would let a degraded metadata service expose every
+   *   tenant's data). System/bootstrap operations short-circuit before this is
+   *   asked (`context.isSystem`), so reaching that branch means an
+   *   authenticated user request whose RBAC/RLS could not be resolved — deny it
+   *   and alert.
+   * - [ADR-0090 D10 — agent intersection] When this principal acts ON BEHALF OF
+   *   a user (an AI agent or a service), its effective permission is the
+   *   INTERSECTION of its own grants and the delegator's grants — never the
+   *   union (confused-deputy prevention). The delegator's effective permission
+   *   sets resolve ONCE here; every gate AND-composes the two lists so the
+   *   tighter of the two wins at each axis (CRUD, capabilities, FLS, depth,
+   *   row-level using/check, VAMA). The whole thing is gated on the presence of
+   *   the delegation LINK (not the `principalKind` label — a service acting for
+   *   a user is the identical risk): on the ordinary non-delegated path
+   *   `delegatorSets` stays null, every combine reduces to today's expression,
+   *   no extra `ql` read happens, and behaviour is byte-identical. A dangling
+   *   link (delegator deleted) fails CLOSED — see resolveDelegatorContext for
+   *   why "empty sets" would be wrong (the additive baseline would resurrect
+   *   access for a non-existent user).
+   */
+  private async resolveOperationPrincipals(
+    operation: string,
+    object: string,
+    context: any,
+  ): Promise<{ permissionSets: PermissionSet[]; delegatorSets: PermissionSet[] | null; delegatorContext: any }> {
+    if (isPrincipalLessContext(context)) {
+      throw principalLessDenial(operation, object);
+    }
+
+    let permissionSets: PermissionSet[] = [];
+    try {
+      permissionSets = await this.resolvePermissionSetsForContext(context);
+    } catch (e) {
+      this.logger.error?.(
+        `[security] permission resolution failed for operation '${operation}' on ` +
+        `object '${object}' (user ${context?.userId ?? 'unknown'}) — ` +
+        `denying request (fail-closed)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      throw new PermissionDeniedError(
+        `[Security] Access denied: permission subsystem unavailable for ` +
+        `operation '${operation}' on object '${object}'`,
+      );
+    }
+
+    let delegatorSets: PermissionSet[] | null = null;
+    let delegatorContext: any = null;
+    if (permissionSets.length > 0 && context?.onBehalfOf?.userId) {
+      const del = await resolveDelegatorContext(this.ql, context);
+      if (del.kind === 'missing') {
+        throw new PermissionDeniedError(
+          `[Security] Access denied: on-behalf-of principal names delegator ` +
+            `'${del.userId}', who does not exist — refusing to act (ADR-0090 D10 fail-closed)`,
+          { operation, object },
+        );
+      }
+      if (del.kind === 'resolved') {
+        delegatorContext = del.context;
+        delegatorSets = await this.resolvePermissionSetsForContext(delegatorContext);
+      }
+    }
+    return { permissionSets, delegatorSets, delegatorContext };
+  }
+
+  /**
+   * [ADR-0055] `ISecurityService.checkControlledByParentWrite` — what the
+   * master-detail write check answers for a by-id UPDATE of `recordId` on
+   * `object` by `context`, for a gate outside the write path (the
+   * `sys_attachment` and `sys_comment` parent gates) that must judge a record as
+   * its own update is judged.
+   *
+   * It is the write path's composition, run, never re-derived: the context is
+   * refused or resolved by {@link resolveOperationPrincipals} (the middleware's
+   * own prologue), and the check is {@link assertControlledByParentWrite}, run
+   * for the principal's sets and then, on a delegated context, for the
+   * delegator's — step 2.8's two calls, in step 2.8's order, so the first
+   * refusal is the answer. Its outcome is read off what that check throws
+   * ({@link controlledByParentWriteOutcomeOf}): a leg-tagged refusal is `deny`,
+   * the three non-verdict errors are `unresolvable`, and anything else — a store
+   * fault, a refusal of the context — rejects unchanged.
+   *
+   * Two places where it does not mirror step 2.8's GUARD, both deliberate:
+   *
+   * - `permissionSets.length > 0`. A principal whose sets resolve to none is
+   *   judged over that empty list, as the contract declares (ADR-0056 D2): it
+   *   holds no `update` grant on any master, so it answers `deny` on
+   *   `object_permission`. On the write path the same principal never reaches
+   *   step 2.8 because the object-level CRUD gate refuses it first.
+   * - `!!context.userId`. A principal with positions or sets and no user id
+   *   (the guest envelope) skips step 2.8 on the write path; here the check runs
+   *   for it. Mirroring the guard would answer `allow` for a master nothing
+   *   measured, which the contract's `allow` does not cover (it is a system
+   *   context or every leg passing), and it would hand a REFUSING gate an
+   *   abstention dressed as a pass. Not mirroring it cannot widen anything: the
+   *   member's every non-`allow` outcome refuses, and the record's own update
+   *   already refuses that principal at the object-level gate (guest bindings
+   *   refuse `allowEdit`), so the parity of the overall answer holds.
+   *
+   * A system context answers `allow` (the write path's very first exit), and an
+   * object that does not declare `controlled_by_parent` answers
+   * `not_applicable` once the context has been admitted.
+   */
+  private async checkControlledByParentWrite(
+    object: string,
+    recordId: string,
+    context?: any,
+  ): Promise<ControlledByParentWriteOutcome> {
+    if (context?.isSystem) return { outcome: 'allow' };
+    const { permissionSets, delegatorSets, delegatorContext } = await this.resolveOperationPrincipals(
+      'update',
+      object,
+      context,
+    );
+    if (!this.declaresControlledByParent(object)) return { outcome: 'not_applicable' };
+    // A by-id update as step 2.8 sees it: one id, addressed by `where`, under the
+    // caller's own context (the delegation link, when present, rides on it — the
+    // master's floor exclusion reads it there on both passes).
+    const opCtx = { object, operation: 'update', options: { where: { id: recordId } }, context };
+    try {
+      await this.assertControlledByParentWrite(permissionSets, object, 'update', opCtx, context);
+      if (delegatorSets) {
+        await this.assertControlledByParentWrite(delegatorSets, object, 'update', opCtx, delegatorContext);
+      }
+    } catch (e) {
+      const outcome = controlledByParentWriteOutcomeOf(e);
+      if (outcome) return outcome;
+      throw e;
+    }
+    return { outcome: 'allow' };
+  }
+
+  /**
    * ADR-0055 — master-detail "controlled by parent" WRITE enforcement.
    *
    * A by-id write (insert/update/delete) to a controlled_by_parent detail
@@ -9132,13 +9316,25 @@ export class SecurityPlugin implements Plugin {
     // that returns `never` — the same reason the `!rel` branch below throws
     // directly rather than routing through the helper — and the chain walk needs
     // real narrowing after each of its refusals.
-    const masterEditDenied = (reason: string, recordId?: unknown): PermissionDeniedError =>
-      new PermissionDeniedError(
+    //
+    // [ADR-0055] Each refusal also names its LEG — the closed vocabulary the
+    // served member (`checkControlledByParentWrite`) reports. It is recorded
+    // beside the error ({@link MASTER_EDIT_DENIAL_LEG}), never on it, so the
+    // envelope this path throws is unchanged.
+    const masterEditDenied = (
+      leg: ControlledByParentWriteDenialLeg,
+      reason: string,
+      recordId?: unknown,
+    ): PermissionDeniedError => {
+      const denial = new PermissionDeniedError(
         `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record (${reason})`,
         { operation, object, recordId },
       );
-    const denyMasterEdit = (reason: string, recordId?: unknown): never => {
-      throw masterEditDenied(reason, recordId);
+      MASTER_EDIT_DENIAL_LEG.set(denial, leg);
+      return denial;
+    };
+    const denyMasterEdit = (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown): never => {
+      throw masterEditDenied(leg, reason, recordId);
     };
 
     const rel = this.resolveCbpRelation(object);
@@ -9317,6 +9513,7 @@ export class SecurityPlugin implements Plugin {
 
       if (visited.has(masterObject)) {
         throw masterEditDenied(
+          'master_chain',
           `the controlled_by_parent chain from '${object}' re-enters '${masterObject}' (metadata cycle)`,
           hopMasterId,
         );
@@ -9324,6 +9521,7 @@ export class SecurityPlugin implements Plugin {
       visited.add(masterObject);
       if (++hops >= CBP_MAX_CHAIN_DEPTH) {
         throw masterEditDenied(
+          'master_chain',
           `the controlled_by_parent chain from '${object}' exceeds the depth bound of ${CBP_MAX_CHAIN_DEPTH}`,
           hopMasterId,
         );
@@ -9332,6 +9530,7 @@ export class SecurityPlugin implements Plugin {
       const nextRel = this.resolveCbpRelation(masterObject);
       if (!nextRel) {
         throw masterEditDenied(
+          'master_chain',
           `master '${masterObject}' declares controlled_by_parent with no relation to derive edit access from`,
           hopMasterId,
         );
@@ -9342,6 +9541,7 @@ export class SecurityPlugin implements Plugin {
       const masterRow = await this.readRowById(masterObject, hopMasterId, { isSystem: true });
       if (!masterRow) {
         throw masterEditDenied(
+          'master_chain',
           `master '${masterObject}' record '${String(hopMasterId)}' is not present, so its own master ` +
             `access cannot be derived`,
           hopMasterId,
@@ -9350,6 +9550,7 @@ export class SecurityPlugin implements Plugin {
       const nextMasterId = masterRow[nextRel.fk];
       if (nextMasterId == null) {
         throw masterEditDenied(
+          'master_chain',
           `master '${masterObject}' has no '${nextRel.fk}' master reference to derive edit access from`,
           hopMasterId,
         );
@@ -9380,12 +9581,12 @@ export class SecurityPlugin implements Plugin {
     masterId: unknown,
     context: any,
     opCtx: any,
-    denyMasterEdit: (reason: string, recordId?: unknown) => never,
+    denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
   ): Promise<void> {
     // Master edit access = CRUD update on the master AND the master row reachable
     // under BOTH halves of its own write gate (write RLS + record sharing).
     if (!this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets)) {
-      denyMasterEdit(`no edit permission on master '${rel.master}'`, masterId);
+      denyMasterEdit('object_permission', `no edit permission on master '${rel.master}'`, masterId);
     }
     // [commit 498f4e884] The master's own write RLS — composed with the SAME ownership
     // authority the by-id write pre-image gate (step 2.7) composes with, which
@@ -9476,7 +9677,9 @@ export class SecurityPlugin implements Plugin {
       } catch {
         visible = null;
       }
-      if (!visible) denyMasterEdit(`master '${rel.master}' not editable by this user (row-level security)`, masterId);
+      if (!visible) {
+        denyMasterEdit('row_level_security', `master '${rel.master}' not editable by this user (row-level security)`, masterId);
+      }
     }
     // [#5386] The OWD / record-share half — asked UNCONDITIONALLY, because the
     // RLS half above is skipped whole when the master authors no write policy,
@@ -9520,7 +9723,7 @@ export class SecurityPlugin implements Plugin {
         context,
       );
       if (authored !== 'admit') {
-        denyMasterEdit(`master '${rel.master}' not editable by this user (record sharing)`, masterId);
+        denyMasterEdit('record_sharing', `master '${rel.master}' not editable by this user (record sharing)`, masterId);
       }
     }
   }

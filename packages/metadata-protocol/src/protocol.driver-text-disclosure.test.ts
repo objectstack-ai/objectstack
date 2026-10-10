@@ -313,7 +313,7 @@ describe('[#8136] a driver failure on the uninstall overlay read is declared, no
             const { protocol } = makeKernel({ dbError: text, failOn: ['find'] });
 
             const err = await captureThrow(() =>
-                protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true }));
+                protocol.deletePackage({ packageId: 'com.acme.crm' }));
 
             // The POSITIVE shape. This is the file's existing contract for "a
             // `sys_metadata` read failed" (`metadataStoreUnavailableError`),
@@ -329,7 +329,7 @@ describe('[#8136] a driver failure on the uninstall overlay read is declared, no
         const { protocol } = makeKernel({ dbError: text, failOn: ['find'] });
 
         const err = await captureThrow(() =>
-            protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true }));
+            protocol.deletePackage({ packageId: 'com.acme.crm' }));
 
         // The operator half of the contract: withheld from the caller, intact
         // for `handleRouteError` / `logWithheldServerFault`. Without this the
@@ -345,7 +345,7 @@ describe('[#8136] a driver failure on the uninstall overlay read is declared, no
         // facts — on a destructive verb.
         const { protocol } = makeKernel({ dbError: DIALECTS[1]!.text, failOn: ['find'] });
         const err = await captureThrow(() =>
-            protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true }));
+            protocol.deletePackage({ packageId: 'com.acme.crm' }));
         expect(err).toBeInstanceOf(Error);
         expect((err as any).status).toBeGreaterThanOrEqual(500);
     });
@@ -487,7 +487,7 @@ describe('[#8136] the uninstall response body carries no driver text either', ()
             seed: [seedRow(REPO_PATH_TYPE, 'acct_overlay', 'com.acme.crm')],
         });
 
-        const result = await protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true });
+        const result = await protocol.deletePackage({ packageId: 'com.acme.crm' });
 
         expect(result.failedCount).toBe(1);
         expect(result.failed[0]?.name).toBe('acct_overlay');
@@ -505,7 +505,7 @@ describe('[#8136] the uninstall response body carries no driver text either', ()
             throw new Error(text);
         });
 
-        const result = await protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true });
+        const result = await protocol.deletePackage({ packageId: 'com.acme.crm' });
 
         const cleanup = result.cleanups.find((c: any) => c.name === 'security-grants');
         expect(cleanup?.success).toBe(false);
@@ -523,7 +523,7 @@ describe('[#8136] the uninstall response body carries no driver text either', ()
         const { protocol } = makeKernel({ dbError: 'unused', failOn: [] });
         protocol.registerUninstallCleanup('security-grants', async () => { throw refusal; });
 
-        const result = await protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true });
+        const result = await protocol.deletePackage({ packageId: 'com.acme.crm' });
 
         const cleanup = result.cleanups.find((c: any) => c.name === 'security-grants');
         expect(cleanup?.error).toContain('[grant_revocation_blocked]');

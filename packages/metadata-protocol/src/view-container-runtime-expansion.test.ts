@@ -33,6 +33,7 @@ import { expandViewContainer, isAggregatedViewContainer, ViewSchema } from '@obj
 import { MetadataPlugin } from '@objectstack/metadata';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { ObjectStackProtocolImplementation } from './index.js';
+import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
     id: string; type: string; name: string; organization_id: string | null;
@@ -101,6 +102,17 @@ function makeStubEngine() {
         },
     };
     return { engine, rows, registered };
+}
+
+/**
+ * [ADR-0131 D6] The save door refuses every organization-scoped write, so an
+ * organization-scoped view row — one stored before that release, which the
+ * reads still serve — is planted at rest through the repository.
+ */
+async function plantOrgRow(engine: any, organizationId: string, name: string, item: unknown): Promise<{ success: true }> {
+    await new SysMetadataRepository({ engine, organizationId, orgLabel: organizationId })
+        .put({ type: 'view', name } as any, item, { parentVersion: null, actor: null });
+    return { success: true };
 }
 
 /** The card's repro body: a `defineView` container, as `defineView` emits it. */
@@ -304,9 +316,7 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        await protocol.saveMetaItem({
-            type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
-        });
+        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
 
         const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
         const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
@@ -316,17 +326,10 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
     it('POSITIVE CONTROL: a pre-existing independent ViewItem for the same object is still served alongside the newly-expanded container', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        await protocol.saveMetaItem({
-            type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
-        });
-        await protocol.saveMetaItem({
-            type: 'view',
-            name: 'crm_lead.mine',
-            item: {
-                name: 'crm_lead.mine', object: 'crm_lead', viewKind: 'list', label: 'My Leads',
-                config: { type: 'grid', data: { provider: 'object', object: 'crm_lead' }, columns: [{ field: 'name' }] },
-            },
-            organizationId: 'org_acme',
+        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
+        await plantOrgRow(engine, 'org_acme', 'crm_lead.mine', {
+            name: 'crm_lead.mine', object: 'crm_lead', viewKind: 'list', label: 'My Leads',
+            config: { type: 'grid', data: { provider: 'object', object: 'crm_lead' }, columns: [{ field: 'name' }] },
         });
 
         const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
@@ -340,9 +343,7 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
     it('ORG ISOLATION HELD: a container authored in org_acme is invisible reading as org_globex, and visible reading as org_acme', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        await protocol.saveMetaItem({
-            type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
-        });
+        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
 
         const globex: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_globex' } as any);
         expect(switcherMatches(globex.items, 'crm_lead')).toEqual([]);
@@ -354,9 +355,7 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
     it('the isolation-safe path never registers an org-scoped expansion into the shared SchemaRegistry', async () => {
         const { engine, registered } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        await protocol.saveMetaItem({
-            type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
-        });
+        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
         await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
 
         // The RESPONSE carries the expansion (re-confirmed above); the SHARED
@@ -383,9 +382,7 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
         it('a DIFFERENT object in the SAME org still serves nothing for it', async () => {
             const { engine } = makeStubEngine();
             const protocol = new ObjectStackProtocolImplementation(engine);
-            await protocol.saveMetaItem({
-                type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
-            });
+            await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
             const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
             expect(switcherMatches(list.items, 'crm_account')).toEqual([]);
         });
@@ -637,11 +634,11 @@ describe('#21334 a container on another package\'s object never takes that packa
         { arm: 'package-less, environment-wide', packageId: undefined, organizationId: undefined, ownPackage: undefined },
         { arm: 'package-less, organization-scoped', packageId: undefined, organizationId: ORG, ownPackage: undefined },
     ] as const;
-    const save = (protocol: Protocol, name: string, item: unknown, c: (typeof CONTAINERS)[number]) =>
-        protocol.saveMetaItem({
+    const save = (protocol: Protocol, name: string, item: unknown, c: (typeof CONTAINERS)[number]) => c.organizationId
+        ? plantOrgRow((protocol as any).engine, c.organizationId, name, item)
+        : protocol.saveMetaItem({
             type: 'view', name, item,
             ...(c.packageId ? { packageId: c.packageId } : {}),
-            ...scoped(c.organizationId),
         } as any);
 
     for (const [kernel, environmentId] of KERNELS) {
@@ -904,7 +901,9 @@ describe('#21334 a container on another package\'s object never takes that packa
                             list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] },
                             listViews: { in_progress: { label: 'Customized In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
                         };
-                        await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay, ...scoped(organizationId) } as any);
+                        await (organizationId
+                            ? plantOrgRow((protocol as any).engine, organizationId, TASK, overlay)
+                            : protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay } as any));
 
                         const served = await objectDoor(protocol, organizationId);
                         for (const name of [DEFAULT, `${TASK}.in_progress`]) {
@@ -981,8 +980,9 @@ describe('#21334 a container on another package\'s object never takes that packa
         };
         /** The control: a name the container expands that has no row of its own. */
         const ROWLESS = `${TASK}.in_progress`;
-        const saveView = (protocol: Protocol, name: string, item: unknown, organizationId?: string) =>
-            protocol.saveMetaItem({ type: 'view', name, item, ...scoped(organizationId) } as any);
+        const saveView = (protocol: Protocol, name: string, item: unknown, organizationId?: string) => (organizationId
+            ? plantOrgRow((protocol as any).engine, organizationId, name, item)
+            : protocol.saveMetaItem({ type: 'view', name, item } as any));
         /** The two doors answer `name` with one item, and that item is the one `expectItem` names. */
         const expectBothDoors = async (
             protocol: Protocol, name: string, organizationId: string | undefined, expectItem: (v: any) => void,
@@ -1243,7 +1243,9 @@ describe('#21334 a container on another package\'s object never takes that packa
 
         for (const [kernel, environmentId] of KERNELS) {
             describe(`on ${kernel}`, () => {
-                for (const organizationId of [undefined, ORG]) {
+                // [ADR-0131 D6] Environment-wide only: an organization-scoped save is refused NOT_OVERRIDABLE / 403
+                // before this check (`protocol.org-scoped-write-refused.test.ts`).
+                for (const organizationId of [undefined]) {
                     const scope = organizationId ? 'organization-scoped' : 'environment-wide';
                     for (const [kind, m] of Object.entries(MEMBER_CASES)) {
                         it(`${scope}, member ${kind}: a container saved under ${m.shadows}, a name its own expansion produces, is refused VALIDATION_ERROR / 400; nothing is stored or registered`, async () => {
@@ -1318,7 +1320,7 @@ describe('#21334 a container on another package\'s object never takes that packa
      * P2b below, this block's own #21334 cases) — so only the name another
      * stored container of the same object expands to is refused.
      *
-     * The ruling's three pins, on both kernels and both scopes: the measured
+     * The ruling's three pins, on both kernels (environment-wide, ADR-0131 D6): the measured
      * save is refused (every member kind the first container can expand the
      * name from, the card's own pair, draft mode, a body with no `name`, a
      * `form`-only body, and a sibling on another package's object); a
@@ -1396,7 +1398,9 @@ describe('#21334 a container on another package\'s object never takes that packa
 
         for (const [kernel, environmentId] of KERNELS) {
             describe(`on ${kernel}`, () => {
-                for (const organizationId of [undefined, ORG]) {
+                // [ADR-0131 D6] Environment-wide only: an organization-scoped save is refused NOT_OVERRIDABLE / 403
+                // before this check (`protocol.org-scoped-write-refused.test.ts`).
+                for (const organizationId of [undefined]) {
                     const scope = organizationId ? 'organization-scoped' : 'environment-wide';
 
                     for (const [kind, member] of Object.entries(FIRST_CASES)) {
@@ -1504,24 +1508,6 @@ describe('#21334 a container on another package\'s object never takes that packa
                     expectNothingWritten(rows, registry, [LEAD], PIPELINE);
                     await expectServed(protocol, PIPELINE, undefined, 'Lead Pipeline');
                 });
-
-                it('an environment-wide sibling is in an organization caller\'s selection: that caller\'s save under its expanded name is refused', async () => {
-                    const { protocol, rows, registry } = showcaseHarness(environmentId);
-                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }));
-                    const PIPELINE = `${LEAD}.pipeline`;
-                    expectRefused(await refusalOf(saveIn(protocol, PIPELINE, second(PIPELINE), ORG)), PIPELINE, LEAD);
-                    expectNothingWritten(rows, registry, [LEAD], PIPELINE);
-                    await expectServed(protocol, PIPELINE, ORG, 'Lead Pipeline');
-                });
-
-                it('CONTROL — another organization\'s container is not this caller\'s sibling: the save is judged by the caller\'s own selection, as the readers judge', async () => {
-                    const { protocol } = showcaseHarness(environmentId);
-                    await saved(saveIn(protocol, LEAD, { name: LEAD, object: LEAD, listViews: { pipeline: leadList('Lead Pipeline') } }, 'org_globex'));
-                    const PIPELINE = `${LEAD}.pipeline`;
-                    await saved(saveIn(protocol, PIPELINE, second(PIPELINE), ORG));
-                    // The other organization still gets its own container's view, on both doors.
-                    await expectServed(protocol, PIPELINE, 'org_globex', 'Lead Pipeline');
-                });
             });
         }
     });
@@ -1552,7 +1538,6 @@ describe('#21334 a container on another package\'s object never takes that packa
      */
     describe('#21639 the save door\'s one collision predicate — the enumeration pin', () => {
         const LEAD = 'crm_lead';
-        const OTHER_ORG = 'org_globex';
         const leadData = { provider: 'object', object: LEAD };
         const leadList = (label: string) => ({ label, type: 'grid', data: leadData, columns: [{ field: 'name' }] });
         const taskList = (label: string) => ({ label, type: 'grid', data, columns: [{ field: 'title' }] });
@@ -1766,16 +1751,6 @@ describe('#21334 a container on another package\'s object never takes that packa
                 },
             },
             {
-                shape: 'a container saved under the expanded name of ANOTHER organization\'s container',
-                scopes: ['organization-scoped'],
-                given: [{ name: LEAD, item: storedLead, organizationId: OTHER_ORG }],
-                save: { name: `${LEAD}.pipeline`, item: { object: LEAD, list: leadList('Mine') } },
-                allowed: {
-                    because: 'the caller\'s selection decides, as it does for the readers: another organization\'s row is not in it',
-                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'Mine' }],
-                },
-            },
-            {
                 shape: 'an environment-wide container saved under the expanded name of an organization\'s container',
                 scopes: ['environment-wide'],
                 given: [{ name: LEAD, item: storedLead, organizationId: ORG }],
@@ -1841,6 +1816,7 @@ describe('#21334 a container on another package\'s object never takes that packa
 
         const writeIn = (protocol: Protocol, write: Write, callerOrganizationId: string | undefined, mode?: 'draft' | 'publish') => {
             const organizationId = write.organizationId === undefined ? callerOrganizationId : (write.organizationId ?? undefined);
+            if (organizationId) return plantOrgRow((protocol as any).engine, organizationId, write.name, write.item);
             return protocol.saveMetaItem({
                 type: 'view', name: write.name, item: write.item,
                 ...(write.packageId ? { packageId: write.packageId } : {}),
@@ -1865,7 +1841,9 @@ describe('#21334 a container on another package\'s object never takes that packa
 
         for (const [kernel, environmentId] of KERNELS) {
             describe(`on ${kernel}`, () => {
-                for (const organizationId of [undefined, ORG]) {
+                // [ADR-0131 D6] Environment-wide only: an organization-scoped save is refused NOT_OVERRIDABLE / 403
+                // before this check (`protocol.org-scoped-write-refused.test.ts`).
+                for (const organizationId of [undefined]) {
                     const scope: Scope = organizationId ? 'organization-scoped' : 'environment-wide';
                     for (const row of SHAPES) {
                         if (row.scopes && !row.scopes.includes(scope)) continue;

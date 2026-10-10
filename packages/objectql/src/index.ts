@@ -84,6 +84,16 @@ export {
   OBJECT_OWNERSHIP_CONFLICT_CODE,
 } from './registry.js';
 
+// [#22371] The package half of the cold-boot check's holder reading (ADR-0048
+// N.3): every package-held position and permission-set name, with its holders.
+// Exported for `os migrate security-catalog-overlays`, which boots the
+// deployment's composition without hydrating `sys_metadata` and meets this
+// list with the stored rows — the population the cold boot refuses — so the
+// CLI holds no second reading of "who holds a name" (maintainer ruling letter B
+// on #22371, record 6074838935). The environment half and the refusal itself
+// stay private to the engine.
+export { findPackageHeldSecurityCatalogNames } from './registry.js';
+
 
 // [#14553] The navigation-contribution group diagnostic (ADR-0029 D7,
 // ADR-0112 D6c). Exported because `os build` is the SECOND door that has to
