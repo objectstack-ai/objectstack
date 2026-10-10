@@ -218,7 +218,7 @@ behind that behaviour are set out in
 the scope and the provenance that make a capability reviewable, attributable and
 uninstallable — but no authorization check reads it. Permission-set grants and
 resource `requiredPermissions` match capability names **as strings**; the only
-production readers of the table are the two boot seeders. The row's `active`
+production reader of the table is the declared-capability boot seeder. The row's `active`
 flag is a catalogue/visibility flag with no authorization effect: clearing it
 revokes nothing. Withdraw a capability by withdrawing the **grant**.
 </Callout>

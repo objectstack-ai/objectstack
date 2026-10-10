@@ -204,10 +204,10 @@ to write into another package's capability.
 
 This **replaces the implicit back-door** where a capability existed only as an
 untitled placeholder derived from whatever a permission set happened to reference
-in `systemPermissions[]`. That derivation still runs for back-compat (a
-reference with no declaration keeps resolving as a `managed_by:'platform'`
-placeholder), but an explicit `defineCapability` takes precedence and — for a
-pre-existing derived placeholder — **claims** it, upgrading the row to package
+in `systemPermissions[]`. That derivation is retired: a reference with no
+declaration still matches by name at runtime but gets no `sys_capability` row.
+An explicit `defineCapability` takes precedence and — for a derived placeholder
+an older database still holds — **claims** it, upgrading the row to package
 provenance with the authored label/description/scope. This is the ADR-0066 D1
 direction: retire the implicit `managed_by`-guessing back-doors in favour of
 explicit, attributable declarations.
@@ -537,15 +537,17 @@ The complete, prioritized gap map lives in issue **#2561** (the production
 
 - **Deny/muting layer** (ADR-0066 ⑦⑧) — union-only grants can't take access
   away; needed for large-org governance and packaged-set adjustment.
-- **Capability registry** (ADR-0066 D1) — **landed**: capabilities are seeded
-  as first-class `sys_capability` records from the canonical list in
+- **Capability registry** (ADR-0066 D1, ADR-0131 D3) — **landed**: the
+  platform's curated capabilities, from the canonical list in
   `@objectstack/spec` (`security/capabilities.ts` → `PLATFORM_CAPABILITIES`),
-  seeded by `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts`.
+  are declared `capability` metadata served by the registry
+  (`registerBuiltinCapabilities`, `GET /api/v1/meta/capability`), with no
+  `sys_capability` row.
   A **package** now DEFINES its own capabilities explicitly via
   [`defineCapability` / `stack.capabilities`](#package-capability-declaration-adr-0066-d1),
   seeded with `managed_by:'package'` + `package_id` provenance by
   `bootstrap-declared-capabilities.ts` — replacing the implicit
-  derive-from-`systemPermissions` back-door (which stays for back-compat).
+  derive-from-`systemPermissions` back-door (now retired).
   The authoring lint (ADR-0066 ⑨) is also **landed**: `validateCapabilityReferences`
   (`@objectstack/lint`) warns at author time (`os validate` / `os lint`) when a
   `requiredPermissions` names a capability registered nowhere — no built-in, no
