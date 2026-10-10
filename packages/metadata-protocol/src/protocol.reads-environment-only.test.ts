@@ -48,10 +48,15 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
             if (!(v as Row[]).some((clause) => matches(row, clause))) return false;
             continue;
         }
+        // Any other combinator is refused, never read as a field name.
+        if (k.startsWith('$')) throw new Error(`matches: unsupported combinator ${k}`);
         if (v === undefined) continue;
         const actual = row[k] ?? null;
         if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
             const ops = v as Record<string, unknown>;
+            for (const op of Object.keys(ops)) {
+                if (op !== '$null' && op !== '$in') throw new Error(`matches: unsupported operator ${op}`);
+            }
             if ('$null' in ops && (actual === null) !== ops.$null) return false;
             if ('$in' in ops && !(ops.$in as unknown[]).includes(actual)) return false;
             continue;
@@ -73,8 +78,9 @@ function harness(seed: Record<string, Row[]>, artifacts: Artifact[] = []) {
     const artifactOf = (type: string, name: string) =>
         artifacts.find((a) => a.type === type && a.name === name)?.body;
     const engine: any = {
-        async find(t: string, q?: { where?: Row }) {
-            return table(t).filter((r) => matches(r, q?.where));
+        async find(t: string, q?: { where?: Row; limit?: number }) {
+            const rows = table(t).filter((r) => matches(r, q?.where));
+            return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
         },
         async findOne(t: string, q: { where: Row }) {
             assertEngineFindOnePredicate(t, q);
