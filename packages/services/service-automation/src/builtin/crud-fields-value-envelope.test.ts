@@ -464,12 +464,16 @@ describe('the date macros — the envelope each refusal names writes the bytes t
     ['Due {TODAY() + 7} for {name}', "'Due ' + isoDate(daysFromNow(7)) + ' for ' + name"],
     ['Due {TODAY()} by {$User.Id}', "'Due ' + isoDate(today()) + ' by ' + current_user.id"],
   ])('%s → %s', async (authored, source) => {
-    expect(remedyOf(authored)).toBe(source);
+    // The parity is asked of the spelling the judge PRINTS, so a remedy that
+    // drifted from the template fails on the written bytes; the table only
+    // names which spelling that is.
+    const remedy = remedyOf(authored);
     for (const instant of INSTANTS) {
       const template = templated(authored, instant);
       expect(typeof template, `${authored} @ ${instant}`).toBe('string');
-      expect(await written({ dialect: 'cel', source }, instant), `${authored} @ ${instant}`).toBe(template);
+      expect(await written({ dialect: 'cel', source: remedy }, instant), `${authored} → ${remedy} @ ${instant}`).toBe(template);
     }
+    expect(remedy).toBe(source);
   });
 
   // The edges the refusal names, each pinned as it names it.
