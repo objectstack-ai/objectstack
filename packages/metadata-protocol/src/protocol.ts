@@ -26430,7 +26430,7 @@ export class ObjectStackProtocolImplementation implements
                 const n = await orNoTable(ledger, () => this.engine.count(ledger, {
                     where: LEGACY,
                     context: { isSystem: true },
-                } as any), 0);
+                }), 0);
                 if (n > 0) ledgers.push(`${ledger}×${n}`);
             }
             if (rows.length === 0 && ledgers.length === 0) return;
