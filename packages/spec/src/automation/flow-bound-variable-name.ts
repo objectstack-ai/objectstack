@@ -35,8 +35,8 @@
  * They agree now, on the rule that judge already reads: the `$` names are
  * reserved for the engine (a resume signal may not write one either —
  * `IAutomationService.resume`'s `INVALID_SIGNAL`). So a binding refuses a name
- * that starts with `$`, and its remedy is the same name without the `$`, read
- * as `{{ name }}`. The one `$` name an author may write is the one the engine
+ * whose first non-blank character is `$`, and its remedy is the same name
+ * without the `$`, read as `{{ name }}`. The one `$` name an author may write is the one the engine
  * itself binds there: `errorVariable: '$error'`, the key's default — the
  * caught error the engine publishes as `$error` either way.
  *
@@ -109,15 +109,24 @@ export type FlowBindingKey = keyof typeof BINDING_CLAUSES;
 export const FLOW_BINDING_KEYS: readonly FlowBindingKey[] = Object.keys(BINDING_CLAUSES) as FlowBindingKey[];
 
 /**
- * Any string whose first character is not `$` — the empty string included,
- * which every executor reads as "no binding". `[\s\S]` rather than `.` so a
- * name carrying a line break is judged on its first character too.
+ * Any string whose first NON-BLANK character is not `$` — the empty and the
+ * blank string included, which every executor reads as "no binding".
+ *
+ * Judged past leading whitespace because two executors trim before they bind
+ * (`screen`'s `idVariable`, `script`'s `outputVariable`): `' $id'` passed a
+ * first-character rule, and its screen then named `$id`, refused on resume
+ * (#22572, measured).
+ * `\s` is exactly the set `String.prototype.trim` removes (ECMA-262
+ * WhiteSpace ∪ LineTerminator, `shared/refinement-projection.ts`), so the
+ * pattern refuses a name whose trimmed form is `$`-led, and nothing a trim
+ * would not turn into one. `[\s\S]` rather than `.` so a name carrying a
+ * line break is judged too.
  */
-const NOT_DOLLAR_LED = '[^$][\\s\\S]*';
+const NOT_DOLLAR_LED = '[^$\\s][\\s\\S]*';
 
 /** Why a `$`-led name is refused at a binding position, with its remedy. */
 function boundVariableNameRefusal(key: FlowBindingKey, name: string): string {
-  const bare = name.replace(/^\$+/, '');
+  const bare = name.trim().replace(/^\$+/, '');
   const read = key === 'errorVariable' ? `${bare}.message` : bare;
   const lead =
     `\`${name}\` is a \`$\` name, and the \`$\` names are reserved for the flow engine's own variables (a resume `
@@ -142,7 +151,7 @@ function boundVariableNameRefusal(key: FlowBindingKey, name: string): string {
  */
 export function flowBoundVariableNameSchema(key: FlowBindingKey) {
   const engineOwn = key === 'errorVariable' ? `${ENGINE_ERROR_VARIABLE.replace('$', '\\$')}|` : '';
-  return z.string().regex(new RegExp(`^(?:${engineOwn}${NOT_DOLLAR_LED})?$`), {
+  return z.string().regex(new RegExp(`^\\s*(?:${engineOwn}${NOT_DOLLAR_LED})?$`), {
     error: (issue) => boundVariableNameRefusal(key, String(issue.input)),
   });
 }

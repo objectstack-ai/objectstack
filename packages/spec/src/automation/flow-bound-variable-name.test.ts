@@ -371,8 +371,17 @@ describe('every binding door refuses a `$` name — #22572 closes the family', (
     }
   });
 
+  it.each(BINDING_SITES)('$label: a leading blank does not hide the `$` — a trimming executor would bind it', ({ flow, flowPath }) => {
+    // `screen`'s `idVariable` and `script`'s `outputVariable` are trimmed by
+    // their executors before they bind, so the rule judges the first non-blank
+    // character, at every site alike.
+    for (const name of [' $x', '\t$record', '\n$x']) {
+      expect(issuesOf(flow(name)).map(({ path }) => path), JSON.stringify(name)).toEqual([flowPath(name)]);
+    }
+  });
+
   it.each(BINDING_SITES)('CONTROL: $label: a plain name and a `$` past the first character parse clean', ({ contract, flow }) => {
-    for (const name of ['x', 'a$b']) {
+    for (const name of ['x', 'a$b', ' x']) {
       if (contract) expect(contract.schema.safeParse(contract.config(name)).success, name).toBe(true);
       expect(issuesOf(flow(name)), name).toEqual([]);
     }
@@ -463,8 +472,8 @@ describe('the enumeration pin — every flow binding is listed, and every listed
       expect(FLOW_BINDING_KEYS as readonly string[], at).toContain(key);
       expect(pattern, `${at} publishes no pattern — compose flowBoundVariableNameSchema`).toBeDefined();
       const re = new RegExp(pattern!);
-      expect(re.test('x') && re.test('a$b'), at).toBe(true);
-      expect(re.test('$x') || re.test('$record'), at).toBe(false);
+      expect(re.test('x') && re.test('a$b') && re.test(' x'), at).toBe(true);
+      expect(re.test('$x') || re.test('$record') || re.test(' $x'), at).toBe(false);
       expect(BINDING_SITES.some((site) => site.declaredBy === exportName && site.key === key), `${at} has no row in BINDING_SITES`).toBe(true);
     }
     // FLOOR: the walk reaches every `*Variable` row of the table, so a walker
@@ -486,8 +495,8 @@ describe('the enumeration pin — every flow binding is listed, and every listed
     for (const [at, pattern] of Object.entries(patterns)) {
       expect(pattern, at).toBeDefined();
       const re = new RegExp(pattern!);
-      expect(re.test('x') && re.test('a$b'), at).toBe(true);
-      expect(re.test('$x'), at).toBe(false);
+      expect(re.test('x') && re.test('a$b') && re.test(' x'), at).toBe(true);
+      expect(re.test('$x') || re.test(' $x'), at).toBe(false);
     }
   });
 });

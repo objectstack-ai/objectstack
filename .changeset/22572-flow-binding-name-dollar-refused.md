@@ -15,15 +15,17 @@ Clause-②: no (narrowing)
 - `iteratorVariable: '$record'` on a `loop` or `map` left `$record` holding the last item for the rest of the run, and `indexVariable: '$runId'` left `$runId` holding an index;
 - `assignments: { $record: … }` overwrote the trigger record;
 - a declared variable named `$record` was overwritten by the engine at run start, so its `defaultValue` never reached the run;
-- a `screen` whose `idVariable` or field `name` was a `$` name paused, and then could never be submitted: the resume carrying the value was refused with `INVALID_SIGNAL`.
+- a `screen` whose `idVariable` or field `name` was a `$` name paused, and then could never be submitted: the resume carrying the value was refused with `INVALID_SIGNAL`;
+- a leading blank hid the `$` from a first-character rule, while the `screen` and `script` executors trim a name before they bind it: under that rule `idVariable: ' $id'` registered, the paused screen named `$id`, and its resume was refused the same way; a `script`'s `outputVariable: ' $record'` passes the protocol-18 rule too and is trimmed to `$record` by its executor (read from the executor, not run).
 
 **What is refused.**
 
 - `iteratorVariable` and `indexVariable` on `LoopConfigSchema` and `MapConfigSchema`, `idVariable` on `ScreenConfigSchema`, `name` on `ScreenFieldConfigSchema` and on `FlowVariableSchema`: a name that starts with `$`. Each key states the rule as a JSON Schema `pattern`, so the published `json-schema/**` refuses what the parse refuses. The parse issue is an `invalid_format` (regex) issue at the key, and its message names the remedy.
+- Every binding key — `outputVariable` and `errorVariable` included — now judges the first NON-BLANK character, so `' $x'` is refused like `'$x'`. The pattern's `\s` is exactly the set `String.prototype.trim` removes.
 - An `assignment` node's targets, in each shape its executor binds: a key of the `assignments` map (`AssignmentConfigSchema` states it as `propertyNames.pattern`), a top-level key of the bare legacy config, and the `variable` (or `name`, `key`) of a legacy `assignments: [{ variable, value }]` item.
 - `FlowSchema.parse`, `registerFlow` and `objectstack validate` refuse the flow where the name was written — `nodes.N.config.iteratorVariable`, `nodes.N.config.fields.M.name`, `nodes.N.config.assignments.NAME`, `variables.N.name` — inside a region body too. A stored flow carrying one is skipped at boot with a warn naming it, and the `loop`, `map` and `screen` executors' own contract parse refuses the node at run time.
 
-**Unchanged.** Any name that does not start with `$`, a `$` later in the name (`a$b`) included; the defaults (`iteratorVariable` is still `item`); an empty string where the key took one; a body-less legacy `loop`, whose `iteratorVariable` nothing reads; and every hole the text-slot judge already admits. Non-string values keep the type refusal they had.
+**Unchanged.** Any name whose first non-blank character is not `$`, a `$` later in the name (`a$b`) included; the defaults (`iteratorVariable` is still `item`); an empty string where the key took one; a body-less legacy `loop`, whose `iteratorVariable` nothing reads; and every hole the text-slot judge already admits. Non-string values keep the type refusal they had.
 
 ## FROM → TO
 

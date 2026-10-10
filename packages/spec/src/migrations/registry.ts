@@ -5675,7 +5675,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'variable\'s `name`, and an `assignment` node\'s targets in each shape its executor reads refuse a name '
       + 'that starts with `$`, by the same rule and with the same remedy. A binding over an engine name replaced '
       + 'it for the rest of the run (`iteratorVariable: \'$record\'`), a declared `$record` was overwritten at '
-      + 'run start, and a `screen` binding a `$` name could never be submitted, its resume refused. Each key '
+      + 'run start, and a `screen` binding a `$` name could never be submitted, its resume refused. Every '
+      + 'binding key, `outputVariable` and `errorVariable` included, now judges the first non-blank character, '
+      + 'since two executors trim a name before they bind it (`idVariable: \' $id\'` named `$id` on its screen). Each key '
       + 'states the rule as a `pattern` (the `assignments` map as `propertyNames`), and the flow parse, '
       + '`registerFlow` and `objectstack validate` refuse such a name where it was written. No D2 conversion '
       + 'exists, for the same reason. Its D3 record is the semantic entry `flow-binding-name-dollar-refused`.',
@@ -13579,10 +13581,12 @@ const step18: MigrationStep = {
     // dollar name, by the same rule — a loop or map iteratorVariable and
     // indexVariable, an object-form screen's idVariable, a screen field's name, a
     // declared flow variable's name, and an assignment node's targets in each shape
-    // its executor reads. It narrows a flow's accept set; no key is removed, so
-    // there is no tombstone and no RETIRED_KEYS_BY_MAJOR row. Semantic-only — no D2
-    // conversion: the bare name may already be bound in the flow, and the reads of
-    // the old name sit in every dialect a flow string speaks.
+    // its executor reads — judged on the first non-blank character at every binding
+    // key, since two executors trim a name before they bind it. It narrows a flow's
+    // accept set; no key is removed, so there is no tombstone and no
+    // RETIRED_KEYS_BY_MAJOR row. Semantic-only — no D2 conversion: the bare name may
+    // already be bound in the flow, and the reads of the old name sit in every
+    // dialect a flow string speaks.
     //
     // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
     // inside a code span and a table cell.
@@ -13593,7 +13597,9 @@ const step18: MigrationStep = {
         + 'flows[].nodes[].config.idVariable and config.fields[].name of a screen node, flows[].variables[].name, '
         + 'and an assignment node\'s targets — a key of config.assignments, a top-level key of a config with no '
         + 'assignments map, or the variable of a legacy assignments array item — when the name starts with a dollar '
-        + 'sign, such as $row. Reachable wherever a flow is authored or stored: defineStack flows sources, '
+        + 'sign, such as $row; and on every binding key, the outputVariable and errorVariable of protocol 18 included, '
+        + 'a name whose first non-blank character is a dollar sign, such as \' $id\'. Reachable wherever a flow is '
+        + 'authored or stored: defineStack flows sources, '
         + 'defineFlow, an exported stack passed to objectstack validate or objectstack compile, a flow saved from the '
         + 'Studio flow designer, and a flow row already in sys_metadata',
       replacement:
@@ -13612,7 +13618,11 @@ const step18: MigrationStep = {
         + 'indexVariable of $runId left the run id holding an index, an assignment to $record overwrote it, a '
         + 'declared variable named $record was overwritten by the engine at run start, and a screen whose '
         + 'idVariable or field name was a dollar name could never be submitted — the resume that carried the value '
-        + 'was refused as a write to an engine variable. Each binding now gives the text slots\' answer: each key '
+        + 'was refused as a write to an engine variable. A leading blank hid the dollar sign from the first-character '
+        + 'rule the outputVariable and errorVariable keys took, while the screen and script executors trim a name '
+        + 'before they bind it, so idVariable: \' $id\' registered and its screen could not be submitted either. Each '
+        + 'binding now gives the text slots\' answer, '
+        + 'judged on the first non-blank character: each key '
         + 'states the rule as a JSON Schema pattern (propertyNames for the assignments map), so the published schema '
         + 'refuses what the parse refuses, and the flow parse, registerFlow and objectstack validate refuse such a '
         + 'name where it was written, naming the same name without the dollar sign — as does the run itself for a '
