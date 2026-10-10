@@ -12,7 +12,8 @@
  * is the shape #11633 §1 calls out: *"most of leg D's win is negative caching"*.
  *
  * This module caches the OUTCOME OF THAT READ — the raw `sys_metadata` rows —
- * per `(engine, type, packageId, organizationId)`, and retires the entry the
+ * per `(engine, type, packageId)` — the environment's rows; ADR-0131 D6 reads
+ * no organization's — and retires the entry the
  * moment the engine's write epoch moves.
  *
  * ## ⭐ Where this cache sits, and why that IS the resolution of the
@@ -131,7 +132,6 @@ export interface MetaOverlayCacheKey {
   /** Canonical metadata type — already folded by `canonicalizeMetaRequestType`. */
   type: string;
   packageId?: string;
-  organizationId?: string;
 }
 
 /** One cached row set, with everything needed to decide it is still the answer. */
@@ -272,11 +272,11 @@ export function bumpWriteEpoch(engine: unknown, reason: string): number | undefi
 
 /**
  * The cache key. `JSON.stringify` over the tuple rather than a delimiter join:
- * a package id or organization id containing the delimiter would otherwise let
- * two different reads collide on one key.
+ * a package id containing the delimiter would otherwise let two different
+ * reads collide on one key.
  */
 function cacheKeyOf(key: MetaOverlayCacheKey): string {
-  return JSON.stringify([key.type, key.packageId ?? null, key.organizationId ?? null]);
+  return JSON.stringify([key.type, key.packageId ?? null]);
 }
 
 /**
@@ -359,8 +359,8 @@ export function writeMetaOverlayCache(
     // ⭐ Every entry read at an older epoch is already dead by the read-side
     // rule, so keeping it costs memory and buys nothing. Without this a
     // long-lived process accumulates one never-evicted entry per distinct
-    // `(type, packageId, organizationId)` ever requested — bounded in principle
-    // by the tenant count, which is not a bound worth shipping.
+    // `(type, packageId)` ever requested — bounded in principle by the
+    // package count, which is not a bound worth shipping.
     bucket.entries.clear();
     bucket.epoch = epoch;
   }

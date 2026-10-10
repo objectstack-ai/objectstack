@@ -179,6 +179,7 @@ import {
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
 import { registerBuiltinPositions } from './builtin-positions.js';
+import { registerBuiltinCapabilities, withoutPlatformCapabilityDeclarations } from './builtin-capabilities.js';
 
 /**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
@@ -1792,6 +1793,20 @@ export class SecurityPlugin implements Plugin {
           + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
           + 'them. Their sys_position rows still seed and no grant changes, but the security catalog read and '
           + 'GET /api/v1/meta/position will not list them.',
+      );
+    }
+
+    // [ADR-0131 D3, ADR-0066 D1] The curated capabilities are declared metadata
+    // of THIS plugin too, by the same item seam and for the same reason: the
+    // manifest's package door refuses a built-in name, and the curated names
+    // are the built-in capability names (`builtin-capabilities.ts`). Sourced
+    // from `PLATFORM_CAPABILITIES`, the list the curated seeding pass reads;
+    // nothing here writes a `sys_capability` row.
+    if (registerBuiltinCapabilities((ql as { registry?: unknown }).registry, SECURITY_PLUGIN_ID) === 0) {
+      ctx.logger.warn(
+        '[security] the curated platform capabilities were NOT declared as capability metadata: the ObjectQL '
+          + 'engine exposes no registry that can register them. Their sys_capability rows still seed and no grant '
+          + 'changes, but the security catalog read and GET /api/v1/meta/capability will not list them.',
       );
     }
 
@@ -4984,7 +4999,11 @@ export class SecurityPlugin implements Plugin {
         // it affects (#4967 Part 3).
         let materializedCapabilityNames: string[] = [];
         try {
-          const capOutcome = await bootstrapDeclaredCapabilities(ql, this.metadata, {
+          // [ADR-0131 D3] Handed the engine WITHOUT this plugin's own curated
+          // declarations (`builtin-capabilities.ts`): they are not a package's,
+          // the curated pass below seeds their rows, and read here each would be
+          // refused as a package claiming a curated name.
+          const capOutcome = await bootstrapDeclaredCapabilities(withoutPlatformCapabilityDeclarations(ql), this.metadata, {
             logger: ctx.logger,
             permissionSets: this.bootstrapPermissionSets,
           });

@@ -292,6 +292,18 @@ export type RestProtocol = DataProtocol & MetadataProtocol;
 type TransportScopedMetaRequest<R> = R & { environmentId?: string };
 
 /**
+ * [ADR-0131 D6, triage ruling Q3 A] The anonymous form doors' `view` list
+ * read: the one metadata read left that reaches a legacy organization's rows.
+ * `legacyFormOrganizationId` is not a key of the spec's `GetMetaItemsRequest`
+ * — every other read is environment → code — and the protocol honours it for
+ * `view` alone: the Default Organization's legacy body is preferred, and a
+ * withdrawal in either layer closes the form, fail-closed until the v18
+ * migration ceremony (ADR-0131 C7) carries those rows into the environment
+ * layer and deletes this read with them.
+ */
+type LegacyFormViewsRequest = TransportScopedMetaRequest<GetMetaItemsRequest> & { legacyFormOrganizationId?: string };
+
+/**
  * [#15866] The DATA doors' sibling of {@link TransportScopedMetaRequest}, and
  * the reason it is a SECOND alias rather than a widening of the first: the data
  * routes layer on TWO server-side members, and only one of them is the meta
@@ -5949,7 +5961,7 @@ export class RestServer {
                         // [commit 2a29caa53] Typed against the spec request shape plus the
                         // transport-level `environmentId` — the `as any` this
                         // literal used to carry is retired now that the spec
-                        // declares `previewDrafts` (and `organizationId`, #9726).
+                        // declares `previewDrafts`.
                         const listRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                             type: req.params.type,
                             packageId,
@@ -6642,7 +6654,7 @@ export class RestServer {
                             // [commit 2a29caa53] Typed against the spec request shape —
                             // the `as any` this literal used to carry is
                             // retired now that the spec declares `state` and
-                            // `previewDrafts` (and `organizationId`, #9726).
+                            // `previewDrafts`.
                             // No transport envelope: this door does not thread
                             // `environmentId` (the kernel was already resolved
                             // above), so the plain declared shape suffices.
@@ -7239,10 +7251,10 @@ export class RestServer {
                     // [#13406 · ADR-0131 D6] The ENV partition, stated by
                     // omission: `sys_metadata_history` is filtered by strict
                     // equality on `organization_id`, and since the
-                    // per-organization overlay axis retired every `/meta` write
-                    // logs there (`organizationId ?? null` in
-                    // `historyMetaItem`). A legacy organization-scoped log is
-                    // not served; its promotion is ADR-0131 C7's.
+                    // per-organization overlay axis retired every write logs
+                    // there and `historyMetaItem` reads no other partition. A
+                    // legacy organization-scoped log is not served; its
+                    // promotion is ADR-0131 C7's.
                     //
                     // Typed through `TransportScopedMetaRequest` like the
                     // reset door above, NOT as a plain `HistoryMetaItemRequest`
@@ -7418,7 +7430,6 @@ export class RestServer {
                     const auditRequest: AuditMetaItemRequest = {
                         type: req.params.type,
                         name: req.params.name,
-                        organizationId: null,
                         // Already finite or absent — the declared parse above
                         // refuses anything else.
                         ...(limit !== undefined ? { limit } : {}),
@@ -7803,8 +7814,7 @@ export class RestServer {
                     }
                     // [#13406 · ADR-0131 D6] The ENV partition, stated by
                     // omission, as on the history twin: `diffMetaItem` reads
-                    // `sys_metadata_history` by strict equality on
-                    // `organization_id` (`request.organizationId ?? null`), and
+                    // the environment's `sys_metadata_history` rows, and
                     // `version` is a per-(org, type, name) lineage counter, so
                     // the environment lineage is the one every `/meta` write
                     // now extends.
@@ -10183,19 +10193,17 @@ export class RestServer {
     }
 
     /**
-     * The object schemas an anonymous form request reads, in the organization
-     * the form itself was resolved in (#21331). They carry the columns the
-     * registry injects, `organization_id` among them.
+     * The object schemas an anonymous form request reads (#21331): the
+     * environment's, as every object read is (ADR-0131 D6). They carry the
+     * columns the registry injects, `organization_id` among them.
      */
     private async readFormObjectDefinitions(
         p: RestProtocol,
         environmentId: string | undefined,
-        organizationId: string | undefined,
     ): Promise<any[]> {
         const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
             type: 'object',
             ...(environmentId ? { environmentId } : {}),
-            ...(organizationId ? { organizationId } : {}),
         };
         const r: any = await p.getMetaItems(objectsRequest);
         return Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
@@ -10221,8 +10229,7 @@ export class RestServer {
         const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
         const posture = anonymousFormIntakePosture(tenancy);
         let objects: Promise<any[]> | undefined;
-        const readObjects = (): Promise<any[]> => (objects ??= anonymousFormOrganization(tenancy)
-            .then((organizationId) => this.readFormObjectDefinitions(p, environmentId, organizationId)));
+        const readObjects = (): Promise<any[]> => (objects ??= this.readFormObjectDefinitions(p, environmentId));
         const warnings: Array<{ path: string; message: string }> = [];
         for (const candidate of candidates) {
             const object = anonymousFormObjectName(view, candidate.form);
@@ -10310,13 +10317,14 @@ export class RestServer {
         };
 
         // [#21331] WHICH organization's metadata an anonymous form request
-        // reads. A public-form request carries no session, so it carries no
-        // active organization, and `getMetaItems` without one merges only the
-        // env-wide overlays. An administrator's edit of a packaged form is
-        // saved as an overlay of THEIR organization, so that read missed every
-        // such edit, including the one that withdraws the form from anonymous
-        // intake. The editor showed the form closed while both doors kept
-        // serving and accepting it.
+        // reads. Before ADR-0131 D6 an administrator's edit of a packaged
+        // form was saved as an overlay of THEIR organization, and an org-less
+        // read missed every such edit, including the one that withdraws the
+        // form from anonymous intake. Since D6 no write lands
+        // organization-scoped and no other read serves such a row; this
+        // `view` read alone keeps the Default Organization's legacy layer
+        // (`legacyFormOrganizationId`, triage ruling Q3 A), fail-closed, until
+        // the v18 migration ceremony (ADR-0131 C7) carries those rows.
         //
         // The answer is the tenancy service's `defaultOrgId()`: the
         // organization a single-posture deployment binds every principal to.
@@ -10344,15 +10352,15 @@ export class RestServer {
             environmentId: string | undefined,
             req: any,
             slug: string,
-        ): Promise<{ view: any; form: any; object: string; organizationId: string | undefined } | null> => {
+        ): Promise<{ view: any; form: any; object: string } | null> => {
             const p = await this.resolveProtocol(environmentId, req);
             if (typeof (p as any).getMetaItems !== 'function') return null;
             const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
             const organizationId = await anonymousFormOrganization(tenancy);
-            const viewsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
+            const viewsRequest: LegacyFormViewsRequest = {
                 type: 'view',
                 ...(environmentId ? { environmentId } : {}),
-                ...(organizationId ? { organizationId } : {}),
+                ...(organizationId ? { legacyFormOrganizationId: organizationId } : {}),
             };
             const listOf = (result: any): any[] => (Array.isArray(result?.items)
                 ? result.items
@@ -10383,10 +10391,10 @@ export class RestServer {
             const unavailable = await anonymousFormIntakeUnavailability(
                 match.object,
                 anonymousFormIntakePosture(tenancy),
-                async () => (await this.readFormObjectDefinitions(p, environmentId, organizationId))
+                async () => (await this.readFormObjectDefinitions(p, environmentId))
                     .find((o: any) => o?.name === match.object),
             );
-            return unavailable ? null : { ...match, organizationId };
+            return unavailable ? null : match;
         };
 
         // GET /forms/:slug — resolve and return the public form spec
@@ -10441,13 +10449,11 @@ export class RestServer {
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).getMetaItems === 'function') {
-                            // [#21331] The same organization the form itself
-                            // was resolved in, so the published field schema
-                            // matches the form the caller was served.
+                            // [#21331] The environment's object schema, as
+                            // every object read is (ADR-0131 D6).
                             const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
                                 ...(environmentId ? { environmentId } : {}),
-                                ...(match.organizationId ? { organizationId: match.organizationId } : {}),
                             };
                             const r: any = await p.getMetaItems(objectsRequest);
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];

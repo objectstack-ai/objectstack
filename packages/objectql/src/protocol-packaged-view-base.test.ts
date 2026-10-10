@@ -36,7 +36,6 @@ import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 const PKG = 'com.example.showcase';
 const OBJ = 'showcase_task';
 const VIEW = 'showcase_task.in_progress';
-const ORG = 'org_acme';
 
 const SHIPPED_LABEL = 'In Progress';
 const EDITED_LABEL = 'In Progress (edited)';
@@ -126,7 +125,8 @@ function seedOrgOverlay(rows: Record<string, unknown>[]) {
         type: 'view',
         name: VIEW,
         package_id: null,
-        organization_id: ORG,
+        // [ADR-0131 D6] An environment overlay: no read serves an organization's.
+        organization_id: null,
         state: 'active',
         metadata: JSON.stringify(overlayBody()),
     });
@@ -190,18 +190,18 @@ describe('#20731 getPackagedViewBase — the packaged view, never an overlay', (
     });
 });
 
-describe('#20731 the published org overlay, through the protocol reads and the translation', () => {
+describe('#20731 the published overlay, through the protocol reads and the translation', () => {
     it('the item and list reads serve the overlay — one identity for the write and both reads', async () => {
         const s = makeSession();
         registerContainer(s.registry, OBJ, taskContainer(), PKG);
         seedOrgOverlay(s.rows);
-        const served = await s.protocol.getMetaItem({ type: 'view', name: VIEW, organizationId: ORG });
+        const served = await s.protocol.getMetaItem({ type: 'view', name: VIEW });
         expect(served.item.label).toBe(EDITED_LABEL);
         // The code artifact's envelope rides on the overlay body; it names the
         // registering package, not a second identity the overlay missed.
         expect(served.item._packageId).toBe(PKG);
 
-        const list = await s.protocol.getMetaItems({ type: 'view', organizationId: ORG });
+        const list = await s.protocol.getMetaItems({ type: 'view' });
         const listed = (list.items as any[]).find((v) => v?.name === VIEW);
         expect(listed?.label).toBe(EDITED_LABEL);
     });
@@ -210,8 +210,8 @@ describe('#20731 the published org overlay, through the protocol reads and the t
         const s = makeSession();
         registerContainer(s.registry, OBJ, taskContainer(), PKG);
         seedOrgOverlay(s.rows);
-        const item = (await s.protocol.getMetaItem({ type: 'view', name: VIEW, organizationId: ORG })).item;
-        const listed = ((await s.protocol.getMetaItems({ type: 'view', organizationId: ORG })).items as any[])
+        const item = (await s.protocol.getMetaItem({ type: 'view', name: VIEW })).item;
+        const listed = ((await s.protocol.getMetaItems({ type: 'view' })).items as any[])
             .find((v) => v?.name === VIEW);
 
         for (const served of [item, listed]) {
@@ -226,7 +226,7 @@ describe('#20731 the published org overlay, through the protocol reads and the t
         const s = makeSession();
         registerContainer(s.registry, OBJ, taskContainer(), PKG);
         seedOrgOverlay(s.rows);
-        const urgent = (await s.protocol.getMetaItem({ type: 'view', name: 'showcase_task.urgent', organizationId: ORG })).item;
+        const urgent = (await s.protocol.getMetaItem({ type: 'view', name: 'showcase_task.urgent' })).item;
         const packagedBase = s.protocol.getPackagedViewBase('showcase_task.urgent');
         expect(packagedBase?.label).toBe('Urgent');
         expect(translateView(urgent, BUNDLE, { locale: 'zh-CN', packagedBase }).label).toBe('紧急');
@@ -236,7 +236,7 @@ describe('#20731 the published org overlay, through the protocol reads and the t
         const s = makeSession();
         registerContainer(s.registry, OBJ, taskContainer(), PKG);
         seedOrgOverlay(s.rows);
-        const served = (await s.protocol.getMetaItem({ type: 'view', name: VIEW, organizationId: ORG })).item;
+        const served = (await s.protocol.getMetaItem({ type: 'view', name: VIEW })).item;
         expect(translateView(served, BUNDLE, { locale: 'zh-CN' }).label).toBe('进行中');
         expect(translateView(served, BUNDLE, { locale: 'en' }).label).toBe(SHIPPED_LABEL);
     });
@@ -245,12 +245,12 @@ describe('#20731 the published org overlay, through the protocol reads and the t
         const s = makeSession();
         registerContainer(s.registry, OBJ, taskContainer(), PKG);
         seedOrgOverlay(s.rows);
-        const edited = (await s.protocol.getMetaItem({ type: 'view', name: VIEW, organizationId: ORG })).item;
+        const edited = (await s.protocol.getMetaItem({ type: 'view', name: VIEW })).item;
         const packagedBase = s.protocol.getPackagedViewBase(VIEW);
         expect(translateView(edited, BUNDLE, { locale: 'zh-CN', packagedBase }).label).toBe(EDITED_LABEL);
 
         s.rows.length = 0;
-        const served = (await s.protocol.getMetaItem({ type: 'view', name: VIEW, organizationId: ORG })).item;
+        const served = (await s.protocol.getMetaItem({ type: 'view', name: VIEW })).item;
         expect(served.label).toBe(SHIPPED_LABEL);
         expect(translateView(served, BUNDLE, { locale: 'zh-CN', packagedBase }).label).toBe('进行中');
     });

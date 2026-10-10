@@ -183,8 +183,8 @@ async function publish(protocol: any, packageId: string): Promise<void> {
   expect(res.success).toBe(true);
 }
 
-async function draftNames(protocol: any, packageId: string, organizationId?: string): Promise<string[]> {
-  const { drafts } = await protocol.listDrafts({ packageId, ...(organizationId ? { organizationId } : {}) });
+async function draftNames(protocol: any, packageId: string): Promise<string[]> {
+  const { drafts } = await protocol.listDrafts({ packageId });
   return drafts.map((d: any) => `${d.type}/${d.name}`).sort();
 }
 
@@ -273,7 +273,14 @@ describe('#22090 POST /packages/:id/revert on a Studio-authored package', () => 
     const answer = await revert(STUDIO_PKG, ACTIVE_ORG);
 
     expect(answer.status).toBe(200);
-    expect(await draftNames(protocol, STUDIO_PKG, OTHER_ORG)).toEqual(['view/repairs_board']);
+    // [ADR-0131 D6] The draft listing is the environment's, so the legacy row
+    // is read at rest: still there, untouched.
+    const legacy = (await engine.find('sys_metadata', {
+      where: { organization_id: OTHER_ORG, package_id: STUDIO_PKG, state: 'draft' },
+      context: { isSystem: true },
+    })) as any[];
+    expect(legacy.map((r) => `${r.type}/${r.name}`)).toEqual(['view/repairs_board']);
+    expect(await draftNames(protocol, STUDIO_PKG)).toEqual([]);
   });
 });
 

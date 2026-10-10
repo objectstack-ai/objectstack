@@ -2556,12 +2556,19 @@ export default class Serve extends Command {
       //
       // [#22405] WHERE the flat set lands is `placeCollectedDocs`'s decision,
       // the one `os build` makes: on a multi-package config it rides the body
-      // of the package whose id is the stack's `manifest.id`, because this boot
-      // registers package bodies and never the top level of such a config, so a
-      // flat doc left there is served by nothing and warned about by nothing.
-      // With no owner (no `packages[]`, or a `manifest.id` naming no single
-      // entry) it stays on the top level, exactly as before. Inline top-level
-      // docs never move; the name dedupe below runs only over what stays.
+      // of the package whose id is the stack's `manifest.id`. With no owner (no
+      // `packages[]`, or a `manifest.id` naming no single entry) it stays on the
+      // top level, exactly as `os build` keeps it. Inline top-level docs never
+      // move; the name dedupe below runs only over what stays.
+      //
+      // [#22521] This is PLACEMENT, not the residual rule, and it stays: what
+      // remains on the top level of a multi-package config is registered under
+      // `manifest.id` with a warning by the metadata door's one residual rule
+      // (`AppPlugin` → `MetadataPlugin.registerUnclaimedTopLevel`). Measured
+      // with this placement withheld, the flat pages of a stack whose
+      // `manifest.id` names one package are still served under that id, but as
+      // a residual, so the config boot warns where the artifact boot of the same
+      // project — whose `os build` placed them on the body — does not.
       if (!useArtifactFallback) {
         try {
           const { collectDocsFromSrc, placeCollectedDocs } = await import('../utils/collect-docs.js');

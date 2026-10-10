@@ -90,12 +90,18 @@ manager, close a cycle in the reporting chain, run past the chain depth cap, or 
 who is provably outside every organization the user belongs to — each with the reason in the
 response. It is platform-admin gated, like every other `/api/v1/auth/admin/*` route.
 
+For many users at once, the admin bulk import (`POST /api/v1/auth/admin/import-users`) reads a
+`manager_id` column holding the manager's email address (or phone number, where phone sign-in is
+enabled) — someone in the same file or an existing user. It links each row once every row in the
+file exists, through the same refusals as the endpoint above, and reports each outcome on the
+row's `manager` result: a link it cannot make never fails the user it imported.
+
 The column is also written by a seed, or by any other system-context write, which bypasses the
 managed-update whitelist. SCIM provisioning and directory sync can populate it too, but only
 through a provisioning path your own deployment supplies: this platform declares the SCIM
-`manager` attribute without projecting it onto the column, and its admin bulk import does not
-write it either. Where an identity carries `source: 'idp_provisioned'` the admin operation
-**refuses**, so that directory stays the one surface that authors its manager.
+`manager` attribute without projecting it onto the column. Where an identity carries
+`source: 'idp_provisioned'` the admin operation **refuses**, so that directory stays the one
+surface that authors its manager.
 
 Setting the column is still something you have to *do*. Where `manager_id` is unset the rung
 expands to nobody, the request opens on a slate no one can act on, and under the default

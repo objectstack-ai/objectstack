@@ -59,7 +59,7 @@ describe('ObjectStackProtocolImplementation - getMetaItemLayered', () => {
         expect(result.effective).toMatchObject({ label: 'Customised Label' });
     });
 
-    it('prefers org-scoped overlay over env-wide when both exist', async () => {
+    it('[ADR-0131 D6] reports the environment overlay even when a legacy organization row exists', async () => {
         const orgOverlay = { ...overlayBody, label: 'Org-Specific Label' };
         mockEngine.findOne.mockImplementation((_table: string, opts: any) => {
             if (opts.where?.organization_id === 'org_alpha') {
@@ -75,10 +75,10 @@ describe('ObjectStackProtocolImplementation - getMetaItemLayered', () => {
             type: 'view',
             name: 'my_view',
             organizationId: 'org_alpha',
-        });
-        expect(result.overlayScope).toBe('org');
-        expect(result.overlay).toMatchObject({ label: 'Org-Specific Label' });
-        expect(result.effective).toMatchObject({ label: 'Org-Specific Label' });
+        } as { type: string; name: string });
+        expect(result.overlayScope).toBe('env');
+        expect(result.overlay).toMatchObject({ label: overlayBody.label });
+        expect(result.effective).toMatchObject({ label: overlayBody.label });
     });
 
     it('returns null code when artifact baseline missing but overlay exists', async () => {

@@ -7,8 +7,8 @@
 // What it pins: per catalog type, the names the read lists are EXACTLY the
 // names the declarations declare — the showcase stack's `positions`,
 // `permissions` and `capabilities`, plus the platform's own bootstrap
-// permission sets and the six built-in positions that `plugin-security`
-// ships (ADR-0131 D2) — and exactly the names the
+// permission sets, the six built-in positions and the curated platform
+// capabilities that `plugin-security` ships (ADR-0131 D2/D3) — and exactly the names the
 // metadata door lists (`GET /api/v1/meta/:type`). Every listed name resolves,
 // by name, to the entry the list gave for it.
 //
@@ -37,6 +37,7 @@ import showcaseStack from '@objectstack/example-showcase';
 import { securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { createSecurityCatalogReader, type SecurityCatalogType } from '@objectstack/core';
 import { AUDIENCE_ANCHOR_POSITIONS, BUILTIN_IDENTITY_NAMES } from '@objectstack/spec';
+import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 
 type Named = { name?: unknown };
 const namesOf = (items: unknown): string[] =>
@@ -56,7 +57,8 @@ const DECLARED: Record<SecurityCatalogType, string[]> = {
   // [ADR-0131 D2] plus the six built-in positions `plugin-security` declares.
   position: [...new Set([...namesOf(stack.positions), ...BUILTIN_IDENTITY_NAMES, ...AUDIENCE_ANCHOR_POSITIONS])].sort(),
   permission: [...new Set([...namesOf(stack.permissions), ...namesOf(securityDefaultPermissionSets)])].sort(),
-  capability: namesOf(stack.capabilities),
+  // [ADR-0131 D3] plus the curated platform capabilities `plugin-security` declares.
+  capability: [...new Set([...namesOf(stack.capabilities), ...PLATFORM_CAPABILITY_NAMES])].sort(),
 };
 
 const TYPES: SecurityCatalogType[] = ['position', 'permission', 'capability'];
