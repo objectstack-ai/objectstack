@@ -62,6 +62,7 @@ import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
 import MigrateMeta from '../commands/migrate/meta.js';
 import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js';
+import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 import MigratePlan from '../commands/migrate/plan.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
@@ -189,6 +190,16 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateMultiValueColumns),
     noWrite: [{ label: 'migrate multi-value-columns', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate multi-value-columns --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/organization-ownership.ts': {
+    run: invoke(MigrateOrganizationOwnership),
+    // The plan FILE is the one thing it writes, into the case directory, never the database.
+    noWrite: [{
+      label: 'migrate organization-ownership',
+      argv: ['--out', '@DIR@/organization-ownership-plan.json', '--database-url', '@DB@', '--json'],
+    }],
+    write: [],
+    note: 'the ADR-0131 D10 preflight: it has no writing mode until the ceremony\'s apply lands',
   },
   'commands/migrate/plan.ts': {
     run: invoke(MigratePlan),
