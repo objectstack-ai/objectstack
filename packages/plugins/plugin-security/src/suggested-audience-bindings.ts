@@ -69,7 +69,7 @@
 import {
   createSeedWriteRefusals,
   type SeedWriteRefusals,
-} from './per-organization-catalog.js';
+} from './write-refusals.js';
 import type { PermissionSet, TenancyPosture } from '@objectstack/spec/security';
 import { describeAnchorForbiddenBits, postureEnforcesWall } from '@objectstack/spec/security';
 import { EVERYONE_POSITION, AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';

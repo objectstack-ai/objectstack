@@ -54,7 +54,7 @@ import {
   resolveOwnOrganizationRow,
   seedCtx,
   SEED_ORGANIZATION_SCAN_LIMIT,
-} from './per-organization-catalog.js';
+} from './organization-scope.js';
 import { GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;

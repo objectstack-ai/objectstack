@@ -16,6 +16,7 @@ import {
 import {
   bootSchemaStack,
   describeDatabaseSource,
+  describeTelemetryDatabase,
   renderPlan,
   renderPendingSchemaWork,
   summarize,
@@ -174,7 +175,9 @@ export default class MigratePlan extends Command {
         return;
       }
 
-      const drift = await stack.driver.detectManagedDrift();
+      // [#22579] Every datasource this plan covers — the primary, and the
+      // `telemetry` sibling the serving boot keeps lifecycle-classed objects in.
+      const drift = await stack.detectManagedDrift();
       const pending = stack.pendingSchemaWork;
 
       // [#13204] What EXISTS that nothing declares. Deliberately computed
@@ -214,6 +217,10 @@ export default class MigratePlan extends Command {
           // [#22581] Who named it — `--database-url`, this process's
           // environment, a `.env*` file, the config's datasource, or nobody.
           databaseSource: stack.dbSource,
+          // [#22579] The sibling lifecycle-classed objects were planned
+          // against — present only when the serving boot keeps one, so a
+          // document without it planned every object against `database`.
+          ...(stack.telemetryDatabase !== null ? { telemetryDatabase: stack.telemetryDatabase } : {}),
           managedTables: stack.managedTableCount,
           total: drift.length,
           changes: drift,
@@ -283,6 +290,7 @@ export default class MigratePlan extends Command {
       }
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
+      if (stack.telemetryDatabase !== null) printInfo(describeTelemetryDatabase(stack.telemetryDatabase));
       printInfo(`Examined ${chalk.white(String(stack.managedTableCount))} managed table(s).`);
       // What the object set was composed from (#12938) — never silent about a
       // host config it could not load, and empty (so this block prints nothing)

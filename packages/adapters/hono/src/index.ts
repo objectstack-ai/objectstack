@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import {
   type ObjectKernel,
@@ -277,6 +278,54 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
     c.set('objectStack', kernel);
     await next();
   };
+}
+
+/**
+ * The JSON body this adapter hands the dispatcher, read WITHOUT consuming the
+ * request (#22576).
+ *
+ * ## Why the raw request must stay readable
+ *
+ * The dispatcher receives two things for a body-carrying request: the parsed
+ * `body` argument, which the domains read, and `{ request: c.req.raw }`, which
+ * a domain that forwards the request reads. Both used to come out of one
+ * `c.req.json()` — and that call CONSUMES `c.req.raw`, whatever the
+ * `Content-Type`. Measured through `createHonoApp`: at dispatch,
+ * `context.request.bodyUsed` was `true` and `request.clone().text()` threw, so
+ * a forwarding domain received a request with nothing in it. Two bridges need
+ * exactly that body — the ADR-0043 action page, whose `token` rides in a FORM
+ * body (the `/approvals/act` domain), and the inbound automation hooks, which
+ * verify an HMAC over the sender's exact JSON bytes — and a spaced JSON body
+ * re-serialised from the parsed value is not those bytes.
+ *
+ * So the parse reads a CLONE: `clone()` tees the body, `c.req.raw` keeps the
+ * other branch unread, and a domain that forwards the request gets every byte
+ * the client sent, for every `Content-Type`, JSON included.
+ *
+ * ## What the domains see is unchanged, deliberately
+ *
+ * Hono's `c.req.json()` is `text()` then `JSON.parse`, with any failure mapped
+ * to `{}` by the `.catch` this adapter put on it — so an empty body, a form
+ * body and invalid JSON all became `{}`, and any JSON value (an array, `null`,
+ * a number) came through as parsed. The clone is parsed by the same two steps
+ * and every failure is the same `{}`, so the `body` argument is the value it
+ * was for every input. One case cannot be read from a clone: a body something
+ * upstream already consumed through `c.req` — Hono's body cache then holds the
+ * only copy, and `c.req.json()` is asked exactly as before.
+ *
+ * ⚠️ The cost is the tee: until the request is released, the unread branch
+ * holds the body's bytes, so a body is buffered twice instead of once for the
+ * life of the request. These are API bodies the old path already buffered
+ * whole; nothing here streams.
+ */
+async function readDispatchBody(c: Context): Promise<any> {
+  const raw = c.req.raw;
+  if (raw.bodyUsed) return c.req.json().catch(() => ({}));
+  try {
+    return JSON.parse(await raw.clone().text());
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -685,7 +734,7 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       // Fallback to legacy dispatcher
       const body = method === 'GET' || method === 'HEAD'
         ? {}
-        : await c.req.json().catch(() => ({}));
+        : await readDispatchBody(c);
       const result = await dispatcher.handleAuth(path, method, body, { request: c.req.raw });
       // `handled: false` is the dispatcher saying no auth domain claimed it —
       // an explicit ownership signal, better than inferring one from a status.
@@ -727,9 +776,12 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       const subPath = c.req.path.substring(prefix.length);
       const method = c.req.method;
 
+      // [#22576] Parsed from a clone: `c.req.raw` reaches the dispatcher with
+      // its body unread, so a domain that forwards the request (the
+      // `/approvals/act` form POST) still has it. See `readDispatchBody`.
       let body: any = undefined;
       if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-        body = await c.req.json().catch(() => ({}));
+        body = await readDispatchBody(c);
       }
 
       const queryParams: Record<string, any> = {};
