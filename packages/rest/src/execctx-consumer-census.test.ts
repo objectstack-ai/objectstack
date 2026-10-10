@@ -63,9 +63,8 @@ import {
     AuthzStoreUnavailableError, AUTHZ_STORE_UNAVAILABLE_STATUS,
 } from '@objectstack/core';
 // [#13538] §9 drives an ORG-OVERRIDABLE type on purpose, and asserts that
-// choice against the registry rather than trusting a literal — the same
-// predicate the read door itself consults.
-import { declaresOrgOverride } from '@objectstack/metadata-core';
+// choice against the registry rather than trusting a literal.
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { RestServer } from './rest-server.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1062,11 +1061,12 @@ const ORG_SCOPED_DOC = { name: 'ops', type: 'dashboard', widgets: [] };
 
 describe('[#13538] §9 a PARTIAL outage is not served as an org-unscoped 200', () => {
     it('CONTROL: this section drives an ORG-OVERRIDABLE type; the type §8 drives is env-wide BY DESIGN', () => {
-        // The second half is why §8's green is not coverage of this card. On
-        // `object`, `organizationIdForMetaRead` returns `undefined` for an
-        // entitled caller too — so no fault model whatsoever could make §8
-        // observe an org-scope difference on the type it sweeps.
-        expect({ driven: declaresOrgOverride(ORG_SCOPED_TYPE), section8: declaresOrgOverride(OBJECT_DOC.type) })
+        // The second half is why §8's green is not coverage of this card: on
+        // `object` no organization was ever read, so no fault model whatsoever
+        // could make §8 observe an org-scope difference on the type it sweeps.
+        const declares = (type: string) =>
+            DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type)?.allowOrgOverride === true;
+        expect({ driven: declares(ORG_SCOPED_TYPE), section8: declares(OBJECT_DOC.type) })
             .toEqual({ driven: true, section8: false });
     });
 

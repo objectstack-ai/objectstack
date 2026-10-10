@@ -112,7 +112,6 @@ const CONFORMS: { [K in keyof DraftHeader]: (value: DraftHeader[K]) => boolean }
   name: (v) => typeof v === 'string',
   // [#22200] The draft body's own label: an `I18nLabel` as authored, or `null`.
   label: (v) => v === null || I18nLabelSchema.safeParse(v).success,
-  organizationId: (v) => v === null || typeof v === 'string',
   packageId: (v) => v === null || typeof v === 'string',
   updatedAt: (v) => v === null || typeof v === 'string',
   updatedBy: (v) => v === null || typeof v === 'string',
@@ -236,9 +235,7 @@ describe('#14938 — listDrafts emits canonical ISO text for updatedAt, whatever
       expectConformsToDeclaration(drafts);
     });
 
-    it('reaches the same canonicalisation through the org-scoped $or read', async () => {
-      // A non-null-org caller sees BOTH its own overlay drafts and the env-wide
-      // ones (#3115); the canonicalisation must not depend on which arm matched.
+    it('[ADR-0131 D6] lists the environment\'s drafts only, whichever repository asks: a legacy organization draft is not listed', async () => {
       const engine = makeFakeEngine([
         draftRow({ organization_id: 'org_alpha', updated_at: PG_INSTANT }),
         draftRow({ name: 'lead_grid', updated_at: PG_INSTANT }),
@@ -248,7 +245,7 @@ describe('#14938 — listDrafts emits canonical ISO text for updatedAt, whatever
       expect(engine.rows[0]!.updated_at).toBeInstanceOf(Date);
 
       const drafts = await repo.listDrafts();
-      expect(drafts).toHaveLength(2);
+      expect(drafts.map((d) => d.name)).toEqual(['lead_grid']);
       for (const draft of drafts) expect(draft.updatedAt).toBe(PG_INSTANT.toISOString());
       expectConformsToDeclaration(drafts);
     });
@@ -367,7 +364,7 @@ describe('#14938 — listDrafts emits canonical ISO text for updatedAt, whatever
  * table above now covers `label` on every case in the file.
  */
 describe('#22200 — each listDrafts row carries the draft body\'s own label, or null', () => {
-  const HEADER_KEYS = ['label', 'name', 'organizationId', 'packageId', 'type', 'updatedAt', 'updatedBy'];
+  const HEADER_KEYS = ['label', 'name', 'packageId', 'type', 'updatedAt', 'updatedBy'];
 
   describe('§A drafts saved through the real write path', () => {
     it('a draft whose body declares a label returns it', async () => {

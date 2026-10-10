@@ -278,7 +278,7 @@ export async function discardPermissionSetOverlay(
   let resyncRefused = false;
   if (protocol && typeof protocol.getMetaItemLayered === 'function') {
     await projectPermissionMutation(protocol, projectionDeps, {
-      type: 'permission', name: String(row.name), state: 'active', organizationId: organizationId ?? null,
+      type: 'permission', name: String(row.name), state: 'active',
     });
     healedRow = (await tryFind(ql, 'sys_permission_set', { id }, 1, organizationId))[0] ?? row;
   } else {
