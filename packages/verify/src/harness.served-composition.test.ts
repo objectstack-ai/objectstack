@@ -119,10 +119,15 @@ describe('the analytics service is built with the app\'s `analyticsCubes`', () =
 
 const PROBE_SUBJECT = 'served-composition probe';
 
-/** Send one message through the booted email service and count the `sys_email` rows it left. */
+/**
+ * Send one message through the booted email service and count the `sys_email`
+ * rows it left. The sender is passed explicitly, so the count answers ONE
+ * question — was `persist` handed to the provider — and not also whether the
+ * configured default sender was.
+ */
 async function probeRowsAfterSend(s: VerifyStack): Promise<number> {
   const email = await s.kernel.getServiceAsync<{ send(input: Record<string, unknown>): Promise<unknown> }>('email');
-  await email.send({ to: 'probe@example.com', subject: PROBE_SUBJECT, text: 'probe' });
+  await email.send({ from: 'sender@example.com', to: 'probe@example.com', subject: PROBE_SUBJECT, text: 'probe' });
   const engine = await s.kernel.getServiceAsync<{
     find(object: string, query: Record<string, unknown>): Promise<unknown>;
   }>('objectql');
