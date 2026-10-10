@@ -2,12 +2,26 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateChartBindings,
+  validateChartBindings as validateChartBindingsUnrecorded,
   CHART_DIMENSION_UNKNOWN,
   CHART_MEASURE_UNKNOWN,
   CHART_DATASET_UNKNOWN,
   CHART_AXIS_NOT_SELECTED,
 } from './validate-chart-bindings.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the two converted ids is one verdict sentence; the
+// reasoning it used to carry is the id's `os explain` entry. Every call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict of those ids to one line of at most 200 characters — every position
+// and surface this suite exercises, not a chosen few. Run the whole file: those
+// cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string; path: string }> = [];
+const validateChartBindings: typeof validateChartBindingsUnrecorded = (...args) => {
+  const findings = validateChartBindingsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /** A dataset whose measure names deliberately differ from the base fields. */
 const baseStack = () => ({
@@ -1038,5 +1052,112 @@ describe('validateChartBindings — floor', () => {
       views: [{ name: 'business_unit', listViews: { org_chart: { type: 'tree' } } }],
     });
     expect(findings).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — chart-measure-unknown, chart-axis-not-selected', () => {
+  const CONVERTED = [CHART_MEASURE_UNKNOWN, CHART_AXIS_NOT_SELECTED];
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => CONVERTED.includes(f.rule));
+    // The coverage control first: both ids fired, the unknown-measure id at a
+    // query position and at all three presentation positions, so the shape
+    // assertion below cannot pass over a partial record.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...CONVERTED].sort());
+    const unknown = converted.filter((f) => f.rule === CHART_MEASURE_UNKNOWN);
+    for (const marker of ['comes back empty', 'DISPLAY-NAME override', 'REPLACES the authored array', 'axis PRESENTATION']) {
+      expect(unknown.some((f) => f.message.includes(marker)), marker).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence per position', () => {
+    const [query] = validateChartBindings({
+      ...baseStack(),
+      reports: [{ name: 'r', dataset: 'task_metrics', values: ['task_count'], chart: { type: 'bar', xAxis: 'status', yAxis: 'estimate_hours' } }],
+    });
+    expect(query!.message).toBe(
+      '"estimate_hours" is not a measure declared by dataset "task_metrics", so this series comes back ' +
+        'empty (result rows are keyed by measure name, not the base field)',
+    );
+    const [series] = validateChartBindings({
+      ...baseStack(),
+      reports: [
+        {
+          name: 'r',
+          dataset: 'task_metrics',
+          values: ['task_count'],
+          chart: { type: 'bar', xAxis: 'status', yAxis: 'task_count', series: [{ name: 'est_hours' }] },
+        },
+      ],
+    });
+    expect(series!.message).toBe(
+      '"est_hours" is a declared measure of "task_metrics" outside this chart\'s selected values ' +
+        '(task_count): this display-name override pairs only with the series the chart derives, so it ' +
+        'lands on nothing',
+    );
+  });
+
+  it('quotes at most three names of the selection, then counts the rest', () => {
+    const stack = {
+      datasets: [
+        {
+          name: 'm',
+          object: 'o',
+          dimensions: [{ name: 'd', field: 'd' }],
+          measures: ['a', 'b', 'c', 'e', 'f', 'z'].map((name) => ({ name, aggregate: 'count' })),
+        },
+      ],
+      pages: [
+        {
+          name: 'p',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'object-chart', properties: { dataset: 'm', dimensions: ['d'], values: ['f', 'e', 'c', 'b', 'a'], series: [{ name: 'z' }] } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const [finding] = validateChartBindings(stack);
+    expect(finding).toMatchObject({ rule: CHART_AXIS_NOT_SELECTED });
+    expect(finding!.message).toContain('selected values (a, b, c and 2 more)');
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [CHART_MEASURE_UNKNOWN]: [
+        'ADR-0021',
+        '`sum_amount`',
+        '`chart.xAxis` × `chart.yAxis`',
+        'per-measure display-name override',
+        'replaced wholesale',
+        'turns on a secondary axis',
+        '`ObjectChart`',
+        '`joined` report',
+      ],
+      [CHART_AXIS_NOT_SELECTED]: [
+        'PRESENTATION position',
+        'widened at runtime',
+        'A query position is never reported',
+        '`report.values` is the selection of the table beneath it',
+        'a `chart.series[].name` override lands only when it names `chart.yAxis`',
+      ],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
+    // The surface paragraph is one text, printed under both ids it explains.
+    const last = (rule: string) => explainRule(rule)!.paragraphs.at(-1);
+    expect(last(CHART_AXIS_NOT_SELECTED)).toBe(last(CHART_MEASURE_UNKNOWN));
   });
 });

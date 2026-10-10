@@ -2,11 +2,24 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateAiAgentAuthoring,
+  validateAiAgentAuthoring as validateAiAgentAuthoringUnrecorded,
   AGENT_AUTHORING_WITHDRAWN,
   DEFAULT_AGENT_OUTSIDE_ROSTER,
   DEFAULT_AGENT_LEGACY_ALIAS,
 } from './validate-ai-agent-authoring.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to carry
+// is the id's `os explain` entry. Every call below records what it fired, and
+// the last cases in this file hold each recorded verdict to one line of at most
+// 200 characters — every firing variant this suite exercises, not a chosen few.
+// Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateAiAgentAuthoring: typeof validateAiAgentAuthoringUnrecorded = (...args) => {
+  const findings = validateAiAgentAuthoringUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 describe('validate-ai-agent-authoring', () => {
   it('is silent for the stack every app package should be — no agents at all', () => {
@@ -199,5 +212,71 @@ describe('validate-ai-agent-authoring', () => {
         validateAiAgentAuthoring({ apps: [{ defaultAgent: 'rogue' }] } as never),
       ).toHaveLength(1);
     });
+  });
+});
+
+describe('[#22161] one-line verdicts — the three agent-authoring ids', () => {
+  const IDS = [AGENT_AUTHORING_WITHDRAWN, DEFAULT_AGENT_OUTSIDE_ROSTER, DEFAULT_AGENT_LEGACY_ALIAS];
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: all three ids fired, and both arms of the
+    // declaration id, so the shape assertion cannot pass over a partial record.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
+    const declared = fired.filter((f) => f.rule === AGENT_AUTHORING_WITHDRAWN);
+    expect(declared.some((f) => f.message.includes('PLATFORM agent id'))).toBe(true);
+    expect(declared.some((f) => f.message.includes('were withdrawn'))).toBe(true);
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence per arm', () => {
+    const findings = validateAiAgentAuthoring({
+      agents: [{ name: 'sales_copilot' }, { name: 'build' }],
+      apps: [
+        { name: 'studio', defaultAgent: 'metadata_assistant' },
+        { name: 'crm', defaultAgent: 'sales_copilot' },
+      ],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'This stack declares the agent "sales_copilot", but app-package agents were withdrawn (ADR-0063 §2): ' +
+        'the runtime filters it out of the agent catalog and refuses to load it, so it never runs',
+      'This stack declares an agent named "build", which is a PLATFORM agent id, so the runtime serves ' +
+        'its own record for that name and this declaration has no effect',
+      'app "studio" pins `defaultAgent` to "metadata_assistant", the RETIRED alias of platform agent ' +
+        '"build": it still resolves, but only through the alias registry',
+      'app "crm" pins `defaultAgent` to "sales_copilot", which is not a platform agent (ask, build), so ' +
+        'it silently falls back to the platform default and the pin has no effect',
+    ]);
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [AGENT_AUTHORING_WITHDRAWN]: ['`listAgents()`', '`loadAgent()`', '404s on chat', 'inert metadata', 'ADR-0078'],
+      [DEFAULT_AGENT_OUTSIDE_ROSTER]: ['ADR-0063 §1', 'snake_case identifier', 'walked back once'],
+      [DEFAULT_AGENT_LEGACY_ALIAS]: ['persisted `agent_id`s', 'the weaker pin', 'in-process alias registration'],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it("the roster paragraph's aliases are the ones the rule resolves", () => {
+    // The explanation module imports nothing, so it spells the aliases out;
+    // this holds each spelling to the rule by running it.
+    const roster = explainRule(DEFAULT_AGENT_LEGACY_ALIAS)!.paragraphs[0]!;
+    for (const [alias, canonical] of [['data_chat', 'ask'], ['metadata_assistant', 'build']] as const) {
+      expect(roster).toContain(`\`${alias}\` for \`${canonical}\``);
+      const [finding] = validateAiAgentAuthoringUnrecorded({ apps: [{ name: 'a', defaultAgent: alias }] });
+      expect(finding).toMatchObject({ rule: DEFAULT_AGENT_LEGACY_ALIAS });
+      expect(finding!.message).toContain(`platform agent "${canonical}"`);
+    }
+    // One paragraph, printed under all three ids it explains.
+    expect(explainRule(DEFAULT_AGENT_OUTSIDE_ROSTER)!.paragraphs[0]).toBe(roster);
+    expect(explainRule(AGENT_AUTHORING_WITHDRAWN)!.paragraphs[0]).toBe(roster);
   });
 });

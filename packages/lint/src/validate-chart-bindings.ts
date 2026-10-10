@@ -364,12 +364,12 @@ const UNSELECTED_CONSEQUENCE: Record<MeasurePosition, string> = {
 
 /**
  * [#22161] A chart's selection for a one-line verdict: sorted, at most three,
- * then `(and N more)`.
+ * then `and N more` (the verdict already quotes it in parentheses).
  */
 function selectionRoster(names: Iterable<string>): string {
   const all = [...names].sort();
   const shown = all.slice(0, 3).join(', ');
-  return all.length > 3 ? `${shown} (and ${all.length - 3} more)` : shown;
+  return all.length > 3 ? `${shown} and ${all.length - 3} more` : shown;
 }
 
 export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
