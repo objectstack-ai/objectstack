@@ -165,7 +165,9 @@ can be shared across records). Reclamation is handled by the platform LifecycleS
   file `GET /storage/files/:id` serves is a file a record read expands into
   `{ id, name, size, mimeType, url }`. The row itself stays tombstoned until a
   sweep tidies it, and a file with no holder left still answers
-  `FILE_NOT_FOUND` (404) and keeps its bare id in a record payload.
+  `FILE_NOT_FOUND` (404) and keeps its bare id in a record payload — except to
+  a reader refused `sys_file` read, who gets `{ id, metadataRefused: true }` for
+  every file id, held or not ([`file` read forms](/docs/protocol/objectql/types#file)).
 - **`sys_upload_session`** — abandoned/terminal chunked-upload sessions are
   reaped, and a reap guard aborts the underlying backend multipart upload
   (S3 `AbortMultipartUpload` / local parts dir) first, so already-uploaded

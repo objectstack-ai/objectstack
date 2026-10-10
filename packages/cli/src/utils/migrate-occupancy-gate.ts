@@ -10,18 +10,29 @@
 
 import type { SqliteOccupancy } from './sqlite-occupancy.js';
 import { probeSqliteOccupancy } from './sqlite-occupancy.js';
+import { loadProjectEnvFiles } from './schema-migrate.js';
 
 /**
  * Probe whatever database this invocation would open. Resolution mirrors the
  * boot exactly (same config → the same `resolveStandaloneDatabase` the stack
  * uses), so the file probed is the file migrated.
  *
+ * [#22581] Same environment too: the project's `.env*` files are loaded first,
+ * by the one load the boot itself calls. The probe runs BEFORE the boot, so
+ * without it a database named in `.env` — the one `os serve` holds open — was
+ * migrated while the probe checked the default file. `dev` is the boot's own
+ * `serveFlags.dev` — the probe must read the files the boot will read.
+ *
  * Non-SQLite targets return `not_applicable`: Postgres and MySQL take their own
  * locks and report their own `SQLITE_BUSY` equivalents server-side, and this
  * probe has nothing to say about them.
  */
-export async function probeMigrationTarget(databaseUrl?: string): Promise<SqliteOccupancy> {
+export async function probeMigrationTarget(
+  databaseUrl?: string,
+  opts: { readonly dev?: boolean } = {},
+): Promise<SqliteOccupancy> {
   try {
+    loadProjectEnvFiles(process.cwd(), { dev: opts.dev === true });
     const { resolveStandaloneDatabase } = await import('@objectstack/runtime');
     const target = resolveStandaloneDatabase({
       projectRoot: process.cwd(),

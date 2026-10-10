@@ -74,14 +74,25 @@ describe('textSlotTemplateRefusal — the one judge of the single brace in a tex
     expect(message).not.toContain('Write `');
   });
 
-  it('names an assignment whose value slot still reads it for a date macro', () => {
-    for (const token of ['{TODAY() + 7}', '{NOW()}']) {
-      const message = textSlotTemplateRefusal(`Due ${token}`)!;
-      expect(message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL), token).toBe(true);
-      expect(message, token).toContain(`assignments: { v: '${token}' }`);
-      // …and that value-slot spelling is one the value slot does keep (#19939).
-      expect(valueSlotTemplateRefusals(token), token).toEqual([]);
-    }
+  // #19939 pass 3: the value slots refuse the date macros too, so a date
+  // macro is computed with the CEL envelope of its string form — the one the
+  // value-slot refusal names — never with a value-slot spelling refused in turn.
+  it.each([
+    ['{TODAY() + 7}', 'isoDate(daysFromNow(7))'],
+    ['{NOW()}', 'isoDatetime(now())'],
+  ])('names an assignment with the CEL envelope of a date macro\'s string form: %s', (token, source) => {
+    const message = textSlotTemplateRefusal(`Due ${token}`)!;
+    expect(message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(message).toContain(`assignments: { v: { dialect: 'cel', source: '${source}' } }`);
+    expect(message).toContain('`{{ v }}`');
+    expect(message).not.toContain(`assignments: { v: '${token}' }`);
+    expect(valueSlotTemplateRefusals(token)).toHaveLength(1);
+    expect(valueSlotTemplateRefusals(token)[0]!.message).toContain(`source: '${source}' }`);
+  });
+
+  it('names where a date macro\'s string form parts from the template, as the value slot does', () => {
+    expect(textSlotTemplateRefusal('Due {TODAY() - 1.5}')).toContain('`daysAgo(1.5)` is refused at build');
+    expect(textSlotTemplateRefusal('Due {TODAY() + days}')).toContain('added 0 days without a word');
   });
 
   // #19939 pass 2: the value slots refuse `{$User.*}`, so the run user's id is
@@ -129,7 +140,7 @@ describe('textSlotTemplateRefusal — the one judge of the single brace in a tex
   it('names each unspellable token once, after the rewrite of the paths', () => {
     const message = textSlotTemplateRefusal('{name}: {NOW()} / {NOW()}')!;
     expect(message.indexOf('`{{ name }}: {NOW()} / {NOW()}`')).toBeGreaterThan(0);
-    expect(message.split("assignments: { v: '{NOW()}' }")).toHaveLength(2);
+    expect(message.split("assignments: { v: { dialect: 'cel', source: 'isoDatetime(now())' } }")).toHaveLength(2);
   });
 });
 

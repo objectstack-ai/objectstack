@@ -15,6 +15,7 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  describeDatabaseSource,
   renderPlan,
   renderPendingSchemaWork,
   summarize,
@@ -210,6 +211,9 @@ export default class MigratePlan extends Command {
       if (flags.json) {
         await emitJson({
           database: stack.dbLabel,
+          // [#22581] Who named it — `--database-url`, this process's
+          // environment, a `.env*` file, the config's datasource, or nobody.
+          databaseSource: stack.dbSource,
           managedTables: stack.managedTableCount,
           total: drift.length,
           changes: drift,
@@ -278,7 +282,7 @@ export default class MigratePlan extends Command {
         console.log('');
       }
 
-      printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
       printInfo(`Examined ${chalk.white(String(stack.managedTableCount))} managed table(s).`);
       // What the object set was composed from (#12938) — never silent about a
       // host config it could not load, and empty (so this block prints nothing)

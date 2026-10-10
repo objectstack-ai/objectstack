@@ -261,13 +261,16 @@ function describeCarrierValue(value: unknown): string {
 
 /**
  * Media/attachment types. The STORED value of every member is an opaque
- * `sys_file` id ({@link FileReferenceIdValueSchema}); the inline metadata
- * object (`{url, name?, size?, ...}`) is the `expanded` READ form
- * ({@link FileValueSchema}), derived rather than stored. ADR-0104 D3 wave 2
- * (file-as-reference) narrowed it, and the classifier below is where that
- * landed: `valueSchemaFor` returns the id ALONE for `form === 'stored'` and
- * the id-or-object union only for `'expanded'`. Both directions are pinned in
- * `field-value.test.ts`.
+ * `sys_file` id ({@link FileReferenceIdValueSchema}). The `expanded` READ
+ * value is one of three forms: the inline metadata object
+ * (`{url, name?, size?, ...}`, {@link FileValueSchema}), derived rather than
+ * stored, when the id resolves to a file; the bare id, unchanged, when it does
+ * not; and `{ id, metadataRefused: true }` ({@link FileRefusedValueSchema})
+ * when the reader is refused the `sys_file` read that resolves it. ADR-0104 D3
+ * wave 2 (file-as-reference) narrowed the stored value, and the classifier
+ * below is where that landed: `valueSchemaFor` returns the id ALONE for
+ * `form === 'stored'` and the union of all three only for `'expanded'`. Both
+ * directions are pinned in `field-value.test.ts`.
  *
  * Legacy values already in storage — an inline blob, an external URL — are
  * admitted by the RUNTIME, never by this schema: they surface as warn-first
@@ -299,8 +302,9 @@ export function isFileIdToken(value: unknown): value is string {
 
 /**
  * ExecutionContext key that makes a read return file-field values in their
- * STORED form (the bare `sys_file` id) instead of the expanded
- * `{ id, name, url, … }` shape the engine's read resolver derives in place.
+ * STORED form (the bare `sys_file` id) instead of the expanded form the
+ * engine's read resolver derives in place: the `{ id, name, url, … }` file
+ * object, or `{ id, metadataRefused: true }` for a reader refused `sys_file`.
  *
  * Exists for the callers whose subject is the stored form itself — the
  * ADR-0104 backfill and `verifyFileReferences` reconciliation (#3617). On a
@@ -488,8 +492,9 @@ export type AddressValue = z.input<typeof AddressValueSchema>;
  * now rejected instead of waved through as an opaque payload.
  *
  * Wave 2 (file-as-reference) narrows the STORED form to an opaque `sys_file`
- * id and makes THIS the `expanded` read shape, with `url` derived from the
- * `/files/:fileId` resolver rather than stored.
+ * id and makes THIS the resolved `expanded` read shape, with `url` derived from
+ * the `/files/:fileId` resolver rather than stored. It is one of three expanded
+ * forms, beside the still-unresolved bare id and {@link FileRefusedValueSchema}.
  */
 export const FileValueSchema = lazySchema(() => z.looseObject({
   url: z.string(),
@@ -527,7 +532,8 @@ export type FileValue = z.input<typeof FileValueSchema>;
  * rejecting them is the point:
  *
  *  - an **inline metadata blob** is no longer the stored form; it is the
- *    `expanded` READ form ({@link FileValueSchema}), derived rather than stored;
+ *    resolved `expanded` READ form ({@link FileValueSchema}), derived rather
+ *    than stored;
  *  - an **external URL** was never a managed file. ADR-0104 R7 retires it toward
  *    an explicit `url` field, which under AI authoring is what stops "managed
  *    file" and "external link" from being the same declaration.
@@ -542,13 +548,56 @@ export const FileReferenceIdValueSchema = lazySchema(() =>
 export type FileReferenceIdValue = z.input<typeof FileReferenceIdValueSchema>;
 
 /**
+ * Media/attachment value whose metadata read was REFUSED to the reader — the
+ * third `expanded` read form (ADR-0104 D3 wave 2), beside the resolved
+ * {@link FileValueSchema} and the still-unresolved bare id.
+ *
+ * The engine expands a stored `sys_file` id by reading `sys_file` AS THE
+ * CALLER. A reader who may read the record but not `sys_file` used to receive
+ * the bare id back — the same value an id with no committed file row, or a
+ * storage outage, produces — so a refused file and an absent one were one
+ * answer on the wire. This shape is the refusal said in-band: the id the
+ * record holds, and `metadataRefused: true`. Nothing else is served, because
+ * nothing else was read: no `name`, `size` or `mimeType`, and no `url` — the
+ * download door judges its own access (by the record that owns the file, not
+ * by `sys_file` read), so a consumer derives the stable `/files/:fileId`
+ * endpoint from the id exactly as it does for a bare id.
+ *
+ * Read-only by construction: the STORED form is
+ * {@link FileReferenceIdValueSchema} alone, so this object is never a value a
+ * record write accepts. Closed, so a consumer can tell it from a resolved
+ * file value by shape — it carries no `url`, which {@link FileValueSchema}
+ * requires.
+ */
+export const FileRefusedValueSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this refused file value',
+    // Customer-facing text: no issue ids (the anchors are in the JSDoc above).
+    history: 'A refused file value is served by the platform and never written: it carries the '
+      + 'file id the record holds and the refusal marker, nothing else.',
+  },
+  {
+    id: FileReferenceIdValueSchema.describe('The sys_file id the record holds'),
+    metadataRefused: z.literal(true).describe(
+      'The reader was refused the file\'s metadata (no read on sys_file): name, size and type are '
+      + 'withheld. Distinct from an empty field, which holds no file at all.',
+    ),
+  },
+));
+export type FileRefusedValue = z.input<typeof FileRefusedValueSchema>;
+
+/**
  * Media/attachment value in either form — the TRANSITIONAL union that was the
  * stored contract before wave 2.
  *
- * @deprecated The stored form is {@link FileReferenceIdValueSchema}; the
- * expanded read form is {@link FileValueSchema}. Retained for consumers that
- * genuinely need to accept both during the migration window, so they say so
- * explicitly rather than by default.
+ * @deprecated The stored form is {@link FileReferenceIdValueSchema}. The
+ * expanded read form is one of three, {@link FileValueSchema}, the bare id or
+ * {@link FileRefusedValueSchema}, and `valueSchemaFor(def, 'expanded')`
+ * derives that union for a file field. This union admits only a non-empty
+ * string or a {@link FileValueSchema} object, so the refused value
+ * `{ id, metadataRefused: true }`, which carries no `url`, fails it. Retained
+ * for consumers that genuinely need to accept a string or a file object during
+ * the migration window, so they say so explicitly rather than by default.
  */
 export const FileLikeValueSchema = lazySchema(() => z.union([
   z.string().min(1),
@@ -644,9 +693,11 @@ export function valueSchemaFor(def: ValueShapeFieldDef, form: ValueForm = 'store
       // Expanded form: the read path replaces a stored id in place with the
       // resolved `{ id, name, size, mimeType, url }` — same polymorphism the
       // reference types have, and for the same reason, so an unresolved id
-      // (storage service absent, file not committed) stays valid.
+      // (storage service absent, file not committed) stays valid. A reader
+      // refused the file's metadata gets `{ id, metadataRefused: true }`
+      // instead of the bare id, so the refusal is not read as an absent file.
       return form === 'expanded'
-        ? z.union([FileReferenceIdValueSchema, FileValueSchema])
+        ? z.union([FileReferenceIdValueSchema, FileValueSchema, FileRefusedValueSchema])
         : FileReferenceIdValueSchema;
     }
     if (t === 'location') return LocationValueSchema;

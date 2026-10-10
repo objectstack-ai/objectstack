@@ -106,9 +106,9 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
         // any variable is set, by the one judge `registerFlow` and `objectstack
         // validate` call (`flowNodeValueTemplateRefusals`) — so the legacy
         // shapes are no way around it, and a flow that registered cannot be
-        // refused here. What reaches `interpolate()` below carries no token, or
-        // only the one the retirement keeps until CEL can spell it (the date
-        // macros); on everything else it is the identity. The run user is
+        // refused here. What reaches `interpolate()` below carries no token —
+        // the retirement keeps none; a date macro is refused with its CEL
+        // string form — so there it is the identity. The run user is
         // `current_user` in a CEL envelope, bound from the `context` this
         // executor passes to the evaluator.
         //
