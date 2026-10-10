@@ -646,6 +646,21 @@ describe('[ADR-0131 D3] controls — what the write-through leaves exactly as it
     expect(await b.envRows('plant_lead')).toEqual([]);
   });
 
+  // [ADR-0131 D3, #15196 Q3 = A] The promotion path the release note names:
+  // under a wall an organization's Setup position is a row with no definition,
+  // so it grants nothing; the metadata door takes an environment definition
+  // under the same name, and that definition is what the catalog then serves.
+  it('a walled posture: an organization\'s row-only position is promoted by an environment definition saved at the metadata door', async () => {
+    const b = await boot({ posture: 'isolated' });
+    await create(b, { name: 'plant_auditor', label: 'Plant auditor' });
+    expect(await b.catalogResolves('plant_auditor')).toBe(false);
+    await (b.protocol as any).saveMetaItem({
+      type: 'position', name: 'plant_auditor', item: { name: 'plant_auditor', label: 'Plant auditor', permissionSets: ['plant_tools'] },
+    });
+    expect((await b.envRows('plant_auditor')).map((r) => r.body.permissionSets)).toEqual([['plant_tools']]);
+    expect(await b.catalogResolves('plant_auditor')).toBe(true);
+  });
+
   it('a system write is never translated', async () => {
     const b = await boot();
     await b.engine.insert('sys_position', { id: 'pos_sys', name: 'seeded_lead', label: 'Seeded' }, { context: SYS } as any);
