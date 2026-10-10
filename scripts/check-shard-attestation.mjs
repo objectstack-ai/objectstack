@@ -242,6 +242,80 @@ function parseAttempt(value) {
   return Number.isInteger(attempt) && attempt > 0 ? attempt : undefined;
 }
 
+// ── A cancelled single leg: the cause the platform recorded (#22606) ────────
+
+/**
+ * The annotation GitHub writes on a job's check run when the job outlived its
+ * own `timeout-minutes` (measured: job 114123251343, `Dogfood Verify CLI` of run
+ * 38021470264 — `The job has exceeded the maximum execution time of 20m0s`).
+ */
+export const CANCEL_CAUSE_TIMEOUT = 'The job has exceeded the maximum execution time';
+
+/**
+ * The annotation GitHub writes when `cancel-in-progress` cancels a job because
+ * a newer run of the same concurrency group exists (measured: job 114005072147
+ * of run 37984828810 — `Canceling since a higher priority waiting request for
+ * ci-CI-push-refs/heads/main exists`; job 114173074639 of run 38038213421, the
+ * same text for `ci-CI-pull_request-22645`).
+ */
+export const CANCEL_CAUSE_SUPERSEDED = 'Canceling since a higher priority waiting request for';
+
+/**
+ * The legs whose cancel CAUSE decides the verdict (#22606) — pure, and shared
+ * by `judge()` and `--verify` so the question `--verify` asks the API is exactly
+ * the one `judge()` decides on.
+ *
+ * A leg qualifies when ALL of these hold:
+ *   - its roster is a SINGLE leg (`total` 1). A matrix has sibling shards of its
+ *     own, and their count is #16157's ruled reading — this path never touches it;
+ *   - its aggregate result is `cancelled` and none of its OWN credentials is
+ *     present — the shape #3668 passes without counting;
+ *   - ANOTHER leg of the same gate has at least one credential present.
+ *
+ * Why that is the question and not the answer: `cancelled` is the same word for
+ * a leg killed by its own `timeout-minutes` (no verdict at all — run
+ * 38021470264) and for a leg cancelled because a newer push superseded the run
+ * (#3668 — run 37984828810). With a sibling attested, both look identical to the
+ * count: same results, same credentials. So "another leg attested ⇒ not
+ * superseded" is NOT used as a discriminator — measured false in the #3668
+ * direction — and the platform's own record of the cause is read instead.
+ *
+ * @param {{ job: string, total: number, result: string }[]} legs
+ * @param {Map<string, unknown>} present
+ * @returns {string[]} the qualifying legs' job ids
+ */
+export function legsNeedingCancelCause(legs, present) {
+  const attestedAny = (leg) => rosterFor(leg.job, leg.total).some((id) => present.has(id));
+  return legs
+    .filter((leg) => leg.total === 1 && leg.result === 'cancelled' && !attestedAny(leg))
+    .filter((leg) => legs.some((other) => other.job !== leg.job && attestedAny(other)))
+    .map((leg) => leg.job);
+}
+
+/**
+ * A cancelled job's check-run annotations, read as a cause (#22606). Pure.
+ *
+ * `timeout` wins over `superseded` if both ever appear: it is the red answer,
+ * and with two contradictory records the gate fails closed. Anything else — a
+ * manual cancel (`The run was canceled by …`), no annotation at all, a message
+ * GitHub has not written before — is `other`, which the verdict also treats as
+ * red: only a recorded supersession buys #3668's pass on this path.
+ *
+ * @param {unknown} annotations the `GET …/check-runs/{id}/annotations` array
+ * @returns {{ kind: 'timeout' | 'superseded' | 'other', detail: string }}
+ */
+export function classifyCancelAnnotations(annotations) {
+  const list = Array.isArray(annotations) ? annotations : [];
+  const messages = list.map((a) => String(a?.message ?? '').trim()).filter(Boolean);
+  const timeout = messages.find((m) => m.startsWith(CANCEL_CAUSE_TIMEOUT));
+  if (timeout) return { kind: 'timeout', detail: timeout };
+  const superseded = messages.find((m) => m.startsWith(CANCEL_CAUSE_SUPERSEDED));
+  if (superseded) return { kind: 'superseded', detail: superseded };
+  const failures = list.filter((a) => a?.annotation_level === 'failure').map((a) => String(a?.message ?? '').trim()).filter(Boolean);
+  const shown = failures.length > 0 ? failures : messages;
+  return { kind: 'other', detail: shown.length > 0 ? shown.join(' | ') : 'the check run carries no annotation at all' };
+}
+
 // ── The verdict, as a pure function ─────────────────────────────────────────
 
 /**
@@ -258,15 +332,20 @@ function parseAttempt(value) {
  *   runId: string,
  *   runAttempt?: string,
  *   downloadOutcome?: string,
- * }} input
+ *   cancelCauses?: Map<string, { kind: 'timeout' | 'superseded' | 'other' | 'unreadable', detail: string }>,
+ * }} input `cancelCauses` answers `legsNeedingCancelCause()` per leg job id
+ *   (#22606); a qualifying leg with no entry is judged as an unreadable cause.
  * @returns {{ ok: boolean, log: string[], errors: string[] }}
  */
-export function judge({ gate, legs, filterResult, present, runId, runAttempt, downloadOutcome }) {
+export function judge({ gate, legs, filterResult, present, runId, runAttempt, downloadOutcome, cancelCauses }) {
   const log = [];
   const errors = [];
   const allowed = new Set();
   let counted = 0;
   const thisAttempt = parseAttempt(runAttempt);
+  const needsCause = new Set(legsNeedingCancelCause(legs, present));
+  /** Single legs whose cancel cause is NOT a recorded supersession, with that cause (#22606). */
+  const killedLegs = new Map();
 
   /**
    * Was this credential published by an EARLIER attempt of THIS run (#11998)?
@@ -327,14 +406,32 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
       //     named, and the required check goes red.
       for (const id of roster) allowed.add(id);
       const attested = roster.filter((id) => present.has(id));
-      if (attested.length === 0) {
+      if (attested.length === 0 && needsCause.has(leg.job)) {
+        // #22606: a SINGLE-leg roster has no sibling shard to say the leg ran,
+        // so the count above cannot split it — and "another leg of this gate
+        // attested" cannot either (a newer push can supersede the run after
+        // the sibling finished: run 37984828810). The platform's recorded
+        // cause decides; only a recorded supersession keeps #3668's pass.
+        const cause = cancelCauses?.get(leg.job) ?? { kind: 'unreadable', detail: 'no cancel cause was read for this leg' };
+        if (cause.kind === 'superseded') {
+          log.push(`    satisfied (cancelled — superseded, per the leg's own check run: "${cause.detail}" — #3668; expected attestations: 0)`);
+          continue;
+        }
+        killedLegs.set(leg.job, cause);
+        log.push(
+          cause.kind === 'timeout'
+            ? `    cancelled by its OWN job timeout ("${cause.detail}") while a sibling leg attested — not a superseded run; the roster is REQUIRED (#22606)`
+            : `    cancelled while a sibling leg attested, and the cause is not a recorded supersession (${cause.kind}: ${cause.detail}) — failing closed; the roster is REQUIRED (#22606)`,
+        );
+      } else if (attested.length === 0) {
         log.push(`    satisfied (cancelled — run-lifecycle state, #3668; expected attestations: 0)`);
         continue;
+      } else {
+        log.push(
+          `    cancelled AFTER ${attested.length} of ${roster.length} declared shard(s) attested — not a superseded matrix; ` +
+            `the roster is REQUIRED and every missing shard is named (#16157)`,
+        );
       }
-      log.push(
-        `    cancelled AFTER ${attested.length} of ${roster.length} declared shard(s) attested — not a superseded matrix; ` +
-          `the roster is REQUIRED and every missing shard is named (#16157)`,
-      );
     }
 
     if (leg.result === 'skipped') {
@@ -367,7 +464,18 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
     log.push(`    attested ${roster.length - missing.length} / ${roster.length} declared shard(s)`);
 
     counted += roster.length;
-    if (missing.length > 0) {
+    const killed = killedLegs.get(leg.job);
+    if (missing.length > 0 && killed) {
+      errors.push(
+        killed.kind === 'timeout'
+          ? `${gate}: leg ${leg.job} (single leg) published no positive attestation (${missing.join(', ')}) — it was killed by its ` +
+              `own job timeout ("${killed.detail}") while a sibling leg of this gate attested, so it produced no verdict at all. ` +
+              `A killed leg is not a passing leg, see #22606.`
+          : `${gate}: leg ${leg.job} (single leg) published no positive attestation (${missing.join(', ')}) and was cancelled while a ` +
+              `sibling leg of this gate attested; its cancel cause is ${killed.kind === 'other' ? 'not a recorded supersession' : 'unreadable'} ` +
+              `(${killed.detail}). Only a recorded supersession passes this shape — failing closed, see #22606.`,
+      );
+    } else if (missing.length > 0) {
       errors.push(
         leg.result === 'cancelled'
           ? `${gate}: ${missing.length} of ${roster.length} declared shard(s) of ${leg.job} published no positive attestation ` +
@@ -718,8 +826,10 @@ export async function scanWorkflow(root) {
   }
 
   let doc;
+  let workflowText = '';
   try {
-    doc = parse(readFileSync(file, 'utf8'));
+    workflowText = readFileSync(file, 'utf8');
+    doc = parse(workflowText);
   } catch (error) {
     return { problems: [`${file} does not parse as YAML: ${error.message}`], gates: 0, legs: 0, attesters: 0, gateIds: [], attesterIds: [] };
   }
@@ -767,6 +877,44 @@ export async function scanWorkflow(root) {
       .map((step) => String(step?.with?.pattern ?? ''));
     if (patterns.length === 0) {
       problems.push(`gate '${id}' never downloads the shard attestations it claims to count.`);
+    }
+
+    // #22606: a single-leg roster beside another leg is the shape whose
+    // `cancelled` verdict is decided by the platform's recorded cause. That
+    // read is declared HERE or it is not done: without the permissions and the
+    // token every such verdict fails closed — a superseded run painted red,
+    // #3668's false red back — and without a display name the runtime can read
+    // from the text, the leg's check run cannot be found at all.
+    const causeLegs = legs.length > 1 ? legs.filter((leg) => leg.total === 1) : [];
+    if (causeLegs.length > 0) {
+      const perms = job.permissions;
+      const grants = (scope) =>
+        perms === 'read-all' || perms === 'write-all' || (perms && typeof perms === 'object' && ['read', 'write'].includes(perms[scope]));
+      for (const scope of ['actions', 'checks']) {
+        if (!grants(scope)) {
+          problems.push(
+            `gate '${id}' counts the single-leg roster(s) ${causeLegs.map((leg) => `'${leg.job}'`).join(', ')} beside another leg, so a cancelled ` +
+              `single leg is judged by its recorded cancel cause — and that read needs \`permissions: ${scope}: read\` on the gate job (#22606).`,
+          );
+        }
+      }
+      const verifyStep = stepsOf(job).find((step) => invokesScript(step?.run, '--verify'));
+      if (!verifyStep?.env || typeof verifyStep.env.GITHUB_TOKEN !== 'string' || verifyStep.env.GITHUB_TOKEN.trim() === '') {
+        problems.push(`gate '${id}': its --verify step must receive GITHUB_TOKEN in its env for the cancel-cause read of ${causeLegs.map((leg) => `'${leg.job}'`).join(', ')} (#22606).`);
+      }
+      for (const leg of causeLegs) {
+        const target = jobs[leg.job];
+        if (!target) continue; // reported below as an unknown leg
+        const declared = typeof target.name === 'string' ? target.name : leg.job;
+        const seen = workflowJobDisplayName(workflowText, leg.job);
+        if (seen !== declared) {
+          problems.push(
+            `job '${leg.job}' is named ${JSON.stringify(declared)} but the runtime's text reading resolves ${JSON.stringify(seen ?? null)} — ` +
+              `the cancel-cause read finds the leg's check run by that name, so a cancelled '${leg.job}' could never be judged (#22606). ` +
+              `Give it a literal, single-line \`name:\`.`,
+          );
+        }
+      }
     }
 
     for (const leg of legs) {
@@ -846,6 +994,200 @@ export async function scanWorkflow(root) {
   return { problems, gates: gates.size, legs, attesters: claimed.size, gateIds: [...gates.keys()], attesterIds: [...claimed.keys()] };
 }
 
+// ── Reading a cancelled single leg's cause off the platform (#22606) ────────
+
+/**
+ * A job's display name as the jobs API reports it, read from the workflow TEXT.
+ *
+ * Text, not YAML, on purpose: `--verify` runs in a gate job that checks out the
+ * repository and never installs dependencies, so the `yaml` package
+ * `scanWorkflow()` uses is not there. The static guard (which does have it)
+ * holds this reading equal to the parsed `name:` for every leg the cause read
+ * can be asked about, so the two cannot drift apart silently.
+ *
+ * `undefined` means "cannot say" — an expression (`${{ … }}`), a block scalar,
+ * an unterminated quote, no such job — and the caller then fails closed. A job
+ * with no `name:` is shown by GitHub under its id, so the id is returned.
+ *
+ * @param {string} text the workflow file's contents
+ * @param {string} jobKey the job's id under `jobs:`
+ * @returns {string | undefined}
+ */
+export function workflowJobDisplayName(text, jobKey) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  const jobsAt = lines.findIndex((line) => /^jobs:\s*(#.*)?$/.test(line));
+  if (jobsAt === -1) return undefined;
+  const header = new RegExp(`^  ${jobKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(#.*)?$`);
+  let at = -1;
+  for (let i = jobsAt + 1; i < lines.length; i += 1) {
+    if (/^\S/.test(lines[i]) && !lines[i].startsWith('#')) break;
+    if (header.test(lines[i])) {
+      at = i;
+      break;
+    }
+  }
+  if (at === -1) return undefined;
+  for (let i = at + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    if (/^ {0,3}\S/.test(line)) break; // the next job, or a top-level key
+    const match = /^ {4}name:[ \t]*(.*?)[ \t]*$/.exec(line);
+    if (!match) continue;
+    const raw = match[1];
+    let value;
+    if (raw.startsWith("'")) {
+      if (!/^'(?:[^']|'')*'$/.test(raw)) return undefined;
+      value = raw.slice(1, -1).replace(/''/g, "'");
+    } else if (raw.startsWith('"')) {
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        return undefined;
+      }
+    } else {
+      value = raw.replace(/[ \t]+#.*$/, '');
+    }
+    if (typeof value !== 'string' || value === '' || value === '|' || value === '>' || value.includes('${{')) return undefined;
+    return value;
+  }
+  return jobKey;
+}
+
+/**
+ * The live fetcher: one JSON GET against the REST API with the job's token.
+ * One retry, for a 5xx / 429 / network failure only — a 4xx is an answer (a
+ * 403 here names a missing `permissions:` entry and asking again does not help).
+ * The token is never printed: every failure carries the status and GitHub's own
+ * message, nothing else.
+ *
+ * @returns {(url: string) => Promise<{ ok: true, status: number, body: unknown } | { ok: false, status: number, error: string }>}
+ */
+export function githubFetchJson(token, { fetchImpl = globalThis.fetch, timeoutMs = 20_000, retryDelayMs = 2_000 } = {}) {
+  return async (url) => {
+    let last = { ok: false, status: 0, error: 'not attempted' };
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const res = await fetchImpl(url, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': SCRIPT_BASENAME,
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (res.ok) return { ok: true, status: res.status, body: await res.json() };
+        last = { ok: false, status: res.status, error: (await res.text()).replace(/\s+/g, ' ').slice(0, 300) };
+        if (res.status < 500 && res.status !== 429) return last;
+      } catch (error) {
+        last = { ok: false, status: 0, error: String(error?.message ?? error) };
+      }
+      if (attempt === 1) await new Promise((done) => setTimeout(done, retryDelayMs));
+    }
+    return last;
+  };
+}
+
+/**
+ * The cause the platform recorded for every leg `legsNeedingCancelCause()`
+ * names (#22606) — and NO request at all when it names none, which is every
+ * run except a cancelled single leg beside an attested sibling.
+ *
+ * Two documented reads, both under the gate job's own `GITHUB_TOKEN`:
+ *   - `GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs`
+ *     ("Actions" repository permission, read) — THIS attempt's jobs, matched by
+ *     the leg's display name, because `needs.<leg>.result` is this attempt's;
+ *   - `GET {check_run_url}/annotations` ("Checks" repository permission, read).
+ *
+ * Every failure is an `unreadable` cause naming why, which `judge()` turns red:
+ * an unanswerable question never buys #3668's pass on this path.
+ *
+ * @param {{
+ *   legs: { job: string, total: number, result: string }[],
+ *   present: Map<string, unknown>,
+ *   runId: string, runAttempt: string, repository?: string, apiUrl?: string,
+ *   token?: string, fetchJson: (url: string) => Promise<{ ok: boolean, status: number, body?: unknown, error?: string }>,
+ *   workflowText: string,
+ * }} input
+ * @returns {Promise<Map<string, { kind: 'timeout' | 'superseded' | 'other' | 'unreadable', detail: string }>>}
+ */
+export async function readCancelCauses({ legs, present, runId, runAttempt, repository, apiUrl, token, fetchJson, workflowText }) {
+  const causes = new Map();
+  const wanted = legsNeedingCancelCause(legs, present);
+  if (wanted.length === 0) return causes;
+  const unreadable = (detail) => ({ kind: 'unreadable', detail });
+  const attempt = parseAttempt(runAttempt);
+  const precondition = !token
+    ? "no GITHUB_TOKEN in the verify step's environment — the gate job needs `permissions:` actions: read + checks: read, and the token passed to this step"
+    : !/^[^/\s]+\/[^/\s]+$/.test(String(repository ?? ''))
+      ? `GITHUB_REPOSITORY is unreadable (${JSON.stringify(repository ?? '')})`
+      : !/^\d+$/.test(String(runId ?? ''))
+        ? `GITHUB_RUN_ID is unreadable (${JSON.stringify(runId ?? '')})`
+        : attempt === undefined
+          ? `GITHUB_RUN_ATTEMPT is unreadable (${JSON.stringify(runAttempt ?? '')})`
+          : undefined;
+  if (precondition) {
+    for (const job of wanted) causes.set(job, unreadable(precondition));
+    return causes;
+  }
+
+  const base = String(apiUrl || 'https://api.github.com').replace(/\/+$/, '');
+  const jobsUrl = (page) => `${base}/repos/${repository}/actions/runs/${runId}/attempts/${attempt}/jobs?per_page=100&page=${page}`;
+  const jobs = [];
+  let listError;
+  for (let page = 1; ; page += 1) {
+    const res = await fetchJson(jobsUrl(page));
+    if (!res.ok) {
+      listError = `GET ${jobsUrl(page)} answered ${res.status || 'nothing'}: ${res.error}`;
+      break;
+    }
+    const batch = Array.isArray(res.body?.jobs) ? res.body.jobs : undefined;
+    if (!batch) {
+      listError = `GET ${jobsUrl(page)} answered without a jobs array`;
+      break;
+    }
+    jobs.push(...batch);
+    const total = Number(res.body?.total_count);
+    if (batch.length < 100 || (Number.isInteger(total) && jobs.length >= total)) break;
+    if (page === 10) {
+      listError = `this attempt lists more than ${jobs.length} jobs — refusing to judge from a partial list`;
+      break;
+    }
+  }
+
+  for (const job of wanted) {
+    if (listError) {
+      causes.set(job, unreadable(listError));
+      continue;
+    }
+    const name = workflowJobDisplayName(workflowText, job);
+    if (name === undefined) {
+      causes.set(job, unreadable(`job '${job}' has no readable display name in the workflow file, so its check run cannot be found`));
+      continue;
+    }
+    const matches = jobs.filter((record) => record?.name === name);
+    if (matches.length !== 1) {
+      causes.set(job, unreadable(`this attempt's jobs list holds ${matches.length} job(s) named '${name}', not exactly one`));
+      continue;
+    }
+    const [record] = matches;
+    if (record.conclusion !== 'cancelled') {
+      causes.set(job, unreadable(`this attempt's jobs list reads '${name}' (job ${record.id}) as ${JSON.stringify(record.conclusion)}, not cancelled`));
+      continue;
+    }
+    const checkRun = typeof record.check_run_url === 'string' && record.check_run_url ? record.check_run_url : `${base}/repos/${repository}/check-runs/${record.id}`;
+    const annotationsUrl = `${checkRun}/annotations?per_page=100`;
+    const res = await fetchJson(annotationsUrl);
+    if (!res.ok || !Array.isArray(res.body)) {
+      causes.set(job, unreadable(`GET ${annotationsUrl} answered ${res.ok ? 'without an array' : `${res.status || 'nothing'}: ${res.error}`}`));
+      continue;
+    }
+    const cause = classifyCancelAnnotations(res.body);
+    causes.set(job, { kind: cause.kind, detail: `${cause.detail} — check run ${record.id}` });
+  }
+  return causes;
+}
+
 // ── Modes ───────────────────────────────────────────────────────────────────
 
 function argValue(flag, fallback) {
@@ -888,7 +1230,7 @@ function emit() {
 }
 
 /** A gate counts the credentials. */
-function verify() {
+async function verify() {
   const gate = argValue('--gate', 'gate');
   const dir = argValue('--dir');
   if (!dir) {
@@ -901,18 +1243,44 @@ function verify() {
     return { job, total: Number(total), result: at === -1 ? '' : token.slice(at + 1).trim() };
   });
   const { present, problems } = readAttestations(dir);
+  const runId = process.env.GITHUB_RUN_ID ?? '';
+  // Read from the environment for the same reason the run id is (#11998):
+  // `GITHUB_RUN_ATTEMPT` is a default variable in every job, `--emit` already
+  // stamps the credential from it, and taking both ends of the comparison
+  // from the same source means no ci.yml step has to remember to pass it.
+  const runAttempt = process.env.GITHUB_RUN_ATTEMPT ?? '';
+  // #22606: the API is asked ONLY when a cancelled single leg sits beside an
+  // attested sibling; every other run makes no request and needs no token.
+  let cancelCauses = new Map();
+  if (legsNeedingCancelCause(legs, present).length > 0) {
+    let workflowText = '';
+    try {
+      workflowText = readFileSync(join(scriptRepoRoot(), '.github', 'workflows', 'ci.yml'), 'utf8');
+    } catch {
+      // No display name can be read, so every asked leg comes back unreadable — red, never a pass.
+    }
+    const token = process.env.GITHUB_TOKEN ?? '';
+    cancelCauses = await readCancelCauses({
+      legs,
+      present,
+      runId,
+      runAttempt,
+      repository: process.env.GITHUB_REPOSITORY,
+      apiUrl: process.env.GITHUB_API_URL,
+      token,
+      fetchJson: githubFetchJson(token),
+      workflowText,
+    });
+  }
   const verdict = judge({
     gate,
     legs,
     filterResult: argValue('--filter-result', ''),
     present,
-    runId: process.env.GITHUB_RUN_ID ?? '',
-    // Read from the environment for the same reason the run id is (#11998):
-    // `GITHUB_RUN_ATTEMPT` is a default variable in every job, `--emit` already
-    // stamps the credential from it, and taking both ends of the comparison
-    // from the same source means no ci.yml step has to remember to pass it.
-    runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? '',
+    runId,
+    runAttempt,
     downloadOutcome: argValue('--download-outcome', ''),
+    cancelCauses,
   });
   for (const line of verdict.log) console.log(line);
   const errors = [...problems.map((p) => `${gate}: ${p}`), ...verdict.errors];
@@ -1635,7 +2003,7 @@ if (!invokedDirectly) {
 } else if (process.argv.includes('--emit')) {
   emit();
 } else if (process.argv.includes('--verify')) {
-  verify();
+  await verify();
 } else {
   await main();
 }
