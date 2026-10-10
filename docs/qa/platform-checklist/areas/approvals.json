@@ -330,20 +330,17 @@
       "title": "An approval notification deep-links straight into the request drawer",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": ["any pending approver"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["at least one pending request on which the signed-in approver can be notified through the REMIND or REASSIGN path — POST /api/v1/approvals/requests/:id/remind (or /reassign {to}) is what actually mints the deep-linked notification; the three seeded demo requests suffice as the request source"],
-        "knownGaps": [
-          "opening a request notifies NOBODY on this build — there is no approval.opened topic. The topics that emit are approval.{reminder,reassigned,returned,request_info,comment,ooo_substituted,ooo_skipped,escalated,sla_breached} (packages/plugins/plugin-approvals/src/approval-service.ts), so an item that waits for an open-time notification waits forever; drive remind/reassign instead (#7517)"
-        ]
+        "requires": ["at least one pending request on which the signed-in approver can be notified through the REMIND or REASSIGN path — POST /api/v1/approvals/requests/:id/remind (or /reassign {to}) mints a deep-linked notification on demand (since PR #22625 the OPENING also emits approval.requested to each concrete approver, so a freshly opened request is a second source); the three seeded demo requests suffice as the request source"]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin (a pending approver on the seeded requests)",
-        "mint the notification: POST /api/v1/approvals/requests/:id/remind on a pending request (or /:id/reassign {to: <self>}) — opening a request emits nothing, the remind/reassign path is what notifies",
+        "mint the notification: POST /api/v1/approvals/requests/:id/remind on a pending request (or /:id/reassign {to: <self>}) — the remind/reassign path notifies on demand; opening a request also emits approval.requested to each concrete approver on the slate it opens on (PR #22625), so a freshly opened request's row is an equally valid source",
         "read the resulting notification row and record its actionUrl — it must carry /system/approvals?request=<id> (#2678 P1.5; ApprovalService.notify rewrites the bare /system/approvals into the deep link centrally, so every emitting topic inherits it)",
         "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; capture the drawer that opens",
         "GET /api/v1/approvals/requests/:id and cross-check the drawer's request identity and status against the read",
@@ -391,13 +388,14 @@
         "#3358 §1",
         "#7213", "#7233",
         "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (#2678 P1.5 — 'notifications carry /system/approvals?request=<id>')",
-        "packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalService (ApprovalService.notify — the central /system/approvals → ?request=<id> rewrite; the emitting topic set, which has no approval.opened member)"
+        "packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalService (ApprovalService.notify — the central /system/approvals → ?request=<id> rewrite; the emitting topic set — approval.requested on open since PR #22625, beside reminder / reassigned / returned / request_info / comment / ooo_substituted / ooo_skipped / escalated / sla_breached — every member inherits the deep link)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 (verified twice on fresh loads)", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-10", "change": "added the route-parity clause: after #7213 the same ?request= link must open the drawer on BOTH /system/approvals (what notifications carry) and the component route the account app mounts", "ref": "#7331" },
-        { "revision": 4, "date": "2026-08-11", "change": "fixtures re-anchored on the remind/reassign path — the old requires rested on a request's OPEN notifying somebody, and no approval.opened topic exists; and the cold-load clause's evidence restated observably (drawer field-matched against the API instead of 'screenshots with the URL visible', which the console's consumption of the query param makes unmeetable)", "ref": "#7530" }
+        { "revision": 4, "date": "2026-08-11", "change": "fixtures re-anchored on the remind/reassign path — the old requires rested on a request's OPEN notifying somebody, and no approval.opened topic exists; and the cold-load clause's evidence restated observably (drawer field-matched against the API instead of 'screenshots with the URL visible', which the console's consumption of the query param makes unmeetable)", "ref": "#7530" },
+        { "revision": 5, "date": "2026-10-10", "change": "the open-time gap is closed: since PR #22625 (#22607) openNodeRequest publishes approval.requested to each concrete approver on the slate the request opens on, through the same notify() deep-link rewrite — the knownGaps entry that said opening notifies nobody is removed, the source note names the topic, step 2 and the fixture note say the opening is a second source; the fixtures stay on remind/reassign (deterministic on demand) and the revision-4 row stands as history", "ref": "#22631" }
       ]
     },
     {
@@ -1116,7 +1114,7 @@
       "title": "The anonymous /approvals/act door: a minted one-tap token renders a confirm page and one POST decides as exactly the bound approver — every dead-token shape is a designed refusal page with no state change",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (submitter of the seeded invoice request — remind is submitter-only, and the remind fan-out is what mints the tokens)", "the ANONYMOUS bearer of an action link: a clean HTTP client holding NO session cookie and NO bearer token"],
@@ -1128,33 +1126,33 @@
         ],
         "knownGaps": [
           "the EMAIL-RENDERING leg (the Approve/Reject links arriving as buttons in an actual message) is not covered by the sys_notification capture — it needs the dev log mail transport the forgot-password item uses (EMAIL_TRANSPORT_PROVIDERS 'log' → LogTransport, see identity-auth.self-service-password-reset fixtures); without it that one leg is blocked(fixture) while every token/door clause still runs off the persisted payload",
-          "the EXPIRED leg has no in-session clock: ACTION_TOKEN_TTL_MS is 72h (approval-service.ts) and issueActionTokens' ttlMs override is not REST-reachable — drive expiry by backdating the minted sys_approval_token row's expires_at over the data API as the admin (a data row, writable), and record that manipulation in the run evidence"
+          "the EXPIRED leg has no live door on this build: ACTION_TOKEN_TTL_MS is 72h (approval-service.ts), issueActionTokens' ttlMs override is not REST-reachable, the service clock is a constructor option the plugin never threads (approvals-plugin.ts constructs ApprovalService without one), and since PR #22633 (#22616) sys_approval_token declares apiEnabled: false + apiMethods: [], so every data-API verb answers 404 OBJECT_API_DISABLED to every caller, the administrator included — the old recipe (backdate expires_at over the data API) is gone, and update was never in the object's whitelist even before. Score the expired shape from the pinned unit test instead: approval-service.test.ts 'redeem: dead tokens — invalid, expired, decided request, reassigned slot' mints with ttlMs: 1 under the fake clock and pins reason 'expired' (RESULT_COPY.expired in action-link-pages.ts is the page that reason renders); a live run records this one leg as blocked(fixture), never as a defect"
         ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
-        "mint: POST /api/v1/approvals/requests/:id/remind on the admin-submitted invoice request; then read the minted rows — GET /api/v1/data/sys_approval_token filtered to request_id: one approve + one reject row PER concrete pending approver, each carrying token_hash (never a raw token), approver_id, expires_at ≈ now+72h, consumed_at null",
+        "mint: POST /api/v1/approvals/requests/:id/remind on the admin-submitted invoice request — the response's notified count equals the number of concrete pending approvers, and GET /:id/actions gains one remind row. ⛔ Do NOT read sys_approval_token through the data API: since PR #22633 the object is apiEnabled: false with apiMethods: [], so GET /api/v1/data/sys_approval_token answers 404 OBJECT_API_DISABLED for every caller (the administrator included) — that 404 is the designed answer, not a finding. The per-approver mint (one approve + one reject row per concrete pending approver, SHA-256 at rest, FORBIDDEN for a non-pending approver) is pinned by the two integration tests named in source; live, step 3's payload.actions is the per-approver oracle",
         "capture the raw links: GET /api/v1/data/sys_notification (topic approval.reminder, source_id = the request id) and extract the two /api/v1/approvals/act?token=... URLs from payload.actions",
-        "switch to a CLEAN anonymous client (no cookies, no Authorization header — prove it: GET /api/v1/approvals/requests from the same client answers 401); GET the approve URL — 200 HTML confirm page naming the action, the acting approver id and the request summary, with a POST form; GET it again, then re-read the request and token row as admin: nothing changed, consumed_at still null (mail-gateway prefetch safety — the GET never mutates)",
+        "switch to a CLEAN anonymous client (no cookies, no Authorization header — prove it: GET /api/v1/approvals/requests from the same client answers 401); GET the approve URL — 200 HTML confirm page naming the action, the acting approver id and the request summary, with a POST form; GET it again — the confirm page renders a second time, not the 'Already used' page (peek validates without consuming), then re-read the request and GET /:id/actions as admin: nothing changed (mail-gateway prefetch safety — the GET never mutates). The token row is served through no door, so the second confirm page IS the 'still live' oracle",
         "POST the form body (token=<raw>) anonymously — 200 result page 'Approved · 已通过'; as admin re-read the request (status moved / group tally advanced) and GET /:id/actions — the approve row's actor is the BOUND approver_id, comment 'Via action link'",
         "replay: POST the same token again — 'Already used · 链接已使用' page; no new action row, no state movement",
         "dead-slot leg: on a second pending request mint tokens, decide it through the normal UI/API first, then GET the leftover token URL — 'Already decided · 请求已处理' page; and on a third, reassign the bound approver away first, then GET — 'No longer your approval · 已不在你名下' (the link died with the slot, ADR-0043 invalidation)",
         "garbage: GET and POST with token=garbage — 'Invalid link · 链接无效' page, 200, no summary rows",
-        "expiry: mint fresh tokens, backdate that sys_approval_token row's expires_at to a past instant via the data API, GET the URL — 'Link expired · 链接已过期' page",
+        "expiry: no live door on this build (see knownGaps) — cite the pinned unit test's 'expired' reason and the RESULT_COPY.expired page copy ('Link expired · 链接已过期'), and record the leg as blocked(fixture)",
         "scope probe: replay the raw token as a credential everywhere else — Authorization: Bearer <token> on GET /api/v1/approvals/requests and on GET /api/v1/data/showcase_invoice — every such call is unauthenticated (401); the token opens nothing but the act door"
       ],
       "acceptance": [
         {
           "clause": "minting is approver-bound and hashed at rest: remind fans out one approve + one reject token per CONCRETE pending approver (literal type:value slots get a plain nudge, no token), stored as SHA-256 hashes with approver_id and expires_at — and issueActionTokens refuses a non-pending approver with FORBIDDEN",
-          "oracle": "api",
-          "verify": "the sys_approval_token rows after the remind: token_hash present (64 hex chars), no raw-token column, approver_id ∈ pending_approvers, action ∈ {approve, reject}; the sys_notification payload carries the raw URLs the hashes verify against",
-          "evidence": "token-row read + notification-payload read"
+          "oracle": "test",
+          "verify": "run the two pinned integration tests and cite their output: approval-token-internal-hash.integration.test.ts (the digest is internal — the generic read omits it, storage holds the SHA-256, peek and redeem resolve by it) and sys-approval-token-generic-door.integration.test.ts (apiEnabled: false, apiMethods: [], every operation refused for every caller with the api-disabled discriminant, the cross-object search returns no token row, and the Approve link remind() delivered still redeems once as the bound approver and is refused on replay). Live, the sys_notification payload carries one approve + one reject /api/v1/approvals/act?token= URL per concrete pending approver and none for a literal slot — the token rows themselves are served through no door since PR #22633",
+          "evidence": "pinned test output + notification-payload read"
         },
         {
           "clause": "the GET confirm page renders session-less and MUTATES NOTHING — repeated GETs leave the request, its actions timeline and the token's consumed_at byte-identical (a mail gateway's link prefetch must never approve a request)",
           "oracle": "api",
-          "verify": "before/after reads of GET /:id, /:id/actions and the token row around two anonymous GETs of the confirm URL — no delta; the page itself came back 200 text/html with the POST form (peekActionToken validates without consuming)",
-          "evidence": "the confirm-page response + before/after reads"
+          "verify": "before/after reads of GET /:id and GET /:id/actions around two anonymous GETs of the confirm URL — no delta; both GETs came back 200 text/html with the POST form (peekActionToken validates without consuming), and the second one rendering the confirm page rather than the 'Already used' page is the consumed_at oracle now that the token row is served through no door",
+          "evidence": "the two confirm-page responses + before/after reads"
         },
         {
           "clause": "one anonymous POST decides as exactly the bound approver on exactly the bound request: the decision is attributed like a UI decision — the approve action row's actor is the token's approver_id (never null, never the submitter), comment 'Via action link', and the request/tally/flow-run all move exactly as a session decision would",
@@ -1165,14 +1163,14 @@
         {
           "clause": "redemption is single-use and consume-FIRST: the second POST answers the 'Already used' page with no second action row — and because the token is burned before the decide, a decide that fails still burns it (replay-safe by design; a burned-but-undecided token is the designed outcome, not a defect to file)",
           "oracle": "api",
-          "verify": "token row's consumed_at set after the first POST; second POST → consumed page; actions timeline count unchanged",
-          "evidence": "token-row read + the replayed response + actions count"
+          "verify": "second POST → the 'Already used' page (the act door's own reading of consumed_at — the row is served through no door); GET /:id/actions count unchanged",
+          "evidence": "the replayed response + actions count"
         },
         {
           "clause": "every dead-token shape answers its DESIGNED 200 refusal page with zero state change: invalid / expired / consumed render WITHOUT request summary rows; not_pending / already-decided and not_approver / reassigned-away render theirs WITH the summary (the bearer legitimately held that link) — and none of the five moves any state",
           "oracle": "network",
-          "verify": "one capture per RESULT_COPY shape (invalid, expired, consumed, not_pending, not_approver) — HTTP 200 text/html, the matching bilingual title, summary-row presence per the rule above; paired before/after request reads show no delta. The 200-on-refusal is by design (a human-facing page reached from a mail client) — a run must not file the missing 4xx as a finding",
-          "evidence": "the five refusal captures + paired reads"
+          "verify": "one capture per RESULT_COPY shape reachable live (invalid, consumed, not_pending, not_approver) — HTTP 200 text/html, the matching bilingual title, summary-row presence per the rule above; paired before/after request reads show no delta; the expired shape is scored from the pinned unit test (knownGaps). The 200-on-refusal is by design (a human-facing page reached from a mail client) — a run must not file the missing 4xx as a finding",
+          "evidence": "the four live refusal captures + paired reads + the pinned expired reason"
         },
         {
           "clause": "the token grants nothing else: presented as a bearer credential on any authenticated route it is a stranger — the platform's auth stack never resolves it",
@@ -1185,7 +1183,7 @@
         "a GET of the confirm URL that consumes the token or records a decision is a FAIL — the prefetch-safety split (GET renders, POST decides) is the whole reason the door has two verbs",
         "a replayed token accepted twice — two action rows, or a tally moved twice — is a FAIL of the consume-first design",
         "an invalid/expired/consumed refusal page that leaks the request summary (process, record, requester) to a bearer whose token never resolved is a FAIL — those three shapes render no summary rows by design",
-        "a raw token readable out of sys_approval_token (a raw-token column, or a hash that is really the token) is a FAIL of the hashed-at-rest claim"
+        "a raw token readable out of sys_approval_token storage (the engine's system read in the internal-hash test: a raw-token column, or a hash that is really the token) is a FAIL of the hashed-at-rest claim — and a run that reads the data API's 404 OBJECT_API_DISABLED on sys_approval_token as a defect is a FAIL of the method: the door is closed by design (PR #22633)"
       ],
       "traps": ["dispatcher-vs-hono-route", "auth-state-leak"],
       "source": [
@@ -1194,10 +1192,14 @@
         "packages/plugins/plugin-approvals/src/approval-service.ts#approver (the remind fan-out is the mint path: per-approver Approve/Reject action links on topic approval.reminder; literal slots fall back to a tokenless nudge)",
         "packages/plugins/plugin-approvals/src/action-link-pages.ts#RESULT_COPY (ADR-0043 session-less bilingual pages; 'The GET page NEVER mutates'; RESULT_COPY — which refusal shapes carry summaryRows and which do not)",
         "packages/services/service-messaging/src/messaging-service.ts#writeEvent + (writeEvent persists the payload on sys_notification — the stock-boot token-capture seam this item's fixtures rest on)",
-        "packages/plugins/plugin-approvals/src/sys-approval-token.object.ts (the token store)"
+        "packages/plugins/plugin-approvals/src/sys-approval-token.object.ts (the token store — enable.apiEnabled: false + apiMethods: [] since PR #22633: every data-API verb 404 OBJECT_API_DISABLED for every caller, and the cross-object search skips it)",
+        "packages/plugins/plugin-approvals/src/approval-token-internal-hash.integration.test.ts (#21197 — the digest is internal; storage holds it; peek + redeem resolve by it)",
+        "packages/plugins/plugin-approvals/src/sys-approval-token-generic-door.integration.test.ts (#22616 — the declaration, every operation refused for every caller, the search pin, and the positive control: the link still redeems once)",
+        "packages/plugins/plugin-approvals/src/approval-service.test.ts ('redeem: dead tokens — invalid, expired, decided request, reassigned slot' — the expired reason under ttlMs: 1 and the fake clock)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "initial — the anonymous actionable-link door (ADR-0043) had no checklist coverage despite being an unauthenticated decision path. Authored from source with one register correction: the hunter proposed an emailed-link capture harness as the fixture, but messaging persists the reminder payload (raw action URLs included) on the sys_notification event row, so every token/door clause is stock-runnable; only the email-rendering leg still wants the LogTransport capture (recorded in knownGaps)", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "initial — the anonymous actionable-link door (ADR-0043) had no checklist coverage despite being an unauthenticated decision path. Authored from source with one register correction: the hunter proposed an emailed-link capture harness as the fixture, but messaging persists the reminder payload (raw action URLs included) on the sys_notification event row, so every token/door clause is stock-runnable; only the email-rendering leg still wants the LogTransport capture (recorded in knownGaps)", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-10-10", "change": "re-pointed after PR #22633 (#22616) closed sys_approval_token to the automatic API (apiEnabled: false, apiMethods: [] — 404 OBJECT_API_DISABLED for every caller): the token-row oracles move to the act door's outcome pages, the request's action history (GET /:id/actions) and the two pinned integration tests (internal-hash, generic-door); the mint clause is scored by test; the expiry leg, whose only recipe was backdating expires_at over the data API, has no surviving door (ttlMs is not REST-reachable and the plugin threads no clock) and is recorded in knownGaps as blocked(fixture) with the pinned 'expired' reason as its oracle. Two steps had contradicted the door before that PR already: the digest has been withheld since #21197, and update was never in the whitelist", "ref": "#22631" }
       ]
     },
     {
