@@ -70,12 +70,34 @@
  * spec decision answers "served" for it — the same default every door reads.
  * A host that constructs `AnalyticsService` with no provider gets no gate and
  * is told so once; `AnalyticsServicePlugin` always wires one.
+ *
+ * ## The registration face — the same decision, asked earlier
+ *
+ * A configured cube, or a dataset `registerDataset` compiled, enters the SHARED
+ * registry that `getMeta` publishes. When its base object or a declared join
+ * is one the decision denies, every query of it is refused by the query face
+ * above, so listing it advertises a cube that can never answer.
+ * {@link assertDefinitionExposed} asks the SAME decision, for the same
+ * operation and over the same object set the query face's first ask reads (the
+ * cube's base object and declared joins), at the moment the definition is
+ * registered, and refuses it with the same codes, naming the definition, the
+ * object and the declaration. A relationship hop one MEMBER walks is not asked
+ * here: it refuses that member's queries, not the cube's.
+ *
+ * Its tiering is the registration doors' own, the one the compile-time probes
+ * in `dataset-compiler.ts` already take: cannot answer, do not block. An object
+ * the provider answers no declaration for is not refused (registration can run
+ * before every object is registered: a configured cube is registered when the
+ * plugin's `init()` constructs the service), and a provider that THROWS is not
+ * an answer either. Neither leaves anything open: the query face still asks
+ * at every query, fail-closed.
  */
 
 import {
   apiExposureDenialReason,
   effectiveOperationsArray,
   resolveEffectiveApiMethods,
+  type ApiExposureDenialReason,
   type EnableLike,
 } from '@objectstack/spec/data';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
@@ -152,6 +174,42 @@ function objectApiMethodNotAllowedError(object: string, allowed: string[]): Erro
   return err;
 }
 
+/** What a registration refusal names as the refused definition. */
+export type RegisteredDefinitionKind = 'cube' | 'dataset';
+
+/**
+ * The registration face's refusal: the code and status the query face answers
+ * for the same declaration, with a message that locates it — the definition
+ * that was not registered, the object it reads, and the declaration that
+ * denies the operation.
+ */
+function unexposedDefinitionError(
+  kind: RegisteredDefinitionKind,
+  name: string,
+  object: string,
+  reason: ApiExposureDenialReason,
+  enable: EnableLike,
+): Error {
+  const allowed =
+    reason === 'method-not-allowed' ? effectiveOperationsArray(resolveEffectiveApiMethods(enable)) : undefined;
+  const declaration =
+    allowed === undefined
+      ? '`enable.apiEnabled: false`'
+      : `\`enable.apiMethods\`, which grants ${allowed.length > 0 ? allowed.map((op) => `'${op}'`).join(', ') : 'no operation'}`;
+  const code = allowed === undefined ? OBJECT_API_DISABLED_CODE : OBJECT_API_METHOD_NOT_ALLOWED_CODE;
+  const status = allowed === undefined ? 404 : 405;
+  const err = new Error(
+    `[Analytics] The ${kind} "${name}" was not registered: it reads the object "${object}", whose ${declaration} ` +
+      `denies the '${ANALYTICS_OPERATION}' operation an analytics query is judged as (${reason}), so every query ` +
+      `of it would be refused ${status} ${code}. Point the ${kind} at an object the API serves, or remove it.`,
+  ) as DoorRefusal;
+  err.code = code;
+  err.status = status;
+  err.object = object;
+  if (allowed !== undefined) err.allowed = allowed;
+  return err;
+}
+
 /** `403 PERMISSION_DENIED` — the declaration could not be read, so nothing runs. */
 function exposureUnresolvedError(object: string): Error {
   const err = new Error(
@@ -218,6 +276,38 @@ export function assertObjectsExposed(
     if (reason === null) continue;
     if (reason === 'api-disabled') throw objectApiDisabledError(object);
     throw objectApiMethodNotAllowedError(object, effectiveOperationsArray(resolveEffectiveApiMethods(enable!)));
+  }
+}
+
+/**
+ * The registration face (see the module doc): refuse to register the `kind`
+ * named `name` when an object in `objects` — its base object and declared
+ * joins — is one the spec's decision denies the aggregate operation. The first
+ * denied object, in the set's order, is the one named.
+ *
+ * Cannot answer, do not block: an object the provider answers no declaration
+ * for is not refused, and neither is one whose lookup throws. Registration
+ * records nothing in either case beyond what it recorded before this face
+ * existed, and the query face still judges the object at every query.
+ */
+export function assertDefinitionExposed(
+  kind: RegisteredDefinitionKind,
+  name: string,
+  objects: Iterable<string>,
+  provider: ObjectDeclarationProvider,
+): void {
+  for (const object of objects) {
+    let enable: EnableLike | null | undefined;
+    try {
+      enable = (provider(object) ?? undefined)?.enable as EnableLike | null | undefined;
+    } catch {
+      // No answer at registration time. The query face refuses fail-closed when
+      // the same lookup throws for a query, so nothing is served on this branch.
+      continue;
+    }
+    const reason = apiExposureDenialReason(enable, ANALYTICS_OPERATION);
+    if (reason === null) continue;
+    throw unexposedDefinitionError(kind, name, object, reason, enable!);
   }
 }
 

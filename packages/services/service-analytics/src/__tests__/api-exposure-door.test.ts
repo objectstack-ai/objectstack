@@ -109,7 +109,10 @@ const ROWS: Record<string, Array<Record<string, unknown>>> = {
   ],
 };
 
-/** Configured cubes — the authored cube door over each subject. */
+/**
+ * Configured cubes — the authored cube door over each subject, registered
+ * before the subjects are declared (see `beforeAll`).
+ */
 const CUBES = [
   {
     name: 'hidden_cube',
@@ -217,6 +220,28 @@ describe.each(STRATEGIES)('the analytics door honours the generic-exit declarati
     engine = new ObjectQL({ logger: quiet } as any);
     engine.registerDriver(driver, true);
     await engine.init();
+
+    // The plugin inits BEFORE the subjects are declared, on purpose: a
+    // configured cube over an object the API does not serve is refused at
+    // registration when the declaration is already known
+    // (`unexposed-definition-registration.test.ts`), so the configured-cube
+    // rows below can only reach the QUERY face through the window registration
+    // cannot judge — an object registered after the analytics plugin's init.
+    // That window is what they pin.
+    const security = grantEverything(engine);
+    const registered: Record<string, unknown> = {};
+    await new AnalyticsServicePlugin({
+      cubes: CUBES as any,
+      ...(capabilities ? { queryCapabilities: capabilities } : {}),
+    }).init({
+      getService: (name: string) => (name === 'data' ? engine : name === 'security' ? security : registered[name]),
+      registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+      replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+      hook: () => {},
+      logger: quiet,
+    } as never);
+    service = registered.analytics as AnalyticsService;
+
     for (const obj of [HIDDEN_OBJECT, NO_LIST_OBJECT, VAULT_OBJECT, LEDGER_OBJECT, OPEN_OBJECT]) {
       engine.registry.registerObject(obj as any);
     }
@@ -236,20 +261,6 @@ describe.each(STRATEGIES)('the analytics door honours the generic-exit declarati
       reads.set(object, readsOf(object) + 1);
       return (realAggregate as any)(object, ...rest);
     };
-
-    const security = grantEverything(engine);
-    const registered: Record<string, unknown> = {};
-    await new AnalyticsServicePlugin({
-      cubes: CUBES as any,
-      ...(capabilities ? { queryCapabilities: capabilities } : {}),
-    }).init({
-      getService: (name: string) => (name === 'data' ? engine : name === 'security' ? security : registered[name]),
-      registerService: (name: string, svc: unknown) => { registered[name] = svc; },
-      replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
-      hook: () => {},
-      logger: quiet,
-    } as never);
-    service = registered.analytics as AnalyticsService;
   });
 
   afterAll(async () => {
