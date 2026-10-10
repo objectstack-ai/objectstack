@@ -699,7 +699,8 @@ export const SysApprovalRequest = ObjectSchema.create({
   enable: {
     // [ADR-0103] Engine-owned: the approval engine owns the request lifecycle
     // (SYSTEM_CTX); users act via domain actions (Submit/Approve/Recall), never
-    // generic CRUD. Reads stay open.
+    // generic CRUD. Reads stay open, and serve each caller only the requests
+    // the approvals door would (#22559, `request-read-gate.ts`).
     apiMethods: ['get', 'list'],
   },
 });

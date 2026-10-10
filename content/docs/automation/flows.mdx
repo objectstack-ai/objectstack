@@ -858,6 +858,12 @@ a key it does not declare, such as `maxRetry` for `maxRetries`, is refused at
 `objectstack validate` with a did-you-mean, rather than dropped to a default
 that never retries.
 
+`errorVariable` defaults to `$error`, the engine's own variable, read as
+`{{ $error.message }}`. A name of your own is written without a `$` —
+`errorVariable: 'caught'`, read as `{{ caught.message }}` — because the `$`
+names belong to the engine: any other `$` name is refused at
+`objectstack validate`, and so is a `$`-named `outputVariable` on any node.
+
 `catch` is optional in the schema, and omitting it is the trap: with no `catch`
 the container **fails** when the `try` region fails, so the failure propagates
 exactly as if nothing had been wrapped (measured — the no-`catch` run and the

@@ -38,9 +38,10 @@ const ctxWith = (data: any): any => ({
 
 describe('#14955 — the throw arm refreshes `$error` like the returned-failure arm', () => {
     it('a thrown failure with no fault edge of its own names ITSELF on the run-wide `$error`', async () => {
-        // `tc` binds its caught error to `$caught`, deliberately NOT to `$error`,
+        // `tc` binds its caught error to `caught`, deliberately NOT to `$error`,
         // so the catch region reads the ENGINE's run-wide variable rather than
-        // `try_catch`'s own rebuilt binding.
+        // `try_catch`'s own rebuilt binding. (Not `$caught`: a `$` name other
+        // than `$error` is the engine's, and the contract refuses it — #22502.)
         const engine = new AutomationEngine(makeLogger());
         let seenError: any;
         let seenNodeScoped: any;
@@ -74,7 +75,7 @@ describe('#14955 — the throw arm refreshes `$error` like the returned-failure 
                 {
                     id: 'tc', type: 'try_catch', label: 'Guarded',
                     config: {
-                        errorVariable: '$caught',
+                        errorVariable: 'caught',
                         try: { nodes: [{ id: 'boom', type: 'store_down', label: 'Boom' }], edges: [] },
                         catch: { nodes: [{ id: 'look', type: 'probe', label: 'Look' }], edges: [] },
                     },

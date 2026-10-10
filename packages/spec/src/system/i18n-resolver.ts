@@ -1884,8 +1884,14 @@ function sameAuthoredText(a: string | Record<string, string>, b: unknown): boole
  *  2. the header's AUTHORED title, left as written: a template such as
  *     `'{name}'`, a plain string, or an inline locale map;
  *  3. the bundle's `pages.<name>.label`, in two cases only: the header authors
- *     no title, or its title restates the page's own authored `label`. In the
- *     second case the label's translation IS a translation of that text, and
+ *     no title AND does not derive its heading from a record
+ *     ({@link headerDerivesFromRecord}), or its title restates the page's own
+ *     authored `label`. In the first case's exception, an absent title IS the
+ *     authored value: `PageHeaderProps.title` makes "omitted" the sanctioned
+ *     spelling for "the renderer derives the heading from the record", so the
+ *     label filling it would put the page's static name in place of the
+ *     record's, and the title stays absent (#22536). In the second case the
+ *     label's translation IS a translation of that text, and
  *     `os i18n extract` offers no `title` key for such a header (it offers the
  *     label alone), so reading the label here is what translates it.
  *
@@ -1896,12 +1902,51 @@ function resolvePageHeaderTitle(
   bundleLabel: string | undefined,
   authoredTitle: unknown,
   authoredPageLabel: unknown,
+  derivesFromRecord: boolean,
 ): string | undefined {
   if (bundleTitle !== undefined) return bundleTitle;
   if (bundleLabel === undefined) return undefined;
   const own = authoredLabelText(authoredTitle);
-  if (own === undefined || sameAuthoredText(own, authoredPageLabel)) return bundleLabel;
+  if (own === undefined) return derivesFromRecord ? undefined : bundleLabel;
+  if (sameAuthoredText(own, authoredPageLabel)) return bundleLabel;
   return undefined;
+}
+
+/**
+ * Does this root-level `page:header` derive its heading from a record? The
+ * test step 3 of {@link resolvePageHeaderTitle} reads (#22536), and all three
+ * conditions must hold:
+ *
+ *  - the page's `type` is `'record'`, read as SERVED. A document with no
+ *    `type` is not a record page to the hosts below, so it is not one here
+ *    either, although `PageSchema` defaults an absent `type` to `'record'`
+ *    at parse;
+ *  - the page's `object` is a non-empty string;
+ *  - the header does not opt out of the record chrome
+ *    (`properties.recordChrome !== false`).
+ *
+ * The renderer's own test is runtime, not a property of this document.
+ * objectui's `PageHeaderRenderer` draws the record-derived heading when a
+ * record context is mounted (`ctx.data` and `ctx.objectSchema`) and the
+ * header keeps its record chrome. The first two conditions are when the
+ * record hosts mount that context: the record route mounts it for the page
+ * `usePageAssignment` picks (`type === 'record'` and `object` naming the
+ * route's object), and the Studio preview mounts it for a `type: 'record'`
+ * page with an `object`. The third is the renderer's own switch, which it
+ * reads off the header node. Only `properties.recordChrome` is read:
+ * `PageComponentSchema` is strict and refuses a bare top-level
+ * `recordChrome` on a component, so a valid document never carries that
+ * spelling.
+ *
+ * One host is not visible from here, and that gap is accepted. A
+ * `type: 'modal'` action renders the page it targets inside the record
+ * context of the page it was invoked from, whatever that page's `type` is.
+ * Such a page keeps the label fill.
+ */
+function headerDerivesFromRecord(page: PageLike, header: PageComponentLike): boolean {
+  return page.type === 'record'
+    && typeof page.object === 'string' && page.object.length > 0
+    && header.properties?.recordChrome !== false;
 }
 
 /**
@@ -2265,7 +2310,10 @@ export function walkAddressedPageComponents(
  * authors no title or its title restates the page's own `label`, so a
  * translator need not repeat a string identical to the page's nav label
  * ({@link resolvePageHeaderTitle}). A label never replaces a header title
- * that says something else, a dynamic `'{name}'` above all.
+ * that says something else, a dynamic `'{name}'` above all. Nor does it fill
+ * the absent title of a header that derives its heading from a record
+ * ({@link headerDerivesFromRecord}): on a `type: 'record'` page bound to an
+ * object, "no title" means "the record's own name".
  *
  * **One component, one address.** A ROOT-LEVEL `page:header` — an entry of a
  * region's `components[]`, or of a `slots.<slot>` on a `kind: 'slotted'` page
@@ -2421,6 +2469,7 @@ export function translatePage<T extends PageLike>(
     // `nested: false`, so the fallback order cannot differ between them.
     const headerTitle = resolvePageHeaderTitle(
       bundleHeaderTitle, bundleLabel, next.properties?.title, doc.label,
+      headerDerivesFromRecord(doc, next),
     );
     if (headerTitle === undefined && headerSubtitle === undefined) return next;
     return {

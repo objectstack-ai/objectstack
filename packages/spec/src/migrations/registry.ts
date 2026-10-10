@@ -5649,6 +5649,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-approval-node-config-contract-refused`.',
   },
   {
+    id: 'flow-binding-variable-dollar-name-refused',
+    order: 92,
+    text:
+      'The binding keys follow the same rule, so a flow cannot bind a `$` name it is then refused to read: '
+      + 'a node\'s `outputVariable` (`get_record`, `create_record`, `map`, `script`, `subflow`) refuses a name '
+      + 'that starts with `$`, and a `try_catch` `errorVariable` refuses every one but the engine\'s own '
+      + '`$error`, its default. The remedy is the same name without the `$`, read as `{{ name }}`. Each key '
+      + 'states the rule as a `pattern`, so the published JSON Schema refuses what the parse refuses, and the '
+      + 'node contract, `registerFlow`, `objectstack validate` and the run itself refuse such a name at the '
+      + 'key. No D2 conversion exists: the bare name may already be bound in the flow, and the reads of the '
+      + 'old name sit in every dialect a flow string speaks, so the rename is the author\'s. Its D3 record is '
+      + 'the semantic entry `flow-binding-variable-dollar-name-refused`.',
+  },
+  {
     id: 'flow-builtin-node-config-undeclared-keys-refused',
     order: 89,
     text:
@@ -13541,6 +13555,54 @@ const step18: MigrationStep = {
         + 'row that exists only in `sys_metadata`. An approval node the contract accepts parses and '
         + 'registers byte-identically to before.',
     },
+    // #22502 — the binding half of the rule the text-slot judge reads
+    // (`flow-text-slot-unbound-dollar-root-refused`): the dollar names are the flow
+    // engine's, so a node's outputVariable and a try_catch errorVariable refuse one
+    // (the engine's own $error excepted, as errorVariable's default). It narrows a
+    // flow's accept set; no key is removed, so there is no tombstone and no
+    // RETIRED_KEYS_BY_MAJOR row. Semantic-only — no D2 conversion: the bare name may
+    // already be bound in the flow, and the reads of the old name sit in every
+    // dialect a flow string speaks.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-binding-variable-dollar-name-refused',
+      surface:
+        'flows[].nodes[].config.outputVariable of a get_record, create_record, map, script or subflow node, and '
+        + 'flows[].nodes[].config.errorVariable of a try_catch node — a variable name that starts with a dollar sign '
+        + 'such as $caught, other than the default $error on errorVariable. Reachable wherever a flow is authored or '
+        + 'stored: defineStack flows sources, defineFlow, an exported stack passed to objectstack validate or '
+        + 'objectstack compile, a flow saved from the Studio flow designer, and a flow row already in sys_metadata',
+      replacement:
+        'the same name without the dollar sign, read as a hole over that name: errorVariable: \'caught\' read as '
+        + '{{ caught.message }}, outputVariable: \'lead\' read as {{ lead.name }}. A try_catch may instead drop '
+        + 'errorVariable and read the engine\'s default, {{ $error.message }}. Rename every read of the old name '
+        + 'with it — a text-slot hole, a CEL expression, a single-brace token in a value position',
+      reason:
+        'The dollar-named variables are the flow engine\'s own: it binds $record, $runId, $flowName, $flowLabel and '
+        + '$error, a flat-graph loop binds $loopItems and $loopIndex, and a resume signal may not write any dollar '
+        + 'name. A flow text slot refuses a hole whose root is a dollar name the engine does not bind, so a flow '
+        + 'that bound $caught as its errorVariable could not read {{ $caught.message }}: the refusal told the '
+        + 'author to drop the dollar sign, while the binding key itself took any string. One contract had two '
+        + 'answers to whether an author may own a dollar name. The binding keys now give the text slots\' answer: '
+        + 'each key states the rule as a JSON Schema pattern, so the published schema refuses what the parse '
+        + 'refuses, and the node contract, registerFlow, objectstack validate and the run itself refuse such a '
+        + 'name at the key, naming the same name without the dollar sign. A binding over an engine name '
+        + '(outputVariable: \'$record\') would also have overwritten the engine\'s value for the rest of the run. '
+        + 'No D2 conversion exists: the bare name may already be bound in the flow, and the reads of the old '
+        + 'name sit in every dialect a flow string speaks, so the rename is the author\'s. Where such a node '
+        + 'already sits the whole flow is refused: registered from the metadata registry or sys_metadata at boot '
+        + 'it is skipped with a warn naming it, its trigger not armed, while the flows beside it register; a '
+        + 'stack source throws StackSchemaInvalidError for the whole stack. ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run objectstack validate over every stack authored in config files, and boot every deployed stack. '
+        + 'Each refusal names the node and the key — nodes.N.config.outputVariable or nodes.N.config.errorVariable, '
+        + 'or the region path nodes.N.config.try.nodes.M.config.outputVariable — and the name to write. Rename the '
+        + 'binding and every read of it, then (1) objectstack validate is clean, (2) each flow registers at boot '
+        + 'with no failed to register flow warn for it, and (3) the flow paths that read the variable — a '
+        + 'notification, a screen, a later node — carry its value, with no blank fragment.',
+    },
     // #21982 — the D3 entry for the build doors refusing an UNDECLARED KEY on the
     // builtin node types whose undeclared keys only `registerFlow` judged until
     // now: `get_record`, `create_record`, `update_record`, `delete_record`,
@@ -15279,13 +15341,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — names '
+        + 'against, `.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 8281 tracked files (0 across the 8234 at f0268ad78, the 7754 at a58626c88, the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 8351 tracked files (0 across the 8281 at 47b1f0bb7, the 8234 at f0268ad78, the 7754 at a58626c88, the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8, to 17468 and 7246 at a58626c88, to 17956 and 7522 at f0268ad78 and to 17980 and 7523 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8, to 17468 and 7246 at a58626c88, to 17956 and 7522 at f0268ad78, to 17980 and 7523 at 47b1f0bb7 and to 18047 and 7545 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -15490,10 +15552,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a`, re-read from this tree — '
+        + '`.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '8281 tracked files, against lit controls timeout 1674, RuntimeConfig 337 and resourceLimits '
-        + '2 on the same corpus (0 across 8234, and 1658 / 337 / 2, at f0268ad78; 0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '8351 tracked files, against lit controls timeout 1694, RuntimeConfig 337 and resourceLimits '
+        + '2 on the same corpus (0 across 8281, and 1674 / 337 / 2, at 47b1f0bb7; 0 across 8234, and 1658 / 337 / 2, at f0268ad78; 0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -15729,10 +15791,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — spells '
+        + 'objectui checkout — `.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 8281 tracked files, against lit controls `useState` 2630 and `timeout` 1674 on '
-        + 'the same corpus (all four 0 across 8234, against 2622 and 1658, at f0268ad78, 0 across 7754, against 2491 and 1431, at a58626c88, 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 8351 tracked files, against lit controls `useState` 2630 and `timeout` 1694 on '
+        + 'the same corpus (all four 0 across 8281, against 2630 and 1674, at 47b1f0bb7, 0 across 8234, against 2622 and 1658, at f0268ad78, 0 across 7754, against 2491 and 1431, at a58626c88, 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -20355,10 +20417,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 8281 tracked '
-        + 'files at that sha, against lit controls window 4449, timeout 1674, period 249, '
-        + 'interval 213 and metrics 455 on that same corpus and sha (0 across 8234, against 4430 / '
+        + '`.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 8351 tracked '
+        + 'files at that sha, against lit controls window 4470, timeout 1694, period 249, '
+        + 'interval 213 and metrics 456 on that same corpus and sha (0 across 8281, against 4449 / '
+        + '1674 / 249 / 213 / 455, at 47b1f0bb7, 0 across 8234, against 4430 / '
         + '1658 / 249 / 213 / 404, at f0268ad78, 0 across 7754, against 4255 / '
         + '1431 / 247 / 200 / 401, at a58626c88, 0 across 7650, against 4194 / '
         + '1360 / 238 / 195 / 401, at 0abd4f9f8, 0 across 7632, against 4193 / '
@@ -20581,12 +20644,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8281 files '
+        + 'pinned objectui checkout — `.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8351 files '
         + 'tracked at that sha (the 517 Span and 57 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 17980 hits for the bare token objectstack, '
-        + 'and 7523 for the package specifier @objectstack/spec (at f0268ad78: 0 across 8234, Span 517, '
+        + 'two lit controls on that same corpus and sha: 18047 hits for the bare token objectstack, '
+        + 'and 7545 for the package specifier @objectstack/spec (at 47b1f0bb7: 0 across 8281, Span 517, '
+        + '17980 and 7523; at f0268ad78: 0 across 8234, Span 517, '
         + '17956 and 7522; at a58626c88: 0 across 7754, Span 509, '
         + '17468 and 7246; at 0abd4f9f8: 0 across 7650, Span 508, '
         + '17390 and 7209; at 9dfaca654: 0 across 7632, Span 508, '
@@ -20703,9 +20767,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — spells it 0 '
-        + 'times across 8281 tracked files, against lit controls `TTL` 184 and `tenant` 1338 on the '
-        + 'same corpus (0 across 8234, against 184 and 1338, at f0268ad78; 0 across 7754, against 184 and 1319, at a58626c88; 0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6` — spells it 0 '
+        + 'times across 8351 tracked files, against lit controls `TTL` 184 and `tenant` 1340 on the '
+        + 'same corpus (0 across 8281, against 184 and 1338, at 47b1f0bb7; 0 across 8234, against 184 and 1338, at f0268ad78; 0 across 7754, against 184 and 1319, at a58626c88; 0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
