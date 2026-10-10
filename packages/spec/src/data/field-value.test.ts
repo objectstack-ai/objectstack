@@ -31,6 +31,7 @@ import {
   referenceTargetOf,
   referenceCarrierOf,
   LocationValueSchema,
+  FileRefusedValueSchema,
 } from './field-value.zod';
 import { findClosestMatches } from '../shared/suggestions.zod';
 
@@ -357,6 +358,25 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     // committed — exactly as an unexpanded lookup id stays valid.
     ok({ type: 'file' }, 'file_01HXYZ', 'expanded');
     bad({ type: 'file' }, 42, 'expanded');
+  });
+
+  it('D3 wave 2: a reader refused the file metadata reads the REFUSED form — never the bare id an absent file reads as', () => {
+    // The third expanded member: the id the record holds plus the marker, and
+    // nothing that was not read.
+    for (const type of ['file', 'image', 'avatar', 'video', 'audio']) {
+      ok({ type }, { id: 'file_01HXYZ', metadataRefused: true }, 'expanded');
+    }
+    ok({ type: 'file', multiple: true }, [{ id: 'file_01HXYZ', metadataRefused: true }, 'file_02ABC'], 'expanded');
+    // Closed: the marker is a literal `true`, the id is the opaque token, and a
+    // refused value carries no metadata it was refused.
+    bad({ type: 'file' }, { id: 'file_01HXYZ', metadataRefused: false }, 'expanded');
+    bad({ type: 'file' }, { id: 'https://cdn/f.pdf', metadataRefused: true }, 'expanded');
+    bad({ type: 'file' }, { metadataRefused: true }, 'expanded');
+    const withName = FileRefusedValueSchema.safeParse({ id: 'file_01HXYZ', metadataRefused: true, name: 'x.pdf' });
+    expect(withName.success).toBe(false);
+    expect(withName.error?.issues.map((i) => i.code)).toContain('unrecognized_keys');
+    // Read-only: the STORED form stays the bare id alone.
+    bad({ type: 'file' }, { id: 'file_01HXYZ', metadataRefused: true });
   });
 
   it('D3 wave 1: the media object form requires a url — a url-less fragment is no longer waved through', () => {

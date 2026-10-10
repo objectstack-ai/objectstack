@@ -27,6 +27,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import type { FileRefusedValue } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -709,6 +710,23 @@ function writeFailureLogMeta(
   return logged instanceof Error
     ? { ...meta, error: { message: logged.message, stack: logged.stack } }
     : { ...(logged as Record<string, unknown> | undefined), ...meta };
+}
+
+/**
+ * Is this failure the security layer refusing the CALLER's read — the
+ * ADR-0112 `PERMISSION_DENIED` code — rather than the read failing?
+ *
+ * Asked by `resolveFileReferences`, whose `sys_file` sub-read runs as the
+ * caller: a refusal there is a verdict about this reader, and is served in the
+ * value (`FileRefusedValueSchema`), while every other failure is an outage that
+ * fails open with a `warn`. Matched by the declared CODE alone — the closed
+ * vocabulary every refusal class carries (`PermissionDeniedError` in
+ * plugin-security, which this package cannot import) — ⛔ never by message
+ * prose, and never by a driver's own ACL code (`42501` is the deployment's
+ * database refusing the platform, not the platform refusing a reader).
+ */
+function isReadRefusal(error: unknown): boolean {
+  return (error as { code?: unknown } | null | undefined)?.code === 'PERMISSION_DENIED';
 }
 
 /**
@@ -11921,6 +11939,10 @@ export class ObjectQL implements IObjectQLEngine {
    * NOT match a committed `sys_file` row (e.g. an external url) pass through
    * unchanged, so a field may hold either form during the pre-v17 window.
    *
+   * REFUSED IS NOT ABSENT: when the caller's own `sys_file` read is refused,
+   * each id becomes `{ id, metadataRefused: true }` (`FileRefusedValueSchema`)
+   * rather than staying a bare id — see the `catch` below.
+   *
    * Batched: at most one `sys_file` `id $in […]` read per call (no N+1); and
    * zero reads when no field holds a string value (the blob-only case), so the
    * step is free for objects that have not adopted references.
@@ -11992,16 +12014,54 @@ export class ObjectQL implements IObjectQLEngine {
       // predicate (`@objectstack/metadata/errors`, #4825) — never a hand-rolled
       // `code === '42P01'` copy — the same call `seedAutonumber` makes above.
       //
-      // Everything else (connection drop, timeout, permission denial, query
-      // error) means the rows may well exist and simply were not seen. The
-      // consumer then receives a bare id where `{ id, name, size, mimeType,
-      // url }` was due, and UI/export renders it as "this record has no
-      // attachment": a fault wearing the appearance of legitimate absent data,
-      // indistinguishable from a record that truly holds no file (ADR-0110 D3).
-      // One `warn`, not `error`, per AGENTS "Degradation log levels" — the loss
-      // is FUNCTIONAL and scoped to this response (the answer is visibly
-      // smaller, and the next read repairs it); nothing on this path claims to
-      // have persisted anything.
+      // Refused: the security layer refused THIS CALLER's read of `sys_file`
+      // (ADR-0112 `PERMISSION_DENIED` — measured to arrive here as a throw,
+      // never as a short result: the object-level CRUD gate refuses the whole
+      // sub-read). The rows exist; this reader may not see their metadata.
+      // Leaving the bare id made the refusal read exactly like an id with no
+      // committed row — "no file" to every consumer — so each id is marked
+      // `{ id, metadataRefused: true }` instead (`FileRefusedValueSchema`):
+      // the refusal reaches the reader as a refusal, in the value itself.
+      // Still fail-open — the record read that asked succeeds — and still no
+      // `name`/`size`/`mimeType`/`url`, because none was read. The download
+      // door judges bytes by the record that owns the file, on its own.
+      //
+      // `debug`, not `warn`: the failure is handed to the CALLER (AGENTS
+      // "Degradation log levels", the third legal answer), and a `warn` here
+      // fired once per read for every reader without `sys_file` read, with a
+      // storage remedy that cannot fix a permission. ⛔ Only the declared
+      // refusal code takes this arm: a database-level ACL fault (`42501`) is
+      // the deployment's outage, not this caller's verdict, and stays below.
+      if (isReadRefusal(error)) {
+        this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
+          object: objectName,
+          fields: fileFields,
+          refusedIds: uniqueIds.length,
+        });
+        const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
+        for (const record of records) {
+          for (const fieldName of fileFields) {
+            const val = record[fieldName];
+            if (val == null) continue;
+            if (Array.isArray(val)) {
+              record[fieldName] = val.map((v: unknown) => (isFileIdToken(v) ? refused(v) : v));
+            } else if (isFileIdToken(val)) {
+              record[fieldName] = refused(val);
+            }
+          }
+        }
+        return records;
+      }
+      // Everything else (connection drop, timeout, a database-level permission
+      // fault, query error) means the rows may well exist and simply were not
+      // seen. The consumer then receives a bare id where `{ id, name, size,
+      // mimeType, url }` was due, and UI/export renders it as "this record has
+      // no attachment": a fault wearing the appearance of legitimate absent
+      // data, indistinguishable from a record that truly holds no file
+      // (ADR-0110 D3). One `warn`, not `error`, per AGENTS "Degradation log
+      // levels" — the loss is FUNCTIONAL and scoped to this response (the
+      // answer is visibly smaller, and the next read repairs it); nothing on
+      // this path claims to have persisted anything.
       if (!isMissingTableError(error, 'sys_file')) {
         this.logger.warn(
           'sys_file lookup failed; file fields keep their raw ids and will render as "no file" for this read — '

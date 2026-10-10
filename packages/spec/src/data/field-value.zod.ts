@@ -542,6 +542,45 @@ export const FileReferenceIdValueSchema = lazySchema(() =>
 export type FileReferenceIdValue = z.input<typeof FileReferenceIdValueSchema>;
 
 /**
+ * Media/attachment value whose metadata read was REFUSED to the reader — the
+ * third `expanded` read form (ADR-0104 D3 wave 2), beside the resolved
+ * {@link FileValueSchema} and the still-unresolved bare id.
+ *
+ * The engine expands a stored `sys_file` id by reading `sys_file` AS THE
+ * CALLER. A reader who may read the record but not `sys_file` used to receive
+ * the bare id back — the same value an id with no committed file row, or a
+ * storage outage, produces — so a refused file and an absent one were one
+ * answer on the wire. This shape is the refusal said in-band: the id the
+ * record holds, and `metadataRefused: true`. Nothing else is served, because
+ * nothing else was read: no `name`, `size` or `mimeType`, and no `url` — the
+ * download door judges its own access (by the record that owns the file, not
+ * by `sys_file` read), so a consumer derives the stable `/files/:fileId`
+ * endpoint from the id exactly as it does for a bare id.
+ *
+ * Read-only by construction: the STORED form is
+ * {@link FileReferenceIdValueSchema} alone, so this object is never a value a
+ * record write accepts. Closed, so a consumer can tell it from a resolved
+ * file value by shape — it carries no `url`, which {@link FileValueSchema}
+ * requires.
+ */
+export const FileRefusedValueSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this refused file value',
+    // Customer-facing text: no issue ids (the anchors are in the JSDoc above).
+    history: 'A refused file value is served by the platform and never written: it carries the '
+      + 'file id the record holds and the refusal marker, nothing else.',
+  },
+  {
+    id: FileReferenceIdValueSchema.describe('The sys_file id the record holds'),
+    metadataRefused: z.literal(true).describe(
+      'The reader was refused the file\'s metadata (no read on sys_file): name, size and type are '
+      + 'withheld. Distinct from an empty field, which holds no file at all.',
+    ),
+  },
+));
+export type FileRefusedValue = z.input<typeof FileRefusedValueSchema>;
+
+/**
  * Media/attachment value in either form — the TRANSITIONAL union that was the
  * stored contract before wave 2.
  *
@@ -644,9 +683,11 @@ export function valueSchemaFor(def: ValueShapeFieldDef, form: ValueForm = 'store
       // Expanded form: the read path replaces a stored id in place with the
       // resolved `{ id, name, size, mimeType, url }` — same polymorphism the
       // reference types have, and for the same reason, so an unresolved id
-      // (storage service absent, file not committed) stays valid.
+      // (storage service absent, file not committed) stays valid. A reader
+      // refused the file's metadata gets `{ id, metadataRefused: true }`
+      // instead of the bare id, so the refusal is not read as an absent file.
       return form === 'expanded'
-        ? z.union([FileReferenceIdValueSchema, FileValueSchema])
+        ? z.union([FileReferenceIdValueSchema, FileValueSchema, FileRefusedValueSchema])
         : FileReferenceIdValueSchema;
     }
     if (t === 'location') return LocationValueSchema;
