@@ -97,6 +97,9 @@ import {
   ListViewExportFormatSchema,
   ListViewExportOptionsSchema,
 } from './list-view-export-options';
+// [#22611] The audience gate's ONE describe, shared with `DashboardSchema`
+// and declared outside the `ui` barrel.
+import { AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION } from './audience-required-permissions';
 
 export { HttpMethodSubsetSchema, HttpRequestSchema };
 
@@ -2882,6 +2885,20 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** View Metadata (Airtable-style view management) */
   description: I18nLabelSchema.optional().describe('View description for documentation/tooltips'),
   sharing: ViewSharingSchema.optional().describe('View sharing and access configuration'),
+
+  /**
+   * [#22611] The audience gate — the platform's one capability key, with the
+   * app / navigation-item / action shape and meaning: a list of capabilities,
+   * all required (ruling 6095014058, letter A). `sharing` above is ownership
+   * and locking, NOT audience, and stays as it is. One describe with
+   * `DashboardSchema.requiredPermissions` — see
+   * {@link AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION} for its clauses, including
+   * why it says the gate is not enforced yet. Declared on the SHAPE, so it
+   * reaches every list-view door built from it: `ListViewSchema`,
+   * `ObjectListViewSchema` (a container's `list` / `listViews`, an object's
+   * `listViews`), the view item's `config` and the flattened overlay arm.
+   */
+  requiredPermissions: z.array(z.string()).optional().describe(AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION),
 
   /** Row Height / Density (Airtable-style) */
   rowHeight: RowHeightSchema.optional().describe('Row height / density setting'),
