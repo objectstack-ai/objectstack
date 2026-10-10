@@ -245,12 +245,12 @@ describe('[#22576] the token is the only credential — the membership gate skip
                 getRegisteredTypes: vi.fn().mockReturnValue([]),
             },
         };
+        let signedIn = true;
         const auth = {
             getApi: async () => ({
-                getSession: async () => ({
-                    user: { id: USER },
-                    session: { userId: USER, activeOrganizationId: 'org-tenant' },
-                }),
+                getSession: async () => (signedIn
+                    ? { user: { id: USER }, session: { userId: USER, activeOrganizationId: 'org-tenant' } }
+                    : null),
             }),
         };
         const tenant = kernelWith({ objectql, auth, approvals: { handleActionPage: member.handleActionPage } });
@@ -265,7 +265,7 @@ describe('[#22576] the token is the only credential — the membership gate skip
             enforceProjectMembership: true,
         });
         const membershipReads = () => find.mock.calls.filter((call) => call[0] === 'sys_environment_member').length;
-        return { dispatcher, member, membershipReads };
+        return { dispatcher, member, membershipReads, signOut: () => { signedIn = false; } };
     }
 
     it('a signed-in non-member reaches the member on GET and POST, and no membership read is made', async () => {
@@ -277,6 +277,15 @@ describe('[#22576] the token is the only credential — the membership gate skip
         expect(viaGet.response, JSON.stringify(viaGet.response?.body)).toBeUndefined();
         expect(viaPost.response, JSON.stringify(viaPost.response?.body)).toBeUndefined();
         expect(member.tokens).toEqual(['tok-1', 'tok-2']);
+        expect(membershipReads()).toBe(0);
+    });
+
+    it('…which is what an anonymous caller holding the same link already got — the gate decides nothing for either', async () => {
+        const { dispatcher, member, membershipReads, signOut } = makeTenantHost();
+        signOut();
+        const result = await dispatcher.dispatch('GET', ACT, undefined, {}, ctx(get('tok-anon')));
+        expect(result.response, JSON.stringify(result.response?.body)).toBeUndefined();
+        expect(member.tokens).toEqual(['tok-anon']);
         expect(membershipReads()).toBe(0);
     });
 

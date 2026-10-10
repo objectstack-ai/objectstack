@@ -43,7 +43,7 @@ import { createShareLinksDomain, handleShareLinksRequest } from './domains/share
 import { createPackagesDomain, handlePackagesRequest } from './domains/packages.js';
 import { createAutomationDomain, handleAutomationRequest } from './domains/automation.js';
 import { createAuthDomain, handleAuthRequest } from './domains/auth.js';
-import { createApprovalsActDomain } from './domains/approvals.js';
+import { createApprovalsActDomain, APPROVALS_ACT_ROUTE } from './domains/approvals.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
 import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
@@ -230,6 +230,18 @@ export interface HttpDispatcherOptions {
      * called on every scoped request so idle projects are evicted after TTL.
      */
     scopeManager?: EnvironmentScopeManager;
+}
+
+/**
+ * Is `path` the ADR-0043 action page route — `/approvals/act` exactly,
+ * optionally under one `/environments/:id` scope — and nothing under or beside
+ * it? The membership gate's skip for the one route whose only credential is its
+ * token (#22576). Exactly as wide as the route's own claim (`match: 'exact'`),
+ * which is also why there is no `?` arm: a path carrying its query string is
+ * not claimed by that route either.
+ */
+function isApprovalsActPath(path: string): boolean {
+    return path.replace(/^\/environments\/[^/]+(?=\/)/, '') === APPROVALS_ACT_ROUTE;
 }
 
 /**
@@ -1416,6 +1428,24 @@ export class HttpDispatcher {
         // so never gate them on project membership (a signed-in non-member
         // opening a public link must not be 403'd before the token handler runs).
         if (/(^|\/)share-links\/[^/]+\/(resolve|messages)$/.test(path)) return null;
+
+        // The ADR-0043 approval action page — the token IS the authorisation
+        // as well (#22576; ruling A on #22438, "token-only, aligned with
+        // self-hosted"). Measured before this line existed: through
+        // `dispatch()` on a multi-tenant host, a SIGNED-IN caller who is not a
+        // member of the resolved environment was refused here
+        // (`403 PROJECT_MEMBERSHIP_REQUIRED`) before the `/approvals/act`
+        // domain could read the token, while an anonymous caller holding the
+        // same link reached it — and the self-hosted raw-app mount has no such
+        // gate at all. So being signed in made a live link fail.
+        //
+        // ⛔ EXACTLY the act route: `/approvals/act`, or its environment-scoped
+        // spelling (this gate runs BEFORE the scoped-URL strip, and the domain
+        // serves both). `/approvals/act/x`, `/approvals/actx`, `/approvals` and
+        // every `/approvals/requests/…` route stay checked — the same exact
+        // route the ADR-0069 allow-list admits in `packages/core`, and nothing
+        // wider. Pinned in `domains/approvals-act.test.ts`.
+        if (isApprovalsActPath(path)) return null;
 
         const environmentId = context.environmentId;
         if (!environmentId) return null; // Unscoped legacy routes fall through.
