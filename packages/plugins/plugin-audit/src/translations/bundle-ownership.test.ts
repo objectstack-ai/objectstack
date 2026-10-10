@@ -20,6 +20,7 @@ const OWNED_OBJECTS = new Set([
   'sys_audit_log',
   'sys_activity',
   'sys_comment',
+  'sys_comment_reaction',
 ]);
 
 describe('objects translation bundle ownership (ADR-0029 D8)', () => {
