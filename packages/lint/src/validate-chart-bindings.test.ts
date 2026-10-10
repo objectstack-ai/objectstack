@@ -1096,8 +1096,7 @@ describe('[#22161] one-line verdicts — chart-measure-unknown, chart-axis-not-s
     });
     expect(series!.message).toBe(
       '"est_hours" is a declared measure of "task_metrics" outside this chart\'s selected values ' +
-        '(task_count): this display-name override pairs only with the series the chart derives, so it ' +
-        'lands on nothing',
+        '(task_count): this display-name override pairs only with `chart.yAxis`, so it lands on nothing',
     );
   });
 

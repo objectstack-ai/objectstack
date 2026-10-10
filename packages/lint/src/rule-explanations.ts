@@ -2047,8 +2047,8 @@ const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
       'of any other type on the node is a non-group route, so a mixed slate is not judged.',
     'The `manager` arm is the same dead end with a cause the product cannot repair. ' +
       '`{ type: \'manager\' }` resolves from `sys_user.manager_id` of the user the record names ' +
-      '(the field `value` names, else the owner), and returns nobody where that column is unset. A ' +
-      'static check cannot read that column, so this does not assert the slate IS empty; it reports ' +
+      '(the field `value` names, else the owner), and returns nobody where that column is unset; a ' +
+      'static check cannot read that column, so this does not assert the slate IS empty — it reports ' +
       'that nothing else on the node can approve if it is. The arm fires only when the whole slate ' +
       'is `manager` rungs, so no node draws both arms, and a slate mixing groups and `manager` is ' +
       'silent.',

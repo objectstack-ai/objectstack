@@ -356,8 +356,7 @@ const SHAPE_HINT: Record<Exclude<MeasurePosition, 'query'>, string> = {
  */
 const UNSELECTED_CONSEQUENCE: Record<MeasurePosition, string> = {
   query: 'the query does not return it, so the series plots nothing',
-  'report-series':
-    'this display-name override pairs only with the series the chart derives, so it lands on nothing',
+  'report-series': 'this display-name override pairs only with `chart.yAxis`, so it lands on nothing',
   'page-series': 'the series are derived from `values`, so this entry lands on nothing',
   'page-axis': 'the plotted columns come from `values`, so the axis entry re-points nothing',
 };

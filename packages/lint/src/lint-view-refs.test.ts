@@ -442,14 +442,14 @@ describe('[#22161] one-line verdicts — view-ref-nav-view-missing, view-key-col
       navStack({ id: 'nav_schedule', type: 'object', objectName: 'duly_task', viewName: 'A4_no_such_view', label: 'S' }),
     );
     expect(miss!.message).toBe(
-      "Navigation entry opens view 'A4_no_such_view' on object 'duly_task', which declares no such list " +
-        'view, so it opens the default view under its own label. List views: board, default, schedule',
+      "Navigation entry opens view 'A4_no_such_view' on object 'duly_task', which has no such list view, " +
+        'so it silently opens the default view. List views: board, default, schedule',
     );
     const [form] = navFindings(navStack({ id: 'n', type: 'object', objectName: 'duly_task', viewName: 'edit', label: 'E' }));
     expect(form!.message).toBe(
-      "Navigation entry opens view 'edit' on object 'duly_task', which declares no such list view (the " +
-        'name resolves to a FORM view), so it opens the default view under its own label. List views: ' +
-        'board, default, schedule',
+      "Navigation entry opens view 'edit' on object 'duly_task', which has no such list view (the name " +
+        'resolves to a FORM view), so it silently opens the default view. List views: board, default, ' +
+        'schedule',
     );
     const [collision] = lintViewRefs({
       views: [{ name: 'task', list: listView('task'), formViews: { default: formView('task') } }],

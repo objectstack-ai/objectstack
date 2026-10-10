@@ -340,10 +340,9 @@ export function lintViewRefs(stack: AnyRec): ViewRefFinding[] {
       // [#22161] One verdict; how the name is matched and why the fallback is
       // silent are `os explain` text. The list views stay: they are the fix.
       message:
-        `Navigation entry opens view '${viewName}' on object '${objectName}', which declares no such ` +
-        `list view` +
+        `Navigation entry opens view '${viewName}' on object '${objectName}', which has no such list view` +
         (isFormView ? ` (the name resolves to a FORM view)` : '') +
-        `, so it opens the default view under its own label. List views: ${viewRoster(available)}`,
+        `, so it silently opens the default view. List views: ${viewRoster(available)}`,
       hint:
         `Correct the name, declare '${viewName}' in the object's \`listViews\`, or drop \`viewName\` ` +
         `to open the default view.` +
