@@ -89,6 +89,7 @@ const MEMBER_GRANTS: Record<string, unknown[]> = {
     sys_member: [],
     sys_user_position: [],
     sys_position: [],
+    sys_metadata_activation: [],
     sys_position_permission_set: [],
     sys_user_permission_set: [{ id: 'ups_member', user_id: MEMBER_ID, permission_set_id: 'ps_member', permission_set: 'organization_admin', organization_id: null }],
     sys_permission_set: [{ id: 'ps_member', name: 'organization_admin', system_permissions: ['setup.access', 'manage_org_users'] }],

@@ -147,6 +147,7 @@ function permissionStore(opts: { syncSchemas: () => Promise<void> }) {
         ],
         sys_user_position: [],
         sys_position: [],
+        sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: [
             { id: 'ups_member', user_id: 'u_member', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: null },

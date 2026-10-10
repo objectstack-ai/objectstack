@@ -59,6 +59,7 @@ export function installerGrantRows(userId: string = INSTALLER_USER_ID): Record<s
         sys_member: [],
         sys_user_position: [],
         sys_position: [],
+        sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: [
             { id: 'ups_installer', user_id: userId, permission_set_id: 'ps_installer', permission_set: 'admin_full_access', organization_id: null },

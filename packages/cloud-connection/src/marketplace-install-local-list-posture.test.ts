@@ -110,6 +110,7 @@ function grantRows(shape: Shape): Record<string, any[]> {
         sys_member: [],
         sys_user_position: [],
         sys_position: [],
+        sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: held.length
             ? [{
