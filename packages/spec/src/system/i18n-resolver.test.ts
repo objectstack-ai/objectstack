@@ -4253,6 +4253,161 @@ describe('resolveFlowScreenTitle — a screen title from the `flows` bundle grou
   });
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// #22507 — the terminal toasts and a screen field's option labels
+// ════════════════════════════════════════════════════════════════════════════
+
+import { resolveFlowScreenFieldOptions } from './i18n-resolver';
+
+describe('translateFlow — the terminal toasts and option labels (#22507)', () => {
+  // hotclm's measured case: the zh-CN `contract_intake` wizard translated its
+  // labels and placeholders and kept its select options and completion toast
+  // in English, because the face had no key for either.
+  const bundle: FlowTestBundle = {
+    'zh-CN': {
+      flows: {
+        contract_intake: {
+          successMessage: '合同已发起。',
+          errorMessage: '合同发起失败。',
+          screens: {
+            details: {
+              fields: {
+                our_entity: { options: { hq: '总部', apac: '亚太子公司' } },
+                tier: { options: { '1': '一级', true: '是' } },
+              },
+            },
+          },
+        },
+      },
+    },
+    en: {
+      flows: {
+        contract_intake: {
+          screens: { details: { fields: { our_entity: { options: { emea: 'EMEA entity (en)' } } } } },
+        },
+      },
+    },
+  };
+
+  const contractIntake = (): any => ({
+    name: 'contract_intake',
+    label: 'Launch Contract',
+    type: 'screen',
+    successMessage: 'Contract launched.',
+    errorMessage: 'Contract launch failed.',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'details',
+        type: 'screen',
+        label: 'Contract details',
+        config: {
+          title: 'Contract details',
+          fields: [
+            {
+              name: 'our_entity', label: 'Our signing entity', type: 'select',
+              options: [
+                { value: 'hq', label: 'Head office' },
+                { value: 'apac', label: 'APAC subsidiary' },
+                { value: 'emea', label: 'EMEA entity' },
+                { value: 'latam', label: 'LATAM entity' },
+              ],
+            },
+            { name: 'tier', label: 'Tier', type: 'select', options: [{ value: 1, label: 'Tier 1' }, { value: true, label: 'Yes' }] },
+            { name: 'notes', label: 'Notes', type: 'textarea' },
+          ],
+        },
+      },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'details' }],
+  });
+
+  const fieldOf = (doc: any, name: string) =>
+    doc.nodes.find((n: any) => n.id === 'details').config.fields.find((f: any) => f.name === name);
+
+  it('translates the completion and failure toasts the flow authors', () => {
+    const out = translateFlow(contractIntake(), bundle, { locale: 'zh-CN' });
+    expect(out.successMessage).toBe('合同已发起。');
+    expect(out.errorMessage).toBe('合同发起失败。');
+  });
+
+  it('never ADDS a toast the flow does not author — the runner\'s own sentence stays', () => {
+    const doc = contractIntake();
+    delete doc.successMessage;
+    delete doc.errorMessage;
+    const out = translateFlow(doc, bundle, { locale: 'zh-CN' });
+    expect(out.successMessage).toBeUndefined();
+    expect(out.errorMessage).toBeUndefined();
+  });
+
+  it('translates the toast a runner holds from the served result, as it does the served label', () => {
+    // The runner holds `AutomationResult.successMessage` and the flow name,
+    // not the flow document — the same call shape as its label resolution.
+    expect(translateFlow({ name: 'contract_intake', successMessage: 'Contract launched.' }, bundle, { locale: 'zh-CN' }).successMessage)
+      .toBe('合同已发起。');
+    expect(translateFlow({ name: 'contract_intake', errorMessage: 'Contract launch failed.' }, bundle, { locale: 'zh' }).errorMessage)
+      .toBe('合同发起失败。');
+    // No entry for the locale: the served string comes back.
+    expect(translateFlow({ name: 'contract_intake', successMessage: 'Contract launched.' }, bundle, { locale: 'ja-JP' }).successMessage)
+      .toBe('Contract launched.');
+  });
+
+  it('overlays option labels by the value read as text, option by option, falling back to the authored label', () => {
+    const out = translateFlow(contractIntake(), bundle, { locale: 'zh-CN', fallbackChain: ['en'] });
+    expect(fieldOf(out, 'our_entity').options).toEqual([
+      { value: 'hq', label: '总部' },
+      { value: 'apac', label: '亚太子公司' },
+      { value: 'emea', label: 'EMEA entity (en)' },   // the next DECLARED locale
+      { value: 'latam', label: 'LATAM entity' },      // no entry anywhere: authored
+    ]);
+    // A number and a boolean value are addressed as `String(value)`, and keep
+    // their own type — only the label is overlaid.
+    expect(fieldOf(out, 'tier').options).toEqual([{ value: 1, label: '一级' }, { value: true, label: '是' }]);
+  });
+
+  it('leaves untouched what it does not translate — same references, input not mutated', () => {
+    const doc = contractIntake();
+    const frozen = JSON.parse(JSON.stringify(doc));
+    const out = translateFlow(doc, bundle, { locale: 'zh-CN' });
+    expect(doc).toEqual(frozen);
+    expect(fieldOf(out, 'notes')).toBe(fieldOf(doc, 'notes'));
+    // A flow the bundle does not carry comes back as the same reference.
+    const other = { ...contractIntake(), name: 'other_flow' };
+    expect(translateFlow(other, bundle, { locale: 'zh-CN' })).toBe(other);
+  });
+});
+
+describe('resolveFlowScreenFieldOptions — a served field\'s options from the `flows` bundle group', () => {
+  const bundle: FlowTestBundle = {
+    'zh-CN': { flows: { intake: { screens: { s1: { fields: { tier: { options: { gold: '金牌', '2': '二级' } } } } } } } },
+  };
+  const served = { name: 'tier', label: 'Tier', options: [{ value: 'gold', label: 'Gold' }, { value: 2, label: 'Two' }, { value: 'x', label: 'X' }] };
+
+  it('resolves a ScreenFieldSpec-shaped field beside the screen\'s nodeId', () => {
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's1', served, { locale: 'zh-CN' })).toEqual([
+      { value: 'gold', label: '金牌' },
+      { value: 2, label: '二级' },
+      { value: 'x', label: 'X' },
+    ]);
+  });
+
+  it('returns the field\'s own array when nothing resolves — the identity callers read', () => {
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's2', served, { locale: 'zh-CN' })).toBe(served.options);
+    expect(resolveFlowScreenFieldOptions(bundle, 'other', 's1', served, { locale: 'zh-CN' })).toBe(served.options);
+    expect(resolveFlowScreenFieldOptions(undefined, 'intake', 's1', served, { locale: 'zh-CN' })).toBe(served.options);
+    const noOptions = { name: 'tier', label: 'Tier' };
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's1', noOptions, { locale: 'zh-CN' })).toBeUndefined();
+    // A field with no name has no address.
+    const anonymous = { label: 'Tier', options: served.options };
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's1', anonymous, { locale: 'zh-CN' })).toBe(served.options);
+  });
+
+  it('reads only the map\'s own keys — a value spelled like a prototype member resolves nothing', () => {
+    const field = { name: 'tier', options: [{ value: 'toString', label: 'To string' }, { value: 'constructor', label: 'Ctor' }] };
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's1', field, { locale: 'zh-CN' })).toBe(field.options);
+  });
+});
+
 /**
  * Bulk-action defs on a list view (#14253, surface 1).
  *
