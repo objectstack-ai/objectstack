@@ -122,6 +122,14 @@ import { referenceCarrierOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/dat
 import { EvalUserSchema } from '@objectstack/spec/identity';
 
 import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
+import {
+  flowCelEntrances,
+  flowCelRootScope,
+  perWriteSnapshotEntrance,
+  unboundFlowCelRoots,
+  unboundFlowCelRootMessage,
+} from './flow-cel-root-scope.js';
+import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
@@ -1157,6 +1165,24 @@ function isBareReferenceToAny(diagnostic: string, roots: readonly string[]): boo
 }
 
 /**
+ * [#22565] Whether `diagnostic` is the flattened-scope near-miss WARNING
+ * `validateExpression` gives a bare non-field identifier on a flow condition
+ * ("`X` is not a field of `obj` — did you mean …? If `X` is a flow variable this
+ * is safe to ignore") about one of `roots`.
+ *
+ * The flow walk withdraws that warning at a site where the unbound-root judge
+ * refuses the same root: the judge has read the flow's whole bound set, so "if it
+ * is a flow variable" is already answered no, and one broken root earns one
+ * finding. Matched on the leading sentence for the reason
+ * {@link isBareReferenceToAny} gives; a reword upstream makes the withdrawal miss
+ * LOUDLY — the root then carries two findings and the `toHaveLength(1)` pin in
+ * `validate-expressions.flow-cel-root.test.ts` goes red.
+ */
+function isFlattenedNearMissFor(diagnostic: string, roots: readonly string[]): boolean {
+  return roots.some((root) => diagnostic.startsWith(`\`${root}\` is not a field of`));
+}
+
+/**
  * [#20078] The field-level predicate slots a read THROUGH a reference field is
  * refused on: the two field-rule slots the server evaluates on a write, and a
  * select option's own `visibleWhen`.
@@ -2111,9 +2137,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * engine's `registerFlow` throw: build and run time must agree about what
    * registers, and a malformed envelope used to be stored verbatim and rendered
    * by `notify` as JSON with nothing said at any layer.
+   *
+   * @returns whether the slot was refused on SHAPE, so the caller can skip the
+   *   root judgment (#22565) — a value that is not an envelope has no source to
+   *   read roots from.
    */
-  const checkDeclaredValue = (where: string, raw: unknown): void => {
-    if (raw == null) return;
+  const checkDeclaredValue = (where: string, raw: unknown): { refused: boolean } => {
+    if (raw == null) return { refused: false };
     // `celSourceOf` — not a second read of `.source`: the same helper every
     // other slot in this file locates its finding with.
     const source = celSourceOf(raw) ?? '';
@@ -2121,7 +2151,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     if (!shape.success) {
       // Already prefixed by the spec's own refinement — do not say it twice.
       for (const issue of shape.error.issues) issues.push({ where, message: issue.message, source, severity: 'error' });
-      return;
+      return { refused: true };
     }
     const res = validateExpression('value', raw as { dialect?: string; source?: string });
     for (const e of res.errors) {
@@ -2130,9 +2160,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     for (const w of res.warnings) {
       issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
     }
+    return { refused: false };
   };
 
   // ── Flows ──────────────────────────────────────────────────────────
+  // [#22565] Which flows an entrance opens to the root judgment — read once per
+  // stack, because an entrance lives outside the flow it feeds (an action,
+  // another flow's `subflow` / `map` node). At the runtime publish gate
+  // (`runtimeWriteType` set) the per-write snapshot holds the written flow alone,
+  // so no entrance is visible there and the judgment stands down
+  // (`perWriteSnapshotEntrance`) until #22636 widens that snapshot; every other
+  // verdict this pass gives at that door is unchanged.
+  const runtimeGateWrite = options.runtimeWriteType !== undefined;
+  const flowEntrances: ReadonlyMap<string, FlowCelEntrance> =
+    objectWrite || runtimeGateWrite ? new Map() : flowCelEntrances(stack, fieldIndex);
   for (const flow of objectWrite ? [] : recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     // `Array.isArray` proves the LIST, never its MEMBERS — the sentence #15742
@@ -2185,6 +2226,56 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // on the first — collecting as the checking walk goes would make the verdict
     // depend on traversal order. `collectFlowGraphs` is still called once.
     const declaredVariables = collectFlowVariableNames(flow, graphs);
+
+    /**
+     * [#22565] The flow CEL ROOT judgment. A root the run does not bind fails
+     * that run with `Unknown variable: X`, and before this pass nothing at build
+     * said so: `user.id == "u1"` — the run-user spelling formulas, RLS and the
+     * client accept — validated clean and faulted at the first evaluation,
+     * because flow CEL binds the run's user as `current_user` only.
+     *
+     * One bound set per flow, built once like `declaredVariables` above and for
+     * the same reason (one variable map serves the whole run): the flow's own
+     * bindings, the engine's roots and every object's fields — see
+     * `flow-cel-root-scope.ts` for the set, and for the flows it stands down on
+     * because their run can bind a name the reader cannot see: a node's, or an
+     * entrance's (`flowEntrances` above). `error`: the run faults on the root,
+     * every time the expression is evaluated.
+     */
+    const rootScope = flowCelRootScope(
+      flow,
+      graphs,
+      objectName,
+      fieldIndex,
+      runtimeGateWrite
+        ? perWriteSnapshotEntrance()
+        : flowEntrances.get(typeof flow.name === 'string' ? flow.name : '') ?? {},
+    );
+
+    /**
+     * [#22565] Refuse each root `raw` reads that the flow does not bind.
+     *
+     * @param from the index in `issues` this site's own findings start at — a
+     *   flattened-scope near-miss warning `check()` pushed there about a root
+     *   refused here is withdrawn ({@link isFlattenedNearMissFor}).
+     * @param role a `value` slot's plain string is a literal, so only its CEL
+     *   envelope is read; a predicate slot is CEL as a string too.
+     */
+    const refuseUnboundRoots = (where: string, raw: unknown, from: number, role: 'predicate' | 'value'): void => {
+      if (role === 'value' && !(raw && typeof raw === 'object' && (raw as AnyRec).dialect === 'cel')) return;
+      const source = celSourceOf(raw);
+      if (!source) return;
+      const unbound = unboundFlowCelRoots(source, rootScope);
+      if (unbound.length === 0) return;
+      const refused = unbound.map((unboundRoot) => unboundRoot.root);
+      for (let i = issues.length - 1; i >= from; i--) {
+        const issue = issues[i]!;
+        if (issue.severity === 'warning' && isFlattenedNearMissFor(issue.message, refused)) issues.splice(i, 1);
+      }
+      for (const unboundRoot of unbound) {
+        issues.push({ where, message: unboundFlowCelRootMessage(unboundRoot, rootScope), source, severity: 'error' });
+      }
+    };
 
     /**
      * [#14089] The one bare-identifier case a flattened flow scope may not stay
@@ -2275,8 +2366,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         const cfg = (node.config ?? {}) as AnyRec;
         const nodeCondWhere = `${at} · node '${node.id}' (${node.type}) condition`;
         if (!checkStructuralCondition(nodeCondWhere, cfg.condition).refused) {
+          const from = issues.length;
           check(nodeCondWhere, cfg.condition, objectName);
           warnShadowedFieldReads(nodeCondWhere, cfg.condition);
+          refuseUnboundRoots(nodeCondWhere, cfg.condition, from, 'predicate');
         }
 
         // Descriptor-declared expression slots (#4027). Before this, the traversal
@@ -2328,10 +2421,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // and a value envelope is evaluated in the flow-variable scope by
           // design — there is no field reading to displace.
           if (found.entry.role === 'value') {
-            checkDeclaredValue(slotWhere, found.value);
+            const from = issues.length;
+            if (!checkDeclaredValue(slotWhere, found.value).refused) {
+              refuseUnboundRoots(slotWhere, found.value, from, 'value');
+            }
             continue;
           }
           if (found.entry.role !== 'predicate') continue;
+          const slotFrom = issues.length;
           // [#15572] A slot refused on SHAPE gets no second diagnostic: the
           // shadowing warning is about which scope a CEL source resolves in,
           // and a value that is not CEL text has no source to resolve.
@@ -2364,6 +2461,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // moves no accept set and judges no bare identifier for being bare
           // (the 2026-09-01 option-C ruling's letter).
           warnShadowedFieldReads(slotWhere, found.value);
+          // [#22565] The same scope again, judged for roots the run cannot bind.
+          refuseUnboundRoots(slotWhere, found.value, slotFrom, 'predicate');
         }
         // [#19939] The `{…}` template dialect is retired from the value slots
         // (the C half of #11182 ruling D, which this replaced: until then a
@@ -2466,8 +2565,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const edge of recordsOf(graph.edges)) {
         const edgeCondWhere = `${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`;
         if (!checkStructuralCondition(edgeCondWhere, edge.condition).refused) {
+          const from = issues.length;
           check(edgeCondWhere, edge.condition, objectName);
           warnShadowedFieldReads(edgeCondWhere, edge.condition);
+          refuseUnboundRoots(edgeCondWhere, edge.condition, from, 'predicate');
         }
       }
       // No `checkNullGuards` on node/edge conditions — and NOT for the reason

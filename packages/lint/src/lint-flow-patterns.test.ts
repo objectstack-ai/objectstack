@@ -2616,6 +2616,11 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         return {
           flows: [{
             name: 'stamp_owner', label: 'Stamp owner', type: 'autolaunched',
+            // The variables the prescriptions below read, bound as their hints
+            // say they must be: the flow's own `source` (`$source`'s remedy) and
+            // the `me` a `get_record` binds (`$User.Email`'s). The build door
+            // refuses a root the flow does not bind (#22565), as the run does.
+            variables: [{ name: 'source', type: 'object' }, { name: 'me', type: 'object' }],
             nodes: [
               { id: 'start', type: 'start', label: 'Start' },
               { id: 'write', type, label: 'Write', config },

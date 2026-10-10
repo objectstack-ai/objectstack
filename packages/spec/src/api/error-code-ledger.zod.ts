@@ -1118,6 +1118,12 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/service-analytics': [
     'CUBE_NOT_FOUND',
     'DATASET_INVALID',             // [#5367] dataset/selection refusal raised by `dataset-refusal.ts`
+    // [#22634] The generic-exit gate (`api-exposure-door.ts`) stamps the data
+    // door's two exposure codes. Measured on the wire: `/analytics/query` and
+    // `/analytics/sql` through the runtime dispatcher, `/analytics/dataset/query`
+    // through rest. `@objectstack/rest` keeps its own rows for the data door.
+    'OBJECT_API_DISABLED',
+    'OBJECT_API_METHOD_NOT_ALLOWED',
     'RAW_SQL_UNSUPPORTED',
     'READ_SCOPE_COMPILE_FAILED',   // [#5367] RLS read-scope lowering failed fail-closed — a SERVER fault (500), never the caller's
   ],

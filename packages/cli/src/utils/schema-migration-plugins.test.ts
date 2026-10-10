@@ -836,7 +836,8 @@ describe('servedPlatform (#22506)', () => {
     for (const name of AUTH_FAMILY) expect(names).not.toContain(name);
     const said = out.notes.join(' ');
     expect(said).toContain('Did not compose the auth family');
-    expect(said).toContain('re-run with that OS_AUTH_SECRET exported');
+    // [#22581] Both homes `os serve` reads the secret from, now that `os migrate` reads them too.
+    expect(said).toContain('re-run with it exported or in the project\'s .env file');
   }, 60_000);
 
   it('a stack that mounts its own AuthPlugin gets no platform family', async () => {
