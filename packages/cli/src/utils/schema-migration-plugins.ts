@@ -1884,9 +1884,9 @@ async function materializeHostPlugins(
  *
  * `serve`'s flags (`--preset minimal` mounts no slate; `--dev` adds the
  * config's `devPlugins`); its tier-gated AI and i18n services and the rest of
- * its boot that is no shared rule; and the `telemetry` sibling datasource a
- * development boot provisions (ADR-0057 §3.6), so lifecycle-classed objects are
- * examined against the primary database here. The parity pin
+ * its boot that is no shared rule. (The `telemetry` sibling datasource a
+ * development boot provisions, ADR-0057 §3.6, is not a composition: the boot
+ * itself provisions it, `bootSchemaStack`, #22579.) The parity pin
  * (`commands/migrate/plan.boot-parity.integration.test.ts`) holds the object
  * set a plan examines equal to the one a real `os serve` boot registers, per
  * example app shape — so whatever this list misses fails one test instead of
