@@ -235,6 +235,8 @@ export { isRowActive, type ActivatableRow } from './row-active.js';
 // effect: the row `active` flag above stays the authority for that.
 export {
   createSecurityCatalogReader,
+  bindSecurityCatalogReader,
+  securityCatalogReaderOf,
   type SecurityCatalogType,
   type SecurityCatalogSourceName,
   type SecurityCatalogRegistry,

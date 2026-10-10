@@ -70,6 +70,7 @@ import { openRequestGrantsMemo, withRequestGrantsMemo } from './request-grants-m
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from './platform-admin.js';
 import { derivePosture } from './posture-ladder.js';
 import { isRowActive } from './row-active.js';
+import { securityCatalogReaderOf, type SecurityCatalogReader } from './security-catalog.js';
 
 /** The transport-agnostic authorization envelope produced from a request. */
 export interface ResolvedAuthzContext {
@@ -139,10 +140,6 @@ export interface ResolveAuthzInput {
    * never made WORSE, only less strict.
    */
   tenancyPosture?: TenancyPosture;
-}
-
-function safeJsonParse<T>(s: string, fallback: T): T {
-  try { return JSON.parse(s) as T; } catch { return fallback; }
 }
 
 /**
@@ -742,69 +739,98 @@ function grantOrganizationOf(row: unknown): string | null {
 }
 
 /**
- * [ADR-0131 D4] The `sys_permission_set` row each user grant holds, found BY
- * NAME: the row of the grant's OWN organization, else the organization-less
- * row. A set row of another organization is never the answer, whatever the
- * grant's `permission_set_id` points at.
+ * [ADR-0049] The `sys_permission_set` rows that carry the `active` flag of the
+ * sets `names` names, found BY NAME: the active organization's own row first,
+ * else the organization-less row. The row is read for its flag and for nothing
+ * else — the set's body is its catalog definition ({@link catalogSetBody}),
+ * and no row decides whether a set exists (ADR-0131 D3/D4).
  *
- * The catalog is still materialized per organization, so one name can carry
- * several rows. A row of an organization applies to a grant of that same
- * organization, an organization-less row to every grant — the grant rule
- * {@link grantAppliesInTenant} asks of the grant itself, asked of the set row.
- * So an organization-less grant reads organization-less rows only, and an
- * organization's grant reads its organization's row first.
+ * The catalog rows are still materialized per organization, so one name can
+ * carry several rows. A row of an organization applies to that organization
+ * only, an organization-less row everywhere — the grant rule
+ * {@link grantAppliesInTenant} asks of a grant, asked of the set row.
  *
- * Two reads, issued together: the organization-less rows for every name, and —
- * only when an organization's grant is among `grants` — that organization's
- * rows, with the organization threaded into the context so the driver's tenant
- * scope (`applyTenantScope`, the one governed spelling of the wall) decides
- * what is visible. `grants` are the ones {@link grantAppliesInTenant} already
- * kept, so the only organization among them is `tenantId`.
+ * Two reads, issued together: the organization-less rows for every name in
+ * `names`, and — for the names in `ownNames`, when there is an active
+ * organization — that organization's rows, with the organization threaded into
+ * the context so the driver's tenant scope (`applyTenantScope`, the one
+ * governed spelling of the wall) decides what is visible.
  *
- * Which row a name resolves to is decided before the ADR-0049 `active` flag is
- * read: an organization's own row that is deactivated is that grant's answer,
- * and it confers nothing — it does not fall through to the organization-less
- * row.
+ * Which row answers is decided before its flag is read: an organization's own
+ * row that is deactivated is that organization's answer, and it does not fall
+ * through to the organization-less row.
  *
  * A read that fails throws (`tryFind`'s `AuthzStoreUnavailableError`).
  */
-async function readGrantSetRowsByName(
+async function readSetActivationRows(
   ql: any,
-  grants: readonly unknown[],
+  names: ReadonlySet<string>,
+  ownNames: ReadonlySet<string>,
   tenantId: string | undefined,
-): Promise<(grant: unknown) => any | undefined> {
-  const allNames = new Set<string>();
-  const ownNames = new Set<string>();
-  for (const grant of grants) {
-    const name = grantSetNameOf(grant);
-    if (!name) continue;
-    allNames.add(name);
-    const organizationId = grantOrganizationOf(grant);
-    if (organizationId !== null && organizationId === tenantId) ownNames.add(name);
-  }
-  if (allNames.size === 0) return () => undefined;
-
+): Promise<{ organizationLess: Map<string, any>; own: Map<string, any> }> {
+  const organizationLess = new Map<string, any>();
+  const own = new Map<string, any>();
+  if (names.size === 0) return { organizationLess, own };
   const [organizationLessRows, ownRows] = await Promise.all([
-    tryFind(ql, PERMISSION_SET_CATALOG, { name: { $in: Array.from(allNames) }, organization_id: null }, 500),
+    tryFind(ql, PERMISSION_SET_CATALOG, { name: { $in: Array.from(names) }, organization_id: null }, 500),
     tenantId && ownNames.size > 0
       ? tryFind(ql, PERMISSION_SET_CATALOG, { name: { $in: Array.from(ownNames) } }, 500, tenantId)
       : Promise.resolve([] as any[]),
   ]);
-  const organizationLess = new Map<string, any>();
   for (const row of organizationLessRows) {
     if (typeof row?.name !== 'string' || grantOrganizationOf(row) !== null) continue;
     if (!organizationLess.has(row.name)) organizationLess.set(row.name, row);
   }
-  const own = new Map<string, any>();
   for (const row of ownRows) {
     if (typeof row?.name !== 'string' || grantOrganizationOf(row) !== tenantId) continue;
     if (!own.has(row.name)) own.set(row.name, row);
   }
-  return (grant: unknown) => {
-    const name = grantSetNameOf(grant);
-    if (!name) return undefined;
-    const organizationId = grantOrganizationOf(grant);
-    return (organizationId !== null ? own.get(name) : undefined) ?? organizationLess.get(name);
+  return { organizationLess, own };
+}
+
+/**
+ * A set is in effect unless the row that answers for it says otherwise: no row
+ * carries no flag to read, the way a position name with no `sys_position` row
+ * is untouched at §6a. Existence is the catalog's question, never the row's.
+ */
+function activationAllows(row: unknown): boolean {
+  return row === undefined || isRowActive(row as any);
+}
+
+/**
+ * [ADR-0131 D3/D4] The permission sets a position definition names
+ * (`PositionSchema.permissionSets`), in declared order — the position → set
+ * binding, read from the definition and from no junction row.
+ */
+function positionSetNamesOf(definition: Readonly<Record<string, unknown>> | undefined): string[] {
+  const value = definition?.permissionSets;
+  if (!Array.isArray(value)) return [];
+  return value.filter((n): n is string => typeof n === 'string' && n !== '');
+}
+
+/** What §6b derives from one held set: its catalog body, read from the definition. */
+interface CatalogSetBody {
+  name: string;
+  systemPermissions: unknown;
+  tabPermissions: unknown;
+}
+
+/**
+ * [ADR-0131 D3/D4] The body of the permission set `name` names, read from its
+ * catalog definition — or `undefined` when the catalog holds no set of that
+ * name (or no catalog is bound), which confers nothing.
+ */
+async function catalogSetBody(
+  catalog: SecurityCatalogReader | undefined,
+  name: string,
+): Promise<CatalogSetBody | undefined> {
+  if (!catalog) return undefined;
+  const entry = await catalog.resolve('permission', name);
+  if (!entry) return undefined;
+  return {
+    name: entry.name,
+    systemPermissions: entry.definition.systemPermissions,
+    tabPermissions: entry.definition.tabPermissions,
   };
 }
 
@@ -813,9 +839,10 @@ async function readGrantSetRowsByName(
  *
  * Given a KNOWN user id, aggregate the authorization grants that user holds:
  * org-admin positions (`sys_member`), platform-RBAC positions
- * (`sys_user_position`), user- and position-bound permission sets
- * (`sys_user_permission_set` / `sys_position_permission_set` →
- * `sys_permission_set`), the derived `platform_admin` built-in + posture rung,
+ * (`sys_user_position`), user- and position-bound permission sets (the
+ * `sys_user_permission_set` grants, and the sets each held position's catalog
+ * definition names — ADR-0131 D3/D4), the derived `platform_admin` built-in +
+ * posture rung,
  * fellow-org peers for identity-table RLS, and the env-side `ai_seat`.
  *
  * Factored out of `resolveAuthzContext` so a surface that already knows WHO the
@@ -1027,23 +1054,36 @@ export async function resolveUserAuthzGrants(
   //    Rows outside their validity window are dropped BEFORE any derivation, so
   //    an expired admin_full_access grant cannot yield platform_admin either.
   //
-  //    [ADR-0131 D4] A grant names its set BY NAME (`permission_set`), and the
-  //    set row is found by that name — the grant's own organization's row, else
-  //    the organization-less one ({@link readGrantSetRowsByName}). The grant's
-  //    `permission_set_id` is not read here: a grant that names nothing, or
-  //    whose name resolves only to another organization's set, confers nothing
-  //    through this resolver. Issued now, so it shares the `sys_position` read's
-  //    leg below; awaited at §6b.
+  //    [ADR-0131 D3/D4] A grant names its set BY NAME (`permission_set`), and
+  //    the set is the catalog's definition of that name ({@link catalogSetBody})
+  //    — the environment registry the security plugin binds to this engine
+  //    ({@link securityCatalogReaderOf}). No row decides whether a set exists or
+  //    what it grants. The grant's `permission_set_id` is not read: a grant
+  //    that names nothing, or a name the catalog does not hold, confers nothing.
+  //
+  //    [ADR-0049] The `active` flag is the one thing still read from a row: the
+  //    grant's own organization's row, else the organization-less one
+  //    ({@link readSetActivationRows}). Issued now, so it shares the
+  //    `sys_position` read's leg below; awaited at §6b.
   // (read in Leg 1 above)
   const upsRows = upsRowsAll.filter((r) => isGrantActive(r, nowMs));
   const applyingGrants = upsRows.filter((r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId));
-  const grantSetRowsLeg = readGrantSetRowsByName(ql, applyingGrants, tenantId);
+  const catalog = securityCatalogReaderOf(ql);
+  const grantSetNames = new Set<string>();
+  const ownGrantSetNames = new Set<string>();
+  for (const grant of applyingGrants) {
+    const name = grantSetNameOf(grant);
+    if (!name) continue;
+    grantSetNames.add(name);
+    const organizationId = grantOrganizationOf(grant);
+    if (organizationId !== null && organizationId === tenantId) ownGrantSetNames.add(name);
+  }
+  const grantActivationLeg = readSetActivationRows(ql, grantSetNames, ownGrantSetNames, tenantId);
   // Its failure is observed where it is awaited (§6b); this only keeps a throw
   // from §6a, which runs first, from leaving the rejection unhandled.
-  grantSetRowsLeg.catch(() => undefined);
-  // Position-bound sets (§6a) are still reached through the junction's id —
-  // the binding relation is ADR-0131 C3's, kept until it retires.
-  const psIds = new Set<string>();
+  grantActivationLeg.catch(() => undefined);
+  // Position-bound sets (§6a), by name, in the order the held positions name them.
+  const boundSetNames: string[] = [];
   // [#11663 L5] …and under a WALLED posture it no longer is. This is the EXIT of
   // the migration window L4 opened: the walled half of the legacy unscoped anchor
   // is RETIRED, so on a walled rig platform standing is config-derived
@@ -1076,8 +1116,10 @@ export async function resolveUserAuthzGrants(
   //     "only when the user has nothing else" cliff.
   if (!grants.positions.includes('everyone')) grants.positions.push('everyone');
 
-  // 6a. Position-bound permission sets (sys_position_permission_set): a position
-  //     carries its permission sets.
+  // 6a. Position-bound permission sets: a position carries its permission sets
+  //     in its definition (`PositionSchema.permissionSets`, ADR-0131 D3/D4),
+  //     read from the catalog by the position's NAME. No junction row is read.
+  //     A held name the catalog has no position for distributes nothing.
   //
   //     [ADR-0049] A DEACTIVATED position grants nothing — the `deactivate_position`
   //     dialog's promise ("users keep their assignment but the position stops
@@ -1095,15 +1137,17 @@ export async function resolveUserAuthzGrants(
   //     with no `sys_position` row at all (`org_owner`, a membership-derived
   //     role) has no flag to read and is untouched.
   if (grants.positions.length > 0) {
+    //     The `sys_position` row is read for its ADR-0049 `active` flag and for
+    //     nothing else.
+    //
     //     [#10103] Scoped to the CALLER's organization. `sys_position` spells
     //     its name index `unique: 'organization'` and its rows are materialized
     //     per organization, so several organizations hold a row named
     //     `everyone` (and one named after every declared position). Swept by
-    //     name alone, this read returned EVERY organization's rows, and the
-    //     junction read below then collected another organization's bindings —
-    //     a cross-organization grant bleed, measured reachable from one tenant's
-    //     resolution to another tenant's `everyone` binding. It also made the
-    //     sweep O(organizations) on a table that is read on every request.
+    //     name alone, this read returned EVERY organization's rows — another
+    //     organization's deactivation then decided this one's grant. It also
+    //     made the sweep O(organizations) on a table that is read on every
+    //     request.
     //
     //     Scoped by threading the organization into the context rather than by
     //     adding an `organization_id` predicate here: the driver's
@@ -1115,10 +1159,7 @@ export async function resolveUserAuthzGrants(
     //
     //     Limit raised with it: the cap has to admit this organization's rows
     //     alongside any organization-less ones the driver's compatibility arm
-    //     still returns, or a caller silently loses positions. Those
-    //     organization-less rows stay REACHABLE on purpose — they are not
-    //     reaped, and grants point at them by row id, so dropping them here
-    //     would revoke standing access silently.
+    //     still returns, or a caller silently loses a deactivation.
     //
     //     [#20515] The same grant rule as §4 and §6 is then asked of each
     //     position row ({@link grantAppliesInTenant}). With a tenant it is a
@@ -1127,12 +1168,9 @@ export async function resolveUserAuthzGrants(
     //     installation-wide by design, so without it every organization's
     //     `everyone` row, and every organization's copy of a name the caller
     //     holds (the `sys_member` role projection's `org_member`, say), fed its
-    //     bindings into an organization-less resolution: measured on a real
-    //     `SqlDriver` over the shipped per-organization catalog, a member
-    //     removed from an organization kept the `manage_metadata` set that
-    //     organization had bound to its `org_member` position. This is the
-    //     grant rule, not a second tenant wall: it decides which organization's
-    //     bindings APPLY, after the driver decided which rows are visible.
+    //     row into an organization-less resolution. This is the grant rule, not
+    //     a second tenant wall: it decides which organization's rows APPLY,
+    //     after the driver decided which rows are visible.
     const positionRows = (await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 200, tenantId))
       .filter((r) => grantAppliesInTenant(r.organization_id, tenantId));
     const deactivatedNames = new Set<string>(
@@ -1141,12 +1179,12 @@ export async function resolveUserAuthzGrants(
     if (deactivatedNames.size > 0) {
       grants.positions = grants.positions.filter((n) => !deactivatedNames.has(n));
     }
-    const positionIds = positionRows.filter((r) => isRowActive(r)).map((r) => r.id).filter(Boolean);
-    if (positionIds.length > 0) {
-      const rpsRows = await tryFind(ql, 'sys_position_permission_set', { position_id: { $in: positionIds } }, 500);
-      for (const r of rpsRows) {
-        const id = r.permission_set_id ?? r.permissionSetId;
-        if (id) psIds.add(id);
+    if (catalog) {
+      for (const positionName of grants.positions) {
+        const entry = await catalog.resolve('position', positionName);
+        for (const setName of positionSetNamesOf(entry?.definition)) {
+          if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
+        }
       }
     }
   }
@@ -1154,21 +1192,31 @@ export async function resolveUserAuthzGrants(
   // 6b. Resolve permission-set details (names → grants.permissions; system_permissions;
   //     tab_permissions merged by highest visibility).
   //
-  //     The user grants' rows, found by name (§6), come first, in grant order;
-  //     the position-bound rows (§6a) follow, read by the junction's id.
-  const setRowOfGrant = await grantSetRowsLeg;
-  const psRowsAll: any[] = [];
-  const takenRows = new Set<unknown>();
-  const take = (row: any): void => {
-    const key = row?.id ?? row;
-    if (takenRows.has(key)) return;
-    takenRows.add(key);
-    psRowsAll.push(row);
+  //     The user grants' sets (§6) come first, in grant order; the
+  //     position-bound sets (§6a) follow, in the order the positions name them.
+  //     Each body is its catalog definition; each `active` flag is its row's —
+  //     the active organization's own row first, else the organization-less
+  //     one, for a position-bound set as for an organization's grant.
+  const [grantActivation, boundActivation] = await Promise.all([
+    grantActivationLeg,
+    readSetActivationRows(ql, new Set(boundSetNames), tenantId ? new Set(boundSetNames) : new Set<string>(), tenantId),
+  ]);
+  const psRowsAll: Array<CatalogSetBody & { active: boolean }> = [];
+  const takenNames = new Set<string>();
+  const take = (body: CatalogSetBody, active: boolean): void => {
+    if (takenNames.has(body.name)) return;
+    takenNames.add(body.name);
+    psRowsAll.push({ ...body, active });
   };
   for (const grant of applyingGrants) {
-    const row = setRowOfGrant(grant);
-    if (!row) continue;
-    take(row);
+    const name = grantSetNameOf(grant);
+    if (!name) continue;
+    const body = await catalogSetBody(catalog, name);
+    if (!body) continue;
+    const ownGrant = grantOrganizationOf(grant) !== null;
+    const row = (ownGrant ? grantActivation.own.get(name) : undefined) ?? grantActivation.organizationLess.get(name);
+    const active = activationAllows(row);
+    take(body, active);
     // platform_admin (ADR-0068 D2) is DERIVED from an UNSCOPED admin_full_access
     // USER grant — the single source of truth (no trusted stored boolean). An
     // unscoped grant reads the organization-less row only, so the set it holds
@@ -1179,44 +1227,41 @@ export async function resolveUserAuthzGrants(
     //
     // [#11663 L5] `legacyGrantAnchorRetired` gates the ANCHOR, not the grant: the
     // set's own name and capabilities are pushed below exactly as for any other
-    // held set, on every posture. What a walled rig stops deriving from the row is
-    // PLATFORM_ADMIN STANDING — the rung, the built-in `platform_admin` position
-    // and everything downstream of them. The row itself is untouched here; its
-    // ownership is ADR-0131 C3's, on the v18 line.
+    // held set, on every posture. What a walled rig stops deriving from the
+    // grant is PLATFORM_ADMIN STANDING — the rung, the built-in
+    // `platform_admin` position and everything downstream of them.
     if (
-      grantOrganizationOf(grant) === null
-      && row.name === ADMIN_FULL_ACCESS
-      && isRowActive(row)
+      !ownGrant
+      && body.name === ADMIN_FULL_ACCESS
+      && active
       && !legacyGrantAnchorRetired
     ) {
       hasPlatformAdminGrant = true;
     }
   }
-  if (psIds.size > 0) {
-    for (const row of await tryFind(ql, PERMISSION_SET_CATALOG, { id: { $in: Array.from(psIds) } }, 500)) take(row);
+  for (const name of boundSetNames) {
+    const body = await catalogSetBody(catalog, name);
+    if (!body) continue;
+    take(body, activationAllows(boundActivation.own.get(name) ?? boundActivation.organizationLess.get(name)));
   }
   if (psRowsAll.length > 0) {
     // [ADR-0049] A DEACTIVATED permission set grants nothing — the
     // `deactivate_permission_set` dialog's promise ("existing assignments stay
     // in place but stop granting access"). Dropped BEFORE any derivation, the
     // same discipline the validity window gets at §6.
-    const psRows = psRowsAll.filter((r) => isRowActive(r));
+    const psRows = psRowsAll.filter((r) => r.active);
     const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
     const mergedTabs: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'> = {};
     for (const ps of psRows) {
       if (ps.name && !grants.permissions.includes(ps.name)) grants.permissions.push(ps.name);
-      const sysPerms = typeof ps.system_permissions === 'string'
-        ? safeJsonParse(ps.system_permissions, [])
-        : (ps.system_permissions ?? ps.systemPermissions);
+      const sysPerms = ps.systemPermissions;
       if (Array.isArray(sysPerms)) {
         for (const p of sysPerms) {
           if (typeof p === 'string' && !grants.systemPermissions.includes(p)) grants.systemPermissions.push(p);
         }
       }
-      const tabs = typeof ps.tab_permissions === 'string'
-        ? safeJsonParse(ps.tab_permissions, {})
-        : (ps.tab_permissions ?? ps.tabPermissions);
-      if (tabs && typeof tabs === 'object') {
+      const tabs = ps.tabPermissions;
+      if (tabs && typeof tabs === 'object' && !Array.isArray(tabs)) {
         for (const [app, val] of Object.entries(tabs as Record<string, unknown>)) {
           if (typeof val !== 'string' || !(val in tabRank)) continue;
           const cur = mergedTabs[app];
