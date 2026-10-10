@@ -85,11 +85,6 @@ import {
     ITEM_KEY_DISCRIMINATORS,
     itemDiscriminator,
     type MetadataItem,
-    // [#13216] The search sweep's page read carries the SAME org scope the
-    // REST `/meta` read doors derive — registry-gated, never a bare tenant id
-    // (#9454's read-side rule). One predicate on both doors means the swept
-    // page set and the served page set cannot drift.
-    organizationIdForMetaRead,
     // [#16319] The field-`type` admission vocabulary. `loadMetaFromDb` asks the
     // registration door's OWN question — never a second opinion about which
     // declarations the registry will take, which is the defect class the
@@ -1979,8 +1974,9 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
 
 /**
  * One place a stored `sys_metadata` row of an item can sit, as
- * {@link servedOverlayRowCandidates} orders them: a scope (the organization's,
- * or env-wide with `organizationId: null`), a spelling of the type
+ * {@link servedOverlayRowCandidates} orders them: a scope (the environment's,
+ * `organizationId: null`, or — for the anonymous form doors' legacy layer
+ * alone — a legacy organization's), a spelling of the type
  * (`'canonical'`, or `'other'`, the type's singular/plural twin, pre-#4432
  * residue), and the package the row is bound to: the address's package, `null`
  * for the package-less row, or `undefined` for any row (an address that names
@@ -2004,12 +2000,19 @@ interface StoredRowPlace {
 }
 
 /**
- * [#21804, ADR-0005, ADR-0048] THE served-row resolution: the order in which
- * the stored rows of one item are tried for the CONTENT a read serves. The
- * first candidate that holds a row is the served row.
+ * [#21804, ADR-0131 D6, ADR-0048] THE served-row resolution: the order in
+ * which the stored rows of one item are tried for the CONTENT a read serves.
+ * The first candidate that holds a row is the served row.
  *
- *  - Scope first (ADR-0005): the organization's rows, then the env-wide rows.
- *    Precedence, never a merge.
+ *  - Scope (ADR-0131 D6): the environment's rows only. A legacy
+ *    organization-scoped row is reported at boot
+ *    ({@link ObjectStackProtocolImplementation.reportUnhydratableOrgScopedRows})
+ *    and never served. The ONE exception is `legacyOrganizationId`, which only
+ *    the anonymous form doors' read of the Default Organization's legacy
+ *    layer passes (through the list read): that legacy organization's rows,
+ *    then the environment's — kept fail-closed until the v18 migration
+ *    ceremony carries those rows into the environment layer and deletes the
+ *    read with them.
  *  - Then the spelling: the canonical type, then the other spelling (the
  *    at-rest tolerance the reads have always had, #4432).
  *  - Then the package (ADR-0048 prefer-local): with a `packageId`, that
@@ -2030,11 +2033,11 @@ interface StoredRowPlace {
  * scope (`resolveOverlayLockLayer` in `item-lock.ts`, #21761).
  */
 function servedOverlayRowCandidates(address: {
-    readonly organizationId: string | undefined;
+    readonly legacyOrganizationId?: string;
     readonly packageId: string | undefined;
 }): ServedOverlayRowCandidate[] {
-    const scopes: Array<Pick<ServedOverlayRowCandidate, 'scope' | 'organizationId'>> = address.organizationId
-        ? [{ scope: 'org', organizationId: address.organizationId }, { scope: 'env', organizationId: null }]
+    const scopes: Array<Pick<ServedOverlayRowCandidate, 'scope' | 'organizationId'>> = address.legacyOrganizationId
+        ? [{ scope: 'org', organizationId: address.legacyOrganizationId }, { scope: 'env', organizationId: null }]
         : [{ scope: 'env', organizationId: null }];
     const packages: Array<string | null | undefined> = address.packageId ? [address.packageId, null] : [undefined];
     return scopes.flatMap((scope) => (['canonical', 'other'] as const).flatMap((spelling) =>
@@ -2048,7 +2051,7 @@ function servedOverlayRowCandidates(address: {
  * `undefined`, which matches a row of any package.
  */
 function addressPackages(packageId: string | undefined): ReadonlyArray<string | null | undefined> {
-    return [...new Set(servedOverlayRowCandidates({ organizationId: undefined, packageId })
+    return [...new Set(servedOverlayRowCandidates({ packageId })
         .map((candidate) => candidate.packageId))];
 }
 
@@ -2113,8 +2116,9 @@ function servedViewExpansion<E extends { packageId: string | undefined }>(
  *     draft winning).
  *   • [#21804] When `records` are stored rows the caller read (`rowsRead`,
  *     each record's `stored` place), the winner among them is the one
- *     {@link servedOverlayRowCandidates} picks for `P`: the organization's row
- *     before the env-wide one, then `P`'s own before the package-less one. It
+ *     {@link servedOverlayRowCandidates} picks for `P`: `P`'s own row before
+ *     the package-less one (the form doors' legacy organization row before
+ *     the environment's, where they read that layer). It
  *     is the resolution `getMetaItem` takes, so it does not depend on the
  *     order the store returned the rows in. Without `rowsRead` (the
  *     MetadataService merge, whose `records` are already-resolved items),
@@ -2162,7 +2166,7 @@ function mergePackageAwareOverlay(
     baseItems: unknown[],
     records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
-    rowsRead?: { readonly organizationId: string | undefined },
+    rowsRead?: { readonly legacyOrganizationId?: string },
     unseated?: WeakSet<object>,
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
@@ -2186,7 +2190,7 @@ function mergePackageAwareOverlay(
     // `real` among a slot's contributions: the first candidate of
     // {@link servedOverlayRowCandidates} that one of the rows sits at.
     const servedStoredRow = (list: readonly Contribution[], real: string | undefined): any => {
-        for (const candidate of servedOverlayRowCandidates({ organizationId: rowsRead?.organizationId, packageId: real })) {
+        for (const candidate of servedOverlayRowCandidates({ legacyOrganizationId: rowsRead?.legacyOrganizationId, packageId: real })) {
             const hit = list.find((c) => c.stored !== undefined
                 && c.stored.organizationId === candidate.organizationId
                 && (c.stored.type === type ? 'canonical' : 'other') === candidate.spelling
@@ -5284,7 +5288,6 @@ export interface MetadataAuthoringGateContext {
     name: string;
     /** Lifecycle the body is being saved into. */
     state: 'draft' | 'active';
-    organizationId?: string;
     /** The body being persisted. */
     body: unknown;
     /** True when a packaged artifact backs this name — the write is an env overlay of shipped metadata. */
@@ -6005,7 +6008,7 @@ export class ObjectStackProtocolImplementation implements
      * declaration body (the baseline an overlay customizes) for the gate.
      */
     private async runAuthoringGate(evt: {
-        type: string; name: string; state: 'draft' | 'active'; organizationId?: string; body: unknown;
+        type: string; name: string; state: 'draft' | 'active'; body: unknown;
     }): Promise<void> {
         const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
         const gate = this.authoringGates.get(singular);
@@ -6021,7 +6024,6 @@ export class ObjectStackProtocolImplementation implements
             type: singular,
             name: evt.name,
             state: evt.state,
-            ...(evt.organizationId ? { organizationId: evt.organizationId } : {}),
             body: evt.body,
             isArtifactBacked: artifactBacked,
             ...(declaredBody !== undefined ? { declaredBody } : {}),
@@ -6070,12 +6072,6 @@ export class ObjectStackProtocolImplementation implements
      */
     private async assertRuntimeAuthoringRules(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
-        /**
-         * The organization partition of this write (`saveMetaItem`'s
-         * `organizationId`). Absent = a platform-level / environment write,
-         * which is one limb of the #6285 refusal combination.
-         */
-        organizationId?: string | null;
         /**
          * [#9612] The package this write belongs to (`saveMetaItem`'s
          * `packageId`, or the promoted draft row's). It decides the CLOSURE the
@@ -6217,7 +6213,6 @@ export class ObjectStackProtocolImplementation implements
                 listRegisteredCollection(singularType, pluralType),
                 singularType,
                 pluralType,
-                evt.organizationId ?? null,
             );
         // Resolved together rather than in sequence: each is one indexed
         // `sys_metadata` read and they do not depend on one another, so the
@@ -6286,7 +6281,6 @@ export class ObjectStackProtocolImplementation implements
             // collections above. Absent on every non-batch door.
             ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
-            ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
             // [#21476] The posture IN FORCE, for the public-form intake
             // advisory — a separate input from the requested one above, on
@@ -6411,29 +6405,26 @@ export class ObjectStackProtocolImplementation implements
         registered: unknown[],
         singularType: string,
         pluralType: string,
-        organizationId: string | null,
     ): Promise<unknown[]> {
         if (typeof this.engine?.find !== 'function') return registered;
         let rows: Record<string, unknown>[];
         try {
-            const scopes: (string | null)[] = organizationId ? [null, organizationId] : [null];
-            const read = async (type: string, oid: string | null): Promise<Record<string, unknown>[]> => {
+            // [ADR-0131 D6] The environment's rows only: a legacy
+            // organization-scoped row is reported at boot, never read
+            // ({@link reportUnhydratableOrgScopedRows}).
+            const read = async (type: string): Promise<Record<string, unknown>[]> => {
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 const rs = await this.engine.find('sys_metadata', {
-                    where: { type, state: 'active', organization_id: oid },
+                    where: { type, state: 'active', organization_id: null },
                     context: { isSystem: true },
                 });
                 return (rs ?? []) as Record<string, unknown>[];
             };
-            rows = [];
-            for (const oid of scopes) {
-                // The same singular/plural retry the registry half and
-                // `getMetaItems` both perform: rows written through a plural
-                // URL spelling are stored under it.
-                let rs = await read(singularType, oid);
-                if (rs.length === 0) rs = await read(pluralType, oid);
-                rows.push(...rs);
-            }
+            // The same singular/plural retry the registry half and
+            // `getMetaItems` both perform: rows written through a plural
+            // URL spelling are stored under it.
+            rows = await read(singularType);
+            if (rows.length === 0) rows = await read(pluralType);
         } catch (error) {
             if (!isMissingTableError(error, 'sys_metadata')) {
                 console.warn(
@@ -6929,7 +6920,7 @@ export class ObjectStackProtocolImplementation implements
         // registry (#6602). So an event a peer stamped with an organization
         // converges on the environment row — the state the registry holds.
         const orgId = null;
-        const repo = this.getOverlayRepo(orgId);
+        const repo = this.getOverlayRepo();
         const ref = {
             type,
             name: evt.name,
@@ -7051,11 +7042,27 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Lazily obtain a SysMetadataRepository for the given organization.
-     * Env-wide overlays (organizationId == null) share a singleton under
-     * the `__env__` key.
+     * [ADR-0131 D6] THE repository every metadata read and write goes
+     * through: the environment's (`organization_id IS NULL`). One lazily
+     * built singleton under the `__env__` key.
      */
-    private getOverlayRepo(organizationId: string | null): SysMetadataRepository {
+    private getOverlayRepo(): SysMetadataRepository {
+        return this.repositoryFor(null);
+    }
+
+    /**
+     * [ADR-0131 D6/D12] The repository of ONE legacy organization's rows,
+     * for the one caller left that touches them: the uninstall's removal of
+     * a package's legacy organization-scoped rows
+     * ({@link removeLegacyOrganizationRowOnUninstall}). ⛔ No read goes
+     * through it: a legacy organization-scoped row is reported at boot
+     * ({@link reportUnhydratableOrgScopedRows}), never served.
+     */
+    private legacyOrganizationRepo(organizationId: string): SysMetadataRepository {
+        return this.repositoryFor(organizationId);
+    }
+
+    private repositoryFor(organizationId: string | null): SysMetadataRepository {
         const key = organizationId ?? '__env__';
         let repo = this.overlayRepos.get(key);
         if (!repo) {
@@ -7833,7 +7840,6 @@ export class ObjectStackProtocolImplementation implements
     async getMetaDiagnostics(request: {
         type?: string;
         severity?: 'error' | 'warning';
-        organizationId?: string;
         packageId?: string;
     } = {}): Promise<{
         entries: Array<{ type: string; name: string; diagnostics: MetadataDiagnostics }>;
@@ -7866,7 +7872,6 @@ export class ObjectStackProtocolImplementation implements
             try {
                 listed = await this.getMetaItems({
                     type: t,
-                    organizationId: request.organizationId,
                     packageId: request.packageId,
                 } as any);
             } catch (error) {
@@ -7995,7 +8000,6 @@ export class ObjectStackProtocolImplementation implements
                     artifact: this.artifactLockLayerAt({
                         type: t,
                         name: itemName,
-                        organizationId: request.organizationId,
                         packageId: request.packageId ?? (item?._packageId as string | undefined),
                     }, shipping),
                     overlay: item,
@@ -8532,17 +8536,16 @@ export class ObjectStackProtocolImplementation implements
      */
     private async restoredCredentialPathsFor(args: {
         type: string;
-        organizationId: string | null;
         name: string;
         packageId: string | null;
         item: unknown;
     }): Promise<readonly string[]> {
         if (!hasMetadataRedactor(args.type)) return [];
-        const repo = this.getOverlayRepo(args.organizationId);
+        const repo = this.getOverlayRepo();
         const ref = {
             type: args.type,
             name: args.name,
-            org: args.organizationId ?? 'env',
+            org: 'env',
         } as Parameters<typeof repo.get>[0];
         const body = await this.storedBodyForCarryForward({
             type: args.type,
@@ -8683,7 +8686,13 @@ export class ObjectStackProtocolImplementation implements
         );
     }
 
-    async getMetaItems(request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean }) {
+    /**
+     * `legacyFormOrganizationId` is not a request key of the spec's
+     * `GetMetaItemsRequest`: only the anonymous form doors pass it, for their
+     * read of the Default Organization's legacy `view` layer (triage ruling
+     * Q3 A; see {@link readFlattenedMetaItems}).
+     */
+    async getMetaItems(request: { type: string; packageId?: string; previewDrafts?: boolean; legacyFormOrganizationId?: string }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This one
         // is load-bearing twice over: the SchemaRegistry indexes code-authored
         // items under the SINGULAR type, and the overlay-hydration branch below
@@ -8720,7 +8729,7 @@ export class ObjectStackProtocolImplementation implements
      * export, a log line. Every such exit serves {@link getMetaItems}, whose
      * redaction is the whole reason this method has to exist separately.
      */
-    async getMetaItemsForExecution(request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean }) {
+    async getMetaItemsForExecution(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
         // The same #4432 fold {@link getMetaItems} applies, for the same reason.
         return this.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'execution');
     }
@@ -8735,112 +8744,24 @@ export class ObjectStackProtocolImplementation implements
      * `request` arrives already folded by the calling face (#4432).
      */
     private async readFlattenedMetaItems(
-        request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean },
+        request: { type: string; packageId?: string; previewDrafts?: boolean; legacyFormOrganizationId?: string },
         audience: 'served' | 'execution',
     ) {
         const { packageId } = request;
-        // ── [commit 96326040f] The registry read gate, resolved ONCE, HERE ──────────────────
+        // ── [ADR-0131 D6] The environment → code read ──────────────────────
         //
-        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
-        // read doors applied from #9454 until the doors stopped carrying an
-        // organization at all (ADR-0131 D6). Until this line
-        // `getMetaItems` applied NO gate of its own: whatever organization
-        // arrived was used for whatever type arrived, so the scope of a
-        // metadata sweep was decided per type, BY THE CALLER — and a request
-        // carrying ONE `organizationId` can only be correct when it sweeps ONE
-        // type. Three live callers sweep more than one: `getMetaDiagnostics`'
-        // untyped arm walks the whole registry; `findReferencesToMeta` spends
-        // the request's organization on `matcher.fromType` — the SOURCES —
-        // while `request.type` is the TARGET, so the target's own flag says
-        // nothing about the types actually read; and the runtime's package
-        // export sweep (`domains/packages.ts`) walks every plural key with one
-        // raw active organization.
-        //
-        // ⭐ THE HARM IS RESURRECTION, NOT CONCEALMENT, and which one it is
-        // decides that the registry-gated predicate is the right instrument.
-        // `SysMetadataRepository.history()` filters `organization_id` by strict
-        // equality, so naming the tenant THERE hides an `allowOrgOverride:
-        // false` type's rows. Here the two `queryByOrg` reads are UNIONed, so
-        // naming it can only ADD — and what it adds are the pre-#6190
-        // phantoms: org-scoped rows of types with no per-org read channel,
-        // which `loadMetaFromDb` walks past and
-        // {@link reportUnhydratableOrgScopedRows} exists to say out loud. Read
-        // back, they surface in the admin "Used by" panel and the Studio
-        // governance directory — inside a clearance shown before a
-        // destructive action, where a resurrected row is worse than an
-        // omission because it reads as evidence.
-        //
-        // ── Why this is a repair, not a tenancy read-scope change ───────────
-        //
-        // Let `f(t, o) = organizationIdForMetaRead(t, o)`. `f` answers `o` when
-        // the registry declares `t` per-org overridable and `undefined`
-        // otherwise, so `f(t, f(t, o)) === f(t, o)` for EVERY `t` and `o`. A
-        // caller that already gates therefore sees no change, provided it gated
-        // on the same type this line gates on. Every such caller does:
-        //
-        //  • `packages/rest`'s `GET /meta/:type` list door — one of TWO doors
-        //    that both gate and reach this method — computes
-        //    `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type),
-        //    ctx?.tenantId)` and then passes `type: req.params.type`, the RAW
-        //    segment. The first statement of this method folds that segment
-        //    through {@link canonicalizeMetaRequestType}, which IS
-        //    `canonicalMetaUrlType` — so `request.type` here is the identical
-        //    STRING the door gated on, and the second application is the
-        //    algebraic no-op above.
-        //  • `GET /meta/diagnostics?type=` — the SECOND such door, and the one
-        //    a caller-side grep cannot see. It gates the same way
-        //    (`organizationIdForMetaRead(canonicalMetaUrlType(diagnosticsType),
-        //    ctx?.tenantId)`) and then passes its own RAW segment on — but it
-        //    reaches this method TRANSITIVELY, through
-        //    {@link getMetaDiagnostics}, whose `?type=` arm sets `targetTypes =
-        //    [request.type]` and loops `getMetaItems({ type: t,
-        //    organizationId, … })` over it. So the door's segment still arrives
-        //    here as `request.type` and is still folded by the same first
-        //    statement: the identical STRING, the same algebraic no-op, one hop
-        //    further out. ⚠️ That hop is UNDECLARED — `getMetaDiagnostics` is
-        //    not a member of `MetadataProtocol`, neither required nor optional,
-        //    so the door reaches it through a `(p as any)` cast behind a 501
-        //    feature-detect. Real at runtime, invisible to the type system, and
-        //    therefore something a caller census must be TOLD rather than left
-        //    to derive.
-        //  • the search sweep's page read below gates on `'page'` and passes
-        //    `'page'`; `page` is non-overridable, so both readings are
-        //    `undefined` whatever the session holds.
-        //  • the four remaining `organizationIdForMetaRead` call sites in
-        //    `rest-server.ts` (`/layers`, the by-name read, `/history`,
-        //    `/diff`) reach `getMetaItemLayered` / `getMetaItem` /
-        //    `historyMetaItem` / `diffMetaItem` — never this method, at any
-        //    depth — so this line cannot move them at all. Two doors named
-        //    above plus these four IS that file's whole set of SIX; the
-        //    enumeration that named one door and "four remaining" described
-        //    five, and the door it dropped was the one that reaches here.
-        //
-        // ⭐ Read this list from the CALLEE side, which is how it is now built.
-        // A grep for doors that invoke `getMetaItems` answers only its own
-        // question: it cannot see a door that arrives through something else,
-        // and that is exactly how the diagnostics door went unlisted. The
-        // closed form is the other direction — `this.getMetaItems(` has THREE
-        // callers in this file: {@link getMetaDiagnostics},
-        // {@link searchAll} and {@link findReferencesToMeta}. The third gates
-        // nothing, deliberately: its door spends the organization on the
-        // reference SOURCES while `req.params.type` is the TARGET, so it hands
-        // the tenant over RAW and is not a caller this paragraph is about.
-        //
-        // ⛔ Gate AFTER the fold, never before it. `declaresOrgOverride`
-        // tolerates the MANIFEST plurals and not the URL-only ones
-        // (`translations` / `email_templates` have no manifest key), and
-        // commit 26f3588fb measured what that costs when the raw segment reaches the
-        // predicate: one item in two partitions, addressed by spelling. Folding
-        // happens at the boundary and only there; this line reads what the
-        // boundary produced.
-        //
-        // ⚠️ ONE resolution for BOTH arms, deliberately — the active-overlay
-        // read below and the `previewDrafts` read further down both spend it.
-        // A gate threaded into only one arm would leave the draft preview
-        // resurrecting exactly the phantoms the active list had just stopped
-        // serving, which is the half-fix shape #9454's own hoist comment
-        // refuses one package over.
-        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
+        // The list serves the environment's stored rows over the code
+        // packages' definitions, and no organization's: a legacy
+        // organization-scoped row is reported at boot
+        // ({@link reportUnhydratableOrgScopedRows}) and never served. The one
+        // exception is `legacyFormOrganizationId`, which only the anonymous
+        // form doors pass (triage ruling Q3 A): their read of a `view` keeps
+        // the Default Organization's legacy layer — that organization's body
+        // preferred, and a withdrawal in either layer closing the form —
+        // fail-closed until the v18 migration ceremony (ADR-0131 C7) carries
+        // those rows into the environment layer and deletes this read. Any
+        // other type reads the environment alone, whoever passes the key.
+        const orgId = canonicalMetaType(request.type) === 'view' ? request.legacyFormOrganizationId : undefined;
         let items: unknown[] = [];
 
         // Unscoped kernels (control plane): read everything from SchemaRegistry.
@@ -8884,10 +8805,9 @@ export class ObjectStackProtocolImplementation implements
         // was never surfaced whenever system-bridged items populated the
         // registry). Deduplicate against whatever the registry returned.
         //
-        // ADR-0005 (revised 2026-05): isolation is now per-organization, since
-        // each env has its own physical DB. We surface both org-scoped overlays
-        // (when an active org is provided) and env-wide (organization_id IS NULL)
-        // overlays; org-scoped rows win on name collision.
+        // [ADR-0131 D6] The environment's rows (organization_id IS NULL); the
+        // anonymous form doors' legacy layer adds one legacy organization's
+        // rows, which win their slot (see the `orgId` binding above).
         // [#21761] Every active row of the type in this caller's scopes,
         // whichever package each is bound to: what each listed item's lock is
         // selected from ({@link overlayLockLayerAt}'s selection, below). A list
@@ -8970,7 +8890,7 @@ export class ObjectStackProtocolImplementation implements
                     return this.foldObjectExtendersFromRegistry(
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
-                }, { organizationId: orgId }, unseated);
+                }, { legacyOrganizationId: orgId }, unseated);
 
                 // [#13407] Expand any aggregated `defineView` container this
                 // READ just merged in, INLINE into this response's own `items`
@@ -9149,10 +9069,15 @@ export class ObjectStackProtocolImplementation implements
                 // process reads from — one listing call was enough, and it also
                 // undid the write-side gate for anything already saved. The
                 // per-row verdict now lives in the shared hydrator, which each
-                // row's own `organizationId` answers to; the merged LIST above
-                // is unchanged, so org readers still get their overlays.
+                // row's own `organizationId` answers to.
+                //
+                // [ADR-0131 D6] An overlay of a sealed managed item is not
+                // served ({@link isUnservedSealedOverlay}), so it is not
+                // registered either: the registry keeps the package's
+                // definition, the item the reads serve.
                 if (this.environmentId === undefined) {
-                    for (const { data, packageId: recPkg, organizationId: recOrg } of overlays) {
+                    for (const { name, data, packageId: recPkg, organizationId: recOrg } of overlays) {
+                        if (this.isUnservedSealedOverlay(request.type, name)) continue;
                         this.hydrateOverlayIntoRegistry(request.type, data, {
                             packageId: recPkg,
                             organizationId: recOrg,
@@ -9194,15 +9119,15 @@ export class ObjectStackProtocolImplementation implements
                     }
                     return rs ?? [];
                 };
-                const draftRecords = [...(await queryDrafts(null, packageId)), ...(orgId ? await queryDrafts(orgId, packageId) : [])];
+                // [ADR-0131 D6] The environment's drafts only, whoever asks.
+                const draftRecords = await queryDrafts(null, packageId);
                 // [#21817] A list scoped to a package previews the package-less
                 // drafts as stand-ins, as its active arm does: the
                 // package-agnostic draft read, filtered back to the
                 // package-less rows. The by-name preview arm naming the
                 // package serves that draft when the package has none.
                 const standInDraftRecords = packageId
-                    ? [...(await queryDrafts(null, undefined)), ...(orgId ? await queryDrafts(orgId, undefined) : [])]
-                        .filter((record) => (record?.package_id ?? null) === null)
+                    ? (await queryDrafts(null, undefined)).filter((record) => (record?.package_id ?? null) === null)
                     : [];
                 if (draftRecords.length > 0 || standInDraftRecords.length > 0) {
                     // ADR-0048 (#1828) — package-aware draft overlay (parity with
@@ -9237,7 +9162,7 @@ export class ObjectStackProtocolImplementation implements
                     items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
-                    }, { organizationId: orgId }, unseated);
+                    }, {}, unseated);
                 }
             } catch (error) {
                 // [#5532] Same rule as the active-overlay read above. Serving
@@ -9456,15 +9381,14 @@ export class ObjectStackProtocolImplementation implements
                 const address: ItemAddress = {
                     type: request.type,
                     name: itemName,
-                    organizationId: orgId,
                     packageId: itemPackageId,
                 };
                 shipping ??= this.shippingPackagesOf(request.type);
                 itemLock = resolveItemLock({
                     artifact: this.artifactLockLayerAt(address, shipping),
-                    overlay: await resolveOverlayLockLayer(address, (organizationId, spelling) =>
+                    overlay: await resolveOverlayLockLayer(address, (spelling) =>
                         (lockRowsByName.get(itemName) ?? []).filter((row) =>
-                            (row.organization_id ?? null) === organizationId
+                            (row.organization_id ?? null) === null
                             && row.type === (spelling === 'canonical' ? request.type : otherType)), { otherSpelling: true }),
                 });
             }
@@ -9483,22 +9407,23 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#21442] The active `sys_metadata` rows a read of `request.type` consults
-     * for one caller: the environment-wide rows, plus that organization's rows
-     * when `orgId` names one (an organization's row wins its slot), restricted
-     * to `request.packageId` when one is given. Moved here unchanged from
+     * [#21442, ADR-0131 D6] The active `sys_metadata` rows a read of
+     * `request.type` consults: the environment's rows, restricted to
+     * `request.packageId` when one is given — plus, for the anonymous form
+     * doors' read alone, the rows of the legacy organization
+     * `legacyOrganizationId` names (that organization's row wins its slot;
+     * read uncached, and retired with the v18 migration ceremony). Moved here unchanged from
      * {@link readFlattenedMetaItems}, the list read, so the by-name read
      * ({@link resolveRowlessExpandedView}) selects the view containers it
      * expands by this same rule — ⛔ never a second selection rule, which would
      * be a second expansion rule.
      *
-     * `orgId` arrives already gated ({@link organizationIdForMetaRead}). A read
-     * failure is thrown as the engine threw it; each caller applies the #5532
-     * rule ({@link rethrowUnlessMetadataStoreUnprovisioned}).
+     * A read failure is thrown as the engine threw it; each caller applies the
+     * #5532 rule ({@link rethrowUnlessMetadataStoreUnprovisioned}).
      */
     private async readActiveOverlayRows(
         request: { type: string; packageId?: string },
-        orgId: string | undefined,
+        legacyOrganizationId?: string,
     ): Promise<any[]> {
         const { packageId } = request;
         const queryByOrg = async (oid: string | null): Promise<any[]> => {
@@ -9524,7 +9449,7 @@ export class ObjectStackProtocolImplementation implements
         //
         // ⭐ The cache sits HERE, and its position IS the resolution of the
         // SchemaRegistry-hydration trap #11633 §4 names. What is cached is
-        // the ROW SET — the value the two `queryByOrg` calls produce —
+        // the ROW SET — the value the environment `queryByOrg` call produces —
         // never the merged answer below it. Everything downstream of this
         // point still runs on every call, hit or miss: the overlay parse,
         // the package-aware merge, `hydrateOverlayIntoRegistry`, the
@@ -9550,7 +9475,6 @@ export class ObjectStackProtocolImplementation implements
         const overlayCacheKey: MetaOverlayCacheKey = {
             type: request.type,
             packageId,
-            organizationId: orgId,
         };
         const overlayCacheEpoch = readWriteEpoch(this.engine);
         const overlayCacheTtlMs = metaOverlayCacheTtlMs();
@@ -9563,30 +9487,7 @@ export class ObjectStackProtocolImplementation implements
         if (cachedRecords !== undefined) {
             records = cachedRecords as any[];
         } else {
-            const envWideRecords = await queryByOrg(null);
-            const orgRecords = orgId ? await queryByOrg(orgId) : [];
-            // org-specific rows override env-wide rows on name collision.
-            // ADR-0048 (#1828) — key by (package, name), not bare name, so a
-            // package A row and a package B row of the same name do not
-            // collapse; org-over-env precedence still holds within each slot.
-            //
-            // [#7774] …and for a bundled type the slot is `(package, name,
-            // locale)`. Within ONE org this changes nothing — the store's own
-            // unique index is `(type, name, organization_id, package_id)`, so
-            // an org cannot hold two rows that differ only by body locale.
-            // Across the two tiers it can: an env-wide row and this org's row
-            // may customize DIFFERENT members of one bundle, and keying them
-            // together made the org's zh-CN row silently displace the
-            // env-wide en-US one. Precedence is unchanged where it was ever
-            // meaningful — an org row still overrides the env-wide row of the
-            // same member — and an undiscriminated type keeps a
-            // byte-identical key.
-            const mergedMap = new Map<string, any>();
-            const rowKey = (r: any): string =>
-                metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
-            for (const r of envWideRecords) mergedMap.set(rowKey(r), r);
-            for (const r of orgRecords) mergedMap.set(rowKey(r), r);
-            records = Array.from(mergedMap.values());
+            records = await queryByOrg(null);
             // ⭐ An EMPTY row set is cached too, and that is the main point
             // rather than an edge case: the empty result is what triggers the
             // alt-type retry above, so "no overlay rows for this type" is the
@@ -9597,7 +9498,21 @@ export class ObjectStackProtocolImplementation implements
                 this.engine, overlayCacheKey, overlayCacheEpoch, records, overlayCacheTtlMs, overlayCacheNow,
             );
         }
-        return records;
+        if (!legacyOrganizationId) return records;
+        // The anonymous form doors' legacy layer (triage Q3 A, ADR-0131 C7):
+        // that organization's rows override the environment's on name
+        // collision. ADR-0048 (#1828) — key by (package, name), not bare name,
+        // so a package A row and a package B row of the same name do not
+        // collapse. [#7774] …and for a bundled type the slot is `(package,
+        // name, locale)`: an environment row and the organization's row may
+        // customize DIFFERENT members of one bundle.
+        const orgRecords = await queryByOrg(legacyOrganizationId);
+        const mergedMap = new Map<string, any>();
+        const rowKey = (r: any): string =>
+            metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
+        for (const r of records) mergedMap.set(rowKey(r), r);
+        for (const r of orgRecords) mergedMap.set(rowKey(r), r);
+        return Array.from(mergedMap.values());
     }
 
     /**
@@ -9628,9 +9543,9 @@ export class ObjectStackProtocolImplementation implements
             if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                 (data as any)._packageId = recPkg;
             }
-            // [#6602] The row's own scope travels with its body. The
-            // merged row set is env-wide rows PLUS this org's rows, and
-            // the two are only distinguishable here, at the row.
+            // [#6602] The row's own scope travels with its body: the form
+            // doors' legacy layer merges a legacy organization's rows into
+            // the environment's, and the two are only distinguishable here.
             const recOrg = (record as { organization_id?: string | null }).organization_id ?? null;
             return {
                 name: String(record.name), data, packageId: recPkg, organizationId: recOrg,
@@ -9715,7 +9630,7 @@ export class ObjectStackProtocolImplementation implements
      * instead of the one the list serves.
      *
      * The answer is the list read's own, by construction: the same rows
-     * ({@link readActiveOverlayRows}, same `packageId`, same gated `orgId`),
+     * ({@link readActiveOverlayRows}, same `packageId`, the environment's),
      * the same parse ({@link storedOverlayEntries}) and the same expansion
      * ({@link expandStoredViewContainers} over
      * {@link expandRuntimeViewContainer}), selected for the address by the
@@ -9738,7 +9653,6 @@ export class ObjectStackProtocolImplementation implements
      */
     private async resolveRowlessExpandedView(
         request: { type: string; name: string; packageId?: string },
-        orgId: string | undefined,
     ): Promise<RowlessExpandedView | undefined> {
         if ((PLURAL_TO_SINGULAR[request.type] ?? request.type) !== 'view') return undefined;
         let records: any[] = [];
@@ -9749,10 +9663,9 @@ export class ObjectStackProtocolImplementation implements
         try {
             records = await this.readActiveOverlayRows(
                 { type: request.type, ...(request.packageId ? { packageId: request.packageId } : {}) },
-                orgId,
             );
             if (request.packageId) {
-                standInRows = (await this.readActiveOverlayRows({ type: request.type }, orgId))
+                standInRows = (await this.readActiveOverlayRows({ type: request.type }))
                     .filter((row) => (row?.package_id ?? null) === null);
             }
         } catch (error) {
@@ -9772,8 +9685,7 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * [#21716, ADR-0005] The stored `sys_metadata` row a by-name read SERVES
-     * for `(type, name)` in `orgId`'s scope, and the scope it was read from —
-     * the ONE content resolution {@link getMetaItem} (both its draft-preview
+     * for `(type, name)` — the ONE content resolution {@link getMetaItem} (both its draft-preview
      * arm and its row read) and {@link getMetaItemLayered} call.
      *
      * [#21761] It decides the served CONTENT only, never the lock. The lock's
@@ -9784,12 +9696,10 @@ export class ObjectStackProtocolImplementation implements
      * reported that package's row while the gate bound whichever row
      * `findOne` returned first.
      *
-     * Precedence is ADR-0005's, and it is precedence, never a merge (the
-     * ruling is recorded in {@link getMetaItem}): the org-scoped row wins,
-     * and the env-wide row (`organization_id` null) is the fallback. Within
-     * one scope, ADR-0048 prefer-local: with a `packageId`, that package's
-     * row first and then the package-less row, never another package's; with
-     * none, any row.
+     * The environment's rows only (`organization_id` null, ADR-0131 D6): a
+     * legacy organization-scoped row is reported at boot and never served.
+     * ADR-0048 prefer-local: with a `packageId`, that package's row first and
+     * then the package-less row, never another package's; with none, any row.
      *
      * [#21804] That order is {@link servedOverlayRowCandidates}, and this
      * method is its store reader: one `findOne` per candidate, first hit
@@ -9797,32 +9707,26 @@ export class ObjectStackProtocolImplementation implements
      * reader, over the rows the list already read, so a package's list slot
      * serves the row this method serves for that package.
      *
-     * `orgId` arrives already gated ({@link organizationIdForMetaRead}): an
-     * organization only selects a row on a type the registry declares per-org
-     * overridable, so a pre-#6190 phantom org row is never the served one.
-     *
      * The reads keep the at-rest tolerance they have always had: a row stored
-     * under the type's other spelling (pre-#4432 residue) is the last resort
-     * in each scope.
+     * under the type's other spelling (pre-#4432 residue) is the last resort.
      *
-     * Returns `undefined` when neither scope holds a row. A failed read
-     * propagates: each caller owns its #5532 discrimination.
+     * Returns `undefined` when no row is found. A failed read propagates: each
+     * caller owns its #5532 discrimination.
      */
     private async findServedOverlayRow(args: {
         type: string;
         name: string;
-        orgId: string | undefined;
         state: 'active' | 'draft';
         packageId?: string;
-    }): Promise<{ row: any; scope: 'org' | 'env' } | undefined> {
+    }): Promise<{ row: any } | undefined> {
         // [#21804] The order is {@link servedOverlayRowCandidates}, the one
-        // the list's merge takes over the rows it read: per scope, the
-        // canonical spelling then the other, and within each, the package's
+        // the list's merge takes over the rows it read: the canonical
+        // spelling then the other, and within each, the package's
         // own row then the package-less row (never another package's, or a
         // collision would serve package B's customization for a package A
         // read); with no package context (legacy/runtime reader), any row.
         const other = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
-        for (const candidate of servedOverlayRowCandidates({ organizationId: args.orgId, packageId: args.packageId })) {
+        for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId })) {
             const type = candidate.spelling === 'canonical' ? args.type : other;
             if (type === undefined) continue;
             const where: Record<string, unknown> = {
@@ -9835,7 +9739,7 @@ export class ObjectStackProtocolImplementation implements
             // itself (`organization_id` above). It no longer reaches the data
             // engine as a principal-less context.
             const row = await this.engine.findOne('sys_metadata', { where, context: { isSystem: true } });
-            if (row) return { row, scope: candidate.scope };
+            if (row) return { row };
         }
         return undefined;
     }
@@ -9866,136 +9770,26 @@ export class ObjectStackProtocolImplementation implements
      */
     private overlayLockLayerAt(address: ItemAddress, options: { readonly otherSpelling: boolean }): Promise<unknown> {
         const other = PLURAL_TO_SINGULAR[address.type] ?? SINGULAR_TO_PLURAL[address.type];
-        return resolveOverlayLockLayer(address, async (organizationId, spelling) => {
+        return resolveOverlayLockLayer(address, async (spelling) => {
             const type = spelling === 'canonical' ? address.type : other;
             if (type === undefined) return [];
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
             const rows: StoredOverlayRow[] | null | undefined = await this.engine.find('sys_metadata', {
-                where: { type, name: address.name, state: 'active', organization_id: organizationId },
+                where: { type, name: address.name, state: 'active', organization_id: null },
                 context: { isSystem: true },
             });
             return rows ?? [];
         }, options);
     }
 
-    async getMetaItem(request: { type: string, name: string, packageId?: string, organizationId?: string, state?: 'active' | 'draft', previewDrafts?: boolean }) {
+    async getMetaItem(request: { type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
         let item: unknown;
-        // ── [commit d5cbb44f3] The registry read gate, resolved ONCE, HERE ────────────────────
-        //
-        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
-        // read doors applied from #9454, and which commit 96326040f moved INSIDE the
-        // plural verb, `getMetaItems` above. Until this line the SINGULAR verb
-        // applied no gate of its own: whatever organization arrived was spent on
-        // whatever type arrived.
-        //
-        // ⭐ THE SHARPER HALF, and why the plural verb's fix did not cover it.
-        // `getMetaItems` UNIONs its two `queryByOrg` reads, so an ungated
-        // organization can only ADD rows — the resurrection commit 96326040f closed.
-        // The two scope reads below ({@link findServedOverlayRow}) combine as
-        // PRECEDENCE: an ungated organization can SUBSTITUTE. On a type the
-        // registry declares `allowOrgOverride: false`, a pre-#6190 phantom
-        // org-scoped row — the kind `loadMetaFromDb` walks past and
-        // {@link reportUnhydratableOrgScopedRows} exists to warn about — was
-        // served INSTEAD OF the live env-wide document, to a caller that asked
-        // for the live one. Not an extra row in a list: the served document.
-        //
-        // ── ⛔ The `??` is the RULING, not the defect ────────────────────────
-        //
-        // Do not "repair" this by turning the precedence read into a layering or
-        // union of the org overlay OVER the env-wide row.
-        //
-        // ⚠️ Read the citations at their real scope. ADR-0005's decision block
-        // names THIS method — `RUNTIME READ getMetaItem(type, name)` → `1.
-        // sys_metadata … ← overlay (wins)`, `2. SchemaRegistry /
-        // MetadataService ← artifact default` — but the pair it RANKS is
-        // overlay-vs-artifact-default, not org-row-vs-env-wide-row. It settles
-        // that an overlay WINS rather than merges; it does not by itself settle
-        // this method's inner `??`.
-        //
-        // What settles the inner one:
-        //  • ADR-0005 design principle 3 — "Customizations are full-JSON
-        //    deltas, not field-level patches" — stores the ENTIRE item
-        //    document per overlay row, so a layering would have nothing to
-        //    layer. The field-level patch model that would have given
-        //    "layering" a meaning was retired and deleted whole under ADR-0049
-        //    (commit 9e0ba21a1, maintainer ruling 2026-08-29), recorded as a
-        //    correction inside principle 3 itself, with ADR-0126 §6 ruling out
-        //    the phase it was held for.
-        //  • {@link organizationIdForMetaRead}'s own docblock quotes THIS
-        //    expression — `(orgId ? findOverlay(orgId) : undefined) ??
-        //    findOverlay(null)` — as the intended shape while defining #9454.
-        //    Precedence is the behaviour that card was written against, not the
-        //    thing it reported.
-        //  • ADR-0029 D9 reaches the same shape one type over. ⚠️ Quoted, not
-        //    paraphrased: `resolveObject` "selects its base layer as `overlay ??
-        //    owner` instead of `owner`, then folds `extend` contributions". Its
-        //    status line reads "Design only — nothing is implemented yet", so
-        //    it is corroboration, not an authority this method rests on.
-        // ⇒ The defect is which ROW `orgId` selects, never how the two rows
-        // combine.
-        //
-        // ── The idempotence proof this change was made conditional on ───────
-        //
-        // Let `f(t, o) = organizationIdForMetaRead(t, o)`.
-        //
-        //  • `f(t, undefined) === undefined` for every `t`, so every caller that
-        //    names no organization — `import-mapping.ts`, `import-prepare.ts`,
-        //    plugin-email's template read, service-analytics' draft probe,
-        //    plugin-auth's `metaReader` — reads exactly what it reads today.
-        //  • `f(t, f(t, o)) === f(t, o)`, so a caller that already gated on the
-        //    same type sees no change. The REST by-name door computes
-        //    `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type),
-        //    ctx?.tenantId)` and then passes `type: req.params.type`, the RAW
-        //    segment; the first statement of this method folds that segment
-        //    through {@link canonicalizeMetaRequestType}, which IS
-        //    `canonicalMetaUrlType` — so `request.type` here is the identical
-        //    STRING the door gated on, and this is the algebraic no-op.
-        //  • That door's CACHED arm reaches here through `getMetaItemCached`,
-        //    which folds first and forwards the same hoisted `readOrganizationId`
-        //    — the same no-op, one hop later.
-        //  • [ADR-0131 D6] Every write lands environment-wide (an
-        //    organization-scoped one is refused, {@link
-        //    organizationScopedWriteRefusal}), and the write-side pre-reads
-        //    (`saveMetaItem`'s destructive-change probe, `publishMetaItem`'s
-        //    seed-loader adapter, `publishPackageDrafts`' build probes) carry
-        //    no organization, so they read the partition their write LANDS in.
-        //
-        // ⇒ What is left to move is the runtime callers that hand this method a
-        // RAW active organization. THREE, all in one file — the population is
-        // stated with the method that establishes it, because the first
-        // enumeration of it named only the first file and was wrong: grep every
-        // `getMetaItem(` / `getMetaItemCached(` invocation in the repo, then
-        // trace each `organizationId` argument to its source.
-        //  • `runtime/src/domains/meta.ts:703` and `:745` — hard-coded `type:
-        //    'object'`, which is `allowOrgOverride: false`: callers that cannot
-        //    be right about scope, by construction.
-        //  • `runtime/src/domains/meta.ts:768` — `singularType` off the URL, so
-        //    it moves only for the non-overridable half of what it serves.
-        // A FOURTH used to sit here: `applyPublishedSeeds` in
-        // `runtime/src/domains/packages.ts`, `type: 'seed'`, equally
-        // non-overridable. It hand-rolled an org-then-env ladder that this gate
-        // had turned into a byte-identical repeat — both rungs asking the
-        // engine the same predicates and serving the same answer. Commit 8744de9e9
-        // measured that (ablation: neutering the second rung reddened nothing
-        // on a pinned publish-then-read path) and collapsed it to a single read
-        // naming no organization at all, so it now belongs to the bucket below.
-        // Every other invocation either names no organization at all or is a
-        // REST door that already computed `organizationIdForMetaRead` — the
-        // idempotence legs above are what make those two cases no-ops.
-        //
-        // ⚠️ ONE resolution for BOTH arms, deliberately — the ADR-0033
-        // `previewDrafts` read below and the active-overlay read under it both
-        // spend this binding. A gate threaded into only one would leave the
-        // draft preview serving exactly the phantom the active read had just
-        // stopped serving, the half-fix shape #9454's hoist comment refuses.
-        //
-        // ⛔ Gate AFTER the fold, never before it. `declaresOrgOverride`
-        // tolerates the MANIFEST plurals and not the URL-only ones
-        // (`translations` / `email_templates` have no manifest key); commit 26f3588fb
-        // measured what that costs when a raw segment reaches the predicate.
-        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
+        // [ADR-0131 D6] Environment → code: the environment's stored row,
+        // else the code packages' definition. No organization's row is read —
+        // a legacy organization-scoped row is reported at boot
+        // ({@link reportUnhydratableOrgScopedRows}) and never served.
         // Studio's editor opens a draft buffer with `state: 'draft'`;
         // runtime loaders omit it and get the live published row.
         const readState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
@@ -10021,9 +9815,8 @@ export class ObjectStackProtocolImplementation implements
         // Scoped to the ACTIVE read. A draft is answered as a draft (the strict
         // `state: 'draft'` read and the `previewDrafts` arm), never under the
         // artifact's envelope, and the list's own preview arm is equally
-        // unfiltered. Organization-scoped flow rows never reach this read:
-        // `orgId` is `undefined` for `flow`, which declares no org override.
-        // What becomes of the stored rows themselves (keep, refuse, migrate) is
+        // unfiltered. Organization-scoped rows never reach this read
+        // (ADR-0131 D6). What becomes of the stored rows themselves (keep, refuse, migrate) is
         // not decided here.
         //
         // ── [#21922, ADR-0062 D4, ADR-0126 §3] A code-defined DATASOURCE name ──
@@ -10056,7 +9849,6 @@ export class ObjectStackProtocolImplementation implements
                 const draftRec = (await this.findServedOverlayRow({
                     type: request.type,
                     name: request.name,
-                    orgId,
                     state: 'draft',
                     ...(request.packageId ? { packageId: request.packageId } : {}),
                 }))?.row;
@@ -10086,11 +9878,10 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // 1. Customization overlay lookup (sys_metadata).
-        //    Per ADR-0005 (revised), org-scoped row wins; env-wide
-        //    (organization_id IS NULL) row is the fallback before falling
+        // 1. Customization overlay lookup (sys_metadata): the environment's
+        //    row (organization_id IS NULL, ADR-0131 D6) before falling
         //    through to the in-memory registry / MetadataService.
-        //    ADR-0048 prefer-local within each scope (a package id prefers that
+        //    ADR-0048 prefer-local (a package id prefers that
         //    package's row, then the package-less one, mirroring
         //    `SchemaRegistry.getItem(type, name, pkg)`). [#21716] The ONE
         //    served-row resolution — see {@link findServedOverlayRow}. It
@@ -10103,7 +9894,6 @@ export class ObjectStackProtocolImplementation implements
             const record = (await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
-                orgId,
                 state: readState,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
             }))?.row;
@@ -10152,7 +9942,7 @@ export class ObjectStackProtocolImplementation implements
                 item: decorateMetadataItem(request.type, this.governServedObject(request.type, item)),
                 // [#22114] The draft row's version token — the one a draft save
                 // (`?mode=draft`) at this address accepts as `If-Match`.
-                version: await this.readVersionToken(request, orgId, 'draft'),
+                version: await this.readVersionToken(request, 'draft'),
             };
         }
 
@@ -10169,7 +9959,6 @@ export class ObjectStackProtocolImplementation implements
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
                 name: request.name,
-                organizationId: orgId,
                 packageId: request.packageId,
             }, { otherSpelling: true });
         } catch (error) {
@@ -10215,7 +10004,7 @@ export class ObjectStackProtocolImplementation implements
         //     answered only for an environment-wide container. ⛔ No
         //     kernel-specific branch: every kernel answers here.
         if (item === undefined) {
-            const expanded = await this.resolveRowlessExpandedView(request, orgId);
+            const expanded = await this.resolveRowlessExpandedView(request);
             if (expanded !== undefined) item = expanded.item;
         }
 
@@ -10340,7 +10129,6 @@ export class ObjectStackProtocolImplementation implements
             artifact: this.artifactLockLayerAt({
                 type: request.type,
                 name: request.name,
-                organizationId: orgId,
                 packageId: request.packageId,
             }),
             overlay: overlayLockLayer,
@@ -10420,7 +10208,7 @@ export class ObjectStackProtocolImplementation implements
             // editor reads `state: 'draft'` or the plain read.
             ...(request.previewDrafts
                 ? {}
-                : { version: storedRowServed ? await this.readVersionToken(request, orgId, 'active') : null }),
+                : { version: storedRowServed ? await this.readVersionToken(request, 'active') : null }),
         };
     }
 
@@ -10475,13 +10263,12 @@ export class ObjectStackProtocolImplementation implements
         type: string;
         name: string;
         packageId?: string;
-        organizationId?: string;
     }): Promise<{
         type: string;
         name: string;
         code: unknown | null;
         overlay: unknown | null;
-        overlayScope: 'org' | 'env' | null;
+        overlayScope: 'env' | null;
         effective: unknown | null;
         /**
          * Load-time validation result for the effective payload — same
@@ -10517,99 +10304,8 @@ export class ObjectStackProtocolImplementation implements
         // `overlay` can be read from two.
         request = canonicalizeMetaRequestType(request);
 
-        // ── [commit e1d4f9e3f] The registry read gate, resolved AFTER the fold ─────────
-        //
-        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
-        // read doors applied from #9454, and the same gate
-        // `getMetaItems` (commit 96326040f) and `getMetaItem` (commit d5cbb44f3) now carry. Until
-        // this line `getMetaItemLayered` — the third `/meta` read verb —
-        // applied NO gate of its own: whatever organization arrived was spent
-        // on whatever type arrived.
-        //
-        // ⛔ THE BINDING MOVED, and that reorder IS the fix. It used to sit
-        // ABOVE the fold, so dropping the sibling verbs' one-liner in place
-        // would have gated on the RAW type. Commit 26f3588fb measured what that costs:
-        // `declaresOrgOverride` tolerates the MANIFEST plurals but not the
-        // URL-only ones (`translations` / `email_templates` have no manifest
-        // key), so a raw segment splits one item across two partitions. Both
-        // REST callers below hand this method an unfolded `/meta/:type`
-        // segment, so gating before the fold would have been wrong on exactly
-        // the types the gate exists to admit.
-        //
-        // ⭐ THE HARM IS A FALSE POSITIVE CUSTOMIZATION CLAIM — which is why
-        // this verb was graded on its own rather than inheriting either twin's.
-        // On the plural verb a phantom can only ADD a row; on the singular verb
-        // it REPLACES the served document. Here the affected value is the
-        // `overlay` layer of a three-layer diagnostic whose entire purpose is
-        // to answer "what did this tenant customize", so a pre-#6190 phantom
-        // org-scoped row of an `allowOrgOverride: false` type is rendered by
-        // the Studio "Code default vs Overlay vs Effective" diff tab as
-        // evidence of a customization that does not exist. It compounds at the
-        // two doors that return the `overlay` layer AS the response: there the
-        // phantom is not merely displayed, it is served.
-        //
-        // ── The idempotence proof, discharged over THIS door's callers ──────
-        //
-        // Let `f(t, o) = organizationIdForMetaRead(t, o)`. `f` answers `o` when
-        // the registry declares `t` per-org overridable and `undefined`
-        // otherwise, so `f(t, undefined) === undefined` and
-        // `f(t, f(t, o)) === f(t, o)` for every `t` and `o`. Commit 96326040f's and
-        // commit d5cbb44f3's proofs do NOT carry: the ruling behind commit 96326040f discharges this per
-        // door over that door's OWN caller population, and this verb's is a
-        // different set. Enumerated by grepping every `getMetaItemLayered(`
-        // invocation in the repo and tracing each `organizationId` argument to
-        // its source — no caller is denied a partition it can legitimately
-        // read:
-        //
-        //  • `rest-server.ts`'s `/meta/:type/:name/layers` door (and the
-        //    deprecated `?layers=` flag, which delegates to the same helper)
-        //    computes `organizationIdForMetaRead(canonicalMetaUrlType(
-        //    req.params.type), ctx?.tenantId)` and then passes `type:
-        //    req.params.type`, the RAW segment. The fold above IS
-        //    `canonicalMetaUrlType`, so `request.type` here is the identical
-        //    STRING the door gated on — the algebraic no-op.
-        //  • Four of the five `plugin-security` invocations name no
-        //    organization at all (`packaged-permission-set-lock-gate.ts`'s
-        //    authoring gate, and three of `permission-set-projection.ts`'s
-        //    reads), so `f(t, undefined) === undefined` leaves them reading
-        //    exactly what they read today. `permission-set-overlay-discard.ts`
-        //    only feature-detects this method and delegates to
-        //    `projectPermissionMutation`; it is not a call site.
-        //
-        // ⇒ THREE callers move, and each one is the defect. ⚠️ Only the first
-        // was named by the enumeration this repair was dispatched with, which
-        // asserted that the runtime dispatcher was the ONLY reachable site,
-        // that BOTH REST doors already gated, and that every `plugin-security`
-        // site passed no organization. The last two were measured false here —
-        // in the direction that adds callers to this gate, never one that
-        // removes them:
-        //
-        //  • `runtime/src/domains/meta.ts` — `resolveActiveOrganizationId`
-        //    straight into the request, on a `type` taken off the URL, so it is
-        //    not confined to the overridable five. Its `if (layered?.overlay !=
-        //    null)` branch returns the overlay layer AS the response.
-        //  • `rest-server.ts`'s `/meta/:type/:name/published` door — the REST
-        //    twin of that dispatcher branch, and the door recorded as already
-        //    gating. It passes `publishedCtx.tenantId` RAW and then
-        //    `res.json(layered.overlay)`. Its own comment argues the raw tenant
-        //    "is right for a READ" because the overlay lookup is
-        //    org-first-then-env, so "nothing that resolves today stops
-        //    resolving" — precisely the argument {@link
-        //    organizationIdForMetaRead} was written to refute: failing open in
-        //    that direction is what RESURRECTS the phantoms, which is why
-        //    #6190 stopped minting them and why boot hydration walks past the
-        //    survivors.
-        //  • `permission-set-projection.ts`'s post-mutation read forwards
-        //    `evt.organizationId` — a raw active organization on
-        //    `type: 'permission'`, which is `allowOrgOverride: false`. Moving
-        //    it makes the projection read the partition boot hydration
-        //    actually serves: the same correction, one caller further out.
-        //
-        // ⚠️ ONE resolution for BOTH overlay arms, deliberately — the
-        // org-scoped read and the env-wide fallback below both spend this
-        // binding, and gating only the first would leave `overlayScope: 'org'`
-        // reachable for a type with no per-org read channel.
-        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
+        // [ADR-0131 D6] Environment → code: the overlay layer is the
+        // environment's stored row; no organization's row is read.
 
         // ── code layer: MetadataService.get + registry, BYPASSING overlay ──
         let code: unknown | null = null;
@@ -10704,29 +10400,26 @@ export class ObjectStackProtocolImplementation implements
             this.throwMetadataServiceUnavailable(codeDegraded.errors);
         }
 
-        // ── overlay layer: sys_metadata row (org-scoped wins, then env-wide) ──
+        // ── overlay layer: the environment's sys_metadata row (ADR-0131 D6) ──
         let overlay: unknown | null = null;
-        let overlayScope: 'org' | 'env' | null = null;
+        let overlayScope: 'env' | null = null;
         // [#21761] The `overlay` layer of the one item-lock resolution below,
         // selected from this read's address as in {@link getMetaItem}: the
         // strictest lock among the item's stored rows in scope, never only the
         // row this layer reports.
         let overlayLockLayer: unknown;
         try {
-            // ADR-0048 prefer-local within each scope. [#21716] The ONE
-            // served-row resolution {@link getMetaItem} calls too — see
-            // {@link findServedOverlayRow}.
+            // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
+            // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
             const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
-                orgId,
                 state: 'active',
                 ...(request.packageId ? { packageId: request.packageId } : {}),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
                 name: request.name,
-                organizationId: orgId,
                 packageId: request.packageId,
             }, { otherSpelling: true });
             if (served) {
@@ -10735,7 +10428,7 @@ export class ObjectStackProtocolImplementation implements
                     String(rec.type ?? request.type),
                     storedRowDocument(rec),
                 );
-                overlayScope = served.scope;
+                overlayScope = 'env';
             }
         } catch (error) {
             // [#5707] The same rule as the four overlay reads in
@@ -10744,8 +10437,8 @@ export class ObjectStackProtocolImplementation implements
             //
             // Swallowing here does not answer 404 — it answers something this
             // method states positively in THREE fields at once: `overlay: null`
-            // ("nothing was ever customised"), `overlayScope: null` ("no scope
-            // holds a row"), and `effective = code` ("what runs today is the
+            // ("nothing was ever customised"), `overlayScope: null` ("no row
+            // is stored"), and `effective = code` ("what runs today is the
             // packaged artifact, verbatim"). The whole point of the layered
             // read is to show an author what they changed; during an outage it
             // told them they had changed nothing, which is the #5532 error —
@@ -10769,16 +10462,15 @@ export class ObjectStackProtocolImplementation implements
         // the layers say where it came from in the fields that already say it:
         // `overlay` is the container's own stored row, the one stored layer
         // behind this name (its `name` is the container's, its `_packageId` the
-        // package its row is bound to), and `overlayScope` the scope that row
-        // was read from. `code` keeps its own read: the item a package ships
+        // package its row is bound to), and `overlayScope` `'env'`. `code` keeps its own read: the item a package ships
         // under this name (a tenant overlay of that package's container), else
         // `null`.
         let expandedFrom: RowlessExpandedView | undefined;
         if (overlay === null) {
-            expandedFrom = await this.resolveRowlessExpandedView(request, orgId);
+            expandedFrom = await this.resolveRowlessExpandedView(request);
             if (expandedFrom !== undefined) {
                 overlay = expandedFrom.container.data;
-                overlayScope = expandedFrom.container.organizationId === null ? 'env' : 'org';
+                overlayScope = 'env';
             }
         }
 
@@ -10855,7 +10547,6 @@ export class ObjectStackProtocolImplementation implements
             artifact: this.artifactLockLayerAt({
                 type: request.type,
                 name: request.name,
-                organizationId: orgId,
                 packageId: request.packageId,
             }),
             overlay: overlayLockLayer,
@@ -10970,16 +10661,12 @@ export class ObjectStackProtocolImplementation implements
      *         unprovisioned table. The `/audit` route's existing
      *         `handleRouteError` turns it into an honest 5xx.
      *
-     * `organizationId` SCOPES the read and is enforced in the query below:
-     * rows for that organization plus env-wide (`organization_id IS NULL`)
-     * rows, and nothing else. Omitted (or `null`) reads the env-wide rows
-     * only. It is never a hint — a caller that does not supply it does not
-     * get another tenant's rows.
+     * [ADR-0131 D6] The environment's rows (`organization_id IS NULL`) only,
+     * enforced in the query below.
      */
     async auditMetaItem(request: {
         type: string;
         name: string;
-        organizationId?: string | null;
         limit?: number;
     }): Promise<{
         events: Array<{
@@ -11045,36 +10732,10 @@ export class ObjectStackProtocolImplementation implements
             Math.max(1, request.limit ?? 100),
             500,
         );
-        // [#8747] `request.organizationId` is READ here. It was declared and
-        // never used, while the comment below described the filter it would
-        // have built — a live cross-tenant disclosure, measured rather than
-        // argued: three saves of one view name under `org_alpha`, `org_beta`
-        // and env-wide, then one `auditMetaItem({ type, name })`, returned all
-        // three orgs' rows (`actor`, `note`, `lock_state` with them).
-        //
-        // ⚠️ Nothing below this method compensates, and all three candidates
-        // were eliminated by measurement, not by reading:
-        //  - the driver's tenant wall never engages — `buildDriverOptions`
-        //    sets `DriverOptions.tenantId` only from `execCtx.tenantId`
-        //    (`objectql/engine.ts`), and this read's context carries no
-        //    `tenantId` (only the system opt-in below);
-        //  - plugin-security's Layer 0 never engages — the middleware
-        //    short-circuits on that `isSystem` opt-in (it used to take its
-        //    principal-less `return next()`, refused since ADR-0096 D5)
-        //    thousands of lines before the `objectFields.has('organization_id')`
-        //    gate that would have carried it;
-        //  - no posture would save it anyway: `computeTenantLayer0Filter`
-        //    yields `null` under `single` and the deny sentinel under
-        //    `isolated` with no tenantId.
-        // So the scope has to be BUILT here. It is unconditional — it does not
-        // depend on a posture, a principal, or a layer below choosing to act.
-        //
-        // `?? null` is the same normalization the sibling `/published` door
-        // applies (`request.organizationId ?? null`, mirroring what an org-less
-        // `publishPackageDrafts` WRITES): a caller that resolves no
-        // organization reads exactly the env-wide rows an org-less write
-        // produces. Fail-closed, and symmetric with the write path.
-        const organizationId = request.organizationId ?? null;
+        // [ADR-0131 D6] The environment's audit trail only — the scope is
+        // built here, unconditionally (#8747: nothing below this method
+        // scopes the read). A legacy organization-scoped audit row is not
+        // read; the v18 migration ceremony carries its organization's rows.
         // [#9638] The FIRST of the two benign causes the catch below used to
         // name, asked as a PRECONDITION rather than as an error shape.
         //
@@ -11105,29 +10766,12 @@ export class ObjectStackProtocolImplementation implements
             return { events: [] };
         }
         try {
-            // Org-scoped lookup: include rows for the specific org AND
-            // env-wide (organization_id IS NULL) rows so the editor
-            // sees both tenant overlays and env-level package writes.
-            //
-            // The env-wide limb is LOAD-BEARING, not defensive garnish: the
-            // REST `PUT /meta/:type/:name` door passes no `organizationId` at
-            // all, so every row that door writes is stamped
-            // `organization_id: null` (`recordMetadataAudit` persists
-            // `entry.organizationId ?? null`). Drop the limb and this read
-            // returns nothing on a REST-authored deployment — "correctly
-            // scoped" and "hides everything" are different behaviours and the
-            // tests pin them apart.
+            // The environment's rows: every write stamps
+            // `organization_id: null` (ADR-0131 D6).
             const where: Record<string, unknown> = {
                 type: singular,
                 name: request.name,
-                ...(organizationId === null
-                    ? { organization_id: null }
-                    : {
-                        $or: [
-                            { organization_id: organizationId },
-                            { organization_id: null },
-                        ],
-                    }),
+                organization_id: null,
             };
             // `order`, NOT `direction`: the QueryAST sort shape is
             // `SortNodeSchema` = `{ field, order }`, and both drivers normalize
@@ -14368,11 +14012,8 @@ export class ObjectStackProtocolImplementation implements
         //  - PUBLISHED only: `getMetaItems` reads `state: 'active'` overlay
         //    rows plus code-registered pages; drafts surface only under
         //    `previewDrafts`, which this sweep never passes.
-        //  - Org scope: threaded through `organizationIdForMetaRead('page',
-        //    context.tenantId)` — the registry-gated predicate every REST meta
-        //    read door uses (#9454), so the sweep and the read door move
-        //    together if `page` ever declares org override (today it does
-        //    not, and the predicate answers env-wide).
+        //  - Scope: the environment's pages, as every `/meta` read door
+        //    answers (ADR-0131 D6: no metadata read is organization-scoped).
         //  - Disabled-package and conversion handling ride along for free —
         //    whatever `getMetaItems` withholds, this sweep never saw.
         //
@@ -14407,11 +14048,7 @@ export class ObjectStackProtocolImplementation implements
         //    whole one's answer.
         const pageHits: Array<{ kind: 'page'; name: string; title: string; snippet?: string; pageType?: string }> = [];
         if (!objectsFilter) {
-            const pageOrgId = organizationIdForMetaRead('page', request.context?.tenantId);
-            const served = await this.getMetaItems({
-                type: 'page',
-                ...(pageOrgId !== undefined ? { organizationId: pageOrgId } : {}),
-            });
+            const served = await this.getMetaItems({ type: 'page' });
             const pageItems: unknown[] = Array.isArray(served) ? served : served.items;
             const localeTexts = (v: unknown): string[] => {
                 if (typeof v === 'string') return v ? [v] : [];
@@ -14468,17 +14105,11 @@ export class ObjectStackProtocolImplementation implements
     // ==========================================
 
     /**
-     * [#9454] `organizationId` — the sole meta read verb that could not express
-     * an org, which is why the CACHED door (`view` and every org-overridable
-     * type that is not `dashboard`) served nothing back after a runtime `PUT`.
-     * Its siblings `getMetaItem` / `getMetaItems` / `getMetaItemLayered` have
-     * carried the member all along; this one hard-coded a two-key delegation
-     * and dropped whatever the caller knew. Threaded into `getMetaItem` below,
-     * so the ADR-0005 read order (`sys_metadata` org row → env-wide row →
-     * registry → MetadataService) is honoured at the same scope the caller
-     * named — the whole reason this method delegates rather than re-reading.
+     * The cached read delegates to {@link getMetaItem}, so it serves the same
+     * environment → code read order (ADR-0131 D6) — the whole reason this
+     * method delegates rather than re-reading.
      */
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string, organizationId?: string }): Promise<MetadataCacheResponse> {
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -14490,14 +14121,6 @@ export class ObjectStackProtocolImplementation implements
             const result = await this.getMetaItem({
                 type: request.type,
                 name: request.name,
-                // [#9454] Spread, not an unconditional member: `getMetaItem`
-                // branches on `organizationId !== undefined`, so passing an
-                // explicit `undefined` is not the same statement as passing
-                // nothing. Mirrors the conditional-spread idiom the REST read
-                // doors use to reach here.
-                ...(request.organizationId !== undefined
-                    ? { organizationId: request.organizationId }
-                    : {}),
             });
             const item = (result as any)?.item;
 
@@ -14530,59 +14153,19 @@ export class ObjectStackProtocolImplementation implements
             // language until a hard refresh (issue #1319). Folding the resolved
             // locale into the hash gives each locale a distinct validator.
             //
-            // [#9454] The ETag MUST also state the ORGANIZATION scope, and the
-            // mechanism differs from `locale` above in a way worth stating
-            // rather than glossing. `locale` is INVISIBLE to the hash (the body
-            // is translated AFTER this runs), so folding it in was the only way
-            // it could vary the validator at all. `organizationId` is VISIBLE —
-            // the org-resolved document is the very thing hashed — so two orgs
-            // whose overlays differ already get different validators, and no
-            // leak is claimed here: `Cache-Control` is `private, no-cache` and
-            // there is no server-side cache ENTRY keyed by type+name.
+            // [ADR-0131 D6] No organization is part of the validator: the
+            // read is the environment's for every caller, so the document
+            // hashed below is the whole scope. An org-less caller's validator
+            // is byte-for-byte the one it was issued before.
             //
-            // It is folded in anyway because that makes the scope a DECLARED
-            // property of the validator instead of an emergent property of the
-            // body. Two orgs whose documents are byte-identical today share a
-            // validator by coincidence, not by statement. Prepended, and ONLY
-            // when present, so an org-less caller's validator stays byte-for-
-            // byte the one it is issued today.
-            //
-            // [#16525] ⚠️ The paragraph above used to argue from "any FUTURE
-            // path that resolves an org row but falls back to the env-wide
-            // body". THAT PATH IS PRESENT, and reading it as future is how a
-            // later author concludes the risk has not arrived yet:
-            // `getMetaItem` resolves `(orgId ? findOverlay(orgId) : undefined)
-            // ?? findOverlay(null)`, so an organization with no row of its own
-            // is served the env-wide document under an org-named validator.
-            //
-            // ⭐ AND `request.organizationId` IS THE SUPPLIED MEMBER, not the
-            // effective scope: {@link organizationIdForMetaRead} reduces it to
-            // `undefined` for a type declaring `allowOrgOverride: false`, and
-            // that reduction happens BELOW this line, inside `getMetaItem`. So
-            // a caller that hands this verb a raw organization gets a validator
-            // naming a scope its body was never resolved under.
-            //
-            // ⛔ Neither is a correctness fault, and the reason is the ONE
-            // invariant this block depends on: `content` — the bytes actually
-            // being sent — is inside the hash below. A 304 is therefore
-            // answered only on an exact match over those bytes, so a caller is
-            // only ever pinned to the representation IT received; the cost is
-            // validator FRAGMENTATION (N orgs, one env-wide document, N
-            // validators), which is waste, not error. ⇒ Hashing anything
-            // cheaper than the document — a version marker, the scope alone —
-            // destroys that argument silently. `get-meta-item-cached-etag-
-            // scope.test.ts` §3 is the pin; measured, removing `content` here
-            // reddens exactly one assertion and leaves the rest green.
-            //
-            // ⛔ Do NOT "repair" this by folding the effective value without
-            // reading #16525: it changes every published ETag that carries an
-            // organization, and buys nothing at the only production door —
-            // `@objectstack/rest` computes `organizationIdForMetaRead` BEFORE
-            // it calls (pinned by `rest-server-meta-cached-etag-door-scope.
-            // test.ts`), so supplied and effective already agree there.
+            // ⛔ The ONE invariant this block depends on: `content` — the bytes
+            // actually being sent — is inside the hash below. A 304 is answered
+            // only on an exact match over those bytes, so a caller is only ever
+            // pinned to the representation IT received. Hashing anything
+            // cheaper than the document — a version marker — destroys that
+            // silently.
             const content = JSON.stringify(item);
             const scope = [
-                request.organizationId ? `org:${request.organizationId}` : undefined,
                 request.locale || undefined,
             ].filter((part): part is string => part !== undefined);
             const hash = simpleHash(
@@ -16537,7 +16120,7 @@ export class ObjectStackProtocolImplementation implements
      * path of its own: the row is skipped, and each read falls through to the
      * code layer it already reads next.
      *
-     * Exactly two answers, each its own type's, neither re-derived here:
+     * Exactly three answers, none re-derived here:
      *
      *  - a FLOW name the loader's set holds ({@link isShippedFlowName},
      *    #20913 / #20946 / #21002) — Regime C, "never an overlay read path";
@@ -16551,6 +16134,14 @@ export class ObjectStackProtocolImplementation implements
      *    a layer of it, only residue ({@link originGatedRemovalRefusal}): it
      *    stays at rest, the boot restore names it in a warning, and the `/meta`
      *    DELETE removes it as repair.
+     *  - [ADR-0131 D6, triage ruling Q1 → C] a SEALED managed item
+     *    ({@link isUnservedSealedOverlay}): an environment overlay row on an
+     *    item a managed package ships, of a type whose registry entry opens no
+     *    overlay channel (a managed flow, action, hook or object), is in no
+     *    regime D6 recognises — the package definition wins. Such rows were
+     *    written through the `OS_METADATA_WRITABLE` hatch before the seal; they
+     *    stay at rest, untouched, and the boot report names them per type with
+     *    the two remedies ({@link reportSealedOverlayRows}).
      *
      * ⛔ Never a row's, slot's or body's `origin` — the caller sets it.
      *
@@ -16575,7 +16166,28 @@ export class ObjectStackProtocolImplementation implements
      */
     declinesStoredRow(type: string, name: unknown): boolean {
         if (this.isShippedFlowName(type, name)) return true;
-        return typeof name === 'string' && name !== '' && this.isDeclaredCodeDatasource(type, name);
+        if (typeof name !== 'string' || name === '') return false;
+        return this.isDeclaredCodeDatasource(type, name) || this.isUnservedSealedOverlay(type, name);
+    }
+
+    /**
+     * [ADR-0131 D6, triage ruling Q1 → C] Is a stored environment row of
+     * `(type, name)` an overlay of SEALED managed content, which no read
+     * serves? {@link isSealedManagedItem}, the predicate the save and delete
+     * doors refuse by, so the write refusal and the read narrowing cannot
+     * disagree about which items are sealed.
+     *
+     * ⛔ Except `permission`. A permission set a code package ships is guarded
+     * by its own lock (ADR-0086 / ADR-0094, `packaged-permission-set-lock`),
+     * and the forks stored before that lock existed have a maintainer ruling
+     * of their own: a detection reading and an operator's Discard Overlay
+     * action, "no automatic reap/merge … not a silent migration". Not serving
+     * such a fork would change the grants the deployment enforces without an
+     * operator's act, so it keeps that ruling's disposition.
+     */
+    private isUnservedSealedOverlay(type: string, name: string): boolean {
+        if (canonicalMetaType(type) === 'permission') return false;
+        return this.isSealedManagedItem(type, name);
     }
 
     /**
@@ -17205,13 +16817,10 @@ export class ObjectStackProtocolImplementation implements
      * writes rejected" were admitted. The door was looser than the read on the
      * organization axis, as it had been on the topology axis (#21694).
      *
-     * So the limb now asks {@link findServedOverlayRow} — the resolution both
-     * reads call — with the organization gated by the same
-     * {@link organizationIdForMetaRead} the reads apply. When the env-wide row
-     * is the one served, its `_lock` binds the organization's writes; when the
-     * organization's own row is served, that row's `_lock` does, whatever the
-     * env-wide row declares (the read reports that same row). ⛔ No second
-     * predicate: a change to the read's precedence moves this limb with it.
+     * So the limb asked {@link findServedOverlayRow} — the resolution both
+     * reads call. [ADR-0131 D6] Both now read the environment's rows alone,
+     * and so does this limb. ⛔ No second predicate: a change to the read's
+     * precedence moves this limb with it.
      *
      * ## [#21761] The limb and the reads select the rows from one ADDRESS
      *
@@ -17310,7 +16919,6 @@ export class ObjectStackProtocolImplementation implements
     private async getEffectiveLock(
         type: string,
         name: string,
-        organizationId: string | null | undefined,
         packageId?: string,
     ): Promise<{
         lock: MetadataLock;
@@ -17331,10 +16939,9 @@ export class ObjectStackProtocolImplementation implements
             artifact: () => this.artifactLockLayerAt({
                 type: canonicalType,
                 name,
-                organizationId: organizationId ?? undefined,
                 packageId,
             }),
-            overlay: () => this.readLockGateOverlayLayer(canonicalType, name, organizationId, packageId),
+            overlay: () => this.readLockGateOverlayLayer(canonicalType, name, packageId),
         });
         return { lock: resolved.lock, lockReason: resolved.lockReason, lockSource: resolved.layer };
     }
@@ -17349,14 +16956,13 @@ export class ObjectStackProtocolImplementation implements
     private async readLockGateOverlayLayer(
         canonicalType: string,
         name: string,
-        organizationId: string | null | undefined,
         packageId: string | undefined,
     ): Promise<unknown> {
         // 2. Overlay rows — addressed by the SAME canonical key the repository
         //    stores them under (`SysMetadataRepository.whereFor`), which is
         //    what makes this limb read the rows the artifact limb already
-        //    folded to. [#21716] …behind the reads' own organization gate, and
-        //    [#21761] through the reads' own selection, from the same address —
+        //    folded to. [#21761] Through the reads' own selection, from the
+        //    same address —
         //    see {@link getEffectiveLock}'s header. Canonical spelling only
         //    (#4432), the one declared difference — see
         //    {@link overlayLockLayerAt}.
@@ -17364,7 +16970,6 @@ export class ObjectStackProtocolImplementation implements
             return await this.overlayLockLayerAt({
                 type: canonicalType,
                 name,
-                organizationId: organizationIdForMetaRead(canonicalType, organizationId ?? undefined),
                 packageId,
             }, { otherSpelling: false });
         } catch (error) {
@@ -17552,7 +17157,7 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<{ err: Error; audit: MetadataAuditEntry } | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, null, args.packageId);
+        const state = await this.getEffectiveLock(args.type, args.name, args.packageId);
         const refusal = evaluateLockForWrite(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -17622,7 +17227,7 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, null);
+        const state = await this.getEffectiveLock(args.type, args.name);
         const refusal = evaluateLockForDelete(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -17761,16 +17366,15 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#22114] The item read's `version`: the keyed form
      * ({@link receiptVersion}) of the stored head a save to this item compares
-     * against ({@link storedHeadAt}), at the read's own scope — its
-     * organization partition and `packageId` — and its lifecycle, or `null`
+     * against ({@link storedHeadAt}), at the read's own scope — the
+     * environment's partition and `packageId` — and its lifecycle, or `null`
      * when no stored row is there. The `/meta` save door builds its address
      * from the same facts (no organization on either since ADR-0131 D6, and
      * `?package=` names the binding on both), so a read followed by a save with the served token is accepted, and a
      * `null` says that save is a create: the state `If-None-Match: *` asserts.
      *
      * ⚠️ The address of the SAVE, not of the served content. A read falls back
-     * from the caller's organization to the environment-wide row (ADR-0005)
-     * and from a package's own row to the package-less one (ADR-0048); a save
+     * from a package's own row to the package-less one (ADR-0048); a save
      * does not, it writes its own partition. A token of a row the save would
      * not overwrite would be refused by that save every time, so such a read
      * serves `null` rather than the served row's token. [#22128] And the
@@ -17781,15 +17385,13 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readVersionToken(
         request: { type: string; name: string; packageId?: string },
-        orgId: string | undefined,
         state: 'active' | 'draft',
     ): Promise<string | null> {
-        const organizationId = orgId ?? null;
-        const repo = this.getOverlayRepo(organizationId);
+        const repo = this.getOverlayRepo();
         const ref = {
             type: PLURAL_TO_SINGULAR[request.type] ?? request.type,
             name: request.name,
-            org: organizationId ?? 'env',
+            org: 'env',
         } as Parameters<typeof repo.headAt>[0];
         const stored = await this.storedHeadAt(repo, ref, state, request.packageId ?? null);
         return stored === null ? null : this.receiptVersion(stored);
@@ -19483,8 +19085,8 @@ export class ObjectStackProtocolImplementation implements
      * never a copy of them:
      *  - another stored container's expansion, in the caller's selection,
      *    whatever that container's object: the rows
-     *    {@link readActiveOverlayRows} selects through the readers' gate
-     *    ({@link organizationIdForMetaRead}) with no package filter, parsed by
+     *    {@link readActiveOverlayRows} selects (the environment's) with no
+     *    package filter, parsed by
      *    {@link storedOverlayEntries} and expanded by
      *    {@link expandStoredViewContainers} with each row's own package
      *    binding. The row stored under the save name is left out: it is the
@@ -20459,10 +20061,6 @@ export class ObjectStackProtocolImplementation implements
             // Stored, and handed to the credential walk below, as written.
             body: flowGateVerdictBody ?? gatedItem,
             source: writeSource,
-            // [#6285] The write's organization partition. It was always here;
-            // it simply never travelled to the gate, which is the whole reason
-            // the "platform-level flow" limb could not be judged before.
-            organizationId: null,
             // [#9612] Which package this write belongs to — the unit the gate
             // now judges it against. Same story as the line above: the request
             // has carried it all along, it just never reached the gate. Null
@@ -20479,7 +20077,6 @@ export class ObjectStackProtocolImplementation implements
             // is absent and not stored as missing. The body judged is unchanged.
             restoredCredentialPaths: () => this.restoredCredentialPathsFor({
                 type: singularType,
-                organizationId: null,
                 name: request.name,
                 packageId: request.packageId ?? null,
                 item: gatedItem,
@@ -20661,7 +20258,7 @@ export class ObjectStackProtocolImplementation implements
         }
         // [ADR-0131 D6] Environment-wide, always: an organization-scoped
         // request was refused at the top of this method.
-        const repo = this.getOverlayRepo(null);
+        const repo = this.getOverlayRepo();
         const ref = {
             type: singularTypeForRepo,
             name: request.name,
@@ -21439,7 +21036,6 @@ export class ObjectStackProtocolImplementation implements
     async historyMetaItem(request: {
         type: string;
         name: string;
-        organizationId?: string;
         sinceSeq?: number;
         limit?: number;
     }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
@@ -21490,17 +21086,17 @@ export class ObjectStackProtocolImplementation implements
         // every event's `ref.name` names the container.
         const expandedFrom = await this.resolveRowlessExpandedView(
             { type: singularType, name: request.name },
-            organizationIdForMetaRead(singularType, request.organizationId),
         );
         if (expandedFrom !== undefined) {
             return this.historyMetaItem({ ...request, name: expandedFrom.container.name });
         }
-        const orgId = request.organizationId ?? null;
-        const repo = this.getOverlayRepo(orgId);
+        // [ADR-0131 D6] The environment's change log; a legacy
+        // organization-scoped history row is not read.
+        const repo = this.getOverlayRepo();
         const ref = {
             type: singularType,
             name: request.name,
-            org: orgId ?? 'env',
+            org: 'env',
         } as Parameters<typeof repo.history>[0];
 
         const events: import('@objectstack/metadata-core').MetadataEvent[] = [];
@@ -21895,7 +21491,7 @@ export class ObjectStackProtocolImplementation implements
         await this.ensureOverlayIndex();
         // [ADR-0131 D6] Environment-wide: every caller refused an
         // organization-scoped request before reaching here.
-        const repo = this.getOverlayRepo(null);
+        const repo = this.getOverlayRepo();
 
         // #4463 D1 — the OTHER way a body reaches `active`. `saveMetaItem`
         // gates a direct active save and deliberately lets every draft through;
@@ -21983,9 +21579,6 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: 'active',
                 body: draftForGate.body,
-                // [#6285] Same partition the draft is being promoted in — the
-                // environment's, since ADR-0131 D6.
-                organizationId: null,
                 // [#9612] The package binding the CALLER stated for this
                 // promotion — the same value threaded into `repo.promoteDraft`
                 // below, so the gate and the write resolve the draft under one
@@ -22351,22 +21944,20 @@ export class ObjectStackProtocolImplementation implements
     async listDrafts(request?: {
         packageId?: string;
         type?: string;
-        organizationId?: string;
     }): Promise<{
         drafts: Array<{
             type: string;
             name: string;
             /** The draft body's own top-level `label`, as authored; `null` when it declares none. */
             label: I18nLabel | null;
-            organizationId: string | null;
             packageId: string | null;
             updatedAt: string | null;
             updatedBy: string | null;
         }>;
     }> {
         await this.ensureOverlayIndex();
-        const orgId = request?.organizationId ?? null;
-        const repo = this.getOverlayRepo(orgId);
+        // [ADR-0131 D6] The environment's pending drafts.
+        const repo = this.getOverlayRepo();
         const drafts = await repo.listDrafts({
             ...(request?.type ? { type: PLURAL_TO_SINGULAR[request.type] ?? request.type } : {}),
             ...(request?.packageId ? { packageId: request.packageId } : {}),
@@ -22424,8 +22015,8 @@ export class ObjectStackProtocolImplementation implements
      * ## Why the batch's existing enumeration cannot supply the bodies
      *
      * `listDrafts` — the read that DEFINES this batch — is a declared header
-     * projection: it maps rows to `(type, name, label, organizationId,
-     * packageId, updatedAt, updatedBy)` and drops `metadata` on purpose — of the
+     * projection: it maps rows to `(type, name, label, packageId, updatedAt,
+     * updatedBy)` and drops `metadata` on purpose — of the
      * body only its own top-level `label` leaves ([#22200]) — because its other
      * caller is the console's "pending changes" list. Widening it would put
      * every draft BODY on that listing, and it would not even remove the guard
@@ -22435,7 +22026,7 @@ export class ObjectStackProtocolImplementation implements
      * and the absence of the member it needs is stated rather than assumed.
      */
     private async collectBatchPendingDeclarations(
-        drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
+        drafts: ReadonlyArray<{ type: string; name: string }>,
     ): Promise<RuntimePendingDeclarations | undefined> {
         // [#13216] Typed as a mapped type over `RuntimePendingDeclarations`
         // with `-?`, not as a hand-listed literal. The literal it replaces was
@@ -22461,8 +22052,7 @@ export class ObjectStackProtocolImplementation implements
             const singular = canonicalMetaType(d.type);
             const key = (CLOSURE_CONTEXT_KEY_BY_TYPE as Record<string, keyof RuntimePendingDeclarations>)[singular];
             if (!key) continue;
-            const draftOrgId = d.organizationId ?? null;
-            const repo = this.getOverlayRepo(draftOrgId);
+            const repo = this.getOverlayRepo();
             // ── The repository-shape guard, and why it degrades ALL-OR-NOTHING
             //
             // This method introduced the batch door's first dependency on
@@ -22495,7 +22085,7 @@ export class ObjectStackProtocolImplementation implements
                 return undefined;
             }
             const ref = {
-                type: singular, name: d.name, org: draftOrgId ?? 'env',
+                type: singular, name: d.name, org: 'env',
             } as unknown as Parameters<typeof repo.get>[0];
             const draft = await repo.get(ref, { state: 'draft' });
             if (draft?.body === undefined || draft.body === null) continue;
@@ -22642,7 +22232,7 @@ export class ObjectStackProtocolImplementation implements
         // `organization_id IS NULL` rows, so a legacy organization-scoped draft
         // is never promoted here (it waits for the promotion ceremony,
         // ADR-0131 C7).
-        const repo = this.getOverlayRepo(null);
+        const repo = this.getOverlayRepo();
         const drafts = await repo.listDrafts({ packageId: request.packageId });
 
         // Runtime enforcement of the package namespace-prefix rule (ADR-0028
@@ -22935,13 +22525,12 @@ export class ObjectStackProtocolImplementation implements
         const commitItems: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }> = [];
         for (const d of ordered) {
             try {
-                // Read the pre-publish active row in the draft's OWN scope
-                // (env-wide drafts have env-wide active rows). Using the
-                // request's active org here would miss an env-wide edit and
-                // mis-record it as a create in the revert plan (#3115).
+                // Read the pre-publish active row in the draft's scope, the
+                // environment's (ADR-0131 D6), so an env-wide edit is not
+                // mis-recorded as a create in the revert plan (#3115).
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 const activeRow = (await this.engine.findOne('sys_metadata', {
-                    where: { organization_id: d.organizationId ?? null, type: d.type, name: d.name, state: 'active' },
+                    where: { organization_id: null, type: d.type, name: d.name, state: 'active' },
                     context: { isSystem: true },
                 })) as { version?: number } | null;
                 commitItems.push({
@@ -23480,7 +23069,7 @@ export class ObjectStackProtocolImplementation implements
             `Package '${request.packageId}'`, request,
         );
         await this.ensureOverlayIndex();
-        const repo = this.getOverlayRepo(null);
+        const repo = this.getOverlayRepo();
         const drafts = await repo.listDrafts({ packageId: request.packageId });
 
         const discarded: Array<{ type: string; name: string }> = [];
@@ -23597,10 +23186,10 @@ export class ObjectStackProtocolImplementation implements
         let drafts: Awaited<ReturnType<SysMetadataRepository['listDrafts']>>;
         let publishedRows: unknown[];
         try {
-            drafts = await this.getOverlayRepo(null).listDrafts({ packageId: request.packageId });
+            drafts = await this.getOverlayRepo().listDrafts({ packageId: request.packageId });
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
             publishedRows = (await this.engine.find('sys_metadata', {
-                where: packageScopedRowWhere(null, 'active', { packageId: request.packageId }),
+                where: packageScopedRowWhere('active', { packageId: request.packageId }),
                 limit: 1,
                 context: { isSystem: true },
             })) as unknown[];
@@ -23911,7 +23500,7 @@ export class ObjectStackProtocolImplementation implements
         actor: string | undefined,
     ): Promise<void> {
         const type = PLURAL_TO_SINGULAR[row.type] ?? row.type;
-        const repo = this.getOverlayRepo(row.organization_id);
+        const repo = this.legacyOrganizationRepo(row.organization_id);
         const ref = { type, name: row.name, org: row.organization_id } as Parameters<typeof repo.delete>[0];
         const current = await repo.get(ref, { state });
         if (!current) return;
@@ -24578,7 +24167,6 @@ export class ObjectStackProtocolImplementation implements
      */
     async listCommits(request: {
         packageId: string;
-        organizationId?: string;
         limit?: number;
     }): Promise<Array<{
         id: string;
@@ -24592,43 +24180,16 @@ export class ObjectStackProtocolImplementation implements
         createdAt?: string;
     }>> {
         try {
-            const where: Record<string, unknown> = { package_id: request.packageId };
-            // [#7779] Surface BOTH org-scoped and env-wide (`organization_id IS
-            // NULL`) commit rows to an org-scoped caller — the same defect and
-            // the same remedy as the sibling {@link deletePackage} read one
-            // function above (#7705), and as {@link
-            // SysMetadataRepository.listDrafts} (#3115) in this package.
-            //
-            // Env-wide commit rows are not hypothetical: {@link
-            // recordPackageCommit} stores `organization_id: request.
-            // organizationId ?? null`, and the ONLY door into a publish — the
-            // dispatcher's `POST /packages/:id/publish-drafts` — forwards an
-            // org only when `resolveActiveOrganizationId` yields one. That
-            // resolver answers `undefined` for a session with no active
-            // organization AND for every failure on the auth seam (it is
-            // `catch`-wrapped). So a publish made before an org was selected —
-            // or during a transient auth blip — lands its commit env-wide,
-            // permanently, and the strict equality then hid it from every
-            // org-scoped read of that package's timeline.
-            //
-            // This is NOT merely an observability miss. {@link
-            // rollbackToPackageCommit} derives the set of commits to undo from
-            // this list, so an invisible commit was silently never reverted:
-            // measured pre-fix, a rollback past an env-wide commit answered
-            // `{success: true, revertedCommits: []}` while that commit's
-            // changes stayed live.
-            //
-            // The no-org branch is deliberately NOT narrowed to
-            // `organization_id IS NULL`, exactly as #7705 left its own: a
-            // caller with no active org reads the package's whole timeline,
-            // and restricting it to env-wide rows would hide every org-scoped
-            // commit instead — the same bug pointed the other way.
-            if (request.organizationId) {
-                where.$or = [
-                    { organization_id: request.organizationId },
-                    { organization_id: null },
-                ];
-            }
+            // [ADR-0131 D6] The environment's timeline: `organization_id IS
+            // NULL`, whoever asks. A legacy organization-scoped commit row is
+            // reported at boot ({@link reportUnhydratableOrgScopedRows}) and
+            // never served — the same rule as the legacy `sys_metadata` rows
+            // it recorded, which no read serves either. So the timeline an
+            // operator reverts from ({@link rollbackToPackageCommit} filters
+            // this list) holds exactly the commits whose changes the reads
+            // serve, and no organization's history is shown to another
+            // organization's operator.
+            const where: Record<string, unknown> = { package_id: request.packageId, organization_id: null };
             // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
             // platform store the door already authorized; the protocol scopes the
             // `where` by organization itself. Principal-less, the engine refuses it.
@@ -24877,7 +24438,7 @@ export class ObjectStackProtocolImplementation implements
             // [ADR-0131 D6] Every item reverts environment-wide: the commit row
             // is environment-wide (a legacy organization's was refused above).
             const itemOrgId = null;
-            const repo = this.getOverlayRepo(itemOrgId);
+            const repo = this.getOverlayRepo();
             const ref = { type: it.type, name: it.name, org: itemOrgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
             try {
                 const current = await repo.get(ref, { state: 'active' });
@@ -25384,7 +24945,7 @@ export class ObjectStackProtocolImplementation implements
         // [ADR-0131 D6] The environment's lineage: an organization-scoped
         // request was refused above.
         const orgId = null;
-        const repo = this.getOverlayRepo(orgId);
+        const repo = this.getOverlayRepo();
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked
             ? 'override-artifact' : 'runtime-only';
@@ -25556,7 +25117,6 @@ export class ObjectStackProtocolImplementation implements
         name: string;
         fromVersion?: number;
         toVersion?: number;
-        organizationId?: string;
     }): Promise<{
         type: string;
         name: string;
@@ -25614,12 +25174,12 @@ export class ObjectStackProtocolImplementation implements
         // `type` follows above.
         const expandedFrom = await this.resolveRowlessExpandedView(
             { type: singularType, name: request.name },
-            organizationIdForMetaRead(singularType, request.organizationId),
         );
         if (expandedFrom !== undefined) {
             return this.diffMetaItem({ ...request, name: expandedFrom.container.name });
         }
-        const orgId = request.organizationId ?? null;
+        // [ADR-0131 D6] The environment's versions only.
+        const orgId = null;
         // [#8798] Read the history rows DIRECTLY, once. `historyMetaItem`
         // cannot serve this function: its `MetadataEvent` shape doesn't carry
         // the per-(type,name) `version` a diff selects versions by, so its
@@ -26021,7 +25581,7 @@ export class ObjectStackProtocolImplementation implements
         if (useRepoPath) {
             // [ADR-0131 D6] Environment-wide: refused above otherwise.
             const orgId = null;
-            const repo = this.getOverlayRepo(orgId);
+            const repo = this.getOverlayRepo();
             const ref = {
                 type: singularTypeForRepo,
                 name: request.name,
@@ -26385,11 +25945,16 @@ export class ObjectStackProtocolImplementation implements
      *
      * Per ADR-0005, environment-kernel mode ALSO hydrates from sys_metadata —
      * customization overlay rows must survive restart. The where-clause below
-     * is `{ state: 'active', organization_id: null }`: env-wide rows only, with
-     * per-org overlays left to `getMetaItem`'s on-demand read so one org's
-     * customization never lands in the process-wide SchemaRegistry. There is no
+     * is `{ state: 'active', organization_id: null }`: the environment's rows
+     * only (ADR-0131 D6 — a legacy organization-scoped row is served by no
+     * read, and {@link reportUnhydratableOrgScopedRows} names it). There is no
      * `environment_id` constraint — ADR-0005 (revised 2026-05) gave each
-     * environment its own database and `organization_id` is the isolation key.
+     * environment its own database.
+     *
+     * [ADR-0131 D6, triage ruling Q1 → C] An environment row that overlays
+     * SEALED managed content ({@link isUnservedSealedOverlay}) is not loaded
+     * either: the package's definition stays the registered one, and
+     * {@link reportSealedOverlayRows} names the row with its remedies.
      *
      * #3903 — two contract duties run per row, and their split is deliberate:
      *
@@ -26452,10 +26017,8 @@ export class ObjectStackProtocolImplementation implements
         /** #5897 — see the TSDoc: set only on the non-benign outer-catch branch. */
         let storeUnavailable = false;
         try {
-            // ADR-0005 (revised 2026-05): hydrate only env-wide rows
-            // (organization_id IS NULL). Per-org overlays are loaded on
-            // demand by getMetaItem to avoid cross-org leakage into the
-            // process-wide SchemaRegistry.
+            // [ADR-0131 D6] Hydrate only the environment's rows
+            // (organization_id IS NULL); no read serves any other.
             const where: Record<string, unknown> = {
                 state: 'active',
                 organization_id: null,
@@ -26473,16 +26036,22 @@ export class ObjectStackProtocolImplementation implements
             const sduiManifest = (records as Array<{ type?: unknown }>).some(
                 (r) => (PLURAL_TO_SINGULAR[String(r.type)] ?? r.type) === 'page',
             ) ? this.resolveSduiManifest() : undefined;
+            /** [ADR-0131 D6] Overlays of sealed managed content, not loaded. */
+            const sealedOverlays: Array<{ type: string; name: string }> = [];
             for (const record of records) {
                 try {
+                    // Normalize DB type to singular (DB may store legacy plural forms)
+                    const normalizedType = PLURAL_TO_SINGULAR[record.type] ?? record.type;
+                    if (this.isUnservedSealedOverlay(normalizedType, String(record.name))) {
+                        sealedOverlays.push({ type: normalizedType, name: String(record.name) });
+                        continue;
+                    }
                     const data = this.convertStoredItem(
                         String(record.type),
                         typeof record.metadata === 'string'
                             ? JSON.parse(record.metadata)
                             : record.metadata,
                     );
-                    // Normalize DB type to singular (DB may store legacy plural forms)
-                    const normalizedType = PLURAL_TO_SINGULAR[record.type] ?? record.type;
                     const verdict = computeMetadataDiagnostics(normalizedType, data);
                     if (verdict && !verdict.valid) {
                         invalid++;
@@ -26648,8 +26217,10 @@ export class ObjectStackProtocolImplementation implements
                     }
                 }
             }
-            // #6190 — say out loud which org-scoped rows this filter just
-            // walked past. See {@link reportUnhydratableOrgScopedRows}.
+            // [ADR-0131 D6] Say out loud which rows this load walked past:
+            // the sealed overlays above, and (#6190) every legacy
+            // organization-scoped row the filter skipped.
+            this.reportSealedOverlayRows(sealedOverlays);
             await this.reportUnhydratableOrgScopedRows();
         } catch (e: unknown) {
             // #5841 — the ONE benign reason this whole read can fail is
@@ -26735,80 +26306,36 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#6190] Cold boot walks past every `organization_id IS NOT NULL` row.
-     * For the types the registry declares per-org overridable that is the
-     * design (ADR-0005 revised 2026-05 — those overlays are loaded on demand
-     * by `getMetaItem`/`getMetaItems`, which is why the filter above exists).
-     * For every OTHER type it is a stored row the platform has no per-org
-     * channel for, and until this method the skip was **completely silent**.
+     * [#6190, ADR-0131 D6] Say out loud which stored rows no read serves
+     * because they sit in a legacy organization's layer.
      *
-     * The measured specimen is `flow`. `flow` is `allowOrgOverride: false`
-     * (rolled back in #6283 / commit 474f131cf, matching ADR-0005:57) but
-     * `allowRuntimeCreate: true`, so a tenant authoring a BRAND-NEW flow in
-     * Studio still writes `sys_metadata.organization_id = '<org>'` — the
-     * runtime `PUT /metadata/:type/:name` threads `resolveActiveOrganizationId`
-     * into `saveMetaItem`, and `SysMetadataRepository.put` stamps
-     * `organization_id: this.organizationId` whatever the type is. That flow
-     * binds its triggers for the rest of the process's life (the publish-time
-     * write-through puts it in the process-wide registry) and then, on the
-     * next restart, this filter drops it and the `kernel:ready` binder —
-     * `getMetaItems({ type: 'flow' })`, no `organizationId`, so
-     * `orgRecords = []` — never sees it. It stops firing, and nothing said so:
-     * the `kernel:bootstrapped` unbound audit cannot report a flow that was
-     * never registered.
-     *
-     * This method does not change what boot loads. It makes the absence
-     * LOUD — AGENTS.md's rule, and the half of #6190 that is implementable
-     * without a contract ruling. Whether such a row should exist at all
-     * (refuse the write / force it env-wide / teach the binder to read per-org)
-     * is the maintainer decision recorded on the issue; the operator-visible
-     * consequence is the same either way and it is what an operator needs
-     * TODAY to explain an automation that stopped after a restart.
+     * Boot hydrates `organization_id IS NULL` rows only, and since ADR-0131 D6
+     * every read is environment → code: no read, of any type, serves a row
+     * stored organization-scoped, and no write can store a new one
+     * ({@link organizationScopedWriteRefusal}). The rows stored before the
+     * per-organization overlay axis retired are left at rest — ⛔ nothing here
+     * deletes or rewrites one. The v18 migration ceremony (ADR-0131 D10, `os
+     * migrate`: plan → backup → apply → post-check) carries them and names
+     * each row's fate: the Default Organization's rows of the five
+     * presentational types are promoted to the environment layer, and a name
+     * another organization also holds is reported for the operator to choose.
+     * Until then this line is the operator's account of what is not served.
      *
      * Shape decisions, all deliberate:
      *
-     *  - **Which rows.** Registry-derived, never a hand-written list
-     *    (Prime Directive #7): the complement of
-     *    {@link OVERLAY_ALLOWED_TYPES}'s source flag. Derived from
-     *    `DEFAULT_METADATA_TYPE_REGISTRY` and NOT from
-     *    {@link isOverlayAllowed}, because the `OS_METADATA_WRITABLE` escape
-     *    hatch only unlocks the WRITE — an env-unlocked type's org rows are
-     *    hydrated no more than any other's, so silencing the line on that
-     *    flag would hide exactly the deployment most likely to have these rows.
-     *  - **[#6992] …plus every LIVE type the registry does not declare at
-     *    all.** {@link listLiveMetadataTypes} — the same accessor
-     *    {@link getMetaTypes} lists from. A plugin-registered type (`theme`,
-     *    `connector`, `webhook`, `sharing_rule`, `analytics_cube`, …) has no
-     *    registry entry, so the loop above could not reach it, yet
-     *    `loadMetaFromDb`'s filter is type-BLIND and skips its org-scoped rows
-     *    exactly like a `flow`'s. That family was the one getting neither the
-     *    refusal nor the warning. It has no declaration to consult, and
-     *    `getMetaTypes()` synthesises `allowOrgOverride: false` for it, so
-     *    "not per-org overridable" is its correct reading here.
-     *
-     *    ── THE REFUSAL HAS SINCE WIDENED TO MEET IT ──
-     *
-     *    The #6190 refusal keyed off the STATIC registry and let exactly this
-     *    family through, while this audit keyed off the LIVE set (ruled on
-     *    #6992, scoped to the diagnostic). Since ADR-0131 D6 the refusal
-     *    ({@link organizationScopedWriteRefusal}) admits no organization-scoped
-     *    write of ANY type, plugin-registered ones included, hatch or no hatch,
-     *    so the only rows this audit can find are residue.
-     *
-     *    Measured, not assumed (#6992): at the instant this method runs — in
-     *    `ObjectQLPlugin.start()` Phase 2, after every plugin's `init` — a
-     *    real `app-showcase` boot has 7 live types with no registry entry
-     *    (`analytics_cube`, `connector`, `data`, `package`, `sharing_rule`,
-     *    `theme`, `webhook`), all of them from the SchemaRegistry. The
-     *    widening is therefore live and not defeated by boot order.
-     *  - **Two predicates, both narrowing.** `organization_id IS NOT NULL`
-     *    plus the type list keeps the query empty-by-default: a healthy
-     *    deployment reads nothing and prints nothing. A driver that drops
-     *    either predicate degrades to reading more rows, never to a false
-     *    line — the JS filter re-checks both.
+     *  - **Every type.** The narrowing is type-blind, so the report is too: a
+     *    view a tenant customised and a flow a tenant authored before #6190
+     *    are both unserved now. No registry is consulted, so a plugin type
+     *    that is not live this boot is reported all the same.
+     *  - **Active and draft rows** of `sys_metadata` — the listing of pending
+     *    drafts no longer shows a legacy organization's drafts either — plus
+     *    a count of the legacy rows of the three ledgers the timeline,
+     *    history, diff and audit reads no longer show.
+     *  - **One predicate, re-checked in JS.** A driver that cannot lower
+     *    `$null: false` hands back a superset, and a superset must not become
+     *    a false line.
      *  - **One aggregated line.** Counts per type plus a capped sample of
-     *    names, so a tenant with a thousand such rows costs one line rather
-     *    than a thousand.
+     *    names, so a tenant with a thousand such rows costs one line.
      *  - **Best-effort, and non-fatal by construction.** A diagnostic must
      *    never be the reason a boot fails, so its own catch swallows: the
      *    caller's outer catch classifies REAL hydration outages
@@ -26818,124 +26345,115 @@ export class ObjectStackProtocolImplementation implements
         /** Names printed per type before the line collapses to a count. */
         const SAMPLE_PER_TYPE = 5;
         try {
-            const orgOverridable = new Set<string>();
-            /** Types `DEFAULT_METADATA_TYPE_REGISTRY` declares, whatever their flags. */
-            const declaredTypes = new Set<string>();
-            /** [#6992] Live types with NO registry entry — reported, never refused. */
-            const undeclaredTypes = new Set<string>();
-            const scannedTypes: string[] = [];
-            const scan = (singular: string): void => {
-                scannedTypes.push(singular);
-                // Both spellings: `sys_metadata.type` may hold the legacy
-                // plural, exactly as the hydration loop above assumes.
-                const plural = SINGULAR_TO_PLURAL[singular];
-                if (plural) scannedTypes.push(plural);
-            };
-            for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-                declaredTypes.add(entry.type);
-                if (entry.allowOrgOverride) {
-                    orgOverridable.add(entry.type);
-                    continue;
+            const legacyRows = async (object: string, where: Record<string, unknown>): Promise<any[]> => {
+                try {
+                    const rows = await this.engine.find(object, {
+                        where: { ...where, organization_id: { $null: false } },
+                        context: { isSystem: true },
+                    });
+                    return ((rows ?? []) as any[]).filter((row) => {
+                        const org = (row as { organization_id?: string | null }).organization_id;
+                        return org !== null && org !== undefined && org !== '';
+                    });
+                } catch (error) {
+                    // An unprovisioned ledger holds no legacy row; any other
+                    // failure is this diagnostic's own, and stays here.
+                    if (isMissingTableError(error, object)) return [];
+                    throw error;
                 }
-                scan(entry.type);
-            }
-            // [#6992] Widen to the live registry — see the TSDoc's "…plus every
-            // LIVE type the registry does not declare at all" bullet. Best
-            // effort like the rest of this method: a kernel whose accessors
-            // throw degrades to the declared scan it had before, never to a
-            // failed boot.
-            let liveTypes: string[] = [];
-            try {
-                liveTypes = await this.listLiveMetadataTypes();
-            } catch {
-                liveTypes = [];
-            }
-            for (const liveType of liveTypes) {
-                const singular = PLURAL_TO_SINGULAR[liveType] ?? liveType;
-                if (declaredTypes.has(singular) || undeclaredTypes.has(singular)) continue;
-                undeclaredTypes.add(singular);
-                scan(singular);
-            }
-            if (scannedTypes.length === 0) return;
+            };
 
-            const rows = await this.engine.find('sys_metadata', {
-                where: {
-                    state: 'active',
-                    organization_id: { $null: false },
-                    type: { $in: scannedTypes },
-                },
-            });
-            if (!rows || rows.length === 0) return;
-
-            // Re-check both predicates in JS: a driver that cannot lower one
-            // of them hands back a superset, and a superset must not become a
-            // false accusation.
+            const rows = await legacyRows('sys_metadata', { state: { $in: ['active', 'draft'] } });
             const counts = new Map<string, number>();
             const samples = new Map<string, string[]>();
-            const scannedSingulars = new Set<string>(
-                scannedTypes.map((t) => PLURAL_TO_SINGULAR[t] ?? t),
-            );
-            let total = 0;
             for (const row of rows) {
-                const org = (row as { organization_id?: string | null }).organization_id;
-                if (org === null || org === undefined || org === '') continue;
                 const singular = PLURAL_TO_SINGULAR[String(row.type)] ?? String(row.type);
-                if (orgOverridable.has(singular)) continue;
-                // [#6992] Re-check the TYPE predicate too, which is what the
-                // TSDoc above has always promised ("the JS filter re-checks
-                // both"). Before the live widening, `orgOverridable` was that
-                // re-check: within the declared registry, "not org-overridable"
-                // and "in the scanned list" were the same statement. They are
-                // not any more — a row of a type that is neither declared NOR
-                // live (a plugin uninstalled since the row was written) is
-                // absent from the list, so only this line keeps a driver that
-                // cannot lower `$in` from turning a superset into a line about
-                // a type this kernel never scanned.
-                if (!scannedSingulars.has(singular)) continue;
-                total++;
                 counts.set(singular, (counts.get(singular) ?? 0) + 1);
                 const names = samples.get(singular) ?? [];
-                if (names.length < SAMPLE_PER_TYPE) names.push(`${String(row.name)}@${String(org)}`);
+                const draft = row.state === 'draft' ? ' (draft)' : '';
+                if (names.length < SAMPLE_PER_TYPE) names.push(`${String(row.name)}@${String(row.organization_id)}${draft}`);
                 samples.set(singular, names);
             }
-            if (total === 0) return;
+            const ledgers: string[] = [];
+            for (const ledger of ['sys_metadata_commit', 'sys_metadata_history', 'sys_metadata_audit']) {
+                const n = (await legacyRows(ledger, {})).length;
+                if (n > 0) ledgers.push(`${ledger}×${n}`);
+            }
+            if (rows.length === 0 && ledgers.length === 0) return;
 
-            let reportedUndeclared = false;
             const detail = Array.from(counts.entries())
                 .map(([type, count]) => {
                     const names = samples.get(type) ?? [];
                     const more = count > names.length ? `, +${count - names.length} more` : '';
-                    // [#6992] Mark the plugin-registered family. Not decoration:
-                    // the operator's next step differs between the two: a
-                    // DECLARED type's org-scoped write is refused from now on
-                    // (#6190), so the listed rows are historical residue and
-                    // cannot grow; an UNDECLARED type's write is not refused,
-                    // so the same names come back after every restart until the
-                    // author stops writing them org-scoped.
-                    const mark = undeclaredTypes.has(type) ? ' [plugin-registered]' : '';
-                    if (mark) reportedUndeclared = true;
-                    return `${type}×${count}${mark} (${names.join(', ')}${more})`;
+                    return `${type}×${count} (${names.join(', ')}${more})`;
                 })
                 .join('; ');
             console.warn(
-                `[Protocol] [metadata_org_scoped_unhydrated] ${total} active sys_metadata row(s) are ` +
-                `org-scoped on types with NO per-org channel (the registry declares allowOrgOverride=false, ` +
-                `or does not declare the type at all), so boot hydration skipped them and they are absent ` +
-                `from the process-wide registry: ${detail}. ` +
-                `A 'flow' listed here will NOT bind its triggers in this process (the kernel:ready binder ` +
-                `reads flows env-wide) — it fired until the last restart and stops now. ` +
-                (reportedUndeclared
-                    ? `Types marked [plugin-registered] have no metadata-type registry entry, so the declared-types-only `
-                    + `org-scope write refusal does NOT cover them: rows of those types can still be written `
-                    + `org-scoped, and will be listed here again after every restart until the author stops. `
+                `[Protocol] [metadata_org_scoped_unserved] ` +
+                (rows.length > 0
+                    ? `${rows.length} sys_metadata row(s) are stored in a legacy organization's layer, which ` +
+                    `ADR-0131 D6 retired: no read serves them, boot does not load them, and the environment's ` +
+                    `row or the package's definition is served in their place: ${detail}. A 'flow' listed here ` +
+                    `does not bind its triggers. `
                     : '') +
-                `Re-save the item env-wide (no active organization), or delete the row. See ADR-0005.`,
+                (ledgers.length > 0
+                    ? `Legacy organization-scoped ledger rows, which the commit timeline, history, diff and audit ` +
+                    `reads no longer show: ${ledgers.join(', ')}. `
+                    : '') +
+                `Nothing is deleted or rewritten: the v18 migration ceremony (\`os migrate\`, ADR-0131 D10) ` +
+                `carries these rows and names each one's fate — promoted to the environment layer, or reported ` +
+                `when another organization holds the same name.`,
             );
         } catch {
             // Diagnostics never break boot — see the TSDoc. Deliberately not
             // routed to the caller's outer catch: that one classifies real
             // hydration outages, and a failed extra probe is not one.
         }
+    }
+
+    /**
+     * [ADR-0131 D6, triage ruling Q1 → C] Say out loud which stored
+     * ENVIRONMENT rows boot did not load because they overlay sealed managed
+     * content ({@link isUnservedSealedOverlay}): an overlay of an item a
+     * managed package ships, on a type whose registry entry opens no overlay
+     * channel — a managed flow, action, hook or object, written through the
+     * `OS_METADATA_WRITABLE` hatch before D6 sealed it. No read serves such a
+     * row: the package's definition wins.
+     *
+     * Per type, a capped sample of names, and the two remedies the ruling
+     * names. ⛔ Nothing here deletes or rewrites the row — its fate is the v18
+     * migration ceremony's to name, as a reported population.
+     *
+     * `warn`: a functional degradation an operator can see (the customised
+     * behaviour is gone, the package's is served), not a durability one.
+     * Judged against the packages registered when boot hydrates; a package
+     * registered later (a marketplace install) is not judged here, and its
+     * sealed overlays are still not served.
+     */
+    private reportSealedOverlayRows(rows: ReadonlyArray<{ type: string; name: string }>): void {
+        if (rows.length === 0) return;
+        const SAMPLE_PER_TYPE = 5;
+        const byType = new Map<string, string[]>();
+        for (const { type, name } of rows) {
+            const names = byType.get(type) ?? [];
+            names.push(name);
+            byType.set(type, names);
+        }
+        const detail = Array.from(byType.entries())
+            .map(([type, names]) => {
+                const shown = names.slice(0, SAMPLE_PER_TYPE);
+                const more = names.length > shown.length ? `, +${names.length - shown.length} more` : '';
+                return `${type}×${names.length} (${shown.join(', ')}${more})`;
+            })
+            .join('; ');
+        console.warn(
+            `[Protocol] [metadata_sealed_overlay_unserved] ${rows.length} active environment sys_metadata row(s) ` +
+            `overlay an item a managed package ships, on a type that is sealed against overlays (ADR-0131 D6): ` +
+            `${detail}. They are not loaded and no read serves them — the package's own definition is served. ` +
+            `Each row is kept at rest, untouched. To keep the change, re-express it as a new item under a new ` +
+            `name (a linkage-free clone of the managed item), then delete the stored row; otherwise delete the ` +
+            `stored row.`,
+        );
     }
 
     // ==========================================
@@ -26988,7 +26506,6 @@ export class ObjectStackProtocolImplementation implements
     async findReferencesToMeta(request: {
         type: string;
         name: string;
-        organizationId?: string;
     }): Promise<{
         references: Array<{
             type: string;
@@ -27189,7 +26706,6 @@ export class ObjectStackProtocolImplementation implements
                 // is what surfaces.
                 const result = await this.getMetaItems({
                     type: matcher.fromType,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                 });
                 const items = (result?.items ?? []) as unknown[];
                 for (const raw of items) {
