@@ -211,7 +211,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **iteratorVariable** | `string` | optional (default: `"item"`) | Variable holding the current item |
 | **indexVariable** | `string` | optional | Optional variable holding the current index |
 | **itemObject** | `string` | optional | When items are records, the object they belong to (exposes each item as the child's record) |
-| **input** | `Record<string, any>` | optional | Params passed to each item's subflow (interpolated per item) |
+| **input** | `Record<string, any>` | optional | Params passed to each item's subflow, keyed by its input variables: each value a CEL value envelope `{ dialect: 'cel', source }` evaluated per item (the item variable is in scope), or a literal written as it is — a `{…}` template token is refused |
 | **outputVariable** | `string` | optional | Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 
 

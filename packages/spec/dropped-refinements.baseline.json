@@ -517,6 +517,11 @@
         "body.nodes.element.lazy.in.waitEventConfig"
       ]
     },
+    "automation/MapConfig": {
+      "sites": [
+        "input.valueType"
+      ]
+    },
     "automation/NotifyConfig": {
       "sites": [
         ""
@@ -541,6 +546,16 @@
     "automation/ScreenFieldConfig": {
       "sites": [
         ""
+      ]
+    },
+    "automation/ScriptConfig": {
+      "sites": [
+        "inputs.valueType"
+      ]
+    },
+    "automation/SubflowConfig": {
+      "sites": [
+        "input.valueType"
       ]
     },
     "automation/TimeRelativeTrigger": {
