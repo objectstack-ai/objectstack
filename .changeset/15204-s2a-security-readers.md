@@ -35,6 +35,6 @@ Clause-②: yes
 **One position name per deployment under `single`.**
 
 - FROM: a Setup create of a position, or a rename into a name, that an environment definition already held overwrote that definition (another organization's label and description, an empty `permissionSets`).
-- TO: refused `409 UNIQUE_VIOLATION` on `name`, and the row write is undone. This covers a definition another organization's row wrote, one saved through the metadata door, and one an application stack declares. A name a package or a built-in holds keeps its `403 NOT_OVERRIDABLE`.
+- TO: refused `409 UNIQUE_VIOLATION`, the answer a second row of the name in one organization already gets, and the row write is undone. This covers a definition another organization's row wrote, one saved through the metadata door, and one an application stack declares. A name a package or a built-in holds keeps its `403 NOT_OVERRIDABLE`.
 
 **`@objectstack/core`.** `readDisabledCatalogNames(ql, positions, sets)` is exported: the resolver's one read of the activation ledger. It returns the names switched off for this deployment and is now shared by the explainer and the security plugin.
