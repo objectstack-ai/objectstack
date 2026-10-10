@@ -1,8 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20492] `DELETE /packages/:id` refuses an uninstall that names no
- * organization BEFORE it touches the running registry.
+ * [#20492] `DELETE /packages/:id` refused an uninstall that names no
+ * organization BEFORE it touched the running registry.
+ *
+ * [ADR-0131 D6/D12] That refusal is RETIRED: an uninstall is environment-wide
+ * by construction and names no organization, so every caller who passes the
+ * operator gate — with or without an active organization — uninstalls, and
+ * `deletePackage` is handed no organization. The history below is kept for
+ * the rig's sake.
  *
  * ## The defect
  *
@@ -25,14 +31,13 @@
  * `SchemaRegistry` holding the package and one object it owns, so "the package
  * left the process" is read off the registry itself and through the door's own
  * `GET`. The `protocol` double keeps the package's stored rows, records every
- * `deletePackage` request, and refuses an org-less one the way
- * `@objectstack/metadata-protocol`'s `deletePackage` does (its request type:
- * "Omitted together with `allTenants` ⇒ refused").
+ * `deletePackage` request, and refuses one carrying the retired
+ * `organizationId` / `allTenants` keys the way
+ * `@objectstack/metadata-protocol`'s `deletePackage` does.
  *
- * Two refused populations, both measured reaching the old half-applied state:
- * a member removed from the organization whose session still names it (the
- * resolver drops the claim), and a caller who never selected an organization.
- * The control is a current member, who uninstalls exactly as before.
+ * Three populations: a current member, a member removed from the organization
+ * whose session still names it (the resolver drops the claim), and a caller who
+ * never selected an organization. All three uninstall the same way.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -140,9 +145,9 @@ function rig(opts: { persistedHalf?: boolean } = {}): Rig {
     const protocol = {
         deletePackage: async (req: any) => {
             deleteRequests.push({ ...req });
-            if (!req?.organizationId && req?.allTenants !== true) {
-                throw Object.assign(new Error('Refusing to uninstall with no organization scope.'), {
-                    code: 'TENANT_SCOPE_REQUIRED', status: 400,
+            if ('organizationId' in (req ?? {}) || 'allTenants' in (req ?? {})) {
+                throw Object.assign(new Error('organizationId / allTenants are retired request keys.'), {
+                    code: 'INVALID_REQUEST', status: 400,
                 });
             }
             const deleted = rows.splice(0);
@@ -220,80 +225,30 @@ let warnSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
 afterEach(() => { warnSpy.mockRestore(); });
 
-// ── The subject: a refused uninstall changes nothing ──────────────────────────
+// ── The subject: every operator uninstalls, naming no organization ───────────
 
-const REFUSED: Array<[Who, string]> = [
+const CALLERS: Array<[Who, string]> = [
+    ['member', 'a current member'],
     ['exmember', 'a member removed from the organization, whose session still names it'],
     ['orgless', 'a caller who never selected an organization'],
 ];
 
-describe('[#20492] DELETE /packages/:id with no organization is refused before the registry is touched', () => {
-    for (const [who, label] of REFUSED) {
-        it(`${label}: answered 400 TENANT_SCOPE_REQUIRED by the door, and deletePackage is never asked`, async () => {
-            const r = rig();
-            const answer = await r.call('DELETE', who, `/packages/${PKG}`);
-            expect({ status: answer.status, code: answer.code, httpStatus: answer.body?.error?.httpStatus })
-                .toEqual({ status: 400, code: 'TENANT_SCOPE_REQUIRED', httpStatus: 400 });
-            expect(r.deleteRequests).toEqual([]);
-        });
-
-        it(`${label}: afterwards the package is still served, listed and registered with its object, and its stored rows are untouched`, async () => {
+describe('[ADR-0131 D6] DELETE /packages/:id names no organization, whoever asks', () => {
+    for (const [who, label] of CALLERS) {
+        it(`${label}: 200; the package and its object leave the registry, GET answers 404, and deletePackage is handed no organization`, async () => {
             const r = rig();
             expect(await observed(r), 'precondition: the package is installed').toEqual(UNTOUCHED);
-            await r.call('DELETE', who, `/packages/${PKG}`);
-            expect(await observed(r)).toEqual(UNTOUCHED);
+            const answer = await r.call('DELETE', who, `/packages/${PKG}`);
+            expect(answer.status).toBe(200);
+            expect(answer.body?.data).toMatchObject({ packageId: PKG, success: true, registryRemoved: true });
+            expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
+            expect(await observed(r)).toEqual({
+                detailStatus: 404,
+                listed: false,
+                inRegistry: false,
+                objectRegistered: false,
+                storedRows: [],
+            });
         });
     }
-
-    it('the rig really drops the removed member\'s claim — that arm is not a session that never presented one', async () => {
-        const r = rig();
-        await r.call('DELETE', 'exmember', `/packages/${PKG}`);
-        const dropped = warnSpy.mock.calls.map((args: unknown[]) => String(args[0]))
-            .filter((line: string) => line.includes('Session organization claim dropped'));
-        expect(dropped.length).toBeGreaterThan(0);
-        expect(dropped[0]).toContain(`organization=${ALPHA}`);
-    });
-});
-
-// ── The control: a member with an organization uninstalls as before ───────────
-
-describe('[#20492] control: a current member uninstalls exactly as before', () => {
-    it('200; the package and its object leave the registry, GET answers 404, and deletePackage removes the rows in that organization', async () => {
-        const r = rig();
-        const answer = await r.call('DELETE', 'member', `/packages/${PKG}`);
-        expect(answer.status).toBe(200);
-        expect(answer.body?.data).toMatchObject({ packageId: PKG, success: true, registryRemoved: true });
-        expect(r.deleteRequests).toEqual([{ packageId: PKG, organizationId: ALPHA }]);
-        expect(await observed(r)).toEqual({
-            detailStatus: 404,
-            listed: false,
-            inRegistry: false,
-            objectRegistered: false,
-            storedRows: [],
-        });
-    });
-});
-
-// ── The mirror's reach: exactly the refusal the persisted half would give ─────
-
-describe('[#20492] the door mirrors the persisted refusal — no wider, no narrower', () => {
-    it('a host with no persisted half (no deletePackage) has no refusal to mirror: the org-less uninstall proceeds as before', async () => {
-        const r = rig({ persistedHalf: false });
-        const answer = await r.call('DELETE', 'orgless', `/packages/${PKG}`);
-        expect(answer.status).toBe(200);
-        expect(r.registry.getPackage(PKG)).toBeUndefined();
-    });
-
-    it('no isSystem bypass — the protocol refuses an org-less uninstall whoever asks, so the door does too, before the registry', async () => {
-        const r = rig();
-        const registry = r.registry;
-        const get = (n: string) => (n === 'objectql' ? { registry } : n === 'protocol' ? { deletePackage: vi.fn() } : null);
-        const d = new HttpDispatcher({ context: { getService: get } } as any);
-        const res = await d.handlePackages(`/${PKG}`, 'DELETE', undefined, {}, {
-            request: {}, executionContext: { isSystem: true },
-        } as any);
-        expect({ status: res.response?.status, code: (res.response?.body as any)?.error?.code })
-            .toEqual({ status: 400, code: 'TENANT_SCOPE_REQUIRED' });
-        expect(registry.getPackage(PKG)).toBeDefined();
-    });
 });

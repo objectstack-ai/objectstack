@@ -9,7 +9,8 @@
  * The refusal combination, all five limbs:
  *
  *   multi-organization posture
- *   && platform-level flow (the write carries no organization)
+ *   && platform-level flow (every write is, since ADR-0131 D6 — an org-scoped
+ *      write is refused 403 before this rule runs; pinned below)
  *   && schedule trigger
  *   && contains a `create_record`
  *   && that node declares no `fields.organization_id`
@@ -174,10 +175,6 @@ describe('findPlatformScheduleOrgGaps — the refusal combination (#6285)', () =
 
     it('passes on a SINGLE-organization deployment (no wall to land outside of)', () => {
         expect(judge({ orgWallEnforced: false })).toEqual([]);
-    });
-
-    it('passes when the flow is written INTO an organization', () => {
-        expect(judge({ organizationId: 'org_a' })).toEqual([]);
     });
 
     it('passes for a non-schedule trigger — a record-change flow resolves an org', () => {

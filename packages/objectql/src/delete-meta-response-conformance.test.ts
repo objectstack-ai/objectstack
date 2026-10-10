@@ -168,8 +168,6 @@ const viewBody = (label: string) => ({
     name: 'cases', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list',
 });
 
-const ORG = 'org_x';
-
 /** Keys the producer emitted that the schema refused to carry through. */
 function strippedKeys(raw: Record<string, unknown>): string[] {
     const parsed = DeleteMetaItemResponseSchema.parse(raw) as Record<string, unknown>;
@@ -180,11 +178,11 @@ describe('deleteMetaItem response conforms to DeleteMetaItemResponseSchema (#131
     it('repository path, row deleted: parses green, strips nothing, and carries seq', async () => {
         const { p } = await makeProtocol();
         await (p as any).saveMetaItem({
-            type: 'view', name: 'cases', organizationId: ORG, item: viewBody('A'),
+            type: 'view', name: 'cases', item: viewBody('A'),
         });
 
         const raw: any = await (p as any).deleteMetaItem({
-            type: 'view', name: 'cases', organizationId: ORG,
+            type: 'view', name: 'cases',
         });
 
         // The assertion that was red before the declaration: `seq` rode the
@@ -205,14 +203,14 @@ describe('deleteMetaItem response conforms to DeleteMetaItemResponseSchema (#131
     it('with an ADR-0094 projector registered: projectionApplied is carried through', async () => {
         const { p } = await makeProtocol();
         await (p as any).saveMetaItem({
-            type: 'view', name: 'cases', organizationId: ORG, item: viewBody('P'),
+            type: 'view', name: 'cases', item: viewBody('P'),
         });
         // Registered AFTER the save so the save's own projection is not what
         // this case reads — the delete's is.
         (p as any).registerMutationProjector('view', async () => { throw new Error('boom-from-projector'); });
 
         const raw: any = await (p as any).deleteMetaItem({
-            type: 'view', name: 'cases', organizationId: ORG,
+            type: 'view', name: 'cases',
         });
 
         expect(Object.keys(raw)).toContain('projectionApplied');
@@ -229,11 +227,11 @@ describe('deleteMetaItem response conforms to DeleteMetaItemResponseSchema (#131
     it('no projector registered → projectionApplied is absent, which is why it is optional', async () => {
         const { p } = await makeProtocol();
         await (p as any).saveMetaItem({
-            type: 'view', name: 'cases', organizationId: ORG, item: viewBody('N'),
+            type: 'view', name: 'cases', item: viewBody('N'),
         });
 
         const raw: any = await (p as any).deleteMetaItem({
-            type: 'view', name: 'cases', organizationId: ORG,
+            type: 'view', name: 'cases',
         });
 
         expect(raw.projectionApplied).toBeUndefined();
@@ -245,7 +243,7 @@ describe('deleteMetaItem response conforms to DeleteMetaItemResponseSchema (#131
         const { p } = await makeProtocol();
 
         const raw: any = await (p as any).deleteMetaItem({
-            type: 'view', name: 'never_written', organizationId: ORG,
+            type: 'view', name: 'never_written',
         });
 
         // This is the branch that makes `seq` optional rather than required.
@@ -263,10 +261,10 @@ describe('deleteMetaItem response conforms to DeleteMetaItemResponseSchema (#131
     it('seq really is the history event sequence: it advances across the item\'s writes', async () => {
         const { p } = await makeProtocol();
         const saved: any = await (p as any).saveMetaItem({
-            type: 'view', name: 'cases', organizationId: ORG, item: viewBody('S'),
+            type: 'view', name: 'cases', item: viewBody('S'),
         });
         const raw: any = await (p as any).deleteMetaItem({
-            type: 'view', name: 'cases', organizationId: ORG,
+            type: 'view', name: 'cases',
         });
 
         // The delete's tombstone event comes after the save's write event on

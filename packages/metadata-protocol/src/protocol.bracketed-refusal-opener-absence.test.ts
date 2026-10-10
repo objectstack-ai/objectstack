@@ -218,7 +218,6 @@ describe('the refusal a caller actually receives', () => {
       type: 'flow',
       name: 'nightly_sweep',
       state: 'active',
-      organizationId: null,
       orgWallEnforced: true,
       body: {
         name: 'nightly_sweep',

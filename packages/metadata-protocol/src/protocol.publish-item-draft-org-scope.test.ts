@@ -17,8 +17,13 @@
  * per-item publish worked for them and failed for views.
  *
  * That is the single-item twin of #3115, which the batch door fixed by promoting
- * each draft in the scope `listDrafts` surfaced it FROM. The per-item door now
- * DISCOVERS the draft's scope the same way, with the ADR-0005 precedence.
+ * each draft in the scope `listDrafts` surfaced it FROM.
+ *
+ * [ADR-0131 D6] Every write is now environment-wide: an organization-scoped
+ * publish request is refused (403 NOT_OVERRIDABLE) before any read, and the
+ * per-item door no longer discovers an org scope at all. What remains pinned
+ * here is the outcome #10219 B asked for — an env-wide draft publishes, and is
+ * reported, env-wide — plus that refusal.
  *
  * Harness: the faithful multi-table stub engine used by
  * `protocol-publish-drafts-org-scope.test.ts` / `-advisories.test.ts` (kept
@@ -178,23 +183,21 @@ const viewBody = (name: string) => ({
     columns: [{ field: 'name', label: 'Name' }],
 });
 
-describe('publishMetaItem resolves the draft\'s OWN org scope (#10219 B, the single-item #3115)', () => {
-    it('publishes an env-wide `view` draft although the session carries an active org', async () => {
+describe('publishMetaItem publishes env-wide drafts (#10219 B; ADR-0131 D6)', () => {
+    it('publishes an env-wide `view` draft', async () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         // Authored env-wide — what package/AI authoring writes, and what
-        // `PUT ?mode=draft` writes with no active org threaded.
+        // `PUT ?mode=draft` writes.
         await protocol.saveMetaItem({
             type: 'view', name: 'customer_list', item: viewBody('customer_list'),
             packageId: PKG, mode: 'draft',
         });
 
-        // `POST /meta/view/customer_list/publish` from a session with an active
-        // org: `view` is org-overridable, so the REST seam threads it. Before the
-        // fix this answered 404 `[no_draft]`.
+        // Before #10219 B this answered 404 `[no_draft]` once an org was threaded.
         const res = await protocol.publishMetaItem({
-            type: 'view', name: 'customer_list', organizationId: 'org_alpha', actor: 'admin',
+            type: 'view', name: 'customer_list', actor: 'admin',
         });
 
         expect(res.success).toBe(true);
@@ -202,7 +205,7 @@ describe('publishMetaItem resolves the draft\'s OWN org scope (#10219 B, the sin
         expect(remaining.filter((r) => r.state === 'draft')).toHaveLength(0);
         const active = remaining.filter((r) => r.state === 'active');
         expect(active).toHaveLength(1);
-        // Promoted in the scope it was authored in — NOT copied into the org.
+        // Promoted in the scope it was authored in.
         expect(active[0]!.organization_id).toBeNull();
     });
 
@@ -217,7 +220,7 @@ describe('publishMetaItem resolves the draft\'s OWN org scope (#10219 B, the sin
             packageId: PKG, mode: 'draft',
         });
         await protocol.publishMetaItem({
-            type: 'view', name: 'customer_list', organizationId: 'org_alpha', actor: 'admin',
+            type: 'view', name: 'customer_list', actor: 'admin',
         });
 
         expect(seen).toEqual([
@@ -225,30 +228,24 @@ describe('publishMetaItem resolves the draft\'s OWN org scope (#10219 B, the sin
         ]);
     });
 
-    it('PRECEDENCE — an org that has its own draft publishes THAT one, not the env-wide row', async () => {
+    it('an organization-scoped publish request is refused 403 NOT_OVERRIDABLE, and the draft stays pending', async () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         await protocol.saveMetaItem({
-            type: 'view', name: 'customer_list', item: { ...viewBody('customer_list'), label: 'Env wide' },
+            type: 'view', name: 'customer_list', item: viewBody('customer_list'),
             packageId: PKG, mode: 'draft',
         });
-        await protocol.saveMetaItem({
-            type: 'view', name: 'customer_list', item: { ...viewBody('customer_list'), label: 'Org alpha' },
-            organizationId: 'org_alpha', packageId: PKG, mode: 'draft',
-        });
 
-        await protocol.publishMetaItem({
-            type: 'view', name: 'customer_list', organizationId: 'org_alpha', actor: 'admin',
-        });
+        await expect(
+            protocol.publishMetaItem({
+                type: 'view', name: 'customer_list', organizationId: 'org_alpha', actor: 'admin',
+            } as any),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
-        // The ADR-0005 overlay order: the caller's own org shadows env-wide.
-        const active = Array.from(rows.values()).filter((r) => r.state === 'active');
-        expect(active).toHaveLength(1);
-        expect(active[0]!.organization_id).toBe('org_alpha');
-        expect(JSON.parse(active[0]!.metadata).label).toBe('Org alpha');
-        // The env-wide draft is untouched — it was never this publish's subject.
-        const drafts = Array.from(rows.values()).filter((r) => r.state === 'draft');
+        const remaining = Array.from(rows.values());
+        expect(remaining.filter((r) => r.state === 'active')).toHaveLength(0);
+        const drafts = remaining.filter((r) => r.state === 'draft');
         expect(drafts).toHaveLength(1);
         expect(drafts[0]!.organization_id).toBeNull();
     });
@@ -264,7 +261,7 @@ describe('publishMetaItem resolves the draft\'s OWN org scope (#10219 B, the sin
 
         await expect(
             protocol.publishMetaItem({
-                type: 'view', name: 'customer_list', organizationId: 'org_alpha', actor: 'admin',
+                type: 'view', name: 'customer_list', actor: 'admin',
             }),
         ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
     });

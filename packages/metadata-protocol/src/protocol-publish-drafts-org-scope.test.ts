@@ -30,9 +30,11 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
  *     `organization_id = <org>` equality and 404'd (`no_draft`) on the
  *     env-wide row it could never match.
  *
- * The fix promotes each listed draft in the org scope it actually lives in
- * (the scope `listDrafts` surfaced it from), so the pending-changes list and
- * the publish path agree.
+ * The fix promoted each listed draft in the org scope it actually lived in.
+ * [ADR-0131 D6] Superseded: an organization-scoped publish request is now
+ * refused outright (403 NOT_OVERRIDABLE), and the publish lists and promotes
+ * ENVIRONMENT-WIDE drafts only — a legacy org-scoped draft is never promoted
+ * (it waits for the promotion ceremony, ADR-0131 C7).
  *
  * These tests exercise the REAL `listDrafts` + `promoteDraft` interaction
  * against a faithful multi-table stub engine (honours `$or` and
@@ -237,13 +239,19 @@ describe('publishPackageDrafts — env-wide draft under a non-null active org (#
             mode: 'draft',
         });
 
-        // 2. Studio "Publish" — the dispatcher resolved a non-null active org.
-        const res = await protocol.publishPackageDrafts({
+        // 2. [ADR-0131 D6] A publish request carrying an organization is
+        //    refused before anything is read — the draft stays a draft.
+        const refused: any = await protocol.publishPackageDrafts({
             packageId: 'app.projects',
             organizationId: 'org_alpha',
-        });
+        } as any).then(() => null, (e: unknown) => e);
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(Array.from(rows.values()).filter((r) => r.state === 'draft')).toHaveLength(1);
 
-        // Before the fix this returned { success:false, failedCount:1,
+        // 3. The environment-wide publish promotes the env-wide draft.
+        const res = await protocol.publishPackageDrafts({ packageId: 'app.projects' });
+
+        // Before #3115's fix this returned { success:false, failedCount:1,
         // failed:[{ code:'NO_DRAFT' }] }.
         expect(res.failed).toEqual([]);
         expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
@@ -258,39 +266,27 @@ describe('publishPackageDrafts — env-wide draft under a non-null active org (#
         expect(active[0].organization_id).toBeNull();
     });
 
-    it('still publishes an org-scoped draft under that same org (no regression)', async () => {
+    it('never promotes a legacy org-scoped draft — the publish lists env-wide drafts only (ADR-0131 D6)', async () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        // A per-org overlay draft (organization_id = org_alpha).
-        //
-        // [#6190, 2026-08-09] Re-spelled from `object` to `view`. The org-scope
-        // resolution this case guards (#3115 — promote the draft in the scope
-        // `listDrafts` surfaced it from) is unchanged and is what is measured
-        // here; what changed is which TYPES may carry an org-scoped row at all.
-        // `object` is `allowOrgOverride: false`, so since the #6190 ruling its
-        // org-scoped draft cannot be written in the first place — a fixture
-        // that kept spelling it would have been pinning a write the platform
-        // refuses, i.e. nothing. `view` is `allowOrgOverride: true`: it HAS a
-        // per-org channel, its org rows ARE read back, and it therefore
-        // exercises the #3115 seam exactly as `object` used to.
-        await protocol.saveMetaItem({
+        // A legacy per-org draft (organization_id = org_alpha), planted
+        // directly: no protocol write can create one any more.
+        await engine.insert('sys_metadata', {
             type: 'view',
             name: 'proj_task_grid',
-            item: viewBody('proj_task_grid'),
-            organizationId: 'org_alpha',
-            packageId: 'app.projects',
-            mode: 'draft',
+            organization_id: 'org_alpha',
+            package_id: 'app.projects',
+            state: 'draft',
+            metadata: JSON.stringify(viewBody('proj_task_grid')),
         });
 
-        const res = await protocol.publishPackageDrafts({
-            packageId: 'app.projects',
-            organizationId: 'org_alpha',
-        });
+        const res = await protocol.publishPackageDrafts({ packageId: 'app.projects' });
 
-        expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
-        const active = Array.from(rows.values()).filter((r) => r.state === 'active');
-        expect(active).toHaveLength(1);
-        expect(active[0].organization_id).toBe('org_alpha');
+        expect(res).toMatchObject({ publishedCount: 0, failedCount: 0 });
+        expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toHaveLength(0);
+        const draft = Array.from(rows.values()).filter((r) => r.state === 'draft');
+        expect(draft).toHaveLength(1);
+        expect(draft[0].organization_id).toBe('org_alpha');
     });
 });

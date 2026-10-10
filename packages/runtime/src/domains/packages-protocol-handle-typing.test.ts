@@ -81,7 +81,6 @@ function declaredKeysCompile(protocol: PackagesDomainProtocol) {
             name: 'crm_console',
             item: { _unpublished: false },
             packageId: 'crm',
-            organizationId: 'org_1',
             actor: 'u_publisher',
         }),
         // `applyPublishedSeeds`' seed body read-back, both attempts.

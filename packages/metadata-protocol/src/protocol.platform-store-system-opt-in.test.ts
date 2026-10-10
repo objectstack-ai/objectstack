@@ -292,7 +292,7 @@ describe('platform-store calls carry the explicit system opt-in (#21911)', () =>
             } as any).catch(() => undefined);
         });
         await expectSystemOptIn(calls, 'deletePackage', async () => {
-            await protocol.deletePackage({ packageId: 'com.example.pincopy', allTenants: true } as any).catch(() => undefined);
+            await protocol.deletePackage({ packageId: 'com.example.pincopy' } as any).catch(() => undefined);
         });
     });
 });
@@ -338,7 +338,7 @@ describe('[#21908] the deny round — the platform-store calls still reaching th
     // (publish, history, audit, diff, commits, migration, the legacy delete),
     // so each carries the explicit opt-in now, like the calls above.
 
-    it('the publish path: the promotion draft read and the org-scoped publish probes', async () => {
+    it('the publish path: the promotion draft read', async () => {
         const { engine, calls } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine) as any;
         await protocol.saveMetaItem({ type: 'view', name: 'proj_task_grid', item: viewBody('proj_task_grid'), mode: 'draft' });
@@ -349,8 +349,6 @@ describe('[#21908] the deny round — the platform-store calls still reaching th
         });
         await expectSystemOptIn(calls, 'promoteDraftForPublish', () =>
             protocol.promoteDraftForPublish({ type: 'view', name: 'proj_task_grid' }).catch(() => undefined));
-        await expectSystemOptIn(calls, 'resolveDraftOrgScopeForPublish', () =>
-            protocol.resolveDraftOrgScopeForPublish('view', 'proj_task_grid', 'org_a'));
     });
 
     it('the readers behind the history, audit, diff and commit doors', async () => {
@@ -358,8 +356,6 @@ describe('[#21908] the deny round — the platform-store calls still reaching th
         const protocol = new ObjectStackProtocolImplementation(engine) as any;
         await protocol.saveMetaItem({ type: 'view', name: 'proj_task_grid', item: viewBody('proj_task_grid'), mode: 'publish' });
 
-        await expectSystemOptIn(calls, 'resolveMetaItemOrgScope', () =>
-            protocol.resolveMetaItemOrgScope('view', 'proj_task_grid', 'org_a'));
         await expectSystemOptIn(calls, 'auditMetaItem', () =>
             protocol.auditMetaItem({ type: 'view', name: 'proj_task_grid' }));
         const diffCalls = await expectSystemOptIn(calls, 'diffMetaItem', () =>
