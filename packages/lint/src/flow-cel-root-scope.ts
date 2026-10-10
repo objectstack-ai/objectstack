@@ -42,10 +42,10 @@
  *  - **record fields**: the trigger record's fields are flattened to top-level
  *    names. Every field of EVERY object the stack declares counts, with the
  *    registry-injected columns — not only the trigger object's — because the run
- *    flattens whichever record its entrance hands it: a flow action passes the
- *    action's own record to any flow it starts, a `subflow` child inherits its
- *    parent's record, and a `map` child gets each record item. A field the stack
- *    declares anywhere is therefore a root this door cannot prove unbound.
+ *    flattens whichever record its entrance hands it (the entrances below). A
+ *    field the stack declares anywhere is therefore a root this door cannot
+ *    prove unbound. An object-less action that launches the flow hands an empty
+ *    record carrying at most the row `id` it was given, so `id` is bound there.
  *
  * ## When the door cannot prove a root unbound, it stands down
  *
@@ -62,24 +62,68 @@
  *  - a `screen` with no input contract — an `object-form` screen, or one that
  *    declares no fields — because `refuseInvalidScreenInput` checks a resume bag
  *    only against a declared field list, so a contract-less screen folds any bag;
- *  - a trigger object the stack does not declare (a platform object, another
- *    package's): its row's keys are not in hand.
+ *  - an ENTRANCE that hands the flow a record whose keys are not in hand
+ *    ({@link flowCelEntrances}, the rule below).
  *
- * ⚠️ The boundary that remains: a record of an object this stack does not
- * declare, handed in by a flow action, a parent `subflow` or a `map` item, can
- * carry a key the reader has never seen. Measured over the example apps and
- * hotcrm, no flow reads a bare root that is not its own binding, an engine root
- * or a field of its trigger object.
+ * ## The rule for records: every entrance the stack declares is read
+ *
+ * The run flattens whichever record its entrance hands it (`seedRunVariables`
+ * reads `context.record` and nothing else), so the record half of the bound set
+ * holds only while every entrance that can hand this flow a record names an
+ * object the stack declares. {@link flowCelEntrances} reads each entrance from
+ * the stack's own declarations and opens the flow when one does not:
+ *
+ *  - **a record trigger** — the start node's `config.objectName` (the trigger
+ *    object a record-change run's row belongs to) names an undeclared object;
+ *  - **a time-relative sweep** — the start node's `config.timeRelative.object`
+ *    (`TimeRelativeTriggerSchema`; its own key, independent of `objectName`, and
+ *    the object whose rows the sweep hands each run) is undeclared;
+ *  - **the inbound hook** — the flow's trigger kind is `api`
+ *    (`resolveFlowTriggerKind`: `type: 'api'` or `config.triggerType: 'api'`), so
+ *    the hook hands the request body in as the record (`trigger-api`), keys and
+ *    all;
+ *  - **an action** — an `ActionSchema` entry with `type: 'flow'` and
+ *    `target: <this flow>` in `actions[]` (its `objectName`) or in
+ *    `objects[].actions[]` (its `objectName`, else the owning object) names an
+ *    undeclared object: `dispatchFlowAction` hands the action's own record to
+ *    whatever flow it targets;
+ *  - **a `map` node** — `MapConfigSchema`'s `flowName` names this flow and its
+ *    `itemObject` is undeclared or absent: each id-bearing item becomes the
+ *    child's record, and with no `itemObject` the items' object is not in hand;
+ *  - **a parent that is itself open** — a `subflow` node (`SubflowConfigSchema`'s
+ *    `flowName`) or a `map` node names this flow inside a flow that is open: the
+ *    child spreads its parent's context, record included. Read to a fixpoint.
+ *
+ * The API run door hands no record (measured): both REST trigger routes and the
+ * declarative endpoint build their context with `buildAutomationContext`, which
+ * carries `params` and `recordId` but no `record`, and the engine never loads a
+ * record from `object` + `recordId`. A schedule run hands none either.
+ *
+ * ## The runtime publish gate stands down (#22636 is the carrier)
+ *
+ * The same pass runs at the runtime publish gate on a flow write, and there the
+ * per-write snapshot carries the written flow alone beside `objects` /
+ * `permissions` / `books` / `datasets` (`buildRuntimeWriteSnapshotSet`): no
+ * action and no other flow, so no entrance is visible and a parent's `subflow` or
+ * `map` node could hand this flow any record. A false 422 on the only door a
+ * Studio tenant has is worse than the gap, so this one judgment stands down there
+ * ({@link perWriteSnapshotEntrance}); every other expression verdict at that door
+ * is unchanged, and `objectstack validate` judges under the rule above. #22636
+ * widens that snapshot to carry flows and actions; when it lands, this
+ * stand-down goes.
  */
 
 import { firstUndeclaredReference, parseCelToAst, SCOPE_ROOTS } from '@objectstack/formula';
 import {
   APPROVAL_NODE_TYPE,
   APPROVAL_REVISE_NODE_TYPE,
+  collectFlowGraphs,
   LOOP_NODE_TYPE,
   PARALLEL_NODE_TYPE,
+  resolveFlowTriggerKind,
   TRY_CATCH_NODE_TYPE,
 } from '@objectstack/spec/automation';
+import type { FlowEdgeParsed, FlowNodeParsed } from '@objectstack/spec/automation';
 
 import { collectFlowVariableNames, type FlowGraphLike, type FlowVariableHost } from './flow-variable-scope.js';
 import { nearestName, recordsOf } from './object-graph.js';
@@ -168,23 +212,41 @@ export interface UnboundFlowCelRoot {
 }
 
 /**
+ * What the flow's entrances contribute to its scope ({@link flowCelEntrances}):
+ * the reason one of them hands it a record whose keys are not in hand, and any
+ * name an entrance binds that no object field covers.
+ */
+export interface FlowCelEntrance {
+  /** Set ⇒ the flow is not judged; names the entrance. */
+  readonly openedBy?: string;
+  /** Names an entrance binds beyond the objects' fields (an object-less action's `id`). */
+  readonly bound?: readonly string[];
+}
+
+/**
  * The bound set of one flow, or the reason it cannot be proved.
  *
  * @param graphs every graph of the flow (`collectFlowGraphs`), so a region's
  *   nodes count — one variable map serves the whole run.
- * @param triggerObject the start node's `objectName`, when it names one.
+ * @param triggerObject the start node's `objectName`, when it names one — its
+ *   fields lead the did-you-mean order.
  * @param fieldIndex object name → its field names, injected columns included.
+ * @param entrance what the flow's entrances contribute: from
+ *   {@link flowCelEntrances} at the build door, {@link perWriteSnapshotEntrance}
+ *   at the runtime publish gate. Its reason takes precedence over a node's.
  */
 export function flowCelRootScope(
   flow: FlowCelRootHost,
   graphs: readonly FlowGraphLike[],
   triggerObject: string | undefined,
   fieldIndex: ReadonlyMap<string, readonly string[]>,
+  entrance: FlowCelEntrance = {},
 ): FlowCelRootScope {
   const bound = new Set<string>(triggerObject !== undefined ? fieldIndex.get(triggerObject) ?? [] : []);
   for (const name of collectFlowVariableNames(flow, graphs)) bound.add(name);
   for (const name of ENGINE_BOUND_ROOTS) bound.add(name);
-  let openedBy: string | undefined;
+  for (const name of entrance.bound ?? []) bound.add(name);
+  let openedBy: string | undefined = entrance.openedBy;
   const open = (reason: string): void => { openedBy ??= reason; };
 
   for (const graph of graphs) {
@@ -216,12 +278,151 @@ export function flowCelRootScope(
     }
   }
 
-  if (triggerObject !== undefined && !fieldIndex.has(triggerObject)) {
-    open(`trigger object '${triggerObject}' is not declared in this stack, so its fields are not in hand`);
-  }
   for (const names of fieldIndex.values()) for (const name of names) bound.add(name);
 
   return openedBy === undefined ? { bound, provable: true } : { bound, provable: false, openedBy };
+}
+
+/** The stack slice {@link flowCelEntrances} reads. */
+export interface FlowCelEntranceHost {
+  readonly flows?: unknown;
+  readonly actions?: unknown;
+  readonly objects?: unknown;
+}
+
+function configOf(node: AnyRec): AnyRec {
+  return node.config && typeof node.config === 'object' && !Array.isArray(node.config) ? (node.config as AnyRec) : {};
+}
+
+function nameOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+/**
+ * Every flow of the stack whose entrances open it, or bind a name beyond the
+ * objects' fields — read from the stack's own declarations (the module's rule
+ * for records). A flow absent from the map is judged as its own text reads.
+ *
+ * Built once per stack, because an entrance lives OUTSIDE the flow it feeds (an
+ * action, another flow's `subflow` / `map` node) and a parent's openness passes
+ * to its children: the parent edges are read to a fixpoint. A child named by a
+ * node but not declared in this stack is another package's flow and is not
+ * judged here.
+ *
+ * @param fieldIndex object name → field names; an object is "declared" when it
+ *   is a key here, the same universe the bound set reads.
+ */
+export function flowCelEntrances(
+  stack: FlowCelEntranceHost,
+  fieldIndex: ReadonlyMap<string, readonly string[]>,
+): ReadonlyMap<string, FlowCelEntrance> {
+  const flows = recordsOf(stack.flows);
+  const flowNames = new Set(flows.map((flow) => nameOf(flow.name)).filter((name): name is string => !!name));
+  const openedBy = new Map<string, string>();
+  const bound = new Map<string, string[]>();
+  const open = (flow: string, reason: string): void => {
+    if (flowNames.has(flow) && !openedBy.has(flow)) openedBy.set(flow, reason);
+  };
+  const undeclared = (object: string): boolean => !fieldIndex.has(object);
+
+  // The flow's own trigger: a record trigger, a time-relative sweep, the inbound hook.
+  for (const flow of flows) {
+    const name = nameOf(flow.name);
+    if (!name) continue;
+    const start = recordsOf(flow.nodes).find((node) => node.type === 'start');
+    const config = start ? configOf(start) : {};
+    const triggerObject = nameOf(config.objectName);
+    if (triggerObject && undeclared(triggerObject)) {
+      open(name, `its trigger object '${triggerObject}' (start config.objectName) is not declared in this stack, so the record's keys are not in hand`);
+    }
+    const sweep = config.timeRelative && typeof config.timeRelative === 'object' ? (config.timeRelative as AnyRec) : undefined;
+    const sweepObject = sweep ? nameOf(sweep.object) : undefined;
+    if (sweepObject && undeclared(sweepObject)) {
+      open(name, `its time-relative sweep's object '${sweepObject}' (start config.timeRelative.object) is not declared in this stack, so the record's keys are not in hand`);
+    }
+    if (resolveFlowTriggerKind(flow) === 'api') {
+      open(name, 'its trigger kind is api, so the inbound hook hands the request body in as the record, whatever its keys');
+    }
+  }
+
+  // Actions that launch a flow: `actions[]`, and each object's own `actions[]`.
+  const launches: Array<{ action: AnyRec; object: string | undefined }> = [];
+  for (const action of recordsOf(stack.actions)) launches.push({ action, object: nameOf(action.objectName) });
+  for (const object of recordsOf(stack.objects)) {
+    for (const action of recordsOf(object.actions)) {
+      launches.push({ action, object: nameOf(action.objectName) ?? nameOf(object.name) });
+    }
+  }
+  for (const { action, object } of launches) {
+    const target = action.type === 'flow' ? nameOf(action.target) : undefined;
+    if (!target || !flowNames.has(target)) continue;
+    if (object === undefined) {
+      // Object-less: the action hands an empty record, carrying at most the row id it was given.
+      bound.set(target, [...(bound.get(target) ?? []), 'id']);
+    } else if (undeclared(object)) {
+      open(target, `action '${nameOf(action.name) ?? '?'}' launches it on '${object}' (the action's objectName), which this stack does not declare`);
+    }
+  }
+
+  // Parent edges: a `subflow` or `map` node naming a flow of this stack.
+  const edges: Array<{ parent: string; child: string; kind: 'subflow' | 'map'; node: string }> = [];
+  for (const flow of flows) {
+    const parent = nameOf(flow.name);
+    if (!parent) continue;
+    const graphs = collectFlowGraphs({
+      ...flow,
+      nodes: recordsOf(flow.nodes) as unknown as FlowNodeParsed[],
+      edges: recordsOf(flow.edges) as unknown as FlowEdgeParsed[],
+    });
+    for (const graph of graphs) {
+      for (const node of recordsOf(graph.nodes)) {
+        if (node.type !== 'subflow' && node.type !== 'map') continue;
+        const config = configOf(node);
+        const child = nameOf(config.flowName);
+        if (!child || !flowNames.has(child)) continue;
+        const nodeId = nameOf(node.id) ?? '?';
+        edges.push({ parent, child, kind: node.type, node: nodeId });
+        if (node.type === 'map') {
+          const itemObject = nameOf(config.itemObject);
+          if (!itemObject) {
+            open(child, `map node '${nodeId}' in flow '${parent}' feeds it items and declares no config.itemObject, so the items' object is not in hand`);
+          } else if (undeclared(itemObject)) {
+            open(child, `map node '${nodeId}' in flow '${parent}' feeds it items of '${itemObject}' (config.itemObject), which this stack does not declare`);
+          }
+        }
+      }
+    }
+  }
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const edge of edges) {
+      if (!openedBy.has(edge.parent) || openedBy.has(edge.child)) continue;
+      open(edge.child, `${edge.kind} node '${edge.node}' in flow '${edge.parent}' hands it that flow's record, and '${edge.parent}' is itself open`);
+      changed = true;
+    }
+  }
+
+  const out = new Map<string, FlowCelEntrance>();
+  for (const name of flowNames) {
+    const reason = openedBy.get(name);
+    const names = bound.get(name);
+    if (reason === undefined && names === undefined) continue;
+    out.set(name, { ...(reason !== undefined ? { openedBy: reason } : {}), ...(names !== undefined ? { bound: names } : {}) });
+  }
+  return out;
+}
+
+/**
+ * The runtime publish gate's entrance: none visible. Its per-write snapshot
+ * carries the written flow alone (module note), so this one judgment stands down
+ * there until #22636 widens the snapshot.
+ */
+export function perWriteSnapshotEntrance(): FlowCelEntrance {
+  return {
+    openedBy:
+      'the runtime publish gate judges a flow write against a per-write snapshot that carries no action and no '
+      + 'other flow, so no entrance that can hand this flow a record is visible',
+  };
 }
 
 /** cel-js's comprehension macros: the receiver calls that bind their first argument in the rest. */

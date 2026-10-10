@@ -10,13 +10,16 @@
  * for every one of them. The three user spellings are the ones formulas, RLS and
  * the client bind; flow CEL binds the run's user as `current_user` only.
  *
- * The judge lives in `flow-cel-root-scope.ts`; these pins drive it through the
- * door `objectstack validate` and the runtime publish gate both call.
+ * The judge lives in `flow-cel-root-scope.ts`; these pins drive it through
+ * `validateStackExpressions`, the pass `objectstack validate` runs. The runtime
+ * publish gate runs the same pass and this one judgment stands down there (the
+ * last block below).
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { flowCelRootScope, unboundFlowCelRoots } from './flow-cel-root-scope.js';
+import { flowCelEntrances, flowCelRootScope, perWriteSnapshotEntrance, unboundFlowCelRoots } from './flow-cel-root-scope.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 import { validateStackExpressions } from './validate-expressions.js';
 
 type AnyRec = Record<string, unknown>;
@@ -251,5 +254,149 @@ describe('the wider family — any root nothing binds (rides the same judge)', (
     const issues = validateStackExpressions(flowStack({ edgeCondition: 'user.id ==' }));
     expect(issues).toHaveLength(1);
     expect(issues[0]!.message).not.toContain('is not bound');
+  });
+});
+
+/**
+ * A′ (triage `6094431558`): every entrance the stack declares is read, and a flow
+ * an entrance hands a record of an undeclared (or unknowable) object is not
+ * judged. One pin per entrance: the undeclared case stands down, and the same
+ * flow fed by a declared object is still judged.
+ */
+describe('the entrances the stack declares (A′)', () => {
+  const USER = 'user.id == "u1"';
+  /** A second flow `g` that names `f` from a node of the given type. */
+  const parentFlow = (opts: { type?: string; start?: AnyRec; node: AnyRec }): AnyRec => ({
+    name: 'g',
+    label: 'G',
+    type: opts.type ?? 'autolaunched',
+    nodes: [
+      { id: 'start', type: 'start', config: opts.start ?? {} },
+      opts.node,
+      { id: 'done', type: 'end', config: {} },
+    ],
+    edges: [{ id: 'g1', source: 'start', target: opts.node.id }, { id: 'g2', source: opts.node.id, target: 'done' }],
+  });
+  const withFlows = (stack: AnyRec, ...flows: AnyRec[]): AnyRec => ({ ...stack, flows: [...(stack.flows as AnyRec[]), ...flows] });
+  const userRefusals = (stack: AnyRec) => rootFindings(stack).filter((i) => i.where.startsWith("flow 'f'"));
+
+  it('a record trigger: an undeclared start config.objectName stands down; a declared one is judged', () => {
+    expect(userRefusals(flowStack({ edgeCondition: USER, objectName: 'sys_user' }))).toEqual([]);
+    expect(userRefusals(flowStack({ edgeCondition: USER, objectName: 'acct' }))).toHaveLength(1);
+  });
+
+  it('a time-relative sweep: an undeclared config.timeRelative.object stands down; a declared one is judged', () => {
+    const sweep = (object: string): AnyRec => {
+      const stack = flowStack({ edgeCondition: USER });
+      const flow = (stack.flows as AnyRec[])[0]!;
+      (flow.nodes as AnyRec[])[0] = { id: 'start', type: 'start', config: { timeRelative: { object, dateField: 'due', withinDays: 7 } } };
+      return stack;
+    };
+    expect(userRefusals(sweep('sys_task'))).toEqual([]);
+    expect(userRefusals(sweep('acct'))).toHaveLength(1);
+  });
+
+  it('the inbound hook: a flow whose trigger kind is api stands down; the same flow as autolaunched is judged', () => {
+    const asApi = flowStack({ edgeCondition: USER });
+    (asApi.flows as AnyRec[])[0]!.type = 'api';
+    expect(userRefusals(asApi)).toEqual([]);
+    const viaTriggerType = flowStack({ edgeCondition: USER });
+    (((viaTriggerType.flows as AnyRec[])[0]!.nodes as AnyRec[])[0] as AnyRec).config = { triggerType: 'api' };
+    expect(userRefusals(viaTriggerType)).toEqual([]);
+    expect(userRefusals(flowStack({ edgeCondition: USER }))).toHaveLength(1);
+  });
+
+  it('an action: one launching the flow on an undeclared object stands down; on a declared object it is judged', () => {
+    const launched = (objectName: string): AnyRec => ({
+      ...flowStack({ edgeCondition: USER }),
+      actions: [{ name: 'go', label: 'Go', type: 'flow', target: 'f', objectName }],
+    });
+    expect(userRefusals(launched('sys_user'))).toEqual([]);
+    expect(userRefusals(launched('acct'))).toHaveLength(1);
+    // An object's own actions[] carry the owning object.
+    const nested = flowStack({
+      edgeCondition: USER,
+      objects: [{ ...OBJECTS[0], actions: [{ name: 'go', label: 'Go', type: 'flow', target: 'f' }] }],
+    });
+    expect(userRefusals(nested)).toHaveLength(1);
+    // A non-flow action naming the flow's name is no entrance.
+    expect(userRefusals({ ...flowStack({ edgeCondition: USER }), actions: [{ name: 'go', label: 'Go', type: 'url', target: 'f', objectName: 'sys_user' }] })).toHaveLength(1);
+  });
+
+  it('an object-less action binds only the row id it is given', () => {
+    const bare = flowStack({ edgeCondition: 'id == "r1"', objects: [] });
+    expect(rootFindings(bare).map((i) => i.message.slice(0, 4))).toEqual(['`id`']);
+    expect(rootFindings({ ...bare, actions: [{ name: 'go', label: 'Go', type: 'flow', target: 'f' }] })).toEqual([]);
+  });
+
+  it('a map node: an undeclared or absent itemObject stands down the flow it feeds; a declared one is judged', () => {
+    const fedBy = (itemObject?: string): AnyRec => withFlows(
+      flowStack({ edgeCondition: USER }),
+      parentFlow({ node: { id: 'each', type: 'map', config: { collection: '{rows}', flowName: 'f', ...(itemObject ? { itemObject } : {}) } } }),
+    );
+    expect(userRefusals(fedBy('sys_task'))).toEqual([]);
+    expect(userRefusals(fedBy(undefined))).toEqual([]);
+    expect(userRefusals(fedBy('acct'))).toHaveLength(1);
+  });
+
+  it('a parent that is itself open: its subflow child stands down, to a fixpoint; a judged parent leaves the child judged', () => {
+    const subflowOf = (parent: AnyRec, child = 'f'): AnyRec => ({ ...parent, nodes: (parent.nodes as AnyRec[]).map((n) => (n.type === 'subflow' ? { ...n, config: { flowName: child } } : n)) });
+    const call = { id: 'call', type: 'subflow', config: {} };
+    const openParent = subflowOf(parentFlow({ type: 'api', node: call }));
+    expect(userRefusals(withFlows(flowStack({ edgeCondition: USER }), openParent))).toEqual([]);
+    // Two levels: g (the inbound hook) → h → f.
+    const middle = { ...subflowOf(parentFlow({ node: call })), name: 'h', label: 'H' };
+    expect(userRefusals(withFlows(flowStack({ edgeCondition: USER }), subflowOf(openParent, 'h'), middle))).toEqual([]);
+    // A parent fed by a declared trigger object is judged, and so is its child.
+    const judgedParent = subflowOf(parentFlow({ start: { objectName: 'acct' }, node: call }));
+    expect(userRefusals(withFlows(flowStack({ edgeCondition: USER }), judgedParent))).toHaveLength(1);
+  });
+
+  it('the reader names the entrance', () => {
+    const entrances = flowCelEntrances(
+      {
+        flows: [{ name: 'f', type: 'autolaunched', nodes: [{ id: 'start', type: 'start' }] }],
+        actions: [{ name: 'go', type: 'flow', target: 'f', objectName: 'sys_user' }],
+      },
+      new Map([['acct', ['status']]]),
+    );
+    expect(entrances.get('f')?.openedBy).toContain("action 'go' launches it on 'sys_user'");
+  });
+});
+
+/**
+ * S (triage `6094850599`): at the runtime publish gate the per-write snapshot
+ * holds the written flow alone, so no entrance is visible and this one judgment
+ * stands down there. Every other expression verdict at that door is unchanged.
+ * #22636 widens the snapshot; when it lands, this stand-down goes.
+ */
+describe('the runtime publish gate (S)', () => {
+  const written = {
+    name: 'f',
+    label: 'F',
+    type: 'autolaunched',
+    nodes: [{ id: 'start', type: 'start', config: {} }, { id: 'done', type: 'end', config: {} }],
+    edges: [
+      { id: 'e1', source: 'start', target: 'done', condition: 'user.id == "u1"' },
+      { id: 'e2', source: 'start', target: 'done', condition: '{record.status} == "open"' },
+    ],
+  };
+
+  it('a flow write is not refused for an unbound root, while another expression verdict still refuses there', () => {
+    const result = runRuntimeAuthoringRules({ type: 'flow', item: written, context: { objects: OBJECTS } });
+    const expressionErrors = result.errors.filter((f) => f.rule === 'expression-invalid');
+    expect(expressionErrors.some((f) => / is not bound in /.test(f.message))).toBe(false);
+    expect(expressionErrors.some((f) => f.message.includes('template brace') && f.where.includes("edge 'e2'"))).toBe(true);
+  });
+
+  it('control: the build door refuses the same root on the same flow', () => {
+    const found = rootFindings({ objects: OBJECTS, flows: [written] });
+    expect(found.map((i) => i.where)).toEqual(["flow 'f' · edge 'e1' (start→done) condition"]);
+  });
+
+  it('the stand-down names the per-write snapshot', () => {
+    const scope = flowCelRootScope({ nodes: [] }, [], undefined, new Map(), perWriteSnapshotEntrance());
+    expect(scope.provable).toBe(false);
+    expect(scope.openedBy).toContain('per-write snapshot');
   });
 });

@@ -3536,6 +3536,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // root at a time. Their keys are that module's own `{ root, members }` and
       // the array's own methods — never metadata keys.
       'unbound', 'unboundRoot',
+      // [#22565] The flow name → entrance index the root judge reads. Its one
+      // "key" is `Map.prototype.get`; the metadata keys it is built from are read
+      // in `flow-cel-root-scope.ts`, not here.
+      'flowEntrances',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

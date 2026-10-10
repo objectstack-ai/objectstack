@@ -122,7 +122,14 @@ import { referenceCarrierOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/dat
 import { EvalUserSchema } from '@objectstack/spec/identity';
 
 import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
-import { flowCelRootScope, unboundFlowCelRoots, unboundFlowCelRootMessage } from './flow-cel-root-scope.js';
+import {
+  flowCelEntrances,
+  flowCelRootScope,
+  perWriteSnapshotEntrance,
+  unboundFlowCelRoots,
+  unboundFlowCelRootMessage,
+} from './flow-cel-root-scope.js';
+import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
@@ -2157,6 +2164,16 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   };
 
   // ── Flows ──────────────────────────────────────────────────────────
+  // [#22565] Which flows an entrance opens to the root judgment — read once per
+  // stack, because an entrance lives outside the flow it feeds (an action,
+  // another flow's `subflow` / `map` node). At the runtime publish gate
+  // (`runtimeWriteType` set) the per-write snapshot holds the written flow alone,
+  // so no entrance is visible there and the judgment stands down
+  // (`perWriteSnapshotEntrance`) until #22636 widens that snapshot; every other
+  // verdict this pass gives at that door is unchanged.
+  const runtimeGateWrite = options.runtimeWriteType !== undefined;
+  const flowEntrances: ReadonlyMap<string, FlowCelEntrance> =
+    objectWrite || runtimeGateWrite ? new Map() : flowCelEntrances(stack, fieldIndex);
   for (const flow of objectWrite ? [] : recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     // `Array.isArray` proves the LIST, never its MEMBERS — the sentence #15742
@@ -2221,10 +2238,19 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * the same reason (one variable map serves the whole run): the flow's own
      * bindings, the engine's roots and every object's fields — see
      * `flow-cel-root-scope.ts` for the set, and for the flows it stands down on
-     * because their run can bind a name the reader cannot see. `error`: the run
-     * faults on the root, every time the expression is evaluated.
+     * because their run can bind a name the reader cannot see: a node's, or an
+     * entrance's (`flowEntrances` above). `error`: the run faults on the root,
+     * every time the expression is evaluated.
      */
-    const rootScope = flowCelRootScope(flow, graphs, objectName, fieldIndex);
+    const rootScope = flowCelRootScope(
+      flow,
+      graphs,
+      objectName,
+      fieldIndex,
+      runtimeGateWrite
+        ? perWriteSnapshotEntrance()
+        : flowEntrances.get(typeof flow.name === 'string' ? flow.name : '') ?? {},
+    );
 
     /**
      * [#22565] Refuse each root `raw` reads that the flow does not bind.
