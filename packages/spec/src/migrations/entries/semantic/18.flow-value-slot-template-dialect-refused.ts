@@ -4,9 +4,10 @@ import type { SemanticMigration } from '../../types.js';
 
 // The template dialect leaves the flow value slots: one dialect for a computed
 // value, CEL. Semantic-only — every token spelling authored in flows was
-// measured lossy under conversion, so no D2 conversion rewrites any of them,
-// and the date macros CEL cannot write yet are kept. The run-user paths are
-// refused too: the flow CEL scope binds current_user, the run's user or null.
+// measured lossy under conversion, so no D2 conversion rewrites any of them.
+// The run-user paths are refused too: the flow CEL scope binds current_user,
+// the run's user or null. So are the date macros, with their CEL string form
+// (isoDate / isoDatetime): no single-brace spelling is kept.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -15,7 +16,7 @@ export const entry: SemanticMigration = {
     'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
     + 'legacy bare config) and of create_record and update_record nodes (the fields map) — a string value, or a '
     + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
-    + 'paths beginning $User. included',
+    + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included',
   replacement:
     'a CEL value envelope, { dialect: "cel", source: "…" }, evaluated to the value: a path is the same path '
     + '(record.owner; a numeric segment becomes an index, items[0]; a variable whose name starts with $ is read '
@@ -26,8 +27,15 @@ export const entry: SemanticMigration = {
     + 'writes null where the template wrote nothing, so on update_record it clears a stored value the template '
     + 'left alone. Every other run-user path ($User.Email, $User.Name, …) never resolved in any shipped run: '
     + 'current_user carries only what the run holds (id, positions, organizationId, isPlatformAdmin), and an email '
-    + 'or a name is read from the user record by current_user.id (a get_record node on sys_user). A string with no '
-    + 'token is the literal text it spells, and braces meant literally are a CEL string literal',
+    + 'or a name is read from the user record by current_user.id (a get_record node on sys_user). A date macro is '
+    + 'its CEL string form on the UTC calendar: TODAY() is isoDate(today()), TODAY() + N and TODAY() - N are '
+    + 'isoDate(daysFromNow(N)) and isoDate(daysAgo(N)), NOW() is isoDatetime(now()), and NOW() plus or minus N is '
+    + 'isoDatetime(addDays(now(), N)) with N signed, which keeps the time of day where daysFromNow lands on '
+    + 'midnight; a variable offset is isoDate(addDays(today(), days)). Where an envelope is literal data — a string '
+    + 'inside an object or list value, or either legacy assignment shape — an envelope written in its place is '
+    + 'stored as the object it spells, so the whole value is one envelope building a CEL map or list literal, and '
+    + 'a legacy assignment moves into the assignments map. A string with no token is the literal text it spells, '
+    + 'and braces meant literally are a CEL string literal',
   reason:
     'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
     + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -38,16 +46,21 @@ export const entry: SemanticMigration = {
     + 'and nothing in a run with no user (a schedule, a record change made by a system write); the flow CEL scope '
     + 'binds current_user to the run\'s user and to null in such a run, never a pseudo-user, so current_user.id '
     + 'fails there and its guarded form writes null. The other run-user paths read a user object no run carries, '
-    + 'so they wrote nothing in every run. One spelling is kept with its old meaning, because CEL cannot write it '
-    + 'yet: the date macros NOW() and TODAY() with a day offset (CEL yields a Timestamp, not the ISO text, and has '
-    + 'no string form for one). A flow carrying a refused value is refused at registration, by objectstack '
-    + 'validate and by the executor; a stored flow carrying one is skipped at boot with a warn naming it.',
+    + 'so they wrote nothing in every run. The date macros wrote the ISO text of the UTC day or instant, which '
+    + 'isoDate and isoDatetime write byte for byte for a whole number of days, but the template read an offset it '
+    + 'could not use as 0 — a variable it did not find, a value that is not a number, text that is neither — '
+    + 'where CEL fails the run, and it truncated a fractional offset after adding it to the day of the month, where '
+    + 'addDays truncates the offset itself and daysFromNow and daysAgo refuse a fraction at build. A flow carrying '
+    + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
+    + 'carrying one is skipped at boot with a warn naming it.',
   acceptanceCriteria:
     'Run objectstack validate: it reports each refused value as expression-invalid at the node and the value\'s '
     + 'path, with the CEL spelling of its tokens. Rewrite each as that envelope; where a variable or key may be '
     + 'absent, guard it (has(record.owner) ? record.owner : null, has(vars.x) ? vars.x : null for a variable) or '
     + 'route around the node. For the run user, find which flows can run without one (a schedule, a record change '
     + 'a system write can make): there, guard current_user.id, or skip the node with a start condition or a '
-    + 'decision on current_user != null where an update_record must leave the stored value alone. Re-run the '
-    + 'flow paths that write those fields and compare the stored values with the ones the template wrote.',
+    + 'decision on current_user != null where an update_record must leave the stored value alone. For a date '
+    + 'macro with a variable offset, check the variable is always set to a number where the flow runs; write a '
+    + 'fractional offset as the whole number of days meant. Re-run the flow paths that write those fields and '
+    + 'compare the stored values with the ones the template wrote.',
 };

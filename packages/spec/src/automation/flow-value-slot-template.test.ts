@@ -13,11 +13,19 @@
  *     `has()` can take it, arithmetic with every divisor a double
  *     (`/ 100.0`), text with holes as one concatenation, a token that
  *     resolves to nothing with the literal-text escape.
- *  2. **Kept.** The date macros, which CEL cannot spell yet, are not refused —
- *     alone or beside another token. The run user (`{$User.*}`) is refused
- *     (#19939 pass 2): `{$User.Id}` names `current_user.id` and its guard for
- *     a user-less run, and every other `$User` path says it never resolved and
- *     names the read of the user record.
+ *  2. **Nothing is kept.** The run user (`{$User.*}`) is refused (#19939
+ *     pass 2): `{$User.Id}` names `current_user.id` and its guard for a
+ *     user-less run, and every other `$User` path says it never resolved and
+ *     names the read of the user record. The date macros are refused (pass 3)
+ *     with their CEL string form — `isoDate(…)` / `isoDatetime(…)` — and the
+ *     edges where it parts from the template: a fraction, a variable offset, an
+ *     offset that is neither. A string mixing them with any other token is
+ *     refused whole, with a remedy for every token.
+ *  2b. **Where an envelope is data, the remedy names none there.** A string
+ *     inside an object or list literal is spelled inside a CEL literal that
+ *     builds the whole value; a legacy `assignment` shape is moved into the
+ *     canonical map (that each remedy evaluates is pinned through the engine in
+ *     `service-automation`'s `assignment-value-envelope.test.ts`).
  *  3. **Controls.** A token-free literal, every non-string literal and a CEL
  *     envelope pass; only value slots are judged (a `filter` value is not).
  *  4. **Every door's contract.** `FlowValueSlotSchema`, `AssignmentValueSchema`
@@ -193,20 +201,142 @@ describe('a head the flow CEL scope claims is read through `vars`', () => {
   });
 });
 
-describe('the one spelling CEL cannot write yet is KEPT — not refused', () => {
+/**
+ * #19939 pass 3 — the date macros are refused with their CEL string form, the
+ * spelling #22277 gave the stdlib (`isoDate` / `isoDatetime`, UTC). That each
+ * one writes the bytes the template wrote, over the same instants, is pinned
+ * through both engines in `service-automation`'s
+ * `crud-fields-value-envelope.test.ts`.
+ */
+describe('the date macros are refused, each with its CEL string form', () => {
   it.each([
-    '{NOW()}',
-    '{TODAY()}',
-    '{TODAY() + 7}',
-    '{TODAY() - 3}',
-    '{TODAY() + expirationDays}',
-    '{NOW() + 2}',
-    'Due {TODAY()} for {name}',
-    // The kept-spelling leak: a run-user token beside a date macro rides the
-    // macro until the macros are retired too.
-    'Due {TODAY()} by {$User.Id}',
-  ])('%s', (value) => {
-    expect(valueSlotTemplateRefusals(value)).toEqual([]);
+    ['{TODAY()}', 'isoDate(today())'],
+    ['{TODAY() + 7}', 'isoDate(daysFromNow(7))'],
+    ['{TODAY()+7}', 'isoDate(daysFromNow(7))'],
+    ['{ TODAY() - 3 }', 'isoDate(daysAgo(3))'],
+    ['{TODAY() + 0}', 'isoDate(today())'],
+    ['{NOW()}', 'isoDatetime(now())'],
+    ['{NOW() + 2}', 'isoDatetime(addDays(now(), 2))'],
+    ['{NOW() - 1}', 'isoDatetime(addDays(now(), -1))'],
+    ['{TODAY() + expirationDays}', 'isoDate(addDays(today(), expirationDays))'],
+    ['{TODAY() - record.grace_days}', 'isoDate(addDays(today(), -record.grace_days))'],
+    ['{NOW() + $error.days}', 'isoDatetime(addDays(now(), vars["$error"].days))'],
+  ])('%s → %s', (token, source) => {
+    const message = refusalOf(token);
+    expect(message).toContain(`Write \`${token}\` as { dialect: 'cel', source: '${source}' }`);
+    expect(message).toContain('on the UTC calendar');
+  });
+
+  it('`{NOW() ± N}` keeps the time of day: the remedy says why it is not `daysFromNow`', () => {
+    expect(refusalOf('{NOW() + 2}')).toContain('where `daysFromNow` would land on midnight');
+    expect(refusalOf('{NOW()}')).not.toContain('daysFromNow');
+  });
+
+  it('a fractional offset: the template truncated the day sum, `addDays` the offset, and `daysAgo(1.5)` is refused at build', () => {
+    const back = refusalOf('{TODAY() - 1.5}');
+    expect(back).toContain("source: 'isoDate(addDays(today(), -1.5))' }");
+    expect(back).toContain('truncated the sum, so it moved 2 days back once the day of the month passed 1.5');
+    expect(back).toContain('where `addDays` moves 1 back by truncating the offset');
+    expect(back).toContain('`daysAgo(1.5)` is refused at build');
+    expect(back).toContain('Write the whole number of days you mean.');
+    const forward = refusalOf('{TODAY() + 1.5}');
+    expect(forward).toContain('moved 1 day forward, as `addDays` does');
+    expect(forward).toContain('`daysFromNow(1.5)` is refused at build');
+    // `NOW()` names no `daysAgo` / `daysFromNow` — its spelling is `addDays` either way.
+    expect(refusalOf('{NOW() - 0.5}')).toContain('moved 1 day back, where `addDays` moves 0 back');
+    expect(refusalOf('{NOW() - 0.5}')).not.toContain('is refused at build');
+  });
+
+  it('a variable offset the template read as 0 when absent or not a number: CEL refuses both loudly', () => {
+    const message = refusalOf('{TODAY() + days}');
+    expect(message).toContain('added 0 days without a word when it found none or the value was not a number');
+    expect(message).toContain('an absent variable fails the run');
+    expect(message).toContain('makes `addDays` an invalid date, which `isoDate` refuses');
+    expect(message).not.toContain('dotted path');
+    expect(refusalOf('{TODAY() + record.days}')).toContain('never walking a dotted path');
+  });
+
+  it('an offset that is neither a number nor a variable: the template added 0 days, so the remedy writes today and says so', () => {
+    const message = refusalOf('{TODAY() + 3d}');
+    expect(message).toContain("source: 'isoDate(today())' }");
+    expect(message).toContain('`3d` is neither a number nor a variable name, so the template added 0 days without a word');
+  });
+
+  it('text with holes: the macro is its string form in the concatenation, with its edge named', () => {
+    const message = refusalOf('Due {TODAY() + 7} for {name}');
+    expect(message).toContain(`{ dialect: 'cel', source: "'Due ' + isoDate(daysFromNow(7)) + ' for ' + name" }`);
+    expect(refusalOf('Due {TODAY() - 1.5}')).toContain('`daysAgo(1.5)` is refused at build');
+  });
+
+  // The kept-spelling leak: while the macros were kept, a run-user token
+  // beside one rode the macro and was kept whole. Nothing is kept now, so the
+  // string is refused, naming a remedy for both tokens.
+  it('the kept-spelling leak is closed: `Due {TODAY()} by {$User.Id}` is refused, with both tokens\' remedies', () => {
+    const message = refusalOf('Due {TODAY()} by {$User.Id}');
+    expect(message).toContain(`{ dialect: 'cel', source: "'Due ' + isoDate(today()) + ' by ' + current_user.id" }`);
+    expect(message).toContain('`{TODAY()}` is `isoDate(today())`');
+    expect(message).toContain("`(current_user != null ? current_user.id : '')`");
+  });
+
+  it('the remedies name no tracker number', () => {
+    for (const token of ['{TODAY() - 1.5}', '{TODAY() + days}', '{TODAY() + 3d}', '{NOW() + 2}', 'Due {TODAY()} by {$User.Id}']) {
+      expect(refusalOf(token)).not.toMatch(/#\d/);
+    }
+  });
+});
+
+/**
+ * #19939 pass 3 (carry from pass 2): where an envelope is literal DATA — a
+ * string inside an object or list literal, or either legacy `assignment` shape
+ * — the remedy prescribes no envelope at that position, because one written
+ * there is stored as the object it spells. That each named spelling evaluates
+ * to the template's value is pinned through the engine in
+ * `service-automation`'s `assignment-value-envelope.test.ts`.
+ */
+describe('where an envelope is literal data, the remedy names none there', () => {
+  it('a string inside an object literal: build the whole value as one CEL map literal', () => {
+    const [refusal] = flowNodeValueTemplateRefusals('assignment', { assignments: { o: { who: '{name}' } } });
+    expect(refusal!.path).toBe('assignments.o.who');
+    expect(refusal!.message).toContain('sits inside an object or list literal, where nothing evaluates');
+    expect(refusal!.message).toContain(`{ dialect: 'cel', source: "{'who': name}" }`);
+    expect(refusal!.message).toContain('wrap each one in `dyn(…)`');
+    // The spelling of the string itself is a bare CEL expression, never an envelope at that position.
+    expect(refusal!.message).toContain('Write `{name}` as `name`.');
+    expect(refusal!.message).not.toContain("{ dialect: 'cel', source: 'name' }");
+  });
+
+  it('a string inside a list literal, and deeper: the literal is built along the path', () => {
+    const refusals = flowNodeValueTemplateRefusals('create_record', {
+      objectName: 'q', fields: { tags: ['{x}'], payload: { meta: { note: 'for {name}' } } },
+    });
+    expect(refusals.map((r) => r.path)).toEqual(['fields.tags[0]', 'fields.payload.meta.note']);
+    expect(refusals[0]!.message).toContain("{ dialect: 'cel', source: '[x]' }");
+    expect(refusals[1]!.message).toContain(`{ dialect: 'cel', source: "{'meta': {'note': 'for ' + name}}" }`);
+    expect(refusals[1]!.message).toContain("one CEL concatenation, `'for ' + name`");
+  });
+
+  it.each([
+    ['the legacy `assignments` array', { assignments: [{ variable: 'o', value: '{name}' }] }, 'assignments[0].value'],
+    ['the legacy bare config', { o: '{name}' }, 'o'],
+  ])('%s: move the assignments into the canonical map, where the envelope evaluates', (_label, config, path) => {
+    const [refusal] = flowNodeValueTemplateRefusals('assignment', config);
+    expect(refusal!.path).toBe(path);
+    expect(refusal!.message).toContain('evaluates nothing: an envelope written in it is stored as the object it spells');
+    expect(refusal!.message).toContain('Move the node\'s assignments into the canonical map, `assignments: { … }`');
+    expect(refusal!.message).toContain("Write `{name}` as { dialect: 'cel', source: 'name' }");
+  });
+
+  it('a nested string in a legacy shape: both — the canonical map, and the whole value as a CEL literal', () => {
+    const [refusal] = flowNodeValueTemplateRefusals('assignment', { assignments: [{ variable: 'o', value: { who: '{$User.Id}' } }] });
+    expect(refusal!.message).toContain('canonical map');
+    expect(refusal!.message).toContain(`{ dialect: 'cel', source: "{'who': current_user.id}" }`);
+  });
+
+  it('control: the top-level value of a declared slot keeps the envelope remedy, with no literal-position lead', () => {
+    const [refusal] = flowNodeValueTemplateRefusals('assignment', { assignments: { o: '{name}' } });
+    expect(refusal!.message).toContain("Write `{name}` as { dialect: 'cel', source: 'name' }");
+    expect(refusal!.message).not.toContain('canonical map');
+    expect(refusal!.message).not.toContain('sits inside');
   });
 });
 
@@ -317,7 +447,7 @@ describe('controls — what the judge never refuses', () => {
 
   it('a string at any depth of a literal is judged, located inside the value', () => {
     const refusals = valueSlotTemplateRefusals({ meta: { note: 'for {name}' }, list: ['ok', '{x}'], when: '{NOW()}' });
-    expect(refusals.map((r) => r.path)).toEqual([['meta', 'note'], ['list', 1]]);
+    expect(refusals.map((r) => r.path)).toEqual([['meta', 'note'], ['list', 1], ['when']]);
   });
 
   it('a self-referencing literal does not loop', () => {
@@ -335,7 +465,8 @@ describe('every value-slot contract refuses the same set, at the value', () => {
     const refused = schema.safeParse('{record.amount}');
     expect(refused.success).toBe(false);
     expect(refused.error!.issues[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
-    expect(schema.safeParse('{TODAY() + 7}').success).toBe(true);
+    expect(schema.safeParse('{TODAY() + 7}').success).toBe(false);
+    expect(schema.safeParse({ dialect: 'cel', source: 'isoDate(daysFromNow(7))' }).success).toBe(true);
     expect(schema.safeParse('literal text').success).toBe(true);
   });
 
@@ -360,6 +491,7 @@ describe('`flowNodeValueTemplateRefusals` — every value position of a node, lo
       expect(refusals.map((r) => [r.path, r.label])).toEqual([
         ['fields.owner', `${nodeType} field value`],
         ['fields.tags[0]', `${nodeType} field value`],
+        ['fields.due', `${nodeType} field value`],
       ]);
     }
   });
@@ -373,7 +505,7 @@ describe('`flowNodeValueTemplateRefusals` — every value position of a node, lo
     const refusals = flowNodeValueTemplateRefusals('assignment', {
       assignments: [{ variable: 'total', value: '{amount}' }, { variable: 'today', value: '{TODAY()}' }],
     });
-    expect(refusals.map((r) => r.path)).toEqual(['assignments[0].value']);
+    expect(refusals.map((r) => r.path)).toEqual(['assignments[0].value', 'assignments[1].value']);
   });
 
   it('the legacy bare config — its top-level keys are the variables', () => {
