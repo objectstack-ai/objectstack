@@ -179,8 +179,8 @@ async function boot(): Promise<Rig> {
   return { engine, svc, protocol: new ObjectStackProtocolImplementation(engine as any), links, requestId };
 }
 
-/** The raw token a delivered action link carries. */
-const tokenOf = (url: string) => String(new URL(url).searchParams.get('token') ?? '');
+/** The raw token a delivered action link carries (relative when no public base URL is configured). */
+const tokenOf = (url: string) => String(new URL(url, 'http://localhost').searchParams.get('token') ?? '');
 
 /** The engine's own read of the token rows, as the system. */
 async function tokenRows(rig: Rig): Promise<any[]> {
