@@ -7,14 +7,18 @@ import type { SemanticMigration } from '../../types.js';
 // measured lossy under conversion, so no D2 conversion rewrites any of them.
 // The run-user paths are refused too: the flow CEL scope binds current_user,
 // the run's user or null. So are the date macros, with their CEL string form
-// (isoDate / isoDatetime): no single-brace spelling is kept.
+// (isoDate / isoDatetime): no single-brace spelling is kept. The surface widens
+// to the maps a node hands to a callee (subflow and map input, script inputs),
+// where a guarded form's null is supplied and wins over a child's default.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
   // span already, and a nested backtick would close it.
   surface:
     'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
-    + 'legacy bare config) and of create_record and update_record nodes (the fields map) — a string value, or a '
+    + 'legacy bare config), of create_record and update_record nodes (the fields map), and of the nodes that hand '
+    + 'a map to a callee: a subflow node and a map node (the input map, evaluated per item on a map node) and a '
+    + 'script node (the inputs map) — a string value, or a '
     + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
     + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included',
   replacement:
@@ -35,7 +39,11 @@ export const entry: SemanticMigration = {
     + 'inside an object or list value, or either legacy assignment shape — an envelope written in its place is '
     + 'stored as the object it spells, so the whole value is one envelope building a CEL map or list literal, and '
     + 'a legacy assignment moves into the assignments map. A string with no token is the literal text it spells, '
-    + 'and braces meant literally are a CEL string literal',
+    + 'and braces meant literally are a CEL string literal. In a subflow or map input, the value is handed to the '
+    + 'child flow\'s input variable of that name: a guarded form\'s null is a supplied value that wins over the '
+    + 'child variable\'s defaultValue, so to keep the default for an absent value write the default in the guard\'s '
+    + 'null branch (has(vars.x) ? vars.x : \'the default\'), and leave the key out only where the value is never '
+    + 'meant to be supplied; a script function is handed null where the template handed undefined',
   reason:
     'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
     + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -50,7 +58,11 @@ export const entry: SemanticMigration = {
     + 'isoDate and isoDatetime write byte for byte for a whole number of days, but the template read an offset it '
     + 'could not use as 0 — a variable it did not find, a value that is not a number, text that is neither — '
     + 'where CEL fails the run, and it truncated a fractional offset after adding it to the day of the month, where '
-    + 'addDays truncates the offset itself and daysFromNow and daysAgo refuse a fraction at build. A flow carrying '
+    + 'addDays truncates the offset itself and daysFromNow and daysAgo refuse a fraction at build. Where the map '
+    + 'is handed to a callee, a whole token that resolved to nothing handed the callee nothing, and the child flow '
+    + 'then seeded the input variable from its defaultValue; under CEL that value either fails the run or, guarded, '
+    + 'is null, which the child takes as supplied, so the default no longer applies unless the guard writes it. A '
+    + 'flow carrying '
     + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
     + 'carrying one is skipped at boot with a warn naming it.',
   acceptanceCriteria:
