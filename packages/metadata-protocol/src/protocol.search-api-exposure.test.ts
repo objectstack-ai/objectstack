@@ -32,7 +32,6 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 interface FixtureObject {
     name: string;
@@ -80,10 +79,6 @@ function harness(objects: FixtureObject[]) {
             if (object === 'sys_metadata') return [];
             readCalls.push(object);
             return [{ id: `${object}_1`, name: `Acme ${object}` }];
-        }),
-        findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
-            assertEngineFindOnePredicate(object, query);
-            return null;
         }),
     };
     const canReadObject = vi.fn(async (_object: string, _context?: unknown) => true);

@@ -38,7 +38,8 @@
  * The scan surface and its prefilter follow
  * `operation-private-keys.pin.test.ts` in this directory: git's authored-file
  * list, never a directory crawl, and `.ts` only, the radius this package
- * declares in `scripts/cross-package-test-inputs.mjs`.
+ * declares in the cross-package test-inputs table. That is also why this file
+ * is listed in this package's `repo` vitest project.
  */
 
 import { execFileSync } from 'node:child_process';
