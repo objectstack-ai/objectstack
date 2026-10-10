@@ -1177,7 +1177,8 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.label
    *   flows.<flow_name>.successMessage                 (the terminal toasts, #22507)
    *   flows.<flow_name>.errorMessage
-   *   flows.<flow_name>.screens.<node_id>.title
+   *   flows.<flow_name>.screens.<node_id>.title          (picked by the engine, #22507)
+   *   flows.<flow_name>.screens.<node_id>.description    (picked by the engine, #22507)
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.label
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.placeholder
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.inlineHelpText
@@ -1187,8 +1188,7 @@ const appTranslationDataShape = () => ({
    * Every user-read string slot of the flow schemas is either one of these
    * keys or recorded, with its reason, in the family pin
    * (`flows-translation-face.test.ts`), so a new slot added without a key
-   * fails there rather than in a locale. One slot is recorded as owed rather
-   * than keyed: a screen's `description` (see "Not keyed" below).
+   * fails there rather than in a locale.
    *
    * **The hole this closes (#7646).** A `type: 'screen'` flow is a wizard the
    * user reads — a heading, a list of labelled inputs — and the bundle had no
@@ -1238,14 +1238,16 @@ const appTranslationDataShape = () => ({
    * ruling on #7646).
    *
    * The runner half was a separate, downstream change, and it has landed
-   * client-side for both halves of the group. objectui's `FlowRunner` reads
-   * `screens`: each screen's `title`, and each field's copy over
-   * `FLOW_SCREEN_FIELD_COPY_KEYS` (`label`, `placeholder`, `inlineHelpText`).
-   * It reads `label` through `translateFlow` to name the flow in its header
-   * and in the completion toast, falling back to the label the engine serves
-   * as `AutomationResult.flowLabel` and then to the flow's API name. Both were
+   * client-side for each field's copy and the flow label. objectui's
+   * `FlowRunner` reads each field's copy over `FLOW_SCREEN_FIELD_COPY_KEYS`
+   * (`label`, `placeholder`, `inlineHelpText`). It reads `label` through
+   * `translateFlow` to name the flow in its header and in the completion
+   * toast, falling back to the label the engine serves as
+   * `AutomationResult.flowLabel` and then to the flow's API name. Both were
    * measured at the `.objectui-sha` pin `0abd4f9f8`. See the `flows` rows in
-   * `liveness/translation.json`: the group and its children are `live`.
+   * `liveness/translation.json`: the group and its children are `live`. A
+   * screen's `title` and `description` are the engine's to pick, not the
+   * runner's (see "picked by the engine" below).
    *
    * ## `refusals` — a refused `end` node's message (#22450)
    *
@@ -1308,15 +1310,40 @@ const appTranslationDataShape = () => ({
    * `screens` was (#7646): objectui's `FlowRunner` reads them in a downstream
    * change, and their liveness rows are `planned` until it lands.
    *
-   * ## Not keyed: a screen's `description` (#22507)
+   * ## `screens.<node_id>.title` / `.description` — picked by the engine (#22507)
    *
-   * A screen's body text is a user-read slot with no key yet, and the family
-   * pin records it as owed, not excluded. It is a `{{ }}` template the server
-   * renders per run (`renderTextSlot` in the screen executor), so the
-   * translated TEMPLATE has to be picked before that render, the route the
-   * `refusals` message takes — an overlay on the served string would draw a
-   * translated hole as literal text. Which reader picks it is a decision of
-   * its own, not taken here.
+   *   flows.<flow_name>.screens.<node_id>.title
+   *   flows.<flow_name>.screens.<node_id>.description
+   *
+   * A screen's heading and body text are `{{ }}` templates the server renders
+   * per run (`renderTextSlot` in the screen executor), so an overlay on the
+   * served string would draw a translated hole as literal text. Maintainer
+   * ruling A on #22507 states the rule once: a user-read flow string the
+   * server renders per run is translated where it is rendered, in the run's
+   * locale, before its holes are filled, and a client overlay never touches a
+   * server-rendered slot. So the screen executor asks the engine for each
+   * translated TEMPLATE (`flowScreenCopyKey`, `system/i18n-resolver.ts`)
+   * through the `i18n` service, in the run's `AutomationContext.locale`, the
+   * one channel the `refusals` message is read through, and renders it in
+   * place of the authored template. With no locale, or no entry, the authored
+   * template renders. The served `ScreenSpec` arrives translated and filled,
+   * and the runner draws it as served.
+   *
+   * - **`title`** covers the node label too: the executor draws
+   *   `config.title ?? node.label`, so one key translates whichever heading the
+   *   screen shows. Its address is unchanged from the client-side route it had
+   *   before.
+   * - **`description`** is translated only where the screen authors one. A
+   *   bundle cannot add body text the author did not write; `objectstack
+   *   validate` refuses such a key. It is judged as the text slot it
+   *   translates: the one text-slot judge (`textSlotTemplateRefusal`) refuses
+   *   a single-brace `{token}` here exactly as `ScreenConfigSchema` refuses it
+   *   on the source.
+   * - ⚠️ A `title` translation is not judged by that judge yet. The key
+   *   predates the engine pick, and refusing a token in it narrows what the
+   *   face accepts, which is a change of its own. A single-brace token in a
+   *   translated heading renders as literal text, as it did when the console
+   *   overlaid the heading.
    */
   flows: z.record(z.string(), strictObject({
     surface: 'this flow translation',
@@ -1347,20 +1374,33 @@ const appTranslationDataShape = () => ({
       // `dashboards.widgets` and `pages.components` both name, so it gets the
       // same alias table.
       aliases: { label: 'title', name: 'title', heading: 'title', header: 'title', inputs: 'fields', items: 'fields' },
-      guidance: {
-        description:
-          "`description` — a screen's body text (`config.description`) — has no key on the flows translation "
-          + 'surface yet: the server renders it per run as a `{{ }}` template, so its translation has to be '
-          + 'picked before that render, and no reader does that today. This surface carries the heading '
-          + '(`title`) and, per field, the label, placeholder, help text and option labels.',
-      },
     }, {
-      // Overlays the screen node's `config.title`. A screen that declares no
-      // `title` shows its node `label` instead (`ScreenConfigSchema.title`,
-      // "falls back to the node label"), so this one key covers whichever of
-      // the two the runner ends up drawing — the same one-string-one-spelling
-      // rule `pages.<name>.title` follows over `label`.
-      title: z.string().optional().describe('Translated screen heading (overlays `config.title`, or the node label when the screen declares none)'),
+      // [#22507] Picked by the ENGINE in the run's locale and rendered in place
+      // of the screen node's `config.title`. A screen that declares no `title`
+      // shows its node `label` instead (`ScreenConfigSchema.title`, "falls back
+      // to the node label"), so this one key covers whichever of the two the
+      // screen shows — the same one-string-one-spelling rule
+      // `pages.<name>.title` follows over `label`.
+      title: z.string().optional().describe(
+        'Translated screen heading — a `{{ }}` template like the heading it translates, picked by the engine in the '
+        + "run's locale and rendered in place of `config.title` (or the node label when the screen declares none)",
+      ),
+      // [#22507] The screen's body text, picked the same way. No `.min(1)`,
+      // like every sibling leaf: an empty string is the untranslated slot
+      // `os i18n extract` writes into a skeleton, and the engine reads it as no
+      // translation (the authored body text renders).
+      description: z.string()
+        // The one text-slot judge, applied to the translation exactly as
+        // `ScreenConfigSchema` applies it to the body text it translates.
+        .superRefine((value, ctx) => {
+          const refusal = textSlotTemplateRefusal(value);
+          if (refusal !== undefined) ctx.addIssue({ code: 'custom', message: refusal });
+        })
+        .optional()
+        .describe(
+          'Translated screen body text — a `{{ }}` template like the `config.description` it translates, picked by '
+          + "the engine in the run's locale and rendered in its place; translated only where the screen authors one",
+        ),
       fields: z.record(z.string(), strictObject({
         surface: 'this flow screen field translation',
         history: TRANSLATION_HISTORY,

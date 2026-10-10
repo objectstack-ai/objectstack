@@ -120,7 +120,7 @@ export const zhCN: TranslationData = {
             },
           },
         },
-        success_screen: { title: '任务已创建' },
+        success_screen: { title: '任务已创建', description: '任务“{{ subject }}”创建成功！' },
       },
     },
   },

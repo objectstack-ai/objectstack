@@ -4109,7 +4109,7 @@ describe('translateFlow — screen-flow copy from the `flows` bundle group', () 
     expect(screenOf(out).label).toBe('Conversion Details');
   });
 
-  it('ignores off-spec bundle keys the schema refuses — never overlays them (`description`, `help`)', () => {
+  it('ignores off-spec bundle keys the schema refuses — never overlays them (a field\'s `help`)', () => {
     // The resolver is deliberately schema-independent (stored rows reach it
     // via the raw sync path), so the negative is pinned on its own, the same
     // way `translatePage` pins the retired `submitLabel`.
@@ -4119,7 +4119,6 @@ describe('translateFlow — screen-flow copy from the `flows` bundle group', () 
           lead_conversion: {
             screens: {
               screen_1: {
-                description: '不应出现',
                 fields: { opportunityName: { help: '不应出现' } },
               },
             },
@@ -4129,8 +4128,32 @@ describe('translateFlow — screen-flow copy from the `flows` bundle group', () 
     } as unknown as FlowTestBundle;
     const out = translateFlow(leadConversion(), offSpec, { locale: 'zh-CN' });
     const screen = screenOf(out);
-    expect(screen.config.description).toBe('Review the details below.');
     expect(screen.config.fields.find((f: any) => f.name === 'opportunityName').help).toBeUndefined();
+  });
+
+  it('overlays a screen\'s body text TEMPLATE where the screen authors one, and never adds one (#22507)', () => {
+    // The document-level twin of the engine's pick: the translated template
+    // replaces `config.description` before any render, holes and all.
+    const withBody: FlowTestBundle = {
+      'zh-CN': {
+        flows: {
+          lead_conversion: {
+            screens: {
+              screen_1: { description: '请核对 {{ record.name }} 的详情。' },
+              screen_2: { description: '不应出现' },
+            },
+          },
+        },
+      },
+    };
+    const doc = leadConversion();
+    doc.nodes.push({ id: 'screen_2', type: 'screen', label: 'No Body', config: { title: 'No Body' } } as any);
+    const out = translateFlow(doc, withBody, { locale: 'zh-CN' });
+    expect(screenOf(out).config.description).toBe('请核对 {{ record.name }} 的详情。');
+    // A screen with no authored body text gets none from the bundle, and
+    // nothing else on it resolved, so it comes back as the same node.
+    expect(screenOf(out, 'screen_2').config.description).toBeUndefined();
+    expect(screenOf(out, 'screen_2')).toBe(doc.nodes[3]);
   });
 
   it('touches only screen nodes with an id, and does not mutate the input document', () => {
