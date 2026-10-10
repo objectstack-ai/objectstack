@@ -17,7 +17,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 17.x and @objectstack/core 17.x (Zod v4 schemas), Node 22+
 metadata:
   author: objectstack-ai
-  version: "1.3"
+  version: "17.7.0"
   domain: platform
   tags: project, defineStack, driver, hono, plugin, kernel, service, requires, capability, DI, lifecycle, cli, deploy, ops
 ---
