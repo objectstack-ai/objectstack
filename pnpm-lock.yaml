@@ -1615,6 +1615,9 @@ importers:
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
+      hono:
+        specifier: ^4.13.5
+        version: 4.13.12
       tsx:
         specifier: ^4.23.15
         version: 4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6)

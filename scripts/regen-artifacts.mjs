@@ -86,9 +86,6 @@ export const ROOT_OWNER = '@objectstack/spec-monorepo';
  * the reconciliation two-way rather than merely permissive.
  */
 export const REGEN_ARTIFACTS = Object.freeze([
-  // Deliberately NOT sharded (#5837): keyed by version, so two PRs append under
-  // different majors — a low-conflict shape the split would not improve.
-  { path: 'packages/spec/spec-changes.json', gen: 'gen:spec-changes', check: 'check:spec-changes' },
   // Sharded by category (#5837): one file per namespace, so two PRs touching
   // different categories never share a file. The reason it had to be sharded and
   // not merely driver-managed is that the driver is LOCAL — the GitHub merge
@@ -936,6 +933,20 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + '`check:upgrade-guide`, which compares no committed copy, would pass the loss. A merge that '
       + 'meets the stub on both sides is a human\'s. Same expiry clause as the three untracked '
       + 'entries above: committing these pages turns this entry red.',
+  },
+  {
+    path: 'packages/spec/spec-changes.json',
+    gen: 'gen:spec-changes',
+    untracked: true,
+    why:
+      'GITIGNORED since #22485: the ADR-0087 D4 manifest `@objectstack/spec` ships. The publish lane '
+      + '(`scripts/release-spec-changes.sh --prepare` / `--generate`) writes it into the package right '
+      + 'before the tarball is packed, `gen:spec-changes` writes the same file locally, and the pull '
+      + 'request generates it in memory (`check:spec-changes`) — so git never merges it. It was a '
+      + 'ROUTED row until #22485 deleted the committed copy under the #22449 B′ ruling. A branch that '
+      + 'still carries one meets a modify/delete conflict on its merge of main, which takes no driver: '
+      + 'the deletion is the answer. Same expiry clause as the untracked entries above: committing it '
+      + 'again turns this entry red.',
   },
   {
     path: 'docs/audits/**',
