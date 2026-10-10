@@ -18,6 +18,7 @@ import {
   normalizeDecisionOutputs,
 } from './approval.zod';
 import { BUILTIN_MEMBERSHIP_ROLES } from '../identity/membership-role';
+import { MetadataTypeSchema } from '../kernel/metadata-plugin.zod';
 
 describe('ApproverType', () => {
   it('should accept all valid approver types', () => {
@@ -154,6 +155,14 @@ describe('APPROVER_VALUE_BINDINGS — an approver value is picked from the recor
     // NAME, the only reference a registry item has. No `valueField`: there is
     // no other column a catalog item could commit.
     expect(APPROVER_VALUE_BINDINGS.position).toEqual({ source: 'registry', type: 'position' });
+    // Every registry binding names a type the registry actually serves — the
+    // compile-time check the binding forgoes to keep approval.zod.ts free of
+    // the kernel module graph.
+    for (const [type, binding] of Object.entries(APPROVER_VALUE_BINDINGS)) {
+      if (binding.source !== 'registry') continue;
+      expect(MetadataTypeSchema.safeParse(binding.type).success, `'${type}' binds unknown metadata type '${binding.type}'`)
+        .toBe(true);
+    }
     // No binding names the retiring table as its source.
     for (const [type, binding] of Object.entries(APPROVER_VALUE_BINDINGS)) {
       expect((binding as { object?: string }).object, `'${type}' binds sys_position rows`).not.toBe('sys_position');

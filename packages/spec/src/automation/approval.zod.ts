@@ -2,7 +2,6 @@
 
 import { z } from 'zod';
 import { BUILTIN_MEMBERSHIP_ROLES } from '../identity/membership-role';
-import type { MetadataType } from '../kernel/metadata-plugin.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 
@@ -159,7 +158,10 @@ export type ApproverValueBinding =
    */
   | { source: 'record'; object: string; valueField: 'id' | 'name' }
   /**
-   * `value` is the machine name of an item of metadata `type` — the picker
+   * `value` is the machine name of an item of metadata `type` — a member of
+   * the registry's own type vocabulary (`MetadataTypeSchema`, singular, as the
+   * meta API spells it; `approval.test.ts` holds every bound `type` to it,
+   * which keeps this module's import graph free of the kernel). The picker
    * lists `GET /api/v1/meta/<type>`, which serves both provenances, the
    * code-declared items and the environment-authored ones (ADR-0131 D2), and
    * commits the item's `name`. There is no `valueField`: a catalog item has no
@@ -175,7 +177,7 @@ export type ApproverValueBinding =
    * environments the way ids are not), so the binding moved without changing
    * the stored value.
    */
-  | { source: 'registry'; type: MetadataType }
+  | { source: 'registry'; type: string }
   /** Closed value set — render a strict select, never free text. */
   | { source: 'enum'; values: readonly string[] }
   /**
