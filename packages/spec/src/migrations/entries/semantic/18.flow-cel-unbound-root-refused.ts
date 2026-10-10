@@ -25,7 +25,9 @@ export const entry: SemanticMigration = {
     + 'record.FIELD',
   reason:
     'A flow CEL expression evaluates in one scope per run: the flow\'s variables spread to top level, the trigger '
-    + 'record\'s fields flattened beside them, and record, previous, vars and current_user bound by the engine. A '
+    + 'record\'s fields flattened beside them, record bound to the record the run was handed (where an entrance the '
+    + 'stack declares hands the flow one, or the flow binds a variable named record), and previous, vars and '
+    + 'current_user bound by the engine. A '
     + 'root outside that scope fails the expression with an unknown-variable fault on every run that reaches it, '
     + 'and the build door, which judged a flow expression\'s syntax only, passed it. The run-user spellings are '
     + 'the reachable case: formulas, row-level security and the client bind the run\'s user under user, ctx.user '

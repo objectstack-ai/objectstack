@@ -35,4 +35,4 @@ In a flow whose run holds no record, read a variable by its name:
 - this repository at `0ec4268972` (`examples/**`, `packages/platform-objects`, `packages/qa/dogfood`): 64 flows, 51 CEL slots, no flow in `packages/platform-objects`; the 2 flows that read `record` are an `api` hook flow and a record-change flow;
 - `objectstack-ai/hotcrm` at `f0afcbda07` (`src/`, `test/`): 45 flows, 57 CEL slots; the 12 flows that read `record` are all record-change flows.
 
-Deployed metadata and other repositories were not measured. `objectstack validate` does not refuse such a `record` read yet; the run fails it, naming the root and the source.
+Deployed metadata and other repositories were not measured. `objectstack validate` refuses such a `record` read too, naming the root (see `@objectstack/lint`'s note).
