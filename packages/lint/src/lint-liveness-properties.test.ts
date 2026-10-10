@@ -830,6 +830,63 @@ describe('lintLivenessProperties', () => {
     });
   });
 
+  // ── #22611: a list view's and a dashboard's audience gate ships spec-first —
+  // `planned` + `authorWarn` until the `/meta` read gate applies it (#22639).
+  // REAL LEDGER: contract tests on the two shipped rows. The enforcing change
+  // flips both rows `live` and drops `authorWarn`, which turns the two warn pins
+  // below red ON PURPOSE — re-subject them to the silence in that change.
+  // (`authorWarn` reaches a container's `list` and every dashboard; the walk
+  // flattens one level of `children`, so a named `listViews` entry is not
+  // walked — the key's describe carries the not-enforced clause for that door.)
+  describe('list-view and dashboard audience gate (#22611 — planned until the read gate enforces it)', () => {
+    const GATE = ['clm_legal_workbench.view'];
+    const viewWith = (list: Record<string, unknown>) =>
+      ({ object: 'clm_contract', list: { type: 'grid', columns: ['name'], ...list } });
+    const boardWith = (extra: Record<string, unknown>) =>
+      ({ name: 'legal_workbench', label: 'Legal Workbench', widgets: [], ...extra });
+    const shippedRow = (type: 'view' | 'dashboard') => {
+      const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), `${type}.json`), 'utf8'));
+      return type === 'view' ? ledger.props.list.children.requiredPermissions : ledger.props.requiredPermissions;
+    };
+
+    for (const [type, path, stack] of [
+      ['view', 'list.requiredPermissions', { views: [viewWith({ requiredPermissions: GATE })] }],
+      ['dashboard', 'requiredPermissions', { dashboards: [boardWith({ requiredPermissions: GATE })] }],
+    ] as const) {
+      it(`warns on an authored \`${path}\` (${type}) — the planned rule id and the row's own authorHint`, () => {
+        const findings = lintLivenessProperties(stack);
+        const f = findings.find((x) => x.message.includes(`sets \`${path}\``));
+        expect(f).toBeDefined();
+        expect(f!.rule).toBe('liveness-planned-property');
+        const row = shippedRow(type);
+        // Anti-vacuity: the row is the shape this pin exists for.
+        expect(row.status).toBe('planned');
+        expect(row.authorWarn).toBe(true);
+        expect(f!.hint).toBe(row.authorHint);
+        expect(f!.hint).not.toMatch(/#\d+/);
+        expect(f!.hint).not.toContain('Remove it');
+      });
+    }
+
+    it('stays silent on a view and a dashboard that author no gate — in a call that still warns', () => {
+      // One stack, two halves: the gated dashboard is the lit control that
+      // proves the ledgers loaded, so the ungated view's silence is a reading.
+      const viewQuiet = lintLivenessProperties({
+        views: [viewWith({})],
+        dashboards: [boardWith({ requiredPermissions: GATE })],
+      });
+      expect(ruleOf(viewQuiet, 'requiredPermissions')).toBe('liveness-planned-property');
+      expect(ruleOf(viewQuiet, 'list.requiredPermissions')).toBeUndefined();
+
+      const boardQuiet = lintLivenessProperties({
+        views: [viewWith({ requiredPermissions: GATE })],
+        dashboards: [boardWith({})],
+      });
+      expect(ruleOf(boardQuiet, 'list.requiredPermissions')).toBe('liveness-planned-property');
+      expect(ruleOf(boardQuiet, 'requiredPermissions')).toBeUndefined();
+    });
+  });
+
   // ── #11288: `stack.translations` is a locale-keyed BUNDLE, not an item ──────
   //
   // Every other collection in `TYPE_COLLECTIONS` is a flat array of items whose
