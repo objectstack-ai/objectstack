@@ -85,7 +85,7 @@ import {
   resolveReadableSnapshotFields,
   type FieldVisibilitySource,
 } from './payload-redaction.js';
-import type { RequestVisibilitySource } from './request-read-gate.js';
+import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
 
 /**
  * Node-era approval runtime (ADR-0019).
@@ -1299,6 +1299,26 @@ async function findRequestRow(
 }
 
 /**
+ * [#22589] The request a row of one of its child tables (`object`, one of
+ * `APPROVAL_REQUEST_CHILD_OBJECTS`) belongs to, read as the system — the one
+ * read the approvals door's by-row rule (`ApprovalService.authorizeFileRead`)
+ * and a by-id visibility question about a child row (the read gate's source
+ * below) both take, so the two cannot disagree about which request a row is
+ * anchored on. `null` when the row does not exist or names no request.
+ */
+async function findChildRequestId(
+  engine: ApprovalEngine,
+  object: string,
+  rowId: string,
+): Promise<string | null> {
+  const rows = await engine.find(object, {
+    where: { id: rowId }, fields: ['request_id'], limit: 1, context: SYSTEM_CTX,
+  });
+  const requestId = (Array.isArray(rows) ? rows[0] : undefined)?.request_id;
+  return requestId != null && String(requestId) !== '' ? String(requestId) : null;
+}
+
+/**
  * [#22559] Each service's own request visibility, as the generic data door's
  * read gate on `sys_approval_request` asks it (`request-read-gate.ts`).
  *
@@ -1382,6 +1402,12 @@ export class ApprovalService implements IApprovalService {
     // is a request loaded by id, which carries its own anchor (`loadRequest`).
     // Absent, the read is untargeted — the participant set alone, as for the
     // inbox.
+    //
+    // [#22589] The same answer serves the gates on a request's child tables
+    // (`sys_approval_action`, `sys_approval_approver`), which keep a row when
+    // its `request_id` is in it. There `target.row` names a child row loaded
+    // by id: the request it belongs to is the anchor, as `authorizeFileRead`
+    // reads it — `findChildRequestId`, shared with that method.
     REQUEST_VISIBILITY.set(this, {
       visibleRequestIdsFor: async (context, target) => {
         // `organizationId` is not on the envelope — see isOverrideActor().
@@ -1392,9 +1418,13 @@ export class ApprovalService implements IApprovalService {
         let anchor: { object?: string | null; recordId?: string | null } = {
           object: target?.object, recordId: target?.recordId,
         };
-        if (!(anchor.object && anchor.recordId) && target?.requestId) {
-          const raw = await findRequestRow(this.engine, target.requestId, tenantOrg);
-          anchor = raw ? { object: raw.object_name, recordId: raw.record_id } : {};
+        if (!(anchor.object && anchor.recordId)) {
+          const requestId = target?.requestId
+            || (target?.row ? await findChildRequestId(this.engine, target.row.object, target.row.id) : null);
+          if (requestId) {
+            const raw = await findRequestRow(this.engine, requestId, tenantOrg);
+            anchor = raw ? { object: raw.object_name, recordId: raw.record_id } : {};
+          }
         }
         return this.visibleRequestIds(context, tenantOrg, anchor);
       },
@@ -2962,6 +2992,9 @@ export class ApprovalService implements IApprovalService {
    * on the node's declared `fallbackApprovers` instead, resolved through the
    * same expansion as `approvers`. The return type is unchanged for that
    * policy: from the flow node's side it is an ordinary pending request.
+   *
+   * A request that opens tells each concrete approver on its slate, once, on
+   * the `approval.requested` topic (see the fan-out at the end of the body).
    */
   async openNodeRequest(
     input: {
@@ -3268,6 +3301,47 @@ export class ApprovalService implements IApprovalService {
         input.object, input.recordId, input.config.approvalStatusField, 'pending',
         row.submitter_id ?? null,
       );
+    }
+
+    // [#22607] Tell each approver the step landed on them — the one lifecycle
+    // step that used to publish nothing, so an approval ladder waited in
+    // silence until someone happened to open the inbox. It goes out through
+    // `notify()`, the same single ingress (ADR-0030) and the same payload
+    // shape as `approval.reminder` and every other sibling: ⛔ no second
+    // notification path. Sent last, once every write above has landed, so no
+    // one is told about a request that failed half-way through opening; and
+    // best-effort like every `notify()` — a failing channel logs and never
+    // fails the opening.
+    //
+    // Who is told is the reminder's recipient rule, read off the slate this
+    // request actually opened on (after OOO delegation and after an
+    // `onEmptyApprovers: 'fallback'` replacement):
+    //  - each CONCRETE approver (a user id or an email), once — a person the
+    //    slate lists under two groups (per_group tagging) is one person;
+    //  - never a `type:value` literal: an unstaffed position / team names no
+    //    one, and `notify()` drops every slot address anyway. So a slate of
+    //    literals only — what `admin_rescue` opens — notifies nobody, and an
+    //    `auto_approve` / `fail` empty slate opened no request to tell anyone
+    //    about: `onEmptyApprovers` decides that case, not this fan-out;
+    //  - not an out-of-office DELEGATE, who was already told above by
+    //    `approval.ooo_substituted` — one message per approver, not two.
+    // No one-tap decision links: ADR-0043 mints those on `remind()` only, and
+    // minting bearer tokens on every opening is a decision this does not make.
+    const toldByOoo = new Set(substitutions.map((sub) => sub.to));
+    const openedOn = new Set(approvers.filter((a) => a && !a.includes(':') && !toldByOoo.has(a)));
+    for (const approver of openedOn) {
+      await this.notify({
+        topic: 'approval.requested',
+        audience: [approver],
+        actorContext: context,
+        source: { object: 'sys_approval_request', id },
+        dedupKey: `approval-requested-${id}-${approver}`,
+        payload: {
+          title: 'Approval requested',
+          body: `A decision on ${input.object}/${input.recordId} is waiting on you.`,
+          actionUrl: '/system/approvals',
+        },
+      });
     }
 
     return rowFromRequest(row);
@@ -6859,7 +6933,10 @@ export class ApprovalService implements IApprovalService {
     // object it passes through the generic door's read gate, which asks this
     // very function about the row it names — a chain of requests about
     // requests, unbounded on a cycle. Fail closed: no tier on it.
-    if (object === 'sys_approval_request') return;
+    // [#22589] Nor is a row of one of its child tables, for the same reason:
+    // their gates ask this function about the request a row belongs to, whose
+    // anchor can be that very row.
+    if (object === 'sys_approval_request' || APPROVAL_REQUEST_CHILD_OBJECTS.includes(object)) return;
     // A tokenless/anonymous caller reads nothing. Fail closed, as above.
     const uid = context?.userId != null ? String(context.userId) : '';
     if (!uid) return;
@@ -7271,15 +7348,12 @@ export class ApprovalService implements IApprovalService {
   async authorizeFileRead(actionId: string, context: ExecutionContext): Promise<boolean> {
     if (!actionId) return false;
     try {
-      const rows = await this.engine.find('sys_approval_action', {
-        where: { id: actionId },
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      const requestId = (Array.isArray(rows) ? rows[0] : undefined)?.request_id;
+      // [#22589] The row's request, read the way the generic door's gate on
+      // this table reads it for a by-id read — `findChildRequestId`, shared.
+      const requestId = await findChildRequestId(this.engine, 'sys_approval_action', actionId);
       if (!requestId) return false;
       // Same gate as listActions: visibility of the decision's parent request.
-      return !!(await this.getRequest(String(requestId), context));
+      return !!(await this.getRequest(requestId, context));
     } catch {
       return false;
     }

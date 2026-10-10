@@ -3,7 +3,7 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
 import type { IDataEngine, II18nService, ISecurityService, ISharingService } from '@objectstack/spec/contracts';
-import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
+import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
 // the service that writes the row on every `emit()` (#4154). This plugin never
@@ -141,7 +141,8 @@ function createHostLocaleReader(
 /**
  * AuditPlugin
  *
- * Registers the sys_audit_log / sys_activity / sys_comment system objects
+ * Registers the sys_audit_log / sys_activity / sys_comment / sys_comment_reaction
+ * system objects
  * and installs ObjectQL hook subscribers that automatically write audit
  * trail + activity stream rows on every data mutation.
  *
@@ -180,7 +181,7 @@ export class AuditPlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      objects: [SysAuditLog, SysActivity, SysComment],
+      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction],
       // ADR-0029 D7 — contribute the Audit Logs entries into the Setup app's
       // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so both
       // doors onto it live and die with this plugin and need no item gate.
@@ -349,6 +350,9 @@ export class AuditPlugin implements Plugin {
       // to `enforceFeedsCapability` above, which gates `enable.feeds`, not
       // access. The sharing service resolves lazily so plugin order doesn't
       // matter; without it the edit checks degrade to parent read visibility.
+      // [#22566] The same two installers gate `sys_comment_reaction`: a
+      // reaction is readable exactly when its comment is, and created only on a
+      // comment the caller can read (`comment-access-hooks.ts`, module header).
       if (typeof (engine as any).registerHook === 'function') {
         installCommentAccessHooks(
           engine as any,
@@ -388,11 +392,11 @@ export class AuditPlugin implements Plugin {
           installCommentReadVisibility(engine as any, ctx.logger);
         } else {
           ctx.logger.warn(
-            'AuditPlugin: engine has no middleware seam — sys_comment READ visibility NOT installed ' +
-              '(comments on records the caller cannot read would be listable)',
+            'AuditPlugin: engine has no middleware seam — sys_comment and sys_comment_reaction READ visibility NOT ' +
+              'installed (comments on records the caller cannot read, and their reactions, would be listable)',
           );
         }
-        ctx.logger.info('AuditPlugin: sys_comment record-level access gates installed');
+        ctx.logger.info('AuditPlugin: sys_comment and sys_comment_reaction record-level access gates installed');
       }
 
       // sys_activity READ visibility — an activity row is readable when the
@@ -515,7 +519,8 @@ export class AuditPlugin implements Plugin {
       // wholesale" and "provisioning ran fine" produced identical logs. Name
       // the consequence, not just the condition.
       ctx.logger.warn(
-        'AuditPlugin: this engine exposes no syncObjectSchema() — sys_audit_log / sys_activity / sys_comment were NOT ' +
+        'AuditPlugin: this engine exposes no syncObjectSchema() — sys_audit_log / sys_activity / sys_comment / ' +
+          'sys_comment_reaction were NOT ' +
           'provisioned up-front and stay lazy-created on first WRITE. An env that READS one first (the home page ' +
           'activity feed queries sys_activity before any mutation) will log "no such table" until something writes to it.',
       );
@@ -533,7 +538,7 @@ export class AuditPlugin implements Plugin {
 
     const placements: string[] = [];
     const offDefault: string[] = [];
-    for (const obj of [SysAuditLog, SysActivity, SysComment]) {
+    for (const obj of [SysAuditLog, SysActivity, SysComment, SysCommentReaction]) {
       try {
         await sync.call(engine, obj.name);
       } catch (err) {

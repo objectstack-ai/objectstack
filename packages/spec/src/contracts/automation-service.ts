@@ -108,18 +108,20 @@ export interface AutomationContext {
      *    `action-execution.ts` (REST `POST /api/v1/actions/...` and the MCP
      *    `run_action` bridge).
      *
-     * Its reader: the engine's refusing `end` node, which picks the translated
-     * message at `flows.<flow>.refusals.<node_id>.message`
-     * (`flowRefusalMessageKey`) in this locale before it renders the `{{ }}`
-     * holes (#22450). With no locale, or no translation, the authored message
-     * renders.
+     * Its readers pick a translated TEMPLATE in this locale before they render
+     * the `{{ }}` holes: the engine's refusing `end` node, at
+     * `flows.<flow>.refusals.<node_id>.message` (`flowRefusalMessageKey`,
+     * #22450), and the `screen` executor, at
+     * `flows.<flow>.screens.<node_id>.title` / `.description`
+     * (`flowScreenCopyKey`, #22507). With no locale, or no translation, the
+     * authored template renders.
      *
      * It lives as long as the run: it is persisted with a suspended run, so a
      * resumed leg renders in the STARTER's locale whoever resumes it (a resume
      * carries no locale of its own), and a `subflow` / `map` child inherits it
      * with the rest of the parent's context. Absent on a run no person started:
      * a record-change, schedule or webhook trigger, or code calling `execute`
-     * directly. Such a run stores the authored message.
+     * directly. Such a run renders the authored templates.
      *
      * Presentation, not authorization: no security middleware keys on it.
      */
@@ -300,7 +302,20 @@ export interface ScreenFieldSpec {
 export interface ScreenSpec {
     /** The screen node's id (correlates the resume back to this pause point). */
     nodeId: string;
+    /**
+     * The heading, rendered: `config.title`, or the node label when the screen
+     * declares none, with its `{{ }}` holes filled — in the run's language. The
+     * engine picks the translated template (`flowScreenCopyKey`, #22507) in
+     * {@link AutomationContext.locale} before it renders, so a client draws
+     * this as served and ⛔ never overlays a translation on it: the holes are
+     * already filled, and a translated template laid over them would draw them
+     * as literal text.
+     */
     title?: string;
+    /**
+     * The body text, rendered and translated exactly as {@link title} is; absent
+     * when the screen authors none.
+     */
     description?: string;
     fields: ScreenFieldSpec[];
     /**

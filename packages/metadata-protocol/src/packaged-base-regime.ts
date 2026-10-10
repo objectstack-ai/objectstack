@@ -109,6 +109,25 @@
  * every package whose items the artifact loader registered is managed, and every
  * sentence here names it so: the install mode is what the refusal is about, not
  * the fact that the item happens to be code.
+ *
+ * ## The remedy follows what the caller DID: an edit, or a create
+ *
+ * [#22591] One sealed item is refused for two different acts, and each has its
+ * own remedy. A save that changes the item under the name (an EDIT) is told
+ * where that item can change: its row's sanctioned path, or its source. A save
+ * that brings an item of the caller's own into existence under a name a package
+ * or a built-in already holds (a CREATE, or a rename into that name) is told the
+ * one thing it can do instead: choose another name. "Edit the source artifact"
+ * sends that author to an artifact they did not write and cannot edit, and a
+ * Regime C path customizes the package's item, which is not what they asked for.
+ *
+ * The create sentence is ONE sentence for every type ({@link heldNameSentence}),
+ * never a row: the remedy does not depend on the type, so a type added later
+ * gets it without a row, and a row added later cannot take it away. Only the
+ * opener and the citation are the row's, as in the edit sentences. The act is
+ * the caller's fact, never inferred here: a door that knows it is taking a name
+ * says so with the `create` operation ({@link SealedItemOperation}), and every
+ * other save keeps the edit remedy, byte for byte.
  */
 
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
@@ -221,8 +240,11 @@ function regimeCPrescription(routes: PackagedBaseRegimeCRoutes): string {
     const prescription = paths
         .map(([opening, following, rest], i) => (i === 0 ? opening : following) + rest)
         .join(', or ');
-    return `${prescription}. See docs/adr/0126-packaged-metadata-customization-model.md.`;
+    return `${prescription}. See ${REGIME_C_ADR}.`;
 }
+
+/** [ADR-0126 §2] The decision record every Regime C sentence cites. */
+const REGIME_C_ADR = 'docs/adr/0126-packaged-metadata-customization-model.md';
 
 /**
  * The PRESCRIPTION half of a regime's refusal, built from the row alone: a
@@ -308,6 +330,49 @@ export function packagedBaseRegimeSentence(
 const MANAGED_SEAL_ADR = 'docs/adr/0131-total-organization-ownership-no-null-organization-id.md';
 
 /**
+ * [#22591] What a refused write did to the item's name — the fact the remedy
+ * follows (module header, "The remedy follows what the caller DID"):
+ *
+ *  - `save` — a change to the item already under the name: an edit. The
+ *    default for every save whose caller declares nothing else, so a door
+ *    that cannot tell keeps the remedy it always gave;
+ *  - `create` — a save that brings an item of the caller's own into existence
+ *    under the name: a create, or a rename into the name. Refused on exactly
+ *    the ground, with exactly the code and status, a `save` is;
+ *  - `delete` — a removal.
+ */
+export type SealedItemOperation = 'save' | 'create' | 'delete';
+
+/**
+ * [#22591] The sentence for a CREATE under a name a managed package or a
+ * built-in holds, or a rename into it — ONE sentence for every type (module
+ * header): who holds the name, the one remedy a create has (choose a name no
+ * package or built-in holds), where the names in use are listed, and the type's
+ * own decision record. The opener and the citation are the row's, as in the edit
+ * sentences — an origin-gated type's item is code-defined, not shipped by a
+ * managed package; a Regime C type's record is the one whose §2 makes a new
+ * machine name mandatory for an item authored beside a packaged one.
+ *
+ * ⛔ It names neither the source artifact, nor a row's sanctioned path, nor the
+ * `OS_METADATA_WRITABLE` hatch: all three act on the item that holds the name,
+ * and the caller asked for an item of their own. The listing route is the
+ * type's own `/meta` list, which answers the names the type serves.
+ *
+ * Kept under the REST door's 500-character client-message bound: outside the
+ * item's name and its type's three mentions it is 255 characters at most
+ * (measured; pinned with an 88-character name on the longest type).
+ */
+function heldNameSentence(singular: string, name: string): string {
+    const row = packagedBaseRegimeRow(singular);
+    const holder = row?.regime === 'origin-gated'
+        ? `${row.noun} '${name}' is code-defined`
+        : `Metadata item '${singular}/${name}' is provided by a managed package`;
+    const docs = row === undefined ? MANAGED_SEAL_ADR : row.regime === 'C' ? REGIME_C_ADR : row.docs;
+    return `${holder}, so its name is taken. To author your own ${singular}, choose a name no package or `
+        + `built-in holds (GET /api/v1/meta/${singular} lists the names in use). See ${docs}.`;
+}
+
+/**
  * [ADR-0131 D6] THE refusal sentence for a write onto, or a removal of, an item a
  * managed package ships, on a type with no environment overlay — every door that
  * refuses one builds it here, and nowhere else: the metadata protocol's package
@@ -315,6 +380,10 @@ const MANAGED_SEAL_ADR = 'docs/adr/0131-total-organization-ownership-no-null-org
  * repository's type door (`SysMetadataRepository.assertAllowed`), which answers
  * the same condition one layer down for the writes that reach it without passing
  * a package door (draft promotion, restore, revert).
+ *
+ * [#22591] A `create` — a save that takes the name for an item of the caller's
+ * own — reads {@link heldNameSentence} whatever the type. An edit (`save`) and a
+ * removal read on:
  *
  * A type with a regime row speaks for its regime ({@link packagedBaseRegimeSentence}:
  * the sanctioned path, never the hatch). Every other type reads the managed seal
@@ -328,8 +397,9 @@ const MANAGED_SEAL_ADR = 'docs/adr/0131-total-organization-ownership-no-null-org
  * Kept under the REST door's 500-character client-message bound: the sentence
  * outside the item's type and name is 321 / 275 characters, save / removal (measured).
  */
-export function managedItemSealedSentence(type: string, name: string, operation: 'save' | 'delete'): string {
+export function managedItemSealedSentence(type: string, name: string, operation: SealedItemOperation): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    if (operation === 'create') return heldNameSentence(singular, name);
     const regime = packagedBaseRegimeSentence(singular, name, operation);
     if (regime !== undefined) return regime;
     return `Metadata item '${singular}/${name}' is provided by a managed package and is sealed `

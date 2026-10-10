@@ -4,6 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor, ScreenConfigSchema, ScriptConfigSchema } from '@objectstack/spec/automation';
 import type { ScreenConfigParsed, ScriptConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
+import { flowScreenCopyKey, type FlowScreenCopyKey } from '@objectstack/spec/system';
 import { interpolate, renderTextSlot } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
 import { judgeHeadlessScreen } from '../screen-input-contract.js';
@@ -170,7 +171,44 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         // The rest keep the single-brace dialect (`{account_id}`): `recordId`
         // names a record and `defaults` / a field's `defaultValue` hand their
         // resolved values over, not text.
-        const text = (v: unknown): string | undefined => renderTextSlot(v, variables);
+        //
+        // [#22507] …in the run's language. Maintainer ruling A: a user-read
+        // flow string the server renders per run is translated where it is
+        // rendered, in the run's locale, before its holes are filled, and a
+        // client overlay never touches a server-rendered slot. So each slot
+        // asks the engine for its translated TEMPLATE at
+        // `flows.<flow>.screens.<node_id>.{title,description}`
+        // (`flowScreenCopyKey`) — the refusing `end` node's pick, through the
+        // one `i18n` channel `setI18nServiceSource` attaches — and renders the
+        // authored template when none is picked. The served `ScreenSpec`
+        // arrives translated and filled.
+        //  - The heading is asked for even with no `config.title`: the one
+        //    `title` key covers the node label the heading falls back to.
+        //  - The body text is asked for only where the screen authors one: a
+        //    bundle never adds body text the author did not write.
+        // `context.flowName` is stamped by the engine at run setup; a call
+        // with none (an executor driven outside a run) renders as authored.
+        const flowName = typeof context.flowName === 'string' && context.flowName.length > 0
+            ? context.flowName
+            : undefined;
+        const screenText = (key: FlowScreenCopyKey, authored: unknown, shownAs: string): string | undefined => {
+            if (flowName === undefined) return renderTextSlot(authored, variables);
+            return engine.renderFlowTextSlot(
+                {
+                    key: flowScreenCopyKey(flowName, node.id, key),
+                    authored,
+                    subject: `flow '${flowName}' screen '${node.id}'`,
+                    shownAs,
+                },
+                variables,
+                context,
+            );
+        };
+        const heading = (): string | undefined => screenText('title', cfg.title, 'the heading');
+        const body = (): string | undefined =>
+            typeof cfg.description === 'string' && cfg.description.length > 0
+                ? screenText('description', cfg.description, 'the body text')
+                : undefined;
         const ref = (v: unknown): string | undefined => {
             const resolved = interpolate(v, variables, context);
             return resolved == null ? undefined : String(resolved);
@@ -198,8 +236,8 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             screen: {
               nodeId: node.id,
               kind: 'object-form',
-              title: text(cfg.title) ?? node.label ?? objectName,
-              description: text(cfg.description),
+              title: heading() ?? node.label ?? objectName,
+              description: body(),
               objectName,
               mode: cfg.mode === 'edit' ? 'edit' : 'create',
               recordId: cfg.recordId != null ? ref(cfg.recordId) : undefined,
@@ -282,8 +320,8 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           suspend: true,
           screen: {
             nodeId: node.id,
-            title: text(cfg.title) ?? node.label ?? 'Input',
-            description: text(cfg.description),
+            title: heading() ?? node.label ?? 'Input',
+            description: body(),
             fields,
           },
         };
