@@ -1082,8 +1082,8 @@ export class AppPlugin implements Plugin {
                     ['positions', 'position'],
                     ['permissions', 'permission'],
                     // [ADR-0066 D1] Package-declared authorization capabilities —
-                    // read back by bootstrapDeclaredCapabilities to seed
-                    // sys_capability with package provenance.
+                    // read back by the security catalog read and the anchor
+                    // predicates' declared-capability context (ADR-0131 D3).
                     ['capabilities', 'capability'],
                     ['sharingRules', 'sharing_rule'],
                     // `['policies', 'policy']` removed at #12894, together with

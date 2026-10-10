@@ -3374,8 +3374,8 @@ const METADATA_ARRAY_KEYS = [
   // `permissions` (#5870, #4967 Part 2): the ONLY seam that stamps
   // ADR-0010 provenance is `registerItem` → `applyProtection`, so a
   // collection missing from this list reaches no registry with a
-  // `_packageId`. `bootstrapDeclaredCapabilities` resolves the owning
-  // package as `cap._packageId ?? cap.packageId`; while `capabilities`
+  // `_packageId`. The declared-capability seeder (retired by ADR-0131 D3)
+  // resolved the owning package as `cap._packageId ?? cap.packageId`; while `capabilities`
   // sat outside this list the first half could never be satisfied and
   // `readDeclared(ql, 'capability')` returned nothing, which made the
   // author-side `packageId` — documented as the FALLBACK — mandatory,

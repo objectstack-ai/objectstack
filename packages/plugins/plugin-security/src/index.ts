@@ -72,8 +72,8 @@ export type {
   CollisionReportSink,
   PermissionSetNameCollisionDiagnostic,
 } from './permission-set-name-collision.js';
-// [#18091] The seeders' remaining refusals. EXPORTED on the criterion the two
-// blocks above state and no wider: a refusal an AUTHOR can cause has a second
+// [#18091] The seeders' remaining refusals. EXPORTED on the criterion the
+// block above states and no wider: a refusal an AUTHOR can cause has a second
 // door by construction — the author-time one (`@objectstack/lint`, `os build` /
 // `os validate`) — and a door that re-spells the token or re-derives the
 // wording is the drift these modules exist to prevent. A package declaring a
