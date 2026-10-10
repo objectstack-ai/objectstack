@@ -1381,13 +1381,19 @@ function selfTest() {
     .filter((e) => e.untracked && e.path.endsWith('/**'))
     .map((e) => e.path.slice(0, -'/**'.length))
     .filter(underRoot);
+  // The trees that MUST be skipped: the set, plus the register's untracked trees
+  // under a ROOT. Judged against this union and never against SKIP_SUBTREES
+  // alone, because a case that reads the set to decide what the set should
+  // exclude cannot see an entry dropped from it.
+  const skipTrees = [...new Set([...SKIP_SUBTREES, ...untrackedUnderRoots])];
   const skippedReached = walkedRel.filter(
-    (f) => [...SKIP_SUBTREES].some((p) => f.startsWith(`${p}/`)),
+    (f) => skipTrees.some((p) => f.startsWith(`${p}/`)),
   );
-  expect('the walk reaches NO page under ANY SKIP_SUBTREES entry, content/docs/protocol-upgrade/ '
-    + 'included whenever a local docs build has written it. On a fresh checkout that tree is '
-    + 'absent and this case cannot fail for it, which is why the register case below and the '
-    + 'program-level battery exist',
+  expect('the walk reaches NO page under any tree that must be skipped (every SKIP_SUBTREES '
+    + 'entry, and every untracked generated tree the register places under a ROOT), '
+    + 'content/docs/protocol-upgrade/ included whenever a local docs build has written it. On a '
+    + 'fresh checkout that tree is absent and this case cannot fail for it, which is why the '
+    + 'register case below and the program-level battery exist',
     skippedReached.length === 0);
   expect('#15061 — every SKIP_SUBTREES entry lies under a configured ROOT and EXISTS, or is an '
     + 'UNTRACKED generated tree the register declares (written on demand, so absent from a fresh '
@@ -1706,7 +1712,6 @@ function selfTest() {
   const skipSandbox = mkdtempSync(join(tmpdir(), 'check-role-word-skipped-'));
   try {
     const nothingRead = scanClause(ROOTS.map((root) => ({ root, files: 0 })));
-    const skipTrees = [...new Set([...SKIP_SUBTREES, ...untrackedUnderRoots])];
     skipTrees.forEach((tree, i) => {
       const buildSkipTree = (leg, pageDir) => {
         const dir = join(skipSandbox, `${i}-${leg}`);
@@ -2370,7 +2375,7 @@ function selfTest() {
   console.log(
     `OK  self-test: the walk reaches ${walkedRel.length} markdown file(s) across the roots, `
     + `${publishedRefs.length} of them published reference pages under skills/, and `
-    + `${skippedReached.length} under the generated subtrees (${[...SKIP_SUBTREES].join(', ')}) — both `
+    + `${skippedReached.length} under the generated subtrees (${skipTrees.join(', ')}) — both `
     + 'directions pinned from the WALK, never from a typed count, so a skip that empties the '
     + 'published half and one that swallows the generated half each name themselves. Every '
     + 'skipped subtree is also held against the register of untracked generator output, and '
