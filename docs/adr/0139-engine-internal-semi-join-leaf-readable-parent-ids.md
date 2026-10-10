@@ -21,7 +21,8 @@ D5 (principal-less refusal), [ADR-0049](./0049-no-unenforced-security-properties
 capability bit returns), [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (the refusal envelope),
 [ADR-0057](./0057-system-data-lifecycle-and-retention.md) (the `telemetry` datasource split that makes a parent federated).
 **Leaves unchanged**: ADR-0055 §2's chosen mechanism (b) for `controlled_by_parent`, its `rlsMembership` IN-form and
-the four-form fail-closed RLS compiler; ADR-0053 D-D1 (drivers receive lowered input) for every form but this one leaf.
+the fail-closed RLS compiler and its closed pushdown form set (historically four, broader today); ADR-0053 D-D1
+(drivers receive lowered input) for every form but this one leaf.
 **Consumers**: `@objectstack/spec` (the leaf's declaration), `@objectstack/objectql` (composition and push-down),
 `@objectstack/driver-sql` and the drivers that inherit it, `@objectstack/driver-turso` (remote transport),
 `@objectstack/driver-memory`, `@objectstack/driver-mongodb`, `@objectstack/plugin-audit` (five of the six consumers),
@@ -75,8 +76,8 @@ multi-organization deployment every organization's rows compete for one 2,000-ro
 ### Why no push-down exists, and what already decided against one
 
 - The filter vocabulary has no subquery spelling: `packages/spec/src/data/filter.zod.ts#FieldOperatorsSchema` and
-  `#VALID_AST_OPERATORS` are closed, and an unknown operator is refused `INVALID_FILTER` / 400 at
-  `#parseFilterAST` and at the engine's comparand doors (`packages/objectql/src/filter-comparand-shape.ts#assertListComparandShapes`).
+  `packages/spec/src/data/filter.zod.ts#VALID_AST_OPERATORS` are closed, and an unknown operator is refused
+  `INVALID_FILTER` / 400 at `packages/spec/src/data/filter.zod.ts#parseFilterAST` and at the engine's comparand doors (`packages/objectql/src/filter-comparand-shape.ts#assertListComparandShapes`).
 - The driver contract retired `packages/spec/src/data/driver.zod.ts#querySubqueries` and `#joins` in 17.0.0 with the
   words "ObjectQL never plans subqueries through a driver, so there was nothing for the bit to switch on" — a
   zero-consumer bit removed under ADR-0049, not a ruling that the platform never evaluates one.
@@ -175,7 +176,8 @@ restriction".
   gate's switch has proven the leaf.
 - **The withheld-update rule** cannot be pushed as it stands: it judges the stored `{ old, new }` change inside the
   `metadata` text column of `packages/plugins/plugin-audit/src/objects/sys-activity.object.ts#sys_activity`
-  (`#isWithheldOnlyUpdate`). So `sys_activity` gains a writer-stamped column, **`changed_fields`** — the key set of the
+  (`packages/plugins/plugin-audit/src/activity-field-redaction.ts#isWithheldOnlyUpdate`). So `sys_activity` gains a
+  writer-stamped column, **`changed_fields`** — the key set of the
   recorded change, stamped by the CRUD mirror from the same `packages/plugins/plugin-audit/src/audit-writers.ts#diff`
   that composes the change — and the rule becomes a predicate: an update row with a non-empty `changed_fields` none of
   whose members this reader is served is withheld. Stored rows are **backfilled** from their `metadata.old` /
@@ -202,17 +204,20 @@ reached by catching a refusal.
 3. **A federated parent**: P bound to a different datasource than the gated object
    (`packages/objectql/src/engine.ts#resolveDatasourceBinding`). No driver evaluates a subquery across two of them.
    ⚠️ This includes every parent of `sys_activity` on a deployment that registers the `telemetry` datasource
-   (ADR-0057 §3.6, `#LIFECYCLE_DATASOURCE`): there the leaf serves consumer 1 nothing, and letter C's loud bound is what
-   that deployment class has. Recorded as a limit, not solved.
+   (ADR-0057 §3.6, `packages/objectql/src/engine.ts#LIFECYCLE_DATASOURCE`): there the leaf serves consumer 1 nothing,
+   and letter C's loud bound is what that deployment class has. Recorded as a limit, not solved.
 
 ### D6 — What ADR-0055 and ADR-0056 now say
 
 ADR-0055's row (a) is reversed **for this one leaf and nothing else**: the leaf is composed by the engine from the
-compiled output of the RLS compiler, whose four forms, `rlsMembership` IN-form and deliberate lack of a subquery form
-are unchanged (`packages/plugins/plugin-security/src/rls-compiler.ts#RLSCompiler`). §2's mechanism (b) for
+compiled output of the RLS compiler, whose closed pushdown form set (historically four, broader today), `rlsMembership`
+IN-form and deliberate lack of a subquery form are unchanged
+(`packages/plugins/plugin-security/src/rls-compiler.ts#RLSCompiler`, `#compileExpression`: a subquery shape compiles to
+`null` and fails closed). §2's mechanism (b) for
 `controlled_by_parent` stands, set-size ceiling included; whether that id set becomes a seventh consumer is ⛔ not
 decided here. ADR-0056's non-goal stands as written for the compiler and is revisited only as the engine-side leaf.
-Each record carries one status-line pointer to this one, landed with this record; nothing else in either moves.
+Each record carries one pointer to this one, landed with this record — ADR-0055's status line, ADR-0056's non-goal
+bullet; nothing else in either moves.
 
 ## Consequences
 
@@ -256,8 +261,8 @@ Each record carries one status-line pointer to this one, landed with this record
 
 ## Acceptance criteria
 
-The maintainer approves this record (Tier H), with the two status-line pointers it carries: ADR-0055 (row (a)
-revisited for one engine-internal leaf; §2 stands) and ADR-0056 (the non-goal stands for the compiler).
+The maintainer approves this record (Tier H), with the one pointer each it carries: ADR-0055's status line (row (a)
+revisited for one engine-internal leaf; §2 stands) and ADR-0056's non-goal bullet (the non-goal stands for the compiler).
 
 ## Execution plan (after acceptance)
 
