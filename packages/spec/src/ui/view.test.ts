@@ -3371,10 +3371,65 @@ describe('UserActionsConfigSchema', () => {
     expect(config.rowHeight).toBe(true);
     expect(config.group).toBe(true);
     expect(config.addRecordForm).toBe(false);
-    expect(config.editInline).toBe(false);
+    expect(config.editInline).toBe(true);
     expect(config.hideFields).toBe(false);
     expect(config.rowColor).toBe(false);
     expect(config.buttons).toBeUndefined();
+  });
+
+  // Maintainer ruling 2026-10-10 (the v18 line): 「乙 v18 把 spec 默认翻成 true,
+  // editInline: false 变成关法。」 A list view is editable in place by default,
+  // under the permission gate that already exists; `editInline: false` is the
+  // opt-out. The rule of objectui#5144 (one vocabulary, the `inlineEdit` fold,
+  // declared = enforced) stands — only the default's value moves.
+  describe('editInline defaults ON (maintainer ruling, protocol 18)', () => {
+    it('an absent key parses to true', () => {
+      expect(UserActionsConfigSchema.parse({}).editInline).toBe(true);
+      const view = ListViewSchema.parse({
+        name: 'audit_log',
+        label: 'Audit Log',
+        columns: [{ field: 'name' }],
+        userActions: {},
+      });
+      expect(view.userActions?.editInline).toBe(true);
+    });
+
+    it('an explicit false stays false — the opt-out the ruling names', () => {
+      expect(UserActionsConfigSchema.parse({ editInline: false }).editInline).toBe(false);
+      const view = ListViewSchema.parse({
+        name: 'audit_log',
+        label: 'Audit Log',
+        columns: [{ field: 'name' }],
+        userActions: { editInline: false },
+      });
+      expect(view.userActions?.editInline).toBe(false);
+    });
+
+    it('an explicit true still parses to true', () => {
+      expect(UserActionsConfigSchema.parse({ editInline: true }).editInline).toBe(true);
+    });
+
+    // The fold (`inlineEdit` → `userActions.editInline`, an explicit `editInline`
+    // winning) lives in the renderer, not here: the spec keeps both spellings
+    // as declared, so this pins the inputs the fold reads are unchanged — the
+    // view-level `inlineEdit` is still optional with no default of its own, and
+    // it does not materialise a `userActions` block.
+    it('the view-level `inlineEdit: true` still parses as before, beside the new default', () => {
+      const view = ListViewSchema.parse({
+        name: 'tasks',
+        label: 'Tasks',
+        columns: [{ field: 'name' }],
+        inlineEdit: true,
+      });
+      expect(view.inlineEdit).toBe(true);
+      expect(view.userActions).toBeUndefined();
+      const silent = ListViewSchema.parse({
+        name: 'tasks',
+        label: 'Tasks',
+        columns: [{ field: 'name' }],
+      });
+      expect(silent.inlineEdit).toBeUndefined();
+    });
   });
 
   // The split is copied from the renderer's reads, not chosen by the spec

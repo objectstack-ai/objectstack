@@ -1,7 +1,7 @@
 ---
 title: Field Value schema — Data Protocol reference
 navTitle: Field Value
-description: "Field runtime VALUE-shape contract. Reference for Address, AddressValue, CalendarDateValue, ClockTimeValue and 6 more: every property with its type and default."
+description: "Field runtime VALUE-shape contract. Reference for Address, AddressValue, CalendarDateValue, ClockTimeValue and 7 more: every property with its type and default."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -41,8 +41,8 @@ this contract has (ADR-0104 performance budget).
 ## TypeScript Usage
 
 ```typescript
-import { AddressSchema, AddressValueSchema, CalendarDateValueSchema, ClockTimeValueSchema, FileLikeValueSchema, FileReferenceIdValueSchema, FileValueSchema, InstantValueSchema, LocationValueSchema, ReferenceIdValueSchema } from '@objectstack/spec/data';
-import type { Address, AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileReferenceIdValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
+import { AddressSchema, AddressValueSchema, CalendarDateValueSchema, ClockTimeValueSchema, FileLikeValueSchema, FileReferenceIdValueSchema, FileRefusedValueSchema, FileValueSchema, InstantValueSchema, LocationValueSchema, ReferenceIdValueSchema } from '@objectstack/spec/data';
+import type { Address, AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileReferenceIdValue, FileRefusedValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
 
 // Validate data
 const result = AddressSchema.parse(data);
@@ -132,6 +132,18 @@ Type: `string`
 ## FileReferenceIdValue
 
 **Type:** `string`
+
+
+---
+
+## FileRefusedValue
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | The sys_file id the record holds |
+| **metadataRefused** | `true` | ✅ | The reader was refused the file's metadata (no read on sys_file): name, size and type are withheld. Distinct from an empty field, which holds no file at all. |
 
 
 ---

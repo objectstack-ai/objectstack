@@ -26,6 +26,9 @@ import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from 
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
 import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+// [#22510] The acting user's object, named by the registry constant rather
+// than a literal — `sys_activity.actor_name` is resolved from its title.
+import { SystemObjectName } from '@objectstack/spec/system';
 // [#21120] The family-wide stored-metadata-body seam. `sys_metadata` /
 // `sys_metadata_history` rows carry a serialized metadata BODY in their
 // `metadata` column (a datasource body holds stored credential material), and
@@ -1367,6 +1370,47 @@ export function installAuditWriters(
   };
 
   /**
+   * [#22510] The acting user's display name, for `sys_activity.actor_name`.
+   *
+   * The object declares that column — and lists it among its highlight fields —
+   * because "activity entries are denormalized snapshots" read
+   * chronologically (`sys-activity.object.ts`). No writer filled it, so every
+   * record History entry read "Unknown user" while its `actor_id` named the
+   * user. The name is written HERE, at write time; nothing resolves it on read.
+   *
+   * The source is `sys_user`'s title through {@link resolveLookupTitles}: the
+   * ADR-0079 answer for that object (`nameField: 'name'`, the profile
+   * display-name column the approval timeline resolves its actors from), and
+   * the same answer this writer already renders for a `user` reference in a
+   * tracked-change summary. One title resolution for a user in this file.
+   *
+   * A user whose name cannot be read — no row, a blank name, an unregistered
+   * `sys_user`, a failing read — answers `null`, never the id: an id in a name
+   * column is a plausible wrong value no reader can tell from a name (the
+   * class `actor-user.ts` describes), while `null` is the empty every reader
+   * already handles, and `actor_id` still says who acted.
+   *
+   * Cost: memoized per user for {@link ACTOR_NAME_TTL_MS}, and the PROMISE is
+   * what is kept, so concurrent rows share one read. A predicate write over N
+   * rows dispatches `writeAudit` once per row; its actor costs one `sys_user`
+   * read, not N — the hot path #6656 / PR #6977 took reads off. A rename shows
+   * on rows written after the window; rows already written keep the name they
+   * were written with, which is what a snapshot is.
+   */
+  const ACTOR_NAME_TTL_MS = 30_000;
+  const actorNameCache = new Map<string, { value: Promise<string | null>; expires: number }>();
+  const resolveActorName = (api: any, userId: string): Promise<string | null> => {
+    const now = Date.now();
+    const hit = actorNameCache.get(userId);
+    if (hit && hit.expires > now) return hit.value;
+    const value = resolveLookupTitles(api, new Map([[SystemObjectName.USER, new Set([userId])]]))
+      .then((titles) => titles?.get(SystemObjectName.USER)?.get(userId) ?? null)
+      .catch(() => null);
+    actorNameCache.set(userId, { value, expires: now + ACTOR_NAME_TTL_MS });
+    return value;
+  };
+
+  /**
    * [#6656, Option A+] The view the ledger records for one record.
    *
    * Retiring `captureBefore` (below) makes both sides of every diff come from
@@ -1854,6 +1898,20 @@ export function installAuditWriters(
     }
     const textSources: ActivityTextSources = { summary: summarySources, record_label: labelSources };
 
+    // `enable.activities` is an opt-OUT capability (#2707): absent block/flag
+    // = mirror on (spec default `true`), explicit `false` = this object's CRUD
+    // is not mirrored into the sys_activity timeline. This is the per-object
+    // lever for activity-row growth (ADR-0057). The compliance audit row is
+    // NOT gated — sys_audit_log capture stays unconditional.
+    const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
+    // [#22510] The name of the user `actor_id` names — the SAME `userId`, so
+    // the two columns cannot disagree about who acted. Read only when an
+    // activity row will be written. No user ⇒ no name: ADR-0118 D1 keeps the
+    // system actor `null`, and rendering it as "System" is the UI's i18n rule,
+    // not data this writer persists.
+    const actorName: string | null =
+      activitiesEnabled && userId ? await resolveActorName(api, userId) : null;
+
     const activityRow: Record<string, any> = {
       type: activityType,
       // Explicit ISO timestamp — `defaultValue: 'NOW()'` on the column
@@ -1862,6 +1920,9 @@ export function installAuditWriters(
       timestamp: new Date().toISOString(),
       summary,
       actor_id: userId ?? null,
+      // [#22510] Present only when a name resolved: an unresolved actor leaves
+      // the column exactly as every row before this change left it.
+      ...(actorName ? { actor_name: actorName } : {}),
       object_name: ctx.object,
       record_id: recordId ?? null,
       record_label: label,
@@ -1876,12 +1937,6 @@ export function installAuditWriters(
       activityRow.organization_id = tenantId ?? null;
     }
 
-    // `enable.activities` is an opt-OUT capability (#2707): absent block/flag
-    // = mirror on (spec default `true`), explicit `false` = this object's CRUD
-    // is not mirrored into the sys_activity timeline. This is the per-object
-    // lever for activity-row growth (ADR-0057). The compliance audit row is
-    // NOT gated — sys_audit_log capture stays unconditional.
-    const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
     const activityRowToWrite = activitiesEnabled ? activityRow : undefined;
     // [#21262] The ledger row is written first; the writer advances this
     // before the activity row, so after a throw it names the refused table.
