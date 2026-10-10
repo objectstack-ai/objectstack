@@ -293,6 +293,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "enable.clone": {
         label: "Clonación"
       },
+      "enable.approvalsVisibleToReaders": {
+        label: "Aprobaciones visibles para lectores",
+        helpText: "Quien puede leer un registro ve sus solicitudes de aprobación y su historial, en solo lectura y sin ninguna acción de aprobación"
+      },
       validations: {
         label: "Validaciones",
         helpText: "Reglas de validación a nivel de objeto — un array de objetos de regla, p. ej. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Las tablas de transición de máquinas de estado también se declaran aquí (ADR-0020)"

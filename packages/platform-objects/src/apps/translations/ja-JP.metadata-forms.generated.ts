@@ -293,6 +293,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "enable.clone": {
         label: "クローン"
       },
+      "enable.approvalsVisibleToReaders": {
+        label: "閲覧者に承認を表示",
+        helpText: "レコードを閲覧できるユーザーが、その承認リクエストと履歴を読み取り専用で参照できます。承認アクションは提供されません"
+      },
       validations: {
         label: "検証ルール",
         helpText: "オブジェクトレベルの検証ルール — ルールオブジェクトの配列。例: [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。ステートマシンの遷移テーブルもここで宣言します（ADR-0020）"
