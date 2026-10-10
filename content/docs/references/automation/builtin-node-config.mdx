@@ -148,7 +148,7 @@ Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` eval
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to insert into |
 | **fields** | `Record<string, any>` | optional | Field values to write on the new record: each key is a field name, each value a CEL value envelope or a literal |
-| **outputVariable** | `string` | optional | Flow variable bound to the created record |
+| **outputVariable** | `string` | optional | Flow variable bound to the created record — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 
 
 ---
@@ -195,7 +195,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **filter** | `Record<string, any>` | optional | Field/value pairs to match (operator values like `{"$ne": null}` are preserved) |
 | **fields** | `string[]` | optional | Field projection — only these fields are read (default: all) |
 | **limit** | `number` | optional | Max records to return; >1 switches to a multi-record query |
-| **outputVariable** | `string` | optional | Flow variable the result is bound to |
+| **outputVariable** | `string` | optional | Flow variable the result is bound to — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 
 
 ---
@@ -212,7 +212,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **indexVariable** | `string` | optional | Optional variable holding the current index |
 | **itemObject** | `string` | optional | When items are records, the object they belong to (exposes each item as the child's record) |
 | **input** | `Record<string, any>` | optional | Params passed to each item's subflow (interpolated per item) |
-| **outputVariable** | `string` | optional | Each item's subflow output, collected in order |
+| **outputVariable** | `string` | optional | Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 
 
 ---
