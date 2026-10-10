@@ -65,8 +65,10 @@ describe('sys_comment_reaction declaration', () => {
     expect((SysCommentReaction as any).systemFields?.audit).not.toBe(false);
   });
 
-  it('offers create, read and delete over the data API — never update', () => {
-    expect(SysCommentReaction.enable?.apiMethods).toEqual(['get', 'list', 'create', 'delete']);
+  it('offers create, read and delete over the data API, in batches too — never update', () => {
+    // `bulk` admits only children that are allowed one at a time (`bulk ∧
+    // derived(child)`), so it opens createMany / deleteMany and never updateMany.
+    expect(SysCommentReaction.enable?.apiMethods).toEqual(['get', 'list', 'create', 'delete', 'bulk']);
     expect((SysCommentReaction as any).userActions).toMatchObject({ edit: false, import: false });
     // The registry strips an advertised verb the managed bucket does not
     // afford; nothing advertised here may be stripped.

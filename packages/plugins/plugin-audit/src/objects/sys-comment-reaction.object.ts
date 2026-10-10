@@ -36,6 +36,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * - **Update** — not offered. `apiMethods` lists no `update` and
  *   `userActions` hides the edit affordance: a reaction is not edited, it is
  *   deleted and made again.
+ * - **Bulk** — offered, and it adds no path around the rules above. The batch
+ *   doors admit a child operation only when it is itself allowed (`bulk ∧
+ *   derived(child)`), so `updateMany` stays refused. `createMany` is ONE engine
+ *   insert of the rows, and the engine runs `beforeInsert` per row, so every
+ *   row meets the create gate. `deleteMany` is one by-id delete per id, so every
+ *   row meets the own-record floor.
  *
  * ## Why `comment_id` is an id column and not a lookup
  *
@@ -120,14 +126,14 @@ export const SysCommentReaction = ObjectSchema.create({
     { fields: ['comment_id', 'emoji', 'user_id'], unique: 'organization' },
   ],
 
-  // A reaction is made and removed, never edited, and never imported in bulk.
+  // A reaction is made and removed, never edited, and never loaded from a file.
   userActions: { edit: false, import: false },
 
   enable: {
     trackHistory: false,
     searchable: false,
     apiEnabled: true,
-    apiMethods: ['get', 'list', 'create', 'delete'],
+    apiMethods: ['get', 'list', 'create', 'delete', 'bulk'],
     // Not a record anyone discusses, and its CRUD is not a timeline event.
     feeds: false,
     activities: false,
