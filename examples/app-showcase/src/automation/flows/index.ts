@@ -48,7 +48,14 @@ export const TaskCompletedFlow = defineFlow({
         // A flow function is PURE: it takes `inputs`, RETURNS a value, and a
         // later declarative node uses or persists it (#4396).
         function: 'summarizeCompletedTask',
-        inputs: { title: '{record.title}', priority: '{record.priority}' },
+        // Each input is a CEL value envelope (the `{…}` template dialect is
+        // retired from value slots). `priority` is optional and a task that
+        // never set it has no such key, which CEL refuses, so it is guarded;
+        // the function reads the `null` as "normal".
+        inputs: {
+          title: { dialect: 'cel', source: 'record.title' },
+          priority: { dialect: 'cel', source: 'has(record.priority) ? record.priority : null' },
+        },
         outputVariable: 'summary',
       },
     },
@@ -718,7 +725,7 @@ export const TaskDoneNotifyOwnerFlow = defineFlow({
         triggerType: 'record-after-update',
         condition: 'status == "done" && previous.status != "done"',
         // The SAME resume-time trap this flow's sibling hit (#7381): the node
-        // below hops `{record.project.owner}`, and a flow record carries
+        // below hops `record.project.owner`, and a flow record carries
         // `project` as a scalar FK. Un-hydrated it resolved to nothing, the
         // subflow's `notify` refused for want of a recipient, and every
         // completion of a task ran this flow to a failure. Unlike the invoice
@@ -733,9 +740,13 @@ export const TaskDoneNotifyOwnerFlow = defineFlow({
       label: 'Notify Owner',
       config: {
         flowName: 'showcase_notify_owner',
+        // CEL value envelopes, evaluated in this flow's scope and handed to the
+        // subflow's input variables. A project with no owner hands `null`, as
+        // the template's empty value did, and the subflow's notify then has
+        // no recipient — guarded, because CEL refuses the absent key.
         input: {
-          ownerId: '{record.project.owner}',
-          message: 'Task "{record.title}" is done.',
+          ownerId: { dialect: 'cel', source: 'has(record.project.owner) ? record.project.owner : null' },
+          message: { dialect: 'cel', source: `'Task "' + record.title + '" is done.'` },
         },
         outputVariable: 'notifyResult',
       },
@@ -843,7 +854,8 @@ export const ProjectClosureFlow = defineFlow({
       config: {
         flowName: 'showcase_closure_signoff',
         input: {
-          reason: 'Project "{record.name}" was marked completed — please sign off the closure.',
+          // A CEL concatenation — `name` is required on a project.
+          reason: { dialect: 'cel', source: `'Project "' + record.name + '" was marked completed — please sign off the closure.'` },
         },
         outputVariable: 'signoffResult',
       },
