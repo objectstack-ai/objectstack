@@ -33,10 +33,6 @@ every dependency and links or copies them for the agent runtimes it detects
 after `pnpm up @objectstack/skills` — which moves with the rest of the
 `@objectstack/*` set — refreshes the installed catalog.
 
-`npm create objectstack` scaffolds projects with this package as their catalog
-source, and the ObjectStack docs give this package-based command as the
-install path.
-
 ## The `next` channel
 
 The repository's `skills/` tree on `main` is the catalog of the **next**
@@ -49,8 +45,8 @@ not published yet, not for a released project.
 `scripts/sync-catalog.mjs`, this package's `build`, wipes `dist/` and copies the
 repository's `skills/**` into `dist/skills/**`, reads the copy back and
 refuses to finish unless the two trees are equal, file for file and byte for
-byte. Its `prepack` runs the same comparison, so a stale or absent copy is never
-packed. The copy is gitignored; the repository's `skills/**` is the one source
+byte. Its `prepublishOnly` runs the same comparison, so a stale or absent copy is
+never published. The copy is gitignored; the repository's `skills/**` is the one source
 of truth, reviewed and gated there.
 
 ## Related

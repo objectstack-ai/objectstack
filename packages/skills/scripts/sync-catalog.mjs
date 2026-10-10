@@ -47,8 +47,14 @@
  *
  * After the copy the tree is read back and compared to the source, file set and
  * bytes, and `--check` runs that same comparison on demand. The package's
- * `prepack` runs `--check`, so `pnpm pack` / `pnpm publish` refuse a stale or
- * absent tree instead of shipping it.
+ * `prepublishOnly` runs `--check`, so `pnpm publish` refuses a stale or absent
+ * tree instead of shipping it — the `@objectstack/console` shape. Not `prepack`:
+ * `pnpm pack --json` prints its lifecycle banner (`> PKG@VERSION prepack …`) on
+ * stdout ahead of the JSON, and `scripts/publish-smoke-pack.mjs` (the release
+ * smoke and the scaffold smoke) does `JSON.parse(stdout)` on that output — a
+ * `prepack` on any publishable package turns both smokes red at their pack step,
+ * measured on this package. `pnpm pack` runs no lifecycle script, so the smokes
+ * pack the tree their own `pnpm run build` just produced.
  */
 
 import { createHash } from 'node:crypto';

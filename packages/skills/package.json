@@ -1,7 +1,7 @@
 {
   "name": "@objectstack/skills",
   "version": "17.7.0",
-  "description": "The published ObjectStack skills catalog — the repository's skills/** tree, shipped at the version of the @objectstack/* packages it teaches.",
+  "description": "The published ObjectStack skills catalog \u2014 the repository's skills/** tree, shipped at the version of the @objectstack/* packages it teaches.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/objectstack-ai/objectstack/tree/main/packages/skills",
   "repository": {
@@ -25,7 +25,7 @@
   },
   "scripts": {
     "build": "node scripts/sync-catalog.mjs --self-test && node scripts/sync-catalog.mjs",
-    "prepack": "node scripts/sync-catalog.mjs --check"
+    "prepublishOnly": "node scripts/sync-catalog.mjs --check"
   },
   "keywords": [
     "objectstack",
