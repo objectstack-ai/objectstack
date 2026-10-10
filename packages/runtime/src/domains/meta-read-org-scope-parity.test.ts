@@ -50,6 +50,7 @@ import { organizationIdForMetaRead } from '@objectstack/metadata-core';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
 // ── The metadata store: env-wide rows and each organization's overlays ────────
 
@@ -166,12 +167,12 @@ function makeQl() {
         if (cond === null) return (row[field] ?? null) === null;
         return row[field] === cond;
     });
-    return {
+    return bindCatalogFromTables({
         find: async (object: string, q: any = {}) => {
             const rows = (tables[object] ?? []).filter((row: any) => matches(row, q?.where));
             return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
         },
-    };
+    }, tables);
 }
 
 interface SessionRow { id: string; token: string; userId: string; activeOrganizationId: string | null }

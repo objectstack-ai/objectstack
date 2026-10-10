@@ -50,6 +50,7 @@ import { hasPlatformAdminStanding, resolveUserAuthzGrants } from '@objectstack/c
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
 const FLOW = 'vendor_lead_router';
 const DEFINITION = { name: FLOW, label: 'Vendor Lead Router', type: 'autolaunched', nodes: [], edges: [] };
@@ -97,12 +98,12 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
             if (v === null) return (row[k] ?? null) === null;
             return row[k] === v;
         });
-    return {
+    return bindCatalogFromTables({
         async find(object: string, opts: any) {
             const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
             return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
         },
-    };
+    }, tables);
 }
 
 type Shape = 'name-only' | 'genuine' | 'plain';

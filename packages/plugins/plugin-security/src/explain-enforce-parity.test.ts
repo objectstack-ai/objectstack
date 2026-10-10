@@ -283,7 +283,8 @@ async function bootRls(predicate: string, opts: { grantCrud?: boolean } = {}) {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission' ? [MEMBER_DEFAULT, set].find((s) => s.name === name) ?? null : engine.getSchema(name) ?? null,
       list: async () => [MEMBER_DEFAULT, set],
     },
   };
@@ -345,7 +346,9 @@ const USER_REMOVED = 'usr_alpha_removed';
 const READER_SET = 'qa_parity_reader';
 /**
  * Authored only as a `sys_permission_set` row OF `org_alpha` (no metadata
- * declaration), granted in `org_alpha`: it opens the global note object.
+ * declaration), granted in `org_alpha`. It would open the global note object,
+ * but a set the security catalog does not hold confers nothing (ADR-0131
+ * D3/D4, #15196 Q3 A): `NOTES` is refused to every principal, on both faces.
  */
 const ALPHA_ONLY_SET = 'qa_parity_alpha_notes';
 
@@ -364,7 +367,8 @@ type PostureSource =
  *   organizations;
  * - `PROBE` — platform-global (`tenancy: { enabled: false }`), so only the
  *   grants decide;
- * - `NOTES` — platform-global, opened only by {@link ALPHA_ONLY_SET}.
+ * - `NOTES` — platform-global, granted only by {@link ALPHA_ONLY_SET}, which no
+ *   definition backs — so refused to everyone.
  *
  * Enforcement's face is `resolveAuthzContext` with a session that claims
  * `org_alpha`, handed the posture admission hands it, assembled by
@@ -438,7 +442,10 @@ async function bootPrincipal(source: PostureSource) {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? [MEMBER_DEFAULT, userAdminSet, readerSet].find((s) => s.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [MEMBER_DEFAULT, userAdminSet, readerSet],
     },
     ...('tenancy' in source ? { tenancy: { posture: source.tenancy } } : { 'org-scoping': {} }),
@@ -572,7 +579,8 @@ async function bootSharing(opts: { faultReadFilter?: boolean } = {}) {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission' ? sets.find((s: { name?: string }) => s.name === name) ?? null : engine.getSchema(name) ?? null,
       list: async () => sets,
     },
     get sharing() { return sharing; },
@@ -879,27 +887,27 @@ const TABLE: Row[] = [
   // #20580 (the removed member) and #20604 position 3 (the current member), under each walled posture.
   ...principalRows('#20580 · #20604 P3', { tenancy: 'isolated' }, '`isolated`', {
     removed: { LEDGER: REFUSED_DENIED, PROBE: REFUSED_DENIED, NOTES: REFUSED_DENIED },
-    member: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
+    member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
   }),
   ...principalRows('#20580 · #20604 P3', { tenancy: 'group' }, '`group`', {
     removed: { LEDGER: REFUSED_DENIED, PROBE: REFUSED_DENIED, NOTES: REFUSED_DENIED },
-    member: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
+    member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
   }),
   ...principalRows('#20580 control · #20604 P3', { tenancy: 'single' }, '`single`', {
-    removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
-    member: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
+    removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
+    member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
   }, {
     removed: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE, 'record:l_beta': NATIVE_SCOPING_UNDER_SINGLE },
     member: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE, 'record:l_beta': NATIVE_SCOPING_UNDER_SINGLE },
   }),
   // The posture-source asymmetry: the member's rows hold; the removed member's are enforcement's finding.
   ...principalRows('#20604 A4', { orgScopingOnly: true }, '`org-scoping` with no `tenancy` service', {
-    removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
-    member: { LEDGER: 'rows', PROBE: 'rows', NOTES: 'rows' },
+    removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
+    member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
   }, {
     removed: Object.fromEntries(
-      ['sets', 'allowed:LEDGER', 'readFilter:LEDGER', 'record:l_alpha', 'allowed:PROBE', 'readFilter:PROBE',
-        'allowed:NOTES', 'readFilter:NOTES'].map((k) => [k, CLAIM_KEPT_UNDER_A_WALL]),
+      ['sets', 'allowed:LEDGER', 'readFilter:LEDGER', 'record:l_alpha', 'allowed:PROBE', 'readFilter:PROBE']
+        .map((k) => [k, CLAIM_KEPT_UNDER_A_WALL]),
     ),
   }),
 ];
