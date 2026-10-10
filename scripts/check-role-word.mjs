@@ -48,7 +48,8 @@
 // merely unimplemented.
 //
 // Scope: content/docs (hand-written; its `references/` tree is generated from
-// spec and excluded BY PATH — the spec source is the fix site there) and
+// spec and its `protocol-upgrade/` tree from the ADR-0087 registries, both
+// excluded BY PATH — the generator's source is the fix site there) and
 // skills/, walked whole, `references/` included: that tree is published catalog
 // content, not a generated one. See the SKIP_SUBTREES docblock below for why the
 // exclusion is a path and not a directory name. File and directory NAMES count
@@ -63,6 +64,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NOT_DRIVER_MANAGED } from './regen-artifacts.mjs';
 
 const ROOTS = ['content/docs', 'skills'];
 
@@ -122,15 +124,37 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist']);
 // justifies the entry above is what decides it rather than weighing against it:
 // the reserved word emitted into a page by its generator is a REAL finding whose
 // remedy is that generator. Naming the generated tree is how the gate is told
-// where to send such a finding, and `content/docs/references/` is the only tree
-// under these roots whose fix site this gate cannot otherwise reach.
+// where to send such a finding, and exactly two trees under these roots have a
+// fix site this gate cannot otherwise reach:
+//
+//   content/docs/references/        generated from spec by
+//                                   packages/spec/scripts/build-docs.ts; the
+//                                   fix site is the Zod source
+//   content/docs/protocol-upgrade/  the protocol upgrade guide, one page per
+//                                   protocol major plus an index, written by
+//                                   `gen:upgrade-guide` from the ADR-0087
+//                                   conversion and migration registries; the
+//                                   fix site is the registry `.ts`
+//
+// The second tree is also UNTRACKED: gitignored, written on demand by the
+// `@objectstack/docs` build, never committed, so CI's checkout never holds it.
+// Read, it made a local run judge a tree CI never sees — a docs build reddened
+// this gate with findings whose remedy lives in a `.ts` file this markdown gate
+// does not read, while CI stayed green over the same commit. Skipping it is the
+// fix-site argument above, applied unchanged, and it makes a local verdict equal
+// CI's. Whether the published guide's prose should itself meet ADR-0090 D3 is a
+// question for the registry, not one this exclusion settles.
 //
 // The self-test pins both directions from the WALK's own output rather than as a
 // file count. A count has to be re-typed whenever a page is added, and neither
 // failure it must catch is a statement a count can make: "the scan reaches no
-// published reference page at all", and "the scan descended into the generated
-// tree".
-const SKIP_SUBTREES = new Set(['content/docs/references']);
+// published reference page at all", and "the scan descended into a generated
+// tree". An untracked tree leaves that walk pin vacuous on a fresh checkout, so
+// the self-test also holds this set against `NOT_DRIVER_MANAGED` in
+// scripts/regen-artifacts.mjs — the one register of untracked generator output —
+// and runs this gate as a child process over a fixture page inside each skipped
+// tree, with the same page outside it as the control.
+const SKIP_SUBTREES = new Set(['content/docs/references', 'content/docs/protocol-upgrade']);
 const EXTENSIONS = new Set(['.mdx', '.md']);
 const BASELINE_PATH = 'scripts/role-word-baseline.json';
 const WORD = /\brole(?:s)?\b/gi;
@@ -1258,11 +1282,12 @@ let selfTestReachedVerdict = false;
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'The scan population: which `references/` the skip means (#15061)': 5,
+  'The scan population: which `references/` the skip means (#15061)': 7,
   'The ratchet-remedy authority convention (#8435)': 4,
   'The NEW-use message names the relocation case (#14659)': 7,
   'The green body reports what was READ (#9910)': 5,
   'A missing ROOT is REFUSED, per root (#9932)': 8,
+  'Every skipped subtree, at the PROGRAM level': 7,
   'The dispatch-gates declaration (#9964\'s pattern)': 4,
   'The vendor-wire fence exemption (#10533)': 6,
   'Every way the MARKING could stop bounding the exemption': 15,
@@ -1275,7 +1300,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1345,12 +1370,44 @@ function selfTest() {
     + 'the three surviving entries meet at every depth and under every root, and `references` '
     + 'never did. A fourth entry has to be stated rather than appended',
     [...SKIP_DIRS].every((d) => INSTALLED_OR_GENERATED.has(d)));
-  expect('#15061 — every SKIP_SUBTREES entry lies under a configured ROOT and EXISTS: a path '
-    + 'excluding a tree no root reaches, or one that has since moved, is dead configuration that '
-    + 'reads as coverage',
+  // The UNTRACKED half of SKIP_SUBTREES, read from the register rather than
+  // re-spelled here: `NOT_DRIVER_MANAGED`'s `untracked: true` entries, which
+  // `check:merge-driver` holds against git and against their generator's name,
+  // narrowed to the ones under a ROOT. Such a tree exists only after its
+  // generator ran, so existence cannot be what proves the exclusion live; the
+  // register entry naming its generator is.
+  const underRoot = (p) => ROOTS.some((r) => p === r || p.startsWith(`${r}/`));
+  const untrackedUnderRoots = NOT_DRIVER_MANAGED
+    .filter((e) => e.untracked && e.path.endsWith('/**'))
+    .map((e) => e.path.slice(0, -'/**'.length))
+    .filter(underRoot);
+  // The trees that MUST be skipped: the set, plus the register's untracked trees
+  // under a ROOT. Judged against this union and never against SKIP_SUBTREES
+  // alone, because a case that reads the set to decide what the set should
+  // exclude cannot see an entry dropped from it.
+  const skipTrees = [...new Set([...SKIP_SUBTREES, ...untrackedUnderRoots])];
+  const skippedReached = walkedRel.filter(
+    (f) => skipTrees.some((p) => f.startsWith(`${p}/`)),
+  );
+  expect('the walk reaches NO page under any tree that must be skipped (every SKIP_SUBTREES '
+    + 'entry, and every untracked generated tree the register places under a ROOT), '
+    + 'content/docs/protocol-upgrade/ included whenever a local docs build has written it. On a '
+    + 'fresh checkout that tree is absent and this case cannot fail for it, which is why the '
+    + 'register case below and the program-level battery exist',
+    skippedReached.length === 0);
+  expect('#15061 — every SKIP_SUBTREES entry lies under a configured ROOT and EXISTS, or is an '
+    + 'UNTRACKED generated tree the register declares (written on demand, so absent from a fresh '
+    + 'checkout): a path excluding a tree no root reaches, or one that has since moved, is dead '
+    + 'configuration that reads as coverage',
     [...SKIP_SUBTREES].every(
-      (p) => ROOTS.some((r) => p === r || p.startsWith(`${r}/`)) && existsSync(p),
+      (p) => underRoot(p) && (existsSync(p) || untrackedUnderRoots.includes(p)),
     ));
+  expect('every untracked generated tree the register places under a ROOT is in SKIP_SUBTREES, '
+    + 'and the register names at least one, so a renamed flag cannot pass this by matching '
+    + 'nothing. CI never generates such a tree, so reading it makes a local run judge pages CI '
+    + 'never sees, with findings whose fix site is their generator. Dropping the '
+    + 'content/docs/protocol-upgrade entry reds HERE on every checkout, pages on disk or not',
+    untrackedUnderRoots.length > 0 && untrackedUnderRoots.every((p) => SKIP_SUBTREES.has(p)));
 
   // ── The ratchet-remedy authority convention (#8435) ────────────────────────
   //
@@ -1623,6 +1680,64 @@ function selfTest() {
     }
   } finally {
     rmSync(sandbox, { recursive: true, force: true });
+  }
+
+  // ── Every skipped subtree, at the PROGRAM level ────────────────────────────
+  //
+  // The scan-population cases prove the SET says the right thing; these prove
+  // the program honours it, by building a tree and running this file in it as a
+  // child, the discipline of the missing-ROOT legs above. It is also the only
+  // evidence an untracked tree leaves on a fresh checkout, where the walk pin
+  // has none of its pages to see.
+  //
+  // The trees are built from SKIP_SUBTREES and the register's untracked trees
+  // together, never re-spelled: an entry dropped from the set is still built
+  // here, so its page is COUNTED and the skip leg reds by exit status.
+  //
+  // Per tree, three legs that differ only in where the page sits:
+  //   inside   the page inside the skipped tree: exit 0 with zero files READ,
+  //            so the green came from the walk never opening it, not from an
+  //            exemption or a baseline (no baseline exists in these trees);
+  //   outside  the same page one level up, in the hand-written tree: a NEW use,
+  //            exit 1, because a gate that skipped everything would pass `inside`;
+  //   sibling  the same page in a sibling directory whose name merely STARTS
+  //            with the skipped one's: a NEW use too, because the exclusion is
+  //            a path and never a string prefix.
+  battery('Every skipped subtree, at the PROGRAM level');
+  const SKIP_FIXTURE_PAGE = 'fixture-page.md';
+  const SKIP_FIXTURE = '# Approvals\n\nEvery approver holds a role, said the prose.\n';
+  expect('the skipped-subtree fixture CARRIES the reserved word, so a green inside a skipped tree '
+    + 'is the skip working and not an empty page',
+    countMatches(SKIP_FIXTURE) === 1);
+  const skipSandbox = mkdtempSync(join(tmpdir(), 'check-role-word-skipped-'));
+  try {
+    const nothingRead = scanClause(ROOTS.map((root) => ({ root, files: 0 })));
+    skipTrees.forEach((tree, i) => {
+      const buildSkipTree = (leg, pageDir) => {
+        const dir = join(skipSandbox, `${i}-${leg}`);
+        for (const r of ROOTS) mkdirSync(join(dir, r), { recursive: true });
+        mkdirSync(join(dir, pageDir), { recursive: true });
+        writeFileSync(join(dir, pageDir, SKIP_FIXTURE_PAGE), SKIP_FIXTURE);
+        return dir;
+      };
+      const inside = runIn(buildSkipTree('inside', tree));
+      expect(`${tree}/ — a page inside it is SKIPPED: exit 0 with nothing read, where the same `
+        + 'page counted would be a NEW use and exit 1',
+        inside.status === 0 && inside.out.includes(nothingRead));
+      const outsidePage = `${dirname(tree)}/${SKIP_FIXTURE_PAGE}`;
+      const outside = runIn(buildSkipTree('outside', dirname(tree)));
+      expect(`${tree}/ — the same page one level up, outside it, still FIRES as a NEW use `
+        + '(exit 1), so the green above came from this exclusion and not from a gate that skips '
+        + 'everything',
+        outside.status === 1 && outside.out.includes(`${outsidePage}: NEW use of the reserved word`));
+      const siblingPage = `${tree}-draft/${SKIP_FIXTURE_PAGE}`;
+      const sibling = runIn(buildSkipTree('sibling', `${tree}-draft`));
+      expect(`${tree}/ — the same page in a sibling directory whose name only STARTS with it still `
+        + 'FIRES as a NEW use (exit 1): the exclusion is a path, never a string prefix',
+        sibling.status === 1 && sibling.out.includes(`${siblingPage}: NEW use of the reserved word`));
+    });
+  } finally {
+    rmSync(skipSandbox, { recursive: true, force: true });
   }
 
   // ── The dispatch-gates declaration (#9964's pattern) ──────────────────────
@@ -2260,9 +2375,12 @@ function selfTest() {
   console.log(
     `OK  self-test: the walk reaches ${walkedRel.length} markdown file(s) across the roots, `
     + `${publishedRefs.length} of them published reference pages under skills/, and `
-    + `${generatedRefs.length} under the generated content/docs/references/ tree — both `
+    + `${skippedReached.length} under the generated subtrees (${skipTrees.join(', ')}) — both `
     + 'directions pinned from the WALK, never from a typed count, so a skip that empties the '
-    + 'published half and one that swallows the generated half each name themselves. '
+    + 'published half and one that swallows the generated half each name themselves. Every '
+    + 'skipped subtree is also held against the register of untracked generator output, and '
+    + 'driven through a real child process: a page inside it is never read, while the same page '
+    + 'outside it, or in a sibling directory sharing its prefix, still counts. '
     + 'The NEW-use remedy marks baseline expansion as maintainer-only, the predicate '
     + 'rejects an unmarked offer, the ratchet-DOWN remedy stays the author\'s own, and that '
     + 'same remedy NAMES the pure-relocation case, quotes a ratchet-DOWN row the gate really '
