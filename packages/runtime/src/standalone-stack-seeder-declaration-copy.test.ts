@@ -14,7 +14,8 @@
 // one FIRST:
 //
 //   bootstrap-declared-permissions.ts  readDeclared(ql, 'permission')     then metadataService.list
-//   bootstrap-declared-capabilities.ts readDeclared(ql, 'capability')     then metadataService.list
+//   (bootstrap-declared-capabilities.ts did the same for 'capability' until
+//   ADR-0131 D3 retired it: a declared capability now has no row at all)
 //   bootstrap-declared-sharing-rules.ts readDeclared(engine,'sharing_rule') then metadataService.list
 //
 // Triage (14491#issuecomment-5507909226) ruled the card down to four questions
@@ -352,22 +353,10 @@ describe('#14491 Q3 — whether a `capability` arrives without its `scope` defau
     });
   });
 
-  it('ABSORBED: `capabilityRowFields` supplies its OWN `platform` default, so the row is indistinguishable from the door-fed one', () => {
-    // `scope: cap.scope === 'org' ? 'org' : 'platform'` — the seeder never
-    // reads the door's value, it re-derives an equal one. The equality is a
-    // coincidence of two independent defaults, not a normalisation of the
-    // door's copy; this row records that it currently holds.
-    const row = byName(rows.sys_capability, 'probe.export');
-    expect(row).toMatchObject({
-      name: 'probe.export',
-      label: 'Export probe data',
-      description: 'Capability probe.export.',   // also the seeder's own default
-      scope: 'platform',
-      managed_by: 'package',
-      package_id: 'com.test.issue-14491',
-      active: true,
-    });
+  it('no row: a declared capability is served by the registry and no `sys_capability` row is written for it (ADR-0131 D3)', () => {
+    expect(rows.sys_capability.filter((r: any) => r.name === 'probe.export')).toEqual([]);
   });
+
 });
 
 describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins in the persisted row', () => {
