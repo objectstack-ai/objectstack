@@ -40,6 +40,7 @@ import { defineStack, type ObjectStackDefinition } from '@objectstack/spec';
 import { SysAuditLog } from '../src/objects/sys-audit-log.object.js';
 import { SysActivity } from '../src/objects/sys-activity.object.js';
 import { SysComment } from '../src/objects/sys-comment.object.js';
+import { SysCommentReaction } from '../src/objects/sys-comment-reaction.object.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
@@ -60,7 +61,7 @@ import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
  * precision: the annotated type is the function's own return type.
  */
 const config: ObjectStackDefinition = defineStack({
-  objects: [SysAuditLog, SysActivity, SysComment] as any,
+  objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction] as any,
   translations: [
     { en: { objects: enObjects } },
     { 'zh-CN': { objects: zhCNObjects } },
