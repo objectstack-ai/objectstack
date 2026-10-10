@@ -54,7 +54,7 @@ export function catalogFromTables(tables: Record<string, readonly unknown[] | un
   for (const row of setRows) {
     if (typeof row.name !== 'string' || permissions.some((d) => d.name === row.name)) continue;
     const definition: Definition = { name: row.name };
-    for (const [column, key] of [['system_permissions', 'systemPermissions'], ['tab_permissions', 'tabPermissions'], ['object_permissions', 'objects']] as const) {
+    for (const [column, key] of [['system_permissions', 'systemPermissions'], ['tab_permissions', 'tabPermissions'], ['object_permissions', 'objects'], ['admin_scope', 'adminScope']] as const) {
       const value = parsed(row[column] ?? row[key]);
       if (value !== undefined && value !== null) definition[key] = value;
     }
@@ -65,9 +65,16 @@ export function catalogFromTables(tables: Record<string, readonly unknown[] | un
     permissionSets: setRows,
     bindings: (tables.sys_position_permission_set ?? []) as Definition[],
   });
+  // A position definition also carries the row's `delegatable` (ADR-0091 D3),
+  // which the delegated-administration gate reads from the definition.
+  const positionRows = (tables.sys_position ?? []) as Definition[];
+  const delegatable = (name: string): boolean =>
+    positionRows.some((r) => r.name === name && (r.delegatable === true || r.delegatable === 1 || r.delegatable === '1'));
   return {
     permissions,
-    positions: positions.flatMap((f) => (f.fate === 'conflicting' ? [] : [{ name: f.name, permissionSets: [...f.permissionSets] }])),
+    positions: positions.flatMap((f) => (f.fate === 'conflicting'
+      ? []
+      : [{ name: f.name, permissionSets: [...f.permissionSets], ...(delegatable(f.name) ? { delegatable: true } : {}) }])),
   };
 }
 

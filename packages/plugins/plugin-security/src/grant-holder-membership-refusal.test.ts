@@ -113,6 +113,12 @@ interface BootOptions {
   members?: boolean | 'unprovisioned';
 }
 
+/** The positions the fixture's assignment rows name, as their definitions. */
+const QA_POSITIONS = [
+  { name: 'qa_rep', label: 'Rep' },
+  { name: 'qa_lead', label: 'Lead' },
+];
+
 async function boot(opts: BootOptions = {}) {
   const withMembers = opts.members === undefined || opts.members === true;
   const engine = new ObjectQL();
@@ -143,9 +149,12 @@ async function boot(opts: BootOptions = {}) {
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: engine,
+    // [ADR-0131 D3/D4] The two positions the rows name are declared, as the
+    // security catalog an assignment is judged against reads them.
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
-      list: async () => [MEMBER_DEFAULT, QA_ADMIN, QA_READ_ONLY_ON_GRANTS],
+      get: async (type: string, name: string) =>
+        (type === 'position' ? QA_POSITIONS.find((p) => p.name === name) : engine.getSchema(name)) ?? null,
+      list: async (type: string) => (type === 'position' ? QA_POSITIONS : [MEMBER_DEFAULT, QA_ADMIN, QA_READ_ONLY_ON_GRANTS]),
     },
     ...(opts.walled
       ? { 'org-scoping': { name: 'com.objectstack.org-scoping' }, tenancy: { posture: 'isolated' } }

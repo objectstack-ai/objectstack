@@ -1340,22 +1340,6 @@ export class SecurityPlugin implements Plugin {
   private catalogSetLoader?: (names: string[]) => Promise<PermissionSet[]>;
 
   /**
-   * The organization a permission-set resolution runs in — the caller's own
-   * active organization, never a scan across all of them.
-   *
-   * Undefined for a `single`-posture caller (and for any context carrying no
-   * organization at all), which lands on the organization-less surface that
-   * posture correctly has. Both spellings are read for the same reason the
-   * sharing service reads both: `tenantId` is the declared envelope field and
-   * `organizationId` is the cast one, and a hand-built context may carry
-   * either.
-   */
-  private callerOrganizationId(context: any): string | undefined {
-    const id = (context?.organizationId ?? context?.tenantId);
-    return typeof id === 'string' && id !== '' ? id : undefined;
-  }
-
-  /**
    * The permission-set loader for ONE caller. `undefined` when no engine is
    * wired, so `resolvePermissionSets` keeps its "no third source" branch. The
    * caller does not choose the answer: the catalog is environment-level.

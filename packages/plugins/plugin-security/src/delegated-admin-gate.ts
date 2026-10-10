@@ -396,7 +396,7 @@ export class DelegatedAdminGate {
 
     switch (opCtx.object) {
       case 'sys_user_position':
-        return this.assertAssignmentWrite(opCtx, held, organizationId);
+        return this.assertAssignmentWrite(opCtx, held);
       case 'sys_user_permission_set':
         return this.assertDirectGrantWrite(opCtx, held);
       case 'sys_position_permission_set':
@@ -764,11 +764,7 @@ export class DelegatedAdminGate {
 
   // ── sys_user_position: user ↔ position assignments ──────────────────
 
-  private async assertAssignmentWrite(
-    opCtx: any,
-    held: HeldScope[],
-    organizationId?: string,
-  ): Promise<void> {
+  private async assertAssignmentWrite(opCtx: any, held: HeldScope[]): Promise<void> {
     const targets = await this.materializeTargets(opCtx, 'sys_user_position');
     for (const t of targets) {
       const buId = t.next?.business_unit_id ?? null;
