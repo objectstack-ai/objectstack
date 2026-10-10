@@ -22,9 +22,9 @@
  * `systemPermissions`, `tabPermissions` — because a consumer that must MERGE
  * the caller's grants cannot reach any of those four from
  * `resolvePermissionSetNames`. Each is asserted through the located handle, on
- * BOTH authoring paths a set can arrive by (declared in metadata, and authored
- * in `sys_permission_set` through the DB loader), because the loader is where
- * a column silently goes missing.
+ * BOTH paths a set can arrive by (the metadata list, and the security
+ * catalog's definition through the plugin's catalog loader — ADR-0131 D3/D4),
+ * because a loader is where a column silently goes missing.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -44,20 +44,24 @@ const MEMBER_DEFAULT: PermissionSet = {
 } as any;
 
 /**
- * A DB-authored set, as it sits in `sys_permission_set` — snake_case columns,
- * JSON-encoded payloads. This is the row shape the plugin's `dbLoader` parses,
- * and the shape `/me/apps` reads `tab_permissions` off today in its own copy.
+ * An environment-authored set, as the security catalog holds it — the engine
+ * registry's definition (hydrated from `sys_metadata`), which the plugin's
+ * catalog loader hands back whole.
  */
-const SALES_MANAGER_ROW = {
+const SALES_MANAGER: PermissionSet = {
   name: 'sales_manager',
   label: 'Sales Manager',
-  object_permissions: JSON.stringify({ deal: { allowRead: true, allowEdit: true } }),
-  field_permissions: JSON.stringify({ 'deal.amount': { readable: true, editable: true } }),
-  system_permissions: JSON.stringify(['setup.access']),
-  tab_permissions: JSON.stringify({ app_crm: 'visible' }),
-};
+  objects: { deal: { allowRead: true, allowEdit: true } },
+  fields: { 'deal.amount': { readable: true, editable: true } },
+  systemPermissions: ['setup.access'],
+  tabPermissions: { app_crm: 'visible' },
+} as any;
 
-function bootPlugin(dbRows: Array<Record<string, unknown>> = []) {
+/** The `sys_permission_set` reads for a set the resolution asked about — there must be none. */
+let permissionSetRowReads = 0;
+
+function bootPlugin(catalog: PermissionSet[] = [], dbRows: Array<Record<string, unknown>> = []) {
+  permissionSetRowReads = 0;
   const schema: any = { name: 'deal', label: 'Deal', systemFields: false, fields: { id: { name: 'id' }, amount: { name: 'amount' } } };
   const ql: any = {
     registerMiddleware: () => {},
@@ -65,8 +69,18 @@ function bootPlugin(dbRows: Array<Record<string, unknown>> = []) {
     findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
     find: async (object: string, query: any) => {
       if (object !== 'sys_permission_set') return [];
+      // Only a read asking for a set the resolution asked about counts: the
+      // boot's own background passes (the org-admin backfill, the baseline
+      // binder) read their own names and race the request.
+      if (/legacy_auditor|sales_manager/.test(JSON.stringify(query?.where ?? {}))) permissionSetRowReads += 1;
       const wanted: string[] = query?.where?.name?.$in ?? [];
       return dbRows.filter((r) => wanted.includes(String(r.name)));
+    },
+    // The engine registry the security catalog reads first (ADR-0131 D3).
+    registry: {
+      getItem: (type: string, name: string) => (type === 'permission' ? catalog.find((d) => d.name === name) : undefined),
+      listItems: (type: string) => (type === 'permission' ? catalog : []),
+      isPackageDisabled: () => false,
     },
   };
   const metadata: any = {
@@ -92,10 +106,15 @@ function bootPlugin(dbRows: Array<Record<string, unknown>> = []) {
  * what makes the feature detection below the same expression the endpoints
  * will write.
  */
-async function locateSecurityService(dbRows: Array<Record<string, unknown>> = []): Promise<Partial<ISecurityService>> {
-  const { plugin, ctx } = bootPlugin(dbRows);
+async function locateSecurityService(
+  catalog: PermissionSet[] = [],
+  dbRows: Array<Record<string, unknown>> = [],
+): Promise<Partial<ISecurityService>> {
+  const { plugin, ctx } = bootPlugin(catalog, dbRows);
   await plugin.init(ctx);
   await plugin.start(ctx);
+  // Boot-time probes are not the resolution under test.
+  permissionSetRowReads = 0;
   const registered = ctx.registerService.mock.calls.find((c: any[]) => c[0] === 'security')?.[1];
   return registered as Partial<ISecurityService>;
 }
@@ -117,7 +136,7 @@ describe('[#7616] resolvePermissionSetsForContext is reachable through the servi
   });
 
   it('is CALLABLE through that handle and returns the sets whole', async () => {
-    const svc = await locateSecurityService([SALES_MANAGER_ROW]);
+    const svc = await locateSecurityService([SALES_MANAGER]);
 
     const sets = await svc.resolvePermissionSetsForContext?.({
       userId: 'u1',
@@ -129,16 +148,15 @@ describe('[#7616] resolvePermissionSetsForContext is reachable through the servi
     const byName = new Map((sets ?? []).map((s) => [s.name, s]));
     expect([...byName.keys()].sort()).toEqual(['member_default', 'sales_manager']);
 
-    // All four columns the names surface cannot reach, on the DB-authored set —
-    // the path where a column goes missing, since the loader projects the row
-    // by hand.
+    // All four members the names surface cannot reach, on the catalog-loaded
+    // set — the path where a member could go missing.
     const dbAuthored: any = byName.get('sales_manager');
     expect(dbAuthored.objects).toEqual({ deal: { allowRead: true, allowEdit: true } });
     expect(dbAuthored.fields).toEqual({ 'deal.amount': { readable: true, editable: true } });
     expect(dbAuthored.systemPermissions).toEqual(['setup.access']);
-    // The column `/me/apps` filters its app list with. Dropped by this loader
-    // until #7616 — which would have made the published contract false for
-    // every DB-authored set the moment a consumer trusted it.
+    // The member `/me/apps` filters its app list with (#7616): dropped, it
+    // would make the published contract false for every environment-authored
+    // set the moment a consumer trusted it.
     expect(dbAuthored.tabPermissions).toEqual({ app_crm: 'visible' });
 
     // …and on the metadata-declared set, which arrives by the other path.
@@ -149,7 +167,7 @@ describe('[#7616] resolvePermissionSetsForContext is reachable through the servi
   });
 
   it('is the SAME resolution the names surface reports — baseline additive, no cliff', async () => {
-    const svc = await locateSecurityService([SALES_MANAGER_ROW]);
+    const svc = await locateSecurityService([SALES_MANAGER]);
     const context = { userId: 'u1', permissions: ['sales_manager'] } as any;
 
     const names = await svc.resolvePermissionSetNames?.(context);
@@ -189,84 +207,48 @@ describe('[#7616] resolvePermissionSetsForContext is reachable through the servi
 });
 
 /**
- * [#11121 residue] An ORGANIZATION-LESS `sys_permission_set` row still grants.
+ * [ADR-0131 D3/D4] A set is the security catalog's definition; no
+ * `sys_permission_set` row is read.
  *
- * #11121 made this loader tenant-scoped so two organizations holding a row for
- * the same name stop answering each other's requests. Its comment promised the
- * other half — "an organization-less leftover only where it does not [have its
- * own]" — and the code read `.own` alone, which by
- * `resolveOwnOrganizationRow`'s documented contract is NEVER a residue once an
- * organization is supplied. That helper is written for SEEDERS, where refusing
- * to see a residue as "already seeded" is the entire point; enforcement wants
- * the opposite reading.
- *
- * The consequence was a silent revocation on upgrade: every walled deployment
- * carrying pre-#11121 rows (or any row authored without a tenant — the admin
- * UI, a hand-run seed) kept its `system_permissions` and `tab_permissions`,
- * because that read is unscoped and by id, while its `object_permissions` and
- * `admin_scope` stopped applying. One row, two enforcement planes, opposite
- * verdicts, no signal at the moment of loss.
+ * The plugin's third source used to be a per-organization row loader (the
+ * caller's own row, else an organization-less one). The authorization
+ * resolver already took a set's body from the catalog and granted nothing
+ * through a row-only set (#15196 Q3 = A); a row fallback here applied that
+ * set's object map anyway — two sources with opposite verdicts on one set.
+ * The loader now reads the catalog, which is environment-level: the same
+ * definition for a caller in any organization or none.
  */
-const RESIDUE_ROW = {
+const ROW_ONLY = {
   name: 'legacy_auditor',
   label: 'Legacy Auditor',
-  organization_id: null,
-  object_permissions: JSON.stringify({ deal: { allowRead: true, allowDelete: true } }),
-  field_permissions: JSON.stringify({}),
-  system_permissions: JSON.stringify([]),
-  tab_permissions: JSON.stringify({}),
-};
-
-/** The SAME name, stamped with the caller's organization — this one must win. */
-const OWN_ROW = {
-  name: 'legacy_auditor',
-  label: 'Legacy Auditor (this organization)',
   organization_id: 'org_a',
-  object_permissions: JSON.stringify({ deal: { allowRead: true, allowDelete: false } }),
-  field_permissions: JSON.stringify({}),
-  system_permissions: JSON.stringify([]),
-  tab_permissions: JSON.stringify({}),
+  object_permissions: JSON.stringify({ deal: { allowRead: true, allowDelete: true } }),
+  active: true,
 };
 
-describe('[#11121] the per-organization loader does not silently revoke organization-less grants', () => {
-  it('resolves an organization-LESS row for a caller who has an organization', async () => {
-    const svc = await locateSecurityService([RESIDUE_ROW]);
+describe('[ADR-0131 D3/D4] the catalog loader reads definitions, never sys_permission_set rows', () => {
+  for (const [label, organizationId] of [['in an organization', 'org_a'], ['with no organization', undefined]] as const) {
+    it(`a set only a row carries resolves nothing for a caller ${label}, and no row is read`, async () => {
+      const svc = await locateSecurityService([], [ROW_ONLY, { ...ROW_ONLY, organization_id: null }]);
+      const sets = await svc.resolvePermissionSetsForContext?.({
+        userId: 'u1',
+        ...(organizationId ? { organizationId } : {}),
+        permissions: ['legacy_auditor'],
+      } as any);
+      expect((sets ?? []).map((s) => s.name)).toEqual(['member_default']);
+      expect(permissionSetRowReads).toBe(0);
+    });
 
-    const sets = await svc.resolvePermissionSetsForContext?.({
-      userId: 'u1',
-      organizationId: 'org_a',
-      permissions: ['legacy_auditor'],
-    } as any);
-
-    const found = (sets ?? []).find((s) => s.name === 'legacy_auditor');
-    expect(found, 'the grant vanished for a caller in an organization — this is the silent revocation').toBeTruthy();
-    // Whole, not merely present: the columns that went missing are the point.
-    expect((found as any)?.objects?.deal?.allowDelete).toBe(true);
-  });
-
-  it('still prefers THIS organization\'s own row when both exist — the cross-tenant bleed stays closed', async () => {
-    const svc = await locateSecurityService([RESIDUE_ROW, OWN_ROW]);
-
-    const sets = await svc.resolvePermissionSetsForContext?.({
-      userId: 'u1',
-      organizationId: 'org_a',
-      permissions: ['legacy_auditor'],
-    } as any);
-
-    const found = (sets ?? []).find((s) => s.name === 'legacy_auditor');
-    expect(found?.label).toBe('Legacy Auditor (this organization)');
-    // The residue's broader grant must NOT leak in behind the own row.
-    expect((found as any)?.objects?.deal?.allowDelete).toBe(false);
-  });
-
-  it('resolves the same row for a caller with NO organization (single posture, unchanged)', async () => {
-    const svc = await locateSecurityService([RESIDUE_ROW]);
-
-    const sets = await svc.resolvePermissionSetsForContext?.({
-      userId: 'u1',
-      permissions: ['legacy_auditor'],
-    } as any);
-
-    expect((sets ?? []).some((s) => s.name === 'legacy_auditor')).toBe(true);
-  });
+    it(`CONTROL: the catalog's definition resolves whole for a caller ${label}`, async () => {
+      const svc = await locateSecurityService([SALES_MANAGER], [ROW_ONLY]);
+      const sets = await svc.resolvePermissionSetsForContext?.({
+        userId: 'u1',
+        ...(organizationId ? { organizationId } : {}),
+        permissions: ['sales_manager'],
+      } as any);
+      const found: any = (sets ?? []).find((s) => s.name === 'sales_manager');
+      expect(found?.objects).toEqual({ deal: { allowRead: true, allowEdit: true } });
+      expect(permissionSetRowReads).toBe(0);
+    });
+  }
 });
