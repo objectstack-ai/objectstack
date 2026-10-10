@@ -30,7 +30,7 @@
  */
 
 import type { ResolveUserAuthzGrantsOptions } from '../resolve-authz-context.js';
-import { bindCatalogFromTables } from './security-catalog.testkit.js';
+import { bindCatalogFromTables, ledgerFromTables } from './security-catalog.testkit.js';
 
 // ── Recording ObjectQL double ───────────────────────────────────────────────
 
@@ -104,7 +104,10 @@ export function makeRecordingQl(tables: Record<string, unknown[]>) {
       });
       try {
         await new Promise((r) => setTimeout(r, 0));
-        const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
+        // [ADR-0131 D3] A fixture's deactivated catalog rows reach the resolver as
+        // the activation-ledger rows the upgrade ceremony converts them to.
+        const stored = object === 'sys_metadata_activation' && !tables[object] ? ledgerFromTables(tables) : tables[object];
+        const rows = (stored ?? []).filter((r) => matches(r, opts?.where));
         return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
       } finally {
         inFlight -= 1;

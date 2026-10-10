@@ -212,8 +212,8 @@ const VARIANTS: Record<
   },
 
   // Standing taken away every way the resolver knows: the set switched off
-  // (ADR-0049), the grant scoped to an organization, the window closed
-  // (ADR-0091), the position deactivated, and the JSON blobs stored as strings.
+  // (ADR-0049, in the activation ledger), the grant scoped to an organization,
+  // the window closed (ADR-0091), and the JSON blobs stored as strings.
   'standing revoked every way': {
     org: 'org_1',
     tables: {
@@ -259,6 +259,11 @@ const VARIANTS: Record<
           tab_permissions: JSON.stringify({ setup: 'visible' }),
         },
         { id: 'pst_2', name: 'contributor_set', active: true },
+      ],
+      // [ADR-0131 D3, ADR-0126 §4] The switch the resolver honours: the set row's
+      // own `active` above is no longer read.
+      sys_metadata_activation: [
+        { id: 'act_1', metadata_type: 'permission', name: 'admin_full_access', package_id: null, active: false },
       ],
     },
   },

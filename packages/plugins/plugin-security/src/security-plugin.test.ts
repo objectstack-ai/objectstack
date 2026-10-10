@@ -3787,9 +3787,16 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
         return row[k] === v;
       });
     const baseSchema: any = { name: 'task', fields: { id: { name: 'id' }, owner_id: { name: 'owner_id' }, name: { name: 'name' } } };
+    // [ADR-0131 D3/D4] The engine registry the security catalog reads the sets from.
+    const catalogSets = () => [memberDefault, subAdmin, hrAdmin];
     const ql = {
       registerMiddleware: vi.fn(),
       getSchema: () => baseSchema,
+      registry: {
+        getItem: (type: string, name: string) => (type === 'permission' ? catalogSets().find((d: any) => d.name === name) : undefined),
+        listItems: (type: string) => (type === 'permission' ? catalogSets() : []),
+        isPackageDisabled: () => false,
+      },
       async find(object: string, opts: any) {
         const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
         return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;

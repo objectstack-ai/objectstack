@@ -1333,20 +1333,27 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
  * over-revoke a set the user also holds in their own right.
  *
  * The predicate is "explicitly deactivated", not "explicitly active": absent
- * means ACTIVE, so a row that predates the column keeps working. Every fixture
- * above this block carries no `active` key at all and is the pin for that
+ * means ACTIVE, so a name with no ledger row keeps working. Every fixture
+ * above this block carries no ledger row at all and is the pin for that
  * direction — requiring `true` would have turned this file red wholesale, which
  * is what it would do to deployed data.
+ *
+ * [ADR-0131 D3, ADR-0126 §4] The switch is the activation ledger
+ * (`sys_metadata_activation`, types `position` / `permission`), deployment-wide.
+ * The catalog ROW's `active` column is no longer read: the last case pins it.
  */
 describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
+  const off = (metadata_type: 'position' | 'permission', name: string, active: unknown = false) =>
+    ({ metadata_type, name, package_id: null, active });
   const withActive = (v: unknown) => ({
     sys_user: [{ id: 'u1' }],
     sys_member: [],
     sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
     sys_user_permission_set: [],
-    sys_position: [{ id: 'r1', name: 'contributor', active: v }],
+    sys_position: [{ id: 'r1', name: 'contributor' }],
     sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
     sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', system_permissions: ['cap_x'] }],
+    sys_metadata_activation: v === undefined ? [] : [off('position', 'contributor', v)],
   });
 
   // ── sys_position ──────────────────────────────────────────────────────────
@@ -1386,7 +1393,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     expect(ctx.systemPermissions).toContain('cap_x');
   });
 
-  it('an ABSENT `active` column grants — deployed rows are not mass-revoked', async () => {
+  it('an ABSENT ledger row grants — deployed positions are not mass-revoked', async () => {
     const ctx = await resolveAuthzContext({
       ql: makeQl(withActive(undefined)),
       headers: H(),
@@ -1411,15 +1418,15 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     expect(on.permissions).toContain('contributor_ps');
   });
 
-  it('a position name with NO `sys_position` row is untouched (org roles, memberships)', async () => {
+  it('a position name with NO ledger row is untouched (org roles, memberships)', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
       sys_member: [{ user_id: 'u1', role: 'owner', organization_id: 'o1' }],
       sys_user_position: [],
       sys_user_permission_set: [],
-      // `org_owner` is projected from the membership and has no catalogue row —
+      // `org_owner` is projected from the membership and has no ledger row —
       // there is no flag to read, so nothing may be inferred from its absence.
-      sys_position: [{ id: 'r9', name: 'something_else', active: false }],
+      sys_metadata_activation: [off('position', 'something_else')],
     });
     const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.positions).toContain('org_owner');
@@ -1435,9 +1442,10 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       ],
       sys_user_permission_set: [],
       sys_position: [
-        { id: 'r1', name: 'contributor', active: false },
-        { id: 'r2', name: 'reviewer', active: true },
+        { id: 'r1', name: 'contributor' },
+        { id: 'r2', name: 'reviewer' },
       ],
+      sys_metadata_activation: [off('position', 'contributor'), off('position', 'reviewer', true)],
       sys_position_permission_set: [
         { position_id: 'r1', permission_set_id: 'ps1' },
         { position_id: 'r2', permission_set_id: 'ps2' },
@@ -1465,10 +1473,10 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_permission_set: [{
         id: 'ps1',
         name: 'crm_full',
-        active: false,
         system_permissions: ['cap_x'],
         tab_permissions: { crm: 'visible' },
       }],
+      sys_metadata_activation: [off('permission', 'crm_full')],
     });
     const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).not.toContain('crm_full');
@@ -1485,9 +1493,9 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_permission_set: [{
         id: 'psA',
         name: 'admin_full_access',
-        active: false,
         system_permissions: ['manage_users'],
       }],
+      sys_metadata_activation: [off('permission', 'admin_full_access')],
     });
     const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
     // Dropped BEFORE the derivation, so the posture cannot be read off a set
@@ -1509,9 +1517,10 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
         { user_id: 'u1', permission_set_id: 'ps2', permission_set: 'crm_read', organization_id: null },
       ],
       sys_permission_set: [
-        { id: 'ps1', name: 'crm_full', active: false },
-        { id: 'ps2', name: 'crm_read', active: true },
+        { id: 'ps1', name: 'crm_full' },
+        { id: 'ps2', name: 'crm_read' },
       ],
+      sys_metadata_activation: [off('permission', 'crm_full'), off('permission', 'crm_read', true)],
     });
     const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).not.toContain('crm_full');
@@ -1526,9 +1535,10 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_member: [],
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
       sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: null }],
-      sys_position: [{ id: 'r1', name: 'contributor', active: false }],
+      sys_position: [{ id: 'r1', name: 'contributor' }],
       sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
       sys_permission_set: [{ id: 'ps1', name: 'crm_full' }],
+      sys_metadata_activation: [off('position', 'contributor')],
     });
     const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).toContain('crm_full');
@@ -1539,6 +1549,46 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     const grants = await resolveUserAuthzGrants(makeQl(withActive(false)), 'u1');
     expect(grants.permissions).not.toContain('contributor_ps');
     expect(grants.positions).not.toContain('contributor');
+  });
+
+  it('[ADR-0131 D3] a composition whose registry has no ledger object issues no ledger read and resolves', async () => {
+    // The engine of such a composition answers "object not found" — a failed
+    // read, not a missing table — so asking it would be a 503 on every request.
+    const reads: string[] = [];
+    const tables = withActive(false);
+    const base = makeQl(tables);
+    const find = base.find.bind(base);
+    const ql = Object.assign(base, {
+      registry: { getObject: (name: string) => (name === 'sys_metadata_activation' ? undefined : { name }) },
+      find: async (object: string, opts: any) => {
+        reads.push(object);
+        if (object === 'sys_metadata_activation') throw new Error("Object 'sys_metadata_activation' not found");
+        return find(object, opts);
+      },
+    });
+    const grants = await resolveUserAuthzGrants(ql, 'u1');
+    expect(reads).not.toContain('sys_metadata_activation');
+    // No ledger in the composition: nothing is switched off.
+    expect(grants.permissions).toContain('contributor_ps');
+    // CONTROL — the same engine with the ledger registered reads it, and honours it.
+    const registered = Object.assign(makeQl(tables), { registry: { getObject: (name: string) => ({ name }) } });
+    expect((await resolveUserAuthzGrants(registered, 'u1')).permissions).not.toContain('contributor_ps');
+  });
+
+  it('[ADR-0131 D3] a catalog ROW\'s `active: false` is not read — the ledger is the switch', async () => {
+    // The rows' flags are carried into the ledger by the upgrade ceremony
+    // (`convertDeactivatedCatalogRows`); the resolver never falls back to them.
+    const ctx = await resolveAuthzContext({
+      ql: makeQl({
+        ...withActive(undefined),
+        sys_position: [{ id: 'r1', name: 'contributor', active: false }],
+        sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', active: false, system_permissions: ['cap_x'] }],
+      }),
+      headers: H(),
+      getSession: session('u1'),
+    });
+    expect(ctx.positions).toContain('contributor');
+    expect(ctx.permissions).toContain('contributor_ps');
   });
 });
 

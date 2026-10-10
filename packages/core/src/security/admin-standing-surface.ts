@@ -98,38 +98,28 @@ export interface AdminStandingTable {
  * ADMISSION path (`resolveApiKeyAdmission`) is outside it on purpose: it
  * authenticates a principal and seeds `permissions` with the key's scopes, and
  * confers no administrator standing of its own — `hasPlatformAdminGrant` is set
- * from a `sys_permission_set` row reached through an UNSCOPED
+ * from the catalog's `admin_full_access` set reached through an UNSCOPED
  * `sys_user_permission_set` grant (§6b, on a NON-WALLED posture only since
  * #11663 L5) or from the deployment config matched against the caller's own
  * STORED `sys_user` row (§6b-config, on every posture), never from a scope
  * string and never from the caller-seedable `grants.email`.
  */
 export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>> = {
-  sys_permission_set: {
+  sys_metadata_activation: {
     role: 'derives',
     reason:
-      'The row `admin_full_access` is resolved BY NAME from (§6b) — `platform_admin` is the '
-      + "POSITION that row derives, not the row's own name. Renaming it, deleting it or switching "
-      + 'it off (ADR-0049 `active`, which this resolver honours) un-makes every GRANT-derived platform '
-      + 'admin at once, with no identity table touched. ⚠️ It does NOT un-make a CONFIG-derived '
-      + 'one (§6b-config): that route sets the same standing from '
-      + "`ADMIN_FULL_ACCESS_CAPABILITIES` in `@objectstack/spec` and matches the caller's own "
-      + 'stored `sys_user` row, so it touches an identity table and never reads this one. With '
-      + '`OS_PLATFORM_OWNER_EMAIL` unset the first sentence is the whole truth; with it declared, '
-      + 'this row stops being the single point that un-makes every administrator. [ADR-0131 D4] '
-      + "Its organization decides which row a grant's name resolves to — the grant's own "
-      + "organization's row, else the organization-less one — so an UNSCOPED grant reaches only "
-      + 'the organization-less `admin_full_access`: moving that row into an organization un-makes '
-      + 'every grant-derived platform admin exactly as deleting it does. [ADR-0131 D3/D4] Since '
-      + 'the catalog switch the row is read for its `active` flag alone: the set itself — its '
-      + 'existence and its body — is the catalog definition (see the `security-catalog` non-table '
-      + 'input), and a name with no row carries no flag, so deleting the row no longer un-makes '
-      + 'anyone; switching it off still does.',
+      '[ADR-0131 D3, ADR-0126 §4] The activation ledger the resolver reads deactivation from '
+      + '(`readDisabledCatalogNames`, §6a): a `permission` row of `admin_full_access` whose `active` '
+      + 'is false un-makes every GRANT-derived platform administrator at once (§6b), with no identity '
+      + 'table touched; a `position` row switches that position off. Deployment-wide (no tenant '
+      + 'column). The `sys_permission_set` and `sys_position` rows are no longer read at all: the '
+      + 'set itself — its existence and its body — is the catalog definition (see the '
+      + '`security-catalog` non-table input). ⚠️ It does NOT un-make a CONFIG-derived administrator '
+      + '(§6b-config), which never reads a set.',
     columns: [
+      'metadata_type',
       'name',
       'active',
-      'organization_id',
-      'organizationId',
     ],
   },
 
@@ -209,13 +199,6 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + 'standing — §6b requires the set to be reached through an unscoped USER grant, so a '
       + 'position-bound `admin_full_access` resolves the set name into `permissions` and leaves '
       + '`hasPlatformAdminGrant` false.',
-  },
-
-  sys_position: {
-    role: 'reads-only',
-    reason:
-      'Read to drop DEACTIVATED positions (ADR-0049, §6a). Same reason as `sys_user_position`: '
-      + 'the position path cannot reach `hasPlatformAdminGrant`.',
   },
 };
 

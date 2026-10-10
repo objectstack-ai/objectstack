@@ -10,7 +10,12 @@
  * conversion the upgrade ceremony applies.
  */
 
-import { bindSecurityCatalogReader, convertPositionBindingRows, createSecurityCatalogReader } from '@objectstack/core';
+import {
+  bindSecurityCatalogReader,
+  convertDeactivatedCatalogRows,
+  convertPositionBindingRows,
+  createSecurityCatalogReader,
+} from '@objectstack/core';
 
 type Definition = Record<string, unknown>;
 
@@ -69,4 +74,16 @@ export function catalogFromTables(tables: Record<string, readonly unknown[] | un
 /** Bind the catalog `tables` convert to, re-derived per lookup so a row written later is in it. */
 export function bindCatalogFromTables<T extends object>(engine: T, tables: Record<string, readonly unknown[] | undefined>): T {
   return bindTestSecurityCatalog(engine, () => catalogFromTables(tables));
+}
+
+/**
+ * The `sys_metadata_activation` rows a fixture's `active: false` catalog rows
+ * convert to (`convertDeactivatedCatalogRows`, the upgrade ceremony's): the
+ * resolver reads deactivation from the ledger, never from the row.
+ */
+export function ledgerFromTables(tables: Record<string, readonly unknown[] | undefined>): Definition[] {
+  return convertDeactivatedCatalogRows({
+    positions: (tables.sys_position ?? []) as Definition[],
+    permissionSets: (tables.sys_permission_set ?? []) as Definition[],
+  }).ledger.map((row) => ({ ...row, package_id: null }));
 }

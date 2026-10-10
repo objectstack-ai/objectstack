@@ -251,6 +251,10 @@ export {
 // never at boot.
 export {
   convertPositionBindingRows,
+  convertDeactivatedCatalogRows,
+  type ActivatableCatalogRow,
+  type CatalogLedgerRow,
+  type CatalogDeactivationConversion,
   type CatalogRowForConversion,
   type PositionBindingRow,
   type PositionBindingConversionInput,

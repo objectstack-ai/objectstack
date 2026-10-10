@@ -69,8 +69,8 @@ import { openUserGrantsCache } from './resolve-user-grants-cache.js';
 import { openRequestGrantsMemo, withRequestGrantsMemo } from './request-grants-memo.js';
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from './platform-admin.js';
 import { derivePosture } from './posture-ladder.js';
-import { isRowActive } from './row-active.js';
 import { securityCatalogReaderOf, type SecurityCatalogReader } from './security-catalog.js';
+import { METADATA_ACTIVATION_TABLE } from '../utils/metadata-activation-store.js';
 
 /** The transport-agnostic authorization envelope produced from a request. */
 export interface ResolvedAuthzContext {
@@ -702,9 +702,6 @@ function grantAppliesInTenant(organizationId: unknown, tenantId: string | undefi
   return !organizationId || organizationId === tenantId;
 }
 
-/** The catalog a user grant (§6) names its permission set in. */
-const PERMISSION_SET_CATALOG = 'sys_permission_set';
-
 /**
  * [ADR-0131 D4] The permission set a stored `sys_user_permission_set` grant
  * names: its `permission_set`, or `undefined` for a grant that names none —
@@ -738,63 +735,64 @@ function grantOrganizationOf(row: unknown): string | null {
   return String(value);
 }
 
-/**
- * [ADR-0049] The `sys_permission_set` rows that carry the `active` flag of the
- * sets `names` names, found BY NAME: the active organization's own row first,
- * else the organization-less row. The row is read for its flag and for nothing
- * else — the set's body is its catalog definition ({@link catalogSetBody}),
- * and no row decides whether a set exists (ADR-0131 D3/D4).
- *
- * The catalog rows are still materialized per organization, so one name can
- * carry several rows. A row of an organization applies to that organization
- * only, an organization-less row everywhere — the grant rule
- * {@link grantAppliesInTenant} asks of a grant, asked of the set row.
- *
- * Two reads, issued together: the organization-less rows for every name in
- * `names`, and — for the names in `ownNames`, when there is an active
- * organization — that organization's rows, with the organization threaded into
- * the context so the driver's tenant scope (`applyTenantScope`, the one
- * governed spelling of the wall) decides what is visible.
- *
- * Which row answers is decided before its flag is read: an organization's own
- * row that is deactivated is that organization's answer, and it does not fall
- * through to the organization-less row.
- *
- * A read that fails throws (`tryFind`'s `AuthzStoreUnavailableError`).
- */
-async function readSetActivationRows(
-  ql: any,
-  names: ReadonlySet<string>,
-  ownNames: ReadonlySet<string>,
-  tenantId: string | undefined,
-): Promise<{ organizationLess: Map<string, any>; own: Map<string, any> }> {
-  const organizationLess = new Map<string, any>();
-  const own = new Map<string, any>();
-  if (names.size === 0) return { organizationLess, own };
-  const [organizationLessRows, ownRows] = await Promise.all([
-    tryFind(ql, PERMISSION_SET_CATALOG, { name: { $in: Array.from(names) }, organization_id: null }, 500),
-    tenantId && ownNames.size > 0
-      ? tryFind(ql, PERMISSION_SET_CATALOG, { name: { $in: Array.from(ownNames) } }, 500, tenantId)
-      : Promise.resolve([] as any[]),
-  ]);
-  for (const row of organizationLessRows) {
-    if (typeof row?.name !== 'string' || grantOrganizationOf(row) !== null) continue;
-    if (!organizationLess.has(row.name)) organizationLess.set(row.name, row);
+/** The activation ledger's catalog types the resolver honours (ADR-0126 §3 regime C, as ADR-0131 D6 amends it). */
+const LEDGER_CATALOG_TYPES = ['position', 'permission'] as const;
+
+/** Whether the engine's registry says the activation ledger is absent from this composition. */
+function ledgerUnregistered(ql: any): boolean {
+  const getObject = ql?.registry?.getObject;
+  if (typeof getObject !== 'function') return false;
+  try {
+    return !getObject.call(ql.registry, METADATA_ACTIVATION_TABLE);
+  } catch {
+    return false; // a registry that cannot answer is not an answer: read, and let the read decide
   }
-  for (const row of ownRows) {
-    if (typeof row?.name !== 'string' || grantOrganizationOf(row) !== tenantId) continue;
-    if (!own.has(row.name)) own.set(row.name, row);
-  }
-  return { organizationLess, own };
 }
 
 /**
- * A set is in effect unless the row that answers for it says otherwise: no row
- * carries no flag to read, the way a position name with no `sys_position` row
- * is untouched at §6a. Existence is the catalog's question, never the row's.
+ * [ADR-0049, ADR-0131 D3, ADR-0126 §4] Which of `positions` and `sets` are
+ * switched OFF for this deployment: the `sys_metadata_activation` rows of type
+ * `position` / `permission` whose `active` is false. ADR-0131 moves the
+ * active/inactive switch off the catalog row "into the environment-authored
+ * definition's lifecycle, since there is no row", and regime C's "disable is
+ * one `active` bit of deployment-level state in the tenant-less activation
+ * ledger". So the catalog ROW's `active` column is not read here at all.
+ *
+ * The ledger is deployment-level (no tenant column): a disabled set is
+ * disabled in every organization. Absence of a row means ACTIVE, and a driver
+ * `0` reads as false — the store's own reading
+ * (`ObjectStoreMetadataActivationStore`, `utils/metadata-activation-store.ts`).
+ * One read, keyed by type and name, so it is bounded by the names asked.
+ *
+ * A read that fails throws (`tryFind`'s `AuthzStoreUnavailableError`); a ledger
+ * table that was never provisioned reads as no row, as any authz table does.
+ * A composition that does not register the ledger object at all (no
+ * `PlatformObjectsPlugin`, its one registrant) holds no row either, and its
+ * engine answers "object not found" rather than a missing table — so the
+ * registry is asked first, as `ObjectQLPlugin`'s own ledger hydration does,
+ * and the read is not issued. An engine with no registry to ask is read.
  */
-function activationAllows(row: unknown): boolean {
-  return row === undefined || isRowActive(row as any);
+async function readDisabledCatalogNames(
+  ql: any,
+  positions: readonly string[],
+  sets: readonly string[],
+): Promise<{ positions: Set<string>; permissions: Set<string> }> {
+  const disabled = { positions: new Set<string>(), permissions: new Set<string>() };
+  const names = [...new Set([...positions, ...sets])];
+  if (names.length === 0) return disabled;
+  if (ledgerUnregistered(ql)) return disabled;
+  const rows = await tryFind(
+    ql,
+    METADATA_ACTIVATION_TABLE,
+    { metadata_type: { $in: [...LEDGER_CATALOG_TYPES] }, name: { $in: names } },
+    names.length * LEDGER_CATALOG_TYPES.length,
+  );
+  for (const row of rows) {
+    if (typeof row?.name !== 'string' || !(row.active === false || row.active === 0)) continue;
+    if (row.metadata_type === 'position') disabled.positions.add(row.name);
+    else if (row.metadata_type === 'permission') disabled.permissions.add(row.name);
+  }
+  return disabled;
 }
 
 /**
@@ -1061,29 +1059,21 @@ export async function resolveUserAuthzGrants(
   //    what it grants. The grant's `permission_set_id` is not read: a grant
   //    that names nothing, or a name the catalog does not hold, confers nothing.
   //
-  //    [ADR-0049] The `active` flag is the one thing still read from a row: the
-  //    grant's own organization's row, else the organization-less one
-  //    ({@link readSetActivationRows}). Issued now, so it shares the
-  //    `sys_position` read's leg below; awaited at §6b.
+  //    [ADR-0049] Whether a set is switched off is the activation ledger's
+  //    answer ({@link readDisabledCatalogNames}), read in §6a with the
+  //    positions' — never a catalog row's `active` column.
   // (read in Leg 1 above)
   const upsRows = upsRowsAll.filter((r) => isGrantActive(r, nowMs));
   const applyingGrants = upsRows.filter((r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId));
   const catalog = securityCatalogReaderOf(ql);
-  const grantSetNames = new Set<string>();
-  const ownGrantSetNames = new Set<string>();
+  const grantSetNames: string[] = [];
   for (const grant of applyingGrants) {
     const name = grantSetNameOf(grant);
-    if (!name) continue;
-    grantSetNames.add(name);
-    const organizationId = grantOrganizationOf(grant);
-    if (organizationId !== null && organizationId === tenantId) ownGrantSetNames.add(name);
+    if (name && !grantSetNames.includes(name)) grantSetNames.push(name);
   }
-  const grantActivationLeg = readSetActivationRows(ql, grantSetNames, ownGrantSetNames, tenantId);
-  // Its failure is observed where it is awaited (§6b); this only keeps a throw
-  // from §6a, which runs first, from leaving the rejection unhandled.
-  grantActivationLeg.catch(() => undefined);
   // Position-bound sets (§6a), by name, in the order the held positions name them.
   const boundSetNames: string[] = [];
+  let disabled = { positions: new Set<string>(), permissions: new Set<string>() };
   // [#11663 L5] …and under a WALLED posture it no longer is. This is the EXIT of
   // the migration window L4 opened: the walled half of the legacy unscoped anchor
   // is RETIRED, so on a walled rig platform standing is config-derived
@@ -1133,58 +1123,29 @@ export async function resolveUserAuthzGrants(
   //     read: `resolvePermissionSetsForContext` requests `positions` as
   //     permission-set NAMES (position names are commonly reused as set names),
   //     so a name left standing would resolve the same grant one layer down.
-  //     Only a name whose row is explicitly deactivated is dropped — a name
-  //     with no `sys_position` row at all (`org_owner`, a membership-derived
-  //     role) has no flag to read and is untouched.
+  //     Only a name the activation ledger switched off is dropped
+  //     ({@link readDisabledCatalogNames}); a name with no ledger row is in
+  //     effect, a membership-derived role (`org_owner`) included.
   if (grants.positions.length > 0) {
-    //     The `sys_position` row is read for its ADR-0049 `active` flag and for
-    //     nothing else.
-    //
-    //     [#10103] Scoped to the CALLER's organization. `sys_position` spells
-    //     its name index `unique: 'organization'` and its rows are materialized
-    //     per organization, so several organizations hold a row named
-    //     `everyone` (and one named after every declared position). Swept by
-    //     name alone, this read returned EVERY organization's rows — another
-    //     organization's deactivation then decided this one's grant. It also
-    //     made the sweep O(organizations) on a table that is read on every
-    //     request.
-    //
-    //     Scoped by threading the organization into the context rather than by
-    //     adding an `organization_id` predicate here: the driver's
-    //     `applyTenantScope` is the one governed spelling of this wall, and a
-    //     bare equality written at this call site would be a second, ungoverned
-    //     implementation of it — the exact shape that produced the defect this
-    //     card repairs. Per-request cost stays O(the caller's own organization's
-    //     catalog).
-    //
-    //     Limit raised with it: the cap has to admit this organization's rows
-    //     alongside any organization-less ones the driver's compatibility arm
-    //     still returns, or a caller silently loses a deactivation.
-    //
-    //     [#20515] The same grant rule as §4 and §6 is then asked of each
-    //     position row ({@link grantAppliesInTenant}). With a tenant it is a
-    //     no-op — the driver's scope already returned only this organization's
-    //     rows and the organization-less ones. With NO tenant the read above is
-    //     installation-wide by design, so without it every organization's
-    //     `everyone` row, and every organization's copy of a name the caller
-    //     holds (the `sys_member` role projection's `org_member`, say), fed its
-    //     row into an organization-less resolution. This is the grant rule, not
-    //     a second tenant wall: it decides which organization's rows APPLY,
-    //     after the driver decided which rows are visible.
-    const positionRows = (await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 200, tenantId))
-      .filter((r) => grantAppliesInTenant(r.organization_id, tenantId));
-    const deactivatedNames = new Set<string>(
-      positionRows.filter((r) => !isRowActive(r)).map((r) => r.name).filter(Boolean),
-    );
-    if (deactivatedNames.size > 0) {
-      grants.positions = grants.positions.filter((n) => !deactivatedNames.has(n));
-    }
+    // The definitions first (in-process), so the ONE ledger read can ask about
+    // every position and every set this resolution may grant.
+    const namedByPosition = new Map<string, string[]>();
     if (catalog) {
       for (const positionName of grants.positions) {
-        const entry = await catalog.resolve('position', positionName);
-        for (const setName of positionSetNamesOf(entry?.definition)) {
-          if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
-        }
+        namedByPosition.set(positionName, positionSetNamesOf((await catalog.resolve('position', positionName))?.definition));
+      }
+    }
+    disabled = await readDisabledCatalogNames(
+      ql,
+      grants.positions,
+      [...grantSetNames, ...[...namedByPosition.values()].flat()],
+    );
+    if (disabled.positions.size > 0) {
+      grants.positions = grants.positions.filter((n) => !disabled.positions.has(n));
+    }
+    for (const positionName of grants.positions) {
+      for (const setName of namedByPosition.get(positionName) ?? []) {
+        if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
       }
     }
   }
@@ -1194,13 +1155,8 @@ export async function resolveUserAuthzGrants(
   //
   //     The user grants' sets (§6) come first, in grant order; the
   //     position-bound sets (§6a) follow, in the order the positions name them.
-  //     Each body is its catalog definition; each `active` flag is its row's —
-  //     the active organization's own row first, else the organization-less
-  //     one, for a position-bound set as for an organization's grant.
-  const [grantActivation, boundActivation] = await Promise.all([
-    grantActivationLeg,
-    readSetActivationRows(ql, new Set(boundSetNames), tenantId ? new Set(boundSetNames) : new Set<string>(), tenantId),
-  ]);
+  //     Each body is its catalog definition; whether it is switched off is the
+  //     activation ledger's answer (§6a).
   const psRowsAll: Array<CatalogSetBody & { active: boolean }> = [];
   const takenNames = new Set<string>();
   const take = (body: CatalogSetBody, active: boolean): void => {
@@ -1214,13 +1170,12 @@ export async function resolveUserAuthzGrants(
     const body = await catalogSetBody(catalog, name);
     if (!body) continue;
     const ownGrant = grantOrganizationOf(grant) !== null;
-    const row = (ownGrant ? grantActivation.own.get(name) : undefined) ?? grantActivation.organizationLess.get(name);
-    const active = activationAllows(row);
+    const active = !disabled.permissions.has(name);
     take(body, active);
     // platform_admin (ADR-0068 D2) is DERIVED from an UNSCOPED admin_full_access
-    // USER grant — the single source of truth (no trusted stored boolean). An
-    // unscoped grant reads the organization-less row only, so the set it holds
-    // is the platform's own `admin_full_access`, never an organization's copy.
+    // USER grant — the single source of truth (no trusted stored boolean). The
+    // set is the catalog's one `admin_full_access` (ADR-0131 D4); an
+    // organization's grant of it confers the set, never platform standing.
     //
     // [ADR-0049] A DEACTIVATED set confers no standing either: a deactivated
     // `admin_full_access` must not keep conferring PLATFORM_ADMIN.
@@ -1242,7 +1197,7 @@ export async function resolveUserAuthzGrants(
   for (const name of boundSetNames) {
     const body = await catalogSetBody(catalog, name);
     if (!body) continue;
-    take(body, activationAllows(boundActivation.own.get(name) ?? boundActivation.organizationLess.get(name)));
+    take(body, !disabled.permissions.has(name));
   }
   if (psRowsAll.length > 0) {
     // [ADR-0049] A DEACTIVATED permission set grants nothing — the

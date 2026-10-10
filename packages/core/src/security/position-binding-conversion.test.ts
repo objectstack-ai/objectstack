@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { convertPositionBindingRows } from './position-binding-conversion.js';
+import { convertDeactivatedCatalogRows, convertPositionBindingRows } from './position-binding-conversion.js';
 
 const sets = [
   { id: 'ps_read', name: 'read_all' },
@@ -111,6 +111,36 @@ describe('convertPositionBindingRows', () => {
         { id: 'b_gone_position', reason: 'position-missing' },
         { id: 'b_gone_set', reason: 'permission-set-missing' },
       ],
+    });
+  });
+});
+
+describe('convertDeactivatedCatalogRows', () => {
+  it('a name every row switches off becomes one ledger row; an active or flagless row converts to nothing', () => {
+    const out = convertDeactivatedCatalogRows({
+      positions: [{ name: 'retired', active: false }, { name: 'auditor', active: true }, { name: 'contributor' }],
+      permissionSets: [{ name: 'dead_set', active: 0 }, { name: 'dead_set', active: false, organization_id: 'org_a' }],
+    });
+    expect(out).toEqual({
+      ledger: [
+        { metadata_type: 'position', name: 'retired', active: false },
+        { metadata_type: 'permission', name: 'dead_set', active: false },
+      ],
+      conflicting: [],
+    });
+  });
+
+  it('organizations that disagree about a name are conflicting — the deployment-wide ledger never guesses', () => {
+    const out = convertDeactivatedCatalogRows({
+      positions: [],
+      permissionSets: [
+        { name: 'tools', organization_id: 'org_a', active: false },
+        { name: 'tools', organization_id: 'org_b', active: true },
+      ],
+    });
+    expect(out).toEqual({
+      ledger: [],
+      conflicting: [{ metadata_type: 'permission', name: 'tools', byOrganization: { org_a: false, org_b: true } }],
     });
   });
 });

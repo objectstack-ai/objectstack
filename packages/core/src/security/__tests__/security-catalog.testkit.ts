@@ -14,7 +14,9 @@
  * `sys_position_permission_set` rows become each position's `permissionSets`
  * through `convertPositionBindingRows` — the very conversion the upgrade
  * ceremony applies — so a fixture that resolved some grants from rows proves
- * the converted definitions resolve the same ones.
+ * the converted definitions resolve the same ones. {@link ledgerFromTables}
+ * does the same for the rows' ADR-0049 `active` flags, through
+ * `convertDeactivatedCatalogRows`, into activation-ledger rows.
  */
 
 import {
@@ -22,7 +24,7 @@ import {
   createSecurityCatalogReader,
   type SecurityCatalogReader,
 } from '../security-catalog.js';
-import { convertPositionBindingRows } from '../position-binding-conversion.js';
+import { convertDeactivatedCatalogRows, convertPositionBindingRows } from '../position-binding-conversion.js';
 
 type Definition = Record<string, unknown>;
 
@@ -105,4 +107,15 @@ export function catalogFromTables(tables: Record<string, readonly unknown[] | un
  */
 export function bindCatalogFromTables<T extends object>(engine: T, tables: Record<string, readonly unknown[] | undefined>): T {
   return bindStaticSecurityCatalog(engine, () => catalogFromTables(tables));
+}
+
+/**
+ * The `sys_metadata_activation` rows a row-shaped fixture's `active: false`
+ * catalog rows convert to (`convertDeactivatedCatalogRows`, module doc).
+ */
+export function ledgerFromTables(tables: Record<string, readonly unknown[] | undefined>): Definition[] {
+  return convertDeactivatedCatalogRows({
+    positions: (tables.sys_position ?? []) as Definition[],
+    permissionSets: (tables.sys_permission_set ?? []) as Definition[],
+  }).ledger.map((row) => ({ ...row, package_id: null }));
 }

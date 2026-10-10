@@ -9,7 +9,7 @@ import { explainAccess, buildContextForUser, resolveDelegatorContext, type Expla
 import { RLS_DENY_FILTER } from './rls-compiler';
 import { unresolvedPostureRemedy } from './unresolved-posture';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
-import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
+import { bindCatalogFromTables, ledgerFromTables } from './__tests__/security-catalog.testkit.js';
 
 // [commit a68c61267] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
 // (ADR-0122), in which every `.default([])` member is OPTIONAL before a parse:
@@ -873,7 +873,12 @@ function makeGrantQl(tables: Rows) {
   return bindCatalogFromTables({
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
-      return (tables[object] ?? []).filter((row) =>
+      // [ADR-0131 D3] The resolver reads deactivation from the activation
+      // ledger: a fixture's `active: false` rows reach it as the ledger rows the
+      // upgrade ceremony converts them to. The explainer's own "deactivated"
+      // annotation still reads the row (stage 2 moves it).
+      const stored = object === 'sys_metadata_activation' && !tables[object] ? ledgerFromTables(tables) : tables[object];
+      return (stored ?? []).filter((row) =>
         Object.entries(where).every(([key, cond]) => { if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`); 
           const cell = row[key];
           // `null` matches a null-valued AND a key-absent cell — the memory

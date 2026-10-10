@@ -183,7 +183,10 @@ const impersonateVerdict = async (manager: AuthManager, bearer: string, userId: 
 interface StandingShape {
   /** Rows written into `sys_permission_set` BEFORE `admin_full_access`. */
   decoySets?: number;
-  /** ADR-0049: the `admin_full_access` catalogue row is switched off. */
+  /**
+   * ADR-0049: `admin_full_access` is switched off — in the activation ledger,
+   * the switch the resolver honours (ADR-0131 D3, ADR-0126 §4).
+   */
   deactivatedSet?: boolean;
   /** ADR-0091: the grant carries a `valid_until` already in the past. */
   expiredGrant?: boolean;
@@ -195,11 +198,15 @@ const seedPlatformAdmin = async (engine: any, userId: string, shape: StandingSha
   for (let i = 0; i < (shape.decoySets ?? 0); i += 1) {
     await engine.insert('sys_permission_set', { id: `ps_decoy_${i}`, name: `decoy_set_${i}` });
   }
-  await engine.insert('sys_permission_set', {
-    id: PS_ADMIN,
-    name: ADMIN_FULL_ACCESS,
-    ...(shape.deactivatedSet ? { active: false } : {}),
-  });
+  await engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
+  if (shape.deactivatedSet) {
+    await engine.insert('sys_metadata_activation', {
+      metadata_type: 'permission',
+      name: ADMIN_FULL_ACCESS,
+      package_id: null,
+      active: false,
+    });
+  }
   await engine.insert('sys_user_permission_set', {
     user_id: userId,
     permission_set_id: PS_ADMIN,

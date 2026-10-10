@@ -26,6 +26,10 @@
  *
  * A binding whose position or set row is missing, or names nothing, is listed
  * in `dangling` and converted nowhere.
+ *
+ * Its sibling {@link convertDeactivatedCatalogRows} carries the rows' ADR-0049
+ * `active` flags into the activation ledger, which is where the resolver reads
+ * deactivation from.
  */
 
 /** One `sys_position` or `sys_permission_set` row, as the conversion reads it. */
@@ -141,4 +145,66 @@ export function convertPositionBindingRows(input: PositionBindingConversionInput
     );
   }
   return { positions, dangling };
+}
+
+/** One `sys_position` / `sys_permission_set` row as the deactivation conversion reads it. */
+export interface ActivatableCatalogRow extends CatalogRowForConversion {
+  readonly active?: unknown;
+}
+
+/**
+ * An activation-ledger row (`sys_metadata_activation`, ADR-0126 §4) the
+ * conversion answers. The applier supplies `package_id`, which the ledger
+ * object requires and the catalog rows do not carry.
+ */
+export interface CatalogLedgerRow {
+  readonly metadata_type: 'position' | 'permission';
+  readonly name: string;
+  readonly active: false;
+}
+
+export interface CatalogDeactivationConversion {
+  /** The names to switch off in the ledger, one row each. */
+  readonly ledger: readonly CatalogLedgerRow[];
+  /** Names some organizations' rows switch off and others' keep on — reported, never guessed (D10 fate 4). */
+  readonly conflicting: ReadonlyArray<{ metadata_type: 'position' | 'permission'; name: string; byOrganization: Readonly<Record<string, boolean>> }>;
+}
+
+const rowIsOff = (value: unknown): boolean =>
+  value === false || value === 0 || value === '0' || value === 'false';
+
+/**
+ * [ADR-0131 D3, ADR-0126 §4] The catalog rows' ADR-0049 `active` flags,
+ * turned into activation-ledger rows. The resolver reads deactivation from the
+ * ledger, never from the row; the upgrade ceremony applies this with
+ * {@link convertPositionBindingRows}. ⛔ Never at boot.
+ *
+ * A name whose every row is off gets one ledger row. A name some
+ * organizations switched off and others did not is `conflicting`: the ledger
+ * is deployment-wide, so switching it off would revoke it from organizations
+ * that kept it.
+ */
+export function convertDeactivatedCatalogRows(input: {
+  readonly positions: readonly ActivatableCatalogRow[];
+  readonly permissionSets: readonly ActivatableCatalogRow[];
+}): CatalogDeactivationConversion {
+  const ledger: CatalogLedgerRow[] = [];
+  const conflicting: Array<{ metadata_type: 'position' | 'permission'; name: string; byOrganization: Record<string, boolean> }> = [];
+  for (const [metadataType, rows] of [['position', input.positions], ['permission', input.permissionSets]] as const) {
+    const byName = new Map<string, Record<string, boolean>>();
+    for (const row of rows) {
+      const name = text(row.name);
+      if (!name) continue;
+      const states = byName.get(name) ?? {};
+      states[organizationKey(row.organization_id)] = !rowIsOff(row.active);
+      byName.set(name, states);
+    }
+    for (const [name, states] of byName) {
+      const values = Object.values(states);
+      if (values.every((on) => on)) continue;
+      if (values.every((on) => !on)) ledger.push({ metadata_type: metadataType, name, active: false });
+      else conflicting.push({ metadata_type: metadataType, name, byOrganization: states });
+    }
+  }
+  return { ledger, conflicting };
 }

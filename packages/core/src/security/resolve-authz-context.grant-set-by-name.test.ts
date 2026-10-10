@@ -5,8 +5,9 @@
  * permission set BY NAME — `sys_user_permission_set.permission_set` — in the
  * security catalog: the set exists, and grants what it grants, because the
  * catalog holds a definition of that name. Its `permission_set_id` is not read.
- * The catalog row is read for one thing, its ADR-0049 `active` flag: the
- * grant's own organization's row, else the organization-less row.
+ * No catalog row is read at all: whether a set or a position is switched off
+ * (ADR-0049) is the activation ledger's answer (`sys_metadata_activation`,
+ * ADR-0126 §4), deployment-wide.
  *
  * What is pinned here, on the recording double the batch-equivalence suite
  * drives (with an explicit catalog bound over it):
@@ -15,8 +16,8 @@
  *   the name — and a name only a row carries (no definition) confers nothing;
  * - a grant that names nothing confers nothing, platform standing included;
  * - platform standing stands on an organization-less grant only;
- * - the `active` flag: an organization's own row wins over the
- *   organization-less one, and a deactivated own row does not fall through;
+ * - deactivation: a ledger row switches a name off in every organization, and
+ *   a catalog row's `active` column is not read;
  * - position-bound sets are the ones the position's definition names, and the
  *   junction rows are not read at all.
  */
@@ -56,8 +57,8 @@ const catalog = () => [
   { id: 'ps_tools_b', name: 'tools', organization_id: ORG_B },
   { id: 'ps_tools', name: 'tools', organization_id: null },
   { id: 'ps_row_only', name: 'row_only', organization_id: ORG_B },
-  { id: 'ps_off_a', name: 'switched', organization_id: ORG_A, active: false },
-  { id: 'ps_on', name: 'switched', organization_id: null, active: true },
+  { id: 'ps_off_a', name: 'switched', organization_id: ORG_A },
+  { id: 'ps_on', name: 'switched', organization_id: null },
   { id: 'ps_bound', name: 'bound_by_position', organization_id: null },
 ];
 
@@ -76,6 +77,10 @@ const definitions = {
 /** The same catalog, with the `everyone` anchor distributing one set. */
 const withEveryone = { ...definitions, positions: [{ name: 'everyone', permissionSets: ['bound_by_position'] }] };
 
+/** One activation-ledger row switching `name` off. */
+const off = (metadata_type: 'position' | 'permission', name: string) =>
+  ({ metadata_type, name, package_id: null, active: false });
+
 function tables(grants: Array<Record<string, unknown>>, extra: Record<string, unknown[]> = {}) {
   return {
     sys_user: [{ id: 'u1', email: 'u1@example.com' }],
@@ -85,6 +90,8 @@ function tables(grants: Array<Record<string, unknown>>, extra: Record<string, un
     sys_position_permission_set: [],
     sys_user_permission_set: grants.map((g) => ({ user_id: 'u1', ...g })),
     sys_permission_set: catalog(),
+    // Stated, never derived from the rows: the ledger is the only switch.
+    sys_metadata_activation: [],
     ...extra,
   };
 }
@@ -128,13 +135,12 @@ describe('[ADR-0131 D3/D4] a grant names its set; the catalog says what the set 
     expect(out.posture).not.toBe('PLATFORM_ADMIN');
   });
 
-  it('the junction and the id bridge are never read; the catalog rows are read by NAME only', async () => {
+  it('the junction, the id bridge and the catalog rows are never read', async () => {
     const { ql } = await resolve([{ permission_set_id: 'ps_tools_a', permission_set: 'tools', organization_id: ORG_A }], ORG_A);
-    expect(ql.calls.map((c) => c.object)).not.toContain('sys_position_permission_set');
-    for (const call of ql.calls.filter((c) => c.object === 'sys_permission_set')) {
-      expect(Object.keys(call.where as object)).not.toContain('id');
-      expect(Object.keys(call.where as object)).toContain('name');
-    }
+    const objects = ql.calls.map((c) => c.object);
+    expect(objects).not.toContain('sys_position_permission_set');
+    expect(objects).not.toContain('sys_permission_set');
+    expect(objects).not.toContain('sys_position');
   });
 });
 
@@ -162,28 +168,43 @@ describe('[ADR-0068 D2] platform standing stands on an organization-less grant o
     expect(out.permissions).toEqual([]);
   });
 
-  it('a DEACTIVATED organization-less row takes the standing away', async () => {
+  it('admin_full_access switched off in the activation ledger takes the standing away', async () => {
     const { out } = await resolve(
       [{ permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS, organization_id: null }],
       undefined,
-      { sys_permission_set: [{ id: 'ps_admin', name: ADMIN_FULL_ACCESS, organization_id: null, active: false }] },
+      { sys_metadata_activation: [off('permission', ADMIN_FULL_ACCESS)] },
     );
     expect(out.posture).not.toBe('PLATFORM_ADMIN');
     expect(out.permissions).toEqual([]);
   });
 });
 
-describe('[ADR-0049] the row that carries the `active` flag', () => {
-  it('a deactivated own row is the answer: it confers nothing and does not fall through to the organization-less row', async () => {
-    const { out } = await resolve([{ permission_set_id: 'ps_off_a', permission_set: 'switched', organization_id: ORG_A }], ORG_A);
-    expect(out.permissions).not.toContain('switched');
-    expect(out.systemPermissions).toEqual([]);
+describe('[ADR-0049, ADR-0131 D3] the activation ledger switches a set off', () => {
+  it('a ledger row switches the name off in every organization: no set, no capability', async () => {
+    for (const [grantOrg, tenantId] of [[ORG_A, ORG_A], [null, ORG_A], [null, undefined]] as const) {
+      const { out } = await resolve(
+        [{ permission_set_id: 'ps_off_a', permission_set: 'switched', organization_id: grantOrg }],
+        tenantId,
+        { sys_metadata_activation: [off('permission', 'switched')] },
+      );
+      expect(out.permissions, `${grantOrg} in ${tenantId}`).toEqual([]);
+      expect(out.systemPermissions, `${grantOrg} in ${tenantId}`).toEqual([]);
+    }
   });
 
-  it('CONTROL — an organization-less grant of the same name reads the organization-less row, which is active', async () => {
-    const { out } = await resolve([{ permission_set_id: 'ps_on', permission_set: 'switched', organization_id: null }], ORG_A);
+  it('CONTROL — with no ledger row the same grant resolves', async () => {
+    const { out } = await resolve([{ permission_set_id: 'ps_off_a', permission_set: 'switched', organization_id: ORG_A }], ORG_A);
     expect(out.permissions).toEqual(['switched']);
     expect(out.systemPermissions).toEqual(['cap_switched']);
+  });
+
+  it('a catalog row\'s `active: false` is not read — no row fallback', async () => {
+    const { out } = await resolve(
+      [{ permission_set_id: 'ps_off_a', permission_set: 'switched', organization_id: ORG_A }],
+      ORG_A,
+      { sys_permission_set: [{ id: 'ps_off_a', name: 'switched', organization_id: ORG_A, active: false }] },
+    );
+    expect(out.permissions).toEqual(['switched']);
   });
 });
 
@@ -216,9 +237,9 @@ describe('[ADR-0131 D3/D4] position-bound sets are the ones the position definit
     expect(ql.calls.map((c) => c.object)).not.toContain('sys_position_permission_set');
   });
 
-  it('a DEACTIVATED position row drops the sets its definition names', async () => {
+  it('a position switched off in the activation ledger drops the sets its definition names', async () => {
     const { out } = await resolve([], ORG_A, {
-      sys_position: [{ id: 'p_everyone', name: 'everyone', organization_id: ORG_A, active: false }],
+      sys_metadata_activation: [off('position', 'everyone')],
     }, withEveryone);
     expect(out.permissions).toEqual([]);
     expect(out.positions).not.toContain('everyone');

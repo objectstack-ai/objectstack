@@ -7147,8 +7147,9 @@ export class SecurityPlugin implements Plugin {
    *      and app-showcase's `finance` / `legal`) are all of that kind. ⛔ A
    *      false positive on a built-in identity is the most expensive failure
    *      this warning has, and this clause is what prevents it;
-   *   2. `P` was NOT already requested through the governed channel. Junction
-   *      rows arrive as permission-set NAMES in `context.permissions`
+   *   2. `P` was NOT already requested through the governed channel. The sets
+   *      a position's definition names (`permissionSets`, ADR-0131 D3/D4)
+   *      arrive as permission-set NAMES in `context.permissions`
    *      (`resolve-authz-context.ts` §6b pushes `ps.name`), as do directly
    *      assigned sets. Either way the grant does not depend on the fold, so
    *      there is nothing ungoverned to report;
@@ -7199,11 +7200,10 @@ export class SecurityPlugin implements Plugin {
       // who can resolve it is already looking.
       this.logger.warn?.(
         `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
-          `because a POSITION of the same name resolved by name — there is no ` +
-          `sys_position_permission_set row binding them. This grant is in force and ungoverned: ` +
-          `it appears in no junction table an operator can inspect. Bind it explicitly ` +
-          `(sys_position_permission_set: position '${position}' -> permission set '${position}') ` +
-          `or rename one of the two.`,
+          `because a POSITION of the same name resolved by name — the position's definition ` +
+          `does not name it in its permissionSets. This grant is in force and ungoverned: ` +
+          `no position declares it. Declare it explicitly (position '${position}': ` +
+          `permissionSets: ['${position}']) or rename one of the two.`,
         {
           event: POSITION_NAME_FOLD_EVENT,
           position,
