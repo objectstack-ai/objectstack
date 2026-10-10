@@ -103,7 +103,11 @@ afterEach(async () => {
   current = undefined;
 });
 
-async function boot(options: ApprovalsPluginOptions = {}): Promise<Rig> {
+async function boot(
+  options: ApprovalsPluginOptions = {},
+  /** Runs before the plugin starts, so a middleware it registers wraps the gate. */
+  beforeStart?: (engine: ObjectQL) => void,
+): Promise<Rig> {
   const engine = new ObjectQL();
   current = engine;
   engine.registerDriver(new SqlDriver({
@@ -160,6 +164,7 @@ async function boot(options: ApprovalsPluginOptions = {}): Promise<Rig> {
       warn: (msg: string) => { warnings.push(String(msg)); },
     },
   };
+  beforeStart?.(engine);
   await new ApprovalsServicePlugin(options).start(ctx);
   const svc = services.approvals as ApprovalService;
 
@@ -320,9 +325,30 @@ describe('fails closed', () => {
     expect(rig.warnings.some((w) => w.includes('request read gate') && w.includes('fail closed'))).toBe(true);
   });
 
-  it('a request about a request is no anchor, even when the opt-in names that object — and the read ends', async () => {
-    const rig = await boot({ recordReaderVisibleObjects: [OBJECT, REQUEST] });
-    // Two rows naming each other: a read that followed the anchor would never end.
+  it('a request about a request is no anchor, even when the opt-in names that object — the read never re-enters itself', async () => {
+    // A FUSE around the gate: the depth of reads of the request object made as
+    // the reader, nested inside one another. The tier's anchor read runs as the
+    // caller, so on this object it would pass through the gate again, which
+    // would ask about the row that one names — unbounded on the cycle below.
+    // The fuse stops a runaway at a bound (a sqlite driver answers in
+    // microtasks, so an unbounded chain starves every timer, the test timeout
+    // included), and the depth it saw is the reading.
+    let depth = 0;
+    let deepest = 0;
+    const rig = await boot({ recordReaderVisibleObjects: [OBJECT, REQUEST] }, (engine) => {
+      engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
+        if (!READ_OPS.has(op.operation) || op.context?.userId !== READER) return next();
+        depth += 1;
+        deepest = Math.max(deepest, depth);
+        try {
+          if (depth > 8) throw new Error('recursion fuse');
+          return await next();
+        } finally {
+          depth -= 1;
+        }
+      }, { object: REQUEST });
+    });
+    // Two rows naming each other.
     const first = 'req_cycle_1';
     const second = 'req_cycle_2';
     for (const [id, other] of [[first, second], [second, first]]) {
@@ -333,5 +359,7 @@ describe('fails closed', () => {
     }
     expect((await byId(rig, asUser(READER), first)).error?.status).toBe(404);
     expect(await listIds(rig, asUser(READER), { object_name: REQUEST, record_id: second })).toEqual({ ids: [], total: 0 });
-  }, 5_000);
+    // The fuse saw the reader's reads (its control), and none ran inside another.
+    expect(deepest).toBe(1);
+  });
 });
