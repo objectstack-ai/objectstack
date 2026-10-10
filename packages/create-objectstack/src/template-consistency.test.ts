@@ -16,7 +16,6 @@ import { copyDir, TEMPLATE_FILE_ALIASES } from './template-copy.js';
 import { TEMPLATES } from './template-registry.js';
 import { gitFreeEnv } from '../../../scripts/git-env.mjs';
 import { SKILLS_CATALOG, SKILLS_INSTALL_COMMAND } from './skills-install.js';
-import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 
 const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(pkgRoot, '..', '..');
@@ -192,17 +191,7 @@ describe('bundled template declared version surfaces', () => {
     // `objectstack.manifest.json` — the two were conflated in this suite's own
     // naming and in the sync script's log strings, and that conflation is part
     // of how the sibling key below went unwatched for eleven majors.
-    //
-    // NOTE the value: the PROTOCOL major, judged against `PROTOCOL_VERSION` —
-    // the constant the runtime's ADR-0087 D1 handshake compares a scaffolded
-    // project's range to — and NOT against this package's own major. The two
-    // differ for the whole pre-mode window in which the protocol moves ahead of
-    // the version pass (packages at 17.x beside protocol 18): judged against the
-    // package major, a template the runtime refuses at boot stayed green here.
-    // `@objectstack/spec/kernel` resolves to the spec's SOURCE through this
-    // package's vitest alias, so the verdict needs no build — it runs on the
-    // release path's post-version tree, where nothing has been built.
-    it('objectstack.config.ts stamps an engines.protocol that PROTOCOL_VERSION satisfies (ADR-0087 D1)', () => {
+    it("objectstack.config.ts stamps engines.protocol at the scaffolder's major (ADR-0087 D1)", () => {
       const config = readTemplateFile('objectstack.config.ts');
       const match = /engines:\s*\{\s*protocol:\s*'\^(\d+)'\s*\}/.exec(config);
       expect(
@@ -211,10 +200,9 @@ describe('bundled template declared version surfaces', () => {
       ).not.toBeNull();
       expect(
         Number(match![1]),
-        `${template} stamps engines.protocol '^${match![1]}', which PROTOCOL_VERSION ${PROTOCOL_VERSION} does not ` +
-          'satisfy: every project it scaffolds is refused at the protocol handshake by the runtime it ships ' +
-          'with. Run `node scripts/sync-template-versions.mjs` — it stamps this key from PROTOCOL_VERSION\'s major.',
-      ).toBe(PROTOCOL_MAJOR);
+        `${template} stamps engines.protocol '^${match![1]}' but create-objectstack is v${ownMajor} — ` +
+          'scripts/sync-template-versions.mjs re-stamps this at version time; keep them in lockstep',
+      ).toBe(ownMajor);
     });
 
     // The key #9264 is about. Required by TemplateManifestSchema, read by the

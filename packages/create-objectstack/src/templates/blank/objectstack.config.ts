@@ -36,7 +36,7 @@ export default defineStack({
     // match the ObjectStack version you installed — change it when you
     // deliberately move to a new protocol major, not to silence a mismatch.
     // Guide: https://objectstack.ai/docs/upgrading
-    engines: { protocol: '^18' },
+    engines: { protocol: '^17' },
   },
 
   // `automation` backs flow execution and materializes any declarative
