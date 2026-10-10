@@ -815,6 +815,37 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
   });
 
+  it('[ADR-0131 D3] a declared set the activation ledger switches OFF refuses admission — never an ungranted admit', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPermissionSet(engine, 'member_default');
+    engine.tables.set('sys_metadata_activation', [
+      { id: 'act_member', metadata_type: 'permission', name: 'member_default', package_id: 'pkg', active: false },
+    ]);
+    const manager = makeManager(engine, {
+      audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
+    });
+    const res = await signUp(manager, 'user@anywhere.com');
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe(AUDIENCE_CONFIG_ERROR);
+    expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
+  });
+
+  it('[ADR-0131 D3] the set ROW\'s `active` switches nothing: a row flagged off still admits and grants', async () => {
+    // The resolver reads no catalog row, so the row flag is not a deactivation.
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPermissionSet(engine, 'member_default', { active: false });
+    const manager = makeManager(engine, {
+      audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
+    });
+    const res = await signUp(manager, 'anyone@anywhere.com');
+    expect(res.status).toBeLessThan(300);
+    await vi.waitFor(() => {
+      expect((engine.tables.get('sys_user_permission_set') ?? []).length).toBe(1);
+    });
+  });
+
   it('open: self-serve admitted and granted', async () => {
     const engine = createMemoryEngine();
     seedExistingUser(engine);

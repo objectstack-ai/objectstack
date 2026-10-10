@@ -1,0 +1,9 @@
+---
+'@objectstack/plugin-sharing': patch
+---
+
+fix(plugin-sharing): a sharing rule reads a position's deactivation from the activation ledger, as the authorization resolver does (ADR-0131 D3, ADR-0126 §4)
+
+Clause-②: no
+
+A sharing rule whose recipient is a position materializes no share while that position is switched off: a `sys_metadata_activation` row of type `position` naming it, with `active` false (a driver `0` included). The switch is deployment-wide, like the ledger. The `sys_position` row's `active` is no longer read, so a deactivation made in Setup (which writes that column) stops neither the resolver nor sharing rules until the upgrade ceremony converts it into a ledger row. A name with no ledger row keeps sharing, a membership-derived position name included, and a ledger read that fails still grants for the pass, as the row read did.

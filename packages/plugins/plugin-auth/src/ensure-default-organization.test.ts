@@ -13,7 +13,7 @@ import {
 } from './ensure-default-organization.js';
 import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
 import { createEnsureDefaultOrganizationOnce } from './default-org-bootstrap-once.js';
-import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
+import { bindCatalogFromTables, bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 // [#11973] The config anchor reads `OS_PLATFORM_OWNER_EMAIL` live (memoized on
 // the raw value), so every case in this file pins the variable's state instead
@@ -117,6 +117,26 @@ describe('ensureDefaultOrganization (plugin-auth home)', () => {
     const res = await ensureDefaultOrganization(ql);
     expect(res).toMatchObject({ defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' });
     expect(ql.insert).not.toHaveBeenCalled();
+  });
+
+  it('[ADR-0131 D3/D4] a set ROW the catalog does not hold anchors nobody — the derivation reads the catalog', async () => {
+    const ql = makeQl();
+    bindTestSecurityCatalog(ql, { permissions: [{ name: 'member_default' }] });
+    const res = await ensureDefaultOrganization(ql);
+    expect(res).toMatchObject({ defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' });
+    expect(ql.insert).not.toHaveBeenCalled();
+  });
+
+  it('[ADR-0131 D3] a set the activation ledger switches off anchors nobody — the row\'s own flag is not read', async () => {
+    const ql = makeQl({
+      sys_metadata_activation: [{ id: 'act_admin', metadata_type: 'permission', name: 'admin_full_access', active: false }],
+    });
+    const res = await ensureDefaultOrganization(ql);
+    expect(res).toMatchObject({ defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' });
+
+    // CONTROL — the same rig with the switch on binds the owner.
+    ql.tables.sys_metadata_activation[0].active = true;
+    expect(await ensureDefaultOrganization(ql)).toMatchObject({ memberCreated: true });
   });
 
   it('respects an admin who already belongs to an org', async () => {
