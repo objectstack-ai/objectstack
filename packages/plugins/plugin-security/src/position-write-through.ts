@@ -379,13 +379,17 @@ export function createPositionWriteThrough(
       const createdRows: Record<string, unknown>[] = [];
       for (const created of written) createdRows.push((await readRowById(ql, created.id)) ?? created);
       // [S10] A name a package or a built-in holds is not taken: the door's
-      // refusal is the answer, asked before any definition is saved.
-      for (const row of createdRows) {
-        const refusal = heldPositionNameRefusal(door, row.name);
-        if (refusal) {
-          await undoInsert(written);
-          throw refusal;
+      // refusal is the answer, asked before any definition is saved. A verdict
+      // the door could not reach (it re-raises anything but its refusal) is
+      // no answer either: the rows go, and the failure is the answer.
+      try {
+        for (const row of createdRows) {
+          const refusal = heldPositionNameRefusal(door, row.name);
+          if (refusal) throw refusal;
         }
+      } catch (e) {
+        await undoInsert(written);
+        throw e;
       }
       const saved: Record<string, unknown>[] = [];
       for (const row of createdRows) {
@@ -425,14 +429,16 @@ export function createPositionWriteThrough(
     }
 
     // [S10] A rename into a name a package or a built-in holds is not taken:
-    // the door's refusal is the answer, and the row gets its old values back.
-    // An edit that keeps such a name stands down below.
-    for (const { pre, post } of posts) {
-      const refusal = pre.name !== post.name ? heldPositionNameRefusal(door, post.name) : null;
-      if (refusal) {
-        await undoUpdate(targets, patch);
-        throw refusal;
+    // the door's refusal (or its failure to answer) is the answer, and the row
+    // gets its old values back. An edit that keeps such a name stands down below.
+    try {
+      for (const { pre, post } of posts) {
+        const refusal = pre.name !== post.name ? heldPositionNameRefusal(door, post.name) : null;
+        if (refusal) throw refusal;
       }
+    } catch (e) {
+      await undoUpdate(targets, patch);
+      throw e;
     }
 
     // Every new definition first; the old names' definitions go only once all landed.

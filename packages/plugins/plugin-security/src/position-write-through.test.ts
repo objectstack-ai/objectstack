@@ -508,6 +508,18 @@ describe('[C2 stage S10, ADR-0048 addendum N.2/N.3] one namespace — a create o
     expect(await b.envRows(held)).toEqual([]);
   });
 
+  it('a verdict the door cannot reach is no admission: the create and the rename are undone, and the failure is the answer', async () => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'yard_lead', label: 'Yard lead' });
+    const unreadable = Object.assign(new Error('registry unreadable'), { code: 'METADATA_STORE_UNAVAILABLE', status: 503 });
+    vi.spyOn(b.protocol, 'packagedBaseRefusal').mockImplementation(() => { throw unreadable; });
+    expect(await refusalOf(create(b, { name: 'dock_lead', label: 'Dock lead' }))).toBe(unreadable);
+    expect(await b.rows('dock_lead')).toEqual([]);
+    expect(await refusalOf(patch(b, created.id, { name: 'gate_lead' }))).toBe(unreadable);
+    expect((await b.rows('yard_lead')).map((r) => r.id)).toEqual([created.id]);
+    expect(await b.rows('gate_lead')).toEqual([]);
+  });
+
   it('control: the engine\'s own refusals keep their answer — a reserved identity name stays VALIDATION_FAILED', async () => {
     const b = await boot();
     // The platform holds `org_admin` too, but the engine's rule validator refuses
