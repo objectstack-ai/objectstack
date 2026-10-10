@@ -5,6 +5,10 @@ import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
+// [ADR-0130 D4] The residual rule's decision half — which top-level items of a
+// multi-package stack no body declares, and the id they take. See
+// `unclaimedTopLevelObjects` below.
+import { unclaimedTopLevel } from '@objectstack/metadata';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
@@ -75,6 +79,35 @@ function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
     service !== null &&
     typeof (service as Record<string, unknown>)['loadMetaFromDb'] === 'function'
   );
+}
+
+/**
+ * The OBJECTS of a multi-package stack's residual, and the id they are owned
+ * by — the residual rule's own answer (ADR-0130 D4), read through
+ * `unclaimedTopLevel` (`@objectstack/metadata`), the one copy both boot doors
+ * and `os validate` read. ⛔ Never re-derived here: which top-level items are
+ * residual and which id they take is that function's decision, and a second
+ * derivation would let this door and the metadata door disagree about it.
+ *
+ * Why the engine needs them: the `manifest` service registers the BODIES of a
+ * stack that carries `packages[]` and never its top level, while the metadata
+ * door registers the residual under the stack's `manifest.id` and the boot
+ * says every door reports that id as their owner. Without this, a residual
+ * object was listed by `GET /meta/object` and answered `404` on
+ * `/data/<name>`, through both boot doors.
+ *
+ * @returns `undefined` when the stack has no residual object — every stack
+ *   without `packages[]`, and every normally composed one.
+ */
+function unclaimedTopLevelObjects(
+  stack: unknown,
+): { ownerId: string | undefined; objects: ServiceObject[] } | undefined {
+  const residual = unclaimedTopLevel(stack);
+  if (!residual) return undefined;
+  const objects = residual.items
+    .filter((entry) => entry.type === 'object')
+    .map((entry) => entry.item as ServiceObject);
+  return objects.length > 0 ? { ownerId: residual.ownerId, objects } : undefined;
 }
 
 /**
@@ -561,8 +594,12 @@ export class ObjectQLPlugin implements Plugin {
       // same one register followed by the same one bridge as before (D7).
       register: (artifact: any) => {
         const ordered = resolveArtifactPackageOrder(artifact) as any[];
+        // [ADR-0130 D4] The objects of the stack's RESIDUAL — top-level objects
+        // no package body declares — as the residual rule answers it. See
+        // {@link unclaimedTopLevelObjects}.
+        const residual = unclaimedTopLevelObjects(artifact);
 
-        if (ordered.length === 0) {
+        if (ordered.length === 0 && residual === undefined) {
           // An artifact that declared `packages: []` registers nothing. Said out
           // loud rather than returning quietly: "the install did nothing" is not
           // a state anyone should have to infer from an absence.
@@ -599,9 +636,11 @@ export class ObjectQLPlugin implements Plugin {
           const declared = new Set<string>();
           for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
           const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
-          const unresolved = ordered
-            .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
-            .filter((ref) => !known(ref.picklist));
+          const unresolved = [
+            ...ordered.flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest))),
+            // The residual's objects register below, so they are judged here too.
+            ...(residual ? collectManifestPicklistReferences({ objects: residual.objects }, residual.ownerId) : []),
+          ].filter((ref) => !known(ref.picklist));
           const orphans = ordered
             .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
             .filter((ext) => !known(ext.picklist));
@@ -615,6 +654,18 @@ export class ObjectQLPlugin implements Plugin {
             id: manifest.id || manifest.name
           });
         }
+        // [ADR-0130 D4] The residual's objects, AFTER every body — the order
+        // the metadata door registers the same stack in — under the id the
+        // residual rule names, through the registry verb a body's own objects
+        // take (`registerApp` step 2), so its refusals are a body's refusals.
+        // There is no package record for that id: the residual is not a
+        // package, and when the id names one of the bodies (a composed stack
+        // keeps one member's manifest) that body's record must not be replaced.
+        if (residual) {
+          for (const object of residual.objects) {
+            ql.registry.registerObject(object, residual.ownerId, undefined, 'own');
+          }
+        }
         // Manifests registered AFTER start() (marketplace install / ledger
         // rehydrate arrive on `kernel:ready` or an HTTP request) land in the
         // SchemaRegistry only — the one-shot startup bridge already ran — so
@@ -622,8 +673,13 @@ export class ObjectQLPlugin implements Plugin {
         // No-op until start() arms it, so boot-time registrations keep the
         // single startup bridge. The promise never rejects; async callers
         // (marketplace install) await it so metadata reads right after
-        // install are deterministic, sync callers may ignore it.
-        return this.bridgeArtifactObjectsToMetadataService(ctx, ordered);
+        // install are deterministic, sync callers may ignore it. The residual's
+        // owner is bridged with them, so a late artifact's residual objects
+        // reach the metadata door as well as the data door.
+        const bridged = residual?.ownerId !== undefined && !scope.packageIds.includes(residual.ownerId)
+          ? [...ordered, { id: residual.ownerId }]
+          : ordered;
+        return this.bridgeArtifactObjectsToMetadataService(ctx, bridged);
       }
     });
 
