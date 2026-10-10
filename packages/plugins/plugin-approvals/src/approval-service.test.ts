@@ -3258,7 +3258,7 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
   it('manager: resolving to nobody adds NO slot, and the warning says so', async () => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
-    const req = await svc.openNodeRequest(approverInput('manager'), CTX);
+    const req = await svc.openNodeRequest(approverInput('manager') as any, CTX) as any;
 
     expect(req.pending_approvers).toEqual([]);
     expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
