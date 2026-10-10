@@ -19,6 +19,21 @@
  * whether you regenerated them or the merge simply did not change them, the
  * marker is removed and the commit proceeds.
  *
+ * ## A path whose route was retired (#22485)
+ *
+ * The one exception to "cannot get stuck" is a pending path that has NO row in
+ * `scripts/regen-artifacts.mjs` any more. git reads `merge=os-regen` from the
+ * checkout doing the merge, so a branch that still routes a path the merged tree
+ * has retired (the protocol upgrade guide at #22483, the committed
+ * `spec-changes.json` at #22485) defers it on its own route, and the merged tree
+ * then has no gate to prove it current. Nothing regenerates it, so nothing clears
+ * it by itself. It stays BLOCKED — the driver kept this side whole and dropped the
+ * other, and that drop is exactly what a silent pass would land — and the refusal
+ * prints the remedy that works: compare the path with the side that was merged in,
+ * keep or restore the right bytes, then `--release <path>`, which removes that one
+ * line from the marker and refuses any path that still has a row (those are
+ * discharged by their gate, never by hand).
+ *
  * ## The deferred merge (#8047)
  *
  * One commit is exempt from the refusal above, and only one: the MERGE commit
@@ -81,6 +96,7 @@
  *   node scripts/check-regen-pending.mjs              # pre-commit
  *   node scripts/check-regen-pending.mjs --pre-push   # pre-push: never defers
  *   node scripts/check-regen-pending.mjs --self-test  # fixtures only, no repo state
+ *   node scripts/check-regen-pending.mjs --release <path>  # settle ONE unrouted pending path
  */
 
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
@@ -89,7 +105,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
+import { DEFAULT_OWNER, PENDING_MARKER, REGEN_ARTIFACTS, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
 import {
   inspectBuildStamp,
   inspectDeclarationStamp,
@@ -479,6 +495,52 @@ export function readMarker(marker) {
 /** Append the deferral record. Appended, never rewritten — the driver owns the path lines. */
 export function recordDeferral(marker, { head, mergeHeads }) {
   appendFileSync(marker, `${DEFERRAL_PREFIX}${[head, ...mergeHeads].join(' ')}\n`);
+}
+
+/** The remedy an UNROUTED pending path's refusal prints, spelled once (#22485). */
+const RELEASE_COMMAND = 'node scripts/check-regen-pending.mjs --release';
+
+/**
+ * `--release <path>`: remove ONE unrouted path from the marker, by hand (#22485).
+ *
+ * Every other pending path clears itself — its gate proves it current and `main()`
+ * removes the marker. A path whose `REGEN_ARTIFACTS` row is gone has no gate, so
+ * the only thing that can settle it is the person who chose its bytes; this is how
+ * they say so. Exactly that line goes: every other path line, and the deferral
+ * record, stay. A marker left holding no path is removed, as `main()` would.
+ *
+ * ⛔ Refuses a path that still HAS a row — those are discharged by their gate, and
+ * releasing one by hand would pass a stale artifact — and a path the marker does
+ * not hold, so a typo cannot read as success.
+ *
+ * @param {string} marker the marker file
+ * @param {string} path the repo-relative path to release
+ * @returns {{ code: 0 | 1, message: string }}
+ */
+export function releasePending(marker, path) {
+  const target = path.replace(/^\.\//, '');
+  if (entryForPath(target)) {
+    return {
+      code: 1,
+      message: `os-regen: ${target} still has a row in scripts/regen-artifacts.mjs, so its gate discharges it — `
+        + 'regenerate it instead. Only an UNROUTED path is released by hand. Marker unchanged.',
+    };
+  }
+  const { paths } = readMarker(marker);
+  if (!paths.includes(target)) {
+    return {
+      code: 1,
+      message: `os-regen: ${target} is not pending (${paths.length ? `pending: ${paths.join(', ')}` : 'nothing is pending'}). Marker unchanged.`,
+    };
+  }
+  const kept = readFileSync(marker, 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && l !== target);
+  if (kept.some((l) => !l.startsWith(DEFERRAL_PREFIX))) writeFileSync(marker, `${kept.join('\n')}\n`);
+  else rmSync(marker, { force: true });
+  const left = kept.filter((l) => !l.startsWith(DEFERRAL_PREFIX)).length;
+  return {
+    code: 0,
+    message: `os-regen: released ${target} — ${left ? `${left} path(s) still pending` : 'nothing left pending, marker cleared'}.`,
+  };
 }
 
 /**
@@ -952,13 +1014,32 @@ function main({ prePush = false } = {}) {
       + `      ${ownerRunCommand(ownerOf(entry), entry.gen)}`);
   }
 
+  // A path with no row (#22485): its route was retired after this branch's merge
+  // driver deferred it, so no gate can verify it and nothing clears it by itself.
+  // Blocked, never passed — the driver kept this side whole and dropped the other —
+  // and the line says how a human settles it, because the generic remedies below
+  // ("regenerate", "clears itself") cannot apply to it.
+  const otherSide = merging ? 'MERGE_HEAD' : 'HEAD^2';
   for (const p of unknown) {
     blocked++;
-    console.error(`  ✗ ${p} — recorded as pending but absent from scripts/regen-artifacts.mjs (cannot verify)`);
+    console.error(
+      `  ✗ ${p} — UNROUTED: pending, but scripts/regen-artifacts.mjs has no row for it any more, so no gate\n`
+        + '      can verify it and nothing clears it by itself. The merge kept THIS side of it whole and dropped\n'
+        + `      the side it merged in: compare them (\`git diff ${otherSide} -- ${p}\`), keep or restore the\n`
+        + '      right bytes, then release it:\n'
+        + `      ${RELEASE_COMMAND} ${p}`,
+    );
   }
+  const unroutedNote = unknown.length
+    ? `\n  ⚠ ${unknown.length} of the path(s) above ${unknown.length === 1 ? 'is' : 'are'} UNROUTED: regenerating clears nothing there.\n`
+      + `    Settle each as its ✗ line says, then \`${RELEASE_COMMAND} <path>\`.\n`
+    : '';
 
   const action = decide({ blocked, merging, deferral, allowDefer: !prePush });
-  const owed = `the ${blocked} stale artifact(s) above`;
+  const stale = blocked - unknown.length;
+  const owed = unknown.length === 0
+    ? `the ${blocked} stale artifact(s) above`
+    : `the ${stale} stale artifact(s) and ${unknown.length} UNROUTED path(s) above`;
 
   if (action === 'defer') {
     recordDeferral(marker, merging);
@@ -969,7 +1050,8 @@ function main({ prePush = false } = {}) {
         + '  os-regen driver exits 0 while silently dropping one side, so only a separate regeneration\n'
         + '  commit on a known-good base tells "what main brought" apart from "what your change produces".\n'
         + '\n  ⚠️ The NEXT commit must discharge this — regenerate, `git add`, commit. Until it does, every\n'
-        + '  commit is refused, a second merge cannot defer on top, and `git push` is refused too.\n',
+        + '  commit is refused, a second merge cannot defer on top, and `git push` is refused too.\n'
+        + unroutedNote,
     );
     return 0;
   }
@@ -1008,7 +1090,8 @@ function main({ prePush = false } = {}) {
       `\nos-regen: a deferral is already outstanding (taken at ${deferral.head.slice(0, 12)}) and ${owed}\n`
         + '  are still stale, so THIS merge cannot defer on top of it. A deferral is one commit deep by\n'
         + '  construction — any deeper and it is an escape hatch, not the split-commit procedure.\n'
-        + '  Discharge the first one (regenerate + commit), then merge again.\n',
+        + '  Discharge the first one (regenerate + commit), then merge again.\n'
+        + unroutedNote,
     );
     return 1;
   }
@@ -1020,20 +1103,26 @@ function main({ prePush = false } = {}) {
           ? `  this push still owes ${owed}. A merge may defer its regeneration to the next commit;\n`
             + '  it may not defer it past the push, which is the last moment anything local can see it.\n'
           : `  this is the commit that owes ${owed}. Regenerate them and \`git add\` them.\n`)
-        + '  (`scripts/pm/os-regen-merge.sh` prints the step-4 chain for the surface you touched.)\n',
+        + '  (`scripts/pm/os-regen-merge.sh` prints the step-4 chain for the surface you touched.)\n'
+        + unroutedNote,
     );
     return 1;
   }
 
   if (action === 'refuse-stale') {
     console.error(
-      `\nRegenerate ${owed}, \`git add\` them, and ${prePush ? 'commit the result before pushing' : 'commit again'}.\n`
-        + '  This check clears itself the moment they are current — nothing to reset by hand.\n'
+      (stale > 0
+        ? `\nRegenerate the ${stale} stale artifact(s) above, \`git add\` them, and ${prePush ? 'commit the result before pushing' : 'commit again'}.\n`
+        : `\nSettle the ${unknown.length} UNROUTED path(s) above, then ${prePush ? 'push again' : 'commit again'}.\n`)
+        + (unknown.length
+          ? '  This check clears itself the moment they are current, except the UNROUTED paths: see below.\n'
+          : '  This check clears itself the moment they are current — nothing to reset by hand.\n')
         + '  Landing a merge? `bash scripts/pm/os-regen-merge.sh` runs the sanctioned sequence — its merge\n'
         + '  auto-commits first with no hook run at all (git skips pre-commit for a merge it completes\n'
         + '  itself), so THIS refusal, on the ordinary commit right after, is that sequence\'s designed\n'
         + '  collection point — not a deferral. Regeneration follows as its own commit; every artifact\n'
-        + '  above also has a required gate on the PR.\n',
+        + '  above also has a required gate on the PR.\n'
+        + unroutedNote,
     );
     return 1;
   }
@@ -1247,10 +1336,16 @@ function batteryFloorFailures(invoked) {
  * (parents `c57e636` + `e3c8ed0`) followed by regeneration `7e4799f`.
  *
  * The gates are redirected at the fixture's own `package.json` via
- * `OS_REGEN_GATE_CWD`, so `check:spec-changes` is a one-line stub the fixture
+ * `OS_REGEN_GATE_CWD`, so the pending row's `check:` is a one-line stub the fixture
  * flips from failing to passing — the two-commit shape is what is under test, not
  * the spec gates, and spawning the real ones here would make the self-test cost
  * a full spec build.
+ *
+ * The pending row is DERIVED from `REGEN_ARTIFACTS` (a plain-file row with no
+ * build prerequisite and the default owner), never spelled: this fixture named
+ * `packages/spec/spec-changes.json` until #22485 retired that row, and a fixture
+ * that hard-codes a row breaks on the row's retirement rather than on anything it
+ * tests.
  */
 function fixtureSelfTest() {
   registerCase('fixtureSelfTest');
@@ -1320,6 +1415,9 @@ function fixtureSelfTest() {
    */
   const rootPackageManager = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).packageManager;
 
+  const row = REGEN_ARTIFACTS.find(
+    (e) => !e.path.includes('*') && !e.readsDist && !e.readsSchemaTree && !e.mixed && ownerOf(e) === DEFAULT_OWNER,
+  );
   const runHook = (gate, args = []) => {
     writeFileSync(
       join(dir, 'package.json'),
@@ -1327,7 +1425,7 @@ function fixtureSelfTest() {
         {
           name: 'os-regen-fixture',
           packageManager: rootPackageManager,
-          scripts: { 'check:spec-changes': GATE_STUBS[gate] },
+          scripts: { [row.check]: GATE_STUBS[gate] },
         },
         null,
         2,
@@ -1386,7 +1484,8 @@ function fixtureSelfTest() {
     appendFileSync(join(gitDir, 'info', 'exclude'), '\n# the self-test gate stub (#9258) — never track it\npackage.json\n');
 
     const marker = join(gitDir, PENDING_MARKER);
-    const pendingPath = 'packages/spec/spec-changes.json'; // a real REGEN_ARTIFACTS entry
+    check('the fixture found a plain REGEN_ARTIFACTS row to defer', Boolean(row));
+    const pendingPath = row.path; // a real REGEN_ARTIFACTS entry, derived (see the docblock)
     const write = (f, c) => writeFileSync(join(dir, f), c);
 
     write('f.txt', 'base\n');
@@ -1571,7 +1670,7 @@ function fixtureSelfTest() {
     rmSync(marker, { force: true });
     git(['checkout', '-qb', 'ff-behind', 'main~1']);
     git(['checkout', '-q', 'main']);
-    mkdirSync(join(dir, 'packages/spec'), { recursive: true });
+    mkdirSync(dirname(join(dir, pendingPath)), { recursive: true });
     write(pendingPath, 'upstream moved the generated artifact\n');
     git(['add', '-A']);
     git(['commit', '-qm', 'main regenerates the artifact']);
@@ -1583,6 +1682,49 @@ function fixtureSelfTest() {
     const afterFf = runHook('stale', ['--pre-push']);
     check('  …so the push is ACCEPTED — a fast-forward is not a merge without a text merge',
       afterFf.code === 0 && afterFf.out.trim() === '');
+
+    // ── #22485: a pending path whose ROUTE was retired ──────────────────────
+    // A branch that still routes a path the merged tree has retired defers it on
+    // its own route, and the merged tree has no row to verify it against. It used
+    // to block every commit and push with a remedy that cannot apply ("clears
+    // itself the moment they are current"). It stays blocked — the driver dropped
+    // a side — and the refusal now prints a remedy that WORKS, which this replays
+    // by running the very command the refusal printed.
+    const unrouted = 'packages/spec/spec-changes.json'; // retired by #22485; the guide's went at #22483
+    check('the retired path really has no REGEN_ARTIFACTS row (the scenario\'s premise)', !entryForPath(unrouted));
+    writeFileSync(marker, `${unrouted}\n`);
+    const stuck = runHook('clean');
+    check('an UNROUTED pending path still REFUSES the commit — a dropped side is never passed', stuck.code === 1);
+    check('  …and no longer claims it clears itself with nothing to reset',
+      !/nothing to reset by hand/.test(stuck.out));
+    const printed = stuck.out.match(/node scripts\/check-regen-pending\.mjs --release (\S+)/);
+    check('  …printing a release command for exactly that path', printed?.[1] === unrouted);
+    const stuckPush = runHook('clean', ['--pre-push']);
+    check('  …and the push is refused with the same remedy',
+      stuckPush.code === 1 && stuckPush.out.includes(`--release ${unrouted}`));
+    const released = runHook('clean', ['--release', printed?.[1] ?? unrouted]);
+    check('THE PRINTED REMEDY WORKS: `--release` exits 0 and clears the marker',
+      released.code === 0 && !existsSync(marker));
+    const after = runHook('stale', ['--pre-push']);
+    check('  …so the next push is accepted, with nothing pending', after.code === 0 && after.out.trim() === '');
+
+    // `--release` is not a bypass: it settles only a path no gate owns, and only
+    // the one named. A routed path beside it keeps its debt and its refusal.
+    writeFileSync(marker, `${pendingPath}\n${unrouted}\n`);
+    const routedRelease = runHook('stale', ['--release', pendingPath]);
+    check('`--release` REFUSES a path that still has a row — its gate discharges it, never a hand',
+      routedRelease.code === 1 && readMarker(marker).paths.length === 2);
+    const typo = runHook('stale', ['--release', 'packages/spec/not-pending.json']);
+    check('`--release` REFUSES a path the marker does not hold, changing nothing',
+      typo.code === 1 && readMarker(marker).paths.length === 2);
+    const one = runHook('stale', ['--release', unrouted]);
+    check('releasing the unrouted path leaves the routed one pending',
+      one.code === 0 && JSON.stringify(readMarker(marker).paths) === JSON.stringify([pendingPath]));
+    const stillStale = runHook('stale', ['--pre-push']);
+    check('  …which still refuses while stale, as `stale`, with no unrouted note',
+      stillStale.code === 1 && /— stale/.test(stillStale.out) && !/UNROUTED/.test(stillStale.out));
+    const current = runHook('clean', ['--pre-push']);
+    check('  …and clears itself once current, as before', current.code === 0 && !existsSync(marker));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1863,6 +2005,17 @@ if (invokedDirectly) {
     }
     console.log('\n✓ check-regen-pending self-test passed.');
     process.exit(0);
+  }
+  const releaseAt = process.argv.indexOf('--release');
+  if (releaseAt >= 0) {
+    const target = process.argv[releaseAt + 1];
+    if (!target || target.startsWith('--')) {
+      console.error(`usage: ${RELEASE_COMMAND} <path>  — the path exactly as the refusal printed it`);
+      process.exit(2);
+    }
+    const { code, message } = releasePending(join(gitDirPath(), PENDING_MARKER), target);
+    console.error(message);
+    process.exit(code);
   }
   process.exit(main({ prePush: process.argv.includes('--pre-push') }));
 }

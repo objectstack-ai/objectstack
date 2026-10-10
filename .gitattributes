@@ -17,22 +17,14 @@
 # stay routed here as directories: the driver still owns a same-category
 # collision, which is the residue sharding cannot remove.
 #
-# One entry below is still a SINGLE file — spec-changes.json — and #8344 asked
-# what the driver-less queue does to it. MEASURED (2026-08-13, the real in-flight
-# case plus four synthetic pairs, each merged in a clone with no
-# merge.os-regen.driver, over it and the protocol upgrade guide, then a second
-# committed single file): the queue leaves neither stale-but-clean. Both were sorted
-# unions and an ADR-0087 registration is insertion-only, so the queue's text merge
-# either takes both sides — byte-identical to the regeneration, gates green — or
-# conflicts outright. It conflicts only when the two in-flight entries are ADJACENT
-# in registry sort order; one existing entry between them is already enough to
-# merge clean AND current.
-#
-# Sharding it would not buy back an ejection, which is why it is still a single
-# file: every conflicting case also conflicts in
-# packages/spec/src/migrations/registry.ts — generated, committed, unsharded,
-# NOT_DRIVER_MANAGED — and every registration touches it by construction. The table
-# and the reproduction are in packages/spec/src/migrations/entries/README.md.
+# packages/spec/spec-changes.json LEFT this list at #22485, because it left git: the
+# #22449 B′ ruling generates it at publish (`scripts/release-spec-changes.sh` writes
+# it into the package before the tarball is packed), the pull request generates it
+# in memory, and the file is gitignored. NOT_DRIVER_MANAGED records `gen:spec-changes`
+# as untracked output. A branch that still carries a regenerated copy meets a
+# modify/delete conflict when it merges main, and the deletion is the resolution:
+# `git rm packages/spec/spec-changes.json`, then commit — git runs no merge driver on
+# a modify/delete, so nothing is deferred and no marker is left.
 #
 # docs/protocol-upgrade-guide.md LEFT this list at #22483 because nothing generates
 # it any more. It is a hand-written pointer stub naming the guide's public address,
@@ -46,7 +38,9 @@
 # forked before #22483 still defers the guide on its first merge of main; the merged
 # tree has no row to discharge it against, so the next commit and the push are
 # refused instead of passed (measured on PR #22556 with the previous head as the
-# control, both merge directions).
+# control, both merge directions). Since #22485 that refusal names the path as
+# UNROUTED and prints the remedy that settles it — compare it with the merged-in
+# side, keep the right bytes, `node scripts/check-regen-pending.mjs --release PATH`.
 #
 # `merge=os-regen` hands those paths to `scripts/git-merge-regen.mjs`, which does
 # NOT text-merge them. See that file for why it also does not regenerate them
@@ -177,7 +171,6 @@
 # case where two branches' rows do not overlap and the text merge exits 0 describing
 # neither side.
 
-packages/spec/spec-changes.json                              merge=os-regen
 packages/spec/liveness/state-counts/**                       merge=os-regen
 packages/spec/authorable-surface/**                          merge=os-regen
 packages/spec/authorable-surface.base.json                   merge=os-regen
