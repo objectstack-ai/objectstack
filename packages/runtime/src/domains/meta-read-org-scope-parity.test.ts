@@ -76,7 +76,7 @@ const ENV_DRAFTS: any[] = [{ type: 'view', name: 'env_board', label: 'Env board 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
 /** The types the registry declares `allowOrgOverride` — the pre-D6 gate the double models. */
-const ORG_OVERRIDABLE = new Set(DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowOrgOverride).map((e) => e.type));
+const ORG_OVERRIDABLE = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowOrgOverride).map((e) => e.type));
 
 function protocolDouble() {
     const gate = (type: string, organizationId: unknown) => {

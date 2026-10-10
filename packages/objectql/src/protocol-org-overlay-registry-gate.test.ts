@@ -633,8 +633,10 @@ describe('#6780 — the registry heal is org-gated: an org DELETE never evicts t
         await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid' });
 
         expect(registry.getItem('view', 'shared_grid')).toBeUndefined();
-        // Org A's own overlay row is untouched by an env-wide delete.
-        const forOrgA: any = await protocol.getMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
-        expect(forOrgA.item.label).toBe('Org A grid');
+        // Org A's legacy row is untouched by an env-wide delete: the one read
+        // left that reaches it (the anonymous form doors' legacy layer) still
+        // finds it.
+        const legacy: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_A });
+        expect(itemNamed(legacy, 'shared_grid')?.label).toBe('Org A grid');
     });
 });

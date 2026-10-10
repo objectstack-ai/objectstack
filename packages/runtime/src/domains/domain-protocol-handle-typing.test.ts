@@ -84,10 +84,10 @@ function declaredKeysCompile(
         ui.getUiView?.({ object: 'account', type: 'form' }),
         // `/meta` reads.
         meta.getMetaTypes?.({}),
-        meta.getMetaItems?.({ type: 'app', packageId: 'crm', organizationId: 'org_1', previewDrafts: true }),
-        meta.getMetaItem?.({ type: 'object', name: 'account', organizationId: 'org_1' }),
-        meta.getMetaItem?.({ type: 'app', name: 'crm', packageId: 'crm', organizationId: undefined, previewDrafts: false }),
-        meta.getMetaItemLayered?.({ type: 'view', name: 'account_list', organizationId: 'org_1' }),
+        meta.getMetaItems?.({ type: 'app', packageId: 'crm', previewDrafts: true }),
+        meta.getMetaItem?.({ type: 'object', name: 'account' }),
+        meta.getMetaItem?.({ type: 'app', name: 'crm', packageId: 'crm', previewDrafts: false }),
+        meta.getMetaItemLayered?.({ type: 'view', name: 'account_list' }),
         // `/meta` write — `writeFace` is a DECLARED closed set and
         // `'meta-dispatch'` is this door's member of it.
         meta.saveMetaItem?.({
@@ -99,7 +99,7 @@ function declaredKeysCompile(
         }),
         // The two undeclared-request verbs: the NAME is bought, the request
         // shape is honestly still `any` (nothing declares one).
-        meta.listDrafts?.({ packageId: 'crm', type: 'view', organizationId: 'org_1' }),
+        meta.listDrafts?.({ packageId: 'crm', type: 'view' }),
         meta.migrateStoredMetadata?.({ apply: false, types: ['view'], actor: 'u_1 (test)' }),
         meta.getProjectId?.(),
         // The `/mcp` merged skill read.
