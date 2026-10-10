@@ -43,6 +43,7 @@ import {
 import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
 import { createPositionWriteThrough } from './position-write-through.js';
 import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
+import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
   explainAccess,
   buildContextForUser,
@@ -5080,6 +5081,34 @@ export class SecurityPlugin implements Plugin {
       (ctx as any).hook('kernel:bootstrapped', runPositionBackfill);
     } else {
       void runPositionBackfill();
+    }
+
+    // [ADR-0131 D3/D4] The catalog reference report: per organization, every
+    // assignment and grant whose name the security catalog does not resolve,
+    // every grant that names nothing, every position row with no definition
+    // (by name and organization), and under `single` every position name more
+    // than one row carries. A reference that resolves nowhere confers nothing;
+    // this is what makes that loud. Registered AFTER the two backfills above,
+    // so it runs after them (handlers run in registration order) and does not
+    // report a name either one resolved this boot. It writes nothing. Only at
+    // `kernel:bootstrapped`: run any earlier, it would judge a catalog that is
+    // still being filled. See `catalog-reference-report.ts`.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
+        try {
+          await reportCatalogReferences(ql as any, {
+            posture: this.tenancyPosture,
+            catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+            logger: ctx.logger,
+          });
+        } catch (e) {
+          ctx.logger.warn(
+            '[security] the catalog reference report did not run — assignments and grants whose names the ' +
+              'security catalog does not resolve go unreported for this boot',
+            { error: (e as Error)?.message },
+          );
+        }
+      });
     }
 
     // ── Project the permission sets of a package that arrives AFTER the boot ──
