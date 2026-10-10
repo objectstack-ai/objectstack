@@ -43,6 +43,7 @@ import { createShareLinksDomain, handleShareLinksRequest } from './domains/share
 import { createPackagesDomain, handlePackagesRequest } from './domains/packages.js';
 import { createAutomationDomain, handleAutomationRequest } from './domains/automation.js';
 import { createAuthDomain, handleAuthRequest } from './domains/auth.js';
+import { createApprovalsActDomain } from './domains/approvals.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
 import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
@@ -834,6 +835,10 @@ export class HttpDispatcher {
         this.domainRegistry.register(createPackagesDomain(this.domainDeps));
         this.domainRegistry.register(createAutomationDomain(this.domainDeps));
         this.domainRegistry.register(createAuthDomain(this.domainDeps));
+        // The ADR-0043 action page for a kernel with no raw app (#22438,
+        // ruling A, segment 2): exactly `/approvals/act`, forwarded to the
+        // `approvals` slot's `handleActionPage`. See `./domains/approvals.ts`.
+        this.domainRegistry.register(createApprovalsActDomain(this.domainDeps));
         this.domainRegistry.register(createAiDomain(this.domainDeps));
         this.domainRegistry.register(createActionsDomain(this.domainDeps));
         for (const route of createMcpDomains(this.domainDeps)) this.domainRegistry.register(route);
