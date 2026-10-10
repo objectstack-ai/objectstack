@@ -11,7 +11,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.4"
+  version: "17.7.0"
   domain: query
   tags: query, filter, sort, paginate, aggregate, ObjectQL, full-text
 ---

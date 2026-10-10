@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.3"
+  version: "17.7.0"
   domain: i18n
   tags: i18n, translation, locale, l10n, bundle, coverage
 ---

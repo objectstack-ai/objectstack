@@ -446,6 +446,20 @@ export const REGEN_ARTIFACTS = Object.freeze([
  */
 export const NOT_DRIVER_MANAGED = Object.freeze([
   {
+    path: 'skills/*/SKILL.md',
+    gen: 'version',
+    owner: ROOT_OWNER,
+    why:
+      'hand-written skill prose carrying two DERIVED lines — the `compatibility:` majors and '
+      + '`metadata.version`, which `scripts/check-skill-compatibility-version.mjs --fix` writes from '
+      + 'the workspace manifests and the root `version` script re-stamps after every `changeset '
+      + 'version`. That `--fix` is what makes the `version` script a generator here, and the answer '
+      + 'to "discard both sides and re-run" is NO: a regeneration would restore the two lines and '
+      + 'lose every prose edit around them. A text conflict in a SKILL.md stays a human\'s; the two '
+      + 'derived lines re-stamp themselves on the next `--fix`, and `check:skill-compatibility` reds '
+      + 'until they do.',
+  },
+  {
     path: 'packages/spec/docs-import-surface.baseline.json',
     why:
       'a SHRINK-ONLY ratchet. `gen:docs` writes it, but regenerating it can WIDEN it — '
