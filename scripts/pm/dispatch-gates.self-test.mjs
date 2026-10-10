@@ -7290,7 +7290,7 @@ export function selfTest({ tier = 'full' } = {}) {
       'scripts/check-issue-citations.mjs:204 local-env',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
       'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
-      'scripts/pm/dispatch-gates.mjs:734 inherited-population',
+      'scripts/pm/dispatch-gates.mjs:736 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
   );
