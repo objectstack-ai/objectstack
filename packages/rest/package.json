@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/metadata": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/observability": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
@@ -40,7 +41,6 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
-    "@objectstack/metadata": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
