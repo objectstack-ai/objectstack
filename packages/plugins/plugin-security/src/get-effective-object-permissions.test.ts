@@ -148,7 +148,7 @@ function bootPlugin(
       isPackageDisabled: () => false,
     },
     getSchema: (name: string) => schemas[name] ?? null,
-    find: async (object: string, query: any) => {
+    find: async (_object: string, query: any) => {
       const rows = ([] as Array<Record<string, unknown>>).filter((r) => matches(r, query?.where));
       // Hold the caller's bound (`check:objectql-double-limit`).
       return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
