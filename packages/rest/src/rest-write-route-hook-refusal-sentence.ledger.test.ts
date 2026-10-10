@@ -223,12 +223,6 @@ const IMPORT_JOB_PROTOCOL = (error: () => Error): Record<string, Fn> => ({
     updateData: async () => ({}),
 });
 
-/** A finished, undoable job whose undo log names one created record. */
-const UNDOABLE_JOB = {
-    id: 'jobId_1', object_name: OBJECT, status: 'succeeded',
-    undo_log: { created: ['r1'], updated: [] },
-};
-
 // ─── the three dispositions ─────────────────────────────────────────────────
 
 interface Driver {
