@@ -356,8 +356,10 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   picklist: 'picklist',
   page: 'page',
   // Screen-flow copy (`flows.<f>.label`, `flows.<f>.screens.<n>.title`, and
-  // the per-field `label` / `placeholder`) and a refused `end` node's message
-  // (`flows.<f>.refusals.<n>.message`, #22450) — the author's own text, so
+  // the per-field `label` / `placeholder` / option labels), the terminal
+  // toasts (`flows.<f>.successMessage` / `.errorMessage`, #22507) and a refused
+  // `end` node's message (`flows.<f>.refusals.<n>.message`, #22450) — the
+  // author's own text, so
   // it keeps its own bucket and reports as `i18n/missing-flow` rather than
   // folding away with `--include-platform`. Until this bucket existed the
   // family could not report a screen-flow gap at all: HotCRM measured
@@ -426,7 +428,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   dataset: 'datasets',
   picklist: 'picklists',
   page: 'pages',
-  flow: 'flow screens and refusals',
+  flow: 'flow screens, toasts and refusals',
   metadataForm: 'metadata forms',
 };
 

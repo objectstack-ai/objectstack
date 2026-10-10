@@ -40,7 +40,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         options: {
           user: "ユーザー",
           tenant: "テナント",
-          public: "公開",
           private: "非公開",
           temp: "一時",
           attachments: "添付ファイル"
