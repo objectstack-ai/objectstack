@@ -11,7 +11,12 @@
 export { MetadataManager, type WatchCallback, type MetadataManagerOptions } from './metadata-manager.js';
 
 // Plugin
-export { MetadataPlugin } from './plugin.js';
+export {
+  MetadataPlugin,
+  unclaimedTopLevel,
+  type UnclaimedTopLevel,
+  type UnclaimedTopLevelItem,
+} from './plugin.js';
 
 // Loaders
 export { type MetadataLoader, type MetadataKeyedItem } from './loaders/loader-interface.js';
