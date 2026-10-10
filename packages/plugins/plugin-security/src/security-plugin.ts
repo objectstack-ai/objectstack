@@ -112,6 +112,7 @@ import {
   type OwnershipFloorAlternate,
 } from './platform-ownership-policies.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   unresolvedPostureDenialMessage,
@@ -3169,11 +3170,10 @@ export class SecurityPlugin implements Plugin {
           // RLS policies declare select/insert/update/delete — map the
           // destructive lifecycle class onto its nearest write class so
           // authored policies apply (purge destroys like delete;
-          // transfer/restore mutate like update).
-          const rlsOperation =
-            opCtx.operation === 'purge' ? 'delete'
-            : opCtx.operation === 'transfer' || opCtx.operation === 'restore' ? 'update'
-            : opCtx.operation;
+          // transfer/restore mutate like update). The mapping is declared once
+          // ({@link rlsOperationForVerb}); `security/explain` composes a
+          // lifecycle verb's row-level security through the same one.
+          const rlsOperation = rlsOperationForVerb(opCtx.operation);
           // [#5492] The floor decision. Its clauses and their reasons (floor in
           // play, `allow` only, the on-behalf-of exclusion) live on
           // {@link resolvePreImageFloorDrop}, which `security/explain` asks too.
@@ -4277,7 +4277,8 @@ export class SecurityPlugin implements Plugin {
       //
       // [#7809] `opCtx.operation` is passed RAW here — no `purge -> delete`,
       // `transfer|restore -> update` normalisation like the 2.7 gate above
-      // does at `rlsOperation`. That asymmetry is deliberate and safe, but ONLY
+      // does at `rlsOperation` (through `rlsOperationForVerb`, the one
+      // declaration of that mapping). That asymmetry is deliberate and safe, but ONLY
       // because of an invariant that lives in another package: the engine's
       // middleware dispatch vocabulary (`OperationContext['operation']`) has
       // seven members and none of them is a destructive lifecycle verb, and
@@ -4296,7 +4297,10 @@ export class SecurityPlugin implements Plugin {
       // `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`.
       // If a recycle bin (#3146) ever makes one of those verbs dispatchable,
       // that pin goes red first — and THIS site and the D10 delegator half
-      // below are what must normalise before it can go green again.
+      // below are what must normalise before it can go green again, by
+      // reading `rlsOperationForVerb` (`lifecycle-verb-rls-operation.ts`), the
+      // mapping the 2.7 gate and `security/explain` already read — never a
+      // second inline copy of it.
       if (opCtx.ast) {
         const extra: Record<string, unknown>[] = [];
         // [#15813] The layered split rather than `computeRlsFilter`, composed
@@ -5456,6 +5460,10 @@ export class SecurityPlugin implements Plugin {
       engineOp: string,
       c: any,
     ): Promise<RlsFilterOptions | undefined> => {
+      // [#22550] `engineOp` here is the operation explain composes the verb's
+      // row-level security for (`rlsOperationForVerb`, the 2.7 gate's own
+      // mapping), so a transfer arrives as `update` and meets the floor
+      // decision and the vouch step 2.7 makes for it, on the mapped verb.
       if (!recordId || (engineOp !== 'update' && engineOp !== 'delete')) return undefined;
       // Fail toward the floor: an unanswerable decision keeps it standing,
       // which is what the gate's own verdict does on a failed probe.
