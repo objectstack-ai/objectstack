@@ -136,3 +136,9 @@ examples/app-crm/storage/
 # The release lane's scratch space: the previously published tarball it unpacks
 # and the artifact it packs to verify the ADR-0087 D4 per-release section.
 .release-spec-changes/
+# The two ADR-0087 D4 projections `@objectstack/spec` ships: generated INTO the
+# package by that lane (`scripts/release-spec-changes.sh --prepare` / `--generate`)
+# right before the tarball is packed, and by `gen:spec-changes` locally. Never
+# committed (#22449 B′, #22485); `files[]` ships whatever the lane wrote.
+packages/spec/spec-changes.json
+packages/spec/protocol-upgrade-guide.md

@@ -18,9 +18,9 @@ export const entry: SemanticMigration = {
     'a double-brace template hole, rendered by the formula template engine over the flow\'s variables: a variable '
     + 'path with an optional formatter, {{ record.name }}, {{ $error.message }}, {{ rows.0.subject }}, '
     + '{{ record.amount | currency }}. A token no hole can spell is computed into a variable first, with an '
-    + 'assignment node — arithmetic and functions as a CEL value envelope, the date macros as the value-slot '
-    + 'spelling that still reads them, the run user\'s id as the CEL value envelope current_user.id — and written as '
-    + '{{ variable }}',
+    + 'assignment node — arithmetic and functions as a CEL value envelope, the date macros as the CEL value '
+    + 'envelope of their string form (isoDate(today()), isoDatetime(now())), the run user\'s id as the CEL value '
+    + 'envelope current_user.id — and written as {{ variable }}',
   reason:
     'ADR-0032 Decision 3 fixes one template delimiter, double braces, and deletes the single brace: it collides '
     + 'with CEL map literals, and an author who meets both dialects in one flow mixes them. The 17.x interpolator '

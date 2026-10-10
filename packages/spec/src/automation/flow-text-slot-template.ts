@@ -56,15 +56,15 @@
  *
  * ## No spelling is kept
  *
- * Unlike the value slots, which keep the date macros because CEL cannot write
- * them yet, a text slot keeps nothing: each has a remedy that renders the same
- * text — compute it into a variable with an `assignment` node, whose value
- * slot still reads the date macro, and write the variable as a hole. The run
- * user's id is computed the same way, with the CEL value envelope
- * `current_user.id` (the value slots refuse `{$User.*}` since #19939's second
- * pass); every other `{$User.<path>}` never resolved, and its remedy says so.
- * So the single brace is deleted from the text slots whole, and the two
- * dialects never share one string.
+ * A text slot keeps nothing: each token has a remedy that renders the same
+ * text — compute it into a variable with an `assignment` node's CEL value
+ * envelope, and write the variable as a hole. A date macro is its CEL string
+ * form there (`isoDate(today())`, `isoDatetime(now())`; the value slots refuse
+ * the macros since #19939's third pass), and the run user's id is
+ * `current_user.id` (refused there since its second); every other
+ * `{$User.<path>}` never resolved, and its remedy says so. So the single
+ * brace is deleted from the text slots whole, and the two dialects never
+ * share one string.
  *
  * ## A `$` root is the engine's (#22477)
  *
@@ -88,6 +88,7 @@
 import {
   CEL_RUN_USER_ID,
   CEL_RUN_USER_ID_GUARDED,
+  celDateMacro,
   celExpression,
   isRunUserIdToken,
   runUserPathNeverResolved,
@@ -299,11 +300,14 @@ function doubled(text: string, tokens: readonly TemplateToken[]): string {
 /** The remedy for one token no `{{ }}` hole can spell. */
 function unspellableRemedy(token: TemplateToken): string {
   switch (token.kind) {
-    case 'date-macro':
+    case 'date-macro': {
+      const macro = celDateMacro(token.inner)!;
       return (
-        `\`${token.text}\` is not a variable, so no hole spells it: compute it into a variable with an \`assignment\` `
-        + `node, whose value slot still reads it (\`assignments: { v: '${token.text}' }\`), and write \`{{ v }}\` here.`
+        `\`${token.text}\` is not a variable, so no hole spells it: compute its ISO text into a variable with an `
+        + `\`assignment\` node's CEL value envelope (\`assignments: { v: { dialect: 'cel', source: '${macro.source}' } }\`) `
+        + 'and write `{{ v }}` here.' + (macro.edge ? ` ${macro.edge}` : '')
       );
+    }
     case 'user':
       if (!isRunUserIdToken(token.inner)) return runUserPathNeverResolved(token.text, (path) => `\`{{ ${path} }}\``);
       return (

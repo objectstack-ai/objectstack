@@ -323,6 +323,8 @@
     "FilePersistenceConfigSchema": "src/data/driver/memory.zod.ts#FilePersistenceConfigSchema (const)",
     "FileReferenceIdValue": "src/data/field-value.zod.ts#FileReferenceIdValue (type)",
     "FileReferenceIdValueSchema": "src/data/field-value.zod.ts#FileReferenceIdValueSchema (const)",
+    "FileRefusedValue": "src/data/field-value.zod.ts#FileRefusedValue (type)",
+    "FileRefusedValueSchema": "src/data/field-value.zod.ts#FileRefusedValueSchema (const)",
     "FileValue": "src/data/field-value.zod.ts#FileValue (type)",
     "FileValueSchema": "src/data/field-value.zod.ts#FileValueSchema (const)",
     "Filter": "src/data/filter.zod.ts#Filter (type)",
