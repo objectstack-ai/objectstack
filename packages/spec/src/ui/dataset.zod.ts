@@ -283,6 +283,9 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
    * `f0268ad78`, re-read there 2026-10-09:
    * `dataset-format.ts` is byte-identical to `a58626c88` (`git diff --quiet`), so
    * `formatMeasureDate` `:240-274`, its datetime arm `:270`-`:272` and its call

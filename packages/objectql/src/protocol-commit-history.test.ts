@@ -291,10 +291,9 @@ const APP_PKG = 'app.myapp';
  * reimplementation of them, so any assertion whose SUBJECT is the org predicate
  * would be measuring this function rather than the protocol. No case in this
  * file has that subject (which is precisely why this file could never see the
- * #7705/#7779/#7819 family), and the operator's real behaviour against a real
- * driver — whether `organization_id = 'org'` matches a NULL column — is pinned
- * on a real engine in `packages/runtime/src/package-revert-commit-org-scope.
- * integration.test.ts`. Keep it that way: do not add org-scoping cases here.
+ * #7705/#7779/#7819 family). [ADR-0131 D6] Every write — commits included — is
+ * environment-wide now and an org-scoped revert is refused, so there is no
+ * org-scoping case left to add here.
  */
 const matchesWhere = (r: Record<string, unknown>, w: Record<string, unknown>): boolean => {
   if (!w || typeof w !== 'object') return true;
@@ -1048,46 +1047,6 @@ describe('#6621 — revertCommit RESTORE limb refreshes the registry', () => {
     // THE LINE THAT WAS RED: pre-fix the registry still served 'Renamed'.
     expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('Cases');
   });
-
-  /**
-   * [#6602] The org dimension, INHERITED rather than re-decided here. ADR-0005:
-   * only env-wide rows enter the process-wide SchemaRegistry, and PR #6779 made
-   * `organizationId` a REQUIRED argument of the write-through so no caller can
-   * forget to say which it is. This limb passes the row's own org, so an
-   * org-scoped revert persists and stays out of the shared registry.
-   *
-   * Direction note (measured, not assumed): this case is green BEFORE the fix
-   * as well — pre-fix nothing was written through at all, so "the shared
-   * registry is untouched" was true for the wrong reason. It cannot go red by
-   * removing the write-through; what it goes red on is the write-through
-   * passing anything other than the row's own org, which is the mistake the
-   * required parameter exists to prevent.
-   */
-  it('an ORG-scoped revert persists and still never reaches the process-wide registry', async () => {
-    const { protocol, rows, registry } = makeRealRepoHarness([applyCommit({
-      id: 'cmt_reg_org',
-      package_id: APP_PKG,
-      organization_id: 'org_a',
-      items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: true, prevVersion: 1 }],
-      created_at: '2026-08-08T00:00:02.000Z',
-    })], { controlPlane: true });
-    await protocol.saveMetaItem({
-      type: 'view', name: 'myapp_case_grid', organizationId: 'org_a', packageId: APP_PKG, item: gridBody('Cases'),
-    });
-    await protocol.saveMetaItem({
-      type: 'view', name: 'myapp_case_grid', organizationId: 'org_a', packageId: APP_PKG, item: gridBody('Renamed'),
-    });
-    expect(registryViewLabel(registry, 'myapp_case_grid')).toBeNull();
-
-    const res = await protocol.revertCommit({ commitId: 'cmt_reg_org', organizationId: 'org_a' });
-
-    expect(res.failed).toEqual([]);
-    expect(res.revertedCount).toBe(1);
-    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_case_grid');
-    expect(stored[0].organization_id).toBe('org_a');
-    expect(JSON.parse(stored[0].metadata).label).toBe('Cases');
-    expect(registryViewLabel(registry, 'myapp_case_grid')).toBeNull();
-  });
 });
 
 /**
@@ -1215,41 +1174,6 @@ describe('#6621 — revertCommit SOFT-REMOVE limb heals the registry, like delet
     expect(registryShapeFor(viaDelete.registry, 'object', 'myapp_invoice').objectServed).toBe(false);
     expect(registryShapeFor(viaRevert.registry, 'object', 'myapp_invoice'))
       .toEqual(registryShapeFor(viaDelete.registry, 'object', 'myapp_invoice'));
-  });
-
-  /**
-   * [#6602] The org gate on this limb is ASYMMETRIC with the write-through's
-   * object branch, on purpose: only an env-wide revert may mutate the registry
-   * every org in this process shares. An org-scoped row never entered it, so
-   * healing on its behalf would retire or un-shadow the ENV-WIDE row's entry —
-   * a per-org undo breaking every other org. Register wide, retire narrow.
-   */
-  it('an ORG-scoped soft-remove leaves the env-wide registry entry alone', async () => {
-    const { protocol, rows, registry } = makeRealRepoHarness([applyCommit({
-      id: 'cmt_reg_new_org',
-      package_id: APP_PKG,
-      organization_id: 'org_a',
-      items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: false, prevVersion: null }],
-      created_at: '2026-08-08T00:00:02.000Z',
-    })], { controlPlane: true });
-    // The env-wide row is what the shared registry holds (ADR-0005).
-    await protocol.saveMetaItem({
-      type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('EnvWide'),
-    });
-    // …and org A authored its own overlay of the same name.
-    await protocol.saveMetaItem({
-      type: 'view', name: 'myapp_case_grid', organizationId: 'org_a', packageId: APP_PKG, item: gridBody('OrgA'),
-    });
-    expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('EnvWide');
-
-    const res = await protocol.revertCommit({ commitId: 'cmt_reg_new_org', organizationId: 'org_a' });
-
-    expect(res.failed).toEqual([]);
-    // Org A's row really went away…
-    expect(Array.from(rows.values()).filter((r) => r.name === 'myapp_case_grid' && r.organization_id === 'org_a'))
-      .toHaveLength(0);
-    // …and the env-wide entry every other org reads is untouched.
-    expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('EnvWide');
   });
 });
 

@@ -387,15 +387,13 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
         expect(served?.item?.records).toHaveLength(2);
     });
 
-    it('the caller\'s organization really reaches this request', async () => {
+    it('[ADR-0131 D6] the caller\'s organization does NOT reach this request', async () => {
         const { publishRequest } = await publishThenRead({ activeOrganizationId: ORG });
 
-        // `applyPublishedSeeds` receives the SAME binding this route handed
-        // `publishPackageDrafts` — one `resolveActiveOrganizationId` call
-        // serves both. So an org here is what put the ladder on its two-rung
-        // branch: without this control every measurement below could be of the
-        // one-rung branch and would prove nothing.
-        expect(publishRequest()?.organizationId).toBe(ORG);
+        // The door threads no organization into `publishPackageDrafts` (nor
+        // into `applyPublishedSeeds`), even with one active.
+        expect(publishRequest()).toEqual({ packageId: PKG });
+        expect(publishRequest()).not.toHaveProperty('organizationId');
     });
 });
 

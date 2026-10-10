@@ -168,8 +168,7 @@ const viewBody = (label: string) => ({
     object: 'case',
     viewKind: 'list',
 });
-const ORG = 'org_alpha';
-const ref = { type: 'view', name: 'case_grid', organizationId: ORG, actor: 'admin' } as const;
+const ref = { type: 'view', name: 'case_grid', actor: 'admin' } as const;
 
 /** Every stored content hash the double holds, active rows and history alike. */
 function storedHashes(h: ReturnType<typeof makeEngine>): Set<string> {
@@ -257,8 +256,8 @@ describe('[#21207] the history read serves keyed hashes per event', () => {
         const v1: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
         await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: v1.version } as any);
 
-        const read1 = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
-        const read2 = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        const read1 = await p.historyMetaItem({ type: 'view', name: 'case_grid' });
+        const read2 = await p.historyMetaItem({ type: 'view', name: 'case_grid' });
         expect(read1.events.length).toBeGreaterThanOrEqual(2);
         for (const ev of read1.events) {
             expect(ev.hash).toMatch(KEYED);
@@ -354,8 +353,8 @@ describe('[#21207] no crypto provider: tokens keyed under a process-scoped ephem
         expect(v2.version).toMatch(KEYED);
         expect(v2.version).not.toBe(v1.version);
 
-        const read1 = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
-        const read2 = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        const read1 = await p.historyMetaItem({ type: 'view', name: 'case_grid' });
+        const read2 = await p.historyMetaItem({ type: 'view', name: 'case_grid' });
         expect(read1.events.length).toBeGreaterThanOrEqual(2);
         for (const ev of read1.events) expect(ev.hash).toMatch(KEYED);
         expect(read1.events.map((e) => e.hash)).toContain(v2.version);
@@ -408,7 +407,7 @@ describe('[#21207] no crypto provider: tokens keyed under a process-scoped ephem
         expect(refused.code).toBe('METADATA_CONFLICT');
         expect(refused.status).toBe(409);
 
-        const { events } = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        const { events } = await p.historyMetaItem({ type: 'view', name: 'case_grid' });
         const current = events.find((e) => e.hash === refused.actualHead);
         expect(refused.actualHead).toBe(await keyedDigest(activeHash(h)));
         expect(current).toBeDefined();
@@ -458,7 +457,7 @@ describe('[#21207] a change note that quotes a stored hash', () => {
             // A row written before the publish door stated its own message.
             for (const row of h.historyRows) row.change_note = `publish draft (hash ${stored})`;
 
-            const { events } = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+            const { events } = await p.historyMetaItem({ type: 'view', name: 'case_grid' });
             expect(events.length).toBeGreaterThan(0);
             for (const ev of events) {
                 // The quote is served as the very token the receipt served.
@@ -483,14 +482,14 @@ describe('[#21207] a change note that quotes a stored hash', () => {
 // from the same read. The lock is type-agnostic, so this file's `view` row
 // stands in for the datasource one.
 
-const VIEW_REF = { type: 'view', name: 'case_grid', org: ORG } as const;
+const VIEW_REF = { type: 'view', name: 'case_grid' } as const;
 
 /** Store the active row the way a writer that stamps no `checksum` did. */
 async function seedUnstamped(h: ReturnType<typeof makeEngine>, label = 'legacy', state = 'active'): Promise<void> {
     await h.engine.insert('sys_metadata', {
         type: 'view',
         name: 'case_grid',
-        organization_id: ORG,
+        organization_id: null,
         package_id: null,
         state,
         metadata: JSON.stringify(viewBody(label)),
@@ -503,7 +502,7 @@ function caseGridRow(h: ReturnType<typeof makeEngine>, state = 'active'): Row | 
 }
 
 function repoFor(h: ReturnType<typeof makeEngine>): SysMetadataRepository {
-    return new SysMetadataRepository({ engine: h.engine, organizationId: ORG, orgLabel: ORG });
+    return new SysMetadataRepository({ engine: h.engine });
 }
 
 /** The version the repository's own read serves for the row, keyed as a door hands it out. */
@@ -643,7 +642,7 @@ describe('[#21978] the repository lock: a row with a checksum is judged exactly 
         await h.engine.insert('sys_metadata', {
             type: 'view',
             name: 'case_grid',
-            organization_id: ORG,
+            organization_id: null,
             package_id: null,
             state: 'active',
             metadata: JSON.stringify(viewBody('stamped')),
@@ -711,7 +710,7 @@ function withReadRegistry(h: ReturnType<typeof makeEngine>): ReturnType<typeof m
     return h;
 }
 
-const READ = { type: 'view', name: 'case_grid', organizationId: ORG } as const;
+const READ = { type: 'view', name: 'case_grid' } as const;
 
 describe('[#22114] the item read serves the version token the save door accepts', () => {
     it('active and draft: the read\'s `version` is the receipt\'s token, keyed, never the stored hash — and it pins the next save', async () => {
@@ -731,25 +730,6 @@ describe('[#22114] the item read serves the version token the save door accepts'
         const next: any = await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: readActive.version } as any);
         expect(next.success).toBe(true);
         expect(((await p.getMetaItem({ ...READ })) as any).version).toBe(next.version);
-    });
-
-    it('`null` where the save\'s address holds no row — an organization falling back to the env-wide row', async () => {
-        const h = withReadRegistry(makeEngine());
-        const p = new ObjectStackProtocolImplementation(h.engine);
-        // Env-wide row only; the org-scoped read serves it (ADR-0005 fallback),
-        // while an org-scoped save writes the org partition, where nothing is.
-        await p.saveMetaItem({ type: 'view', name: 'case_grid', item: viewBody('env-wide'), actor: 'admin' } as any);
-
-        const read: any = await p.getMetaItem({ ...READ });
-        expect(read.item?.label).toBe('env-wide');
-        expect(read.version).toBeNull();
-        // `null` is the create pin: honoured, and then refused once the row exists.
-        const created: any = await p.saveMetaItem({ ...ref, item: viewBody('org'), parentVersion: null } as any);
-        const refused = await rejection(() =>
-            p.saveMetaItem({ ...ref, item: viewBody('org again'), parentVersion: null } as any));
-        expect(refused.code).toBe('METADATA_CONFLICT');
-        expect(refused.status).toBe(409);
-        expect(refused.currentVersion).toBe(created.version);
     });
 
     it('a `previewDrafts` read publishes no `version` — it serves two lifecycles', async () => {

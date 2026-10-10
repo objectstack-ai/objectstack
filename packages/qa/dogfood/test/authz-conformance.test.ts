@@ -250,6 +250,16 @@ const PROBES: readonly Probe[] = [
     re: /shouldDenyAnonymous\s*\(/g,
     key: () => 'analytics:domains/analytics.ts:anonymous-gate',
   },
+  // #22432 — the /i18n domain gate. Same GATE-pin shape: the key exists only
+  // while `handleI18nRequest` still consults `shouldDenyAnonymous`. Delete the
+  // domain floor and the key vanishes → the covering `anonymous-deny-i18n` row
+  // goes STALE → red CI.
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/i18n.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'i18n:domains/i18n.ts:anonymous-gate',
+  },
 
   // ── a probe whose POPULATION WAS DELETED, re-declared for what it is ────
   //
@@ -973,6 +983,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       'dispatcher-domain:route-ledger.ts:/actions',
       'dispatcher-domain:route-ledger.ts:/analytics',
       'dispatcher-domain:route-ledger.ts:/automation',
+      // [#22432] classified by `anonymous-deny-i18n`.
+      'dispatcher-domain:route-ledger.ts:/i18n',
       'dispatcher-domain:route-ledger.ts:/mcp',
       'dispatcher-domain:route-ledger.ts:/meta',
       'dispatcher-domain:route-ledger.ts:/packages',

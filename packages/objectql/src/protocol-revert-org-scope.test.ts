@@ -40,6 +40,11 @@
  * asserts `code` AND `status` (ADR-0112) — a bare `rejects.toThrow()` is green
  * against an implementation that throws a naked `Error`, so it proves nothing
  * about the envelope.
+ *
+ * [ADR-0131 D6] Every protocol write is now environment-wide and an
+ * organization-scoped write request is refused (403 NOT_OVERRIDABLE), so the
+ * round trip below is driven with no organization on the write verbs; the
+ * writer/reader key agreement it pins is the env-wide one.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -218,22 +223,21 @@ describe('#7559 — the revert reads the history row under the key the writer st
     };
 
     /**
-     * The card's reproduction: two publishes of an env-wide draft, driven by a
-     * caller carrying an active org — which is every console request, since
-     * `resolveActiveOrganizationId` puts one on all of them.
+     * The card's reproduction: two publishes of an env-wide draft. [ADR-0131 D6]
+     * The publish carries no organization any more (an org-scoped one is refused).
      */
     const publishTwiceEnvWideAsOrg = async () => {
         await protocol.saveMetaItem({
             type: 'view', name: 'cases', item: viewBody('A'), packageId: PKG, mode: 'draft',
         });
         await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, message: 'publish 1',
+            packageId: PKG, message: 'publish 1',
         });
         await protocol.saveMetaItem({
             type: 'view', name: 'cases', item: viewBody('B'), packageId: PKG, mode: 'draft',
         });
         const p2 = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, message: 'publish 2',
+            packageId: PKG, message: 'publish 2',
         });
         return p2;
     };
@@ -243,7 +247,7 @@ describe('#7559 — the revert reads the history row under the key the writer st
     // everything, and asserting the restored BODY so it cannot pass by
     // reverting to the wrong version.
 
-    it('revertCommit restores the pre-commit BODY for an env-wide item when the caller has an active org', async () => {
+    it('revertCommit restores the pre-commit BODY for an env-wide item', async () => {
         const p2 = await publishTwiceEnvWideAsOrg();
         expect(p2.success).toBe(true);
         expect(p2.commitId).toBeTruthy();
@@ -251,7 +255,7 @@ describe('#7559 — the revert reads the history row under the key the writer st
         expect(await activeBody(null)).toMatchObject({ label: 'B' });
 
         const res = await protocol.revertCommit({
-            commitId: p2.commitId!, organizationId: ORG,
+            commitId: p2.commitId!,
         });
 
         expect(res.failed).toEqual([]);
@@ -284,44 +288,17 @@ describe('#7559 — the revert reads the history row under the key the writer st
         expect(Object.keys(hist[0])).not.toContain('package_id');
     });
 
-    it('rollbackMetaItem — the sibling item-level revert — restores the same env-wide item for an org caller', async () => {
+    it('rollbackMetaItem — the sibling item-level revert — restores the same env-wide item', async () => {
         await publishTwiceEnvWideAsOrg();
         expect(await activeBody(null)).toMatchObject({ label: 'B' });
 
         const res = await protocol.rollbackMetaItem({
-            type: 'view', name: 'cases', toVersion: 2, organizationId: ORG,
+            type: 'view', name: 'cases', toVersion: 2,
         });
 
         expect(res.success).toBe(true);
         expect(res.restoredFromVersion).toBe(2);
         expect(await activeBody(null)).toMatchObject({ label: 'A' });
-    });
-
-    it('an ORG-SCOPED item is still reverted in its OWN scope, not redirected env-wide', async () => {
-        // The control for the resolution's precedence: an org that has its own
-        // overlay row must keep reverting that row. Without it, "fall back to
-        // env-wide" could pass every test above while quietly hijacking the
-        // org-scoped case that already worked.
-        await protocol.saveMetaItem({
-            type: 'view', name: 'cases', item: viewBody('ORG-A'),
-            packageId: PKG, mode: 'draft', organizationId: ORG,
-        });
-        await protocol.publishPackageDrafts({ packageId: PKG, organizationId: ORG });
-        await protocol.saveMetaItem({
-            type: 'view', name: 'cases', item: viewBody('ORG-B'),
-            packageId: PKG, mode: 'draft', organizationId: ORG,
-        });
-        const p2 = await protocol.publishPackageDrafts({ packageId: PKG, organizationId: ORG });
-
-        const res = await protocol.revertCommit({
-            commitId: p2.commitId!, organizationId: ORG,
-        });
-
-        expect(res.failed).toEqual([]);
-        expect(res.success).toBe(true);
-        expect(await activeBody(ORG)).toMatchObject({ label: 'ORG-A' });
-        // Nothing was written into the env-wide scope on this org's behalf.
-        expect(await activeBody(null)).toBeNull();
     });
 
     // ── REFUSALS — `code` AND `status`, never a bare throw ────────────────
@@ -333,7 +310,7 @@ describe('#7559 — the revert reads the history row under the key the writer st
 
         await expect(
             protocol.rollbackMetaItem({
-                type: 'view', name: 'cases', toVersion: 99, organizationId: ORG,
+                type: 'view', name: 'cases', toVersion: 99,
             }),
         ).rejects.toMatchObject({ code: 'VERSION_NOT_FOUND', status: 404 });
     });
@@ -343,14 +320,14 @@ describe('#7559 — the revert reads the history row under the key the writer st
         // Hand-write a commit whose plan points at a version nobody ever wrote.
         await engine.insert('sys_metadata_commit', {
             id: 'cmt_bogus', package_id: PKG, operation: 'apply',
-            organization_id: ORG, item_count: 1,
+            organization_id: null, item_count: 1,
             items: JSON.stringify([
                 { type: 'view', name: 'cases', existedBefore: true, prevVersion: 99 },
             ]),
             created_at: '2026-08-11T00:00:00.000Z',
         });
 
-        const res = await protocol.revertCommit({ commitId: 'cmt_bogus', organizationId: ORG });
+        const res = await protocol.revertCommit({ commitId: 'cmt_bogus' });
 
         expect(res.success).toBe(false);
         expect(res.failedCount).toBe(1);
@@ -361,7 +338,7 @@ describe('#7559 — the revert reads the history row under the key the writer st
 
     it('an unknown commit id is refused with COMMIT_NOT_FOUND / 404', async () => {
         await expect(
-            protocol.revertCommit({ commitId: 'cmt_nope', organizationId: ORG }),
+            protocol.revertCommit({ commitId: 'cmt_nope' }),
         ).rejects.toMatchObject({ code: 'COMMIT_NOT_FOUND', status: 404 });
     });
 });

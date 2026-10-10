@@ -496,7 +496,7 @@ describe('[#8441] the delete-backed `failed[]` collectors are clean at their pro
             seed: [row({ type: 'view', name: 'acct_view' })],
         });
 
-        const r = await protocol.deletePackage({ packageId: PKG, allTenants: true });
+        const r = await protocol.deletePackage({ packageId: PKG });
 
         expect(r.failed).toHaveLength(1);
         expect(r.failed[0].code).toBeUndefined();

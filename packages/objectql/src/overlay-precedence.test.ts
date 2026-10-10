@@ -131,12 +131,14 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
 
     // ── allowed types: pure render-time, safe per-org override ──
     describe('allowed (allowOrgOverride: true) — must accept', () => {
+        // [ADR-0131 D6] These writes used to pass `organizationId: 'org_alpha'`;
+        // every org-scoped write is now refused (403 NOT_OVERRIDABLE), so they
+        // run environment-wide, as the runtime-creatable loop below already does.
         it('accepts view', async () => {
             const result = await protocol.saveMetaItem({
                 type: 'view',
                 name: 'case_grid',
                 item: validView,
-                organizationId: 'org_alpha',
             });
             expect(result.success).toBe(true);
         });
@@ -146,7 +148,6 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                 type: 'dashboard',
                 name: 'sales_overview',
                 item: validDashboard,
-                organizationId: 'org_alpha',
             });
             expect(result.success).toBe(true);
         });
@@ -158,7 +159,6 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                 type: 'report',
                 name: 'monthly_revenue',
                 item: validReport,
-                organizationId: 'org_alpha',
             });
             expect(result.success).toBe(true);
         });
@@ -168,7 +168,6 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                 type: 'email_template',
                 name: 'welcome',
                 item: { name: 'welcome', label: 'Welcome', subject: 'Hi', bodyHtml: '<p>Hello</p>' },
-                organizationId: 'org_alpha',
             });
             expect(result.success).toBe(true);
         });
@@ -178,7 +177,6 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                 type: 'views',
                 name: 'case_grid',
                 item: validView,
-                organizationId: 'org_alpha',
             });
             expect(result.success).toBe(true);
         });
@@ -229,7 +227,6 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                         type,
                         name: item.name,
                         item,
-                        organizationId: 'org_alpha',
                     }),
                 ).rejects.toMatchObject({
                     code: expect.stringMatching(/^(NOT_OVERRIDABLE|NOT_CREATABLE)$/),

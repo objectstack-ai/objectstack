@@ -107,13 +107,6 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
-    // The one rule for which forms a `view` body opens to anonymous intake —
-    // the same rule the anonymous form doors in `@objectstack/rest` serve by.
-    anonymousFormIntakeSlugs,
-    // A withdrawal is a kill switch: the doors' layer predicate, which the
-    // org-scoped write door asks before accepting a re-opening write.
-    anonymousFormIntakeCandidates,
-    anonymousFormIntakeWithdrawnIn,
     // [#21476] The posture IN FORCE, read off the `tenancy` service the one way
     // the anonymous form doors read it — the runtime authoring gate's input for
     // its public-form intake advisory (see `tenancyPostureInForce()`).
@@ -5080,7 +5073,6 @@ export type PublishMaterializer = (args: {
  */
 export type UninstallCleanup = (args: {
     packageId: string;
-    organizationId?: string;
     actor?: string;
 }) => Promise<{ success: boolean; removed: number; error?: string }>;
 
@@ -5123,21 +5115,13 @@ export interface UninstallCleanupOutcome {
  * not asked for. Should an external consumer ever appear, the spec declaration
  * is its own card for the spec seat, not a rider on a typing convergence.
  *
- * `organizationId` is the load-bearing member. The tenant-scope gate in
- * `deletePackage` refuses a call naming neither it nor `allTenants`
- * (`TENANT_SCOPE_REQUIRED`, 400 — #7780), so it is precisely the key whose
- * presence decides an uninstall's blast radius, and it was the key the REST
- * seam's own type had no word for.
+ * [ADR-0131 D6/D12] No organization member: an uninstall is environment-wide
+ * by construction. The `organizationId` and `allTenants` keys that once chose
+ * its blast radius (#7780) are retired, and `deletePackage` refuses a request
+ * still carrying either (`INVALID_REQUEST`, 400).
  */
 export interface DeletePackageRequest {
     packageId: string;
-    /**
-     * Scope the uninstall to ONE organization's rows (#7705). Omitted together
-     * with `allTenants` ⇒ refused, never inferred as "every tenant" (#7780).
-     */
-    organizationId?: string;
-    /** DECLARE a cross-tenant uninstall. Never deduced from an absent org (#7780). */
-    allTenants?: boolean;
     actor?: string;
     /** Remove the metadata but PRESERVE each object's physical table. */
     keepData?: boolean;
@@ -5408,7 +5392,12 @@ export type MetadataAuthoringChannel = 'environment' | 'package-author';
 interface MetadataAuditEntry {
     type: string;
     name: string;
-    organizationId?: string | null;
+    /**
+     * [ADR-0131 D6/D7] Always environment-wide: the audit ledger is
+     * deployment-level, and no metadata write is organization-scoped any more.
+     * Typed `null` so an organization cannot be recorded by accident.
+     */
+    organizationId?: null;
     operation: 'save' | 'publish' | 'rollback' | 'delete' | 'reset';
     outcome: 'allowed' | 'denied' | 'forced';
     code: string;
@@ -5876,7 +5865,7 @@ export class ObjectStackProtocolImplementation implements
      * that door before this existed: the package's object answered 404 after a
      * restart while its `managed_by: package` `sys_permission_set` row and its
      * user grant survived. `deletePackage` itself does not fit that door: it
-     * refuses without a tenant scope, answers `success: false` when it deletes
+     * answers `success: false` when it deletes
      * no `sys_metadata` row, and withdraws the package from the running
      * registry, which that door never did.
      *
@@ -5887,14 +5876,13 @@ export class ObjectStackProtocolImplementation implements
      * does — and never swallows it.
      */
     async runUninstallCleanups(
-        request: Pick<DeletePackageRequest, 'packageId' | 'organizationId' | 'actor'>,
+        request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
     ): Promise<UninstallCleanupOutcome[]> {
         const cleanups: UninstallCleanupOutcome[] = [];
         for (const [name, cleanup] of this.uninstallCleanups) {
             try {
                 const r = await cleanup({
                     packageId: request.packageId,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 cleanups.push({
@@ -6935,12 +6923,17 @@ export class ObjectStackProtocolImplementation implements
      */
     private async applyRemoteMetadataMutation(evt: MetadataMutationEvent): Promise<void> {
         const type = canonicalMetaType(evt.type);
-        const orgId = evt.organizationId ?? null;
+        // [ADR-0131 D6] The registry reflects the ENVIRONMENT row, whatever
+        // organization the event names: no write lands organization-scoped
+        // any more, and an organization-scoped row never entered the shared
+        // registry (#6602). So an event a peer stamped with an organization
+        // converges on the environment row — the state the registry holds.
+        const orgId = null;
         const repo = this.getOverlayRepo(orgId);
         const ref = {
             type,
             name: evt.name,
-            org: orgId ?? 'env',
+            org: 'env',
         } as Parameters<typeof repo.get>[0];
         const current = await repo.get(ref, { state: 'active' });
         if (current) {
@@ -7074,171 +7067,6 @@ export class ObjectStackProtocolImplementation implements
             this.overlayRepos.set(key, repo);
         }
         return repo;
-    }
-
-    /**
-     * [#7559] ADR-0005 / #3115 — resolve the org scope an item's lineage
-     * ACTUALLY lives in, for a caller whose active org may not be that scope.
-     *
-     * This is the read-side half of the rule {@link SysMetadataRepository.listDrafts}
-     * states on the write side: a non-null-org caller sees BOTH its own overlay
-     * rows and the env-wide (`organization_id IS NULL`) ones, "so consumers that
-     * then act on a draft MUST route the write to THIS scope, not the caller's
-     * active org, or they 404 on the env-wide row they can never match".
-     * {@link publishPackageDrafts} learned it — it promotes each draft through
-     * `getOverlayRepo(d.organizationId)` and captures `prevVersion` from the
-     * row in the draft's OWN scope. The two revert callers did not, and read
-     * back under `getOverlayRepo(request.organizationId)` instead.
-     *
-     * Measured on `origin/main` (#7559): an env-wide `view` published twice from
-     * a console request carrying an active org lands its `sys_metadata` and
-     * `sys_metadata_history` rows at `organization_id = NULL` while the commit
-     * records `prevVersion: 2`; `revertCommit` with that same active org then
-     * asks `sys_metadata_history` for `(organization_id='org_x', version=2)`,
-     * matches nothing, and answers `VERSION_NOT_FOUND: No history row at
-     * version 2` — over a row `GET …/history` lists. Same input with no active
-     * org succeeds, and an org-scoped item reverted by its own org succeeds:
-     * the disagreement is `organization_id` alone.
-     *
-     * NOT the `package_id` scoping #6215 fixed — that one is a step later, in
-     * {@link SysMetadataRepository.restoreVersion}'s `put()` parent lookup, and
-     * is intact and uninvolved here (the history table carries no `package_id`
-     * column at all).
-     *
-     * Precedence is the ADR-0005 overlay order — the caller's own org shadows
-     * env-wide — so an org that has its own overlay row reverts THAT row, and
-     * only an org with no overlay of its own falls through to the env-wide
-     * lineage it was already publishing into. When neither scope has a lineage
-     * the caller's own scope is returned unchanged, so a genuinely absent item
-     * still fails in the scope the caller asked about.
-     *
-     * Deliberately NO `catch`: a driver failure here must fail the revert, not
-     * resolve to a scope nobody verified (AGENTS.md read-seam invention rule).
-     */
-    private async resolveMetaItemOrgScope(
-        singularType: string,
-        name: string,
-        requestOrgId: string | null,
-    ): Promise<string | null> {
-        if (requestOrgId === null) return null;
-        // [#21908, ADR-0096 D5] The explicit system opt-in on both probes: a
-        // platform store read the door that asked already authorized, scoped by
-        // the protocol itself (`organization_id` in each `where`). Principal-
-        // less, the engine refuses it.
-        const inOrg = await this.engine.findOne('sys_metadata_history', {
-            where: { organization_id: requestOrgId, type: singularType, name },
-            context: { isSystem: true },
-        });
-        if (inOrg) return requestOrgId;
-        const inEnv = await this.engine.findOne('sys_metadata_history', {
-            where: { organization_id: null, type: singularType, name },
-            context: { isSystem: true },
-        });
-        return inEnv ? null : requestOrgId;
-    }
-
-    /**
-     * [#10219] ADR-0005 / #3115 — resolve the org scope the PENDING DRAFT of an
-     * item actually lives in, for a per-item publish whose caller may not be in
-     * that scope.
-     *
-     * This is the single-item twin of the rule `publishPackageDrafts` already
-     * follows. The batch door DISCOVERS each draft's scope (`listDrafts`
-     * surfaces a non-null-org caller's own rows AND the env-wide ones via its
-     * `$or`, and the promote targets `d.organizationId`); the per-item door
-     * DEDUCED one instead, from `organizationIdForMetaWrite(type, activeOrg)` at
-     * the REST seam. The two answers differ for exactly the types the registry
-     * declares `allowOrgOverride: true` (`view`, `dashboard`, `report`,
-     * `translation`, `email_template`): a draft authored env-wide — which is
-     * what package/AI authoring writes, and what `PUT ?mode=draft` writes when no
-     * active org is threaded — is looked up under `organization_id = <org>`,
-     * matches nothing, and answers `404 NO_DRAFT` — `… nothing to publish` — over a
-     * row the console's own pending-changes list is showing. Measured on a cloud
-     * rig: four AI-authored `view` drafts, visible in `sys_metadata` at
-     * `state='draft'`, all four refused by the per-item door while the batch
-     * "publish 4 changes" button promoted them.
-     *
-     * Non-org-overridable types (`object`, `flow`, …) never reached this at all:
-     * `organizationIdForMetaWrite` already answers `undefined` for them, which is
-     * why per-item publish worked for objects and flows and failed for views.
-     *
-     * Precedence is the ADR-0005 overlay order — the caller's own org shadows
-     * env-wide — so an org holding its own draft publishes THAT draft, and only
-     * an org with no draft of its own falls through to the env-wide row it was
-     * already authoring into. When NEITHER scope holds a draft the caller's own
-     * scope is returned unchanged, so a genuinely absent draft still raises the
-     * same `NO_DRAFT` refusal, from the scope the caller asked about.
-     *
-     * [commit c74aefe63] `packageId` — the ADR-0048 package dimension, threaded into BOTH
-     * probes exactly as {@link promoteDraftForPublish} threads it into
-     * `repo.promoteDraft`: stated (string, or `null` pinning the unbound row),
-     * each probe adds `package_id` to its `where`, so the scope probes ask the
-     * promote's question and the ADR-0005 precedence above is applied WITHIN
-     * the stated package's rows. `undefined` (caller stated no package) keeps
-     * the historical package-agnostic probes — the promote is then
-     * package-agnostic too, so the two questions still agree.
-     *
-     * Maintainer ruling 2026-08-22 (option A — recorded in commit c74aefe63):
-     * a package-stating publish resolves the scope of the draft it NAMED.
-     * Without the dimension, probe 1 could match ANOTHER package's row in the
-     * caller's org, name a scope the package-exact promote then finds empty,
-     * and answer `404 NO_DRAFT` over a publishable draft sitting env-wide.
-     * Accepted cost, on the record: a caller stating a package no longer
-     * discovers a no-package draft of the same `(type, name)` — it 404s and the
-     * caller retries without `?package=`; that narrowing is the ruling, not a
-     * side effect. A package-first probe FALLING BACK to package-agnostic was
-     * rejected by name (it reintroduces the two-question resolution #8907
-     * removed, and a mistyped package would silently publish another package's
-     * draft instead of failing loudly).
-     *
-     * ⛔ This is discovery, not a tolerant fallback: it names the one row the
-     * promote will then address, and it reads DRAFT rows in `sys_metadata` (the
-     * thing being promoted) rather than the history lineage
-     * {@link resolveMetaItemOrgScope} reads — a first-ever draft of a
-     * never-published item has no lineage to resolve.
-     *
-     * Deliberately NO `catch`, for the same reason as its read-side sibling: a
-     * driver failure must fail the publish, not resolve to a scope nobody
-     * verified.
-     */
-    private async resolveDraftOrgScopeForPublish(
-        singularType: string,
-        name: string,
-        requestOrgId: string | null,
-        packageId?: string | null,
-    ): Promise<string | null> {
-        if (requestOrgId === null) return null;
-        // These reads must ask the same question `promoteDraft` will (see
-        // `SysMetadataRepository.whereFor`), because their whole job is to name
-        // the scope the promote then addresses. A probe NARROWER than the
-        // promote hides a draft the promote can see; a probe WIDER names a
-        // scope it cannot.
-        //
-        // [commit c74aefe63] That rule is what threads the package dimension in: since
-        // commit 9e04c3e35 the per-item door names a package whenever its HTTP caller
-        // does (`?package=PKG_ID`), and the promote's `whereFor` then
-        // constrains `package_id` — so a package-agnostic probe here was the
-        // WIDER shape, naming a scope off another package's row (ADR-0048 keys
-        // overlay rows by `(org, type, name, package_id)`, so two packages'
-        // same-name drafts coexist in different scopes). `undefined` spreads
-        // NOTHING — the caller stated no package, the promote matches any
-        // package, and these probes keep asking that same question. See the
-        // docblock above for the ruling commit c74aefe63 records and its accepted narrowing.
-        const packageDim = packageId !== undefined ? { package_id: packageId } : {};
-        // [#21908, ADR-0096 D5] The explicit system opt-in on both probes: a
-        // platform store read the door that asked already authorized, scoped by
-        // the protocol itself (`organization_id` in each `where`). Principal-
-        // less, the engine refuses it.
-        const inOrg = await this.engine.findOne('sys_metadata', {
-            where: { organization_id: requestOrgId, type: singularType, name, state: 'draft', ...packageDim },
-            context: { isSystem: true },
-        });
-        if (inOrg) return requestOrgId;
-        const inEnv = await this.engine.findOne('sys_metadata', {
-            where: { organization_id: null, type: singularType, name, state: 'draft', ...packageDim },
-            context: { isSystem: true },
-        });
-        return inEnv ? null : requestOrgId;
     }
 
     /**
@@ -8914,8 +8742,8 @@ export class ObjectStackProtocolImplementation implements
         // ── [commit 96326040f] The registry read gate, resolved ONCE, HERE ──────────────────
         //
         // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
-        // read doors have applied since #9454, twin of the write side's
-        // `organizationIdForMetaWrite` (#6190 / #7018). Until this line
+        // read doors applied from #9454 until the doors stopped carrying an
+        // organization at all (ADR-0131 D6). Until this line
         // `getMetaItems` applied NO gate of its own: whatever organization
         // arrived was used for whatever type arrived, so the scope of a
         // metadata sweep was decided per type, BY THE CALLER — and a request
@@ -10056,9 +9884,8 @@ export class ObjectStackProtocolImplementation implements
         let item: unknown;
         // ── [commit d5cbb44f3] The registry read gate, resolved ONCE, HERE ────────────────────
         //
-        // {@link organizationIdForMetaRead} — the read-side twin of
-        // `organizationIdForMetaWrite` (#6190 / #7018), which the REST `/meta`
-        // read doors have applied since #9454 and which commit 96326040f moved INSIDE the
+        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
+        // read doors applied from #9454, and which commit 96326040f moved INSIDE the
         // plural verb, `getMetaItems` above. Until this line the SINGULAR verb
         // applied no gate of its own: whatever organization arrived was spent on
         // whatever type arrived.
@@ -10128,19 +9955,12 @@ export class ObjectStackProtocolImplementation implements
         //  • That door's CACHED arm reaches here through `getMetaItemCached`,
         //    which folds first and forwards the same hoisted `readOrganizationId`
         //    — the same no-op, one hop later.
-        //  • `organizationIdForMetaWrite` has the identical body, so the
-        //    write-side pre-reads (`saveMetaItem`'s destructive-change probe,
-        //    `publishMetaItem`'s seed-loader adapter, `publishPackageDrafts`'
-        //    build probes) now read the partition their write LANDS in. Read
-        //    scope and write scope cannot disagree — the property #9454 chose
-        //    this predicate for. ⚠️ True BY DEFAULT, and deliberately not under
-        //    the operator hatch: {@link orgScopedWriteRefusal} returns early
-        //    when `isOverlayAllowed` is satisfied via `OS_METADATA_WRITABLE`,
-        //    so a non-overridable type CAN still land an org-scoped write while
-        //    this read resolves env-wide. That divergence is the hatch's own
-        //    stated contract — its refusal message says it "unlocks the write,
-        //    not the read" — and the row it admits is exactly the kind boot
-        //    hydration walks past.
+        //  • [ADR-0131 D6] Every write lands environment-wide (an
+        //    organization-scoped one is refused, {@link
+        //    organizationScopedWriteRefusal}), and the write-side pre-reads
+        //    (`saveMetaItem`'s destructive-change probe, `publishMetaItem`'s
+        //    seed-loader adapter, `publishPackageDrafts`' build probes) carry
+        //    no organization, so they read the partition their write LANDS in.
         //
         // ⇒ What is left to move is the runtime callers that hand this method a
         // RAW active organization. THREE, all in one file — the population is
@@ -10700,8 +10520,7 @@ export class ObjectStackProtocolImplementation implements
         // ── [commit e1d4f9e3f] The registry read gate, resolved AFTER the fold ─────────
         //
         // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
-        // read doors have applied since #9454, twin of the write side's
-        // `organizationIdForMetaWrite` (#6190 / #7018) and the same gate
+        // read doors applied from #9454, and the same gate
         // `getMetaItems` (commit 96326040f) and `getMetaItem` (commit d5cbb44f3) now carry. Until
         // this line `getMetaItemLayered` — the third `/meta` read verb —
         // applied NO gate of its own: whatever organization arrived was spent
@@ -11556,9 +11375,9 @@ export class ObjectStackProtocolImplementation implements
      *   Studio-authored `object` COULD legitimately exist as a per-org row,
      *   invisible to boot hydration, and this gate's fail-closed answer meant
      *   404 for every record in a table that still held the data. The premise
-     *   is now true by enforcement: {@link orgScopedWriteRefusal} refuses an
-     *   org-scoped write of any type the registry declares non-org-overridable,
-     *   on both minting paths, so the only org-scoped `object` rows that can
+     *   is now true by enforcement: {@link organizationScopedWriteRefusal}
+     *   refuses an org-scoped write of every type (ADR-0131 D6), on every
+     *   minting path, so the only org-scoped `object` rows that can
      *   exist are residue written before that gate (#6190's ruling 2 = A:
      *   handled non-destructively — made audible by
      *   {@link reportUnhydratableOrgScopedRows} and disposed of operationally,
@@ -16157,294 +15976,75 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#6190] The org-scope half of the same family: a write that would stamp
-     * `sys_metadata.organization_id` on a type the registry declares has NO
-     * per-org channel. Returns the refusal, or `null` when the write is fine.
+     * [ADR-0131 D6/D7] The protocol refuses EVERY organization-scoped
+     * metadata write. Returns the refusal, or `null` when the request names no
+     * organization.
      *
-     * ## Why a write-time refusal and not a read-time repair
+     * Environment metadata — whatever Studio, the cloud build agent or an
+     * install writes — belongs to the whole deployment, so `sys_metadata` has
+     * no per-organization partition left to write into: the ADR-0005
+     * per-organization overlay axis is retired (ADR-0131 D6), and with it the
+     * five-type exemption this gate used to grant (`allowOrgOverride: true` —
+     * `view`, `dashboard`, `report`, `translation`, `email_template` — and the
+     * `OS_METADATA_WRITABLE` hatch, which unlocked org scoping exactly as it
+     * unlocked the overlay). The `/meta` doors already carry no organization
+     * into a write; this is the protocol's own refusal, so every other door
+     * (the `/packages` verbs, the stored-row migrations, a plugin) answers
+     * the same.
      *
-     * `allowOrgOverride` and `allowRuntimeCreate` are orthogonal tiers (see
-     * {@link isRuntimeCreateAllowed}), and the runtime-create tier never
-     * consulted the ORG dimension: `SysMetadataRepository.put` stamps
-     * `organization_id: this.organizationId` whatever the type is, so a
-     * Studio-authored item of an `allowOrgOverride: false` type persisted a
-     * per-org row that the platform can never read back. Cold boot
-     * (`loadMetaFromDb`, `organization_id: null`) walks past it and the
-     * env-wide consumers never ask for it — the write path was strictly more
-     * permissive than the read path, which is the false-compliance shape
-     * ADR-0049 forbids. Measured consequences, both silent before this gate:
+     * One gate for every write verb — `saveMetaItem` (draft and publish),
+     * `publishMetaItem`, `deleteMetaItem`, `rollbackMetaItem`, the commit
+     * reverts and every package verb — asked FIRST, before any read, so
+     * "refused, not refused after writing" holds on each. A legacy
+     * organization-scoped row is not rewritten here or anywhere else in this
+     * file: the promotion ceremony (ADR-0131 C7) carries those rows to the
+     * environment layer.
      *
-     *  - `flow` — the row binds its triggers for the life of the process that
-     *    wrote it and stops firing after the next restart, with no log line
-     *    (#6190's original report; the cold-boot warn that made the residue
-     *    audible shipped separately, see
-     *    {@link reportUnhydratableOrgScopedRows}).
-     *  - `object` — worse, and fails CLOSED: the object is absent from the
-     *    registry after boot while its physical table still holds the data, so
-     *    {@link assertObjectRegistered} answers 404 `OBJECT_NOT_FOUND` for
-     *    every record in it.
-     *
-     * Maintainer ruling 2026-08-08 on #6190 (option A of three): refuse the
-     * write. Option B — silently coercing the row to env-wide — was rejected
-     * because it rewrites the tenancy statement the author made; option D —
-     * the log alone — leaves declared ≠ enforced.
-     *
-     * ## Shape decisions
-     *
-     *  - **Registry-derived, never a hand-written type list** (Prime Directive
-     *    #8): the predicate is {@link isOverlayAllowed} — the same one the
-     *    sibling refusal below it uses, over the same derived
-     *    {@link OVERLAY_ALLOWED_TYPES} set. A type that gains
-     *    `allowOrgOverride: true` tomorrow is admitted here the same day, with
-     *    nothing to keep in sync.
-     *  - **The operator hatch stays ONE door.** Because the predicate is
-     *    `isOverlayAllowed`, `OS_METADATA_WRITABLE` unlocks org scoping exactly
-     *    as it unlocks the overlay — which is what this file already promises a
-     *    few lines down ("unlocking a type there unlocks it here too") and what
-     *    the ruling asked for by naming this the *sibling* of the
-     *    `NOT_OVERRIDABLE` refusal. Two differently-keyed notions of
-     *    "overridable" inside one method would be the drift, not the safety.
-     *
-     *    The DIAGNOSTIC is deliberately wider than the refusal:
-     *    {@link reportUnhydratableOrgScopedRows} ignores the hatch and reports
-     *    an org-scoped row of any non-org-overridable type, because the hatch
-     *    unlocks the write and cannot teach `loadMetaFromDb` to read the row
-     *    back. So an operator who deliberately opens the door still gets told,
-     *    at every boot, that what they wrote did not survive it. Warning is
-     *    free and should be maximal; refusing removes a capability, and the
-     *    declaration — including its documented override — decides that.
-     *  - **Statically-declared types only.** A type with no entry in
-     *    `DEFAULT_METADATA_TYPE_REGISTRY` is plugin-registered at runtime, and
-     *    both existing gates ({@link isRuntimeCreateAllowed} here,
-     *    `assertAllowed` in the repository) treat that family as permissive by
-     *    construction — `getMetaTypes()` synthesises `allowRuntimeCreate: true`
-     *    for it. Refusing those here would extend a ruling measured over the
-     *    registry to a surface nobody measured, so they keep today's behaviour.
-     *    Their org rows are skipped by cold boot too; that gap is stated in the
-     *    PR rather than silently widened here.
-     *  - **`NOT_OVERRIDABLE`, not a new code.** The condition IS "this type has
-     *    no per-org override channel", the sentence `NOT_OVERRIDABLE` already
-     *    carries, and the code vocabulary is a closed set owned by
-     *    `packages/spec`'s ledger (ADR-0112 D3) — a cross-package edit this
-     *    card is not authorised to make. The message carries the distinction.
-     *
-     * Pinned by `protocol.org-scoped-write-refused.test.ts`.
+     * `NOT_OVERRIDABLE` / 403, the code this refusal has always carried: the
+     * condition is still "this item has no per-organization channel", now for
+     * every type. The first sentence names the tenancy posture in force,
+     * because the posture is what a reader suspects first — and none of the
+     * three (`single`, `group`, `isolated`) opens the channel.
      */
-    private static orgScopedWriteRefusal(
-        type: string,
-        name: string,
-        organizationId: string | null | undefined,
+    private static organizationScopedWriteRefusal(
+        subject: string,
+        organizationId: unknown,
+        remedy = 'Retry with no organization: the write then lands environment-wide, where every organization reads it.',
     ): Error | null {
-        if (!organizationId) return null;
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (this.isOverlayAllowed(type)) return null;
-        if (!this.STATIC_REGISTRY_TYPES.has(singular) && !this.STATIC_REGISTRY_TYPES.has(type)) return null;
+        if (organizationId === undefined || organizationId === null || organizationId === '') return null;
+        let posture: string;
+        try {
+            posture = `the '${resolveTenancyPosture()}' tenancy posture`;
+        } catch {
+            posture = 'an unrecognized tenancy posture';
+        }
         const err: any = new Error(
-            `Metadata item '${type}/${name}' cannot be written org-scoped `
-            + `(organization '${organizationId}'). `
-            + `The metadata-type registry declares allowOrgOverride=false for '${singular}', so the platform has `
-            + `no per-org channel for it: boot hydration loads env-wide rows only, so this row would be absent `
-            + `from the registry after the next restart — a '${singular}' that answered today would stop `
-            + `(an 'object' answers 404 OBJECT_NOT_FOUND for every record in its still-populated table, a 'flow' `
-            + `silently stops firing). Save it env-wide instead (retry with no active organization), or ship the `
-            + `per-org variant as its own deployment (ADR-0005: "Per-org variants are a deployment, not an `
-            + `overlay"). An operator may set OS_METADATA_WRITABLE=${singular} to grant a runtime escape hatch, `
-            + `but note the row still will not survive a restart — the hatch unlocks the write, not the read, `
-            + `and boot logs every such row it walks past. `
-            + `See docs/adr/0005-metadata-customization-overlay.md.`
+            `${subject} cannot be written organization-scoped (organization '${String(organizationId)}'): `
+            + `under ${posture}, as under every posture, environment metadata belongs to the whole deployment `
+            + `and no organization holds its own copy (ADR-0131 D6). `
+            + `${remedy} `
+            + `A row stored organization-scoped before this release stays where it is until the promotion ceremony `
+            + `(ADR-0131 C7) carries it to the environment layer. `
+            + `See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.`
         );
         err.code = 'NOT_OVERRIDABLE';
         err.status = 403;
         err.organizationId = organizationId;
-        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        err.docs = 'docs/adr/0131-total-organization-ownership-no-null-organization-id.md';
         return err;
     }
 
-    /**
-     * An organization-scoped `view` write that changes which public forms
-     * accept anonymous intake, on a deployment whose anonymous form doors do
-     * not read that organization. Returns the refusal, or `null` when the
-     * write is fine.
-     *
-     * An anonymous form request carries no session and so no organization.
-     * The doors resolve the form in `tenancy.defaultOrgId()`'s organization
-     * (`registerFormEndpoints` in `@objectstack/rest`). Where that is not the
-     * write's organization (every walled posture, degraded or not, answers
-     * `null`), the doors read the env-wide definition, so the write is refused
-     * and the author is pointed at the env-wide save, which every door
-     * honours. A composition with no tenancy service has no posture to judge
-     * (and no session to carry an organization over HTTP), so it is left as is.
-     *
-     * Judged on the anonymous slug set alone ({@link anonymousFormIntakeSlugs}):
-     * an organization-scoped edit that leaves it as the env-wide definition has
-     * it is unaffected. Same code and status as {@link orgScopedWriteRefusal}:
-     * this item's anonymous intake has no per-org channel on this deployment.
-     */
-    private async anonymousFormIntakeOrgScopeRefusal(args: {
-        type: string;
-        name: string;
-        organizationId: string | null | undefined;
-        body: unknown;
-        /** The package binding the row is saved under (a container's expansion is placed by it). */
-        packageId?: string | null;
-    }): Promise<Error | null> {
-        if (!args.organizationId) return null;
-        const singular = PLURAL_TO_SINGULAR[args.type] ?? args.type;
-        if (singular !== 'view') return null;
-        const tenancy = this.getServicesRegistry?.().get('tenancy') as
-            | { defaultOrgId?: () => Promise<string | null> }
-            | undefined;
-        if (typeof tenancy?.defaultOrgId !== 'function') return null;
-        const doorOrganization = await tenancy.defaultOrgId();
-        if (doorOrganization === args.organizationId) {
-            return this.anonymousFormIntakeReopenRefusal({ ...args, type: singular, organizationId: args.organizationId });
-        }
-        const proposed = anonymousFormIntakeSlugs(args.body);
-        const served = anonymousFormIntakeSlugs(
-            ((await this.getMetaItem({ type: singular, name: args.name })) as any)?.item,
-        );
-        if (proposed.length === served.length && proposed.every((s, i) => s === served[i])) return null;
-        const list = (slugs: string[]) => (slugs.length ? slugs.map((s) => `'${s}'`).join(', ') : 'none');
-        const err: any = new Error(
-            `Metadata item 'view/${args.name}' cannot change which public forms accept anonymous intake `
-            + `in organization '${args.organizationId}' (env-wide: ${list(served)}; this write: ${list(proposed)}). `
-            + `An anonymous form request carries no organization, and this deployment resolves `
-            + (doorOrganization
-                ? `it in organization '${doorOrganization}'`
-                : `none for it (a walled tenancy posture never guesses one)`)
-            + `, so the anonymous form doors serve the env-wide definition and would never see this change. `
-            + `Save it env-wide instead (retry with no active organization): that withdraws or publishes the form `
-            + `on every anonymous door. An organization-scoped edit that leaves the form's sharing as the env-wide `
-            + `definition has it is still accepted. See docs/adr/0005-metadata-customization-overlay.md.`
-        );
-        err.code = 'NOT_OVERRIDABLE';
-        err.status = 403;
-        err.organizationId = args.organizationId;
-        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
-        return err;
+    /** The request's `organizationId`, read off whatever the caller sent — the key is retired from every write verb's declared request, so a caller still sending it is untyped by construction. */
+    private static requestedOrganization(request: unknown): unknown {
+        return request && typeof request === 'object'
+            ? (request as { organizationId?: unknown }).organizationId
+            : undefined;
     }
 
-    /**
-     * An organization-scoped `view` write, in the organization the anonymous
-     * form doors read, that would leave open a public form the env-wide layer
-     * withdrew. Returns the refusal, or `null` when the write is fine.
-     *
-     * A withdrawal is a kill switch: an explicit withdrawal of a public form
-     * (the same view, the same slot, the link kept with `enabled` or
-     * `allowAnonymous` cleared) at any layer closes it, and layering may only
-     * narrow intake, never re-open it. The doors enforce that at read time
-     * (`registerFormEndpoints` in `@objectstack/rest` reads the env-wide layer
-     * beneath the organization's and lets its withdrawal close the form), so
-     * such a write would be accepted and then never honoured. It is refused
-     * instead, and the author is pointed at the env-wide definition, which is
-     * the switch.
-     *
-     * Judged by the doors' own verdict ({@link anonymousFormIntakeWithdrawnIn})
-     * over the env-wide `view` list, for every form this write would leave
-     * open — whether or not the organization's current definition has it open
-     * already, so re-saving an overlay that was open before the env-wide
-     * withdrawal is refused too. The body is judged as the list read serves
-     * it: a container-shaped body (`formViews`, `form`, …) is expanded into
-     * the view items the doors read ({@link expandRuntimeViewContainer}). An
-     * organization-scoped save that keeps the form withdrawn, or that opens
-     * nothing the env-wide layer withdrew, is never refused here.
-     */
-    private async anonymousFormIntakeReopenRefusal(args: {
-        type: string;
-        name: string;
-        organizationId: string;
-        body: unknown;
-        packageId?: string | null;
-    }): Promise<Error | null> {
-        if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) return null;
-        const raw = args.body as Record<string, unknown>;
-        // The name stamp the container-collision judge applies (a body with no
-        // `name` is a container under the save name); a view item is the save
-        // name's own row.
-        const stamped = raw.name ? raw : { ...raw, name: args.name };
-        const served: unknown[] = isAggregatedViewContainer(stamped)
-            ? this.expandRuntimeViewContainer(args.type, stamped, { packageId: args.packageId ?? undefined })
-            : [{ ...raw, name: args.name }];
-        const open = served.flatMap((view) => anonymousFormIntakeCandidates(view).map((c) => ({ view, c })));
-        if (open.length === 0) return null;
-        const envWide: any = await this.getMetaItems({ type: args.type });
-        const layer: unknown[] = Array.isArray(envWide?.items) ? envWide.items : [];
-        const closed = new Set(
-            open.filter(({ view, c }) => anonymousFormIntakeWithdrawnIn(layer, view, c)).map(({ c }) => c.slug),
-        );
-        // The same judgement anchored on the stored ROW this overlay is keyed
-        // by: the env-wide body of row `name`, as stored (a container is not
-        // expanded, so a form moved to another key or slot, renamed through
-        // `form.name`, or renamed by an expansion collision is still matched
-        // against the form it was, by slot or by slug). [#21934] One body per
-        // package that holds the name ({@link envWideRawViewRows}), so every
-        // package's withdrawal of it is judged, whatever the registry order.
-        const envRows = (await this.envWideRawViewRows(args.type, args.name)).map((r) => ({ ...r, name: args.name }));
-        if (envRows.length > 0) {
-            const own = { ...raw, name: args.name };
-            for (const c of anonymousFormIntakeCandidates(own)) {
-                if (anonymousFormIntakeWithdrawnIn(envRows, own, c)) closed.add(c.slug);
-            }
-        }
-        const reopened = [...closed].sort();
-        if (reopened.length === 0) return null;
-        const list = reopened.map((s) => `'/forms/${s}'`).join(', ');
-        const err: any = new Error(
-            `Metadata item 'view/${args.name}' cannot keep public form ${list} open for anonymous intake `
-            + `in organization '${args.organizationId}': the env-wide definition withdraws it. A withdrawal is `
-            + `a kill switch, so an organization overlay may narrow a public form's intake but never re-open it, `
-            + `and the anonymous form doors keep answering it as not found. Save this overlay with the form's `
-            + `sharing withdrawn (enabled or allowAnonymous false), or, to publish the form again, save it `
-            + `env-wide (retry with no active organization) with sharing enabled and anonymous access allowed. `
-            + `See docs/adr/0005-metadata-customization-overlay.md.`
-        );
-        err.code = 'NOT_OVERRIDABLE';
-        err.status = 403;
-        // The sentence an end user is shown (the producer-declared channel).
-        err.userMessage = `This public form was withdrawn for the whole environment, so it cannot be open `
-            + `for one organization. Publish it again from the environment-wide form definition.`;
-        err.organizationId = args.organizationId;
-        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
-        return err;
-    }
-
-    /**
-     * The env-wide bodies of the `view` row `name`, as stored, for every
-     * package that holds the name. [#21934] Resolved per package, the way the
-     * list read resolves each package's item (ADR-0048): the package's own
-     * active env-wide `sys_metadata` row (the env-wide overlay is keyed by its
-     * own name, ADR-0005), else the package-less env-wide row, which stands in
-     * for every package's row of the name, else that package's artifact of
-     * the name. So a stored row of one package anchors that package only, and
-     * every package that ships the name is judged on its own definition,
-     * whatever the registry order. Empty when no package holds the name.
-     *
-     * Read raw, never through the list read: that serves a container only as
-     * its expansion, whose item names and slots the overlay author chooses,
-     * and the kill switch anchors identity on the row instead.
-     */
-    private async envWideRawViewRows(type: string, name: string): Promise<Record<string, unknown>[]> {
-        let records: any[] = [];
-        try {
-            records = await this.readActiveOverlayRows({ type }, undefined);
-        } catch (error) {
-            // [#5532] Only an unprovisioned store means "no rows".
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        const stored = this.storedOverlayEntries({ type }, records)
-            .filter((e) => e.name === name && e.organizationId === null)
-            .filter((e) => !!e.data && typeof e.data === 'object' && !Array.isArray(e.data));
-        const bodies = stored.map((e) => e.data as Record<string, unknown>);
-        const withOwnRow = new Set(stored.map((e) => e.packageId));
-        // The package-less row stands in for every package without a row of its own.
-        if (withOwnRow.has(undefined)) return bodies;
-        for (const artifact of this.shippedArtifactsOf(type, name)) {
-            if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) continue;
-            const pkg = (artifact as { _packageId?: unknown })._packageId;
-            if (typeof pkg === 'string' && withOwnRow.has(pkg)) continue;
-            bodies.push(artifact as Record<string, unknown>);
-        }
-        return bodies;
+    /** Throw {@link organizationScopedWriteRefusal} for an organization-scoped write request. */
+    private static refuseOrganizationScopedWrite(subject: string, request: unknown): void {
+        const refusal = this.organizationScopedWriteRefusal(subject, this.requestedOrganization(request));
+        if (refusal) throw refusal;
     }
 
     /**
@@ -17881,7 +17481,7 @@ export class ObjectStackProtocolImplementation implements
                 // canonical, and a fold here would make the assert unfalsifiable.
                 type: entry.type,
                 name: entry.name,
-                organization_id: entry.organizationId ?? null,
+                organization_id: null,
                 operation: entry.operation,
                 outcome: entry.outcome,
                 code: entry.code,
@@ -17940,7 +17540,6 @@ export class ObjectStackProtocolImplementation implements
     private async lockWriteRefusal(args: {
         type: string;
         name: string;
-        organizationId?: string;
         /**
          * [#21761] The package the write names (ADR-0048 `?package=`), part of
          * the item's address the gate selects the rows in scope from. It never
@@ -17953,7 +17552,7 @@ export class ObjectStackProtocolImplementation implements
         source?: string;
         requestId?: string;
     }): Promise<{ err: Error; audit: MetadataAuditEntry } | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null, args.packageId);
+        const state = await this.getEffectiveLock(args.type, args.name, null, args.packageId);
         const refusal = evaluateLockForWrite(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -17970,7 +17569,7 @@ export class ObjectStackProtocolImplementation implements
             audit: {
                 type: args.type,
                 name: args.name,
-                organizationId: args.organizationId ?? null,
+                organizationId: null,
                 operation: args.operation,
                 outcome: 'denied',
                 // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -17999,7 +17598,6 @@ export class ObjectStackProtocolImplementation implements
     private async assertLockAllowsWrite(args: {
         type: string;
         name: string;
-        organizationId?: string;
         /** [#21761] See {@link lockWriteRefusal}. */
         packageId?: string;
         operation: 'save' | 'publish' | 'rollback';
@@ -18020,12 +17618,11 @@ export class ObjectStackProtocolImplementation implements
     private async assertLockAllowsDelete(args: {
         type: string;
         name: string;
-        organizationId?: string;
         actor?: string;
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null);
+        const state = await this.getEffectiveLock(args.type, args.name, null);
         const refusal = evaluateLockForDelete(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -18040,7 +17637,7 @@ export class ObjectStackProtocolImplementation implements
         await this.recordMetadataAudit({
             type: args.type,
             name: args.name,
-            organizationId: args.organizationId ?? null,
+            organizationId: null,
             operation: 'delete',
             outcome: 'denied',
             // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -18077,7 +17674,6 @@ export class ObjectStackProtocolImplementation implements
     private async recordOptimisticConflictAudit(args: {
         type: string;
         name: string;
-        organizationId?: string | null;
         operation: 'save' | 'publish' | 'rollback' | 'delete';
         actor?: string;
         source: string;
@@ -18168,9 +17764,8 @@ export class ObjectStackProtocolImplementation implements
      * against ({@link storedHeadAt}), at the read's own scope — its
      * organization partition and `packageId` — and its lifecycle, or `null`
      * when no stored row is there. The `/meta` save door builds its address
-     * from the same three facts (`organizationIdForMetaWrite` has the body of
-     * `organizationIdForMetaRead`, and `?package=` names the binding on both),
-     * so a read followed by a save with the served token is accepted, and a
+     * from the same facts (no organization on either since ADR-0131 D6, and
+     * `?package=` names the binding on both), so a read followed by a save with the served token is accepted, and a
      * `null` says that save is a create: the state `If-None-Match: *` asserts.
      *
      * ⚠️ The address of the SAVE, not of the served content. A read falls back
@@ -18274,7 +17869,6 @@ export class ObjectStackProtocolImplementation implements
     private static optimisticConflictAuditEntry(args: {
         type: string;
         name: string;
-        organizationId?: string | null;
         operation: 'save' | 'publish' | 'rollback' | 'delete';
         actor?: string;
         source: string;
@@ -18285,7 +17879,7 @@ export class ObjectStackProtocolImplementation implements
         return {
             type: args.type,
             name: args.name,
-            organizationId: args.organizationId ?? null,
+            organizationId: null,
             operation: args.operation,
             outcome: 'denied',
             // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -19921,9 +19515,7 @@ export class ObjectStackProtocolImplementation implements
      * container and under any of these names is that name's sanctioned
      * override; a container under its object's name, or under any name of
      * its own, whose expansion collides with nothing; an overlay of a
-     * package's own container; #21334's own-name arm; a container whose would-be
-     * sibling is in another organization (the caller's selection decides, as
-     * it does for the readers). Rows already stored in a refused shape keep
+     * package's own container; #21334's own-name arm. Rows already stored in a refused shape keep
      * their bytes and are served as before; a new save of one, a re-save
      * included, is refused until its body stops colliding, and the re-savers
      * that write through this door (`migrateStoredMetadata`,
@@ -19944,7 +19536,6 @@ export class ObjectStackProtocolImplementation implements
         item: unknown,
         saveName: string,
         packageId: string | null | undefined,
-        organizationId: string | undefined,
     ): Promise<(Error & { code: 'VALIDATION_ERROR'; status: 400 }) | undefined> {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return undefined;
         if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
@@ -19955,7 +19546,9 @@ export class ObjectStackProtocolImplementation implements
 
         let records: any[] = [];
         try {
-            records = await this.readActiveOverlayRows({ type }, organizationIdForMetaRead(type, organizationId));
+            // [ADR-0131 D6] A save lands environment-wide, so its siblings are
+            // the environment-wide rows.
+            records = await this.readActiveOverlayRows({ type }, undefined);
         } catch (error) {
             // [#5532] The readers' rule: only an unprovisioned store means "no
             // rows". Any other failure is not answered as "no sibling".
@@ -20082,7 +19675,13 @@ export class ObjectStackProtocolImplementation implements
     // STORED content hash itself (`migrateStoredMetadata`): it reaches the
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
-    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
+    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
+        // [ADR-0131 D6] FIRST, before every other gate and every read: an
+        // organization-scoped write is refused for every type, draft or
+        // publish. See {@link organizationScopedWriteRefusal}.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Metadata item '${request.type}/${request.name}'`, request,
+        );
         // [commit fd6bdf89f] The ADR-0112 envelope this refusal always owed. Every OTHER
         // refusal in this method declares `code` AND `status`
         // (`NOT_OVERRIDABLE`/403, `NOT_CREATABLE`/403, `ITEM_LOCKED`/403,
@@ -20312,37 +19911,6 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // [#6190] …and the ORG dimension of the same declaration, on the tier
-        // that never consulted it. Placed HERE — before the topology carve-out
-        // below, before the destructive diff, before the schema parse — for the
-        // two reasons #5086 put its own refusal first: the verdict depends on
-        // nothing but the type and the requested scope, and "refused, not
-        // refused after writing" is the property the issue was filed about, so
-        // the gate must precede every path that could persist a row. Draft
-        // saves are gated identically (the branch is below): a draft is the
-        // first half of the SECOND minting path this closes, and #4463 D1
-        // recorded what happens when only one of the two doors gates.
-        // See {@link orgScopedWriteRefusal} for the ruling and the shape.
-        {
-            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
-                request.type, request.name, request.organizationId,
-            );
-            if (orgRefusal) throw orgRefusal;
-        }
-        // An org-scoped change to a form's anonymous intake that the anonymous
-        // form doors cannot see. Drafts too, so no draft is minted that its
-        // own promotion would refuse. See {@link anonymousFormIntakeOrgScopeRefusal}.
-        {
-            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
-                type: request.type,
-                name: request.name,
-                organizationId: request.organizationId,
-                body: request.item,
-                ...(request.packageId ? { packageId: request.packageId } : {}),
-            });
-            if (intakeRefusal) throw intakeRefusal;
-        }
-
         // [#8184] THE PACKAGE DOOR — the refusal of a write onto an item a
         // code package ships, on a type with no per-org overlay channel.
         // The verdict and its full record live in
@@ -20409,7 +19977,6 @@ export class ObjectStackProtocolImplementation implements
             const lockErr = await this.assertLockAllowsWrite({
                 type: request.type,
                 name: request.name,
-                ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                 // [#21761] The save's address carries its package, as the read's does.
                 ...(request.packageId ? { packageId: request.packageId } : {}),
                 operation: 'save',
@@ -20498,7 +20065,6 @@ export class ObjectStackProtocolImplementation implements
                 const existing = await this.getMetaItem({
                     type: request.type,
                     name: request.name,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                 } as any);
                 const prev = (existing as any)?.item;
                 if (prev) {
@@ -20633,7 +20199,7 @@ export class ObjectStackProtocolImplementation implements
             // `viewKind` onto it. See {@link viewContainerNameCollisionRefusal}.
             {
                 const containerCollision = await this.viewContainerNameCollisionRefusal(
-                    singularType, request.item, request.name, request.packageId, request.organizationId,
+                    singularType, request.item, request.name, request.packageId,
                 );
                 if (containerCollision) throw containerCollision;
             }
@@ -20896,7 +20462,7 @@ export class ObjectStackProtocolImplementation implements
             // [#6285] The write's organization partition. It was always here;
             // it simply never travelled to the gate, which is the whole reason
             // the "platform-level flow" limb could not be judged before.
-            organizationId: request.organizationId ?? null,
+            organizationId: null,
             // [#9612] Which package this write belongs to — the unit the gate
             // now judges it against. Same story as the line above: the request
             // has carried it all along, it just never reached the gate. Null
@@ -20913,7 +20479,7 @@ export class ObjectStackProtocolImplementation implements
             // is absent and not stored as missing. The body judged is unchanged.
             restoredCredentialPaths: () => this.restoredCredentialPathsFor({
                 type: singularType,
-                organizationId: request.organizationId ?? null,
+                organizationId: null,
                 name: request.name,
                 packageId: request.packageId ?? null,
                 item: gatedItem,
@@ -20963,7 +20529,6 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: mode === 'draft' ? 'draft' : 'active',
-                ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                 body: request.item,
             });
         }
@@ -21094,12 +20659,13 @@ export class ObjectStackProtocolImplementation implements
                 singularTypeForRepo, request.packageId, hatchOpen, request.name,
             );
         }
-        const orgId = request.organizationId ?? null;
-        const repo = this.getOverlayRepo(orgId);
+        // [ADR-0131 D6] Environment-wide, always: an organization-scoped
+        // request was refused at the top of this method.
+        const repo = this.getOverlayRepo(null);
         const ref = {
             type: singularTypeForRepo,
             name: request.name,
-            org: orgId ?? 'env',
+            org: 'env',
         } as Parameters<typeof repo.put>[0];
         let parentVersion: string | null;
         if (request.storedParentVersion !== undefined) {
@@ -21130,7 +20696,7 @@ export class ObjectStackProtocolImplementation implements
                 try {
                     parentVersion = await this.storedParentForToken(ref, request.parentVersion, currentStored);
                 } catch (err: unknown) {
-                    if (err instanceof ConflictError) throw await this.saveConflict(err, request, orgId, writeSource);
+                    if (err instanceof ConflictError) throw await this.saveConflict(err, request, writeSource);
                     throw err;
                 }
             }
@@ -21226,9 +20792,8 @@ export class ObjectStackProtocolImplementation implements
                     name: request.name,
                     item: request.item,
                     packageId: request.packageId ?? null,
-                    // [#6602] The SAME scope the row was just written with —
-                    // a per-org overlay stays out of the shared registry.
-                    organizationId: orgId,
+                    // [#6602] The SAME scope the row was just written with.
+                    organizationId: null,
                 });
                 await this.ensureObjectStorage(request.type, request.name);
             }
@@ -21236,7 +20801,7 @@ export class ObjectStackProtocolImplementation implements
             await this.recordMetadataAudit({
                 type: request.type,
                 name: request.name,
-                organizationId: orgId,
+                organizationId: null,
                 operation: 'save',
                 outcome: 'allowed',
                 code: 'ok',
@@ -21251,14 +20816,14 @@ export class ObjectStackProtocolImplementation implements
                 type: singularTypeForRepo,
                 name: request.name,
                 state: mode === 'draft' ? 'draft' : 'active',
-                organizationId: orgId,
+                organizationId: null,
                 body: request.item,
             });
             this.emitMetadataMutation({
                 type: singularTypeForRepo,
                 name: request.name,
                 state: mode === 'draft' ? 'draft' : 'active',
-                organizationId: orgId,
+                organizationId: null,
             });
             return {
                 success: true,
@@ -21316,15 +20881,11 @@ export class ObjectStackProtocolImplementation implements
                 // this path does not already make, and a receipt is not worth
                 // a query — so the verb stays the neutral, true "Saved".
                 message: artifactBacked
-                    ? (orgId
-                        ? `Saved customization overlay (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
-                        : `Saved customization overlay (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`)
-                    : (orgId
-                        ? `Saved ${singularTypeForRepo} '${request.name}' (org=${orgId}, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`
-                        : `Saved ${singularTypeForRepo} '${request.name}' (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`),
+                    ? `Saved customization overlay (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
+                    : `Saved ${singularTypeForRepo} '${request.name}' (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`,
             };
         } catch (err: any) {
-            if (err instanceof ConflictError) throw await this.saveConflict(err, request, orgId, writeSource);
+            if (err instanceof ConflictError) throw await this.saveConflict(err, request, writeSource);
             throw err;
         }
     }
@@ -21339,7 +20900,6 @@ export class ObjectStackProtocolImplementation implements
     private async saveConflict(
         err: ConflictError,
         request: { type: string; name: string; actor?: string },
-        orgId: string | null,
         writeSource: string,
     ): Promise<Error> {
         const conflict = await this.metadataConflictRefusal(
@@ -21350,7 +20910,6 @@ export class ObjectStackProtocolImplementation implements
         await this.recordOptimisticConflictAudit({
             type: request.type,
             name: request.name,
-            organizationId: orgId,
             operation: 'save',
             ...(request.actor ? { actor: request.actor } : {}),
             source: writeSource,
@@ -21636,6 +21195,24 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
 
+            // [ADR-0131 D6] An organization-scoped row is reported, never
+            // re-saved: the protocol refuses every organization-scoped write,
+            // and re-saving the body environment-wide would move it — the
+            // promotion ceremony's job (ADR-0131 C7), not this pass's. `skipped`
+            // for the same reason as the guard above: nothing is broken about
+            // this pass, the row is outside its reach.
+            if (organizationId !== null) {
+                record({
+                    ...base,
+                    outcome: 'skipped',
+                    reason: `the row is stored organization-scoped (organization '${organizationId}'), and `
+                        + `environment metadata no longer has a per-organization layer (ADR-0131 D6), so this `
+                        + `pass does not re-save it. The promotion ceremony (ADR-0131 C7) carries it to the `
+                        + `environment layer; until then it stays in sys_metadata as stored.`,
+                });
+                continue;
+            }
+
             let body: unknown;
             try {
                 body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
@@ -21806,7 +21383,6 @@ export class ObjectStackProtocolImplementation implements
                     force: true,
                     source: 'migrate-stored',
                     actor: request.actor ?? 'migrate-stored',
-                    ...(organizationId ? { organizationId } : {}),
                 });
                 record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'rewritten' });
             } catch (e: any) {
@@ -21957,7 +21533,6 @@ export class ObjectStackProtocolImplementation implements
     async publishMetaItem(request: {
         type: string;
         name: string;
-        organizationId?: string;
         actor?: string;
         message?: string;
         /**
@@ -22051,6 +21626,11 @@ export class ObjectStackProtocolImplementation implements
          */
         advisories?: RuntimeAuthoringIssue[];
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped promotion is refused.
+        // See {@link organizationScopedWriteRefusal}.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Metadata item '${request.type}/${request.name}'`, request,
+        );
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This is the
         // SEVENTH `/meta` entry point, and until #8769 it was the only one that
         // did not funnel through the boundary fold — so the URL family
@@ -22135,43 +21715,12 @@ export class ObjectStackProtocolImplementation implements
         // residue drafts the refusal (rather than a promotion) is the ruled
         // direction, and `deleteMetaItem` stays open to clear them.
         this.refuseUngrammaticalMetaItemName(request);
-        // [#10219] Then resolve WHICH SCOPE's draft this publish means. The
-        // caller states the scope it is IN; the draft may live env-wide. See
-        // {@link resolveDraftOrgScopeForPublish} — the single-item twin of the
-        // #3115 rule `publishPackageDrafts` already follows.
-        //
-        // Placed after the type fold (the probe must name the canonical stored
-        // `type`) and before every gate below, so the ADR-0010 lock check, the
-        // #6190 org-scoped-write refusal and the promote all judge ONE scope —
-        // the one the row is actually in. Resolving it later would gate against
-        // a partition the promotion never touches.
-        //
-        // [commit c74aefe63] The package dimension rides along under the SAME
-        // present/absent contract `promoteDraftForPublish` spells as
-        // `...('packageId' in request ? { packageId: request.packageId ?? null }
-        // : {})`: an ABSENT key keeps the historical package-agnostic probes,
-        // a stated one (string, or `null` for the unbound row) makes both
-        // probes ask the promote's package-exact question. Passing
-        // `request.packageId` bare would collapse "absent" and
-        // "present-and-undefined" into one spelling — the coercion trap the
-        // request type's own TSDoc warns against.
-        {
-            const singular = PLURAL_TO_SINGULAR[request.type] ?? request.type;
-            const resolvedOrgId = await this.resolveDraftOrgScopeForPublish(
-                singular, request.name, request.organizationId ?? null,
-                'packageId' in request ? (request.packageId ?? null) : undefined,
-            );
-            if (resolvedOrgId !== (request.organizationId ?? null)) {
-                const { organizationId: _requested, ...rest } = request;
-                request = resolvedOrgId === null ? rest : { ...rest, organizationId: resolvedOrgId };
-            }
-        }
         // [#8594] The refusal's own row is written HERE, by the route that owns
         // the (absent) transaction — see `promoteDraftForPublish`'s header. This
         // site has no transaction of its own, so recording it in the `catch` is
         // where it always effectively landed; what changed is that the helper no
         // longer assumes that on behalf of the batch route too.
-        const { singularType, orgId, advisories, result } = await this.promoteDraftForPublish(request)
+        const { singularType, advisories, result } = await this.promoteDraftForPublish(request)
             .catch(async (err: unknown) => {
                 await this.recordPendingDenialAudit(err);
                 throw err;
@@ -22198,7 +21747,7 @@ export class ObjectStackProtocolImplementation implements
         await this.recordMetadataAudit({
             type: request.type,
             name: request.name,
-            organizationId: orgId,
+            organizationId: null,
             operation: 'publish',
             outcome: 'allowed',
             code: 'ok',
@@ -22230,7 +21779,6 @@ export class ObjectStackProtocolImplementation implements
         const effects = await this.runPublishSideEffects({
             singularType,
             name: request.name,
-            orgId,
             body: result.item.body,
             packageId: result.packageId,
             ...(request.actor ? { actor: request.actor } : {}),
@@ -22250,7 +21798,7 @@ export class ObjectStackProtocolImplementation implements
         await this.emitMetaItemPublished({
             type: singularType,
             name: request.name,
-            organizationId: orgId,
+            organizationId: null,
         });
         return response;
     }
@@ -22290,13 +21838,12 @@ export class ObjectStackProtocolImplementation implements
      * again — the pre-#7748 state, not merely a worse one.
      */
     private async promoteDraftForPublish(request: {
-        type: string; name: string; organizationId?: string; actor?: string; message?: string;
+        type: string; name: string; actor?: string; message?: string;
         /**
          * [#8907] ADR-0048 — the package binding of the draft being promoted,
          * when the caller listed it under one. Threaded straight into
          * `repo.promoteDraft` so the promotion resolves the draft under the
-         * SAME key it was listed by, exactly as `organizationId` above threads
-         * the draft's own org scope for the #3115 partition analogue.
+         * SAME key it was listed by.
          *
          * `undefined` (any caller with no binding to state) keeps the
          * historical "match any package" resolution. `null` pins the lookup to
@@ -22321,7 +21868,6 @@ export class ObjectStackProtocolImplementation implements
         pending?: RuntimePendingDeclarations;
     }): Promise<{
         singularType: string;
-        orgId: string | null;
         /**
          * [#9176] The #4463 gate's advisory half for this promotion — the
          * non-blocking findings `assertRuntimeAuthoringRules` RETURNS (its
@@ -22346,24 +21892,10 @@ export class ObjectStackProtocolImplementation implements
             err.status = 403;
             throw err;
         }
-        // [#6190] The draft→active promotion is the OTHER way an org-scoped row
-        // of a non-org-overridable type reaches `active` — `publishMetaItem`
-        // and, behind Studio's "publish whole app", `publishPackageDrafts`.
-        // `saveMetaItem`'s gate now refuses to MINT such a draft, so what this
-        // door closes is the promotion of residue that predates the refusal:
-        // a legacy org-scoped draft row must not be promotable into a fresh
-        // active phantom. Exactly the #4463 D1 posture — gating one door and
-        // not the other makes the refusal bypassable by anyone who saves
-        // `?mode=draft` and then POSTs `/publish`.
-        {
-            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
-                request.type, request.name, request.organizationId,
-            );
-            if (orgRefusal) throw orgRefusal;
-        }
         await this.ensureOverlayIndex();
-        const orgId = request.organizationId ?? null;
-        const repo = this.getOverlayRepo(orgId);
+        // [ADR-0131 D6] Environment-wide: every caller refused an
+        // organization-scoped request before reaching here.
+        const repo = this.getOverlayRepo(null);
 
         // #4463 D1 — the OTHER way a body reaches `active`. `saveMetaItem`
         // gates a direct active save and deliberately lets every draft through;
@@ -22397,7 +21929,7 @@ export class ObjectStackProtocolImplementation implements
                 // exactly as its sibling store reads do. Principal-less, the
                 // engine now refuses it.
                 draftRow = await this.engine.findOne('sys_metadata', {
-                    where: { type: singularType, name: request.name, organization_id: orgId, state: 'draft' },
+                    where: { type: singularType, name: request.name, organization_id: null, state: 'draft' },
                     context: { isSystem: true },
                 });
             } catch (error) {
@@ -22413,7 +21945,6 @@ export class ObjectStackProtocolImplementation implements
         const _publishLockRefusal = await this.lockWriteRefusal({
             type: request.type,
             name: request.name,
-            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
             // [#21761] The promotion's address carries its package, as the read's does.
             // [#21934] It is the key resolved above, the one the gate reads the
             // draft under and the promotion writes under: the caller's stated
@@ -22427,7 +21958,7 @@ export class ObjectStackProtocolImplementation implements
             throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
         }
         const draftForGate = await repo.get(
-            { type: singularType, name: request.name, org: orgId ?? 'env' } as Parameters<typeof repo.get>[0],
+            { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}) },
         );
         // [#21470] …and the divergent `name` refusal, on the same body and for
@@ -22441,21 +21972,6 @@ export class ObjectStackProtocolImplementation implements
             const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
             if (nameRefusal) throw nameRefusal;
         }
-        // The promotion half of {@link anonymousFormIntakeOrgScopeRefusal}: a
-        // draft saved before that refusal existed must not reach `active`.
-        if (draftForGate) {
-            // The binding the promoted row is placed by: the key the draft was
-            // read under above (a container's expansion is placed by it).
-            const draftPackageId = draftKey;
-            const intakeRefusal = await this.anonymousFormIntakeOrgScopeRefusal({
-                type: singularType,
-                name: request.name,
-                organizationId: orgId,
-                body: draftForGate.body,
-                ...(draftPackageId ? { packageId: draftPackageId } : {}),
-            });
-            if (intakeRefusal) throw intakeRefusal;
-        }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
         // promotion is about to earn, exactly as `saveMetaItem` attaches its
@@ -22467,10 +21983,9 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: 'active',
                 body: draftForGate.body,
-                // [#6285] Same partition the draft is being promoted in. Without
-                // it the draft door would be a bypass for this refusal alone,
-                // which is the exact hole #4463 D1 closed for the other 26.
-                organizationId: orgId,
+                // [#6285] Same partition the draft is being promoted in — the
+                // environment's, since ADR-0131 D6.
+                organizationId: null,
                 // [#9612] The package binding the CALLER stated for this
                 // promotion — the same value threaded into `repo.promoteDraft`
                 // below, so the gate and the write resolve the draft under one
@@ -22523,7 +22038,7 @@ export class ObjectStackProtocolImplementation implements
         const ref = {
             type: singularType,
             name: request.name,
-            org: orgId ?? 'env',
+            org: 'env',
         } as Parameters<typeof repo.promoteDraft>[0];
         // [#20312] ADR-0080 §5: `requires` is derived from the source at save,
         // and this promotion is the second way a body reaches `active`. The
@@ -22565,7 +22080,7 @@ export class ObjectStackProtocolImplementation implements
                 // conflict instead of being promoted unjudged.
                 expectedDraftHash: draftForGate ? draftForGate.hash : null,
             });
-            return { singularType, orgId, advisories: runtimeAdvisories, result };
+            return { singularType, advisories: runtimeAdvisories, result };
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 // [#21207] Keyed values or none in the text and attributes.
@@ -22585,7 +22100,6 @@ export class ObjectStackProtocolImplementation implements
                     ObjectStackProtocolImplementation.optimisticConflictAuditEntry({
                         type: request.type,
                         name: request.name,
-                        organizationId: orgId,
                         operation: 'publish',
                         ...(request.actor ? { actor: request.actor } : {}),
                         source: 'protocol.publishMetaItem',
@@ -22612,7 +22126,6 @@ export class ObjectStackProtocolImplementation implements
     private async runPublishSideEffects(args: {
         singularType: string;
         name: string;
-        orgId: string | null;
         body: unknown;
         packageId: string | null;
         actor?: string;
@@ -22637,8 +22150,8 @@ export class ObjectStackProtocolImplementation implements
             name: args.name,
             item: args.body,
             packageId: args.packageId,
-            // [#6602] The promoted draft carries the org it was drafted in.
-            organizationId: args.orgId,
+            // [#6602] The promoted draft is environment-wide (ADR-0131 D6).
+            organizationId: null,
         });
         // Create the object's table now so it's CRUD-able without a restart.
         //
@@ -22668,7 +22181,7 @@ export class ObjectStackProtocolImplementation implements
         // lands data, not just metadata. The body is already in hand from
         // the promote — no read-back, so no org-scope resolution pitfalls.
         if (args.singularType === 'seed' && !args.skipSeedApply) {
-            out.seedApplied = await this.applySeedBodies([args.body], args.orgId);
+            out.seedApplied = await this.applySeedBodies([args.body]);
         }
         // Publish-time materializer (ADR-0086 P2): project the published body
         // into its data-plane row (e.g. `permission` → `sys_permission_set`
@@ -22683,7 +22196,7 @@ export class ObjectStackProtocolImplementation implements
                 out.materializeApplied = await materializer({
                     body: args.body,
                     packageId: args.packageId,
-                    organizationId: args.orgId,
+                    organizationId: null,
                     actor: args.actor ?? 'system',
                 });
             } catch (e: any) {
@@ -22719,7 +22232,7 @@ export class ObjectStackProtocolImplementation implements
             type: args.singularType,
             name: args.name,
             state: 'active',
-            organizationId: args.orgId,
+            organizationId: null,
             body: args.body,
         });
         if (publishProjection) out.projectionApplied = publishProjection;
@@ -22727,7 +22240,7 @@ export class ObjectStackProtocolImplementation implements
             type: args.singularType,
             name: args.name,
             state: 'active',
-            organizationId: args.orgId,
+            organizationId: null,
         });
         return out;
     }
@@ -22742,7 +22255,6 @@ export class ObjectStackProtocolImplementation implements
      */
     private async applySeedBodies(
         bodies: unknown[],
-        organizationId: string | null,
     ): Promise<{
         success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
@@ -22761,11 +22273,7 @@ export class ObjectStackProtocolImplementation implements
             // metadata reads so no kernel service lookup is required.
             const metadataAdapter = {
                 getObject: async (name: string) => {
-                    const wrapper: any = await (this as any).getMetaItem({
-                        type: 'object',
-                        name,
-                        ...(organizationId ? { organizationId } : {}),
-                    });
+                    const wrapper: any = await (this as any).getMetaItem({ type: 'object', name });
                     return wrapper?.item ?? wrapper ?? null;
                 },
             };
@@ -22785,7 +22293,9 @@ export class ObjectStackProtocolImplementation implements
                 config: {
                     defaultMode: 'upsert',
                     multiPass: true,
-                    ...(organizationId ? { organizationId } : {}),
+                    // [ADR-0131 D6, §12] No caller organization: a seed dataset
+                    // names the organization it populates itself, and the
+                    // loader derives the owner only under `single` (D9).
                 },
             });
             if (!parsedRequest.success) throw seedRequestValidationError(parsedRequest.error.issues);
@@ -23049,7 +22559,6 @@ export class ObjectStackProtocolImplementation implements
      */
     async publishPackageDrafts(request: {
         packageId: string;
-        organizationId?: string;
         actor?: string;
         /** ADR-0067 — commit message (for AI turns: the user's instruction). */
         message?: string;
@@ -23123,9 +22632,17 @@ export class ObjectStackProtocolImplementation implements
         /** ADR-0067 — id of the commit this publish recorded (absent if nothing published). */
         commitId?: string;
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped package publish is
+        // refused. See {@link organizationScopedWriteRefusal}.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Package '${request.packageId}'`, request,
+        );
         await this.ensureOverlayIndex();
-        const orgId = request.organizationId ?? null;
-        const repo = this.getOverlayRepo(orgId);
+        // Environment-wide drafts only: the environment repository lists
+        // `organization_id IS NULL` rows, so a legacy organization-scoped draft
+        // is never promoted here (it waits for the promotion ceremony,
+        // ADR-0131 C7).
+        const repo = this.getOverlayRepo(null);
         const drafts = await repo.listDrafts({ packageId: request.packageId });
 
         // Runtime enforcement of the package namespace-prefix rule (ADR-0028
@@ -23163,17 +22680,6 @@ export class ObjectStackProtocolImplementation implements
             name: string;
             error: string;
             code: PreflightViolationCode;
-            /**
-             * [#8595] The DRAFT's own scope, captured at detection — the same
-             * rule the promoted rows follow (`PromotedDraft.draftOrgId`) and for
-             * the same reason: `listDrafts` surfaces env-wide drafts
-             * (`organization_id IS NULL`) to a non-null-org caller, so an audit
-             * row keyed on the caller's active org would record the refusal
-             * against a partition the item never lived in. Internal to this
-             * method — deliberately NOT part of `failed[]`, which is a wire
-             * shape; the projection at the refusal site drops it.
-             */
-            organizationId: string | null;
         }> = [];
         if (pkgNamespace) {
             for (const d of drafts) {
@@ -23185,7 +22691,6 @@ export class ObjectStackProtocolImplementation implements
                         name: d.name,
                         error: err,
                         code: 'NAMESPACE_PREFIX',
-                        organizationId: d.organizationId ?? null,
                     });
                 }
             }
@@ -23242,7 +22747,6 @@ export class ObjectStackProtocolImplementation implements
                     + `POST /meta/_migrate-stored does NOT rewrite a stored type spelling — it canonicalizes `
                     + `bodies, and reports rows of this class as 'skipped' with that same reason.`,
                 code: 'STORED_TYPE_NOT_CANONICAL',
-                organizationId: d.organizationId ?? null,
             });
         }
 
@@ -23342,8 +22846,7 @@ export class ObjectStackProtocolImplementation implements
                     // `failed[].error`, where it is the actionable fact.
                     type: canonicalMetaType(v.type),
                     name: v.name,
-                    // The draft's OWN scope — see the violation type above.
-                    organizationId: v.organizationId,
+                    organizationId: null,
                     operation: 'publish',
                     outcome: 'denied',
                     // The violation's own verdict, in the audit column's
@@ -23506,17 +23009,6 @@ export class ObjectStackProtocolImplementation implements
              * then carries no `advisories` key at all.
              */
             advisories: RuntimeAuthoringIssue[];
-            /**
-             * [#8400] The scope the draft was PROMOTED IN — `d.organizationId`,
-             * not the request's active org. `listDrafts` surfaces env-wide
-             * (`organization_id IS NULL`) drafts to a non-null-org caller and
-             * the promote above targets the draft's own scope (#3115), so the
-             * audit row must be keyed the same way or it records the publish
-             * against a partition the active row never entered. Captured here
-             * rather than re-derived in Phase 2 because `d` is narrowed to
-             * `{ type, name }` by the type above.
-             */
-            draftOrgId: string | null;
         };
         const promoted: PromotedDraft[] = [];
         // (assigned inside the transaction closure — keep the wide type)
@@ -23533,23 +23025,12 @@ export class ObjectStackProtocolImplementation implements
             await inTxn(async () => {
                 for (const d of ordered) {
                     try {
-                        // Promote each draft in the scope `listDrafts` surfaced
-                        // it from (#3115). Studio/package authoring writes the
-                        // draft env-wide (`organization_id = NULL`) while the
-                        // publishing session may carry a non-null active org;
-                        // `listDrafts` includes those env-wide rows via its `$or`,
-                        // so the promote MUST target the draft's own org or it
-                        // 404s (`no_draft`) on a row it can never match.
-                        const draftOrgId = d.organizationId ?? null;
                         if (d.type === 'seed') {
                             // Capture the body BEFORE promote (the draft row is
-                            // deleted by the promote, and a post-publish read-back
-                            // has org-scope resolution pitfalls — reading the
-                            // draft is unambiguous). Read from the draft's own
-                            // scope, not the request's active org.
-                            const seedRepo = this.getOverlayRepo(draftOrgId);
-                            const ref = { type: d.type, name: d.name, org: draftOrgId ?? 'env' } as unknown as Parameters<typeof seedRepo.get>[0];
-                            const draft = await seedRepo.get(ref, { state: 'draft' });
+                            // deleted by the promote, and reading the draft is
+                            // unambiguous).
+                            const ref = { type: d.type, name: d.name, org: 'env' } as unknown as Parameters<typeof repo.get>[0];
+                            const draft = await repo.get(ref, { state: 'draft' });
                             if (draft?.body) seedBodies.push(draft.body);
                         }
                         const { singularType, advisories, result } = await this.promoteDraftForPublish({
@@ -23576,10 +23057,8 @@ export class ObjectStackProtocolImplementation implements
                             // refuses if it is not canonical.
                             type: canonicalMetaType(d.type),
                             name: d.name,
-                            ...(draftOrgId ? { organizationId: draftOrgId } : {}),
                             // [#8907] Promote each draft under the PACKAGE
-                            // `listDrafts` surfaced it from, for the same reason
-                            // `draftOrgId` above threads its org: ADR-0048 keys
+                            // `listDrafts` surfaced it from: ADR-0048 keys
                             // overlay rows by `(org, type, name, package_id)`,
                             // so with two packages holding drafts for one
                             // `(type, name)` a promote that omits the package
@@ -23605,7 +23084,6 @@ export class ObjectStackProtocolImplementation implements
                             version: result.version,
                             seq: result.seq,
                             advisories,
-                            draftOrgId,
                         });
                         if (typeof result.seq === 'number') publishedSeqs.push(result.seq);
                     } catch (e: unknown) {
@@ -23623,7 +23101,6 @@ export class ObjectStackProtocolImplementation implements
                 if (promoted.length > 0) {
                     const promotedKeys = new Set(promoted.map((p) => `${p.d.type}/${p.d.name}`));
                     commit = await this.recordPackageCommit({
-                        orgId,
                         packageId: request.packageId,
                         operation: 'apply',
                         ...(request.message ? { message: request.message } : {}),
@@ -23734,7 +23211,7 @@ export class ObjectStackProtocolImplementation implements
                     // (`__batchItem`), so its `type` is the STORED spelling.
                     type: canonicalMetaType(causal.type),
                     name: causal.name,
-                    organizationId: causal.organizationId ?? null,
+                    organizationId: null,
                     operation: 'publish',
                     outcome: 'denied',
                     // adr0112-ok: D6b — persisted audit column, its own
@@ -23829,8 +23306,7 @@ export class ObjectStackProtocolImplementation implements
                 // #8858 as a provable no-op).
                 type: canonicalMetaType(p.d.type),
                 name: p.d.name,
-                // The draft's OWN scope — see `PromotedDraft.draftOrgId`.
-                organizationId: p.draftOrgId,
+                organizationId: null,
                 operation: 'publish',
                 outcome: 'allowed',
                 code: 'ok',
@@ -23857,7 +23333,6 @@ export class ObjectStackProtocolImplementation implements
                 const eff = await this.runPublishSideEffects({
                     singularType: p.singularType,
                     name: p.d.name,
-                    orgId,
                     body: p.body,
                     packageId: p.packageId,
                     ...(request.actor ? { actor: request.actor } : {}),
@@ -23904,7 +23379,7 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        const seedApplied = seedBodies.length > 0 ? await this.applySeedBodies(seedBodies, orgId) : undefined;
+        const seedApplied = seedBodies.length > 0 ? await this.applySeedBodies(seedBodies) : undefined;
 
         // ADR-0038 L3: exercise what was just published — one real read per
         // artifact — so "Published!" can never again mean "and silently
@@ -23919,16 +23394,12 @@ export class ObjectStackProtocolImplementation implements
                 probes = await runBuildProbes({
                     engine: this.engine as any,
                     getItem: async (type, name) => {
-                        const wrapper: any = await (this as any).getMetaItem({
-                            type,
-                            name,
-                            ...(orgId ? { organizationId: orgId } : {}),
-                        });
+                        const wrapper: any = await (this as any).getMetaItem({ type, name });
                         return wrapper?.item ?? wrapper ?? undefined;
                     },
                     published,
                     ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
-                    organizationId: orgId,
+                    organizationId: null,
                 });
             } catch {
                 probes = undefined;
@@ -23996,7 +23467,6 @@ export class ObjectStackProtocolImplementation implements
      */
     async discardPackageDrafts(request: {
         packageId: string;
-        organizationId?: string;
         actor?: string;
     }): Promise<{
         success: boolean;
@@ -24005,9 +23475,12 @@ export class ObjectStackProtocolImplementation implements
         discarded: Array<{ type: string; name: string }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped discard is refused.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Package '${request.packageId}'`, request,
+        );
         await this.ensureOverlayIndex();
-        const orgId = request.organizationId ?? null;
-        const repo = this.getOverlayRepo(orgId);
+        const repo = this.getOverlayRepo(null);
         const drafts = await repo.listDrafts({ packageId: request.packageId });
 
         const discarded: Array<{ type: string; name: string }> = [];
@@ -24042,24 +23515,19 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Discard ONE pending draft in the scope it lives in — the per-draft step
-     * {@link discardPackageDrafts} and {@link revertStoredPackage} share, so
-     * the scope rule below has one home.
+     * Discard ONE pending draft — the per-draft step
+     * {@link discardPackageDrafts} and {@link revertStoredPackage} share. The
+     * draft is environment-wide: both list through the environment
+     * repository (ADR-0131 D6).
      */
     private async discardDraftInItsScope(
-        draft: { type: string; name: string; organizationId: string | null },
+        draft: { type: string; name: string },
         actor: string | undefined,
     ): Promise<void> {
-        // Discard the draft in the scope it lives in (#3115). Like
-        // publish, `listDrafts` surfaces env-wide drafts to a non-null
-        // active org via `$or`; deleting under the request's active org
-        // would silently no-op on those env-wide rows.
-        const draftOrgId = draft.organizationId ?? null;
         await this.deleteMetaItem({
             type: draft.type,
             name: draft.name,
             state: 'draft',
-            ...(draftOrgId ? { organizationId: draftOrgId } : {}),
             ...(actor ? { actor } : {}),
         });
     }
@@ -24090,7 +23558,7 @@ export class ObjectStackProtocolImplementation implements
      * published state.
      *
      * Membership is the package's rows as {@link SysMetadataRepository.listDrafts}
-     * reads them — `package_id`, the caller's organization plus env-wide — and
+     * reads them — `package_id`, environment-wide (ADR-0131 D6) — and
      * the active rows are read through the same predicate,
      * {@link packageScopedRowWhere}, never a `where` of this method's own.
      *
@@ -24116,21 +23584,23 @@ export class ObjectStackProtocolImplementation implements
      */
     async revertStoredPackage(request: {
         packageId: string;
-        organizationId?: string;
         actor?: string;
     }): Promise<{
         stored: boolean;
         discarded: Array<{ type: string; name: string }>;
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped revert is refused.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Package '${request.packageId}'`, request,
+        );
         await this.ensureOverlayIndex();
-        const orgId = request.organizationId ?? null;
         let drafts: Awaited<ReturnType<SysMetadataRepository['listDrafts']>>;
         let publishedRows: unknown[];
         try {
-            drafts = await this.getOverlayRepo(orgId).listDrafts({ packageId: request.packageId });
+            drafts = await this.getOverlayRepo(null).listDrafts({ packageId: request.packageId });
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
             publishedRows = (await this.engine.find('sys_metadata', {
-                where: packageScopedRowWhere(orgId, 'active', { packageId: request.packageId }),
+                where: packageScopedRowWhere(null, 'active', { packageId: request.packageId }),
                 limit: 1,
                 context: { isSystem: true },
             })) as unknown[];
@@ -24173,7 +23643,7 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#21276] The steps, in order. Nothing durable happens before step 4, so
      * a refusal at any of steps 1–4 leaves everything as it was:
-     *  1. the tenant-scope refusals (`TENANT_SCOPE_REQUIRED`) — pure;
+     *  1. the retired-key refusal (`INVALID_REQUEST`) — pure;
      *  2. the `sys_metadata` read — a read; a failure is thrown;
      *  3. the registry's uninstall refusal (another package extends an object
      *     this one owns, ADR-0029), asked through
@@ -24189,119 +23659,29 @@ export class ObjectStackProtocolImplementation implements
      *  7. the uninstall cleanups — each refusal is reported in `cleanups[]`.
      */
     async deletePackage(request: DeletePackageRequest): Promise<DeletePackageResponse> {
-        // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
-        // an absent parameter. Maintainer ruling (2026-08-12):
-        // 跨租户卸载必须显式声明,缺省缺参永远不等于「全部租户」.
-        //
-        // Before this gate, `{ packageId }` with no org matched EVERY
-        // organization's rows — measured during #7705 at 5 of 5 deleted,
-        // including a foreign org's. The two doors disagreed on which semantic
-        // that was: the direct-mount REST registrar
-        // (`packages/rest/src/package-routes.ts`) passes no org and got the
-        // cross-tenant read, while the dispatcher twin
-        // (`packages/runtime/src/domains/packages.ts`) resolves one and got the
-        // org-scoped read. Nobody chose that split; it fell out of a missing
-        // argument.
-        //
-        // Why a flag and not a convention: `resolveActiveOrganizationId`
-        // (#4127) is entirely `catch`-wrapped, so ANY throw on the auth seam
-        // returns `undefined`. An accidental org-less call and a deliberate
-        // env-wide one are byte-identical at the call site, and the widest
-        // possible reading of a destructive operation is the one that must
-        // never be reachable by accident. `allTenants: true` is the carrier
-        // that makes the two distinguishable.
-        //
-        // ⛔ NOT narrowed to `organization_id IS NULL` — #7705 proved that
-        // revives the orphaned-row defect on the other door. The remedy here is
-        // explicitness, not narrowing: with the flag, the no-org branch stays
-        // package-wide exactly as it was.
-        //
-        // Mirrors the `force: true` / `DESTRUCTIVE_CHANGE` opt-in this same
-        // class already uses for `saveMetaItem` — refuse, name the remedy in the
-        // message, and carry a ledger-declared code plus an explicit status.
-        // Two ways to violate ONE contract — "the uninstall's tenant scope must be
-        // readable off the request" — so both answer in the same family, with the
-        // same code and status, and each names the parameters that produced it.
-        //
-        // (a) CONTRADICTORY. `organizationId` says "this tenant", `allTenants`
-        // says "every tenant". Rejecting beats picking a winner, because both
-        // silent resolutions are worse than a refusal: resolving narrow-first
-        // makes `allTenants: true` silently INERT (the caller believes they
-        // asked for a cross-tenant uninstall and quietly gets a scoped one,
-        // discovering it only when the rows they expected gone are still
-        // there); resolving explicit-first silently IGNORES a named
-        // organization and deletes every tenant's rows — the original defect
-        // wearing a flag. Rejecting is also the only reading that stays correct
-        // when a request is COMPOSED from two places (a resolver supplying the
-        // org, config supplying the flag), which is exactly the accidental
-        // composition `resolveActiveOrganizationId` makes real.
-        if (request.organizationId && request.allTenants === true) {
-            const err = new Error(
-                `Refusing to uninstall '${request.packageId}':`
-                + ` organizationId ('${request.organizationId}') and allTenants: true are mutually exclusive —`
-                + ` one scopes the uninstall to a single tenant, the other clears every tenant's rows.`
-                + ` — pass organizationId alone to scope it, or allTenants: true alone to confirm the cross-tenant uninstall.`
-            );
-            (err as any).code = 'TENANT_SCOPE_REQUIRED';
-            (err as any).status = 400;
-            throw err;
-        }
-        // (b) UNDECLARED. Note `!== true`: an explicit `allTenants: false` lands
-        // here with absent, deliberately. `false` is not a request for
-        // cross-tenant semantics, so it cannot authorise them — only the
-        // affirmative `true` does.
-        if (!request.organizationId && request.allTenants !== true) {
-            const err = new Error(
-                `Refusing to uninstall '${request.packageId}' with no organization scope:`
-                + ` an uninstall that names neither an organization nor an explicit cross-tenant intent would delete`
-                + ` EVERY organization's rows for this package.`
-                + ` — pass organizationId to scope it, or allTenants: true to confirm the cross-tenant uninstall.`
-            );
-            (err as any).code = 'TENANT_SCOPE_REQUIRED';
-            (err as any).status = 400;
-            throw err;
+        // [ADR-0131 D6/D12] An uninstall is environment-wide by construction:
+        // every `sys_metadata` row bound to the package, in this environment,
+        // whatever organization a legacy row was stored under. The
+        // `organizationId` / `allTenants` request keys that once chose between
+        // one organization's rows and every organization's (#7780) name
+        // nothing now, and retire: a request still carrying either is refused
+        // whole, before anything is read, rather than read past — the caller
+        // believes the key still scopes something. Who may uninstall is the
+        // package door's operator gate, not a request key.
+        for (const retired of ['organizationId', 'allTenants'] as const) {
+            if (Object.prototype.hasOwnProperty.call(request, retired)) {
+                const err = new Error(
+                    `Refusing to uninstall '${request.packageId}': the '${retired}' request key is retired. `
+                    + `An uninstall is environment-wide — it removes every row bound to the package in this `
+                    + `environment — so no organization scope is stated or confirmed. Retry without '${retired}'. `
+                    + `See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.`
+                );
+                (err as any).code = 'INVALID_REQUEST';
+                (err as any).status = 400;
+                throw err;
+            }
         }
         const where: Record<string, unknown> = { package_id: request.packageId };
-        // [#7705] Surface BOTH org-scoped rows and env-wide (`organization_id
-        // IS NULL`) rows to an org-scoped uninstall. A strict
-        // `organization_id = <org>` equality silently dropped every env-wide
-        // row, and env-wide is where a package's metadata normally LANDS: the
-        // REST `PUT /meta/:type/:name` save path does not thread the session's
-        // active org, and AI-authored metadata is written env-wide too. So an
-        // uninstall issued by a session that HAS an active org (the dispatcher
-        // door, `packages/runtime/src/domains/packages.ts`, is the one that
-        // resolves and passes `organizationId`) selected only the handful of
-        // rows that happened to be org-scoped and left the rest behind —
-        // reporting `deletedCount` > 0 and `success: true` while the package's
-        // rows demonstrably survived (the orphaned-uninstall bug).
-        //
-        // Same defect and same remedy as the #3115 "orphaned draft" bug one
-        // file over ({@link SysMetadataRepository.listDrafts}), and the shape
-        // is deliberately identical to it. The driver's own implicit tenant
-        // wall already reads this way (`field = :tenant OR field IS NULL`,
-        // #2734); only author-supplied predicates are strict, which is what
-        // made this silent.
-        //
-        // The no-org branch is deliberately NOT narrowed to `organization_id
-        // IS NULL`: the other door of this route (the direct-mount REST
-        // registrar, `packages/rest/src/package-routes.ts`) passes no
-        // `organizationId` at all, and restricting it to env-wide rows would
-        // orphan every org-scoped row — the same bug, re-created on the other
-        // door. Absent an org, a full uninstall stays package-wide — and since
-        // #7780 that branch is reachable only with `allTenants: true`, so the
-        // width is now something a caller ASKED for rather than something a
-        // missing argument selected.
-        //
-        // There is no tie-break for "both supplied" because that combination
-        // never reaches here — it is refused above. A destructive operation
-        // whose scope is stated twice, contradictorily, has no reading that is
-        // safe to guess.
-        if (request.organizationId) {
-            where.$or = [
-                { organization_id: request.organizationId },
-                { organization_id: null },
-            ];
-        }
         // [#8136] This read is the uninstall's FIRST database touch, and until
         // now it sat outside every `try` in this method — the per-item `catch`
         // below wraps only the `deleteMetaItem` loop. So a driver failure here
@@ -24413,14 +23793,17 @@ export class ObjectStackProtocolImplementation implements
         for (const row of ordered) {
             const state: 'active' | 'draft' = row.state === 'draft' ? 'draft' : 'active';
             try {
-                await this.deleteMetaItem({
-                    type: row.type,
-                    name: row.name,
-                    state,
-                    ...(row.organization_id ? { organizationId: row.organization_id } : {}),
-                    ...(request.actor ? { actor: request.actor } : {}),
-                    ...(dropStorage ? { dropStorage: true } : {}),
-                });
+                if (row.organization_id) {
+                    await this.removeLegacyOrganizationRowOnUninstall(row, state, request.actor);
+                } else {
+                    await this.deleteMetaItem({
+                        type: row.type,
+                        name: row.name,
+                        state,
+                        ...(request.actor ? { actor: request.actor } : {}),
+                        ...(dropStorage ? { dropStorage: true } : {}),
+                    });
+                }
                 deleted.push({ type: row.type, name: row.name, state });
             } catch (e: any) {
                 // [#8136] NO filter here, deliberately, and this comment is why
@@ -24505,6 +23888,54 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [ADR-0131 D6/D12] Remove ONE organization-scoped row stored before the
+     * per-organization overlay axis retired, as part of uninstalling the
+     * package it is bound to. The uninstall is environment-wide, so the
+     * package's legacy rows leave with it rather than being stranded for the
+     * promotion ceremony (ADR-0131 C7) to carry into the environment layer
+     * for a package that is gone.
+     *
+     * The one organization-scoped write left in this class, and it only
+     * REMOVES: reachable from {@link deletePackage} alone, never from a
+     * request (every write verb refuses an organization-scoped request,
+     * {@link organizationScopedWriteRefusal}). Through the repository, so the
+     * removal is transactional and leaves its history tombstone, like every
+     * other delete. A legacy row is presentational (only the five
+     * formerly org-overridable types could be stored per organization), so
+     * there is no table to tear down and no registry entry to retire —
+     * boot hydration never registered one.
+     */
+    private async removeLegacyOrganizationRowOnUninstall(
+        row: { type: string; name: string; organization_id: string },
+        state: 'active' | 'draft',
+        actor: string | undefined,
+    ): Promise<void> {
+        const type = PLURAL_TO_SINGULAR[row.type] ?? row.type;
+        const repo = this.getOverlayRepo(row.organization_id);
+        const ref = { type, name: row.name, org: row.organization_id } as Parameters<typeof repo.delete>[0];
+        const current = await repo.get(ref, { state });
+        if (!current) return;
+        await repo.delete(ref, {
+            parentVersion: current.hash,
+            actor: actor ?? null,
+            source: 'protocol.deletePackage',
+            intent: 'runtime-only',
+            state,
+        });
+        await this.recordMetadataAudit({
+            type,
+            name: row.name,
+            organizationId: null,
+            operation: 'delete',
+            outcome: 'allowed',
+            code: 'ok',
+            ...(actor ? { actor } : {}),
+            source: 'protocol.deletePackage',
+            note: `${state}; legacy organization-scoped row (organization '${row.organization_id}') removed with its package`,
+        });
+    }
+
+    /**
      * ADR-0070 D4 — duplicate a writable base into a NEW package (the Airtable
      * "duplicate base" gesture). Clones every ACTIVE item the source owns into
      * `targetPackageId`, RE-NAMESPACING object names — the blueprint prefixes a
@@ -24519,7 +23950,6 @@ export class ObjectStackProtocolImplementation implements
         targetPackageId: string;
         targetName?: string;
         targetNamespace?: string;
-        organizationId?: string;
         actor?: string;
     }): Promise<{
         success: boolean;
@@ -24529,6 +23959,10 @@ export class ObjectStackProtocolImplementation implements
         copied: Array<{ type: string; name: string }>;
         failed: Array<{ type: string; name: string; error: string }>;
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped duplicate is refused.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Package '${request.targetPackageId}'`, request,
+        );
         // [#19417] ⭐ THE TARGET ID IS PARSED BEFORE ANYTHING IS MINTED — same
         // declaration, same surfaced sentence, one key over.
         //
@@ -24625,100 +24059,19 @@ export class ObjectStackProtocolImplementation implements
             );
         }
 
-        const where: Record<string, unknown> = { package_id: request.sourcePackageId, state: 'active' };
-        // [#7819 tier 2] Copy the source's env-wide (`organization_id IS NULL`)
-        // rows too, not just the ones this org happens to own — the same `$or`
-        // {@link deletePackage} (#7705) and {@link listCommits} (#7779) carry.
-        // Unlike the tier-1 sites this really is plain scan scoping (`where` is
-        // keyed on package + state, not on `id`), so the family remedy applies
-        // without their authorization question.
-        //
-        // Measured on a real driver before the fix: a source package holding one
-        // env-wide row and one org-scoped row duplicated by an org caller
-        // answered `{success: true, copiedCount: 1, failedCount: 0}` — a PARTIAL
-        // copy reported as a whole one, because `organization_id = <org>` matches
-        // no NULL column. The mixed state is ordinary, not contrived: a publish
-        // made before an active org was selected lands its `sys_metadata` row
-        // env-wide (`saveMetaItem` writes `organization_id = NULL`), and
-        // `resolveActiveOrganizationId` yields `undefined` for such a session
-        // *and* for any throw on the auth seam.
-        //
-        // The sharper consequence is the rename map below, which is built ONLY
-        // from the rows this scan returns. With the env-wide OBJECT rows missing
-        // it came out empty, so a copied view was renamed `iojn2_list` while its
-        // `data.object` still pointed at the SOURCE package's `iojn_widget` — a
-        // duplicate silently wired back to the base it was cloned from, reporting
-        // success. An all-env-wide source degraded differently and just as
-        // quietly: `{success: false, copiedCount: 0, failedCount: 0}`, nothing
-        // copied and nothing named as failed.
-        //
-        // The no-org branch is deliberately NOT narrowed to `organization_id IS
-        // NULL`, exactly as #7705 / #7779 / tier 1 left theirs: that door copies
-        // every scope today, and restricting it to env-wide rows would drop every
-        // org-scoped row from the copy — the same bug pointed the other way.
-        if (request.organizationId) {
-            where.$or = [
-                { organization_id: request.organizationId },
-                { organization_id: null },
-            ];
-        }
+        // [ADR-0131 D6] The source's ENVIRONMENT rows — the ones every `/meta`
+        // read serves. A legacy organization-scoped row is served by none of
+        // them and waits for the promotion ceremony (ADR-0131 C7); copying it
+        // would write its body environment-wide under the new package, a
+        // promotion this verb has no business performing, and — beside the
+        // environment row of the same item — land two bodies on one target key.
+        const where: Record<string, unknown> = {
+            package_id: request.sourcePackageId,
+            state: 'active',
+            organization_id: null,
+        };
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
-        const scanned = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
-
-        // [#7819 tier 2] ADR-0005 overlay precedence — the caller's OWN org
-        // shadows env-wide ({@link resolveMetaItemOrgScope} states the same rule
-        // for history lineages). Widening the scan makes a collision newly
-        // possible that could not occur while it was a strict equality: one item
-        // can now appear TWICE, as an env-wide row PLUS this org's overlay of it.
-        // Every copy is written under `request.organizationId`, so both would
-        // land on the same target key — overlay uniqueness is
-        // `(type, name, organization_id, COALESCE(package_id, ''))` — and which
-        // body survived would be decided by driver row order. Keep the org
-        // overlay: it is what this caller already reads everywhere else.
-        let rows = scanned;
-        if (request.organizationId) {
-            const byKey = new Map<string, any>();
-            for (const row of scanned) {
-                // [#7932] …and for a bundled type the slot is
-                // `(type, name, discriminator)`. Same shape #7774 gave
-                // {@link metaItemKey}: the discriminator is appended ONLY
-                // when the type declares one, so every undiscriminated type
-                // keeps a byte-identical two-component key and this
-                // change's blast radius is provable rather than argued.
-                //
-                // Within ONE org the collapse cannot happen —
-                // `sys_metadata`'s overlay uniqueness is
-                // `(type, name, organization_id, package_id)` and the table
-                // has no locale column, so one org cannot hold two rows
-                // differing only by body locale. Across the two tiers it
-                // can, and this scan is the one place they meet: an
-                // env-wide `auth.welcome` customized in `en-US` and THIS
-                // org's `zh-CN` customization are two different members of
-                // one bundle (`EmailTemplateDefinitionSchema` resolves a
-                // template by `(name, locale)`), and keying them together
-                // let the org row displace the env-wide one — the
-                // duplicate then shipped one locale of a two-locale
-                // customization, reporting success. Precedence is unchanged
-                // where it was ever meaningful: an org row still wins over
-                // the env-wide row of the SAME member.
-                //
-                // The discriminator is read off the RAW stored body rather
-                // than the converted one, which is safe because no ADR-0087
-                // conversion entry touches `email_template` — re-checked
-                // against `packages/spec/src/conversions/registry.ts`,
-                // whose surfaces are flow/page/object/view/app/… and never
-                // this type.
-                const disc = storedRowDiscriminator(String(row?.type), row);
-                const base = `${row?.type}\u0000${row?.name}`;
-                const key = disc === undefined ? base : `${base}\u0000${disc}`;
-                const kept = byKey.get(key);
-                const keptIsEnvWide = kept != null && (kept.organization_id ?? null) === null;
-                if (kept == null || (keptIsEnvWide && (row?.organization_id ?? null) !== null)) {
-                    byKey.set(key, row);
-                }
-            }
-            rows = [...byKey.values()];
-        }
+        const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
 
         // Map only OBJECT names that carry the source namespace prefix; views/etc.
         // are renamed by the same prefix swap and reference-rewritten via the map.
@@ -24860,36 +24213,6 @@ export class ObjectStackProtocolImplementation implements
             }
             const rewritten = deepRewrite(item);
             if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) rewritten.name = newName;
-            // [#7819 tier 2] The copy lands in the SCOPE OF THE ROW IT CAME
-            // FROM, not the request's — the same rule #7559 gave `revertCommit`
-            // ({@link resolveMetaItemOrgScope}) for the same reason, now that
-            // widening the scan above means this loop, too, processes a batch
-            // that "legitimately mixes an env-wide artifact with an org
-            // overlay".
-            //
-            // Not cosmetic: without it the read fix alone cannot produce a
-            // working duplicate. Stamping the request's org on every copy is
-            // REFUSED for any type the metadata-type registry declares
-            // `allowOrgOverride=false` — `object` among them — with
-            // `NOT_OVERRIDABLE`, because boot hydration loads env-wide rows
-            // only and an org-scoped `object` row would vanish on the next
-            // restart (ADR-0005, #6190). Since an `object` therefore CANNOT
-            // exist org-scoped, every object row in a source package is
-            // env-wide, and an org-scoped `duplicatePackage` could not copy a
-            // single one: before this card the strict equality hid them, and
-            // with only the scan widened they would land in `failed[]`
-            // instead. Objects being what a base is mostly made of, ADR-0070
-            // D4's "duplicate base" gesture was structurally unable to
-            // duplicate a base whenever an org was active.
-            //
-            // Scoped to the org-scoped door alone. With no `organizationId` on
-            // the request the scan returns every organization's rows and each
-            // copy is written env-wide exactly as before — that door's
-            // behaviour is deliberately left byte-identical, as this card
-            // leaves all of its no-org branches.
-            const copyOrgId: string | null = request.organizationId
-                ? ((row?.organization_id ?? null) as string | null)
-                : null;
             try {
                 await this.saveMetaItem({
                     type: row.type,
@@ -24905,7 +24228,6 @@ export class ObjectStackProtocolImplementation implements
                     // duplicate-AGAIN workflow, and its `?force=true` default
                     // would name a parameter this door does not accept.
                     writeFace: 'package-duplicate',
-                    ...(copyOrgId ? { organizationId: copyOrgId } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 copied.push({ type: row.type, name: newName });
@@ -24960,7 +24282,6 @@ export class ObjectStackProtocolImplementation implements
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;
-        organizationId?: string;
         actor?: string;
     }): Promise<{
         success: boolean;
@@ -24968,46 +24289,19 @@ export class ObjectStackProtocolImplementation implements
         reassigned: Array<{ type: string; name: string }>;
         targetPackageId: string;
     }> {
-        const where: Record<string, unknown> = {};
-        // [#7819 tier 2] See env-wide (`organization_id IS NULL`) orphans too.
-        // This is the sharper member of the family, because FINDING ORPHANS IS
-        // THE ENTIRE PURPOSE of this method: a class of orphan it structurally
-        // cannot see is not a partial answer, it is a wrong one. Measured on a
-        // real driver before the fix — two orphans, one env-wide and one
-        // org-scoped, adopted by an org caller: `{success: true,
-        // reassignedCount: 1}`, with the env-wide orphan left at
-        // `package_id = null` and nothing reporting that it was skipped.
-        //
-        // Not a legacy-only population, which is what makes this live rather
-        // than latent. The docstring above calls orphans a pre-package-first
-        // residue, and ADR-0070 D1 does reject NEW orphans that name a
-        // read-only package (`WRITABLE_PACKAGE_REQUIRED`) — but a
-        // `saveMetaItem` that names NO package at all still succeeds today and
-        // lands `package_id = null, organization_id = null`, i.e. the current
-        // write path mints exactly the orphan this scan could not see.
-        //
-        // ADR-0070 D5 settles the scope question this widening raises (an
-        // org-scoped caller now rebinds rows every org can see): the unit is
-        // explicitly the ENVIRONMENT — "bulk-assign legacy orphans to a default
-        // base named for the environment", completing when "an environment has
-        // no orphans", in a deployment model whose own words are "there is no
-        // per-org overlay dimension here… the relevant axis is code package vs
-        // writable base, not 'org'". Under that model every orphan is env-wide,
-        // so the strict equality made this method inert for an org-scoped
-        // caller in precisely the deployment it was designed for.
-        //
-        // ⛔ The no-org branch stays `{}` — deliberately un-narrowed, and this
-        // is the exposure the card flagged as worst: that door already scans
-        // EVERY organization's rows. Narrowing it to `organization_id IS NULL`
-        // would re-create this same bug pointed the other way. Whether that
-        // door should be that wide is #7780's open product question, which is
-        // a maintainer call and explicitly NOT decided here.
-        if (request.organizationId) {
-            where.$or = [
-                { organization_id: request.organizationId },
-                { organization_id: null },
-            ];
-        }
+        // [ADR-0131 D6] FIRST: an organization-scoped adoption is refused.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Package '${request.targetPackageId}'`, request,
+        );
+        // The ENVIRONMENT's orphans: ADR-0070 D5 makes the environment the unit
+        // ("bulk-assign legacy orphans to a default base named for the
+        // environment"), and since ADR-0131 D6 every new orphan is
+        // environment-wide (`saveMetaItem` writes `organization_id = NULL`). A
+        // legacy organization-scoped row is left as it is stored — rebinding
+        // it would be an organization-scoped write; the promotion ceremony
+        // (ADR-0131 C7) carries it to the environment layer, where a later
+        // adoption sees it.
+        const where: Record<string, unknown> = { organization_id: null };
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
         const orphans = rows.filter(
@@ -25148,7 +24442,6 @@ export class ObjectStackProtocolImplementation implements
      * `isMissingTableError` predicate rather than a hand-rolled code test.
      */
     private async recordPackageCommit(args: {
-        orgId: string | null;
         packageId: string;
         operation: 'apply' | 'revert';
         message?: string;
@@ -25175,7 +24468,8 @@ export class ObjectStackProtocolImplementation implements
                 ...(args.eventSeqEnd !== undefined ? { event_seq_end: args.eventSeqEnd } : {}),
                 items: JSON.stringify(args.items),
                 item_count: args.items.length,
-                organization_id: args.orgId,
+                // [ADR-0131 D6/D7] The commit ledger is environment-level.
+                organization_id: null,
                 created_at: new Date().toISOString(),
             });
             return { commitId };
@@ -25412,7 +24706,6 @@ export class ObjectStackProtocolImplementation implements
      */
     async revertCommit(request: {
         commitId: string;
-        organizationId?: string;
         actor?: string;
     }): Promise<{
         success: boolean;
@@ -25422,55 +24715,12 @@ export class ObjectStackProtocolImplementation implements
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         revertCommitId?: string;
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped revert is refused.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Commit '${request.commitId}'`, request,
+        );
         await this.ensureOverlayIndex();
-        const orgId = request.organizationId ?? null;
         const where: Record<string, unknown> = { id: request.commitId };
-        // [#7819] Resolve BOTH org-scoped and env-wide (`organization_id IS
-        // NULL`) commit rows for an org-scoped caller — the same defect and
-        // remedy as the sibling {@link listCommits} (#7779) and {@link
-        // deletePackage} (#7705). `organization_id = <org>` matches no NULL
-        // column, so this answered `COMMIT_NOT_FOUND` (404) for a row that
-        // demonstrably exists and that the SAME caller's `listCommits`
-        // returns.
-        //
-        // ⚠️ This site is NOT the family's plain scan-scoping, and the `$or`
-        // was chosen over the two alternatives rather than copied. `where` is
-        // keyed on `id`, so the predicate reads like an AUTHORIZATION filter
-        // layered on a unique key. Measured against the only door, it is not
-        // one: authorization on `POST /packages/:id/commits/:commitId/revert`
-        // is `requireManageMetadata`, checked before this call; the
-        // `organizationId` that arrives is the session's *active org
-        // selection* from `resolveActiveOrganizationId`, whose body is
-        // entirely `catch`-wrapped and answers `undefined` on any auth-seam
-        // throw — and `undefined` omits this predicate, which is the WIDEST
-        // reading (every organization's commits). A boundary that fails OPEN
-        // is not a boundary, so there is no authz here to make precise; that
-        // rules out "keep it but distinguish 'not yours' from 'no such
-        // commit'". Dropping the predicate outright is defensible on an id
-        // lookup, but it would newly let an org caller revert ANOTHER
-        // organization's commit by id — a widening this card never asked for.
-        // The `$or` admits the env-wide rows and refuses that one.
-        //
-        // The body already agreed with this reading before the lookup did:
-        // #7559 made each item resolve its scope FROM THE ROW ({@link
-        // resolveMetaItemOrgScope}) precisely because "a batch legitimately
-        // mixes an env-wide artifact with an org overlay", so the loop below
-        // processes env-wide items for an org caller while the lookup above
-        // refused to hand them over. {@link rollbackToPackageCommit} made the
-        // contradiction self-evident: since #7814 it plans from `listCommits`
-        // (org + env-wide) and fed each id straight back into this lookup.
-        //
-        // The no-org branch is deliberately NOT narrowed to `organization_id
-        // IS NULL`, exactly as #7705 and #7779 left theirs: the direct-mount
-        // REST registrar passes no `organizationId` at all, and restricting
-        // that door to env-wide rows would make every org-scoped commit
-        // unrevertable — the same bug pointed the other way.
-        if (request.organizationId) {
-            where.$or = [
-                { organization_id: request.organizationId },
-                { organization_id: null },
-            ];
-        }
         // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
         // platform store the door already authorized; the protocol scopes the
         // `where` by organization itself. Principal-less, the engine refuses it.
@@ -25480,6 +24730,16 @@ export class ObjectStackProtocolImplementation implements
             err.code = 'COMMIT_NOT_FOUND';
             err.status = 404;
             throw err;
+        }
+        // [ADR-0131 D6] A commit recorded in a legacy organization's layer
+        // describes organization-scoped rows; reverting it would write them.
+        {
+            const legacy = ObjectStackProtocolImplementation.organizationScopedWriteRefusal(
+                `Commit '${request.commitId}'`,
+                row.organization_id,
+                'It records a change to that organization\'s legacy layer, which no write reaches any more.',
+            );
+            if (legacy) throw legacy;
         }
         const items = this.parseCommitItems(row.items);
         // #4556 — threaded into repo.put/delete → `recorded_by`; NULL when the
@@ -25614,20 +24874,9 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
 
-            // [#7559] PER ITEM, and from the ROW rather than from the request —
-            // the same shape {@link publishPackageDrafts} already uses when it
-            // promotes each draft in the draft's OWN scope and captures
-            // `prevVersion` there. A batch legitimately mixes an env-wide
-            // artifact with an org overlay, so a hoisted `orgId` has to pick one
-            // and be wrong about the other — which is exactly how a commit whose
-            // items are env-wide answered `VERSION_NOT_FOUND` for every item
-            // when reverted by a caller with an active org. See
-            // {@link resolveMetaItemOrgScope} for the measurement.
-            const itemOrgId = await this.resolveMetaItemOrgScope(
-                PLURAL_TO_SINGULAR[it.type] ?? it.type,
-                it.name,
-                orgId,
-            );
+            // [ADR-0131 D6] Every item reverts environment-wide: the commit row
+            // is environment-wide (a legacy organization's was refused above).
+            const itemOrgId = null;
             const repo = this.getOverlayRepo(itemOrgId);
             const ref = { type: it.type, name: it.name, org: itemOrgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
             try {
@@ -25919,40 +25168,9 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // Record the revert as its own commit (append-only history).
-        //
-        // [#7860] The scope of the commit being REVERTED, not the request's —
-        // the same rule #7559 gave this function's items ({@link
-        // resolveMetaItemOrgScope}) and #7819 tier 2 gave {@link
-        // duplicatePackage}'s copies, now applied to the commit RECORD that
-        // documents them. `packageId` on this very call is already read off
-        // `row`; the org was the one field still taken from whoever asked.
-        //
-        // Reachable only since #7819 tier 1: before it, the lookup above
-        // answered COMMIT_NOT_FOUND for an env-wide row, so an org caller
-        // could not reach this line with a mismatched scope at all.
-        //
-        // The invariant it restores: a revert commit is visible to exactly
-        // the readers who can see the commit it reverts. Measured on a real
-        // driver, both directions were incoherent without it —
-        //
-        //   env-wide commit reverted by an org caller: the revert row was
-        //   stamped with that org, so a DIFFERENT org's `listCommits` showed
-        //   the env-wide `apply` with no compensation anywhere after it —
-        //   while the artifact really was removed env-wide (the items revert
-        //   in the ROW's scope), i.e. the effect was global and the record
-        //   private. That is the reporting defect this card was opened to
-        //   measure, and it is not cosmetic: {@link rollbackToPackageCommit}
-        //   plans from `listCommits`.
-        //
-        //   org-scoped commit reverted by the no-org REST door: the revert
-        //   row was stamped env-wide, so every OTHER org read a dangling
-        //   `Revert: …` entry whose `parentCommitId` names a commit that
-        //   door cannot see.
-        //
-        // Both collapse to one line because both are the same mismatch.
+        // Record the revert as its own commit (append-only history),
+        // environment-wide like the commit it reverts (ADR-0131 D6/D7).
         const revertCommit = await this.recordPackageCommit({
-            orgId: (row.organization_id ?? null) as string | null,
             packageId: row.package_id,
             operation: 'revert',
             message: `Revert: ${row.message ?? request.commitId}`,
@@ -25983,28 +25201,17 @@ export class ObjectStackProtocolImplementation implements
      */
     async rollbackToPackageCommit(request: {
         commitId: string;
-        organizationId?: string;
         actor?: string;
     }): Promise<{
         success: boolean;
         revertedCommits: string[];
         failed: Array<{ commitId: string; error: string }>;
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped rollback is refused.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Commit '${request.commitId}'`, request,
+        );
         const where: Record<string, unknown> = { id: request.commitId };
-        // [#7819] Same widening as the {@link revertCommit} lookup above, and
-        // for the sharper reason: this function PLANS from {@link listCommits},
-        // which since #7814 returns org-scoped and env-wide rows alike to an
-        // org caller. With the strict equality here, an org-scoped rollback
-        // whose TARGET happened to be recorded env-wide answered 404 before it
-        // planned anything at all — for a commit the caller's own timeline had
-        // just listed. The rationale for the `$or` over the alternatives, and
-        // for leaving the no-org branch un-narrowed, is stated in full there.
-        if (request.organizationId) {
-            where.$or = [
-                { organization_id: request.organizationId },
-                { organization_id: null },
-            ];
-        }
         // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
         // platform store the door already authorized; the protocol scopes the
         // `where` by organization itself. Principal-less, the engine refuses it.
@@ -26015,10 +25222,7 @@ export class ObjectStackProtocolImplementation implements
             err.status = 404;
             throw err;
         }
-        const all = await this.listCommits({
-            packageId: target.package_id,
-            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
-        });
+        const all = await this.listCommits({ packageId: target.package_id });
         // listCommits is newest-first; revert every `apply` commit strictly newer
         // than the target (by created_at). Revert commits are skipped (their
         // effect is already captured by re-reverting the apply they undid).
@@ -26042,7 +25246,6 @@ export class ObjectStackProtocolImplementation implements
             try {
                 await this.revertCommit({
                     commitId: c.id,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 revertedCommits.push(c.id);
@@ -26081,7 +25284,6 @@ export class ObjectStackProtocolImplementation implements
         type: string;
         name: string;
         toVersion: number;
-        organizationId?: string;
         actor?: string;
         message?: string;
     }): Promise<{
@@ -26091,6 +25293,11 @@ export class ObjectStackProtocolImplementation implements
         restoredFromVersion: number;
         message?: string;
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped rollback is refused.
+        // See {@link organizationScopedWriteRefusal}.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Metadata item '${request.type}/${request.name}'`, request,
+        );
         if (!Number.isFinite(request.toVersion) || request.toVersion < 1) {
             const err: any = new Error(
                 `rollbackMetaItem requires a positive integer 'toVersion' (got ${request.toVersion}).`,
@@ -26168,25 +25375,15 @@ export class ObjectStackProtocolImplementation implements
         const _rollbackLockErr = await this.assertLockAllowsWrite({
             type: request.type,
             name: request.name,
-            ...(request.organizationId ? { organizationId: request.organizationId } : {}),
             operation: 'rollback',
             ...(request.actor ? { actor: request.actor } : {}),
             source: 'protocol.rollbackMetaItem',
         });
         if (_rollbackLockErr) throw _rollbackLockErr;
         await this.ensureOverlayIndex();
-        // [#7559] The scope the item's lineage actually lives in, not the
-        // caller's active org. Measured on `origin/main`: an env-wide `view`
-        // rolled back by a caller with an active org threw `VERSION_NOT_FOUND`
-        // (404) at exactly the version its own history endpoint lists, while
-        // the identical call with no active org succeeded — the same
-        // disagreement {@link revertCommit} showed, one caller over. See
-        // {@link resolveMetaItemOrgScope}.
-        const orgId = await this.resolveMetaItemOrgScope(
-            singularType,
-            request.name,
-            request.organizationId ?? null,
-        );
+        // [ADR-0131 D6] The environment's lineage: an organization-scoped
+        // request was refused above.
+        const orgId = null;
         const repo = this.getOverlayRepo(orgId);
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked
@@ -26306,7 +25503,6 @@ export class ObjectStackProtocolImplementation implements
                 await this.recordOptimisticConflictAudit({
                     type: request.type,
                     name: request.name,
-                    organizationId: orgId,
                     operation: 'rollback',
                     ...(request.actor ? { actor: request.actor } : {}),
                     source: 'protocol.rollbackMetaItem',
@@ -26656,7 +25852,6 @@ export class ObjectStackProtocolImplementation implements
     async deleteMetaItem(request: {
         type: string;
         name: string;
-        organizationId?: string;
         parentVersion?: string | null;
         actor?: string;
         state?: 'active' | 'draft';
@@ -26675,6 +25870,11 @@ export class ObjectStackProtocolImplementation implements
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
     }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped delete is refused.
+        // See {@link organizationScopedWriteRefusal}.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Metadata item '${request.type}/${request.name}'`, request,
+        );
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. Without it
         // the authorization tier (`isOverlayAllowed` / `isArtifactBacked`) and
         // the registry heal (`restoreArtifactRegistryView`) read the caller's
@@ -26777,7 +25977,6 @@ export class ObjectStackProtocolImplementation implements
             const lockErr = await this.assertLockAllowsDelete({
                 type: request.type,
                 name: request.name,
-                ...(request.organizationId ? { organizationId: request.organizationId } : {}),
                 ...(request.actor ? { actor: request.actor } : {}),
                 source: 'protocol.deleteMetaItem',
             });
@@ -26820,7 +26019,8 @@ export class ObjectStackProtocolImplementation implements
         // undefined) take the legacy raw-engine path below — the repository's
         // `assertAllowed()` whitelist would 403 those deletes.
         if (useRepoPath) {
-            const orgId = request.organizationId ?? null;
+            // [ADR-0131 D6] Environment-wide: refused above otherwise.
+            const orgId = null;
             const repo = this.getOverlayRepo(orgId);
             const ref = {
                 type: singularTypeForRepo,
@@ -26998,7 +26198,6 @@ export class ObjectStackProtocolImplementation implements
                     await this.recordOptimisticConflictAudit({
                         type: request.type,
                         name: request.name,
-                        organizationId: orgId,
                         operation: 'delete',
                         ...(request.actor ? { actor: request.actor } : {}),
                         source: 'protocol.deleteMetaItem',
@@ -27066,7 +26265,7 @@ export class ObjectStackProtocolImplementation implements
         const scopedWhere: Record<string, unknown> = {
             type: request.type,
             name: request.name,
-            organization_id: request.organizationId ?? null,
+            organization_id: null,
         };
 
         try {
@@ -27105,7 +26304,7 @@ export class ObjectStackProtocolImplementation implements
                 await this.restoreArtifactRegistryView(
                     request.type,
                     request.name,
-                    request.organizationId ?? null,
+                    null,
                 );
             }
 
@@ -27120,7 +26319,7 @@ export class ObjectStackProtocolImplementation implements
                 type: singularTypeForRepo,
                 name: request.name,
                 state: 'deleted',
-                organizationId: request.organizationId ?? null,
+                organizationId: null,
             });
 
             // [#14179] A real deletion announces itself on the ONE choke
@@ -27136,7 +26335,7 @@ export class ObjectStackProtocolImplementation implements
                 type: singularTypeForRepo,
                 name: request.name,
                 state: 'deleted',
-                organizationId: request.organizationId ?? null,
+                organizationId: null,
             });
 
             return {
@@ -27587,20 +26786,14 @@ export class ObjectStackProtocolImplementation implements
      *    `getMetaTypes()` synthesises `allowOrgOverride: false` for it, so
      *    "not per-org overridable" is its correct reading here.
      *
-     *    ── THE DIVERGENCE FROM THE REFUSAL IS DELIBERATE ──
+     *    ── THE REFUSAL HAS SINCE WIDENED TO MEET IT ──
      *
-     *    {@link orgScopedWriteRefusal} keys off the STATIC registry and
-     *    returns `null` for exactly this family (its "Statically-declared
-     *    types only" bullet); this audit keys off the LIVE set and reports it.
-     *    The two sets are meant to differ, and a future reader should not
-     *    "fix" one to match the other. The asymmetry is this file's own stated
-     *    posture, three bullets up in that method: *warning is free and should
-     *    be maximal; refusing removes a capability*. Widening the refusal
-     *    would extend the 2026-08-08 ruling — reasoned over the 27 declared
-     *    entries — onto a surface nobody measured; widening the warning costs
-     *    an operator one more segment on a line that already exists. Same
-     *    reasoning by which this method ignores `OS_METADATA_WRITABLE` while
-     *    the refusal honours it. Ruled on #6992, scoped to the diagnostic.
+     *    The #6190 refusal keyed off the STATIC registry and let exactly this
+     *    family through, while this audit keyed off the LIVE set (ruled on
+     *    #6992, scoped to the diagnostic). Since ADR-0131 D6 the refusal
+     *    ({@link organizationScopedWriteRefusal}) admits no organization-scoped
+     *    write of ANY type, plugin-registered ones included, hatch or no hatch,
+     *    so the only rows this audit can find are residue.
      *
      *    Measured, not assumed (#6992): at the instant this method runs — in
      *    `ObjectQLPlugin.start()` Phase 2, after every plugin's `init` — a

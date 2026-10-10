@@ -203,7 +203,6 @@ describe('#5961 — capability: the runtime write door is closed, and validated 
                 type: 'capability',
                 name: 'billing.refund',
                 item: NOT_A_CAPABILITY,
-                organizationId: 'org_alpha',
             }),
         ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
 
@@ -224,7 +223,6 @@ describe('#5961 — capability: the runtime write door is closed, and validated 
                 type: 'capability',
                 name: 'billing.refund',
                 item: CAPABILITY,
-                organizationId: 'org_alpha',
             }),
         ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
         expect(rows.size).toBe(0);

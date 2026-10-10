@@ -422,7 +422,7 @@ describe('[#12536 §3] `deletePackage` reports a marked refusal as a refusal on 
     it('carries the mark onto `failed[]`, where no HTTP boundary could put it', async () => {
         const p = new ObjectStackProtocolImplementation(uninstallEngine(() => markedRefusal())) as any;
 
-        const res = await p.deletePackage({ packageId: 'com.acme.crm', allTenants: true });
+        const res = await p.deletePackage({ packageId: 'com.acme.crm' });
 
         expect(res.failedCount).toBe(1);
         expect(declaredUserMessage(res.failed[0])).toBe(AUTHOR_TEXT);
@@ -434,7 +434,7 @@ describe('[#12536 §3] `deletePackage` reports a marked refusal as a refusal on 
     it('leaves the row unmarked — and unleaked — for a genuine driver fault', async () => {
         const p = new ObjectStackProtocolImplementation(uninstallEngine(driverFault)) as any;
 
-        const res = await p.deletePackage({ packageId: 'com.acme.crm', allTenants: true });
+        const res = await p.deletePackage({ packageId: 'com.acme.crm' });
 
         expect(res.failedCount).toBe(1);
         expect(res.failed[0].userMessage).toBeUndefined();
@@ -447,13 +447,13 @@ describe('[#12536 §3] `deletePackage` reports a marked refusal as a refusal on 
     it('classifies the uninstall\'s own overlay READ the same way', async () => {
         const marked = new ObjectStackProtocolImplementation(unreadableEngine(() => markedRefusal())) as any;
         const caughtMarked = await captureThrow(
-            () => marked.deletePackage({ packageId: 'com.acme.crm', allTenants: true }));
+            () => marked.deletePackage({ packageId: 'com.acme.crm' }));
         expect(declaredUserMessage(caughtMarked)).toBe(AUTHOR_TEXT);
         expect(caughtMarked.status).not.toBe(503);
 
         const fault = new ObjectStackProtocolImplementation(unreadableEngine(driverFault)) as any;
         const caughtFault = await captureThrow(
-            () => fault.deletePackage({ packageId: 'com.acme.crm', allTenants: true }));
+            () => fault.deletePackage({ packageId: 'com.acme.crm' }));
         expect(caughtFault.status).toBe(503);
         expect(caughtFault.message).toBe(STORE_UNAVAILABLE_MESSAGE);
         expect(outsideTheDoor(caughtFault)).not.toContain(DRIVER_SENTINEL);
@@ -464,7 +464,7 @@ describe('[#12536 §3] `deletePackage` reports a marked refusal as a refusal on 
         p.registerUninstallCleanup('marked-cleanup', async () => { throw markedRefusal({ status: 403 }); });
         p.registerUninstallCleanup('faulting-cleanup', async () => { throw driverFault(); });
 
-        const res = await p.deletePackage({ packageId: 'com.acme.crm', allTenants: true });
+        const res = await p.deletePackage({ packageId: 'com.acme.crm' });
 
         const marked = res.cleanups.find((c: any) => c.name === 'marked-cleanup');
         const faulting = res.cleanups.find((c: any) => c.name === 'faulting-cleanup');
