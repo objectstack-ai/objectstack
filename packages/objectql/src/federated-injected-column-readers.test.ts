@@ -225,10 +225,6 @@ const READERS: Record<string, Row> = {
     disposition: 'row-value',
     why: 'reads the tenant column off the written row; a federated row has none, so the event omits it',
   },
-  'plugin.ts#isLegacyOrganizationRow :: organization_id': {
-    disposition: 'row-value',
-    why: 'reads the column off a sys_metadata row in hand to skip a legacy organization row (ADR-0131 D6); sys_metadata is a platform table, never federated',
-  },
   'relation-filter-lowering.ts#admitRelationCondition :: referenceTargetOf()': {
     disposition: 'caller-predicate',
     why: "lowers a relation condition the caller wrote; it names an injected column only when the caller did",
