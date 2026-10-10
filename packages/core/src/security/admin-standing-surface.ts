@@ -120,17 +120,16 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + "Its organization decides which row a grant's name resolves to — the grant's own "
       + "organization's row, else the organization-less one — so an UNSCOPED grant reaches only "
       + 'the organization-less `admin_full_access`: moving that row into an organization un-makes '
-      + 'every grant-derived platform admin exactly as deleting it does.',
+      + 'every grant-derived platform admin exactly as deleting it does. [ADR-0131 D3/D4] Since '
+      + 'the catalog switch the row is read for its `active` flag alone: the set itself — its '
+      + 'existence and its body — is the catalog definition (see the `security-catalog` non-table '
+      + 'input), and a name with no row carries no flag, so deleting the row no longer un-makes '
+      + 'anyone; switching it off still does.',
     columns: [
-      'id',
       'name',
       'active',
       'organization_id',
       'organizationId',
-      'system_permissions',
-      'systemPermissions',
-      'tab_permissions',
-      'tabPermissions',
     ],
   },
 
@@ -206,8 +205,8 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
     role: 'reads-only',
     reason:
       'ADR-0057 D4 platform-RBAC position assignments (§4). A position can carry permission sets '
-      + '(see `sys_position_permission_set`) but never platform-admin standing — §6b requires the '
-      + 'set to be reached through an unscoped USER grant (`unscopedUserPsIds`), so a '
+      + '(its catalog definition\'s `permissionSets`, ADR-0131 D3/D4) but never platform-admin '
+      + 'standing — §6b requires the set to be reached through an unscoped USER grant, so a '
       + 'position-bound `admin_full_access` resolves the set name into `permissions` and leaves '
       + '`hasPlatformAdminGrant` false.',
   },
@@ -218,20 +217,16 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       'Read to drop DEACTIVATED positions (ADR-0049, §6a). Same reason as `sys_user_position`: '
       + 'the position path cannot reach `hasPlatformAdminGrant`.',
   },
-
-  sys_position_permission_set: {
-    role: 'reads-only',
-    reason:
-      'Position-bound permission sets (§6a). Contributes ids to `psIds` — and therefore names to '
-      + '`permissions` — but not to `unscopedUserPsIds`, which is the set §6b tests for '
-      + 'platform-admin standing.',
-  },
 };
 
 /** A derivation input that is not a table — see {@link ADMIN_STANDING_NON_TABLE_INPUTS}. */
 export interface AdminStandingNonTableInput {
-  /** How the value reaches the resolver, e.g. `env` for a process environment variable. */
-  readonly kind: 'env';
+  /**
+   * How the value reaches the resolver: `env` for a process environment
+   * variable, `security-catalog` for a definition the resolver reads from the
+   * catalog bound to its engine (ADR-0131 D3/D4).
+   */
+  readonly kind: 'env' | 'security-catalog';
   /** The exact spelling an operator sets — quotable verbatim in a refusal message. */
   readonly name: string;
   /** What it decides, and what a break-glass guard can and cannot do about it. */
@@ -265,6 +260,17 @@ export const ADMIN_STANDING_NON_TABLE_INPUTS: readonly AdminStandingNonTableInpu
       + 'ZERO config-derived administrators, fail closed. No runtime write reaches it, so no '
       + 'break-glass guard can simulate a change to it: revocation is a configuration change plus '
       + 'a process roll, by design.',
+  },
+  {
+    kind: 'security-catalog',
+    name: 'admin_full_access',
+    reason:
+      'The permission-set definition an unscoped `admin_full_access` user grant names, read from '
+      + 'the security catalog by name (ADR-0131 D3/D4) — the platform\'s own declaration, shipped '
+      + 'on the security plugin\'s manifest. A name the catalog does not hold confers nothing, so '
+      + 'every grant-derived platform administrator rests on it. It is code-declared and refused '
+      + 'an overlay at the metadata door, so no runtime write reaches it either: removing it is '
+      + 'a code change plus a process roll.',
   },
 ];
 

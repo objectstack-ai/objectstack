@@ -854,23 +854,9 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
 
   [USER_PERMISSION_SET]: {},
 
-  [SystemObjectName.PERMISSION_SET]: {
-    id:
-      'On this engine `data.id` on an update ADDRESSES the row rather than proposing a new '
-      + 'primary key (see the note above `PERMISSION_SET_STANDING_KEYS`), so a key rewrite is not '
-      + 'expressible through this write path at all.',
-    system_permissions:
-      'What the set CONTAINS does not un-make a platform admin: `hasPlatformAdminGrant` is set '
-      + "from `ps.name === 'admin_full_access'` on an ACTIVE set, and the posture rung and "
-      + 'superuser bypass ride on that boolean. Emptying the blob costs the holder setup/studio '
-      + 'access — recoverable from inside the product, an ADR-0086 capability question, not a '
-      + 'break-glass one.',
-    systemPermissions: 'Camel-case spelling of `system_permissions` — same reason.',
-    tab_permissions:
-      'Tab visibility per app. Same reason as `system_permissions`: it is content of the set, '
-      + 'never the name-and-active pair the derivation reads.',
-    tabPermissions: 'Camel-case spelling of `tab_permissions` — same reason.',
-  },
+  // [ADR-0131 D3/D4] The resolver reads a set row for its `active` flag alone;
+  // the set's body is its catalog definition, so no other column is read here.
+  [SystemObjectName.PERMISSION_SET]: {},
 
   [SystemObjectName.USER]: {
     id:

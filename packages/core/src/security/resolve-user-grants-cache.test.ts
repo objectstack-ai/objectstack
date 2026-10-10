@@ -36,6 +36,7 @@ import {
   makeRecordingQl,
   FIXTURES,
 } from './__tests__/resolve-authz-context.batch-equivalence.testkit.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 // ── An engine double that carries the #11968 seams ──────────────────────────
 
@@ -87,7 +88,7 @@ function makeSeamQl(tables: Record<string, any[]>) {
     };
     await run(0);
   }
-  return {
+  return bindCatalogFromTables({
     calls,
     tables,
     writeEpoch: epoch,
@@ -121,7 +122,7 @@ function makeSeamQl(tables: Record<string, any[]>) {
         tables[object] = (tables[object] ?? []).filter((r) => !matches(r, where));
       });
     },
-  };
+  }, tables);
 }
 
 type SeamQl = ReturnType<typeof makeSeamQl>;

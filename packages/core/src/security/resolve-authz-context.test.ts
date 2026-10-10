@@ -5,6 +5,7 @@ import { hasPlatformAdminStanding, resolveAuthzContext, resolveUserAuthzGrants, 
 import { POSTURE_RANK } from './posture-ladder.js';
 import { hashApiKey } from './api-key.js';
 import type { AuthzPosture } from '@objectstack/spec/security';
+import { bindCatalogFromTables, bindStaticSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 /**
  * [#14273 A1] The refusal REASON is observable on exactly ONE surface: the
@@ -54,7 +55,7 @@ function bounded<T>(rows: T[], opts: any): T[] {
 }
 
 function makeQl(tables: Record<string, any[]>) {
-  return {
+  return bindCatalogFromTables({
     async find(object: string, opts: any) {
       const rows = tables[object] ?? [];
       const where = opts?.where ?? {};
@@ -70,7 +71,7 @@ function makeQl(tables: Record<string, any[]>) {
         opts,
       );
     },
-  };
+  }, tables);
 }
 const session = (userId: string, opts: { email?: string; org?: string } = {}) =>
   async () => ({ user: { id: userId, email: opts.email }, session: { activeOrganizationId: opts.org ?? null } });
@@ -161,7 +162,7 @@ describe('resolveAuthzContext — single source of truth', () => {
 // assert the de-duplication of redundant authz/localization reads (#2409).
 function makeCountingQl(tables: Record<string, any[]>) {
   const counts: Record<string, number> = {};
-  return {
+  return bindCatalogFromTables({
     counts,
     async find(object: string, opts: any) {
       counts[object] = (counts[object] ?? 0) + 1;
@@ -179,7 +180,7 @@ function makeCountingQl(tables: Record<string, any[]>) {
         opts,
       );
     },
-  };
+  }, tables);
 }
 
 describe('resolveAuthzContext — request-scoped read de-duplication (#2409)', () => {
@@ -1940,14 +1941,15 @@ describe('[#20515] with no active organization, only global grants apply', () =>
   });
 
   /**
-   * §6a — position-bound sets. Under a walled posture the catalog holds one
-   * copy of each built-in position PER ORGANIZATION (`everyone`, `org_member`,
-   * …), and an organization binds its own sets to its own copies. With no
-   * tenant the `sys_position` read is installation-wide, so every
-   * organization's copy of a name the caller holds used to feed its bindings in.
-   * This double ignores the context's tenant exactly as that read does.
+   * [ADR-0131 D3/D4] The catalog has no organization level: a position's sets
+   * are the `permissionSets` its definition names, the same in every
+   * organization and with none. The organization-scoped junction rows below —
+   * alpha binding its own sets to its own copies of `org_member` and
+   * `everyone` — are not read, so a member removed from alpha cannot keep
+   * what alpha bound, in beta or with no tenant, and neither can alpha's own
+   * members: what an organization bound is not a grant any more (#15196 Q3 A).
    */
-  describe('§6a: a position row scoped to an organization binds nothing with no tenant', () => {
+  describe('§6a: a position binds what its definition names — no organization binds its own', () => {
     const catalog = () => ({
       sys_position: [
         { id: 'pos_member_alpha', name: 'org_member', organization_id: ALPHA },
@@ -1966,35 +1968,35 @@ describe('[#20515] with no active organization, only global grants apply', () =>
         { id: 'ps_global_everyone', name: 'global_everyone_default' },
       ],
     });
-    /** Removed from alpha, still an `org_member` of beta — the role name alpha bound its set to. */
-    const exMember = () => makeQl({
-      sys_user: [{ id: 'u_ex' }],
-      sys_member: [{ user_id: 'u_ex', organization_id: BETA, role: 'member' }],
+    const definitions = {
+      positions: [{ name: 'everyone', permissionSets: ['global_everyone_default'] }],
+      permissions: [
+        { name: 'alpha_member_tools', systemPermissions: ['manage_metadata'] },
+        { name: 'alpha_everyone_extra' },
+        { name: 'global_everyone_default' },
+      ],
+    };
+    const principal = (userId: string, organizationId: string) => bindStaticSecurityCatalog(makeQl({
+      sys_user: [{ id: userId }],
+      sys_member: [{ user_id: userId, organization_id: organizationId, role: 'member' }],
       sys_user_position: [],
       sys_user_permission_set: [],
       ...catalog(),
+    }), definitions);
+
+    it('a member removed from alpha: the definition\'s set and nothing alpha bound — with no tenant and in beta', async () => {
+      for (const tenantId of [undefined, BETA]) {
+        const grants = await resolveUserAuthzGrants(principal('u_ex', BETA), 'u_ex', tenantId ? { tenantId } : {});
+        expect(grants.positions, String(tenantId)).toContain('org_member');
+        expect([...grants.permissions].sort(), String(tenantId)).toEqual(['global_everyone_default']);
+        expect(grants.systemPermissions, String(tenantId)).not.toContain('manage_metadata');
+      }
     });
 
-    it('no tenant: neither alpha\'s org_member binding nor alpha\'s everyone binding applies; the global everyone binding does', async () => {
-      const grants = await resolveUserAuthzGrants(exMember(), 'u_ex', {});
-      expect(grants.positions).toContain('org_member');
-      expect([...grants.permissions].sort()).toEqual(['global_everyone_default']);
-      expect(grants.systemPermissions).not.toContain('manage_metadata');
-    });
-
-    it('in beta: alpha\'s bindings still do not apply; in alpha (a current member there): they do', async () => {
-      const inBeta = await resolveUserAuthzGrants(exMember(), 'u_ex', { tenantId: BETA });
-      expect([...inBeta.permissions].sort()).toEqual(['global_everyone_default']);
-      const alphaMember = makeQl({
-        sys_user: [{ id: 'u_in' }],
-        sys_member: [{ user_id: 'u_in', organization_id: ALPHA, role: 'member' }],
-        sys_user_position: [],
-        sys_user_permission_set: [],
-        ...catalog(),
-      });
-      const inAlpha = await resolveUserAuthzGrants(alphaMember, 'u_in', { tenantId: ALPHA });
-      expect([...inAlpha.permissions].sort()).toEqual(['alpha_everyone_extra', 'alpha_member_tools', 'global_everyone_default']);
-      expect(inAlpha.systemPermissions).toContain('manage_metadata');
+    it('a current alpha member gets the same: alpha\'s organization-scoped junction rows bind nothing', async () => {
+      const inAlpha = await resolveUserAuthzGrants(principal('u_in', ALPHA), 'u_in', { tenantId: ALPHA });
+      expect([...inAlpha.permissions].sort()).toEqual(['global_everyone_default']);
+      expect(inAlpha.systemPermissions).not.toContain('manage_metadata');
     });
   });
 

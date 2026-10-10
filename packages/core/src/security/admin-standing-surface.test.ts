@@ -45,6 +45,7 @@ import { describe, it, expect } from 'vitest';
 import { ADMIN_STANDING_SURFACE, adminStandingTables } from './admin-standing-surface.js';
 import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveAuthzContext } from './resolve-authz-context.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 /** table -> every column name the resolver touched on it. */
 type Observation = Map<string, Set<string>>;
@@ -79,7 +80,7 @@ function makeRecordingQl(tables: Record<string, Array<Record<string, unknown>>>,
   const raw = (row: Record<string, unknown>, key: string): unknown =>
     key in row ? row[key] : row[camelOf(key)];
 
-  return {
+  return bindCatalogFromTables({
     async find(object: string, opts: { where?: Record<string, unknown>; limit?: number } = {}) {
       if (!seen.has(object)) seen.set(object, new Set<string>());
       const where = opts?.where ?? {};
@@ -116,7 +117,7 @@ function makeRecordingQl(tables: Record<string, Array<Record<string, unknown>>>,
           }),
       );
     },
-  };
+  }, tables);
 }
 
 const headers = () => new Headers();

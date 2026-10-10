@@ -32,6 +32,7 @@ import {
   AUTHZ_STORE_UNAVAILABLE_CODE,
   AUTHZ_STORE_UNAVAILABLE_STATUS,
 } from './authz-store-unavailable.js';
+import { bindStaticSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const USER = 'u_admin';
 const SESSION = { getSession: async () => ({ user: { id: USER } }) };
@@ -40,16 +41,18 @@ const SESSION = { getSession: async () => ({ user: { id: USER } }) };
 const qlDown = () => ({ find: async () => { throw new Error('permission store unreachable'); } });
 /** The INNOCENT TWIN: reachable, and genuinely holding no rows for this user. */
 const qlEmpty = () => ({ find: async () => [] });
-/** A store that actually grants something, so "resolves" is read against a real grant. */
-const qlHealthy = () => ({
+/**
+ * A store that actually grants something, so "resolves" is read against a real
+ * grant: the grant row, and the set it names in the security catalog bound to
+ * the engine (ADR-0131 D3/D4).
+ */
+const qlHealthy = () => bindStaticSecurityCatalog({
   find: async (object: string) => {
     if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps', permission_set: 'pkg_admin' }];
-    if (object === 'sys_permission_set') {
-      return [{ id: 'ps', name: 'pkg_admin', system_permissions: ['studio.access'] }];
-    }
+    if (object === 'sys_permission_set') return [{ id: 'ps', name: 'pkg_admin' }];
     return [];
   },
-});
+}, { permissions: [{ name: 'pkg_admin', systemPermissions: ['studio.access'] }] });
 
 const settle = async (p: Promise<unknown>) =>
   p.then((v) => ({ ok: true as const, v }), (e) => ({ ok: false as const, e }));

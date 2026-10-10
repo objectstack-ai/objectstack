@@ -30,7 +30,7 @@
  */
 
 import type { ResolveUserAuthzGrantsOptions } from '../resolve-authz-context.js';
-import { bindStaticSecurityCatalog, catalogFromTables } from './security-catalog.testkit.js';
+import { bindCatalogFromTables } from './security-catalog.testkit.js';
 
 // ── Recording ObjectQL double ───────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ export function makeRecordingQl(tables: Record<string, unknown[]>) {
       if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
-  return bindStaticSecurityCatalog({
+  return bindCatalogFromTables({
     calls,
     legOf,
     get legs() { return legs; },
@@ -110,7 +110,7 @@ export function makeRecordingQl(tables: Record<string, unknown[]>) {
         inFlight -= 1;
       }
     },
-  }, catalogFromTables(tables));
+  }, tables);
 }
 
 // ── Fixture matrix — one entry per shape the eight reads discriminate on ────

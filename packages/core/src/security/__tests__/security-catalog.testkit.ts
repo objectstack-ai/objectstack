@@ -32,17 +32,21 @@ export interface StaticCatalog {
   permissions?: readonly Definition[];
 }
 
-/** A catalog over these definitions alone (first definition of a name wins). */
-export function createStaticSecurityCatalog(catalog: StaticCatalog): SecurityCatalogReader {
-  const byType: Record<string, Definition[]> = {
-    position: [...(catalog.positions ?? [])],
-    permission: [...(catalog.permissions ?? [])],
-    capability: [],
+/**
+ * A catalog over these definitions alone (first definition of a name wins).
+ * Given a function, the definitions are read afresh on every lookup — the
+ * shape for a suite that writes its fixture between two resolutions.
+ */
+export function createStaticSecurityCatalog(catalog: StaticCatalog | (() => StaticCatalog)): SecurityCatalogReader {
+  const current = typeof catalog === 'function' ? catalog : () => catalog;
+  const itemsOf = (type: string): readonly Definition[] => {
+    const c = current();
+    return type === 'position' ? (c.positions ?? []) : type === 'permission' ? (c.permissions ?? []) : [];
   };
   return createSecurityCatalogReader({
     registry: {
-      getItem: (type, name) => byType[type]?.find((d) => d.name === name),
-      listItems: (type) => byType[type] ?? [],
+      getItem: (type, name) => itemsOf(type).find((d) => d.name === name),
+      listItems: (type) => itemsOf(type),
       isPackageDisabled: () => false,
     },
     metadata: { get: () => undefined, list: () => [] },
@@ -50,7 +54,7 @@ export function createStaticSecurityCatalog(catalog: StaticCatalog): SecurityCat
 }
 
 /** Bind {@link createStaticSecurityCatalog} to `engine`; returns the engine for chaining. */
-export function bindStaticSecurityCatalog<T extends object>(engine: T, catalog: StaticCatalog): T {
+export function bindStaticSecurityCatalog<T extends object>(engine: T, catalog: StaticCatalog | (() => StaticCatalog)): T {
   bindSecurityCatalogReader(engine, createStaticSecurityCatalog(catalog));
   return engine;
 }
@@ -93,4 +97,12 @@ export function catalogFromTables(tables: Record<string, readonly unknown[] | un
     if (fate.fate !== 'conflicting') positions.push({ name: fate.name, permissionSets: [...fate.permissionSets] });
   }
   return { positions, permissions };
+}
+
+/**
+ * Bind to `engine` the catalog `tables`' rows convert to ({@link catalogFromTables}),
+ * re-derived on every lookup, so a row the suite writes later is in it.
+ */
+export function bindCatalogFromTables<T extends object>(engine: T, tables: Record<string, readonly unknown[] | undefined>): T {
+  return bindStaticSecurityCatalog(engine, () => catalogFromTables(tables));
 }
