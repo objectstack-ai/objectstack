@@ -177,7 +177,7 @@ describe.each(NODE_TYPES)('%s `fields.*` — a CEL value envelope is EVALUATED (
 });
 
 describe.each(NODE_TYPES)('%s `fields.*` — every literal writes exactly what it wrote before', (nodeType) => {
-  it('literals, arrays, nested envelope-shaped JSON and the two kept `{…}` spellings: byte-identical to the whole-map `interpolate()`', async () => {
+  it('literals, arrays, nested envelope-shaped JSON and the kept `{…}` spelling: byte-identical to the whole-map `interpolate()`', async () => {
     const fields = {
       subject: '{TODAY() + 7}',                           // a date macro — kept until CEL can write it
       total: 42,
@@ -256,7 +256,43 @@ describe.each(NODE_TYPES)('%s `fields.*` — the retired `{…}` template dialec
     expect(writes[0]!.data.total).toBe(before.total);
     expect(writes[0]!.data.subject).toBe(before.subject);
   });
+
+  // #19939 pass 2 — `{$User.Id}` is refused; `current_user.id` writes the
+  // run user, the value the template wrote, and the guard writes `null` in a
+  // run with no user, where the template wrote nothing (the key absent).
+  it('`{$User.Id}` is refused; `current_user.id` writes the run user the template wrote, and the guard writes `null` without one', async () => {
+    const automation = new AutomationEngine(makeLogger());
+    registerCrudNodes(automation, { logger: makeLogger(), getService: () => undefined } as any);
+    expect(() => automation.registerFlow('price_quote', writeFlow(nodeType, { subject: '{$User.Id}' })))
+      .toThrow("{ dialect: 'cel', source: 'current_user.id' }");
+
+    const before = interpolate({ subject: '{$User.Id}' }, new Map(), { userId: 'u1' } as any);
+    const withUser = await makeStack();
+    withUser.automation.registerFlow('price_quote', writeFlow(nodeType, { subject: { dialect: 'cel', source: 'current_user.id' } }));
+    const res = await run(withUser.automation);
+    expect(res.success, res.error).toBe(true);
+    expect(writes0(withUser.writes).subject).toBe(before.subject);
+    expect(before.subject).toBe('u1');
+
+    // A user-less run writes data only under an explicit `runAs: 'system'` (ADR-0049).
+    const userless = await makeStack();
+    userless.automation.registerFlow('price_quote', {
+      ...writeFlow(nodeType, { subject: { dialect: 'cel', source: 'current_user != null ? current_user.id : null' } }),
+      runAs: 'system',
+    });
+    const res2 = await userless.automation.execute('price_quote', { params: PARAMS } as any);
+    expect(res2.success, res2.error).toBe(true);
+    expect(interpolate({ subject: '{$User.Id}' }, new Map(), {} as any).subject).toBeUndefined();
+    // The guarded form sends `null` — on `update_record` that clears the stored value.
+    expect(writes0(userless.writes)).toHaveProperty('subject', null);
+  });
 });
+
+/** The first row that reached the store. */
+function writes0(writes: Array<{ data: Record<string, unknown> }>): Record<string, unknown> {
+  expect(writes.length).toBeGreaterThan(0);
+  return writes[0]!.data;
+}
 
 describe.each(NODE_TYPES)('%s `fields.*` — a malformed envelope is refused at registration, and by the evaluator', (nodeType) => {
   it.each(MALFORMED)('$label: registerFlow refuses it, located at the field and led by the slot-neutral sentence', ({ envelope }) => {

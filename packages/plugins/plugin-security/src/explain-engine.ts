@@ -51,6 +51,7 @@ import type {
 } from '@objectstack/spec/security';
 import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { ExplainObjectNotFoundError } from './errors.js';
 import { RLS_DENY_FILTER, compiledPolicyNameOf } from './rls-compiler.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
@@ -279,7 +280,12 @@ export interface ExplainEngineDeps {
   }>;
   /** The middleware's requiredPermissions AND-gate resolution for an operation. */
   requiredCaps: (meta: any, engineOperation: string) => string[];
-  /** The middleware's RLS filter composition (same inputs, same output). */
+  /**
+   * The middleware's RLS filter composition (same inputs, same output). Asked
+   * for the operation the door composes the explained verb's row-level
+   * security for ({@link rlsOperationForVerb}): a lifecycle verb arrives as its
+   * write class, every other verb as itself.
+   */
   computeRlsFilter: (
     sets: PermissionSet[],
     object: string,
@@ -336,6 +342,9 @@ export interface ExplainEngineDeps {
    * layers (the same `Layer0(tenant) AND Layer1(business)` the effective filter
    * is built from). Lets the tenant wall (Layer 0) and business RLS (Layer 1) be
    * attributed to a record separately. `undefined` return = engine cannot split.
+   * Asked for the same operation as {@link computeRlsFilter} (the explained
+   * verb through {@link rlsOperationForVerb}), so a `transfer`'s row story is
+   * composed as the update the door composes it as.
    */
   computeLayeredRlsFilter?: (
     sets: PermissionSet[],
@@ -1269,6 +1278,14 @@ interface RecordAttributionContext {
   object: string;
   recordId: string;
   engineOp: string;
+  /**
+   * [#22550] The operation the record's row-level security is composed for:
+   * `engineOp` through {@link rlsOperationForVerb}, as the by-id write
+   * pre-image gate (step 2.7) maps it. Only the RLS composition reads it; every
+   * other row judgement (the write gate, the master-detail check, the prose)
+   * keeps the verb as asked.
+   */
+  rlsOp: string;
   context: any;
   sets: PermissionSet[];
   layers: ExplainLayer[];
@@ -1314,7 +1331,7 @@ async function applyRecordAttribution(
   ra: RecordAttributionContext,
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
   const {
-    deps, object, recordId, engineOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
+    deps, object, recordId, engineOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
     declaredColumns, depthScope,
   } = ra;
   const isRead = engineOp === 'find';
@@ -1346,8 +1363,13 @@ async function applyRecordAttribution(
 
   // The composition enforcement runs before the query: when it throws, neither
   // layer answered, so neither may read as "contributes nothing".
+  // [#22550] Composed for `rlsOp`, the door's operation for this verb. Composed
+  // for the raw verb, a `transfer` reached the RLS compiler as a READ
+  // (`mapOperationToRLS` sends an unlisted verb to `select`), so no
+  // update-class policy and no ownership floor reached its verdict: a row an
+  // update policy excludes was reported writable beside the door's 403.
   const layeredOrFault = deps.computeLayeredRlsFilter
-    ? await settle(deps.computeLayeredRlsFilter(sets, object, engineOp, context))
+    ? await settle(deps.computeLayeredRlsFilter(sets, object, rlsOp, context))
     : undefined;
   const layeredFault = layeredOrFault === DEPENDENCY_FAULT;
   const layered = layeredOrFault === DEPENDENCY_FAULT ? undefined : layeredOrFault;
@@ -1785,6 +1807,11 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   // [#3544] The gate operation (`engineOp`) and the data operation may differ —
   // today only for `export`, which is gated as itself but reads as a `find`.
   const dataOp = dataOpOf(operation, engineOp);
+  // [#22550] ...and the row-level security operation may differ from both: a
+  // lifecycle verb is composed as its nearest write class (transfer and restore
+  // as update, purge as delete), the mapping the by-id write pre-image gate
+  // (step 2.7) reads. Both RLS compositions below are asked for it.
+  const rlsOp = rlsOperationForVerb(dataOp);
   const layers: ExplainLayer[] = [];
 
   // ── 1. principal ──────────────────────────────────────────────────────
@@ -2156,7 +2183,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   // ── 9. rls — the composed machine artifact ─────────────────────────────
   let agentFilter: Record<string, unknown> | null | undefined;
   try {
-    agentFilter = await deps.computeRlsFilter(sets, object, dataOp, context);
+    agentFilter = await deps.computeRlsFilter(sets, object, rlsOp, context);
   } catch {
     agentFilter = { id: DENY_ALL_SENTINEL_ID };
   }
@@ -2165,7 +2192,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   let delegatorFilter: Record<string, unknown> | null | undefined;
   if (delegatorSets && delegatorContextForRls) {
     try {
-      delegatorFilter = await deps.computeRlsFilter(delegatorSets, object, dataOp, delegatorContextForRls);
+      delegatorFilter = await deps.computeRlsFilter(delegatorSets, object, rlsOp, delegatorContextForRls);
     } catch {
       delegatorFilter = { id: DENY_ALL_SENTINEL_ID };
     }
@@ -2210,7 +2237,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   let posture: AuthzPosture | undefined;
   if (input.recordId) {
     const out = await applyRecordAttribution({
-      deps, object, recordId: input.recordId, engineOp: dataOp, context, sets, layers, owd, capsDeny, crudAllowed,
+      deps, object, recordId: input.recordId, engineOp: dataOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed,
       vamaEffective, vamaSets, declaredColumns, depthScope: scope,
     });
     recordVerdict = out.record;
