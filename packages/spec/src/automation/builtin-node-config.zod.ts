@@ -105,6 +105,9 @@ import { textSlotTemplateRefusal } from './flow-text-slot-template';
 // [#22502] The `$` names are the flow engine's at the binding keys too — the
 // one rule, composed into every `outputVariable` below rather than re-spelled.
 import { flowBoundVariableNameSchema } from './flow-bound-variable-name';
+// The one key a screen field's option is addressed by as text — the option
+// collision refusal below reads it, as `translateFlow` and the extractor do.
+import { flowScreenFieldOptionKey } from './flow-screen-option-key';
 
 /** What a rejected key on these contracts silently did before #4001 批 9. */
 const BUILTIN_NODE_CONFIG_HISTORY =
@@ -604,6 +607,43 @@ export const SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED =
   + "offers (e.g. `reference: 'crm_knowledge_article'`). Without it the field renders a picker with nothing to "
   + 'resolve.';
 
+/**
+ * The sentence every refusal of two colliding screen-field options leads with.
+ *
+ * An option is addressed as text by {@link flowScreenFieldOptionKey}
+ * (`String(value)`): its label translation sits under
+ * `flows.<flow>.screens.<node_id>.fields.<field>.options.<value>`, and the
+ * console's select keys its items the same way. `value` is `z.unknown()`, so
+ * `1` and `"1"` (or `true` and `"true"`) both parse — and then read as ONE
+ * option to both readers: one translation key, one select item. Refused at the
+ * second of the pair rather than tolerated, because no reader can recover
+ * which one the author meant.
+ */
+export const SCREEN_FIELD_OPTION_VALUE_COLLISION =
+  'Two options of this screen field have values that read the same as text, so nothing can tell them apart: an '
+  + "option's label translation is addressed by its value as text "
+  + '(`flows.<flow>.screens.<node_id>.fields.<field>.options.<value>`), and so is the item the select offers.';
+
+/** An option value as an author wrote it — `1`, `"1"`, `true` — for a refusal to quote. */
+function quoteOptionValue(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean'
+    || typeof value === 'bigint') {
+    return String(value);
+  }
+  return Array.isArray(value) ? 'an array' : `a value of type ${typeof value}`;
+}
+
+/** The full refusal for option `second` colliding with the earlier option `first` of the same field. */
+function screenFieldOptionCollision(first: number, firstValue: unknown, second: number, secondValue: unknown): string {
+  const key = flowScreenFieldOptionKey(secondValue);
+  return (
+    `${SCREEN_FIELD_OPTION_VALUE_COLLISION} Option [${second}] (value ${quoteOptionValue(secondValue)}) reads as `
+    + `${JSON.stringify(key)}, exactly as option [${first}] (value ${quoteOptionValue(firstValue)}) does. Give each `
+    + 'option a value that stays distinct as text, or drop the duplicate.'
+  );
+}
+
 export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   surface: 'this screen field',
   history: BUILTIN_NODE_CONFIG_HISTORY,
@@ -658,14 +698,19 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   type: z.string().optional().describe('Input type'),
   /** Whether the runner requires a value before resume. */
   required: z.boolean().optional().describe('Whether a value is required to submit'),
-  /** Choices for a select-style field. */
+  /**
+   * Choices for a select-style field. Each option is addressed as text by its
+   * value (`String(value)`, {@link flowScreenFieldOptionKey}) — the key its
+   * label translation sits under — so two options of one field whose values
+   * read the same as text are refused by the refinement below.
+   */
   options: z.array(strictObject({
     surface: 'this screen field option',
     history: BUILTIN_NODE_CONFIG_HISTORY,
   }, {
-    value: z.unknown().describe('Stored value'),
+    value: z.unknown().describe('Stored value; it also addresses the option as text (its label translation key), so it must stay distinct from its siblings as text'),
     label: z.string().describe('Display label'),
-  })).optional().describe('Choices for a select-style field'),
+  })).optional().describe('Choices for a select-style field; option values must stay distinct when read as text'),
   /** Prefilled value; interpolates `{token}` templates at suspend time. */
   defaultValue: z.unknown().optional().describe('Prefilled value (interpolates {token} templates)'),
   /** Input placeholder text. */
@@ -729,6 +774,26 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    */
   reference: z.string().optional().describe("Target object name (snake_case) whose records a `type: 'lookup'` field picks from; REQUIRED when `type` is `lookup`"),
 }).superRefine((field, ctx) => {
+  // Two options whose values read the same as text are ONE option to every
+  // reader that addresses them as text — the label translation key and the
+  // console's select alike — so the second of each pair is refused, at its own
+  // `value`. Judged before the lookup rule below, which returns early.
+  if (Array.isArray(field.options)) {
+    const firstByKey = new Map<string, number>();
+    field.options.forEach((option, index) => {
+      const key = flowScreenFieldOptionKey(option.value);
+      const first = firstByKey.get(key);
+      if (first === undefined) {
+        firstByKey.set(key, index);
+        return;
+      }
+      ctx.addIssue({
+        code: 'custom',
+        path: ['options', index, 'value'],
+        message: screenFieldOptionCollision(first, field.options![first]!.value, index, option.value),
+      });
+    });
+  }
   // Conditional requirement, not a shape change: the key set is unchanged and
   // `.shape` still enumerates twelve keys. `type` is an open widget hint, so
   // this reads ONE member of it — the member whose whole meaning is "resolve

@@ -113,10 +113,12 @@ export interface ConsoleRouteLedgerEntry {
 }
 
 export const CONSOLE_ROUTE_LEDGER: readonly ConsoleRouteLedgerEntry[] = [
-    // ── console SPA static serving (createConsoleStaticPlugin) ─────────
+    // ── console SPA static serving (createConsoleStaticPlugin), and the ────
+    // ── responders mounted on the same routes when the Console is refused ──
+    // ── (createConsoleNotBuiltPlugin, createConsoleShaDriftRefusalPlugin) ──
     {
         route: 'GET /',
-        family: 'console-static',
+        family: 'console-static | console-unavailable',
         mountedIn: 'utils/console.ts',
         disposition: 'static-asset',
         conditional: 'options.rootRedirect !== false (default: mounted)',
@@ -124,17 +126,23 @@ export const CONSOLE_ROUTE_LEDGER: readonly ConsoleRouteLedgerEntry[] = [
             'redirects the site root to `/_console/`. The Console is the default end-user surface, so claiming `/` is the '
             + 'intended behaviour in both dev and production once the Console is mounted at all; `os serve` gates whether '
             + 'it mounts via `--no-console` / `OS_DISABLE_CONSOLE=1`. Not API surface — a redirect to a static bundle. '
-            + 'CONDITIONAL, and the ledger says so because the census reads the mount call and cannot see the branch.',
+            + 'CONDITIONAL, and the ledger says so because the census reads the mount call and cannot see the branch. '
+            + 'Also mounted, unconditionally, by the `console-unavailable` responders `os serve` mounts on a boot that '
+            + 'wants a Console and refuses it — `createConsoleNotBuiltPlugin` (no built `dist/`, or no console package) '
+            + 'and `createConsoleShaDriftRefusalPlugin` (a dev build that is not the repo\'s objectui pin): the same '
+            + 'redirect, to the `503` that `GET /_console/*` answers there. One mount per boot; the boots are exclusive.',
     },
     {
         route: 'GET /_console',
-        family: 'console-static',
+        family: 'console-static | console-unavailable',
         mountedIn: 'utils/console.ts',
         disposition: 'static-asset',
         note:
             'redirects the bare mount path to its trailing-slash form, the ordinary SPA convention — the Console is built '
             + 'with `base: \'/_console/\'`, so relative asset URLs only resolve from the slashed path. Pure navigation '
-            + 'plumbing for a static bundle; there is nothing here for an SDK to express.',
+            + 'plumbing for a static bundle; there is nothing here for an SDK to express. Also mounted by the '
+            + '`console-unavailable` responders (`createConsoleNotBuiltPlugin`, `createConsoleShaDriftRefusalPlugin`) on a '
+            + 'boot that refuses the Console: the same redirect.',
     },
     {
         route: 'GET /forms/:slug',
@@ -151,14 +159,18 @@ export const CONSOLE_ROUTE_LEDGER: readonly ConsoleRouteLedgerEntry[] = [
     },
     {
         route: 'GET /_console/*',
-        family: 'console-static',
+        family: 'console-static | console-unavailable',
         mountedIn: 'utils/console.ts',
         disposition: 'static-asset',
         note:
             'serves the pre-built Console SPA verbatim from `dist/`, with HTML entry points routed through base-tag '
             + 'injection and an SPA fallback for client-side routes. Reads files off disk behind a path-traversal guard '
             + '(any resolved path escaping `dist/` is refused 403). A file server, not an endpoint: its peer group is a '
-            + 'CDN origin, so no client method builds these URLs and none should.',
+            + 'CDN origin, so no client method builds these URLs and none should. On a boot that refuses the Console, '
+            + 'the `console-unavailable` responders mount it instead and answer `503` with a `no-store` plain-text body '
+            + 'naming the remedy the boot message prints, without host paths: `createConsoleNotBuiltPlugin` (build it, '
+            + 'or reinstall `@objectstack/console`) and `createConsoleShaDriftRefusalPlugin` (rebuild the dist at the '
+            + 'repo\'s objectui pin). Still the bundle\'s address, answering why there is no bundle to serve.',
     },
 
     // ── runtime asset serving (second factory in the same module) ──────

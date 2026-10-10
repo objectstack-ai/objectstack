@@ -43,6 +43,13 @@
 //     not serve it, and a method here that handed the engine a hand-built
 //     `{ publicFormGrant, … }` context would be the stand-in the design rule
 //     below forbids. `handle.public-form-door.test.ts` pins the door.
+//   automation.evaluateCondition         → the booted `automation` service's
+//     own predicate evaluator, `AutomationEngine.evaluateCondition`: the one
+//     method a flow's start gate, its edges and its `decision` branches are
+//     decided by. [#22301] No route carries it, so the door is the service
+//     itself, resolved off the kernel at call time, with the condition handed
+//     over as given and the engine's boolean (or its throw) handed back.
+//     `handle.automation-door.test.ts` pins it.
 //   contextFor(token)                    → the dispatcher's own identity
 //     resolution (`resolveRequestScope` → `resolveExecutionContext` →
 //     `@objectstack/core`'s `resolveAuthzContext`), the exact resolver every
@@ -65,10 +72,18 @@ import type { AutomationResult } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { resolveEngineUpdateDispatch, type ObjectQL } from '@objectstack/objectql';
 import type { TenancyService } from '@objectstack/plugin-auth';
+import type { AutomationEngine } from '@objectstack/service-automation';
 
 /** Any row the engine hands back. Untyped on purpose: the engine's, not the handle's. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type EngineRow = Record<string, any>;
+
+/**
+ * [#22301] The condition shapes the automation engine's evaluator takes: the
+ * method's own parameter type, read off it rather than re-declared here, so
+ * the door accepts exactly what the engine accepts.
+ */
+type AutomationCondition = Parameters<AutomationEngine['evaluateCondition']>[0];
 
 /**
  * The refusal a dispatcher-door method (`flows.*`, `actions.run`) throws when
@@ -260,6 +275,39 @@ export interface VerifyHandle {
       action: string,
       opts: AsUser & { recordId?: string; params?: EngineRow },
     ): Promise<unknown>;
+  };
+
+  automation: {
+    /**
+     * [#22301] Evaluate a flow condition with the booted stack's own
+     * evaluator: the `automation` service's `evaluateCondition(condition,
+     * variables)`, the method a flow's start gate, its edges and its
+     * `decision` branches are decided by. For a truth table over variable
+     * shapes no write produces. Resolves with the engine's boolean,
+     * unchanged; no caller is resolved, because the evaluator takes none.
+     *
+     * `condition` is handed to the engine as given, in any shape it takes: an
+     * envelope (`{ dialect: 'cel', source }`) or a string, which the engine
+     * reads as CEL unless it carries a `{var}` hole (the legacy template
+     * dialect). The handle never rewrites it. The engine's own flow sites
+     * hand it an envelope: a start node's `condition` and a `decision`
+     * branch's `expression` are wrapped as `{ dialect: 'cel', source }`, and
+     * an edge's condition already is one. So pass the envelope to model any
+     * of them; a bare string gets the reading a screen field's `visibleWhen`
+     * gets.
+     *
+     * `variables` is a plain object, and each own key becomes one entry of
+     * the `Map` the engine takes: `{ record, previous }` binds `record` and
+     * `previous`.
+     *
+     * A refusal is the engine's own error, rethrown unchanged: a condition
+     * the engine cannot evaluate rejects, never answers `false`. On a stack
+     * with no `automation` service (boot with `automation: true`, or have the
+     * app declare `requires: ['automation']`) it rejects with the kernel's
+     * own `SERVICE_NOT_REGISTERED` error, whose `serviceName` is
+     * `'automation'` (`isServiceNotRegisteredError` from `@objectstack/core`).
+     */
+    evaluateCondition(condition: AutomationCondition, variables: Record<string, unknown>): Promise<boolean>;
   };
 
   /**
@@ -517,6 +565,18 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
           ...(opts.recordId !== undefined ? { recordId: opts.recordId } : {}),
           params: opts.params ?? {},
         });
+      },
+    },
+
+    automation: {
+      async evaluateCondition(condition, variables) {
+        // Typed as the engine class, as `engine` above is: `evaluateCondition`
+        // is the engine's method, not a member of the slot's
+        // `IAutomationService` contract. The async accessor is the kernel's
+        // typed answer for an empty slot (`SERVICE_NOT_REGISTERED`), and it
+        // is handed back as the kernel threw it.
+        const automation = await kernel.getServiceAsync<AutomationEngine>('automation');
+        return automation.evaluateCondition(condition, new Map(Object.entries(variables)));
       },
     },
 
