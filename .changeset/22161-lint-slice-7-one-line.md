@@ -6,7 +6,7 @@ fix(lint): the approval-approver, data-model, AI agent-authoring, view-reference
 
 Clause-②: no
 
-- **Shorter verdicts.** Each finding of these 15 rule ids now prints a `message` of one verdict sentence. Every finding the rules' own test suites fire is at most 200 characters; before, the longest of each ran from 199 to 478 characters. The ids:
+- **Shorter verdicts.** Each finding of these 15 rule ids now prints a `message` of one verdict sentence. Every finding the rules' own test suites fire is at most 197 characters, the `packages/cli` unit suite's at most 188, and `os validate` on the example apps' at most 191; before, the longest of each ran from 201 to 480 characters. The ids:
   - approval nodes (`flows[]`): `approval-approvers-may-resolve-empty` (both the group arm and the `manager` arm), `approval-approver-not-membership-tier`;
   - the ADR-0120 uniqueness rules (`objects[].indexes` and field-level `unique`): `unique/unscoped-declared-index`, `unique/double-declaration`, `unique/legacy-organization-composite`;
   - `os lint`'s data-model sweep: `relationship/master-detail-required`, `relationship/delete-behavior`, `rollup/non-numeric-aggregand`;
