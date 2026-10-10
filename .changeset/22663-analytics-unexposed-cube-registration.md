@@ -4,7 +4,7 @@
 
 fix(service-analytics)!: a configured cube, or a dataset `registerDataset` registers, over an object the API does not serve is refused at registration, and `GET /analytics/meta` no longer lists it (#22663)
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the analytics registry's accept set: a cube or dataset whose base object or declared join the spec's exposure decision already denies is no longer registered, and every query of such a cube was already refused. The remedy is to point the definition at an object the API serves or remove it, never a rewrite of anyone's code or metadata. `CubeRegistry` gains one optional constructor parameter, which is additive; nothing on the type surface narrows. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only). -->
 
