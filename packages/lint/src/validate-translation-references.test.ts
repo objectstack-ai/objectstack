@@ -2309,6 +2309,27 @@ describe('validateTranslationReferences — flow toasts and screen-field options
       'Option translations are keyed under screen field "notes" of screen "details" in flow "contract_intake", which declares no `options`.',
     );
   });
+
+  it('reports nothing for a translated `description` over a screen that authors one (#22507)', () => {
+    const flow = structuredClone(intakeStack.flows[0]!) as { nodes: Array<{ id: string; config?: Record<string, unknown> }> };
+    flow.nodes.find((n) => n.id === 'details')!.config!.description = 'Review {{ record.name }}.';
+    const withBody = {
+      flows: [flow],
+      translations: [{ 'zh-CN': { flows: { contract_intake: { screens: { details: { description: '请核对 {{ record.name }}。' } } } } } }],
+    };
+    expect(validateTranslationReferences(withBody)).toEqual([]);
+  });
+
+  it('refuses a translated `description` over a screen that authors none — a bundle cannot add body text (#22507)', () => {
+    const findings = validateTranslationReferences(bundle({ contract_intake: { screens: { details: { description: '请核对。' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.screens.details.description');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Translations carry `description` for screen "details" of flow "contract_intake", which declares no `config.description`.',
+    );
+  });
 });
 
 describe('validateTranslationReferences — namespaces deliberately not judged', () => {

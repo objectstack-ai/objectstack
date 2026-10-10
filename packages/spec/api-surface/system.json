@@ -792,6 +792,7 @@
     "docAudienceAllows (function)",
     "emailTemplateForm (const)",
     "flowRefusalMessageKey (function)",
+    "flowScreenCopyKey (function)",
     "gcsStorageExample (const)",
     "globalFilterKey (function)",
     "hasMovedFileColumns (function)",

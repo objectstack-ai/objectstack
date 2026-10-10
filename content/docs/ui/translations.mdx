@@ -80,7 +80,7 @@ export default defineStack({
 | Dataset dimension and measure labels | `datasets.<name>.dimensions.<dimension>.label` / `datasets.<name>.measures.<measure>.label` |
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` — on a `kind: 'slotted'` page the header under `slots.header` is the page's header |
 | Page component copy, by component id | `pages.<name>.components.<id>.title` / `description` / `label` / `placeholder` / `emptyText` — reached under `regions[].components[]` and `slots.<slot>`, through `properties.children` and a `page:tabs` / `page:accordion` panel's `items[].children` |
-| Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` / `.inlineHelpText` — a screen field's help text is `inlineHelpText`, the key the field itself declares, not `help`; see the boundary note below |
+| Screen-flow wizards (flow label, screen headings and body text, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.description` / `.fields.<field>.label` / `.placeholder` / `.inlineHelpText` — a screen field's help text is `inlineHelpText`, the key the field itself declares, not `help`; see the boundary note below |
 | Global actions, messages | `globalActions`, `messages` |
 | Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
@@ -390,23 +390,28 @@ Honest limits worth knowing before you plan around them:
   by rule name alone and so could not tell two objects' rules apart; the route
   above is object-scoped and shipped with its reader. ADR-0049's 2026-09-04
   amendment carries that record.
-- **The `flows` group is applied by the console's screen-flow runner, and its
-  face is deliberately small.** The keys are addressed the way the runner
-  resolves them — flow name, screen node id, screen field name — and both
-  halves render in the active locale:
-  - `screens` is applied to the screen copy: each screen's `title`, and each
-    field's `label`, `placeholder` and `inlineHelpText`;
+- **The `flows` group is applied where each string is rendered, and its face
+  is deliberately small.** The keys are addressed the way the runner resolves
+  them — flow name, screen node id, screen field name — and every part renders
+  in the active locale:
+  - a screen's `title` and `description` are `{{ }}` templates the server
+    renders for each run, so the server translates them: it picks the
+    translated template in the locale of the person who started the run, then
+    fills its holes, and the console draws the screen as served. A translation
+    keeps the holes of the text it translates (`'任务“{{ subject }}”创建成功！'`),
+    and `description` is translated only where the screen authors one;
+  - each field's `label`, `placeholder` and `inlineHelpText` is applied by the
+    console's screen-flow runner;
   - the flow's own `label` names the flow in the runner's header, above the
     step's heading, and in the completion toast. A locale the bundle does not
     cover shows the label authored on the flow, and a backend that serves no
     label shows the flow's API name.
 
-  Three strings stay outside the group. A screen's `description` renders as
-  authored. A `successMessage` authored on the flow replaces the completion
-  sentence and renders as authored too, so the translated label appears in the
-  toast only when the flow declares none. The runner's own chrome — the Cancel
-  and Submit buttons — belongs to the console's message catalog rather than your
-  app's bundle.
+  Two strings stay outside the group. A `successMessage` authored on the flow
+  replaces the completion sentence and renders as authored, so the translated
+  label appears in the toast only when the flow declares none. The runner's own
+  chrome — the Cancel and Submit buttons — belongs to the console's message
+  catalog rather than your app's bundle.
 
   **The tooling asks for these keys like any other group's.** `os lint` reports
   a missing `flows.*` key against `supportedLocales`, and `os i18n extract`
