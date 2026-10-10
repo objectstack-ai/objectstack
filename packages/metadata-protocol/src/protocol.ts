@@ -9071,13 +9071,17 @@ export class ObjectStackProtocolImplementation implements
                 // per-row verdict now lives in the shared hydrator, which each
                 // row's own `organizationId` answers to.
                 //
-                // [ADR-0131 D6] An overlay of a sealed managed item is not
-                // served ({@link isUnservedSealedOverlay}), so it is not
-                // registered either: the registry keeps the package's
-                // definition, the item the reads serve.
+                // [ADR-0131 D6] An `object` overlay of a sealed managed item is
+                // not served ({@link isUnservedSealedOverlay}), so it is not
+                // registered either: an object row registers as a LAYER the
+                // engine resolves the object through, not as a bare copy the
+                // reads decline, so the registry keeps the package's
+                // definition. Every other type's row is hydrated as before
+                // (#20913: the bare copy is the tenant row, which the reads
+                // decline through {@link isStoredEntryOfDeclinedName}).
                 if (this.environmentId === undefined) {
                     for (const { name, data, packageId: recPkg, organizationId: recOrg } of overlays) {
-                        if (this.isUnservedSealedOverlay(request.type, name)) continue;
+                        if (request.type === 'object' && this.isUnservedSealedOverlay(request.type, name)) continue;
                         this.hydrateOverlayIntoRegistry(request.type, data, {
                             packageId: recPkg,
                             organizationId: recOrg,
@@ -25952,9 +25956,12 @@ export class ObjectStackProtocolImplementation implements
      * environment its own database.
      *
      * [ADR-0131 D6, triage ruling Q1 → C] An environment row that overlays
-     * SEALED managed content ({@link isUnservedSealedOverlay}) is not loaded
-     * either: the package's definition stays the registered one, and
-     * {@link reportSealedOverlayRows} names the row with its remedies.
+     * SEALED managed content ({@link isUnservedSealedOverlay}) is named by
+     * {@link reportSealedOverlayRows} with its remedies. An `object` such row
+     * is not loaded: it would register as a layer the engine resolves the
+     * object through, so the package's definition stays the registered one.
+     * Every other type's row still registers its bare, tenant-marked copy,
+     * which the reads decline (#20913, {@link isStoredEntryOfDeclinedName}).
      *
      * #3903 — two contract duties run per row, and their split is deliberate:
      *
@@ -26036,7 +26043,7 @@ export class ObjectStackProtocolImplementation implements
             const sduiManifest = (records as Array<{ type?: unknown }>).some(
                 (r) => (PLURAL_TO_SINGULAR[String(r.type)] ?? r.type) === 'page',
             ) ? this.resolveSduiManifest() : undefined;
-            /** [ADR-0131 D6] Overlays of sealed managed content, not loaded. */
+            /** [ADR-0131 D6] Overlays of sealed managed content, reported. */
             const sealedOverlays: Array<{ type: string; name: string }> = [];
             for (const record of records) {
                 try {
@@ -26044,7 +26051,7 @@ export class ObjectStackProtocolImplementation implements
                     const normalizedType = PLURAL_TO_SINGULAR[record.type] ?? record.type;
                     if (this.isUnservedSealedOverlay(normalizedType, String(record.name))) {
                         sealedOverlays.push({ type: normalizedType, name: String(record.name) });
-                        continue;
+                        if (normalizedType === 'object') continue;
                     }
                     const data = this.convertStoredItem(
                         String(record.type),
@@ -26449,7 +26456,7 @@ export class ObjectStackProtocolImplementation implements
         console.warn(
             `[Protocol] [metadata_sealed_overlay_unserved] ${rows.length} active environment sys_metadata row(s) ` +
             `overlay an item a managed package ships, on a type that is sealed against overlays (ADR-0131 D6): ` +
-            `${detail}. They are not loaded and no read serves them — the package's own definition is served. ` +
+            `${detail}. No read serves them — the package's own definition is served. ` +
             `Each row is kept at rest, untouched. To keep the change, re-express it as a new item under a new ` +
             `name (a linkage-free clone of the managed item), then delete the stored row; otherwise delete the ` +
             `stored row.`,
