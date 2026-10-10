@@ -195,7 +195,8 @@ export default class MigratePlan extends Command {
       // indistinguishable from "never looked at". See `../../utils/unmanaged-tables.ts`.
       const { normalizeRows } = await import('@objectstack/metadata-protocol');
       const unmanagedTables: UnmanagedTablesReport = await collectUnmanagedTables({
-        driver: stack.driver,
+        // [#22580] Every database the drift above covers, the sibling included.
+        drivers: stack.drivers,
         declaredObjects: stack.allObjects(),
         composition: stack.composition,
         normalize: normalizeRows,

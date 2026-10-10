@@ -131,7 +131,11 @@ function boot(protocol: Record<string, unknown>) {
             {
                 method: 'GET',
                 path: AUDIT_PATH,
-                params: { type: 'views', name: 'shared_grid' },
+                // [#22639] A type no per-caller gate judges. `view` is judged
+                // now (its own `requiredPermissions`), which costs this door a
+                // current-document read this stub deliberately does not serve;
+                // what these cases pin is the audit read, not the gate.
+                params: { type: 'reports', name: 'shared_grid' },
                 query: {},
                 headers: {},
                 body: {},
