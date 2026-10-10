@@ -169,7 +169,7 @@ async function boot(filename: string, posture: Posture, declared: Declared): Pro
     await plugin.init(ctx);
     await plugin.start(ctx);
     vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
-    const exists = await engine.find('sys_user', { where: { id: 'usr_admin' }, limit: 1, context: SYS } as any);
+    const exists = await engine.find('sys_user', { where: { id: 'usr_admin' }, limit: 1, context: SYS });
     if (!Array.isArray(exists) || exists.length === 0) {
       await engine.insert(
         'sys_user',
@@ -186,7 +186,7 @@ async function boot(filename: string, posture: Posture, declared: Declared): Pro
 
 /** The `sys_capability` rows, one string per row. */
 async function census(engine: ObjectQL): Promise<string[]> {
-  const rows = (await engine.find('sys_capability', { where: {}, limit: 5000, context: SYS } as any)) as any[];
+  const rows = (await engine.find('sys_capability', { where: {}, limit: 5000, context: SYS })) as any[];
   return rows
     .map((r) => [r.name, r.managed_by, r.package_id ?? '-', r.label, r.description ?? '-', r.scope, r.active].join(' | '))
     .sort();
