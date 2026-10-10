@@ -50,11 +50,14 @@ async function served(ql: ObjectQL, type: string, name: string): Promise<any> {
 describe('registry path stamps the package version it is handed', () => {
   it('an app and an object registered through ObjectQL.registerApp are served with _packageVersion', async () => {
     const ql = new ObjectQL();
-    ql.registerApp(manifest('2.0.0'));
+    const m = manifest('2.0.0');
+    ql.registerApp(m);
 
     expect(envelope(await served(ql, 'app', 'hotcrm')))
       .toEqual({ _packageId: PKG, _packageVersion: '2.0.0', _provenance: 'package' });
     expect((await served(ql, 'object', 'hc_lead'))?._packageVersion).toBe('2.0.0');
+    // The authored object definition is left unstamped, as the registry leaves it.
+    expect(m.objects[0]).not.toHaveProperty('_packageVersion');
   });
 
   it('an upgrade re-registered through the same door is served with the NEW version', async () => {

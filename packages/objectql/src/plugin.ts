@@ -2330,11 +2330,12 @@ export class ObjectQLPlugin implements Plugin {
       try {
         // The metadata door stamps the residual with `(ownerId, ownerVersion)`. The
         // registry's own stamp knows the id only and keeps a key already set, so
-        // the version is stamped here first.
-        if (residual.ownerVersion !== undefined) {
-          applyProtection(object as any, { packageId: residual.ownerId, packageVersion: residual.ownerVersion });
-        }
-        ql.registry.registerObject(object, residual.ownerId, undefined, 'own');
+        // the version is stamped here first — on a shallow copy, leaving the
+        // artifact's own object as the registry leaves it.
+        const stamped = residual.ownerVersion === undefined
+          ? object
+          : applyProtection({ ...object } as any, { packageId: residual.ownerId, packageVersion: residual.ownerVersion }) as ServiceObject;
+        ql.registry.registerObject(stamped, residual.ownerId, undefined, 'own');
       } catch (e) {
         if (!(e instanceof ObjectOwnershipConflictError)) throw e;
         unserved.push(`'${object.name}' (package '${e.existingPackageId}' already owns that name)`);

@@ -4083,6 +4083,18 @@ function stampPackage<T>(item: T, packageId: string, packageVersion: string | un
   return item;
 }
 
+/**
+ * {@link stampPackage} for an authored OBJECT definition, on a shallow copy.
+ * The registry stamps an object schema on its own copy (`applySystemFields`
+ * and friends run first), so `registerApp` leaves the caller's definition
+ * unstamped, and a manifest registered twice, or recorded by a second install,
+ * shows the same objects both times. `applyProtection` writes top-level keys
+ * only, so a shallow copy holds every key it touches.
+ */
+function stampObjectPackage(def: ServiceObject, packageId: string, packageVersion: string | undefined): ServiceObject {
+  return packageVersion === undefined ? def : stampPackage({ ...def }, packageId, packageVersion);
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -7346,7 +7358,7 @@ export class ObjectQL implements IObjectQLEngine {
           if (Array.isArray(manifest.objects)) {
              this.logger.debug('Registering objects from manifest (Array)', { id, objectCount: manifest.objects.length });
              for (const objDef of manifest.objects) {
-                const fqn = this._registry.registerObject(stampPackage(objDef, id, version), id, namespace, 'own');
+                const fqn = this._registry.registerObject(stampObjectPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           } else {
@@ -7359,7 +7371,7 @@ export class ObjectQL implements IObjectQLEngine {
              for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
                 objDef.name = name;
-                const fqn = this._registry.registerObject(stampPackage(objDef, id, version), id, namespace, 'own');
+                const fqn = this._registry.registerObject(stampObjectPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           }
@@ -7522,7 +7534,7 @@ export class ObjectQL implements IObjectQLEngine {
               if (Array.isArray(plugin.objects)) {
                   this.logger.debug('Registering plugin objects (Array)', { pluginName, count: plugin.objects.length });
                   for (const objDef of plugin.objects) {
-                      const fqn = this._registry.registerObject(stampPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
+                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               } else {
@@ -7532,7 +7544,7 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
                   for (const [name, objDef] of entries) {
                       objDef.name = name;
-                      const fqn = this._registry.registerObject(stampPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
+                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               }
