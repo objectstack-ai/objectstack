@@ -185,10 +185,10 @@ const viewBody = (name: string, label: string) => ({
 });
 
 /**
- * Author one draft and publish it, which is what records ONE commit row. The
- * commit's `organization_id` is the PUBLISH REQUEST's org (`?? null`), so
- * omitting `organizationId` here reproduces exactly what the dispatcher sends
- * when the session has no active organization.
+ * Author one draft and publish it, which is what records ONE commit row,
+ * env-wide. [ADR-0131 D6] The protocol refuses an organization-scoped publish,
+ * so an `organizationId` here plants a LEGACY organization commit: the
+ * env-wide commit row is re-stamped at rest, the way an older release left it.
  */
 async function publishOne(
   protocol: any,
@@ -203,11 +203,18 @@ async function publishOne(
   });
   const res = await protocol.publishPackageDrafts({
     packageId: args.packageId,
-    ...(args.organizationId ? { organizationId: args.organizationId } : {}),
     message: args.message,
   });
   expect(res.success).toBe(true);
   expect(res.commitId).toBeTruthy();
+  if (args.organizationId) {
+    // `isSystem`: the column is `readonly`, and only a system write may set it.
+    await protocol.engine.update(
+      'sys_metadata_commit',
+      { id: res.commitId, organization_id: args.organizationId },
+      { context: { isSystem: true } },
+    );
+  }
   return res.commitId as string;
 }
 
@@ -360,8 +367,10 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
     // commit (asserted above) AND can now act on it — the only combination
     // under which an org-scoped rollback past an env-wide publish does what it
     // reports. Its own negative directions live in the sibling
-    // `package-revert-commit-org-scope.integration.test.ts`.
-    const rollback = await p.rollbackToPackageCommit({ commitId: c1, organizationId: ACTIVE_ORG });
+    // the org-scoped revert-commit integration suite (retired with ADR-0131 D6).
+    // [ADR-0131 D6] The rollback itself is environment-wide now: an
+    // organization-scoped one is refused, so it names none.
+    const rollback = await p.rollbackToPackageCommit({ commitId: c1 });
     expect(rollback.failed).toEqual([]);
     expect(rollback.success).toBe(true);
     expect(rollback.revertedCommits).toEqual([c2]);

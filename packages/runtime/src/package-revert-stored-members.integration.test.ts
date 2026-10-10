@@ -52,7 +52,7 @@ import {
  * double of either would pin the double. It lives in `packages/runtime`
  * because the door does, and because `metadata-protocol` cannot import
  * `objectql` (dependency cycle) — the same reason its sibling
- * `package-revert-commit-org-scope.integration.test.ts` lives here.
+ * the org-scoped revert-commit integration suite (retired with ADR-0131 D6) lives here.
  */
 
 /** A Studio-authored, writable package. */
@@ -81,7 +81,7 @@ const OTHER_ORG = 'org_other';
  * Every publish this fixture makes runs the metadata-protocol build probes, and
  * the views it publishes are bound to the placeholder object `anything`, which
  * nothing here creates — the sibling suite's arrangement and its reason
- * (`package-revert-commit-org-scope.integration.test.ts`). The engine refuses a
+ * (the org-scoped revert-commit integration suite (retired with ADR-0131 D6)). The engine refuses a
  * name its registry does not hold before any driver, so nothing is withheld;
  * the capture stays declared and asserts that.
  */
@@ -167,7 +167,7 @@ const viewBody = (name: string, label: string) => ({
 
 async function draftSave(
   protocol: any,
-  args: { view: string; label: string; packageId: string; organizationId?: string },
+  args: { view: string; label: string; packageId: string },
 ): Promise<void> {
   await protocol.saveMetaItem({
     type: 'view',
@@ -175,7 +175,6 @@ async function draftSave(
     item: viewBody(args.view, args.label),
     packageId: args.packageId,
     mode: 'draft',
-    ...(args.organizationId ? { organizationId: args.organizationId } : {}),
   });
 }
 
@@ -261,11 +260,14 @@ describe('#22090 POST /packages/:id/revert on a Studio-authored package', () => 
   });
 
   it('another organization’s draft of the package is neither read nor discarded', async () => {
-    const { protocol, revert } = await boot();
+    const { engine, protocol, revert } = await boot();
     await draftSave(protocol, { view: 'repairs_board', label: 'Board v1', packageId: STUDIO_PKG });
     await publish(protocol, STUDIO_PKG);
-    await draftSave(protocol, {
-      view: 'repairs_board', label: 'Other org overlay (draft)', packageId: STUDIO_PKG, organizationId: OTHER_ORG,
+    // [ADR-0131 D6] The protocol refuses an organization-scoped save, so the
+    // other organization's draft is a LEGACY row, planted at rest.
+    await engine.insert('sys_metadata', {
+      type: 'view', name: 'repairs_board', organization_id: OTHER_ORG, package_id: STUDIO_PKG, state: 'draft',
+      metadata: JSON.stringify(viewBody('repairs_board', 'Other org overlay (draft)')), checksum: 'sha256:legacy', version: 1,
     });
 
     const answer = await revert(STUDIO_PKG, ACTIVE_ORG);

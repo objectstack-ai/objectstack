@@ -15261,13 +15261,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186` — names '
+        + 'against, `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 8234 tracked files (0 across the 7754 at a58626c88, the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 8281 tracked files (0 across the 8234 at f0268ad78, the 7754 at a58626c88, the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8, to 17468 and 7246 at a58626c88 and to 17956 and 7522 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8, to 17468 and 7246 at a58626c88, to 17956 and 7522 at f0268ad78 and to 17980 and 7523 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -15472,10 +15472,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186`, re-read from this tree — '
+        + '`.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '8234 tracked files, against lit controls timeout 1658, RuntimeConfig 337 and resourceLimits '
-        + '2 on the same corpus (0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '8281 tracked files, against lit controls timeout 1674, RuntimeConfig 337 and resourceLimits '
+        + '2 on the same corpus (0 across 8234, and 1658 / 337 / 2, at f0268ad78; 0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -15711,10 +15711,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186` — spells '
+        + 'objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 8234 tracked files, against lit controls `useState` 2622 and `timeout` 1658 on '
-        + 'the same corpus (all four 0 across 7754, against 2491 and 1431, at a58626c88, 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 8281 tracked files, against lit controls `useState` 2630 and `timeout` 1674 on '
+        + 'the same corpus (all four 0 across 8234, against 2622 and 1658, at f0268ad78, 0 across 7754, against 2491 and 1431, at a58626c88, 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -16332,6 +16332,54 @@ const step18: MigrationStep = {
         + 'nothing ever read the key, so removing it removes no behaviour — the live type '
         + 'set stays exactly `DEFAULT_METADATA_TYPE_REGISTRY` plus item-population growth, '
         + 'before and after.',
+    },
+    // ADR-0131 D6 (C5, stage S4) — the protocol half of the door narrowing
+    // `meta-doors-organization-scope-retired` records: the metadata protocol itself
+    // refuses every organization-scoped write, and the per-organization write path
+    // behind it is deleted. Registered because a caller that still names an
+    // organization is refused where it was accepted, and because the
+    // `organizationId` key leaves three declared request shapes.
+    {
+      id: 'metadata-write-organization-scope-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the organizationId member of the SaveMetaItem, PublishMetaItem and DeleteMetaItem request '
+        + 'schemas of @objectstack/spec; and every organization-scoped write the metadata protocol of '
+        + '@objectstack/metadata-protocol accepted: saveMetaItem (draft and publish), publishMetaItem, '
+        + 'deleteMetaItem, rollbackMetaItem, revertCommit, rollbackToPackageCommit, publishPackageDrafts, '
+        + 'discardPackageDrafts, revertStoredPackage, duplicatePackage and reassignOrphanedMetadata — '
+        + 'including the five types that declared allowOrgOverride (view, dashboard, report, translation, '
+        + 'email_template) and the OS_METADATA_WRITABLE hatch; and the active organization of the caller '
+        + 'publishing a package, which a published seed draft whose records named no organization was '
+        + 'loaded into under the group posture',
+      replacement:
+        'drop `organizationId` from the request: every metadata write lands environment-wide '
+        + '(`organization_id` NULL), where every organization reads it. The key is stripped at a spec '
+        + 'parse and refused at the protocol: a request that still names an organization is refused with '
+        + '403 `NOT_OVERRIDABLE`, before anything is read or written, and the message names the tenancy '
+        + 'posture in force. A seed draft sets `organization_id` on each record (ADR-0131 D12, item 12); '
+        + 'under group a seed record that names none is refused at load',
+      reason:
+        'ADR-0131 D6 retires the per-organization overlay axis: environment metadata written by Studio, '
+        + 'by the cloud build agent or by an install belongs to the whole deployment. The /meta doors '
+        + 'already carry no organization (meta-doors-organization-scope-retired); this is the protocol '
+        + 'refusing the same write from every other door — the /packages verbs, the stored-row '
+        + 'migrations, a plugin — so no path is left that stamps an organization on a metadata row. '
+        + 'The audit and commit ledgers are environment-level too (ADR-0131 D7) and record no '
+        + 'organization. Legacy organization-scoped rows are not touched: the stored-metadata migration '
+        + 'reports them as skipped, the flow credential move reports them as not moved, and the '
+        + 'promotion ceremony (ADR-0131 C7) carries them to the environment layer.',
+      acceptanceCriteria:
+        'A protocol write naming an organization — a saveMetaItem of a view with organizationId set, a '
+        + 'publishPackageDrafts or a revertCommit with one — answers 403 NOT_OVERRIDABLE and writes '
+        + 'nothing, for every metadata type and every tenancy posture; the same call without the key '
+        + 'succeeds and stores organization_id NULL. POST /meta/_migrate-stored reports each '
+        + 'organization-scoped row as skipped, naming the promotion ceremony, and re-saves none. A '
+        + 'commit recorded in a legacy organization layer is refused by revertCommit with the same code, '
+        + 'and duplicatePackage and reassignOrphanedMetadata copy or adopt the environment rows only. '
+        + 'Remove organizationId from any typed SaveMetaItem / PublishMetaItem / DeleteMetaItem '
+        + 'request literal: the key no longer type-checks.',
     },
     // The ADR-0087 D3/D4 surface leaves the package root for its own subpath, so the
     // migration registry's text stops riding in every bundle of the root entry. The
@@ -17013,6 +17061,43 @@ const step18: MigrationStep = {
         + 'SDKs from the contract entry, and the route\'s handler emits the same '
         + 'bytes before and after — the retirement removes a false claim, not '
         + 'behaviour.',
+    },
+    // ADR-0131 D6/D12 (C5, stage S4) — the ruled retirement of the uninstall's
+    // organization-scope guard: once every package-owned metadata row is
+    // environment-wide, an uninstall is environment-wide by construction and an
+    // organization names nothing. Retires what `package-uninstall-explicit-all-tenants`
+    // (protocol 17) introduced.
+    {
+      id: 'package-uninstall-environment-wide',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the organizationId and allTenants members of the deletePackage request of '
+        + '@objectstack/metadata-protocol (DeletePackageRequest), the two TENANT_SCOPE_REQUIRED refusals '
+        + 'of deletePackage, and the organization-scope refusal of DELETE /api/v1/packages/:id on the '
+        + 'runtime dispatcher',
+      replacement:
+        'call `deletePackage({ packageId })` with neither key: the uninstall removes every row bound to '
+        + 'the package in this environment. A request still carrying `organizationId` or `allTenants` '
+        + 'is refused with 400 `INVALID_REQUEST` and removes nothing; drop the key and retry. Who may '
+        + 'uninstall is the package door\'s operator gate',
+      reason:
+        'The guard existed because an uninstall naming no organization once matched every '
+        + 'organization\'s rows, so a cross-tenant uninstall had to be declared (allTenants: true) and a '
+        + 'scoped one named (organizationId). ADR-0131 D6 removes that premise: no metadata write lands '
+        + 'organization-scoped any more, so a package\'s rows belong to the environment and an '
+        + 'organization names nothing. The HTTP door never sent allTenants, so an operator with no active '
+        + 'organization could not uninstall over HTTP at all. The keys are refused rather than ignored, '
+        + 'because a caller still sending one believes it scopes the uninstall. Legacy '
+        + 'organization-scoped rows bound to the package are removed with it, as the declared '
+        + 'cross-tenant uninstall removed them, rather than stranded for the promotion ceremony.',
+      acceptanceCriteria:
+        'DELETE /api/v1/packages/:id by a manage_metadata caller with no active organization succeeds '
+        + 'and removes every sys_metadata row bound to the package, environment-wide and legacy '
+        + 'organization-scoped alike; the same call with an active organization behaves identically. A '
+        + 'deletePackage request carrying organizationId or allTenants (true or false) answers 400 '
+        + 'INVALID_REQUEST and changes nothing. No response carries TENANT_SCOPE_REQUIRED. Remove both '
+        + 'keys from every deletePackage caller, and any deploy script that passed allTenants: true.',
     },
     // The published release row's half of the version canon. It moves in BOTH
     // directions at once — gaining uppercase identifiers, losing the degenerate
@@ -20242,10 +20327,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 8234 tracked '
-        + 'files at that sha, against lit controls window 4430, timeout 1658, period 249, '
-        + 'interval 213 and metrics 404 on that same corpus and sha (0 across 7754, against 4255 / '
+        + '`.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 8281 tracked '
+        + 'files at that sha, against lit controls window 4449, timeout 1674, period 249, '
+        + 'interval 213 and metrics 455 on that same corpus and sha (0 across 8234, against 4430 / '
+        + '1658 / 249 / 213 / 404, at f0268ad78, 0 across 7754, against 4255 / '
         + '1431 / 247 / 200 / 401, at a58626c88, 0 across 7650, against 4194 / '
         + '1360 / 238 / 195 / 401, at 0abd4f9f8, 0 across 7632, against 4193 / '
         + '1360 / 238 / 195 / 401, at 9dfaca654, 0 across 7579, against 4175 / '
@@ -20467,12 +20553,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8234 files '
+        + 'pinned objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8281 files '
         + 'tracked at that sha (the 517 Span and 57 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 17956 hits for the bare token objectstack, '
-        + 'and 7522 for the package specifier @objectstack/spec (at a58626c88: 0 across 7754, Span 509, '
+        + 'two lit controls on that same corpus and sha: 17980 hits for the bare token objectstack, '
+        + 'and 7523 for the package specifier @objectstack/spec (at f0268ad78: 0 across 8234, Span 517, '
+        + '17956 and 7522; at a58626c88: 0 across 7754, Span 509, '
         + '17468 and 7246; at 0abd4f9f8: 0 across 7650, Span 508, '
         + '17390 and 7209; at 9dfaca654: 0 across 7632, Span 508, '
         + '17313 and 7186; at 2e818d0b5: 0 across 7579, Span 505, '
@@ -20588,9 +20675,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `f0268ad784854568aa58a2aa791f6a7502259186` — spells it 0 '
-        + 'times across 8234 tracked files, against lit controls `TTL` 184 and `tenant` 1338 on the '
-        + 'same corpus (0 across 7754, against 184 and 1319, at a58626c88; 0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — spells it 0 '
+        + 'times across 8281 tracked files, against lit controls `TTL` 184 and `tenant` 1338 on the '
+        + 'same corpus (0 across 8234, against 184 and 1338, at f0268ad78; 0 across 7754, against 184 and 1319, at a58626c88; 0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '

@@ -62,32 +62,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
     // ═══════════════════════════════════════════════════════════════
 
     describe('per-organization overlay isolation', () => {
-        it('saveMetaItem persists organization_id when provided', async () => {
-            // [#6190] Re-spelled from `app` to `view`. The claim — an org-scoped
-            // save stamps `organization_id` on the row — is unchanged, but since
-            // the 2026-08-08 ruling only types that DECLARE a per-org channel may
-            // carry one, and `app` rolled back to `allowOrgOverride: false` in
-            // commit ee58392e1. `view` is the whitelisted specimen, so this now measures the
-            // stamping on a row the platform can actually read back.
-            mockEngine.findOne.mockResolvedValue(null);
-            await protocol.saveMetaItem({
-                type: 'view',
-                name: 'test_grid',
-                item: sampleView,
-                organizationId: 'org_alpha',
-            });
-            expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                // ADR-0048 — a package-less save scopes the upsert lookup to the
-                // GLOBAL row (package_id IS NULL), not any package's row.
-                where: { type: 'view', name: 'test_grid', organization_id: 'org_alpha', state: 'active', package_id: null },
-                // [#21911] The platform store read carries the explicit system opt-in.
-                context: { isSystem: true },
-            });
-            expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
-                organization_id: 'org_alpha',
-            }), expect.anything());
-        });
-
         // [commit d5cbb44f3] Re-spelled from `app` to `view`, and its sibling below with
         // it. The CLAIM is unchanged — an org row and an env-wide row of the
         // same `(type, name)` both exist, and the org row is the one SERVED,
@@ -368,12 +342,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // case above: the package dimension this pins is untouched, but the
             // ORG dimension now requires a type that declares a per-org channel.
             await protocol.saveMetaItem({
-                type: 'view', name: 'test_grid', item: sampleView,
-                organizationId: 'org_alpha', packageId: 'com.acme.beta',
+                type: 'view', name: 'test_grid', item: sampleView, packageId: 'com.acme.beta',
             });
 
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'view', name: 'test_grid', organization_id: 'org_alpha', state: 'active', package_id: 'com.acme.beta' },
+                where: { type: 'view', name: 'test_grid', organization_id: null, state: 'active', package_id: 'com.acme.beta' },
                 // [#21911] The platform store read carries the explicit system opt-in.
                 context: { isSystem: true },
             });
@@ -428,12 +401,12 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             registry.registerItem('view', { ...sampleView }, 'name', 'com.acme.showcase');
 
             const result = await protocol.saveMetaItem({
-                type: 'view', name: 'test_grid', item: sampleView, organizationId: 'org_alpha',
+                type: 'view', name: 'test_grid', item: sampleView,
             });
 
             expect(result.success).toBe(true);
             expect(result.message).toMatch(
-                /^Saved customization overlay \(org=org_alpha, state=active\) — type=view, name=test_grid \[seq=\d+\]$/,
+                /^Saved customization overlay \(env-wide, state=active\) — type=view, name=test_grid \[seq=\d+\]$/,
             );
         });
 
@@ -1520,7 +1493,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     // the provenance gate's and no other gate's: the door also
                     // refuses a hook with no `body`.
                     item: { name: 'shipped_hook', object: 'case', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'NOT_OVERRIDABLE',
@@ -1609,7 +1581,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     type: 'agent',
                     name: 'my_agent',
                     item: { name: 'my_agent', label: 'My Agent' },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'NOT_CREATABLE',
@@ -1688,7 +1659,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 type: 'rag_pipeline',
                 name: 'my_pipeline',
                 item: { name: 'my_pipeline', label: 'Test' },
-                organizationId: 'org_alpha',
             });
 
             expect(result.success).toBe(true);
@@ -1712,7 +1682,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     type: 'policy',
                     name: 'my_policy',
                     item: { name: 'my_policy', label: 'Test' },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'INVALID_REQUEST',
@@ -1728,7 +1697,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     type: 'policy',
                     name: 'my_policy',
                     item: { name: 'my_policy', label: 'Test' },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toThrow(/'policy' is not a metadata type/);
 
@@ -1762,7 +1730,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     triggers: ['create'],
                     url: 'https://e.example/x',
                 },
-                organizationId: 'org_alpha',
             });
 
             expect(result.success).toBe(true);
@@ -1781,7 +1748,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     type: 'webhook',
                     name: 'my_webhook',
                     item: { name: 'my_webhook', url: 'https://e.example/x', events: ['x.created'] },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'INVALID_METADATA',
@@ -1796,7 +1762,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 type: 'connector',
                 name: 'my_connector',
                 item: { name: 'my_connector', label: 'My Connector', type: 'api' },
-                organizationId: 'org_alpha',
             });
 
             expect(result.success).toBe(true);
@@ -1820,7 +1785,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                         provider: 'github',
                         authentication: { type: 'basic', username: 'u', password: 'p' },
                     },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'INVALID_METADATA',
@@ -1841,7 +1805,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     condition: "record.department == 'Sales'",
                     sharedWith: { type: 'team', value: 'sales' },
                 },
-                organizationId: 'org_alpha',
             });
 
             expect(result.success).toBe(true);
@@ -1863,7 +1826,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                         type: 'criteria',
                         sharedWith: { type: 'team', value: 'sales' },
                     },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'INVALID_METADATA',
@@ -1897,7 +1859,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     triggers: ['create'],
                     url: 'https://example.com/hook',
                 },
-                organizationId: 'org_alpha',
             });
 
             expect(result.success).toBe(true);
@@ -1914,7 +1875,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     type: 'webhook',
                     name: 'my_hook',
                     item: { name: 'my_hook', label: 'Test' },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'INVALID_METADATA',
@@ -1930,7 +1890,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     type: 'theme',
                     name: 'my_theme',
                     item: { name: 'my_theme', label: 'My Theme', colors: { primary: '#3b82f6' } },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'INVALID_REQUEST',
@@ -1950,7 +1909,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     measures: { count: { label: 'Count', type: 'count', sql: '*' } },
                     dimensions: { stage: { label: 'Stage', type: 'string', sql: 'stage' } },
                 },
-                organizationId: 'org_alpha',
             });
 
             expect(result.success).toBe(true);
@@ -1968,7 +1926,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     type: 'analytics_cube',
                     name: 'orders',
                     item: { name: 'orders', table: 'orders' },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'INVALID_METADATA',
@@ -2050,7 +2007,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 type: 'view',
                 name: 'case_grid',
                 item: { ...viewBase, columns: [{ field: 'name' }, { field: 'status' }] },
-                organizationId: 'org_alpha',
             });
             expect(result.success).toBe(true);
         });

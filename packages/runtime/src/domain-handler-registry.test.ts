@@ -146,14 +146,23 @@ describe('HttpDispatcher domain registry (D11 step ③)', () => {
     });
 
     it('/i18n keeps its in-handler 501 when the i18n service is absent', async () => {
-        const result = await makeDispatcher().dispatch('GET', '/i18n/locales', undefined, {}, {} as any);
+        // [#22432] `/i18n` stands on the anonymous-deny floor now, so the
+        // domain is exercised by a signed-in caller — the resolution seam is
+        // stubbed exactly as the `/analytics` case below does. Anonymity itself
+        // is pinned in `domains/i18n-anonymous-deny.test.ts`.
+        const dispatcher = makeDispatcher();
+        (dispatcher as any).timedResolveExecutionContext = async () => ({ userId: 'u_i18n', isSystem: false });
+        const result = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, {} as any);
         expect(result.handled).toBe(true);
         expect(result.response?.status).toBe(501);
     });
 
     it('/i18n/locales serves from the i18n service when present', async () => {
         const i18n = { getLocales: vi.fn().mockReturnValue(['en', 'zh-CN']), getTranslations: vi.fn().mockReturnValue({}) };
-        const result = await makeDispatcher({ i18n }).dispatch('GET', '/i18n/locales', undefined, {}, {} as any);
+        // [#22432] A signed-in caller, as in the case above.
+        const dispatcher = makeDispatcher({ i18n });
+        (dispatcher as any).timedResolveExecutionContext = async () => ({ userId: 'u_i18n', isSystem: false });
+        const result = await dispatcher.dispatch('GET', '/i18n/locales', undefined, {}, {} as any);
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.locales.map((l: any) => l.code)).toEqual(['en', 'zh-CN']);
     });

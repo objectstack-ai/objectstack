@@ -206,9 +206,9 @@ describe('#8016 — a coded refusal keeps its status AND its code on every packa
   const REFUSALS: Array<{ name: string; error: unknown; status: number; code: string }> = [
     {
       name: 'a coded 4xx (`status`)',
-      error: thrown('Package scope is required', { status: 400, code: 'TENANT_SCOPE_REQUIRED' }),
+      error: thrown('A retired request key', { status: 400, code: 'INVALID_REQUEST' }),
       status: 400,
-      code: 'TENANT_SCOPE_REQUIRED',
+      code: 'INVALID_REQUEST',
     },
     {
       name: 'the established 409 (`status`)',
@@ -299,7 +299,7 @@ describe('#8016 — a coded refusal keeps its status AND its code on every packa
  */
 describe('#8016 — the wire answer IS the shared mapping, not a second copy of it', () => {
   const SHAPES: unknown[] = [
-    thrown('coded 4xx', { status: 400, code: 'TENANT_SCOPE_REQUIRED' }),
+    thrown('coded 4xx', { status: 400, code: 'INVALID_REQUEST' }),
     thrown('coded 409', { status: 409, code: 'DESTRUCTIVE_CHANGE' }),
     thrown('statusCode spelling', { statusCode: 403, code: 'PERMISSION_DENIED' }),
     thrown('a record-validation failure', { name: 'ValidationError', code: 'VALIDATION_FAILED', fields: [] }),

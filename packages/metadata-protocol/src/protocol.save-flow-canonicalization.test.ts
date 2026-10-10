@@ -462,7 +462,6 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         await protocol.saveMetaItem({
             type: 'view',
             name: 'case_grid',
-            organizationId: 'org_alpha',
             // [#7741] carries the object binding the inline arm now requires.
             item: { name: 'case_grid', type: 'grid', label: 'Cases', columns: ['id', 'title'], object: 'case', viewKind: 'list' },
         });
