@@ -30,6 +30,7 @@
  */
 
 import type { ResolveUserAuthzGrantsOptions } from '../resolve-authz-context.js';
+import { bindStaticSecurityCatalog, catalogFromTables } from './security-catalog.testkit.js';
 
 // ── Recording ObjectQL double ───────────────────────────────────────────────
 
@@ -48,6 +49,12 @@ export interface RecordedCall { object: string; where: unknown; limit: unknown; 
  * while another is in flight JOINS the open leg. Sequential awaits therefore
  * count one leg each, and a `Promise.all` of any width counts one — which is
  * exactly the definition cloud#1539 measured latency against.
+ *
+ * [ADR-0131 D3/D4] The double also carries the security catalog the resolver
+ * reads positions, their sets and the set bodies from: the definitions the
+ * fixture's catalog rows convert to (`catalogFromTables` — the junction rows
+ * through the upgrade ceremony's own conversion). The catalog is in-process,
+ * so it adds no read and no leg.
  */
 export function makeRecordingQl(tables: Record<string, unknown[]>) {
   const calls: RecordedCall[] = [];
@@ -62,7 +69,7 @@ export function makeRecordingQl(tables: Record<string, unknown[]>) {
       if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
-  return {
+  return bindStaticSecurityCatalog({
     calls,
     legOf,
     get legs() { return legs; },
@@ -103,7 +110,7 @@ export function makeRecordingQl(tables: Record<string, unknown[]>) {
         inFlight -= 1;
       }
     },
-  };
+  }, catalogFromTables(tables));
 }
 
 // ── Fixture matrix — one entry per shape the eight reads discriminate on ────

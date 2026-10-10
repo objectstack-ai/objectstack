@@ -288,15 +288,16 @@
         "isSystem": true
       },
       {
-        "object": "sys_position_permission_set",
+        "object": "sys_permission_set",
         "where": {
-          "position_id": {
+          "name": {
             "$in": [
-              "p_contrib",
-              "p_auditor",
-              "p_everyone"
+              "write_all",
+              "read_all",
+              "base_access"
             ]
-          }
+          },
+          "organization_id": null
         },
         "limit": 500,
         "isSystem": true
@@ -304,11 +305,11 @@
       {
         "object": "sys_permission_set",
         "where": {
-          "id": {
+          "name": {
             "$in": [
-              "ps_write",
-              "ps_read",
-              "ps_base"
+              "write_all",
+              "read_all",
+              "base_access"
             ]
           }
         },
@@ -506,14 +507,14 @@
         "isSystem": true
       },
       {
-        "object": "sys_position_permission_set",
+        "object": "sys_permission_set",
         "where": {
-          "position_id": {
+          "name": {
             "$in": [
-              "p_orgadmin",
-              "p_everyone"
+              "organization_admin"
             ]
-          }
+          },
+          "organization_id": null
         },
         "limit": 500,
         "isSystem": true
@@ -542,9 +543,9 @@
       {
         "object": "sys_permission_set",
         "where": {
-          "id": {
+          "name": {
             "$in": [
-              "ps_oa"
+              "organization_admin"
             ]
           }
         },

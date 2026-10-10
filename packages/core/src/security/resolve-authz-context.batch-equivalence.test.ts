@@ -47,6 +47,21 @@
  * sequential capture. The fixtures' grants carry the name the platform writers
  * store beside the id. The by-name read joins the `sys_position` read's leg, so
  * a principal whose sets are all held directly resolves in two legs, not three.
+ *
+ * ⚠️ A second recorded move ([ADR-0131] D3/D4, C3 stage 1): a position's sets
+ * are the `permissionSets` its catalog definition names, and every set body is
+ * its catalog definition. The recording double carries that catalog: the
+ * definitions the fixture's own rows convert to, the junction rows through the
+ * upgrade ceremony's `convertPositionBindingRows`. In the two fixtures whose
+ * positions bind sets (`position-derived-grants`, `tenant-admin-via-position`),
+ * the `sys_position_permission_set` read and the `sys_permission_set` read by
+ * the junction's ids are gone; in their place the position-bound sets' rows are
+ * read BY NAME, for their ADR-0049 `active` flag only — the organization-less
+ * rows and the active organization's own rows, the pair a user grant's sets
+ * get. Same query count. Every `grants` envelope is byte-identical to the
+ * capture: the switch moved where a grant is read from, never what it grants.
+ * The by-name pair needs only the position NAMES, so those two fixtures resolve
+ * in three legs, not four.
  */
 
 import { readFileSync } from 'node:fs';
@@ -84,21 +99,20 @@ const GOLDEN: Record<string, Golden> = JSON.parse(
  * control, written out per fixture rather than derived, so a regression that
  * re-serialises one read shows up as a number rather than as a slower suite.
  *
- * Four is the floor, not three: wave 1 (every independent read) → wave 2
- * (`sys_position`, needs the position NAMES wave 1 produced) → wave 3
- * (`sys_position_permission_set`, needs the position IDS wave 2 produced) →
- * wave 4 (`sys_permission_set` by the junction's ids). The directly granted
- * sets are read by NAME in wave 2, beside `sys_position` ([ADR-0131] D4), so a
- * principal with no `sys_position` row backing any of its position names skips
- * waves 3 and 4 and lands in 2.
+ * Three is the floor, not two: wave 1 (every independent read) → wave 2
+ * (`sys_position`, needs the position NAMES wave 1 produced) → wave 3 (the
+ * position-bound sets' `sys_permission_set` rows, by the names the held
+ * positions' catalog definitions name — [ADR-0131] D3/D4). The directly
+ * granted sets are read by NAME in wave 2, beside `sys_position` (D4), so a
+ * principal whose positions name no set skips wave 3 and lands in 2.
  */
 const BATCHED_LEGS: Record<string, number> = {
   'empty-principal': 2,
   'multi-org-membership': 2,
   'lapsed-own-membership-among-active-peers': 2,
-  'position-derived-grants': 4,
+  'position-derived-grants': 3,
   'permission-set-derived-grants': 2,
-  'tenant-admin-via-position': 4,
+  'tenant-admin-via-position': 3,
   'ai-seat-and-email-from-sys-user': 2,
   'ai-seat-denied': 2,
   'seeded-permissions-and-email': 2,
