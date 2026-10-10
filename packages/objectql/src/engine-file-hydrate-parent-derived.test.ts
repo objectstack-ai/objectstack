@@ -387,7 +387,7 @@ describe('a refused sys_file read still hydrates a file the record being read ow
   it('a read whose projection leaves out id cannot name its owner record, so every id keeps the marker', async () => {
     const { engine, calls } = await boot();
 
-    const rows = await engine.find('doc', { fields: ['attachment'], context: READER_CTX } as any);
+    const rows = await engine.find('doc', { fields: ['attachment'], context: READER_CTX });
 
     expect(rows.find((r: any) => r.attachment?.id === OWNED && !r.attachment.metadataRefused)).toBeUndefined();
     expect(rows.filter((r: any) => r.attachment != null)).toContainEqual({ attachment: refused(OWNED) });

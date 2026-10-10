@@ -60,7 +60,8 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { RouteHandler } from '@objectstack/spec/contracts';
+import type { IStorageService, RouteHandler } from '@objectstack/spec/contracts';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { StorageServicePlugin } from './storage-service-plugin.js';
@@ -186,8 +187,8 @@ describe('#22637 — a file field\'s metadata and the download door agree, for a
     const dataEngine = new Proxy(engine, {
       get(target, prop) {
         if (prop === 'find') {
-          return (object: string, query?: unknown) =>
-            target.getSchema(object) ? target.find(object, query as any) : Promise.resolve([]);
+          return (object: string, query?: EngineQueryOptions) =>
+            target.getSchema(object) ? target.find(object, query) : Promise.resolve([]);
         }
         const value = Reflect.get(target, prop, target);
         return typeof value === 'function' ? value.bind(target) : value;
@@ -251,18 +252,18 @@ describe('#22637 — a file field\'s metadata and the download door agree, for a
 
     // Seeded BEFORE kernel:ready, so the field-reference hooks (which would
     // copy an already-owned id into a fresh row) do not rewrite the fixture.
-    for (const f of FILES) await engine.insert('sys_file', f as any, { context: SYS } as any);
+    for (const f of FILES) await engine.insert('sys_file', f as any, { context: SYS });
     await engine.insert('sys_attachment', {
       id: 'att_1', file_id: F_ATTACH, parent_object: 'contract', parent_id: 'c_open',
       file_name: 'attached.pdf', mime_type: 'application/pdf', size: 2048,
-    } as any, { context: SYS } as any);
+    } as any, { context: SYS });
     await engine.insert('contract', {
       id: 'c_open', title: 'Open', signed_pdf: F_OWNED, annexes: [F_ANNEX, F_SIBLING, F_VAULT, F_ATTACH, F_PUBLIC],
-    } as any, { context: SYS } as any);
-    await engine.insert('contract', { id: 'c_other', title: 'Other', signed_pdf: F_SIBLING } as any, { context: SYS } as any);
-    await engine.insert('vault', { id: 'v1', doc: F_VAULT } as any, { context: SYS } as any);
-    await engine.insert('decision', { id: 'dec_allow', proof: F_DEC_ALLOW } as any, { context: SYS } as any);
-    await engine.insert('decision', { id: 'dec_deny', proof: F_DEC_DENY } as any, { context: SYS } as any);
+    } as any, { context: SYS });
+    await engine.insert('contract', { id: 'c_other', title: 'Other', signed_pdf: F_SIBLING } as any, { context: SYS });
+    await engine.insert('vault', { id: 'v1', doc: F_VAULT } as any, { context: SYS });
+    await engine.insert('decision', { id: 'dec_allow', proof: F_DEC_ALLOW } as any, { context: SYS });
+    await engine.insert('decision', { id: 'dec_deny', proof: F_DEC_DENY } as any, { context: SYS });
 
     // The security layer, as far as this fixture needs it.
     const refuseNonSystem = async (opCtx: any, next: () => Promise<void>) => {
@@ -275,7 +276,7 @@ describe('#22637 — a file field\'s metadata and the download door agree, for a
     await plugin.start(ctx as any);
     await ctx.flushReady();
 
-    const storage = ctx.getService<any>('storage');
+    const storage = ctx.getService<IStorageService>('storage');
     for (const f of FILES) await storage.upload(f.key, Buffer.from(`bytes of ${f.id}`));
   });
 
@@ -302,10 +303,10 @@ describe('#22637 — a file field\'s metadata and the download door agree, for a
 
   /** What the record read tells the reader about one record's file fields. */
   const readAs = async (object: string, id: string) =>
-    (await engine.find(object, { where: { id }, context: READER_CTX } as any))[0];
+    (await engine.find(object, { where: { id }, context: READER_CTX }))[0];
 
   it('the refusal it starts from: the reader may not query sys_file directly — and still may not', async () => {
-    const direct = await engine.find('sys_file', { context: READER_CTX } as any).then(() => null, (e: any) => e);
+    const direct = await engine.find('sys_file', { context: READER_CTX }).then(() => null, (e: any) => e);
     expect({ code: direct?.code, status: direct?.statusCode ?? direct?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
   });
 
