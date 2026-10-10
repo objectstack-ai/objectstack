@@ -250,7 +250,7 @@ import { F } from '@objectstack/spec';
 const total = {
   type: 'formula',
   expression: F`record.amount * record.tax_rate`,  // CEL — `record.` prefixes required
-  returnType: 'number',   // 'number' | 'text' | 'boolean' | 'date' (no 'currency')
+  returnType: 'number',   // 'number' | 'text' | 'boolean' | 'date' | 'currency' (+ currencyConfig)
 };
 ```
 

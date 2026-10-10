@@ -353,16 +353,19 @@ export const objectForm = defineForm({
             // `expression`, not `formula` — the key is named for what it holds,
             // not for the field type that uses it.
             { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL formula expression', visibleWhen: "data.type == 'formula'" },
-            // The four members are what `FieldSchema.returnType` declares, and
+            // The five members are what `FieldSchema.returnType` declares, and
             // the same explicit list the field designer's own control carries
             // in `field.form.ts` (#19677). This grid additionally offered
             // `datetime` and `currency`, so an author who added a formula field
             // here and picked either wrote a value the parse refuses — the
             // refusal arriving from the save door, naming a key they never
             // typed. Declared-vs-enforced, one seam before that door.
+            // `currency` is declared since #22727 and offered again, in the
+            // same change as the enum; `datetime` is still refused.
             { field: 'returnType', type: 'select', helpText: 'Result type for formulas', visibleWhen: "data.type == 'formula'", options: [
               { label: 'Text', value: 'text' }, { label: 'Number', value: 'number' },
               { label: 'Boolean', value: 'boolean' }, { label: 'Date', value: 'date' },
+              { label: 'Currency', value: 'currency' },
             ] },
             // A roll-up is ONE key — `summaryOperations` {object, field, function}.
             // The flat `summaryType` / `summaryField` pair named neither of them
