@@ -36,10 +36,15 @@
  * `origin/main` at eae3368a, those are the analytics relationship hop
  * (`service-analytics/src/hop-object.ts` — its target comes from the host's
  * relationship resolver; the analytics door already judges every hop's object
- * for `aggregate` over `queryObjects`), and the reads whose target is a FIXED
- * platform object rather than an authored one (a file field's `sys_file`
- * hydration, the `sys_user` display names the approvals and audit surfaces
- * resolve). They are named here, not held.
+ * for `aggregate` over `queryObjects`); the import door's reference resolution
+ * (`core/src/utils/import-runner.ts` `resolveRef`, whose target
+ * `import-field-meta.ts` reads off the raw `reference` carrier — measured: a
+ * cell's display text is matched against an unexposed target and the matched
+ * id is stored, a miss is reported per row; open, carried by a follow-up of
+ * #22661); and the reads whose target is a FIXED platform object rather than
+ * an authored one (a file field's `sys_file` hydration, the `sys_user` display
+ * names the approvals and audit surfaces resolve). They are named here, not
+ * held.
  *
  * The scan surface and its prefilter follow `row-serving-door-exposure.pin.test.ts`
  * in this directory: git's authored-file list, never a directory crawl, and `.ts`
