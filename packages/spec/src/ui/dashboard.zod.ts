@@ -31,6 +31,9 @@ import { I18nLabelSchema } from './i18n.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+// [#22611] The audience gate's ONE describe, shared with `ListViewSchema` and
+// declared outside the `ui` barrel.
+import { AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION } from './audience-required-permissions';
 export const WidgetColorVariantSchema = lazySchema(() => z.enum([
   'default',
   'blue',
@@ -1791,6 +1794,18 @@ export const DashboardSchema = lazySchema(() => strictObject({
 
   /** Global Filters */
   globalFilters: z.array(GlobalFilterSchema).optional().describe('Global filters that apply to all widgets in the dashboard'),
+
+  /**
+   * [#22611] The audience gate — the platform's one capability key, with the
+   * app / navigation-item / action shape and meaning: a list of capabilities,
+   * all required (ruling 6095014058, letter A). Distinct from a widget's
+   * `requiresObject` / `requiresService`, which gate one widget on what is
+   * INSTALLED, never on who is asking. One describe with
+   * `ListViewSchema.requiredPermissions` — see
+   * {@link AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION} for its clauses,
+   * including why it says the gate is not enforced yet.
+   */
+  requiredPermissions: z.array(z.string()).optional().describe(AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION),
 
   // `aria` / `performance` REMOVED (#3896 audit close-out): authorable and
   // inert — no DashboardRenderer path applied either (ledger: dead; the
