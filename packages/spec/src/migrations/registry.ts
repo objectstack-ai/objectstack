@@ -15640,7 +15640,11 @@ const step18: MigrationStep = {
     // is no tombstone and no RETIRED_KEYS_BY_MAJOR row, and no D2 conversion
     // exists — a mechanical pass writing `editInline: false` into every silent
     // view would preserve the old posture and defeat the ruling, and one writing
-    // `true` would add nothing the default does not already do.
+    // `true` would add nothing the default does not already do. The one-vocabulary
+    // rule the printed `reason` names is objectui#5144 (a boolean view-level
+    // `inlineEdit` folds into `editInline`; an explicit `editInline` wins); the
+    // citation lives here, not in the printed guidance, which carries no tracker
+    // number.
     {
       id: 'list-view-edit-inline-default-on',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
@@ -15660,7 +15664,7 @@ const step18: MigrationStep = {
         + 'edits a cell in place with the field\'s type-aware widget; a user without `update` sees no '
         + 'toggle, because the permission gate is untouched. A view with no `userActions` block at all '
         + 'parses with none on either side; the renderer reads an absent key as the spec default. The '
-        + 'one-vocabulary rule of objectui#5144 stands: a boolean view-level `inlineEdit` folds into '
+        + 'one-vocabulary rule objectui ruled for the fold stands: a boolean view-level `inlineEdit` folds into '
         + '`editInline` (`true` reads on and opens the grid in edit mode), and an explicit `editInline` '
         + 'wins. Not losslessly convertible because the question is intent, not text: only the '
         + 'deployment knows which silent lists were relying on read-only cells. The accept set is '

@@ -4,7 +4,7 @@
 
 `ListView.userActions.editInline` defaults to `true` on the v18 line: a list view is editable in place by default, under the permission gate that already exists, and `userActions: { editInline: false }` is the opt-out.
 
-Clause-②: yes (widening)
+Clause-②: no
 
 <!-- adr-0087: registered list-view-edit-inline-default-on -->
 
