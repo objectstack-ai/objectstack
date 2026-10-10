@@ -3593,6 +3593,63 @@ describe('ApprovalService — a person approver that resolves to nobody adds no 
     const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'position', value: 'cfo' }]), CTX) as any;
     expect(req.pending_approvers).toEqual(['position:cfo']);
   });
+
+  // ── stored rows: the disposition of a request opened before this fix ──
+  //
+  // A pending request a pre-fix release opened already holds the dead slot.
+  // Nothing rewrites it. Each pin below takes a request the current code
+  // opened on `[manager, user u9]` and puts the STORED row back into the
+  // pre-fix shape, then drives its next transition.
+
+  /** Open `[manager, user u9]` unanimous, then hand back the stored row. */
+  const openUnanimous = async (svc: ApprovalService, engine: any) => {
+    const req = await svc.openNodeRequest(node(
+      'u_no_mgr', [{ type: 'manager' }, { type: 'field', value: 'reviewer' }, { type: 'user', value: 'u9' }],
+      { behavior: 'unanimous' },
+    ), CTX) as any;
+    return { req, row: engine._tables['sys_approval_request'][0] };
+  };
+
+  it('stored row WITH the open-time slate snapshot keeps its dead slot: not rewritten, still an admin rescue', async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc } = svcWithWarnings(engine);
+    const { req, row } = await openUnanimous(svc, engine);
+    // The pre-fix shape: the literal on the slate AND in the tally snapshot.
+    const cfg = JSON.parse(row.node_config_json);
+    cfg.__approverGroups = { 'manager:undefined': ['#0'], u9: ['#2'] };
+    row.node_config_json = JSON.stringify(cfg);
+    row.pending_approvers = 'manager:undefined,u9';
+
+    const vote = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(vote.finalized).toBe(false);
+    expect(vote.request.pending_approvers).toEqual(['manager:undefined']);
+
+    // The recovery it always had: a privileged override decides it outright.
+    const rescue = await svc.decideNode(req.id, { decision: 'approve', actorId: 'admin_x' }, SYS);
+    expect(rescue.finalized).toBe(true);
+    expect(rescue.request.status).toBe('approved');
+  });
+
+  // A request opened before the tally snapshot existed is re-resolved at its
+  // next approve, against the stored payload — none here, so the person
+  // rungs have no record to read (the one way `field` reaches the no-slot
+  // branch). Both now add nothing, so the dead slots stop counting.
+  it('stored row WITHOUT a snapshot is re-evaluated at its next approve: the dead person slots stop counting', async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc } = svcWithWarnings(engine);
+    const { req, row } = await openUnanimous(svc, engine);
+    const cfg = JSON.parse(row.node_config_json);
+    delete cfg.__approverGroups;
+    row.node_config_json = JSON.stringify(cfg);
+    row.payload_json = null;
+    row.pending_approvers = 'manager:undefined,u9';
+
+    const vote = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(vote.finalized).toBe(true);
+    expect(vote.request.status).toBe('approved');
+  });
 });
 
 // ── File-access delegate (ADR-0104 D3 wave 2) ────────────────────────
