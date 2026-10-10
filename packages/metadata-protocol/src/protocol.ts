@@ -13276,7 +13276,20 @@ export class ObjectStackProtocolImplementation implements
         // reproduced by it, so for those we skip the count and fall back to a
         // page-local estimate (a full page implies there may be more) rather than
         // reporting a wrong total.
-        const pageLimit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : undefined;
+        //
+        // [#22588] `limit: 0` IS a limit. It asks for no rows (objectstack#6485,
+        // the drivers' pagination conformance), so `records.length` is 0 and was
+        // reported as the total: `?$top=0` answered `total: 0` while `?$top=1`
+        // answered the true count, and the Console's footer probe — which sends
+        // exactly `$top: 0` to read the total and nothing else — showed `0` on
+        // every list page. Gated `> 0`, a zero-row page fell into the "no limit,
+        // the full set is the total" arm, which is true of every limit except
+        // this one. So `>= 0`: a zero-row request is a paged request like any
+        // other, and the three arms below keep their meaning for it — the count
+        // runs (`total` is the filtered count, whatever the page size), `$count=false`
+        // still omits `total` instead of reporting the page's 0, and `search`
+        // still reports its page-local estimate rather than a count.
+        const pageLimit = typeof options.limit === 'number' && options.limit >= 0 ? options.limit : undefined;
         const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
         let total: number | undefined = records.length;
         let hasMore = false;
