@@ -2366,8 +2366,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "説明"
       },
       permissionSets: {
-        label: "Permission Sets",
-        helpText: "Permission sets this position distributes, by name (snake_case)."
+        label: "権限セット",
+        helpText: "この役職が配布する権限セット（名前で指定、snake_case）。"
       },
       delegatable: {
         label: "セルフ委任を許可",

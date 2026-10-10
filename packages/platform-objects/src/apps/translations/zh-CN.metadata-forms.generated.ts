@@ -2366,8 +2366,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "描述"
       },
       permissionSets: {
-        label: "Permission Sets",
-        helpText: "Permission sets this position distributes, by name (snake_case)."
+        label: "权限集",
+        helpText: "该岗位分配的权限集，按名称填写（snake_case）。"
       },
       delegatable: {
         label: "可自助委派",

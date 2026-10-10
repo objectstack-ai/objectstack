@@ -2366,8 +2366,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Descripción"
       },
       permissionSets: {
-        label: "Permission Sets",
-        helpText: "Permission sets this position distributes, by name (snake_case)."
+        label: "Conjuntos de permisos",
+        helpText: "Conjuntos de permisos que distribuye este puesto, por nombre (snake_case)."
       },
       delegatable: {
         label: "Delegable",
