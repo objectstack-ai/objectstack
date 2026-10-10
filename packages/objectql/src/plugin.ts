@@ -42,6 +42,9 @@ import {
 // [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
 // cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
+// [ADR-0029 D3] The registry's own refusal of a second owner — read, never
+// re-derived, when a residual object's name is already owned.
+import { ObjectOwnershipConflictError } from './registry.js';
 
 export type { Plugin, PluginContext };
 
@@ -636,11 +639,9 @@ export class ObjectQLPlugin implements Plugin {
           const declared = new Set<string>();
           for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
           const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
-          const unresolved = [
-            ...ordered.flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest))),
-            // The residual's objects register below, so they are judged here too.
-            ...(residual ? collectManifestPicklistReferences({ objects: residual.objects }, residual.ownerId) : []),
-          ].filter((ref) => !known(ref.picklist));
+          const unresolved = ordered
+            .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
+            .filter((ref) => !known(ref.picklist));
           const orphans = ordered
             .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
             .filter((ext) => !known(ext.picklist));
@@ -657,15 +658,11 @@ export class ObjectQLPlugin implements Plugin {
         // [ADR-0130 D4] The residual's objects, AFTER every body — the order
         // the metadata door registers the same stack in — under the id the
         // residual rule names, through the registry verb a body's own objects
-        // take (`registerApp` step 2), so its refusals are a body's refusals.
-        // There is no package record for that id: the residual is not a
-        // package, and when the id names one of the bodies (a composed stack
-        // keeps one member's manifest) that body's record must not be replaced.
-        if (residual) {
-          for (const object of residual.objects) {
-            ql.registry.registerObject(object, residual.ownerId, undefined, 'own');
-          }
-        }
+        // take (`registerApp` step 2). There is no package record for that id:
+        // the residual is not a package, and when the id names one of the
+        // bodies (a composed stack keeps one member's manifest) that body's
+        // record must not be replaced.
+        if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
         // Manifests registered AFTER start() (marketplace install / ledger
         // rehydrate arrive on `kernel:ready` or an HTTP request) land in the
         // SchemaRegistry only — the one-shot startup bridge already ran — so
@@ -2284,6 +2281,65 @@ export class ObjectQLPlugin implements Plugin {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+  }
+
+  /**
+   * [ADR-0130 D4] Register the objects of a stack's residual in the engine —
+   * the half the metadata door cannot reach — so the data door serves what
+   * `GET /meta/object` lists, under the same owner.
+   *
+   * Two classes are NOT registered, because registering them would refuse a
+   * boot the residual rule accepts (both measured on a kernel):
+   *
+   *  - an object whose name another package already owns: the registry's
+   *    ADR-0029 D3 refusal (`ObjectOwnershipConflictError`) would fail the
+   *    boot, and the data door keeps serving that package's object;
+   *  - an object whose field names a picklist none of the stack's package
+   *    bodies declares: the boot's picklist audit at `kernel:ready` would fail
+   *    it, because the residual's own picklists are registered as metadata
+   *    only. Judged off the stack's bodies, never off the registry, which is
+   *    still filling while this runs.
+   *
+   * Each such object is LISTED (the metadata door registered it) and NOT
+   * served, and the boot says so once, naming each object and why. Any other
+   * refusal the registry raises — a field with no valid `type` — propagates,
+   * as a body's does.
+   */
+  private registerUnclaimedTopLevelObjects(
+    ctx: PluginContext,
+    residual: { ownerId: string | undefined; objects: ServiceObject[] },
+    bodies: unknown[],
+  ): void {
+    const ql = this.ql;
+    if (!ql) return;
+    const bodyPicklists = new Set<string>();
+    for (const body of bodies) for (const name of collectManifestPicklistNames(body)) bodyPicklists.add(name);
+    const unserved: string[] = [];
+    for (const object of residual.objects) {
+      const dangling = collectManifestPicklistReferences({ objects: [object] }, residual.ownerId)
+        .find((ref) => !bodyPicklists.has(ref.picklist));
+      if (dangling) {
+        unserved.push(
+          `'${object.name}' (field '${dangling.field}' names picklist '${dangling.picklist}', which no package body declares)`,
+        );
+        continue;
+      }
+      try {
+        ql.registry.registerObject(object, residual.ownerId, undefined, 'own');
+      } catch (e) {
+        if (!(e instanceof ObjectOwnershipConflictError)) throw e;
+        unserved.push(`'${object.name}' (package '${e.existingPackageId}' already owns that name)`);
+      }
+    }
+    if (unserved.length === 0) return;
+    const owner = residual.ownerId ?? '<none>';
+    ctx.logger.warn(
+      `[ObjectQLPlugin] ${unserved.length} top-level object(s) of stack '${owner}' that no package body `
+      + `declares are listed by the metadata door under that id but NOT served by the data door: `
+      + `${unserved.join(', ')}. Declare each one inside the \`packages[]\` entry of the package that owns it, `
+      + 'together with every picklist its fields name; to add fields to an object another package owns, '
+      + 'use `objectExtensions` instead of declaring it again.',
+    );
   }
 
   /**
