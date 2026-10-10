@@ -409,7 +409,7 @@ Calculated field using a CEL expression (see [Expressions](/docs/data-modeling/f
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `expression` | `string \| Expression` | **required** | CEL calculation expression |
-| `returnType` | `'number' \| 'text' \| 'boolean' \| 'date'` | — | Declared value type of the computed result |
+| `returnType` | `'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'` | — | Declared value type of the computed result. `currency`: an amount of money, in the currency the formula's own `currencyConfig` declares (none: dynamic) |
 
 ```typescript
 { name: 'total', label: 'Total', type: 'formula', expression: 'record.quantity * record.unit_price', returnType: 'number' }

@@ -187,11 +187,14 @@ describe('textOperatorDoorVerdict — a text operator over a type that never sto
     for (const t of TEXT_OPERATOR_DOOR_PASSING_TYPES) expect(textOperatorDoorVerdict({ type: t }), t).toBe('passes');
   });
 
-  it('H3: judges a formula as the FieldType its returnType names — text passes, number/boolean/date are refused, absent is deferred', () => {
+  it('H3: judges a formula as the FieldType its returnType names — text passes, number/boolean/date/currency are refused, absent is deferred', () => {
     expect(textOperatorDoorVerdict({ type: 'formula', returnType: 'text' })).toBe('passes');
     expect(textOperatorDoorVerdict({ type: 'formula', returnType: 'number' })).toBe('door-refusal');
     expect(textOperatorDoorVerdict({ type: 'formula', returnType: 'boolean' })).toBe('door-refusal');
     expect(textOperatorDoorVerdict({ type: 'formula', returnType: 'date' })).toBe('door-refusal');
+    // #22727 — a currency formula reads like the currency field it is judged as.
+    expect(textOperatorDoorVerdict({ type: 'formula', returnType: 'currency' })).toBe('door-refusal');
+    expect(textOperatorDoorVerdict({ type: 'formula', returnType: 'currency' })).toBe(textOperatorDoorVerdict({ type: 'currency' }));
     expect(textOperatorDoorVerdict({ type: 'formula' })).toBe('deferred');
     expect(textOperatorDoorVerdict({ type: 'formula', returnType: undefined })).toBe('deferred');
     // A spelling the schema does not declare is unreadable too — never a silent pass.
@@ -212,7 +215,7 @@ describe('textOperatorDoorVerdict — a text operator over a type that never sto
 // ── The fixture ──────────────────────────────────────────────────────────────
 
 describe('the fixture', () => {
-  it('carries one field per FieldType member (f_<type>), four typed formulas and one untyped', () => {
+  it('carries one field per FieldType member (f_<type>), five typed formulas and one untyped', () => {
     const names = TEXT_OPERATOR_DOOR_FIXTURE_FIELDS.map((f) => f.name);
     expect(new Set(names).size).toBe(names.length);
     for (const t of FieldType.options) {
@@ -221,8 +224,8 @@ describe('the fixture', () => {
     }
     const formulas = TEXT_OPERATOR_DOOR_FIXTURE_FIELDS.filter((f) => f.type === 'formula');
     expect(sorted(formulas.map((f) => f.returnType ?? '(none)')))
-      .toEqual(['(none)', 'boolean', 'date', 'number', 'text']);
-    expect(TEXT_OPERATOR_DOOR_FIXTURE_FIELDS).toHaveLength(FieldType.options.length - 1 + 5);
+      .toEqual(['(none)', 'boolean', 'currency', 'date', 'number', 'text']);
+    expect(TEXT_OPERATOR_DOOR_FIXTURE_FIELDS).toHaveLength(FieldType.options.length - 1 + 6);
   });
 
   it('every field is a legal FieldSchema input, and the object a legal ObjectSchema input', () => {
@@ -273,7 +276,8 @@ describe('TEXT_OPERATOR_DOOR_CASES', () => {
 
   it('covers all three verdicts — a table with one answer would not need the discriminant', () => {
     const count = (v: string) => TEXT_OPERATOR_DOOR_CASES.filter((c) => c.verdict === v).length;
-    expect(count('door-refusal')).toBe((TEXT_OPERATOR_DOOR_REFUSED_TYPES.size + 3) * TEXT_FILTER_OPERATORS.length);
+    // `+ 4`: the formulas returning number, boolean, date and (#22727) currency.
+    expect(count('door-refusal')).toBe((TEXT_OPERATOR_DOOR_REFUSED_TYPES.size + 4) * TEXT_FILTER_OPERATORS.length);
     expect(count('passes')).toBe((TEXT_OPERATOR_DOOR_PASSING_TYPES.size + 1) * TEXT_FILTER_OPERATORS.length);
     expect(count('deferred')).toBe((1 + STRUCTURED_JSON_TYPES.size) * TEXT_FILTER_OPERATORS.length);
   });

@@ -771,7 +771,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 62 today: #21863's two new predicates each hold two single-quoted
     // literal comparisons, `data.type == 'api'` and `data.type == 'script'`,
     // on `action :: outcomeMessages` and on `action :: onSuccess`.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(62);
+    // It is 64 today: #22727's `field :: currencyConfig` gate also opens for a
+    // currency formula, `data.type == 'formula' && data.returnType == 'currency'`,
+    // two more single-quoted literal comparisons.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(64);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);
