@@ -23,12 +23,28 @@ import { describe, expect, it } from 'vitest';
 import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
 
 import {
-  validateRlsPredicateEnforceability,
+  validateRlsPredicateEnforceability as validateRlsPredicateEnforceabilityUnrecorded,
   RLS_PREDICATE_UNENFORCEABLE,
   RLS_PREDICATE_UNKNOWN_FIELD,
 } from './validate-rls-predicate-enforceability.js';
 import { runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is the id's `os explain` entry. Every call below records what it
+// fired, and the last case in this file holds each recorded verdict to one
+// line of at most 200 characters. Run the whole file: that case reads what the
+// cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateRlsPredicateEnforceability: typeof validateRlsPredicateEnforceabilityUnrecorded = (...args) => {
+  const findings = validateRlsPredicateEnforceabilityUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 const deal = {
   name: 'deal',
@@ -78,18 +94,20 @@ const OPERATORS: ReadonlyArray<{ op: string; spell: (a: string, b: string) => st
 ];
 
 const COLUMNS = [
-  { column: 'a json field', field: 'tags', declared: "`tags` is declared `type: 'json'`" },
-  { column: 'a multiple lookup', field: 'reviewers', declared: "`reviewers` is declared `type: 'lookup'`, `multiple: true`" },
+  { column: 'a json field', field: 'tags' },
+  { column: 'a multiple lookup', field: 'reviewers' },
 ] as const;
 
-const CLASS_SENTENCE =
-  'A column that holds a list or an object is not one comparable value, on either side of a field-to-field ' +
-  'comparison, so the platform refuses the comparison instead of evaluating it';
+/** What the refusal costs, per clause — the verdict's closing clause. */
+const REFUSED = {
+  using: 'so the SQL drivers refuse every read it scopes (INVALID_FILTER / 400)',
+  check: 'so the write check refuses the writes it judges (INVALID_FILTER / 400)',
+} as const;
 
 describe('validateRlsPredicateEnforceability — a field compared with a json / multiple field is REFUSED (#19886)', () => {
   for (const { clause, operation } of CLAUSES) {
     for (const { op, spell, quoted } of OPERATORS) {
-      for (const { column, field, declared } of COLUMNS) {
+      for (const { column, field } of COLUMNS) {
         for (const order of ['scalar first', 'list first'] as const) {
           const [left, right] = order === 'scalar first' ? ['status', field] : [field, 'status'];
           const predicate = spell(left, right);
@@ -100,9 +118,9 @@ describe('validateRlsPredicateEnforceability — a field compared with a json / 
             ]);
             const [finding] = findings;
             expect(finding.where).toBe('permission set "sales" policy "p" on object "deal"');
-            expect(finding.message).toContain(
-              `RLS ${clause} \`${predicate}\` lowers, but compares a field with a field that holds a list or an ` +
-                `object: \`record.${left} ${quoted} record.${right}\`, where ${declared}. ${CLASS_SENTENCE}: `,
+            expect(finding.message).toBe(
+              `RLS ${clause} compares \`record.${left} ${quoted} record.${right}\`, where \`${field}\` holds a list ` +
+                `or an object, ${REFUSED[clause]}`,
             );
             expect(finding.hint).toMatch(/^A field compared with a `json` or `multiple` field has no row-filter form/);
           });
@@ -115,21 +133,27 @@ describe('validateRlsPredicateEnforceability — a field compared with a json / 
     expect(CLAUSES.length * OPERATORS.length * COLUMNS.length * 2).toBe(224);
   });
 
-  it('states the consequence of its own clause — the read and the fail-closed write for `using`, the write for `check`', () => {
+  it('states the consequence of its own clause — the read for `using`, the write for `check`', () => {
     const using = validateRlsPredicateEnforceability(stackWith({ operation: 'select', using: 'record.status != record.tags' }))[0];
-    expect(using.message).toContain(
-      'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses a ' +
-        'cross-field comparison against such a column by its declared type), and every by-id update or delete it ' +
-        'scopes fails closed (`PERMISSION_DENIED` / 403).',
-    );
-    expect(using.message).toContain('the same `using` is also the write check whenever no applicable policy');
+    expect(using.message.endsWith(REFUSED.using)).toBe(true);
 
     const check = validateRlsPredicateEnforceability(stackWith({ operation: 'insert', check: 'record.status != record.tags' }))[0];
-    expect(check.message).toContain(
-      'every single-record insert and by-id update whose record holds a list or an object in that column is ' +
-        'refused (`INVALID_FILTER` / 400) and stores nothing',
+    expect(check.message.endsWith(REFUSED.check)).toBe(true);
+    expect(check.message).not.toContain('every read it scopes');
+  });
+
+  it('`os explain` carries the class and both clauses\' measured consequence the verdict no longer states', () => {
+    const text = explanationOf(RLS_PREDICATE_UNENFORCEABLE);
+    expect(text).toContain(
+      'is not one comparable value, on either side of a field-to-field comparison, so the platform refuses the ' +
+        'comparison instead of evaluating it',
     );
-    expect(check.message).not.toContain('every read this policy scopes');
+    expect(text).toContain('every by-id update or delete it scopes fails closed (`PERMISSION_DENIED` / 403)');
+    expect(text).toContain('where the `using` is the write check');
+    expect(text).toContain(
+      'against a list-holding column every single-record insert and by-id update whose record holds a list or an ' +
+        'object there',
+    );
   });
 });
 
@@ -155,14 +179,14 @@ describe('validateRlsPredicateEnforceability — every declared list-or-object c
     ['multiple file', { type: 'file', multiple: true }, "`type: 'file'`, `multiple: true`"],
     ['multiple image', { type: 'image', multiple: true }, "`type: 'image'`, `multiple: true`"],
   ];
-  for (const [label, def, declared] of LIST_HOLDING) {
-    it(`${label}: refused, naming the declaration`, () => {
+  for (const [label, def] of LIST_HOLDING) {
+    it(`${label}: refused, naming the column`, () => {
       const objects = [{ ...deal, fields: { ...deal.fields, subject: { label: 'Subject', ...def } } }, account];
       const findings = validateRlsPredicateEnforceability(
         stackWith({ operation: 'select', using: 'record.status != record.subject' }, objects),
       );
       expect(findings.map((f) => f.rule)).toEqual([RLS_PREDICATE_UNENFORCEABLE]);
-      expect(findings[0].message).toContain(`\`record.status != record.subject\`, where \`subject\` is declared ${declared}.`);
+      expect(findings[0].message).toContain('`record.status != record.subject`, where `subject` holds a list or an object,');
     });
   }
 });
@@ -208,21 +232,22 @@ describe('validateRlsPredicateEnforceability — the one-value spellings stay CL
     );
     expect(findings.map((f) => f.rule)).toEqual([RLS_PREDICATE_UNENFORCEABLE]);
     expect(findings[0].message).not.toContain('holds a list or an object');
-    expect(findings[0].message).toContain('share no comparison class');
+    expect(findings[0].message).toContain('which no comparison class spans (text vs a file field)');
   });
 });
 
 describe('validateRlsPredicateEnforceability — the arm is the graph\'s, and reports once (#19886)', () => {
-  it('names every offending comparison of one clause in ONE finding', () => {
+  it('reports every offending comparison of one clause in ONE finding: the first quoted, the rest counted', () => {
     const findings = validateRlsPredicateEnforceability(
       stackWith({ operation: 'select', using: 'record.status != record.tags || record.reviewers == record.tags' }),
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain(
-      "object: `record.status != record.tags`, where `tags` is declared `type: 'json'`; " +
-        "`record.reviewers == record.tags`, where `reviewers` is declared `type: 'lookup'`, `multiple: true` and " +
-        "`tags` is declared `type: 'json'`. ",
+      'compares `record.status != record.tags`, where `tags` holds a list or an object (and 1 more), ',
     );
+    // Both columns of one comparison are named when both hold a list.
+    const both = validateRlsPredicateEnforceability(stackWith({ operation: 'select', using: 'record.reviewers == record.tags' }));
+    expect(both[0].message).toContain('where `reviewers` and `tags` hold a list or an object, ');
   });
 
   it('judges nothing the graph cannot answer: an object outside the stack, a field map it cannot read', () => {
@@ -277,5 +302,19 @@ describe('validateRlsPredicateEnforceability — the arm is the graph\'s, and re
       { rule: RLS_PREDICATE_UNENFORCEABLE, path: 'permissions.sales.rowLevelSecurity[0].check' },
     ]);
     expect(refused[0].message).toBe(cli[0].message);
+  });
+});
+
+describe('[#22161] one-line verdicts', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: the cases above fired the list-holding and
+    // the cross-class verdicts, so the shape assertion cannot pass over an
+    // empty record.
+    expect(fired.some((f) => f.message.includes('holds a list or an object'))).toBe(true);
+    expect(fired.some((f) => f.message.includes('which no comparison class spans'))).toBe(true);
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });
