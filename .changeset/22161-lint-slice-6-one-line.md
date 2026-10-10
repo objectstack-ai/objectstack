@@ -6,7 +6,7 @@ fix(lint): the list-view sort and search, form-predicate path, bulk-dispatch, co
 
 Clause-②: no
 
-- **Shorter verdicts.** Each finding of these 12 rule ids now prints a `message` of one verdict sentence. Every finding the rules' own test suites and the runtime publish gate's suites fire is at most 200 characters; before, the longest of each ran from 256 to 927 characters. The ids:
+- **Shorter verdicts.** Each finding of these 12 rule ids now prints a `message` of one verdict sentence. Every finding the rules' own test suites fire is at most 193 characters, and the runtime publish gate's suites at most 137; before, the longest of each ran from 287 to 927 characters. The ids:
   - list-view `sort` (`objects[].listViews`, `views[]` lists, list overlays and ViewItem records): `sort-field-unknown`, `sort-field-unsortable`, `sort-field-unprovisioned`;
   - `searchableFields` (the object's own set, list views, and a react page's `<ListView searchableFields>`): `searchable-field-unknown`, `searchable-field-unsearchable`, `searchable-field-unprovisioned`;
   - metadata-form `visibleWhen` predicates (`views[]` forms bound to a schema): `predicate-path-unresolved`, `predicate-path-unrooted`, `predicate-rhs-path-shaped`;
