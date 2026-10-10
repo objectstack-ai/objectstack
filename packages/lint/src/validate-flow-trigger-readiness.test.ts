@@ -1075,7 +1075,7 @@ describe('validateFlowTriggerReadiness', () => {
       expect(new Set(findings.map((f) => f.path)).size).toBe(2);
       expect(
         findings.find((f) => f.rule === FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE)!.message,
-      ).toMatch(/binds to NOTHING/);
+      ).toMatch(/binds to nothing and never fires$/);
     });
 
     it('the id is the published slug and is distinct from the routed-token id', () => {

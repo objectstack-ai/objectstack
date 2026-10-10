@@ -858,8 +858,11 @@ describe('validateRuleCompilability — reads only keys the spec declares (meta-
     // metadata. `walked` and `names` are the two accumulators #5178 added when
     // the rule walk and the registered-format vocabulary became shared handles
     // (`walkObjectValidationRules`, `registeredFormatNames`) — array `.push` /
-    // `.length` / `.sort`, never a key off authored metadata.
-    const PLUMBING = new Set(['findings', 'out', 'walked', 'names']);
+    // `.length` / `.sort`, never a key off authored metadata. [#22161] `text`,
+    // `echo`, `lead` and `violations` are the verdict helpers' strings — a
+    // compiler's refusal and the prefixes cut off it (`regexRefusal`,
+    // `schemaRefusal`): `.startsWith` / `.slice` / `.split` / `.length`.
+    const PLUMBING = new Set(['findings', 'out', 'walked', 'names', 'text', 'echo', 'lead', 'violations']);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
 
     // …and no excuse outlives the read it excuses. A stale name in either list

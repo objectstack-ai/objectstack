@@ -1100,7 +1100,7 @@ describe('[#22161] one-line verdicts — the two ids', () => {
 
   // What each verdict stopped saying, which `os explain RULE_ID` now prints.
   const MOVED: Record<string, readonly string[]> = {
-    [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]: ['property of the SQL dialect', 'average YEAR', 'COMPARES', '400 DATASET_INVALID', '`measure-aggregate-incoherent`'],
+    [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]: ['property of the SQL dialect', 'average YEAR', 'compares values for equality', '400 DATASET_INVALID', '`measure-aggregate-incoherent`'],
     [DIMENSION_JSON_STORED_FIELD_REFUSED]: ['GROUP KEY', 'one groups each serialized value apart', 'before any SQL is built', 'instead of an answer'],
   };
 

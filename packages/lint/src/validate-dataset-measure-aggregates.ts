@@ -419,15 +419,19 @@ function refusedMeasureFinding(
   // [#20890] The row accepts the TYPE and the declaration is what refuses:
   // a multi-capable field flagged `multiple: true` under `count_distinct`.
   const flaggedList = isAggregateCompatibleWithFieldType(aggregate, fieldType);
-  const pair = `aggregate "${aggregate}" over field "${site.column}" (${declaredAs(shape)} on ${site.declarer})`;
+  // The declaration as the verdict needs it: the flag where it is what refuses
+  // the pair, the type alone where the table's row does.
+  const pair = (declaration: string) =>
+    `aggregate "${aggregate}" over field "${site.column}" (${declaration} on ${site.declarer})`;
   return {
     severity: 'error',
     rule: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
     where: site.where,
     path: site.path,
     message: flaggedList
-      ? `${pair} is refused: a list stored as JSON, which no two backends compare alike`
-      : `${pair} is refused by the aggregate × field-type table: the number would depend on the SQL dialect`,
+      ? `${pair(declaredAs(shape))} is refused: a list stored as JSON, which no two backends compare alike`
+      : `${pair(`\`${fieldType}\``)} is refused by the aggregate × field-type table: the number would depend ` +
+        'on the SQL dialect',
     hint:
       `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
       `"${site.column}" with one its ${declaredAs(shape)} ${shape.multiple === true ? 'declaration' : 'type'} accepts: ` +
