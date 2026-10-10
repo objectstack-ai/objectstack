@@ -416,6 +416,7 @@
     "api/UploadChunkRequest",
     "api/UploadChunkResponse",
     "api/UploadProgress",
+    "api/UploadScope",
     "api/UserProfileResponse",
     "api/ValidateDataIssue",
     "api/ValidateDataRequest",
