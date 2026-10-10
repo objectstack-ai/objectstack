@@ -276,7 +276,8 @@ describe('TEXT_OPERATOR_DOOR_CASES', () => {
 
   it('covers all three verdicts — a table with one answer would not need the discriminant', () => {
     const count = (v: string) => TEXT_OPERATOR_DOOR_CASES.filter((c) => c.verdict === v).length;
-    expect(count('door-refusal')).toBe((TEXT_OPERATOR_DOOR_REFUSED_TYPES.size + 3) * TEXT_FILTER_OPERATORS.length);
+    // `+ 4`: the formulas returning number, boolean, date and (#22727) currency.
+    expect(count('door-refusal')).toBe((TEXT_OPERATOR_DOOR_REFUSED_TYPES.size + 4) * TEXT_FILTER_OPERATORS.length);
     expect(count('passes')).toBe((TEXT_OPERATOR_DOOR_PASSING_TYPES.size + 1) * TEXT_FILTER_OPERATORS.length);
     expect(count('deferred')).toBe((1 + STRUCTURED_JSON_TYPES.size) * TEXT_FILTER_OPERATORS.length);
   });
