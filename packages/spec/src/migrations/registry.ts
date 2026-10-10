@@ -5649,6 +5649,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-approval-node-config-contract-refused`.',
   },
   {
+    id: 'flow-binding-variable-dollar-name-refused',
+    order: 92,
+    text:
+      'The binding keys follow the same rule, so a flow cannot bind a `$` name it is then refused to read: '
+      + 'a node\'s `outputVariable` (`get_record`, `create_record`, `map`, `script`, `subflow`) refuses a name '
+      + 'that starts with `$`, and a `try_catch` `errorVariable` refuses every one but the engine\'s own '
+      + '`$error`, its default. The remedy is the same name without the `$`, read as `{{ name }}`. Each key '
+      + 'states the rule as a `pattern`, so the published JSON Schema refuses what the parse refuses, and the '
+      + 'node contract, `registerFlow`, `objectstack validate` and the run itself refuse such a name at the '
+      + 'key. No D2 conversion exists: the bare name may already be bound in the flow, and the reads of the '
+      + 'old name sit in every dialect a flow string speaks, so the rename is the author\'s. Its D3 record is '
+      + 'the semantic entry `flow-binding-variable-dollar-name-refused`.',
+  },
+  {
     id: 'flow-builtin-node-config-undeclared-keys-refused',
     order: 89,
     text:
