@@ -87,6 +87,9 @@ import {
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
+// The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
+// self-hosted mount and by `handleActionPage` alike.
+import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 
 /**
  * Node-era approval runtime (ADR-0019).
@@ -814,6 +817,18 @@ export interface StrandedApprovalRequest {
 
 /** Default lifetime of an actionable-link token (ADR-0043). */
 export const ACTION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * The ADR-0043 action page's path: where {@link ApprovalService.actionLinkUrl}
+ * points, and where the confirm page's form posts the token back. Relative on
+ * purpose, as the self-hosted mount's form action is.
+ */
+const ACTION_PAGE_PATH = '/api/v1/approvals/act';
+
+/** An action page, answered the way the self-hosted mount answers it. */
+function actionPageResponse(html: string): Response {
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+}
 
 /** Outcome of redeeming (or peeking) an actionable-link token. */
 export type ActionTokenOutcome =
@@ -4850,7 +4865,7 @@ export class ApprovalService implements IApprovalService {
 
   /** Build the session-less confirm-page URL for a raw token. */
   actionLinkUrl(rawToken: string): string {
-    return `${this.publicBaseUrl}/api/v1/approvals/act?token=${encodeURIComponent(rawToken)}`;
+    return `${this.publicBaseUrl}${ACTION_PAGE_PATH}?token=${encodeURIComponent(rawToken)}`;
   }
 
   /**
@@ -4951,6 +4966,59 @@ export class ApprovalService implements IApprovalService {
       comment: 'Via action link',
     }, person ? { ...SYSTEM_CTX, userId: person } : SYSTEM_CTX);
     return { ok: true, action: res.token.action, request: out.request, approverId: res.token.approver_id };
+  }
+
+  /**
+   * [#22578] `IApprovalService.handleActionPage` — the ADR-0043 action page,
+   * from a web-standard `Request` to a `Response`, for a host with no raw app
+   * to mount pages on (a hosted tenant kernel). Its one caller is the runtime
+   * HTTP dispatcher's `/approvals/act` domain (ruling A on #22438, segment 2).
+   *
+   * It answers exactly what the plugin's self-hosted raw-app mount
+   * (`approvals-plugin.ts`, `mountActionPages`) answers for the same token and
+   * method — the same status, `Content-Type` and bytes — because it is built
+   * from the same parts: {@link peekActionToken} / {@link redeemActionToken}
+   * hold the ONE token check and redemption chain, and `action-link-pages.ts`
+   * holds the ONE copy of the page text. The mount is not a caller and is not
+   * rewritten onto this member; the two doors share a token store, so a token
+   * one of them consumed is dead at the other.
+   *
+   *  - `GET` renders: the token comes from the `token` query parameter, and it
+   *    never decides (mail gateways prefetch every link in a message).
+   *  - `POST` redeems: the token comes from the `token` field of the form body.
+   *    A body that is not a form carries no token, and is told "invalid".
+   *  - A dead link is told on the page, with `200`, never as an error status.
+   *  - Any other method: `405` with `Allow: GET, POST`. The contract and
+   *    ADR-0043 name only these two methods, and answering a third as either
+   *    would be inventing what it means.
+   *
+   * The token is the only credential: no {@link ExecutionContext}, and no
+   * session, cookie or `Authorization` header is read. The decision is made,
+   * and audited, as the approver the token binds (`redeemActionToken`).
+   */
+  async handleActionPage(request: Request): Promise<Response> {
+    if (request.method === 'GET') {
+      const token = new URL(request.url).searchParams.get('token') ?? '';
+      const peek = await this.peekActionToken(token);
+      if (!peek.ok) return actionPageResponse(renderResultPage(peek.reason, peek.request));
+      return actionPageResponse(renderConfirmPage({
+        request: peek.request, action: peek.action, approverId: peek.approverId,
+        token, actPath: ACTION_PAGE_PATH,
+      }));
+    }
+    if (request.method === 'POST') {
+      let token = '';
+      try {
+        // The LAST `token` field, as the self-hosted mount's body parser reads
+        // a repeated field — so the two doors agree on every body.
+        const fields = (await request.formData()).getAll('token');
+        token = String(fields[fields.length - 1] ?? '');
+      } catch { /* not a form body: no token, told "invalid" below */ }
+      const out = await this.redeemActionToken(token);
+      if (!out.ok) return actionPageResponse(renderResultPage(out.reason, out.request));
+      return actionPageResponse(renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request));
+    }
+    return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
   }
 
   /**

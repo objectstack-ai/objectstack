@@ -466,10 +466,13 @@ describe('assignment value contract — a CEL envelope beside literals; the `{to
         list: ['a', 2],
         obj: { nested: 'x', source: 'not an envelope without a dialect' },
         empty: '',
-        // The one `{…}` spelling the retirement keeps until CEL can write it
-        // (the run user is refused since #19939 pass 2: `current_user.id`).
-        due: '{TODAY() + 7}',
       },
+    }).success).toBe(true);
+    // No `{…}` spelling is kept (#19939 pass 3): a date macro is refused, and
+    // its CEL string form is the envelope that writes the same text.
+    expect(AssignmentConfigSchema.safeParse({ assignments: { due: '{TODAY() + 7}' } }).success).toBe(false);
+    expect(AssignmentConfigSchema.safeParse({
+      assignments: { due: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' } },
     }).success).toBe(true);
     // An envelope-shaped object with a non-string `dialect` is a literal, as it always was.
     expect(AssignmentConfigSchema.safeParse({ assignments: { weird: { dialect: 1 } } }).success).toBe(true);
@@ -849,7 +852,7 @@ describe('CRUD `fields` value contract — the CEL value envelope beside literal
   it.each(configs)('%s PRESERVATION: every literal still parses, unchanged', (_type, schema, wrap) => {
     const fields = {
       subject: 'Follow up',                    // text
-      due_date: '{TODAY() + 7}',               // a date macro — kept until CEL can write it
+      due_date: '2026-10-17',                  // an ISO date, written as it is (a date macro is refused, #19939)
       cel_looking_text: 'a + b',               // a STRING is never CEL here
       n: 3, ok: true, nothing: null, empty: '',
       tags: ['a', 2, { dialect: 'cel' }],      // arrays are data, envelope-shaped members included
