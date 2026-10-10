@@ -102,6 +102,17 @@ export const SysApprovalToken = ObjectSchema.create({
   enable: {
     // [ADR-0103] Engine-owned: one-time email-approval tokens are minted and
     // consumed by the approval engine (SYSTEM_CTX), never via the data API.
-    apiMethods: ['get', 'list'],
+    //
+    // [#22616] Declared in the form every door enforces, so the generic doors
+    // serve token rows to no caller — as the approvals door serves them to
+    // nobody. `apiEnabled: false` is the automatic API's off switch: judged
+    // first for every operation (`apiExposureDenialReason` → 404
+    // OBJECT_API_DISABLED on REST, the dispatcher and MCP), and the one flag the
+    // cross-object search reads. `apiMethods: []` is `deny-all`
+    // (`api-derivation.ts`); the read methods are retired, not the key dropped,
+    // because an ABSENT whitelist resolves to fully open. The engine's mint,
+    // lookup-by-digest and consume path runs as the system and is untouched.
+    apiEnabled: false,
+    apiMethods: [],
   },
 });

@@ -77,10 +77,17 @@ export const SysAutomationRun = ObjectSchema.create({
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{flow_name} · {node_id}',
-  // `selected_count`/`acted_count` sit in the highlight set on purpose (#4354):
-  // "selected 30, acted 0" has to be visible on the run row itself, not one
-  // drill-down away — a signal you must click to find is a signal nobody sees.
-  highlightFields: ['flow_name', 'node_id', 'status', 'selected_count', 'acted_count', 'correlation', 'started_at', 'updated_at'],
+  // The three operands of the broken-sweep first filter —
+  // `selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0` — sit in
+  // the highlight set on purpose (#4354): "selected 30, acted 0" has to be
+  // visible on the run row itself, not one drill-down away — a signal you must
+  // click to find is a signal nobody sees. The qualifier is not optional there:
+  // `acted_count = 0` beside a non-zero `unmeasured_count` means "cannot tell",
+  // not "did nothing". On a served stack a notify step's delivery is enqueued
+  // (reliable delivery on), so a notify sweep that did its job reads
+  // `acted 0, unmeasured 1` — and with the qualifier off the row it read as a
+  // sweep with nothing to do (#22590).
+  highlightFields: ['flow_name', 'node_id', 'status', 'selected_count', 'acted_count', 'unmeasured_count', 'correlation', 'started_at', 'updated_at'],
 
   fields: {
     id: Field.text({ label: 'Run ID', required: true, readonly: true, group: 'System' }),
@@ -459,7 +466,7 @@ export const SysAutomationRun = ObjectSchema.create({
     unmeasured_count: Field.number({
       label: 'Uncountable Effects',
       required: false,
-      description: 'Executions that reached something the platform cannot count (a `connector_action`, a mutating `http` call whose response was lost). The qualifier `acted_count` needs to be trusted: the broken-sweep filter is `selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0` (a filter, not a verdict — see `acted_count`), because a run with uncountable effects has an INCOMPLETE acted count, not a zero one. Null on rows written before this was tracked.',
+      description: 'Executions that reached something the platform cannot count (a `connector_action`, a mutating `http` call whose response was lost, a notification queued for delivery). The qualifier `acted_count` needs to be trusted: the broken-sweep filter is `selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0` (a filter, not a verdict — see `acted_count`), because a run with uncountable effects has an INCOMPLETE acted count, not a zero one. Null on rows written before this was tracked.',
       group: 'Outcome',
     }),
 
