@@ -1884,8 +1884,14 @@ function sameAuthoredText(a: string | Record<string, string>, b: unknown): boole
  *  2. the header's AUTHORED title, left as written: a template such as
  *     `'{name}'`, a plain string, or an inline locale map;
  *  3. the bundle's `pages.<name>.label`, in two cases only: the header authors
- *     no title, or its title restates the page's own authored `label`. In the
- *     second case the label's translation IS a translation of that text, and
+ *     no title AND does not derive its heading from a record
+ *     ({@link headerDerivesFromRecord}), or its title restates the page's own
+ *     authored `label`. In the first case's exception, an absent title IS the
+ *     authored value: `PageHeaderProps.title` makes "omitted" the sanctioned
+ *     spelling for "the renderer derives the heading from the record", so the
+ *     label filling it would put the page's static name in place of the
+ *     record's, and the title stays absent (#22536). In the second case the
+ *     label's translation IS a translation of that text, and
  *     `os i18n extract` offers no `title` key for such a header (it offers the
  *     label alone), so reading the label here is what translates it.
  *
@@ -1896,12 +1902,51 @@ function resolvePageHeaderTitle(
   bundleLabel: string | undefined,
   authoredTitle: unknown,
   authoredPageLabel: unknown,
+  derivesFromRecord: boolean,
 ): string | undefined {
   if (bundleTitle !== undefined) return bundleTitle;
   if (bundleLabel === undefined) return undefined;
   const own = authoredLabelText(authoredTitle);
-  if (own === undefined || sameAuthoredText(own, authoredPageLabel)) return bundleLabel;
+  if (own === undefined) return derivesFromRecord ? undefined : bundleLabel;
+  if (sameAuthoredText(own, authoredPageLabel)) return bundleLabel;
   return undefined;
+}
+
+/**
+ * Does this root-level `page:header` derive its heading from a record? The
+ * test step 3 of {@link resolvePageHeaderTitle} reads (#22536), and all three
+ * conditions must hold:
+ *
+ *  - the page's `type` is `'record'`, read as SERVED. A document with no
+ *    `type` is not a record page to the hosts below, so it is not one here
+ *    either, although `PageSchema` defaults an absent `type` to `'record'`
+ *    at parse;
+ *  - the page's `object` is a non-empty string;
+ *  - the header does not opt out of the record chrome
+ *    (`properties.recordChrome !== false`).
+ *
+ * The renderer's own test is runtime, not a property of this document.
+ * objectui's `PageHeaderRenderer` draws the record-derived heading when a
+ * record context is mounted (`ctx.data` and `ctx.objectSchema`) and the
+ * header keeps its record chrome. The first two conditions are when the
+ * record hosts mount that context: the record route mounts it for the page
+ * `usePageAssignment` picks (`type === 'record'` and `object` naming the
+ * route's object), and the Studio preview mounts it for a `type: 'record'`
+ * page with an `object`. The third is the renderer's own switch, which it
+ * reads off the header node. Only `properties.recordChrome` is read:
+ * `PageComponentSchema` is strict and refuses a bare top-level
+ * `recordChrome` on a component, so a valid document never carries that
+ * spelling.
+ *
+ * One host is not visible from here, and that gap is accepted. A
+ * `type: 'modal'` action renders the page it targets inside the record
+ * context of the page it was invoked from, whatever that page's `type` is.
+ * Such a page keeps the label fill.
+ */
+function headerDerivesFromRecord(page: PageLike, header: PageComponentLike): boolean {
+  return page.type === 'record'
+    && typeof page.object === 'string' && page.object.length > 0
+    && header.properties?.recordChrome !== false;
 }
 
 /**
@@ -2265,7 +2310,10 @@ export function walkAddressedPageComponents(
  * authors no title or its title restates the page's own `label`, so a
  * translator need not repeat a string identical to the page's nav label
  * ({@link resolvePageHeaderTitle}). A label never replaces a header title
- * that says something else, a dynamic `'{name}'` above all.
+ * that says something else, a dynamic `'{name}'` above all. Nor does it fill
+ * the absent title of a header that derives its heading from a record
+ * ({@link headerDerivesFromRecord}): on a `type: 'record'` page bound to an
+ * object, "no title" means "the record's own name".
  *
  * **One component, one address.** A ROOT-LEVEL `page:header` — an entry of a
  * region's `components[]`, or of a `slots.<slot>` on a `kind: 'slotted'` page
@@ -2421,6 +2469,7 @@ export function translatePage<T extends PageLike>(
     // `nested: false`, so the fallback order cannot differ between them.
     const headerTitle = resolvePageHeaderTitle(
       bundleHeaderTitle, bundleLabel, next.properties?.title, doc.label,
+      headerDerivesFromRecord(doc, next),
     );
     if (headerTitle === undefined && headerSubtitle === undefined) return next;
     return {
@@ -2783,6 +2832,26 @@ export function objectValidationMessageKey(objectName: string, ruleName: string)
  */
 export function flowRefusalMessageKey(flowName: string, nodeId: string): string {
   return `flows.${flowName}.refusals.${nodeId}.message`;
+}
+
+/**
+ * Dot-notation i18n key for a screen's heading or body text —
+ * `flows.<flow>.screens.<node_id>.title` / `.description` (#22507).
+ *
+ * The sibling of {@link flowRefusalMessageKey}, for the same reason and with
+ * the same reader. Both slots are `{{ }}` templates the screen executor renders
+ * per run, so the automation engine picks the translated TEMPLATE in the run's
+ * locale (`AutomationContext.locale`) through the `i18n` service, which takes a
+ * key, and only then fills the holes. That is the rule the maintainer's ruling
+ * on #22507 states once: a user-read flow string the server renders per run is
+ * translated where it is rendered, in the run's locale, before its holes are
+ * filled, and a client overlay never touches a server-rendered slot.
+ *
+ * `flowName` is `Flow.name`, `nodeId` the screen node's `FlowNode.id` (the
+ * client's `ScreenSpec.nodeId`), and `key` one of {@link FLOW_SCREEN_COPY_KEYS}.
+ */
+export function flowScreenCopyKey(flowName: string, nodeId: string, key: FlowScreenCopyKey): string {
+  return `flows.${flowName}.screens.${nodeId}.${key}`;
 }
 
 export function resolveObjectFieldLabels(
@@ -3954,10 +4023,10 @@ export interface FlowLike {
 }
 
 /**
- * Minimal screen shape consumed by {@link resolveFlowScreenTitle} — satisfied
- * by the served `ScreenSpec` (`contracts/automation-service.ts`) a paused run
- * hands the client, and equally by a `{ nodeId, title }` pair assembled from a
- * screen node's `id` + `config.title` on the server side.
+ * Minimal screen shape consumed by {@link resolveFlowScreenTitle} — a
+ * `{ nodeId, title }` pair. Since #22507 a served `ScreenSpec` is NOT one to
+ * hand it: its `title` arrives already translated by the engine (see
+ * {@link resolveFlowScreenTitle}).
  */
 export interface FlowScreenLike {
   /** The screen node's id (`FlowNode.id`) — the `screens` translation key. */
@@ -3981,23 +4050,28 @@ const SCREEN_NODE_TYPE = 'screen';
  * omitting one it reads. `translation.zod.ts` declares the same face;
  * `translation.test.ts` pins the two in agreement.
  *
+ * **Both keys are templates the engine picks (#22507).** A screen's heading
+ * (`config.title`, or the node label when it declares none) and its body text
+ * (`config.description`) are `{{ }}` templates the screen executor renders per
+ * run, so the automation engine reads each key ({@link flowScreenCopyKey})
+ * through the `i18n` service in the run's locale and renders the translation
+ * in place of the authored template — the route the refused `end` node's
+ * message takes ({@link flowRefusalMessageKey}). The served `ScreenSpec`
+ * therefore arrives translated, and a client overlays neither key on it
+ * (maintainer ruling A on #22507). {@link translateFlow} applies the same
+ * keys to a flow DOCUMENT's templates, which is the engine's pick, made on the
+ * document instead of the run.
+ *
  * Deliberately NOT here, measured against the schema face rather than
  * mirrored from the issue (#7646's report):
  *
- * - `description` — a screen's body text (`config.description`) is
- *   guidance-refused by the schema, and the family pin
- *   (`flows-translation-face.test.ts`) records it as owed (#22507): the
- *   server renders it per run as a `{{ }}` template, so a translation has to
- *   be picked before that render, which an overlay on the served screen
- *   cannot do. Growing the face is a schema-side ruled step, never a
- *   resolver-side accretion.
  * - runner chrome (Cancel / Submit / the toast's own sentence, `Flow "…"
  *   completed`) — the console's own words in every app, ruled into the
  *   console's message catalog, not the per-app bundle. The flow's AUTHORED
  *   toast text is not chrome: it is keyed at the flow level,
  *   {@link FLOW_TERMINAL_MESSAGE_KEYS}.
  */
-export const FLOW_SCREEN_COPY_KEYS = ['title'] as const;
+export const FLOW_SCREEN_COPY_KEYS = ['title', 'description'] as const;
 
 export type FlowScreenCopyKey = typeof FLOW_SCREEN_COPY_KEYS[number];
 
@@ -4196,14 +4270,19 @@ function lookupFlowScreenFieldCopy(
 /**
  * Resolve a translated screen heading against
  * `flows.<flow_name>.screens.<node_id>.title`, falling back to the literal
- * `screen.title` (the authored source string the runner would draw anyway),
- * and to `undefined` when the screen declares none — the same
+ * `screen.title`, and to `undefined` when the screen declares none — the same
  * bundle-then-literal order every resolver on this surface follows.
  *
- * Takes the screen rather than a bare node id so the call site that already
- * holds a `ScreenSpec` — the shape a paused `AutomationResult` carries —
- * passes it as-is; `nodeId` is the one screen identifier guaranteed stable
- * and present client-side (it correlates the resume back to its pause point).
+ * ⛔ Not for a served `ScreenSpec` since #22507. The engine picks the
+ * translated heading TEMPLATE in the run's locale before it renders the
+ * `{{ }}` holes ({@link flowScreenCopyKey}), so a paused run's `ScreenSpec.title`
+ * is already translated and filled. Overlaying this answer on it would put the
+ * raw translated template back, holes drawn literally — the boundary the
+ * client-side route always had. Under maintainer ruling A on #22507 a client
+ * overlay never touches a server-rendered slot. Its one caller, objectui's
+ * `FlowRunner` `localizeScreen`, stops overlaying the heading in that ruling's
+ * consumer half, and this function retires once the `.objectui-sha` pin
+ * carries that change (the pinned console still imports it).
  */
 export function resolveFlowScreenTitle(
   bundle: TranslationBundle | undefined,
@@ -4223,9 +4302,9 @@ export function resolveFlowScreenTitle(
  * B, the resolver half #11287): translates the flow's own `label` against
  * `flows.<name>.label`, its terminal toasts against
  * `flows.<name>.{successMessage,errorMessage}` (#22507), and — for every
- * `type: 'screen'` node with an id — the screen heading and per-field copy
- * against
- * `flows.<name>.screens.<node_id>.{title,fields.<field_name>.{label,placeholder,inlineHelpText,options.<value>}}`.
+ * `type: 'screen'` node with an id — the screen heading, body text and
+ * per-field copy against
+ * `flows.<name>.screens.<node_id>.{title,description,fields.<field_name>.{label,placeholder,inlineHelpText,options.<value>}}`.
  * The input document is not mutated.
  *
  * **The toasts overlay only what the flow authors.** A flow with no
@@ -4243,11 +4322,20 @@ export function resolveFlowScreenTitle(
  * the author relied on — the one-key-covers-both rule the schema's own
  * `flows` note records. The node's designer-canvas `label` itself is NOT
  * overlaid: it is not on the declared vocabulary, and rewriting it would
- * change the Studio canvas, not the wizard.
+ * change the Studio canvas, not the wizard. The body text is overlaid only
+ * where the screen authors a `config.description`, the rule the engine
+ * applies (#22507): a bundle never adds body text the author did not write.
+ *
+ * **A screen's heading and body text are TEMPLATES (#22507).** Both are
+ * `{{ }}` templates the executor renders per run, and this function overlays
+ * the translated template on the document, before any render — the same pick
+ * the engine makes for a run ({@link flowScreenCopyKey}). It never sees a
+ * served `ScreenSpec`, whose copy the engine has already translated and
+ * filled.
  *
  * **Schema-independent on purpose**, like every translator here: it reads
  * whatever object it is handed, and overlays ONLY the declared copy keys —
- * an off-spec bundle entry carrying a key the schema refuses (`description`,
+ * an off-spec bundle entry carrying a key the schema refuses (a field's
  * `help`) is ignored, never overlaid (the negative `translatePage` pins for
  * the retired `submitLabel`).
  *
@@ -4291,7 +4379,11 @@ export function resolveFlowScreenTitle(
  * `successMessage` / `errorMessage` to this function as it does the label,
  * and overlays each served field's options through
  * {@link resolveFlowScreenFieldOptions} — in a downstream objectui change;
- * their ledger rows are `planned` until it lands.
+ * their ledger rows are `planned` until it lands. A screen's heading and body
+ * text do NOT take the client side any more (maintainer ruling A on #22507):
+ * the server renders both per run, so the engine picks their translated
+ * templates in the run's locale ({@link flowScreenCopyKey}), and the runner
+ * stops overlaying the served heading.
  */
 export function translateFlow<T extends FlowLike>(
   flow: T,
@@ -4359,12 +4451,20 @@ function translateScreenNode(
       })
     : undefined;
 
-  if (copy?.title === undefined && !fieldsChanged) return node;
+  // [#22507] The body text only where the screen authors one — the engine's
+  // rule: a bundle never adds body text the author did not write. The heading
+  // lands even with no `config.title` (see `translateFlow`).
+  const description = typeof cfg?.description === 'string' && cfg.description.length > 0
+    ? copy?.description
+    : undefined;
+
+  if (copy?.title === undefined && description === undefined && !fieldsChanged) return node;
   return {
     ...node,
     config: {
       ...cfg,
       ...(copy?.title !== undefined ? { title: copy.title } : {}),
+      ...(description !== undefined ? { description } : {}),
       ...(fieldsChanged ? { fields } : {}),
     },
   };

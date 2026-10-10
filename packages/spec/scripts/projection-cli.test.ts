@@ -126,6 +126,24 @@ describe('runProjectionCli — the two projections’ command-line contract', ()
     expect(fs.readFileSync(path.join(tmp, 'committed', 'fixture.json'), 'utf8')).toBe('{"generated":true}\n');
   });
 
+  it('with no flag and no committed copy it refuses as a usage error, builds nothing and writes nothing', () => {
+    let builds = 0;
+    const result = runProjectionCli({
+      name: 'fixture.json',
+      build: () => {
+        builds += 1;
+        return '{}\n';
+      },
+      argv: [],
+    });
+
+    expect(result.code).toBe(2);
+    expect(result.stderr.join('\n')).toContain('fixture.json has no committed copy');
+    expect(result.wrote).toBeNull();
+    expect(builds).toBe(0);
+    expect(fs.readdirSync(tmp)).toEqual([]);
+  });
+
   it('--check with --out, and --out with no path, are usage errors that build nothing', () => {
     let builds = 0;
     const build = () => {

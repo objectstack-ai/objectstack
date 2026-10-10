@@ -17,21 +17,36 @@
 # stay routed here as directories: the driver still owns a same-category
 # collision, which is the residue sharding cannot remove.
 #
-# Two entries below are still SINGLE files — spec-changes.json and
-# docs/protocol-upgrade-guide.md — and #8344 asked what the driver-less queue does
-# to them. MEASURED (2026-08-13, the real in-flight case plus four synthetic pairs,
-# each merged in a clone with no merge.os-regen.driver): it never leaves them
-# stale-but-clean. Both are sorted unions and an ADR-0087 registration is
-# insertion-only, so the queue's text merge either takes both sides — byte-identical
-# to the regeneration, gates green — or conflicts outright. It conflicts only when
-# the two in-flight entries are ADJACENT in registry sort order; one existing entry
-# between them is already enough to merge clean AND current.
+# One entry below is still a SINGLE file — spec-changes.json — and #8344 asked
+# what the driver-less queue does to it. MEASURED (2026-08-13, the real in-flight
+# case plus four synthetic pairs, each merged in a clone with no
+# merge.os-regen.driver, over it and the protocol upgrade guide, then a second
+# committed single file): the queue leaves neither stale-but-clean. Both were sorted
+# unions and an ADR-0087 registration is insertion-only, so the queue's text merge
+# either takes both sides — byte-identical to the regeneration, gates green — or
+# conflicts outright. It conflicts only when the two in-flight entries are ADJACENT
+# in registry sort order; one existing entry between them is already enough to
+# merge clean AND current.
 #
-# Sharding them would not buy back an ejection, which is why they are still single
-# files: every conflicting case also conflicts in
+# Sharding it would not buy back an ejection, which is why it is still a single
+# file: every conflicting case also conflicts in
 # packages/spec/src/migrations/registry.ts — generated, committed, unsharded,
 # NOT_DRIVER_MANAGED — and every registration touches it by construction. The table
 # and the reproduction are in packages/spec/src/migrations/entries/README.md.
+#
+# docs/protocol-upgrade-guide.md LEFT this list at #22483 because nothing generates
+# it any more. It is a hand-written pointer stub naming the guide's public address,
+# and `gen:upgrade-guide` writes the gitignored docs pages under
+# content/docs/protocol-upgrade/ instead (NOT_DRIVER_MANAGED records that path). A
+# route there was harmful, not idle: the driver kept OURS whole, and the pre-commit
+# discharge then passed it, because `check:upgrade-guide` compares no committed
+# copy — so a branch carrying a generated guide merged the stub away in silence.
+# Unrouted, a merge made from a checkout that carries this file conflicts on the
+# stub. ⚠️ git reads the route from the checkout DOING the merge, so a branch
+# forked before #22483 still defers the guide on its first merge of main; the merged
+# tree has no row to discharge it against, so the next commit and the push are
+# refused instead of passed (measured on PR #22556 with the previous head as the
+# control, both merge directions).
 #
 # `merge=os-regen` hands those paths to `scripts/git-merge-regen.mjs`, which does
 # NOT text-merge them. See that file for why it also does not regenerate them
@@ -173,7 +188,6 @@ packages/spec/src/meta-spelling/meta-url-data.generated.ts   merge=os-regen
 packages/spec/export-origins/**                              merge=os-regen
 packages/spec/declaration-map/**                             merge=os-regen
 packages/spec/api-surface-signatures.json                    merge=os-regen
-docs/protocol-upgrade-guide.md                               merge=os-regen
 docs/audits/2026-07-unknown-key-strictness-ledger.counts/**  merge=os-regen
 content/docs/references/**                                   merge=os-regen
 content/docs/permissions/system-context.mdx                  merge=os-regen

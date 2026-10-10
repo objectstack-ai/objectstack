@@ -286,3 +286,39 @@ describe('continueRestoredRun — the approvals operator repair verb, declared',
         expect(doc).toMatch(/refused a REST\/CLI route/);
     });
 });
+
+// ---------------------------------------------------------------------------
+// [#22575] `handleActionPage` — the ADR-0043 action page, declared on the
+// contract transport-neutrally (segment 1 of the maintainer's ruling A on
+// #22438).
+//
+// The card names two pins and these are they: the contract carries the member,
+// OPTIONAL, at the web-standard `(request: Request) => Promise<Response>` shape
+// (no Hono context, no raw app, no `http.server` type); and a service object
+// without it still satisfies `IApprovalService`. The type-level identities are
+// exported aliases for the TS6196 reason the blocks above give;
+// `check:test-typecheck` compiles this file.
+// ---------------------------------------------------------------------------
+
+type HandleActionPage = NonNullable<IApprovalService['handleActionPage']>;
+
+/** Optional: a service may omit it. A required member turns this alias red. */
+export type ActionPageIsOptional = Assert<{} extends Pick<IApprovalService, 'handleActionPage'> ? true : false>;
+
+/** One web-standard `Request` in — the whole input, with no execution context beside it. */
+export type ActionPageTakesOneRequest = Assert<Eq<Parameters<HandleActionPage>, [request: Request]>>;
+
+/** A web-standard `Response` out, asynchronously. */
+export type ActionPageAnswersAResponse = Assert<Eq<ReturnType<HandleActionPage>, Promise<Response>>>;
+
+describe('handleActionPage — the ADR-0043 action page, declared transport-neutrally', () => {
+    it('is optional: a service object without it still satisfies IApprovalService', () => {
+        // `minimalService()` declares every REQUIRED member and nothing else, so
+        // this is the population the optionality is for: an approvals
+        // implementation with no action pages, before which the caller must
+        // answer a typed refusal rather than call.
+        const service: IApprovalService = minimalService();
+
+        expect(service.handleActionPage).toBeUndefined();
+    });
+});

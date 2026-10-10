@@ -17,8 +17,8 @@ import type { Page } from '@objectstack/spec/ui';
  *
  * Strategy
  * --------
- *  - `kind: 'slotted'` + `isDefault: true`: overrides `highlights`,
- *    `details`, `tabs` and `discussion`. Header / actions fall through
+ *  - `kind: 'slotted'` + `isDefault: true`: overrides `alerts`,
+ *    `highlights`, `tabs` and `discussion`. Header / actions fall through
  *    to the synthesizer so the object's declared actions
  *    (`update_my_profile / change_my_password / resend_verification_email
  *    / ban_user / impersonate_user / …`) still appear
@@ -26,13 +26,17 @@ import type { Page } from '@objectstack/spec/ui';
  *  - `highlights` promotes the four signals worth scanning at the top:
  *    email, verification state, 2FA, platform role. Highlight fields
  *    are auto-dropped from the details grid below.
- *  - `details` re-groups remaining fields into sections and hides
- *    admin-internal audit columns. Banned / ban metadata is still
- *    editable from the header actions — we just don't show it in
- *    every user's body.
- *  - `tabs` is **explicitly curated** to the 5 related lists that matter
- *    on a user profile (Positions / Sessions / Linked Accounts / Organizations /
- *    Personal OAuth Apps). Without this override, the synthesizer
+ *  - The FIRST `tabs` item is the details grid: a `record:details` that
+ *    re-groups remaining fields into sections and hides admin-internal
+ *    audit columns. Banned / ban metadata is still editable from the
+ *    header actions — we just don't show it in every user's body. It is
+ *    a tab item and not a `details` slot because the `tabs` slot replaces
+ *    the whole tab strip the Details tab lives in: a `details` slot beside
+ *    `tabs` never rendered, and `PageSchema` refuses the pair.
+ *  - The other `tabs` items are **explicitly curated** to the related lists
+ *    that matter on a user profile (Positions / Permission Sets / Business
+ *    Units / Sessions / Linked Accounts / Organizations / OAuth Apps / API
+ *    Keys) plus a Security tab. Without this override, the synthesizer
  *    auto-generates a tab per object that has a FK to sys_user
  *    (sys_position.created_by, sys_email.updated_by, sys_user_preference,
  *    sys_email_template.created_by, …) producing dozens of noisy
@@ -125,40 +129,16 @@ export const SysUserDetailPage: Page = {
       },
     },
 
-    // ── Body / details grid ───────────────────────────────────────
-    details: {
-      type: 'record:details',
-      properties: {
-        hideFields: [
-          'id',
-          'banned',
-          'ban_reason',
-          'ban_expires',
-          // already promoted to highlights:
-          'email',
-          'phone_number',
-          'email_verified',
-          'two_factor_enabled',
-          'role',
-        ],
-        sections: [
-          {
-            label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad' },
-            fields: ['name', 'image'],
-          },
-          {
-            label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría' },
-            fields: ['created_at', 'updated_at'],
-          },
-        ],
-      },
-    },
-
-    // ── Tabs: curated related lists ───────────────────────────────
-    // Only the 4 lists that are semantically about THIS user account.
+    // ── Tabs: the details grid, then curated related lists ────────
+    // Only the lists that are semantically about THIS user account.
     // Everything else (sys_position created_by, sys_email_template
     // updated_by, …) is incidental authorship metadata and would only
     // create noise.
+    //
+    // There is no `details` slot: the `tabs` slot replaces the whole tab
+    // strip the synthesized Details tab lives in, so a `details` slot beside
+    // it never rendered and `PageSchema` refuses the pair (#22568). The
+    // details grid is therefore the FIRST tab's body here.
     tabs: {
       type: 'page:tabs',
       properties: {
@@ -166,6 +146,44 @@ export const SysUserDetailPage: Page = {
         tabStyle: 'line',
         position: 'top',
         items: [
+          {
+            // ── Body / details grid ───────────────────────────────
+            // Re-groups the remaining fields into sections and hides
+            // admin-internal columns. Banned / ban metadata is still
+            // editable from the header actions — it is just not shown in
+            // every user's body.
+            label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles' },
+            icon: 'file-text',
+            children: [
+              {
+                type: 'record:details',
+                properties: {
+                  hideFields: [
+                    'id',
+                    'banned',
+                    'ban_reason',
+                    'ban_expires',
+                    // already promoted to highlights:
+                    'email',
+                    'phone_number',
+                    'email_verified',
+                    'two_factor_enabled',
+                    'role',
+                  ],
+                  sections: [
+                    {
+                      label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad' },
+                      fields: ['name', 'image'],
+                    },
+                    {
+                      label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría' },
+                      fields: ['created_at', 'updated_at'],
+                    },
+                  ],
+                },
+              },
+            ],
+          },
           {
             label: { en: 'Positions', 'zh-CN': '岗位', 'ja-JP': 'ポジション', 'es-ES': 'Puestos' },
             icon: 'shield-check',

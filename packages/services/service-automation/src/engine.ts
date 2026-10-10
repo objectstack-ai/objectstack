@@ -1324,12 +1324,32 @@ function isRefusalSignal(err: unknown): err is FlowRefusalSignal {
 
 /**
  * [#22450] The slice of `II18nService` (`@objectstack/spec/contracts`) a
- * refusing `end` node reads: `t()` for the translated template, and
- * `getLocales()`, when the service offers it, to negotiate the run's locale.
+ * flow text slot reads ({@link AutomationEngine.renderFlowTextSlot}): `t()` for
+ * the translated template, and `getLocales()`, when the service offers it, to
+ * negotiate the run's locale. Named for its first reader, the refusing `end`
+ * node; the `screen` executor's heading and body text read it too (#22507).
  */
 export interface RefusalI18nService {
     t(key: string, locale: string, params?: Record<string, unknown>): string;
     getLocales?(): string[];
+}
+
+/**
+ * [#22507] One user-read flow text slot {@link AutomationEngine.renderFlowTextSlot}
+ * renders in the run's language.
+ */
+export interface FlowTextSlotTranslation {
+    /**
+     * The slot's key in the `flows` translation face, as `@objectstack/spec/system`
+     * spells it — `flowRefusalMessageKey`, `flowScreenCopyKey`.
+     */
+    readonly key: string;
+    /** The authored `{{ }}` template, rendered whenever no translation is picked. */
+    readonly authored: unknown;
+    /** Whose slot it is, for the log line — `flow 'dedupe' refused at node 'finish'`. */
+    readonly subject: string;
+    /** What shows the authored text in its place, for the log line — `the refusal`. */
+    readonly shownAs: string;
 }
 
 /**
@@ -11060,10 +11080,46 @@ export class AutomationEngine implements IAutomationService {
      * The run stores the refusal already rendered
      * (`sys_automation_run.refusal_message`, `AutomationResult.refusalMessage`),
      * so the translation has to be picked HERE, as a template, before its
-     * `{{ }}` holes are filled. This is the validation-message precedent
-     * (objectql's `authoredRuleMessage`) on the automation side:
+     * `{{ }}` holes are filled — {@link renderFlowTextSlot}, at
+     * `flowRefusalMessageKey` (`@objectstack/spec/system`). This is the
+     * validation-message precedent (objectql's `authoredRuleMessage`) on the
+     * automation side.
+     */
+    private renderRefusalMessage(
+        flowName: string,
+        nodeId: string,
+        authored: string | undefined,
+        variables: Map<string, unknown>,
+        context: AutomationContext,
+    ): string | undefined {
+        return this.renderFlowTextSlot(
+            {
+                key: flowRefusalMessageKey(flowName, nodeId),
+                authored,
+                subject: `flow '${flowName}' refused at node '${nodeId}'`,
+                shownAs: 'the refusal',
+            },
+            variables,
+            context,
+        );
+    }
+
+    /**
+     * [#22450, #22507] Render one user-read flow TEXT slot in the run's
+     * language: pick the translated TEMPLATE at `slot.key`, then fill its
+     * `{{ }}` holes through `renderTextSlot`, the one text renderer — or render
+     * the authored template when no translation is picked.
      *
-     *  - the address is `flowRefusalMessageKey` (`@objectstack/spec/system`);
+     * The rule it implements is stated once, in the maintainer's ruling on
+     * #22507: a user-read flow string the server renders per run is translated
+     * where it is rendered, in the run's locale, before its holes are filled,
+     * and a client overlay never touches a server-rendered slot. Its callers
+     * are the refusing `end` node ({@link renderRefusalMessage}) and the
+     * `screen` executor (its heading and body text, at `flowScreenCopyKey`).
+     * One pick for all of them:
+     *
+     *  - the address is the caller's key in the `flows` translation face
+     *    (`@objectstack/spec/system` spells each one);
      *  - the channel is the existing `i18n` service, reached through
      *    {@link setI18nServiceSource} — no second i18n path;
      *  - the locale is `AutomationContext.locale`, the door's already-resolved
@@ -11073,49 +11129,48 @@ export class AutomationEngine implements IAutomationService {
      * The authored template renders whenever no translation is picked: no
      * locale on the run (a record-change or schedule trigger, code calling
      * `execute` directly), no service, no entry (`t()` echoes the key on a
-     * miss), or a service that throws. A resumed leg renders in the locale the
-     * run was STARTED in — the context is persisted with the suspended run and a
-     * resume carries none of its own.
+     * miss; an empty skeleton slot reads as none), or a service that throws. A
+     * resumed leg renders in the locale the run was STARTED in — the context is
+     * persisted with the suspended run and a resume carries none of its own.
      *
-     * A translation is a text slot like the message it translates: the
+     * A translation is a text slot like the template it translates: the
      * single-brace `{token}` is refused at every door that reads the bundle
-     * (`TranslationDataSchema`, the one text-slot judge). If one still fails to
-     * compile here, it is a translator's defect, not the run's: the refusal
-     * must not become a failure, so the authored message renders and the line
-     * below names the key and the reason.
+     * (`TranslationDataSchema`, the one text-slot judge) for the keys that
+     * judge covers. If one still fails to compile here, it is a translator's
+     * defect, not the run's: the run must not fail on it, so the authored
+     * template renders and the line below names the key and the reason. A
+     * failure of the AUTHORED template still throws, exactly as before.
      */
-    private renderRefusalMessage(
-        flowName: string,
-        nodeId: string,
-        authored: string | undefined,
+    renderFlowTextSlot(
+        slot: FlowTextSlotTranslation,
         variables: Map<string, unknown>,
         context: AutomationContext,
     ): string | undefined {
-        const translated = this.translatedRefusalTemplate(flowName, nodeId, context.locale);
+        const translated = this.translatedFlowTemplate(slot, context.locale);
         if (translated !== undefined) {
             try {
                 return renderTextSlot(translated.template, variables);
             } catch (err: unknown) {
                 if (!(err instanceof FlowTextTemplateError)) throw err;
                 this.logger.warn(
-                    `[automation] flow '${flowName}' refused at node '${nodeId}': the '${translated.locale}' translation ` +
-                    `at '${translated.key}' does not compile (${err.message}), so the refusal shows the authored ` +
-                    `message instead. Fix the translation's holes to match the authored message.`,
+                    `[automation] ${slot.subject}: the '${translated.locale}' translation at '${slot.key}' does not ` +
+                    `compile (${err.message}), so ${slot.shownAs} shows its authored text instead. Fix the ` +
+                    `translation's holes to match the authored text.`,
                 );
             }
         }
-        return renderTextSlot(authored, variables);
+        return renderTextSlot(slot.authored, variables);
     }
 
     /**
-     * [#22450] The translated refusal TEMPLATE for `locale`, or `undefined` when
-     * none is picked — see {@link renderRefusalMessage} for every reason.
+     * [#22450, #22507] The translated TEMPLATE at `slot.key` for `requested`, or
+     * `undefined` when none is picked — see {@link renderFlowTextSlot} for
+     * every reason.
      */
-    private translatedRefusalTemplate(
-        flowName: string,
-        nodeId: string,
+    private translatedFlowTemplate(
+        slot: FlowTextSlotTranslation,
         requested: string | undefined,
-    ): { template: string; key: string; locale: string } | undefined {
+    ): { template: string; locale: string } | undefined {
         if (typeof requested !== 'string' || requested.length === 0) return undefined;
         let service: RefusalI18nService | undefined;
         try {
@@ -11125,17 +11180,17 @@ export class AutomationEngine implements IAutomationService {
         }
         if (!service || typeof service.t !== 'function') return undefined;
         const locale = negotiatedServiceLocale(service, requested);
-        const key = flowRefusalMessageKey(flowName, nodeId);
+        const { key } = slot;
         try {
             const template = service.t(key, locale);
             // II18nService echoes the key back on a miss.
             if (typeof template === 'string' && template.length > 0 && template !== key) {
-                return { template, key, locale };
+                return { template, locale };
             }
         } catch (err: unknown) {
             this.logger.warn(
-                `[automation] flow '${flowName}' refused at node '${nodeId}': the i18n service threw reading ` +
-                `'${key}' (${err instanceof Error ? err.message : String(err)}), so the refusal shows the authored message.`,
+                `[automation] ${slot.subject}: the i18n service threw reading '${key}' ` +
+                `(${err instanceof Error ? err.message : String(err)}), so ${slot.shownAs} shows its authored text.`,
             );
         }
         return undefined;
