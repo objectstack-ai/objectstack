@@ -1,67 +1,29 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #6190 — cold boot must SAY which org-scoped rows it walked past.
+ * [#6190, ADR-0131 D6] Cold boot SAYS which stored rows sit in a legacy
+ * organization's layer — rows no read serves any more.
  *
- * ---------------------------------------------------------------------------
- * What survived the upstream ruling, measured against `origin/main`
- * ---------------------------------------------------------------------------
- * #6155 Q1=B → #6283 → commit 474f131cf rolled `flow`'s `allowOrgOverride` back to
- * `false` and proved declared=enforced on the write side: overlaying a
- * PACKAGED flow per org is now a 403 `NOT_OVERRIDABLE` before persistence.
+ * #6190 made the skip of an organization-scoped `flow` row loud: boot hydrates
+ * `organization_id IS NULL` rows only, and an organization-authored flow
+ * stopped firing after a restart with nothing said. ADR-0131 D6 then retired
+ * the per-organization overlay axis: every read is environment → code, for
+ * every type, so a legacy organization row of ANY type — a tenant's `view`
+ * overlay as much as a pre-#6190 flow — is served by no read. The report
+ * widened with it: every type, active and draft rows, plus the legacy rows of
+ * the three ledgers the timeline, history, diff and audit reads no longer
+ * show, and the remedy is the v18 migration ceremony (`os migrate`, ADR-0131
+ * D10), which names each row's fate. Nothing is deleted or rewritten here.
  *
- * That closed one of the two write tiers. The other is still open BY DESIGN —
- * `flow` keeps `allowRuntimeCreate: true`, which is ADR-0005's "a deployment,
- * not an overlay" — and it is the tier the tenant scenario in #6190 actually
- * uses: authoring a BRAND-NEW flow in Studio. Measured on current main, that
- * write still lands `sys_metadata.organization_id = '<org>'`, because
- * `SysMetadataRepository.put` stamps `organization_id: this.organizationId`
- * for every type and the runtime `PUT /metadata/:type/:name` threads
- * `resolveActiveOrganizationId` into `saveMetaItem`:
- *
- *     PROBE rows = [{"name":"org_sweep","org":"org_a"},
- *                   {"name":"platform_sweep","org":null}]
- *     PROBE loadMetaFromDb = {"loaded":1,...}   // only platform_sweep
- *     PROBE logs during cold boot = []          // ← the defect
- *     PROBE getMetaItems({type:flow}) no org = ["platform_sweep"]
- *
- * So the symptom #6190 filed — an org-scoped flow that fires all day and never
- * fires again after a restart — is still reachable, and the third line is why
- * nobody can tell: the skip was completely silent. `kernel:bootstrapped`'s
- * unbound audit cannot report it either, because the flow was never registered.
- *
- * This file pins the loud half. It does NOT change what boot loads — whether
- * such a row should exist at all (refuse the write / force it env-wide / teach
- * the binder to read per-org) is a contract ruling recorded on the issue.
- *
- * ---------------------------------------------------------------------------
- * Reverse verification, direction predicted BEFORE running
- * ---------------------------------------------------------------------------
- * Ordinary red, with a deliberately green control. Deleting the
- * `reportUnhydratableOrgScopedRows()` call from `loadMetaFromDb` turns the
- * three "warns" cases red AND the probe-failure case with them — that one
- * asserts the second `find` happened at all, so it goes red counting calls
- * rather than reading a message. The two silence cases and the registry
- * premise pin stay green: they assert an ABSENCE of output, which a deleted
- * producer trivially satisfies. Predicted 4 red / 3 green; measured 4 red /
- * 3 green, and the reds fail in the shape that names the defect:
- *
- *   AssertionError: no [metadata_org_scoped_unhydrated] line in: []
- *   AssertionError: expected 1 to be greater than 1
- *
- * — the silent cold boot of the PROBE output above, reproduced on demand.
- *
- * The silence cases are not slack: a "fix" that warned about every skipped
- * org-scoped row would pass the red half and fail there, and that shape is
- * wrong — for `view` and friends (`allowOrgOverride: true`) the skip IS the
- * ADR-0005 design, loaded on demand by `getMetaItem`/`getMetaItems`.
+ * Reverse verification: deleting the `reportUnhydratableOrgScopedRows()` call
+ * from `loadMetaFromDb` turns the "names" cases red and leaves the silence
+ * cases green (they assert an absence a deleted producer satisfies).
  */
 import { describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update). From `@objectstack/metadata-core`, never `@objectstack/objectql`
 // — objectql depends on THIS package, so that import would close a cycle.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
-import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -82,6 +44,11 @@ interface Row {
  */
 function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
+        if (k === '$and') {
+            if (!(v as Array<Record<string, unknown>>).every((clause) => matchesWhere(r, clause))) return false;
+            continue;
+        }
+        if (k.startsWith('$')) throw new Error(`matchesWhere: unsupported combinator ${k}`);
         if (v === undefined) continue;
         const actual = (r as any)[k];
         if (v !== null && typeof v === 'object') {
@@ -93,6 +60,7 @@ function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
             if ('$in' in ops) {
                 if (!(ops.$in as unknown[]).includes(actual)) return false;
             }
+            if ('$ne' in ops && actual === ops.$ne) return false;
             continue;
         }
         if (actual !== v) return false;
@@ -100,14 +68,25 @@ function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
     return true;
 }
 
-function makeEngine(rows: Row[], opts: { dropPredicates?: boolean } = {}) {
+function makeEngine(
+    rows: Row[],
+    opts: { dropPredicates?: boolean; ledgers?: Record<string, Array<{ organization_id: string | null }>> } = {},
+) {
     const registered: Array<{ type: string; name: string }> = [];
     const engine: any = {
-        async find(_table: string, q: { where: Record<string, unknown> }) {
+        async find(table: string, q: { where: Record<string, unknown> }) {
+            if (table !== 'sys_metadata') {
+                const ledger = (opts.ledgers?.[table] ?? []) as any[];
+                return opts.dropPredicates ? ledger : ledger.filter((r) => matchesWhere(r, q.where));
+            }
             // A driver that cannot lower `$null`/`$in` hands back a superset —
             // the exact degradation the JS re-check exists for.
-            if (opts.dropPredicates) return rows.filter((r) => r.state === q.where.state);
+            if (opts.dropPredicates) return rows;
             return rows.filter((r) => matchesWhere(r, q.where));
+        },
+        async count(table: string, q: { where: Record<string, unknown> }) {
+            const ledger = (opts.ledgers?.[table] ?? []) as any[];
+            return ledger.filter((r) => matchesWhere(r, q.where)).length;
         },
         async findOne(object: string, query?: EngineFindOneQueryInput) {
                           assertEngineFindOnePredicate(object, query); return null; },
@@ -171,50 +150,46 @@ async function bootAndCapture(engine: any): Promise<{ result: any; warns: string
     }
 }
 
-const AUDIT = '[metadata_org_scoped_unhydrated]';
+const AUDIT = '[metadata_org_scoped_unserved]';
 
-describe('#6190 — cold boot names the org-scoped rows it cannot hydrate', () => {
-    // ── the premise, read from the registry rather than restated ──────────
-
-    it('flow is the specimen: not per-org overridable, still runtime-creatable', () => {
-        // Both halves matter. `allowOrgOverride: false` (#6283 / commit 474f131cf) is
-        // why an org-scoped flow row can never be read back as an overlay;
-        // `allowRuntimeCreate: true` is why one can still be WRITTEN. If a
-        // later ruling closes the second flag, this case goes red and the
-        // whole file should be re-read, not repaired.
-        expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'flow')).toMatchObject({
-            allowOrgOverride: false,
-            allowRuntimeCreate: true,
-        });
-        // The control specimen's flag, likewise read and not assumed.
-        expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'view')).toMatchObject({
-            allowOrgOverride: true,
-        });
-    });
-
-    // ── the acceptance criterion: the absence is loud ─────────────────────
-
-    it('warns, naming type/name/org, when an org-scoped FLOW row is skipped', async () => {
+describe('[#6190, ADR-0131 D6] cold boot names every legacy organization-scoped row, which no read serves', () => {
+    it('names a legacy organization FLOW row and a tenant VIEW overlay alike, per type, with the ceremony as the remedy', async () => {
         const { engine } = makeEngine([
             row({ type: 'flow', name: 'org_sweep', organization_id: 'org_a' }),
             row({ type: 'flow', name: 'platform_sweep' }),
+            row({ type: 'view', name: 'org_grid', organization_id: 'org_a' }),
+            row({ type: 'view', name: 'org_draft_grid', organization_id: 'org_b', state: 'draft' }),
+            row({ type: 'view', name: 'platform_grid' }),
         ]);
 
         const { result, warns } = await bootAndCapture(engine);
 
-        // Hydration itself is UNCHANGED — this issue's fix is the log, not a
-        // load. The org row stays out of the process-wide registry.
-        expect(result).toMatchObject({ loaded: 1, errors: 0, invalid: 0, storeUnavailable: false });
+        // Hydration loads the environment's rows only.
+        expect(result).toMatchObject({ loaded: 2, errors: 0, storeUnavailable: false });
 
         const line = warns.find((w) => w.includes(AUDIT));
         expect(line, `no ${AUDIT} line in: ${JSON.stringify(warns)}`).toBeDefined();
-        expect(line).toContain('flow×1');
-        expect(line).toContain('org_sweep@org_a');
-        // The consequence, not just the fact — an operator reading this must
-        // learn why an automation stopped firing after a restart.
+        expect(line).toContain('flow×1 (org_sweep@org_a)');
+        expect(line).toContain('view×2 (org_grid@org_a, org_draft_grid@org_b (draft))');
         expect(line).toContain('bind its triggers');
-        // And it must not name the row that DID load.
-        expect(line).not.toContain('platform_sweep');
+        expect(line).toContain('os migrate');
+        expect(line).not.toContain('platform_');
+    });
+
+    it('counts the legacy rows of the three ledgers the reads no longer show', async () => {
+        const { engine } = makeEngine([], {
+            ledgers: {
+                sys_metadata_commit: [{ organization_id: 'org_a' }, { organization_id: null }],
+                sys_metadata_history: [{ organization_id: 'org_a' }, { organization_id: 'org_b' }],
+                sys_metadata_audit: [{ organization_id: null }],
+            },
+        });
+
+        const { warns } = await bootAndCapture(engine);
+
+        const line = warns.find((w) => w.includes(AUDIT));
+        expect(line).toContain('sys_metadata_commit×1, sys_metadata_history×2');
+        expect(line).not.toContain('sys_metadata_audit×');
     });
 
     it('counts every row but samples the names, so a thousand rows cost one line', async () => {
@@ -232,45 +207,20 @@ describe('#6190 — cold boot names the org-scoped rows it cannot hydrate', () =
         expect(audit[0]).toContain('+4 more');
     });
 
-    it('still warns when the driver drops the predicates and returns a superset', async () => {
-        // `driver-memory` historically dropped `is_null` outright (see its
-        // `memory-filter-ast-vocabulary.test.ts`), so the audit re-checks both
-        // predicates in JS. A superset must produce the SAME line — not a
-        // false accusation against the env-wide and view rows in it.
+    it('still reports truthfully when the driver drops the predicates and returns a superset', async () => {
         const { engine } = makeEngine([
             row({ type: 'flow', name: 'org_sweep', organization_id: 'org_a' }),
             row({ type: 'flow', name: 'platform_sweep' }),
-            row({ type: 'view', name: 'org_grid', organization_id: 'org_a' }),
         ], { dropPredicates: true });
 
         const { warns } = await bootAndCapture(engine);
 
         const line = warns.find((w) => w.includes(AUDIT));
-        expect(line).toBeDefined();
         expect(line).toContain('org_sweep@org_a');
         expect(line).not.toContain('platform_sweep');
-        expect(line).not.toContain('org_grid');
     });
 
-    // ── the silence that is the design, not a miss ────────────────────────
-
-    it('says NOTHING about an org-scoped VIEW — that skip is ADR-0005 working', async () => {
-        // `view` is `allowOrgOverride: true`: the row is a per-org overlay,
-        // deliberately not hydrated process-wide and served on demand by
-        // `getMetaItem`/`getMetaItems({ organizationId })`. Warning here would
-        // print a line at every boot of every healthy tenant.
-        const { engine } = makeEngine([
-            row({ type: 'view', name: 'org_grid', organization_id: 'org_a' }),
-            row({ type: 'view', name: 'platform_grid' }),
-        ]);
-
-        const { result, warns } = await bootAndCapture(engine);
-
-        expect(result.loaded).toBe(1);
-        expect(warns.filter((w) => w.includes(AUDIT))).toEqual([]);
-    });
-
-    it('says nothing at all on a store with no org-scoped rows', async () => {
+    it('says nothing at all on a store with no legacy organization row', async () => {
         const { engine } = makeEngine([
             row({ type: 'flow', name: 'platform_sweep' }),
             row({ type: 'view', name: 'platform_grid' }),
@@ -282,13 +232,9 @@ describe('#6190 — cold boot names the org-scoped rows it cannot hydrate', () =
         expect(warns.filter((w) => w.includes(AUDIT))).toEqual([]);
     });
 
-    // ── the diagnostic can never become the outage ────────────────────────
-
     it('a failing audit probe does not change the boot verdict', async () => {
-        // #5897 draws a hard line between "the store had no rows" and "the
-        // store could not be read". A best-effort extra probe must not be able
-        // to cross it: the first `find` succeeds, so this boot is HEALTHY, and
-        // `storeUnavailable` must stay false even though the probe threw.
+        // #5897: a best-effort extra probe must not turn a healthy boot into
+        // `storeUnavailable`.
         let call = 0;
         const { engine } = makeEngine([row({ type: 'flow', name: 'platform_sweep' })]);
         const inner = engine.find;

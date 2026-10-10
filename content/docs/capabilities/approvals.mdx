@@ -9,17 +9,18 @@ Discounts, contracts, spend — anything that needs a human "yes" becomes an app
 
 ## Who approves — seven resolution styles
 
-A specific person · everyone holding a position (e.g. sales managers) · the submitter's direct manager (needs a provisioned reporting chain — see below) · a team · a department (optionally including sub-departments) · organization leadership · **a person named on the record itself** (e.g. the "regional director" field).
+A specific person · everyone holding a position (e.g. sales managers) · the submitter's direct manager (needs each user's manager set — see below) · a team · a department (optionally including sub-departments) · organization leadership · **a person named on the record itself** (e.g. the "regional director" field).
 
 <Callout type="warn">
-**Routing to the submitter's manager needs a reporting chain you provide.** Unlike a position you
-staff, a team you add people to, or a field you name on the record, this style does not get its
-data from inside the product: it resolves `sys_user.manager_id`, and no Console field, data-API
-write or auth admin endpoint sets that column. Your own provisioning fills it — a seed or other
-system-context write, or a SCIM / directory-sync path your deployment supplies. Until it is
-filled, a manager-only approval step resolves to nobody and the request waits. The exact remedy,
-and the fallback that needs no provisioning at all, are in
-[Automation → Approvals](/docs/automation/approvals).
+**Routing to the submitter's manager needs each user's manager set.** This style resolves
+`sys_user.manager_id`, which is not a profile field: editing the user does not set it. A platform
+admin sets it one user at a time from **Setup → Users → ⋯ → Set Manager**, which calls
+`POST /api/v1/auth/admin/set-user-manager`. For many users at once, provisioning fills it: the
+admin bulk-import endpoint reads a `manager_id` column, and a seed, or a SCIM / directory-sync
+path your deployment supplies, can write it too. Until it is set, a manager-only approval step
+resolves to nobody and the node's `onEmptyApprovers` policy decides what happens — by default the
+request opens and waits for an administrator. The details, and the fallback that needs no manager
+data at all, are in [Automation → Approvals](/docs/automation/approvals).
 </Callout>
 
 ## How it passes — four decision modes

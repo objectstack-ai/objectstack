@@ -300,19 +300,24 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
         expect(await listedLabel()).toBe(EXTENSION_LABEL);
     });
 
-    it('SHOULD: a tenant\'s own rename reaches the reads its forms derive from', async () => {
+    it('[triage ruling Q1 → C] a pre-seal rename of the PACKAGED object is kept at rest, not served: the package definition wins', async () => {
         // [ADR-0131 D6] The rename is the row a pre-seal Studio save stored —
-        // see `withPreSealRename` — read by a cold boot.
+        // see `withPreSealRename` — read by a cold boot. `object` is sealed
+        // against overlays of what a managed package ships, so that row is an
+        // overlay no regime recognises: boot names it
+        // (`[metadata_sealed_overlay_unserved]`) and does not load it, and the
+        // reads every writable form derives from serve the package's
+        // definition. Nothing is deleted.
         await withPreSealRename();
 
         const layered: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account?layers=true')).json();
-        // The row stored the rename — the customisation is real and readable…
+        // The row is still at rest — the diagnostic read shows it…
         expect(labelOf(layered?.overlay)).toBe(RENAMED_LABEL);
 
-        // …and neither read that a writable form derives from ever shows it.
+        // …and the two translated reads serve the package's (folded) label.
         const after: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account')).json();
-        expect(labelOf(after?.item)).toBe(RENAMED_LABEL);
-        expect(await listedLabel()).toBe(RENAMED_LABEL);
+        expect(labelOf(after?.item)).toBe(EXTENSION_LABEL);
+        expect(await listedLabel()).toBe(EXTENSION_LABEL);
     }, 180_000);
 
     it('[#8284] after the rename the three reads still AGREE — on the extension, not the catalog', async () => {
