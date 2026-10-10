@@ -106,11 +106,11 @@
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
 //     this table reaches 1.
-//   `packages/runtime/src/route-ledger.ts`: 82 rows over 21 domains. Its
+//   `packages/runtime/src/route-ledger.ts`: 84 rows over 22 domains. Its
 //     machine contract is DOMAIN-level, by live registry introspection
 //     (`domainRegistry.list()`), the per-route rows being documentation. It
 //     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all
-//     16 `DomainRoute` prefixes declared by the 15 domain files.
+//     17 `DomainRoute` prefixes declared by the 16 domain files.
 //   Nine more ledgers exist repo-wide (290 rows in total).
 //
 // ⭐ On FILE SELECTION the ledgers are simply the right answer, and that is
@@ -294,7 +294,11 @@ export interface ProbeTableReading {
 // table as a GATE_PIN on `packages/runtime/src/domains/i18n.ts`, and the
 // `anonymous-deny-i18n` row covers its key plus the `/i18n` dispatcher-domain
 // key that left the shrink-only ledger baseline.
-export const PROBE_TABLE: ProbeTableReading = { entries: 20, files: 15, keys: 20 };
+// [#22576] 20 / 15 / 20 -> 20 / 15 / 21: no probe and no file joined; the
+// `approval-action-token` row covers one more key, the `/approvals/act`
+// dispatcher-domain key, which arrived classified rather than through the
+// baseline (the baseline still holds 30 and its ceiling did not move).
+export const PROBE_TABLE: ProbeTableReading = { entries: 20, files: 15, keys: 21 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -377,7 +381,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     file: 'packages/runtime/src/route-ledger.ts',
     kinds: ['ROUTE_ENUMERATION'],
     probes: 1,
-    keys: 21,
+    keys: 22,
     // [#13953] 80 -> 82: the two operator run-lifecycle rows
     // (`POST /automation/:name/runs/:runId/cancel` and `.../restore-suspension`).
     // Both carry `domain: '/automation'`, an EXISTING key, so `reachable` moves
@@ -391,11 +395,20 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // mount (ADR-0126 §7.1). It carries `domain: '/automation'`, an EXISTING
     // key, so `reachable` moves with `population`, `blindSpot` stays 0 and
     // `keys` stays 21 (21 distinct domains before and after, re-derived).
-    population: 82,
-    reachable: 82,
+    // [#22576] 82 -> 84: the `GET` and `POST /approvals/act` rows arrived with
+    // the dispatcher's `/approvals/act` domain (the ADR-0043 action page for a
+    // kernel with no raw app). Both carry `domain: '/approvals/act'`, so both
+    // are REACHABLE — `reachable` moves with `population` and `blindSpot`
+    // stays 0 — and, unlike the rows above, they carry a NEW distinct domain:
+    // `keys` 21 -> 22, one new key, classified by `approval-action-token`
+    // rather than added to the baseline. Re-derived by the companion test; the
+    // controls moved with the rows ("route: '" and "domain: '" 82 -> 84,
+    // RouteLedgerEntry unchanged at 2).
+    population: 84,
+    reachable: 84,
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
-    controls: { "route: '": 82, "domain: '": 82, RouteLedgerEntry: 2 },
+    controls: { "route: '": 84, "domain: '": 84, RouteLedgerEntry: 2 },
     // [#22432] Re-derived on the merged ref: the note's two counts had stood at
     // 11 files / 5 classified / 16 baselined since before the `/analytics`
     // domain was classified (#21061), which named one more file and moved one
@@ -403,14 +416,18 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // 15 domain files declare a DomainRoute prefix, 6 of them are named by a
     // probe (actions, automation, packages, analytics, i18n, mcp), and the
     // baseline's dispatcher block holds 14 of the 21 domains.
+    // [#22576] `domains/approvals.ts` is a sixteenth domain file with a
+    // seventeenth plain prefix, named by no probe, and its key is the eighth
+    // classified: 22 domains, 14 still in the baseline.
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
       'registered domain needs a row, and every ledger domain must be a live prefix or a pinned legacy / ' +
       'non-dispatch branch. That two-way guard is what settles the FILE-SELECTION layer by ' +
-      'construction — all 16 DomainRoute prefixes declared across the 15 domain files that declare one are ' +
-      'ledger domains today, including the 9 files no probe names. 21 domains; 7 classified ' +
-      '(/meta, /actions, /automation, /packages, /mcp, /analytics, /i18n), 14 in the shrink-only baseline.',
+      'construction — all 17 DomainRoute prefixes declared across the 16 domain files that declare one are ' +
+      'ledger domains today, including the 10 files no probe names. 22 domains; 8 classified ' +
+      '(/meta, /actions, /automation, /packages, /mcp, /analytics, /i18n, /approvals/act), 14 in the ' +
+      'shrink-only baseline.',
   },
   {
     file: 'packages/rest/src/rest-server.ts',

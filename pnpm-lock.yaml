@@ -2197,6 +2197,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/plugin-approvals':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-approvals
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../../plugins/plugin-hono-server

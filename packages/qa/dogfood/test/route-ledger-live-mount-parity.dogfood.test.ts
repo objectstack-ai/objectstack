@@ -140,6 +140,15 @@ const UNEXERCISED_BY_THIS_BOOT: Record<string, string> = {
     'plugin-auth mounts one rawApp.all() catch-all on Hono directly, so no auth route ever passes through the IHttpServer port. Audited against better-auth\'s live auth.api table by auth-route-ledger.conformance.test.ts instead',
   '* /api/v1/apps/**':
     'the ADR-0121 declarative-endpoint carve-out is a setFallbackHandler seam, not a route — being invisible to a route table is the property that makes it incapable of shadowing one (#5040 §1-C)',
+  // [#22576] Two doors, one path. These rows ledger the DISPATCHER's
+  // `/approvals/act` domain, which is the door for a kernel with NO raw app (a
+  // hosted tenant kernel). This boot is self-hosted, so plugin-approvals serves
+  // the same path itself, from `rawApp.get()` / `rawApp.post()` on the Hono app
+  // — exactly like plugin-auth's catch-all above, never through the port.
+  'GET /api/v1/approvals/act':
+    'self-hosted, plugin-approvals mounts the ADR-0043 action page with rawApp.get() directly on Hono, so it never passes through the IHttpServer port; the dispatcher domain this row ledgers serves only a kernel with no raw app. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-approvals-act.conformance.test.ts',
+  'POST /api/v1/approvals/act':
+    'self-hosted, plugin-approvals mounts the ADR-0043 redemption with rawApp.post() directly on Hono, so it never passes through the IHttpServer port; the dispatcher domain this row ledgers serves only a kernel with no raw app. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-approvals-act.conformance.test.ts',
 };
 
 /** Segments a probe path uses for `:params` — must match no literal segment. */
