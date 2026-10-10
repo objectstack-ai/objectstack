@@ -22,8 +22,8 @@ The Data Engine acts as the "Driver" layer in the Hexagonal Architecture.
 ## TypeScript Usage
 
 ```typescript
-import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema, QueryTransportParamsSchema, QueryWithTransportSchema } from '@objectstack/spec/data';
-import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineExecuteRequest, DataEngineFilter, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions, QueryTransportParams, QueryWithTransport } from '@objectstack/spec/data';
+import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema, QueryTransportParamsSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '@objectstack/spec/data';
+import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineExecuteRequest, DataEngineFilter, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions, QueryTransportParams, QueryWithTransport, ValidationAdvisoryEvent } from '@objectstack/spec/data';
 
 // Validate data
 const result = BaseEngineOptionsSchema.parse(data);
@@ -1431,6 +1431,23 @@ Transport spellings of the QueryAST slots — folded to canonical keys at the bo
 | **minScore** | `number` | optional | [EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results. |
 | **language** | `string` | optional | [EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer. |
 | **highlight** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights. |
+
+
+---
+
+## ValidationAdvisoryEvent
+
+An advisory (warning or info) validation-rule hit on a write that still succeeded
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rule** | `string` | ✅ | The advisory validation rule's declared `name` |
+| **severity** | `Enum<'warning' \| 'info'>` | ✅ | The rule's declared severity. Never `error`: an `error` rule refuses the write instead. |
+| **field** | `string` | ✅ | The field the rule is about: its first declared field, or `_record` for an object-level rule |
+| **code** | `string` | ✅ | Machine-readable finding code, the one a refused write reports for the same rule (`rule_violation` for a predicate rule) |
+| **message** | `string` | ✅ | The rule's author-written message, in the caller's locale |
 
 
 ---

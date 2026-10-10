@@ -3503,7 +3503,7 @@ function advisoryEvent(
 export function emitValidationAdvisories(
   listener: ((event: ValidationAdvisoryEvent) => void) | undefined,
   advisories: readonly ValidationAdvisoryEvent[],
-  logger?: { warn?: (message: string, meta?: unknown) => void },
+  logger?: EvaluateRulesOptions['logger'],
   object?: string,
 ): void {
   if (typeof listener !== 'function') return;
