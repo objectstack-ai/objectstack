@@ -3231,17 +3231,15 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     },
   });
 
+  // `manager` is no longer a row here (#22558): it names a PERSON, so resolving
+  // to nobody now adds no slot at all instead of the dead `manager:undefined`
+  // literal this table used to pin — see the `manager` case just below and the
+  // #22558 describe further down.
   it.each([
     ['team', 'team_gone'],
     ['department', 'bu_gone'],
     ['position', 'nobody_holds_this'],
     ['org_membership_level', 'member'],
-    // `manager` is in GRAPH_APPROVER_TYPES like the four above, and the row was
-    // missing from this table. It is the worst of the set, not the mildest: it
-    // authors no `value`, so the dead literal it leaves is `manager:undefined`
-    // — a slot that names a person who does not exist AND reads like a bug in
-    // the platform to whoever finds it in `pending_approvers`.
-    ['manager', undefined],
   ])('%s: the dead literal is logged with its type, value and org', async (type, value) => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
@@ -3252,6 +3250,21 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     expect(hit, `no warning for ${type}`).toBeTruthy();
     expect(String(hit[0])).toContain('cannot advance until someone is added or the approver is re-pointed');
     expect(hit[1]).toMatchObject({ type, value, organizationId: 't1' });
+  });
+
+  // The warning `manager` had as a graph type survives without a slot: an
+  // unset `sys_user.manager_id` is the common cause and nothing else on the
+  // request names it. What it must no longer say is that a slot routes anywhere.
+  it('manager: resolving to nobody adds NO slot, and the warning says so', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(approverInput('manager'), CTX);
+
+    expect(req.pending_approvers).toEqual([]);
+    expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+    const hit = warnings.find(([msg]) => String(msg).includes("approver 'manager' resolved to nobody"));
+    expect(hit, 'no warning for manager').toBeTruthy();
+    expect(hit[1]).toMatchObject({ type: 'manager', value: null, organizationId: 't1' });
   });
 
   it('stays quiet when the graph DOES resolve someone', async () => {
@@ -3276,13 +3289,15 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
 
 // The empty-slate policy that NAMES people. Before it, an empty
 // `{ type: 'manager' }` rung had three endings and all three were bad: open on
-// `manager:undefined` and wait for an admin (`admin_rescue`), kill the run
-// (`fail`), or wave the record through (`auto_approve`). `fallback` adds the
+// a slate nobody can act on and wait for an admin (`admin_rescue`), kill the
+// run (`fail`), or wave the record through (`auto_approve`). `fallback` adds the
 // fourth — open on someone who can actually decide.
 //
-// The rung is not special. Every graph approver type ends at the same literal;
-// `manager` is just the one that reaches it without anybody authoring a wrong
-// value, which is why it is the proving case here.
+// The rung is not special: every approver type can resolve to nobody. `manager`
+// is just the one that gets there without anybody authoring a wrong value,
+// which is why it is the proving case here. Since #22558 it leaves an EMPTY
+// slate rather than the dead `manager:undefined` literal, so the
+// `admin_rescue` degradations below open on `[]`.
 describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named rescue)", () => {
   const svcWithWarnings = (engine: any) => {
     const warnings: any[] = [];
@@ -3375,7 +3390,8 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     }), CTX) as any;
 
     expect(req.status).toBe('pending');
-    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    // The abandoned primary slate: the empty manager rung added no slot.
+    expect(req.pending_approvers).toEqual([]);
     expect(said(warnings, 'resolved to nobody either')).toBe(true);
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
   });
@@ -3388,7 +3404,7 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     const req = await svc.openNodeRequest(managerNode({ onEmptyApprovers: 'fallback' }), CTX) as any;
 
     expect(req.status).toBe('pending');
-    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    expect(req.pending_approvers).toEqual([]);
     expect(said(warnings, 'with no fallbackApprovers')).toBe(true);
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
   });
@@ -3436,15 +3452,141 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     expect(engine._tables['sys_approval_request'] ?? []).toHaveLength(0);
   });
 
-  it("'admin_rescue' still opens on the dead literal and warns", async () => {
+  it("'admin_rescue' still opens — on the empty slate — and warns", async () => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
     const req = await svc.openNodeRequest(managerNode({
       onEmptyApprovers: 'admin_rescue', fallbackApprovers: [OWNER_BACKSTOP],
     }), CTX) as any;
-    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    expect(req.pending_approvers).toEqual([]);
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
     expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(false);
+  });
+});
+
+// #22558 — a PERSON approver (`manager`, `field`) that resolves to nobody adds
+// NO slot. Measured on 17.7.0 in a downstream app: a `{ type: 'manager' }` step
+// for a record whose owner carries no `manager_id` opened with
+// `pending_approvers: ["manager:undefined"]` on both read doors — a slot that
+// reads as real, interpolates a missing value, and can be taken by nobody (the
+// acting path admits only a user id, the caller's own email, or a held
+// `position:<p>` address). The documented contract
+// (`content/docs/automation/approvals.mdx`) is that an entry resolving to
+// nobody contributes nothing and the node's `onEmptyApprovers` policy decides
+// the empty slate.
+//
+// The directory is REAL here, not absent: the owner has a `sys_user` row whose
+// `manager_id` is null — the exact shape the report measured — beside a second
+// owner who does have one (the control).
+describe('ApprovalService — a person approver that resolves to nobody adds no slot (#22558)', () => {
+  const svcWithWarnings = (engine: any) => {
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    return { svc, warnings };
+  };
+  const said = (warnings: any[], needle: string) =>
+    warnings.some(([msg]) => String(msg).includes(needle));
+
+  const seedDirectory = (engine: any) => {
+    engine._tables['sys_user'] = [
+      { id: 'u_no_mgr', manager_id: null },
+      { id: 'u_has_mgr', manager_id: 'u_boss' },
+      { id: 'u_boss', manager_id: null },
+    ];
+  };
+
+  /** A node on a record owned by `owner`, with the given approvers / config. */
+  const node = (owner: string, approvers: any[], configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    record: { id: 'opp1', amount: 100, owner_id: owner },
+    config: {
+      approvers,
+      behavior: 'first_response' as const,
+      lockRecord: false,
+      ...configExtra,
+    },
+  });
+
+  it('a manager step for an owner with no manager_id opens on an EMPTY pending_approvers, and admin_rescue fires', async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'manager' }]), CTX) as any;
+
+    expect(req.status).toBe('pending');
+    expect(req.pending_approvers).toEqual([]);
+    // The stored row — what both read doors serve — holds no slot either.
+    const stored = String(engine._tables['sys_approval_request'][0].pending_approvers ?? '');
+    expect(stored.split(',').filter(Boolean)).toEqual([]);
+    // `onEmptyApprovers` defaults to admin_rescue, and it fired on this slate.
+    expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
+  });
+
+  it("the same step under onEmptyApprovers: 'fallback' opens on the named people", async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'manager' }], {
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'user', value: 'u_backstop' }],
+    }), CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_backstop']);
+  });
+
+  it("control: an owner WITH a manager gets that manager's slot", async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_has_mgr', [{ type: 'manager' }]), CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_boss']);
+    expect(said(warnings, "approver 'manager' resolved to nobody")).toBe(false);
+    expect(said(warnings, 'decidable only by a privileged admin')).toBe(false);
+  });
+
+  // Beside other entries an empty manager rung contributes nothing, so the
+  // others carry the request — the "second entry that cannot resolve empty"
+  // escape the docs name for an unset manager. Under `unanimous` the dead
+  // literal used to be an unapprovable slot that held the request open after
+  // every real approver had approved.
+  it('beside a concrete approver, an empty manager rung adds nothing and does not hold a unanimous request open', async () => {
+    const engine = makeFakeEngine();
+    seedDirectory(engine);
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node(
+      'u_no_mgr', [{ type: 'manager' }, { type: 'user', value: 'u9' }], { behavior: 'unanimous' },
+    ), CTX) as any;
+    expect(req.pending_approvers).toEqual(['u9']);
+
+    const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+    expect(out.finalized).toBe(true);
+    expect(out.request.status).toBe('approved');
+  });
+
+  // `field` is the other person type. On the open path the record is always
+  // present (the live re-read falls back to the trigger snapshot, then `{}`),
+  // so an empty field already contributed nothing; this pins that it still
+  // does, beside the manager change.
+  it('an empty field approver adds no slot either', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'field', value: 'reviewer' }]), CTX) as any;
+    expect(req.pending_approvers).toEqual([]);
+  });
+
+  // The kept half: a GROUP type's literal is untouched. For `position` the
+  // literal IS an acting address — a holder staffed in later decides it.
+  it('kept: an unstaffed position still opens on its position literal', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(node('u_no_mgr', [{ type: 'position', value: 'cfo' }]), CTX) as any;
+    expect(req.pending_approvers).toEqual(['position:cfo']);
   });
 });
 
