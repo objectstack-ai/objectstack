@@ -1163,7 +1163,11 @@ with `multiple: true`) into one of **three** forms, and none of them fails the
 record read that asked for it.
 
 **The file object** — the caller's `sys_file` read found the file (a committed
-row, or a tombstone something still holds). `url` is its only required member,
+row, or a tombstone something still holds). A caller refused that read gets it
+too for a file the record being read owns (its `ref_object` / `ref_id` name that
+record) whenever the download door would serve them its bytes: the same
+field-owned verdict — the object's declared `fileAccessDelegate`, or else the
+caller's read of that record — decides both. `url` is its only required member,
 derived from the id rather than stored:
 
 ```json
@@ -1185,9 +1189,14 @@ provisioned yet, or the read failed for any reason other than a refusal (an
 outage, which the engine logs as a warning).
 
 **`{ "id": "abc123", "metadataRefused": true }`** — the caller may read the record
-but is refused the `sys_file` read. The value is the id the record holds plus the
-marker, nothing else: no `url`, `name`, `size` or `mimeType`, because none was
-read, and it says nothing about whether the file exists. It is distinct from an
+but is refused the `sys_file` read, and the file is not one the record being read
+owns that the download door's verdict lets them read: an id copied in from
+another record, an attachment-only or unclaimed file (`acl: 'public_read'`
+included), an owned file whose delegate or record read refuses them, or an owned
+file whose verdict could not be asked (an outage, which the engine logs as a
+warning). The value is the id the record holds plus the
+marker, nothing else: no `url`, `name`, `size` or `mimeType`, because none is
+served to this caller, and it says nothing about whether the file exists. It is distinct from an
 empty field, which holds no file at all, and from the file object, which always
 carries `url`.
 [`FileRefusedValueSchema`](/docs/references/data/field-value#filerefusedvalue)
