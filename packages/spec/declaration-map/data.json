@@ -150,6 +150,8 @@
     "FilePersistenceConfigSchema": "data/FilePersistenceConfig",
     "FileReferenceIdValue": "data/FileReferenceIdValue",
     "FileReferenceIdValueSchema": "data/FileReferenceIdValue",
+    "FileRefusedValue": "data/FileRefusedValue",
+    "FileRefusedValueSchema": "data/FileRefusedValue",
     "FileValue": "data/FileValue",
     "FileValueSchema": "data/FileValue",
     "FilterArray": "data/FilterArray",
