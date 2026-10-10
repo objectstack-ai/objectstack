@@ -41,11 +41,15 @@ const TIER_A = ['view', 'dashboard', 'report', 'translation', 'email_template'] 
 
 type Row = Record<string, unknown>;
 
-/** Equality (NULL included), `$or`, `$null` and `$in` — the subset these reads emit. */
+/** Equality (NULL included), `$or`, `$and`, `$null`, `$in` and `$ne` — the subset these reads emit. */
 function matches(row: Row, where: Record<string, unknown> = {}): boolean {
     for (const [k, v] of Object.entries(where)) {
         if (k === '$or') {
             if (!(v as Row[]).some((clause) => matches(row, clause))) return false;
+            continue;
+        }
+        if (k === '$and') {
+            if (!(v as Row[]).every((clause) => matches(row, clause))) return false;
             continue;
         }
         // Any other combinator is refused, never read as a field name.
@@ -55,10 +59,11 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
         if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
             const ops = v as Record<string, unknown>;
             for (const op of Object.keys(ops)) {
-                if (op !== '$null' && op !== '$in') throw new Error(`matches: unsupported operator ${op}`);
+                if (op !== '$null' && op !== '$in' && op !== '$ne') throw new Error(`matches: unsupported operator ${op}`);
             }
             if ('$null' in ops && (actual === null) !== ops.$null) return false;
             if ('$in' in ops && !(ops.$in as unknown[]).includes(actual)) return false;
+            if ('$ne' in ops && actual === ops.$ne) return false;
             continue;
         }
         if (actual !== v) return false;
@@ -77,10 +82,19 @@ function harness(seed: Record<string, Row[]>, artifacts: Artifact[] = []) {
     let nextId = 0;
     const artifactOf = (type: string, name: string) =>
         artifacts.find((a) => a.type === type && a.name === name)?.body;
+    /** Every `find` the protocol made: the object, its predicate, and the columns it asked for. */
+    const finds: Array<{ object: string; where?: Row; fields?: string[] }> = [];
     const engine: any = {
-        async find(t: string, q?: { where?: Row; limit?: number }) {
+        async find(t: string, q?: { where?: Row; limit?: number; fields?: string[] }) {
+            finds.push({ object: t, where: q?.where, fields: q?.fields });
             const rows = table(t).filter((r) => matches(r, q?.where));
-            return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
+            const page = typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
+            // A projection hands back only the columns asked for, as a driver does.
+            const fields = q?.fields;
+            return fields ? page.map((r) => Object.fromEntries(fields.map((f) => [f, r[f]]))) : page;
+        },
+        async count(t: string, q?: { where?: Row }) {
+            return table(t).filter((r) => matches(r, q?.where)).length;
         },
         async findOne(t: string, q: { where: Row }) {
             assertEngineFindOnePredicate(t, q);
@@ -115,7 +129,7 @@ function harness(seed: Record<string, Row[]>, artifacts: Artifact[] = []) {
         },
     };
     const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_prod') as any;
-    return { protocol, tables };
+    return { protocol, tables, finds };
 }
 
 const metaRow = (type: string, name: string, org: string | null, body: Row, over: Row = {}): Row => ({
@@ -273,9 +287,9 @@ describe('§3 the boot report names both populations, per type, with their remed
     async function boot(seed: Record<string, Row[]>, artifacts: Artifact[] = []) {
         const warns: string[] = [];
         vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => { warns.push(a.map(String).join(' ')); });
-        const { protocol } = harness(seed, artifacts);
+        const { protocol, finds } = harness(seed, artifacts);
         const result = await protocol.loadMetaFromDb();
-        return { result, warns };
+        return { result, warns, finds };
     }
 
     it('one line per population: the legacy organization rows (the ceremony), the sealed overlays (the two remedies)', async () => {
@@ -309,6 +323,29 @@ describe('§3 the boot report names both populations, per type, with their remed
         expect(sealed[0]).toContain('linkage-free clone');
         expect(sealed[0]).toContain('delete the stored row');
         expect(sealed[0]).not.toContain('env_grid');
+    });
+
+    it('it reads no ledger row and no row body: the three ledgers are counted, sys_metadata yields the four columns the line prints', async () => {
+        const LEDGERS = ['sys_metadata_commit', 'sys_metadata_history', 'sys_metadata_audit'];
+        const { warns, finds } = await boot({
+            sys_metadata: [metaRow('view', 'org_grid', ORG, { label: 'org' })],
+            sys_metadata_commit: [{ id: 'c1', organization_id: ORG, payload: 'body' }, { id: 'c2', organization_id: null }],
+            sys_metadata_history: [{ id: 'h1', organization_id: ORG, metadata: 'body' }],
+            sys_metadata_audit: [{ id: 'a1', organization_id: '' }],
+        });
+
+        const legacy = warns.filter((w) => w.includes('[metadata_org_scoped_unserved]'));
+        expect(legacy).toHaveLength(1);
+        expect(legacy[0]).toContain('view×1 (org_grid@org_a)');
+        expect(legacy[0]).toContain('sys_metadata_commit×1, sys_metadata_history×1');
+        expect(legacy[0]).not.toContain('sys_metadata_audit×');
+
+        // No ledger row is read at all…
+        expect(finds.filter((f) => LEDGERS.includes(f.object))).toEqual([]);
+        // …and the legacy sys_metadata read projects the printed columns, never `metadata`.
+        const legacyReads = finds.filter((f) => f.object === 'sys_metadata' && JSON.stringify(f.where ?? {}).includes('$ne'));
+        expect(legacyReads).toHaveLength(1);
+        expect(legacyReads[0].fields).toEqual(['type', 'name', 'organization_id', 'state']);
     });
 
     it('silence on a store with neither population', async () => {

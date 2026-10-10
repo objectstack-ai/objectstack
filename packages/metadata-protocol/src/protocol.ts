@@ -26387,25 +26387,34 @@ export class ObjectStackProtocolImplementation implements
         /** Names printed per type before the line collapses to a count. */
         const SAMPLE_PER_TYPE = 5;
         try {
-            const legacyRows = async (object: string, where: Record<string, unknown>): Promise<any[]> => {
+            // A legacy row is one whose `organization_id` names an
+            // organization: neither NULL nor the empty string.
+            const LEGACY = { $and: [{ organization_id: { $null: false } }, { organization_id: { $ne: '' } }] };
+            // An unprovisioned ledger holds no legacy row; any other failure is
+            // this diagnostic's own, and stays here.
+            const orNoTable = async <T>(object: string, read: () => Promise<T>, empty: T): Promise<T> => {
                 try {
-                    const rows = await this.engine.find(object, {
-                        where: { ...where, organization_id: { $null: false } },
-                        context: { isSystem: true },
-                    });
-                    return ((rows ?? []) as any[]).filter((row) => {
-                        const org = (row as { organization_id?: string | null }).organization_id;
-                        return org !== null && org !== undefined && org !== '';
-                    });
+                    return await read();
                 } catch (error) {
-                    // An unprovisioned ledger holds no legacy row; any other
-                    // failure is this diagnostic's own, and stays here.
-                    if (isMissingTableError(error, object)) return [];
+                    if (isMissingTableError(error, object)) return empty;
                     throw error;
                 }
             };
 
-            const rows = await legacyRows('sys_metadata', { state: { $in: ['active', 'draft'] } });
+            // Only the columns the line prints — never a row's body. The
+            // three ledgers below are counted, never read: this runs on every
+            // boot, and the populations it names can be large.
+            const rows = (await orNoTable('sys_metadata', async () => ((await this.engine.find('sys_metadata', {
+                where: { state: { $in: ['active', 'draft'] }, ...LEGACY },
+                fields: ['type', 'name', 'organization_id', 'state'],
+                context: { isSystem: true },
+            })) ?? []) as any[], [] as any[]))
+                // A driver that cannot lower the predicate hands back a
+                // superset; the names this line prints are re-checked here.
+                .filter((row) => {
+                    const org = (row as { organization_id?: string | null }).organization_id;
+                    return org !== null && org !== undefined && org !== '';
+                });
             const counts = new Map<string, number>();
             const samples = new Map<string, string[]>();
             for (const row of rows) {
@@ -26418,7 +26427,10 @@ export class ObjectStackProtocolImplementation implements
             }
             const ledgers: string[] = [];
             for (const ledger of ['sys_metadata_commit', 'sys_metadata_history', 'sys_metadata_audit']) {
-                const n = (await legacyRows(ledger, {})).length;
+                const n = await orNoTable(ledger, () => this.engine.count(ledger, {
+                    where: LEGACY,
+                    context: { isSystem: true },
+                } as any), 0);
                 if (n > 0) ledgers.push(`${ledger}×${n}`);
             }
             if (rows.length === 0 && ledgers.length === 0) return;

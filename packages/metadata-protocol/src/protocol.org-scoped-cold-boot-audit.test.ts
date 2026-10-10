@@ -44,6 +44,11 @@ interface Row {
  */
 function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
+        if (k === '$and') {
+            if (!(v as Array<Record<string, unknown>>).every((clause) => matchesWhere(r, clause))) return false;
+            continue;
+        }
+        if (k.startsWith('$')) throw new Error(`matchesWhere: unsupported combinator ${k}`);
         if (v === undefined) continue;
         const actual = (r as any)[k];
         if (v !== null && typeof v === 'object') {
@@ -55,6 +60,7 @@ function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
             if ('$in' in ops) {
                 if (!(ops.$in as unknown[]).includes(actual)) return false;
             }
+            if ('$ne' in ops && actual === ops.$ne) return false;
             continue;
         }
         if (actual !== v) return false;
@@ -77,6 +83,10 @@ function makeEngine(
             // the exact degradation the JS re-check exists for.
             if (opts.dropPredicates) return rows;
             return rows.filter((r) => matchesWhere(r, q.where));
+        },
+        async count(table: string, q: { where: Record<string, unknown> }) {
+            const ledger = (opts.ledgers?.[table] ?? []) as any[];
+            return ledger.filter((r) => matchesWhere(r, q.where)).length;
         },
         async findOne(object: string, query?: EngineFindOneQueryInput) {
                           assertEngineFindOnePredicate(object, query); return null; },
