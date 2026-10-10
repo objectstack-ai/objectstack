@@ -682,6 +682,11 @@
       "pinned": 3
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.flow-by-name-shipped-name.test.ts",
       "verb": "findOne",
       "pinned": 1
