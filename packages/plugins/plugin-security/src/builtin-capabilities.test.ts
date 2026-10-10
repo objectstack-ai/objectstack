@@ -65,12 +65,12 @@ describe('readDeclaredCapabilityContext, beside the curated declarations', () =>
 
   it('excuses a package-declared token and never a curated one: the platform floor discards the curated declarations', async () => {
     const context = await readDeclaredCapabilityContext(engineWith([OWN, APP]), undefined);
-    expect(describeHighPrivilegeBits(setGranting(APP.name) , context)).toBeNull();
-    expect(describeHighPrivilegeBits(setGranting(curated) , context)).not.toBeNull();
+    expect(describeHighPrivilegeBits(setGranting(APP.name), context)).toBeNull();
+    expect(describeHighPrivilegeBits(setGranting(curated), context)).not.toBeNull();
     // A registry holding only the curated declarations excuses nothing, as no declaration did.
     const curatedOnly = await readDeclaredCapabilityContext(engineWith([OWN]), undefined);
-    expect(describeHighPrivilegeBits(setGranting(APP.name) , curatedOnly))
-      .toEqual(describeHighPrivilegeBits(setGranting(APP.name) , undefined));
-    expect(describeHighPrivilegeBits(setGranting(APP.name) , undefined)).not.toBeNull();
+    expect(describeHighPrivilegeBits(setGranting(APP.name), curatedOnly))
+      .toEqual(describeHighPrivilegeBits(setGranting(APP.name), undefined));
+    expect(describeHighPrivilegeBits(setGranting(APP.name), undefined)).not.toBeNull();
   });
 });
