@@ -91,6 +91,11 @@ columns: [
 | `link` | Make this the primary navigation link |
 | `summary` | Footer aggregation: `count`, `sum`, `avg`, `min`, `max`, etc. |
 
+**Inline editing is on by default**, under the permission gate: a user who may
+`update` the object edits a cell in place. A list whose records are read-only
+by nature — a log, an audit trail, a history, a report roll-up — declares
+`userActions: { editInline: false }`.
+
 ### Filtering
 
 ```typescript
