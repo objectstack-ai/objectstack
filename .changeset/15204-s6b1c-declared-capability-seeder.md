@@ -2,7 +2,7 @@
 '@objectstack/plugin-security': minor
 ---
 
-feat(plugin-security)!: a package's declared capabilities are served by the registry alone — the declared-capability seeder and its collision diagnostic are deleted
+feat(plugin-security): a package's declared capabilities are served by the registry alone — the declared-capability seeder and its collision diagnostic are deleted
 
 Clause-②: no
 
