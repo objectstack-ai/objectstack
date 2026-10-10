@@ -82,6 +82,9 @@ export type {
     // [#22450] What the reader `AutomationEngine.setI18nServiceSource` takes
     // answers — barrel-reachable through that method.
     RefusalI18nService,
+    // [#22507] What `AutomationEngine.renderFlowTextSlot` takes — the slot a
+    // builtin executor hands the engine's one translated-template pick.
+    FlowTextSlotTranslation,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot

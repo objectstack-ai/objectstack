@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS, FLOW_TERMINAL_MESSAGE_KEYS, flowRefusalMessageKey } from './i18n-resolver';
+import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS, FLOW_TERMINAL_MESSAGE_KEYS, flowRefusalMessageKey, flowScreenCopyKey } from './i18n-resolver';
 import { TEXT_SLOT_TEMPLATE_REFUSAL } from '../automation/flow-text-slot-template';
 import { FlowSchema } from '../automation/flow.zod';
 import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
@@ -1243,15 +1243,39 @@ describe('translation unknown-key strictness', () => {
       }
     });
 
-    it('still refuses a screen `description`, and says the surface carries the option labels now', () => {
-      // #22507 leaves the body text unkeyed on purpose (the family pin records
-      // it as owed): it is a server-rendered `{{ }}` template, so the guidance
-      // says why and lists what the screen face DOES carry.
-      const issue = parse({ f: { screens: { s: { description: 'x' } } } })
-        .error?.issues.find((i) => i.code === 'unrecognized_keys');
-      expect(issue).toBeDefined();
-      expect(issue?.message).toContain('renders it per run');
-      expect(issue?.message).toContain('option labels');
+    it('keys a screen\'s `description` — a translated template that keeps the `{{ }}` holes (#22507)', () => {
+      // Ruling A on #22507: the engine picks this template in the run's locale
+      // before it fills the holes, so a translation carries the holes of the
+      // body text it translates, and the address is the one the engine asks for.
+      const result = parse({ quick_add_task: { screens: { success_screen: { description: '任务“{{ subject }}”已创建。' } } } });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect((result as { data: any }).data.flows.quick_add_task.screens.success_screen.description)
+        .toBe('任务“{{ subject }}”已创建。');
+      expect(flowScreenCopyKey('quick_add_task', 'success_screen', 'description'))
+        .toBe('flows.quick_add_task.screens.success_screen.description');
+      expect(flowScreenCopyKey('quick_add_task', 'success_screen', 'title'))
+        .toBe('flows.quick_add_task.screens.success_screen.title');
+    });
+
+    it('refuses a single-brace `{token}` in a translated `description`, through the one text-slot judge', () => {
+      const result = parse({ quick_add_task: { screens: { success_screen: { description: '任务 {subject} 已创建' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues[0]!;
+      expect(issue.code).toBe('custom');
+      expect(issue.path).toEqual(['flows', 'quick_add_task', 'screens', 'success_screen', 'description']);
+      expect(issue.message.slice(0, issue.message.indexOf('. ') + 1)).toBe(TEXT_SLOT_TEMPLATE_REFUSAL);
+      expect(issue.message).toContain('{{ subject }}');
+      // The metadata-item door reads the same shape.
+      const item = TranslationItemSchema.safeParse({
+        locale: 'zh-CN',
+        flows: { quick_add_task: { screens: { success_screen: { description: '任务 {subject} 已创建' } } } },
+      });
+      expect(item.success).toBe(false);
+      expect(item.error!.issues[0]!.path).toEqual(['flows', 'quick_add_task', 'screens', 'success_screen', 'description']);
+    });
+
+    it('accepts an empty `description` — the untranslated slot `os i18n extract` writes into a skeleton', () => {
+      expect(parse({ quick_add_task: { screens: { success_screen: { description: '' } } } }).success).toBe(true);
     });
 
     it('keeps runner chrome out of the bundle', () => {
