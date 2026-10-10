@@ -6,7 +6,8 @@
  * Some auth policies (password expiry, enforced MFA) must block an
  * authenticated user from PROTECTED RESOURCES until they remediate, while
  * still letting them reach the auth endpoints (change-password, two-factor
- * enrollment, sign-out) and a few UI-bootstrap reads.
+ * enrollment, sign-out), a few UI-bootstrap reads, and the ADR-0043 approval
+ * action page, which no session authenticates at all.
  *
  * The posture is computed ONCE, in the auth `customSession` enrichment, and
  * attached to the session user as `user.authGate = { code, message }`. The
@@ -103,6 +104,24 @@ const SCOPE_SEGMENTS: readonly string[] = ['environments', 'projects'];
  * the dispatcher's probes and discovery document; `/me/apps` and
  * `/me/localization` are the current-user reads the remediation UI needs
  * (`plugin-hono-server/src/current-user-endpoints.ts`).
+ *
+ * `/approvals/act` is the ADR-0043 approval action page: `GET` renders the
+ * confirm page, `POST` redeems. It is session-less by design. The single-use
+ * token the request carries is its entire authorization, and the decision is
+ * recorded as the approver that token binds, never as the session. The
+ * self-hosted mount (`plugin-approvals`, `ACT_PATH = '/api/v1/approvals/act'`
+ * on the raw host app) has never passed through this gate. This entry gives
+ * the dispatcher's spelling of the same route the same token-only
+ * authentication and nothing more (ruling A on #22438). The same holds for
+ * `shouldDenyAnonymous` (`anonymous-deny.ts`), which reads this allow-list for
+ * its control-plane exemption when a seam passes it a path: ADR-0043 serves
+ * this page to a bearer with no session at all.
+ *
+ * ⛔ It is the exact route, matched like every entry above: no `approvals`
+ * prefix, no wildcard, and no other approvals path. `/approvals/act/x`,
+ * `/approvals/actx` and every `/approvals/requests/…` route stay gated.
+ * Admitting anything wider than the self-hosted mount's authentication
+ * loosens a security boundary, and that decision is the maintainer's.
  */
 const ALLOW_ROUTES: readonly (readonly string[])[] = [
   ['health'],
@@ -110,6 +129,7 @@ const ALLOW_ROUTES: readonly (readonly string[])[] = [
   ['discovery'],
   ['me', 'apps'],
   ['me', 'localization'],
+  ['approvals', 'act'],
 ];
 
 /** Do `segments` start with every segment of `prefix`? */
@@ -168,7 +188,8 @@ function matchesAllowlistedRoute(rawPath: string): boolean {
 }
 
 /**
- * True when `path` is exempt from the auth gate (auth + remediation + health).
+ * True when `path` is exempt from the auth gate (auth + remediation + health,
+ * and the ADR-0043 approval action page).
  *
  * ## FAIL-CLOSED on an absent or empty path (#7898)
  *

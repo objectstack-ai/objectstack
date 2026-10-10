@@ -1090,4 +1090,60 @@ export interface IApprovalService {
     /** Set only on the tolerated non-failure: a concurrent resume already had it. */
     resumeError?: string;
   }>;
+
+  /**
+   * **The ADR-0043 action page, served transport-neutrally** — the
+   * session-less page an approver reaches from the approve / reject link in an
+   * e-mail or IM message (#22438; the maintainer's ruling A, 2026-10-09,
+   * declared here as its first segment).
+   *
+   * What it serves, exactly as the plugin's self-hosted pages serve it today:
+   *  - `GET` renders. It reads the raw token from the `token` query parameter
+   *    and answers the confirm page — the request summary and a form that
+   *    `POST`s the token back — or, for a token that is invalid, expired,
+   *    consumed or no longer live, the explanatory result page. ⛔ A `GET`
+   *    never decides: mail gateways prefetch every link in a message, and a
+   *    `GET` that executes gets requests approved by robots.
+   *  - `POST` redeems. It reads the token from the `token` field of the form
+   *    body, runs ADR-0043's whole redemption chain (hash lookup, not
+   *    consumed, not expired, request still `pending`, approver still holding
+   *    the slot, consume, then decide AS that approver), and answers the
+   *    result page.
+   *  - Both answer an HTML page. A dead link is told on the page, never as an
+   *    error status: ADR-0043 answers "this link is no longer valid", not an
+   *    error code.
+   *
+   * **The token is the only credential.** This member takes no
+   * {@link ExecutionContext} and reads no session, cookie or `Authorization`
+   * header: the holder of an action link has no session by design, and the
+   * token carries the whole authorization, which ADR-0043 narrows on every
+   * axis — one request, one action, one approver, single use, a TTL. The
+   * decision is audited as the approver the token binds, never as a system
+   * actor.
+   *
+   * **Transport-neutral, deliberately**: a web-standard `Request` in, a
+   * `Response` out — no Hono context, no raw app, no `http.server` type. A
+   * hosted tenant kernel owns no socket, so it has no raw app to mount pages
+   * on; the dispatcher reaches it, and this signature is the one a dispatcher
+   * can call.
+   *
+   * **Its one caller** is the runtime `HttpDispatcher`'s `/approvals/act`
+   * domain (#22438, segment 2). That domain forwards `GET` and `POST` to the
+   * request kernel's `approvals` service and returns this member's `Response`
+   * as it is; it forwards the `POST` body unread, because the token rides in
+   * it. The plugin's self-hosted raw-app mount is not a caller: it stays as it
+   * is, and the path is never mounted twice.
+   *
+   * **Optional — and its absence is loud.** An approvals implementation with
+   * no action pages still satisfies this contract, so the caller probes for
+   * presence: an absent `approvals` slot or an absent member answers a typed
+   * 404 or 501, ⛔ never `ROUTE_NOT_FOUND`, which would tell the holder of a
+   * live link that the URL is wrong when what is missing is the service
+   * behind it.
+   *
+   * @param request - The forwarded request: on `GET` the token is in its query
+   *   string, on `POST` in its form body
+   * @returns The page to show the approver
+   */
+  handleActionPage?(request: Request): Promise<Response>;
 }
