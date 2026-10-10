@@ -55,12 +55,18 @@ export const SystemFile = ObjectSchema.create({
       label: 'Size (bytes)',
     }),
 
+    // A logical key prefix and a lifecycle discriminator — never an access
+    // grant: the download doors judge `acl`, the attachments scope and field
+    // ownership alone. `public` is retired (#22443, ruling B): it promised a
+    // public file and stored a private one. A deployment's stored `public` rows
+    // are rewritten to `user` by `backfill-sys-file-public-scope.ts`, the
+    // operator step that must run before a copy of such a row can succeed.
+    // Anonymous download is `acl: 'public_read'` and nothing else.
     scope: Field.select({
       label: 'Scope',
       options: [
         { label: 'User', value: 'user' },
         { label: 'Tenant', value: 'tenant' },
-        { label: 'Public', value: 'public' },
         { label: 'Private', value: 'private' },
         { label: 'Temp', value: 'temp' },
         // Files uploaded through the generic Attachments surface (#2727).

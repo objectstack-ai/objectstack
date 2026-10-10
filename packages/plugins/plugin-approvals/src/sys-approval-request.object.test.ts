@@ -12,7 +12,8 @@
  *
  *   • every `type:'api'` target resolves `{id}` and points at a route that the
  *     REST server actually registers (approve/reject/reassign/recall/remind/
- *     request-info/revise/resubmit) — a typo'd verb would 404 silently in the UI;
+ *     request-info/revise/resubmit/comment) — a typo'd verb would 404 silently
+ *     in the UI;
  *   • submitter levers (remind/recall/resubmit) gate on the server-computed
  *     `record.viewer.is_submitter`, so a plain non-submitter never sees them.
  *     `recall` additionally ORs in the #3424 admin override (#12716) — an
@@ -34,14 +35,15 @@ const vis = (n: string): string => {
 
 /** Verbs the REST server registers under `/api/v1/approvals/requests/:id/*`. */
 const ROUTE_VERBS = new Set([
-  'approve', 'reject', 'reassign', 'recall', 'remind', 'request-info', 'revise', 'resubmit',
+  'approve', 'reject', 'reassign', 'recall', 'remind', 'request-info', 'revise', 'resubmit', 'comment',
 ]);
 
 describe('sys_approval_request declared actions', () => {
-  it('declares the full decision + continuity set', () => {
+  it('declares the full decision + continuity set, and the thread reply', () => {
     expect(actions.map((a) => a.name).sort()).toEqual(
       [
         'approval_approve',
+        'approval_comment',
         'approval_recall',
         'approval_reassign',
         'approval_reject',
@@ -90,7 +92,7 @@ describe('sys_approval_request declared actions', () => {
     for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_recall']) {
       expect(vis(name)).toContain('record.viewer.can_override');
     }
-    for (const name of ['approval_send_back', 'approval_request_info', 'approval_remind', 'approval_resubmit']) {
+    for (const name of ['approval_send_back', 'approval_request_info', 'approval_remind', 'approval_resubmit', 'approval_comment']) {
       expect(vis(name)).not.toContain('can_override');
     }
 
@@ -188,5 +190,38 @@ describe('sys_approval_request declared actions', () => {
       expect(att, `${name}.attachments`).toMatchObject({ type: 'file', multiple: true });
       expect(att.required ?? false).toBe(false);
     }
+  });
+
+  // ── The thread reply (objectui#12045 ruling 乙) ─────────────────────
+  // The reply the console drawer used to post by hand, declared so the
+  // request page's decision panel carries it through the same param dialog as
+  // every other lever. Its admission is pinned against the REAL service in
+  // `approval-service.test.ts` ("its visible gate is the comment route's
+  // admission"); this block pins the declaration itself.
+  it('approval_comment posts a required comment and optional multi-file attachments to the comment route', () => {
+    const reply = byName('approval_comment');
+    expect(reply).toMatchObject({
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/approvals/requests/{id}/comment',
+      locations: ['record_section'],
+      refreshAfter: true,
+    });
+    expect(reply.params.map((p: any) => [p.name, p.type, p.multiple ?? false, p.required ?? false])).toEqual([
+      ['comment', 'textarea', false, true],
+      ['attachments', 'file', true, false],
+    ]);
+  });
+
+  it('approval_comment shows for a pending approver or for the submitter of a pending request, and no one else', () => {
+    // The two admissions `ApprovalService.comment` grants: a slot holder
+    // (`can_act`, pending-scoped where it is computed) or the submitter on a
+    // request still pending (`is_submitter` carries no status, so the
+    // predicate states it). No override arm — the route grants none.
+    expect(vis('approval_comment')).toBe(
+      'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true'
+        + ' || has(record.status) && record.status == "pending"'
+        + ' && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
+    );
   });
 });

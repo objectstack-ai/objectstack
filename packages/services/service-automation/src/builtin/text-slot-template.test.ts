@@ -329,8 +329,38 @@ describe('#22477 — a text-slot hole may root only at a `$` variable the engine
         const refusal = registrationRefusal(engine, 'by_user', notifyFlow('by_user', { title: 'Closed', message: 'By {{ $User.Id }}' }));
         expect(refusal).toBeDefined();
         expect(refusal).toContain("node 'notify' (notify) notify message at config.message");
-        expect(refusal).toContain("assignments: { v: '{$User.Id}' }");
+        expect(refusal).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
         // The renderer it no longer reaches: the hole resolves to nothing.
         expect(renderTextSlot('By {{ $User.Id }}', new Map([['userId', 'usr_7']]))).toBe('By ');
+    });
+
+    // #19939 pass 2: the value slots refuse `{$User.Id}`, so the remedy above
+    // computes the run user with the CEL scope's `current_user` — and it
+    // renders the user, and nothing in a run with none (as the template did).
+    it('the remedy renders the run user: an assignment of `current_user.id`, then `By {{ v }}`', async () => {
+        const flow = (source: string) => ({
+            name: 'by_user', label: 'by_user', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'who', type: 'assignment', label: 'Who', config: { assignments: { v: { dialect: 'cel', source } } } },
+                { id: 'notify', type: 'notify', label: 'Notify', config: { recipients: ['user_1'], title: 'Closed', message: 'By {{ v }}' } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'who' },
+                { id: 'e2', source: 'who', target: 'notify' },
+                { id: 'e3', source: 'notify', target: 'end' },
+            ],
+        });
+        const withUser = harness();
+        withUser.engine.registerFlow('by_user', flow('current_user.id') as never);
+        expect((await withUser.engine.execute('by_user', ctx())).success).toBe(true);
+        expect(withUser.emitted[0]!.payload).toMatchObject({ body: 'By usr_7' });
+
+        const userless = harness();
+        userless.engine.registerFlow('by_user', flow('current_user != null ? current_user.id : null') as never);
+        const noUser = { event: 'manual', object: 'account', record: ACME } as unknown as AutomationContext;
+        expect((await userless.engine.execute('by_user', noUser)).success).toBe(true);
+        expect(userless.emitted[0]!.payload).toMatchObject({ body: 'By ' });
     });
 });

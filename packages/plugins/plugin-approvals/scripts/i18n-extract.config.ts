@@ -39,16 +39,28 @@
  * `@objectstack/platform-objects` — this plugin translates only the objects it
  * owns, so it must not commit a second copy. Add `--check` to run the same
  * command as a drift gate.
+ *
+ * `pages` declares the record page this plugin ships
+ * (`sys_approval_request_detail`). The command above writes the objects
+ * sub-tree only, so the page's one bundle key — its page-level `label` — is
+ * HAND-AUTHORED in `src/translations/pages.ts`, the way
+ * `@objectstack/platform-objects` carries its own record pages' labels, and
+ * that section rides in the `translations` baseline below. Declaring the page
+ * here is what puts its label in the coverage ratchet's population, counted
+ * against that section: a page left out of this config is a label no gate
+ * looks at.
  */
 
 import { defineStack, type ObjectStackDefinition } from '@objectstack/spec';
 import { SysApprovalRequest } from '../src/sys-approval-request.object.js';
 import { SysApprovalAction } from '../src/sys-approval-action.object.js';
 import { SysApprovalDelegation } from '../src/sys-approval-delegation.object.js';
+import { SysApprovalRequestDetailPage } from '../src/sys-approval-request.page.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
+import { approvalsPageTranslations } from '../src/translations/pages.js';
 
 /**
  * The annotation is load-bearing, not decoration (#10868). `defineStack`
@@ -66,11 +78,12 @@ import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
  */
 const config: ObjectStackDefinition = defineStack({
   objects: [SysApprovalRequest, SysApprovalAction, SysApprovalDelegation] as any,
+  pages: [SysApprovalRequestDetailPage],
   translations: [
-    { en: { objects: enObjects } },
-    { 'zh-CN': { objects: zhCNObjects } },
-    { 'ja-JP': { objects: jaJPObjects } },
-    { 'es-ES': { objects: esESObjects } },
+    { en: { objects: enObjects, pages: approvalsPageTranslations.en } },
+    { 'zh-CN': { objects: zhCNObjects, pages: approvalsPageTranslations['zh-CN'] } },
+    { 'ja-JP': { objects: jaJPObjects, pages: approvalsPageTranslations['ja-JP'] } },
+    { 'es-ES': { objects: esESObjects, pages: approvalsPageTranslations['es-ES'] } },
   ],
 });
 

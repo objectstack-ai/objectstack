@@ -180,24 +180,39 @@ This README deliberately does not keep a second copy of that per-node reference.
 
 ## Expressions
 
-A flow mixes **two dialects**, and the rule is short: **every condition is CEL;
-braces are for values.**
+A flow's expressions follow its positions: **a condition is bare CEL, a value is
+a CEL value envelope, and text is a `{{ }}` template.**
 
 | Where | Dialect | Write it like |
 |:---|:---|:---|
 | Start-node `condition` | CEL — bare, no braces | `record.amount > 500` |
 | Edge `condition` | CEL — bare, no braces | `record.status == 'open'` |
 | Decision `conditions[].expression` | CEL — bare, no braces | `order_amount > 10000` |
-| Field values in `create_record` / `update_record` | Interpolation — braces required | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` |
+| Value slots — `create_record` / `update_record` `fields`, `assignment` values | CEL value envelope; a plain string is the literal text it spells | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'` |
 | Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
 
-Value bindings: `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`,
-`{TODAY()}`, `{TODAY() + 90}`.
+A value slot refuses a `{…}` template token — `registerFlow()` and
+`objectstack validate` name its CEL spelling — except the date macros
+(`'{NOW()}'`, `'{TODAY()}'`, `'{TODAY() + 90}'`), which it still reads until CEL
+can write them: CEL's `now()` / `today()` are timestamps, not the text the
+macros write. Other value-like positions — a `filter`, `recipients`, an `http`
+payload, `subflow.input` — still read the single-brace dialect (`{record.id}`).
+
+The run's user is **`current_user`** in every flow CEL expression: `id`,
+`positions`, `organizationId`, `isPlatformAdmin`, nothing more. In a run with no
+user (a schedule, a record change made by a system write) it is `null`, never a
+stand-in user. So `{$User.Id}` is refused in a value slot: write
+`{ dialect: 'cel', source: 'current_user.id' }`, or, in a flow that can run
+without a user, `current_user != null ? current_user.id : null` (with no user it
+writes `null`, which on `update_record` clears the stored value). Every other
+`{$User.<path>}` (`{$User.Email}`) never resolved and is refused too: read the
+user record by `current_user.id` with a `get_record` on `sys_user`.
 
 The two failure modes to memorize:
 
-1. **Braces missing in a field value** — `due_date: 'TODAY() + 7'` writes the
-   literal text into the field. Write `'{TODAY() + 7}'`.
+1. **A plain string in a value slot** — `due_date: 'TODAY() + 7'` or
+   `owner: 'current_user.id'` writes that text into the field. Write a date
+   macro in braces (`'{TODAY() + 7}'`), anything else as a CEL envelope.
 2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Since #4336
    conditions reject this loudly: `registerFlow()` / `objectstack validate`
    refuse the flow with a CEL error naming the reference. Before that they were

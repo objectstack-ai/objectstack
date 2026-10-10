@@ -40,7 +40,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         options: {
           user: "User",
           tenant: "Tenant",
-          public: "Public",
           private: "Private",
           temp: "Temp",
           attachments: "Attachments"

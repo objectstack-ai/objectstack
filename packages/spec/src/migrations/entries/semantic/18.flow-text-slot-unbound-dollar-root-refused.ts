@@ -16,8 +16,10 @@ export const entry: SemanticMigration = {
     + '(message) — a string, or the source of a template envelope, carrying a double-brace hole whose root is a '
     + 'dollar-named variable the flow engine does not bind, such as {{ $User.Id }}',
   replacement:
-    'a variable the run has, written as a hole. The run user is computed first, with an assignment node whose '
-    + 'value slot still reads the run-user path (assignments: { by: \'{$User.Id}\' }), then written as {{ by }}. '
+    'a variable the run has, written as a hole. The run user\'s id is computed first, with an assignment node '
+    + 'whose CEL value envelope reads current_user, the run\'s user (assignments: { by: { dialect: \'cel\', source: '
+    + '\'current_user.id\' } }), then written as {{ by }}; every other run-user path never resolved in any shipped '
+    + 'run, and an email or a name is read from the user record by current_user.id. '
     + 'A variable the flow binds itself (a declared variable, an assignment target, an outputVariable, a try_catch '
     + 'errorVariable) is named without the dollar sign and written as {{ caught.message }}. The engine\'s own '
     + 'variables stay holes: {{ $error.message }}, {{ $record.name }}, {{ $runId }}, {{ $flowName }}, '
