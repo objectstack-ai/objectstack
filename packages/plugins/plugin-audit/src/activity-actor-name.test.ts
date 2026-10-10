@@ -173,7 +173,8 @@ function makeCountingDriver() {
   /** How many `find` calls have read `object` so far. */
   const readsOf = (object: string) => findSpy.mock.calls.filter(([o]) => o === object).length;
   /** The query of every `find` that read `object`, in call order. */
-  const queriesOf = (object: string) => findSpy.mock.calls.filter(([o]) => o === object).map(([, ast]) => ast);
+  const queriesOf = (object: string): Array<{ fields?: string[] }> =>
+    findSpy.mock.calls.filter(([o]) => o === object).map(([, ast]) => ast as { fields?: string[] });
   return { driver, readsOf, queriesOf, storeFor };
 }
 
