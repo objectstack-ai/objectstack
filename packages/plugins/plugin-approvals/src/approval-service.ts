@@ -85,6 +85,7 @@ import {
   resolveReadableSnapshotFields,
   type FieldVisibilitySource,
 } from './payload-redaction.js';
+import type { RequestVisibilitySource } from './request-read-gate.js';
 
 /**
  * Node-era approval runtime (ADR-0019).
@@ -1250,6 +1251,52 @@ export interface ApprovalServiceOptions {
   messageTranslator?: () => ValidationMessageTranslator | undefined;
 }
 
+/**
+ * The stored row request `requestId` names inside `tenantOrg` (every
+ * organization when `null`), read as the system — the one read a by-id serve
+ * (`ApprovalService.loadRequest`) and a by-id visibility question (the read
+ * gate's source below) both take, so the two cannot disagree about which record
+ * an id is anchored on.
+ */
+async function findRequestRow(
+  engine: ApprovalEngine,
+  requestId: string,
+  tenantOrg: string | null,
+): Promise<any | null> {
+  const where: any = { id: requestId };
+  if (tenantOrg) where.organization_id = tenantOrg;
+  const rows = await engine.find('sys_approval_request', {
+    where, limit: 1, context: SYSTEM_CTX,
+  });
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+/**
+ * [#22559] Each service's own request visibility, as the generic data door's
+ * read gate on `sys_approval_request` asks it (`request-read-gate.ts`).
+ *
+ * In-package only, and deliberately not a member of {@link ApprovalService}:
+ * the published class type stays exactly what it was, and the one consumer —
+ * `ApprovalsServicePlugin`, binding the gate — reaches it through
+ * {@link requestVisibilitySourceOf}, which the package entry does not
+ * re-export. The answer is written by the class itself, in its constructor,
+ * so it calls the class's private rule rather than restating it.
+ */
+const REQUEST_VISIBILITY = new WeakMap<ApprovalService, RequestVisibilitySource>();
+
+/**
+ * [#22559] The visibility source the read gate consumes for `service`: the
+ * approvals door's own `visibleRequestIds`, asked for a read that arrives
+ * through another door. Every constructed service registers one.
+ */
+export function requestVisibilitySourceOf(service: ApprovalService): RequestVisibilitySource {
+  const source = REQUEST_VISIBILITY.get(service);
+  if (!source) {
+    throw new Error('[approvals] no request visibility source is registered for this ApprovalService instance');
+  }
+  return source;
+}
+
 export class ApprovalService implements IApprovalService {
   private readonly engine: ApprovalEngine;
   private readonly clock: ApprovalClock;
@@ -1292,6 +1339,39 @@ export class ApprovalService implements IApprovalService {
         .map((n) => String(n ?? '').trim())
         .filter(Boolean),
     );
+    // [#22559] This door's request visibility, asked by a read that arrives
+    // through ANOTHER door: the generic data door's read gate on
+    // `sys_approval_request`. It is `visibleRequestIds` itself — the
+    // participant set, the override actor's unrestricted view and the
+    // default-OFF record-reader tier (#8652) — so the two doors serve one rule
+    // and cannot drift apart. ⛔ No second visibility rule lives in the gate.
+    //
+    // `null` is "every request in scope": the override actor, a system context
+    // included (its own reads are this service's, so the gate never narrows
+    // them, and answering costs no read). Otherwise the ids this door would
+    // serve the caller for a read naming `target`; empty means none. `target`
+    // names the record the tier anchors on, exactly as on this door: `object` +
+    // `recordId` is a list filtered to one record (`listRequests`); `requestId`
+    // is a request loaded by id, which carries its own anchor (`loadRequest`).
+    // Absent, the read is untargeted — the participant set alone, as for the
+    // inbox.
+    REQUEST_VISIBILITY.set(this, {
+      visibleRequestIdsFor: async (context, target) => {
+        // `organizationId` is not on the envelope — see isOverrideActor().
+        const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
+        // The same first question `visibleRequestIds` asks, asked before the
+        // by-id anchor is fetched so the unrestricted answer costs no read.
+        if (this.isOverrideActor(context, tenantOrg)) return null;
+        let anchor: { object?: string | null; recordId?: string | null } = {
+          object: target?.object, recordId: target?.recordId,
+        };
+        if (!(anchor.object && anchor.recordId) && target?.requestId) {
+          const raw = await findRequestRow(this.engine, target.requestId, tenantOrg);
+          anchor = raw ? { object: raw.object_name, recordId: raw.record_id } : {};
+        }
+        return this.visibleRequestIds(context, tenantOrg, anchor);
+      },
+    });
   }
 
   /** Attach (or replace) the ADR-0105 D9 posture provider. */
@@ -6529,63 +6609,6 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * [#22559] This door's request visibility, asked by a read that arrives
-   * through ANOTHER door: the generic data door's read gate on
-   * `sys_approval_request` (`request-read-gate.ts`). It is
-   * {@link ApprovalService.visibleRequestIds} itself — the participant set,
-   * the override actor's unrestricted view and the default-OFF record-reader
-   * tier (#8652) — so the two doors serve one rule and cannot drift apart.
-   * ⛔ No second visibility rule lives in the gate.
-   *
-   * `null` means "every request in scope": the override actor, a system
-   * context included (its own reads are this service's, so the gate never
-   * narrows them, and answering costs no read). Otherwise the set of request
-   * ids this door would serve the caller for a read naming `target`; empty
-   * means none.
-   *
-   * `target` names the record the record-reader tier anchors on, exactly as on
-   * this door: `object` + `recordId` is a list filtered to one record
-   * ({@link ApprovalService.listRequests}); `requestId` is a request loaded by
-   * id, which carries its own anchor ({@link ApprovalService.loadRequest}).
-   * Absent, the read is untargeted — the participant set alone, as for the
-   * inbox.
-   */
-  async visibleRequestIdsFor(
-    context: ExecutionContext,
-    target?: { object?: string | null; recordId?: string | null; requestId?: string | null },
-  ): Promise<Set<string> | null> {
-    // `organizationId` is not on the envelope — see isOverrideActor().
-    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
-    // The same first question `visibleRequestIds` asks, asked before the
-    // by-id anchor is fetched so the unrestricted answer costs no read.
-    if (this.isOverrideActor(context, tenantOrg)) return null;
-    let anchor: { object?: string | null; recordId?: string | null } = {
-      object: target?.object, recordId: target?.recordId,
-    };
-    if (!(anchor.object && anchor.recordId) && target?.requestId) {
-      const raw = await this.findRequestRow(target.requestId, tenantOrg);
-      anchor = raw ? { object: raw.object_name, recordId: raw.record_id } : {};
-    }
-    return this.visibleRequestIds(context, tenantOrg, anchor);
-  }
-
-  /**
-   * The stored row request `requestId` names inside `tenantOrg` (every
-   * organization when `null`), read as the system — the one read a by-id serve
-   * ({@link ApprovalService.loadRequest}) and a by-id visibility question
-   * ({@link ApprovalService.visibleRequestIdsFor}) both take, so the two cannot
-   * disagree about which record an id is anchored on.
-   */
-  private async findRequestRow(requestId: string, tenantOrg: string | null): Promise<any | null> {
-    const where: any = { id: requestId };
-    if (tenantOrg) where.organization_id = tenantOrg;
-    const rows = await this.engine.find('sys_approval_request', {
-      where, limit: 1, context: SYSTEM_CTX,
-    });
-    return Array.isArray(rows) && rows[0] ? rows[0] : null;
-  }
-
-  /**
    * The request ids this caller is a PARTICIPANT of, or `null` for a caller
    * who may see everything in scope (#3590).
    *
@@ -6969,7 +6992,7 @@ export class ApprovalService implements IApprovalService {
     if (!requestId) return null;
     // `organizationId` is not on the envelope — see isOverrideActor().
     const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
-    const raw = await this.findRequestRow(requestId, tenantOrg ?? null);
+    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
     if (!raw) return null;
     const caller = await this.actingCaller(context);
     // #3590: tenant scoping alone let any authenticated user read any request

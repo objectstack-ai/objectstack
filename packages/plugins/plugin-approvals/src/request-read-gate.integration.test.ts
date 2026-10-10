@@ -51,7 +51,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions } from '@objectstack/spec/data';
-import { ApprovalService } from './approval-service.js';
+import { ApprovalService, requestVisibilitySourceOf } from './approval-service.js';
 import { ApprovalsServicePlugin, type ApprovalsPluginOptions } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
@@ -322,7 +322,8 @@ describe('the record-reader tier ON for the object', () => {
 describe('fails closed', () => {
   it('a visibility answer that fails denies the read, and says so', async () => {
     const rig = await boot();
-    vi.spyOn(rig.svc, 'visibleRequestIdsFor').mockRejectedValueOnce(new Error('probe went away'));
+    // The very source the plugin handed the gate: the service registers one object per instance.
+    vi.spyOn(requestVisibilitySourceOf(rig.svc), 'visibleRequestIdsFor').mockRejectedValueOnce(new Error('probe went away'));
     expect((await listIds(rig, ADMIN)).ids).toEqual([]);
     expect(rig.warnings.some((w) => w.includes('request read gate') && w.includes('fail closed'))).toBe(true);
   });

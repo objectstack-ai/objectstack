@@ -18,12 +18,14 @@
  *
  * ## One rule, two doors
  *
- * ⛔ Nothing here decides who may see a request. The answer is
- * `ApprovalService.visibleRequestIdsFor`, which IS the approvals door's
- * `visibleRequestIds`: the participant set (submitter, current approver, past
- * actor), the override actor's unrestricted view, and the record-reader tier,
- * which stays default OFF. This module only reads which record a query names,
- * hands that to the service, and ANDs the answer into the read.
+ * ⛔ Nothing here decides who may see a request. The answer is the approvals
+ * service's own: {@link RequestVisibilitySource}, which the plugin reaches
+ * with `requestVisibilitySourceOf(service)` (`approval-service.ts`, in-package
+ * only) and which IS the approvals door's private `visibleRequestIds`: the
+ * participant set (submitter, current approver, past actor), the override
+ * actor's unrestricted view, and the record-reader tier, which stays default
+ * OFF. This module only reads which record a query names, hands that to the
+ * service, and ANDs the answer into the read.
  *
  * ⛔ This is deliberately NOT `plugin-audit`'s parent-record read gate (the
  * activity stream's shape), which keeps a row whenever its parent record is
@@ -76,6 +78,7 @@
  * by the tier is served the row read-only on both doors.
  */
 
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { pinnedEquality } from './payload-predicate-guard.js';
 import { APPROVAL_REQUEST_OBJECT, type MiddlewareEngine } from './payload-redaction-middleware.js';
 
@@ -94,10 +97,15 @@ export interface RequestReadTarget {
   requestId?: string;
 }
 
-/** The one visibility definition the gate reads: the approvals service's. */
+/**
+ * The one visibility definition the gate reads: the approvals service's,
+ * written by `ApprovalService`'s constructor and reached through
+ * `requestVisibilitySourceOf`. `null` is "every request in scope"; a set is the
+ * ids the approvals door would serve the caller for a read naming `target`.
+ */
 export interface RequestVisibilitySource {
   visibleRequestIdsFor(
-    context: any,
+    context: ExecutionContext,
     target?: { object?: string | null; recordId?: string | null; requestId?: string | null },
   ): Promise<Set<string> | null>;
 }

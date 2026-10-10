@@ -15,6 +15,7 @@ import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
   ApprovalService,
+  requestVisibilitySourceOf,
   ESCALATION_JOB_NAME,
   ESCALATION_SCAN_INTERVAL_MS,
   type ApprovalEngine,
@@ -310,7 +311,7 @@ export class ApprovalsServicePlugin implements Plugin {
     // the manual API), and a read through the generic door needs the gate
     // whichever API wrote the row.
     if (typeof (engine as any).registerMiddleware === 'function') {
-      bindRequestReadGate(engine as any, this.service, ctx.logger);
+      bindRequestReadGate(engine as any, requestVisibilitySourceOf(this.service), ctx.logger);
     } else {
       ctx.logger.warn(
         'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request '
