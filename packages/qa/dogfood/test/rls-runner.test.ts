@@ -133,6 +133,7 @@ function fakeStack(opts: FakeOpts): VerifyStack {
     validate: undefined as never,
     flows: undefined as never,
     actions: undefined as never,
+    automation: undefined as never,
     seed: undefined as never,
     rows: undefined as never,
     metadata: undefined as never,
