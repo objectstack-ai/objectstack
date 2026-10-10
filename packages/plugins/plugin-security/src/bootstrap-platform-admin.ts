@@ -89,7 +89,7 @@ import {
   createSeedWriteRefusals,
   reportSeedWriteRefusals,
   type SeedWriteRefusals,
-} from './per-organization-catalog.js';
+} from './write-refusals.js';
 import { reportThroughSink } from './seed-refusal-sink.js';
 import {
   resolvePlatformAdminStanding,
@@ -396,7 +396,7 @@ async function tryFind(
 // write indistinguishable from "nothing to do": `seeded` never grows, the pass
 // returns normally, and the boot reports a successful seed of zero rows. Still
 // no rethrow — this pass reports, it does not decide whether the deployment
-// boots. See `reportSeedWriteRefusals` in `per-organization-catalog.ts`.
+// boots. See `reportSeedWriteRefusals` in `write-refusals.ts`.
 async function tryInsert(
   ql: any, object: string, data: any, refusals?: SeedWriteRefusals,
   // Symmetric with {@link tryFind}'s observer, and for the same reason: a

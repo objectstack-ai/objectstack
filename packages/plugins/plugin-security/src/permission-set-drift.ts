@@ -65,7 +65,7 @@ import {
 import {
   createSeedWriteRefusals,
   logSeedDurabilityFailure,
-} from './per-organization-catalog.js';
+} from './write-refusals.js';
 import { readDeclared } from './bootstrap-declared-permissions.js';
 import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
 import { buildExistingByName } from './seed-name-lookup.js';
