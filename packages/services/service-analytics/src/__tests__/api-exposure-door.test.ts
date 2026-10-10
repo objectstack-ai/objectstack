@@ -348,7 +348,7 @@ describe.each(STRATEGIES)('the analytics door honours the generic-exit declarati
 
     // ── Controls ────────────────────────────────────────────────────────
     it('CONTROL: an ordinary object and an ordinary column are served as before', async () => {
-      const groups = async (cube: string, measure: string, member: string, object = OPEN) => {
+      const groups = async (cube: string, measure: string, member: string) => {
         const result = await service.query({ cube, measures: [measure], dimensions: [member] }, context);
         return (result.rows as Array<Record<string, unknown>>)
           .map((r) => [String(r[member]), Number(r[measure])] as const)
