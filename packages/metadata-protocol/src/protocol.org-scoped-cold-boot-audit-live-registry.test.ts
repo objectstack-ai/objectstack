@@ -20,13 +20,10 @@
  * …while `loadMetaFromDb`'s filter is type-BLIND (`organization_id: null`) and
  * skips its rows exactly like a `flow`'s. Neither the gate nor the warning.
  *
- * Triage on #6992 scoped the fix to the DIAGNOSTIC half only. The refusal is
- * untouched here and stays static-registry-keyed on purpose — see
- * `protocol.org-scoped-write-refused.test.ts` and the divergence note in
- * `reportUnhydratableOrgScopedRows`' TSDoc. The asymmetry is the file's own
- * stated posture: a warning is free and should be maximal, a refusal removes a
- * capability. The last case in this file PINS the divergence, so a future
- * reader who "harmonises" the two sets gets a red test and the reason.
+ * Triage on #6992 scoped the fix to the DIAGNOSTIC half only; the refusal
+ * stayed static-registry-keyed. [ADR-0131 D6] has since widened the refusal to
+ * every organization-scoped write of every type, so the two sets agree; the
+ * last case in this file records that.
  *
  * ---------------------------------------------------------------------------
  * Boot order — measured, because it is how this widening could have been inert
@@ -336,21 +333,19 @@ describe('#6992 — the cold-boot audit scans the live registry, not just the de
 
     // ── the divergence from the refusal is deliberate, and pinned ─────────
 
-    it('does NOT extend the write refusal to the family it now reports', async () => {
-        // #6992's scope is the diagnostic half ONLY. `orgScopedWriteRefusal`
-        // keeps its "statically-declared types only" predicate: a warning is
-        // free and should be maximal, a refusal removes a capability measured
-        // over a different set. This case is the guard against a future reader
-        // "harmonising" the two — if the refusal is ever widened, that is a new
-        // ruling and this case is where it gets recorded, not deleted.
-        const refuse = (ObjectStackProtocolImplementation as any).orgScopedWriteRefusal.bind(
-            ObjectStackProtocolImplementation,
+    it('the write refusal now covers the family it reports too — recorded, not deleted (ADR-0131 D6)', async () => {
+        // #6992's scope was the diagnostic half ONLY, and this case used to pin
+        // the divergence: `orgScopedWriteRefusal` refused statically-declared
+        // types only, so a plugin-registered type's org-scoped write was
+        // accepted. ADR-0131 D6 is the new ruling that widened the refusal —
+        // every organization-scoped write is refused, for every type — so the
+        // two sets now agree, and this case records it.
+        const refuse = (type: string) => (ObjectStackProtocolImplementation as any).organizationScopedWriteRefusal(
+            `Metadata item '${type}/x'`, 'org_a',
         );
-        // Declared, not org-overridable → refused (#6190's landing, untouched).
-        expect(refuse('flow', 'x', 'org_a')).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-        // Plugin-registered → still accepted, even though the audit now reports it.
+        expect(refuse('flow')).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
         for (const type of ['webhook', 'theme', 'sharing_rule', 'connector']) {
-            expect(refuse(type, 'x', 'org_a'), `${type} write refusal changed`).toBeNull();
+            expect(refuse(type), `${type} write refusal changed`).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
         }
     });
 });

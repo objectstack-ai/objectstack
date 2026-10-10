@@ -272,8 +272,6 @@ const viewBody = (label: string) => ({
     viewKind: 'list',
 });
 
-const ORG = 'org_alpha';
-
 /** Audit rows for one operation, in write order. */
 const opRows = (h: Harness, operation: string) =>
     h.auditRows.filter((a) => a.operation === operation);
@@ -309,7 +307,7 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
 
         expect(h.auditRows).toHaveLength(0);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             item: viewBody('v1'), actor: 'admin',
         } as any);
 
@@ -317,7 +315,7 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         expect(opRows(h, 'save')[0]).toMatchObject({
             type: 'view',
             name: 'case_grid',
-            organization_id: ORG,
+            organization_id: null,
             operation: 'save',
             outcome: 'allowed',
             code: 'ok',
@@ -331,7 +329,7 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         const protocol = new ObjectStackProtocolImplementation(h.engine);
 
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             item: viewBody('staged'), mode: 'draft', actor: 'admin',
         } as any);
 
@@ -339,7 +337,7 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         expect(opRows(h, 'publish')).toHaveLength(0);
 
         const res = await protocol.publishMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG, actor: 'admin',
+            type: 'view', name: 'case_grid', actor: 'admin',
         } as any);
         expect((res as any).success).toBe(true);
 
@@ -348,7 +346,7 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         expect(opRows(h, 'publish')[0]).toMatchObject({
             type: 'view',
             name: 'case_grid',
-            organization_id: ORG,
+            organization_id: null,
             operation: 'publish',
             outcome: 'allowed',
             code: 'ok',
@@ -363,15 +361,15 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
 
         for (const label of ['v1', 'v2']) {
             await protocol.saveMetaItem({
-                type: 'view', name: 'case_grid', organizationId: ORG,
+                type: 'view', name: 'case_grid',
                 item: viewBody(label), mode: 'draft', actor: 'admin',
             } as any);
             await protocol.publishMetaItem({
-                type: 'view', name: 'case_grid', organizationId: ORG, actor: 'admin',
+                type: 'view', name: 'case_grid', actor: 'admin',
             } as any);
         }
         await protocol.rollbackMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             toVersion: 1, actor: 'admin',
         } as any);
 
@@ -390,18 +388,18 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         const protocol = new ObjectStackProtocolImplementation(h.engine);
 
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             item: viewBody('v1'), actor: 'admin',
         } as any);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             item: viewBody('v2'), actor: 'admin',
         } as any);
 
         expect(opRows(h, 'rollback')).toHaveLength(0);
 
         const res = await protocol.rollbackMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             toVersion: 1, actor: 'admin',
         } as any);
         expect((res as any).success).toBe(true);
@@ -429,13 +427,13 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         const protocol = new ObjectStackProtocolImplementation(h.engine);
 
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             item: viewBody('head'), actor: 'admin',
         } as any);
         const auditedBefore = h.auditRows.length;
 
         const caught = await rejection(() => protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             item: viewBody('should not land'),
             parentVersion: 'sha256:stale', actor: 'admin',
         } as any));
@@ -471,11 +469,11 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         const protocol = new ObjectStackProtocolImplementation(h.engine);
 
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             item: viewBody('staged'), mode: 'draft', actor: 'admin',
         } as any);
         await protocol.publishMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG, actor: 'admin',
+            type: 'view', name: 'case_grid', actor: 'admin',
         } as any);
 
         const { events } = await protocol.auditMetaItem({ type: 'view', name: 'case_grid' });
@@ -497,11 +495,11 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
             const protocol = new ObjectStackProtocolImplementation(h.engine);
 
             await protocol.saveMetaItem({
-                type: 'view', name: 'case_grid', organizationId: ORG,
+                type: 'view', name: 'case_grid',
                 item: viewBody('staged'), mode: 'draft', actor: 'admin',
             } as any);
             const res = await protocol.publishMetaItem({
-                type: 'view', name: 'case_grid', organizationId: ORG, actor: 'admin',
+                type: 'view', name: 'case_grid', actor: 'admin',
             } as any);
 
             // The publish still succeeds — best-effort, by contract.

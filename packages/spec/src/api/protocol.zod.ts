@@ -668,15 +668,6 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'the publish door.',
   ),
   item: z.unknown().describe('Metadata item definition'),
-  organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the write. Load-bearing, not advisory: '
-    + 'it selects the overlay partition (ADR-0005) the row lands in — an '
-    + 'org-scoped save writes that tenant\'s own overlay, while an org-less '
-    + 'save writes the environment-wide row every tenant reads — and it is '
-    + 'the scope stamped on the write\'s audit row. An org-scoped write of a '
-    + 'type whose registry entry declares `allowOrgOverride: false` is '
-    + 'refused (403). Absent = environment-wide.',
-  ),
   parentVersion: z.string().nullable().optional().describe(
     'ADR-0008 optimistic-concurrency pin: the version token the caller '
     + 'believes is current (on the REST door, the `If-Match` request '
@@ -907,12 +898,6 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     'Item name — lowercase snake_case segments, optionally dot-qualified '
     + '(`crm_lead`, `crm_lead.pipeline`). The promotion door enforces the '
     + 'same grammar as `saveMetaItem`.',
-  ),
-  organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the promotion. The implementation resolves '
-    + 'the draft through the org partition (ADR-0005), so a draft '
-    + 'authored org-scoped must be published under the same scope or the lookup '
-    + 'answers 404 `NO_DRAFT`. Absent = environment-wide.',
   ),
   actor: z.string().optional().describe(
     'Identity recorded on the `op=\'publish\'` history event. On the REST door '
@@ -1371,14 +1356,6 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
 export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
-  organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the reset. Load-bearing, not '
-    + 'advisory: it selects the ADR-0005 overlay partition, so it decides '
-    + 'WHICH row the reset destroys — an org-scoped delete removes that '
-    + 'tenant\'s own overlay, while an org-less delete reaches the '
-    + 'environment-wide row and would blank the item for every tenant. '
-    + 'Absent = environment-wide.',
-  ),
   parentVersion: z.string().optional().describe(
     'ADR-0008 optimistic-concurrency pin: the version token the caller '
     + 'believes is current (on the REST door, the `If-Match` request header). '
