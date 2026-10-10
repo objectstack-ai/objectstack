@@ -70,6 +70,10 @@ import {
     type ObjectSchemaMaskPosture,
 } from '@objectstack/metadata-core';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
+// [#22614] The registry's one spelling of a container's binding, through its
+// import-free leaf entry (that module's header measures why the leaf exists).
+import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
+import type { ExpandedViewItem } from '@objectstack/spec/ui';
 import { isEndpointMatchAuthority, selectServedEndpoints } from './served-endpoints.js';
 import { logError, logWarn } from './log.js';
 
@@ -2233,6 +2237,13 @@ export async function translateMetaList(
  * Moved here, unchanged, from `RestServer.translateMetaItem` (which now
  * delegates), so the runtime dispatcher's item read translates with the same
  * function instead of serving the authored labels.
+ *
+ * [#22614] A `view` document is classified ONCE, here, before any translator
+ * reads it: a view CONTAINER goes to {@link translateMetaViewContainer}, a
+ * single view to the spec's view translator. Both shapes are served under the
+ * type `view` — the registry files a `defineView` container under the object
+ * it binds and serves it on that key's by-name read — and the spec translator
+ * the table dispatches `view` to reads a single view's `name`.
  */
 export async function translateMetaDocument(
     sources: MetaListTranslationSources,
@@ -2245,6 +2256,17 @@ export async function translateMetaDocument(
     const bundle = translationBundleOf(i18n);
     const locale = sources.requestLocale(i18n);
     if (!locale) return document;
+    if (metaType === 'view') {
+        const { isAggregatedViewContainer } = await import('@objectstack/spec/ui');
+        if (isAggregatedViewContainer(document)) {
+            return translateMetaViewContainer(
+                sources,
+                document as Record<string, unknown>,
+                bundle,
+                metaTranslateOptions(i18n, locale),
+            );
+        }
+    }
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
     const packagedBase = PACKAGED_BASE_ACCESSORS.has(metaType)
         ? packagedObjectBaseOf(await sources.resolveProtocol(), metaType, (document as any)?.name)
@@ -2254,6 +2276,160 @@ export async function translateMetaDocument(
         packagedBase,
     });
 }
+
+/**
+ * [#22614] Translate a served view CONTAINER as a container — the by-name read
+ * of a `defineView` document, which the registry files under the object it
+ * binds ({@link deriveViewContainerObject}).
+ *
+ * The spec's `translateView` is the translator for ONE view, and it keys the
+ * catalog on that view's `name`. A container has no `name` of its own when a
+ * compiled artifact ships it (only the config boot's registrar stamps one), so
+ * handing the container to it threw on the artifact boot, and on the config
+ * boot it served the container as one view keyed by the object: a fabricated
+ * `label` equal to the object name, and every view inside left untranslated.
+ * ⛔ Guarding the `name` read instead would leave the container untranslated
+ * in silence.
+ *
+ * So a container is translated in two parts, each through `translateView`
+ * under its own key rule:
+ *
+ *  - **each view it expands to**, under the name the composer gives it
+ *    (`expandViewContainer`, the one producer of a view's runtime identity, the
+ *    same expansion the registrars run), with that view's packaged base looked
+ *    up by that name — exactly what the by-name read of the expanded view
+ *    (`<object>.<key>`) is translated with, so the two reads cannot disagree.
+ *    The result lands back in the slot the view came from;
+ *  - **the container's own `label` and `description`**, keyed by the object it
+ *    binds, with the packaged container as the base.
+ *
+ * A string the catalog does not carry is never invented: the translator falls
+ * back to a view's `name` for a missing label, and that fallback is not a
+ * translation ({@link projectViewTranslation}). With no bundle, nothing
+ * changes and the SAME container is returned.
+ *
+ * Known limit: a container saved at runtime on ANOTHER package's object is
+ * expanded by the metadata protocol under its own name (`<object>.<name>.<key>`),
+ * which this function does not reproduce; its views are translated under the
+ * composer's names.
+ */
+async function translateMetaViewContainer(
+    sources: MetaListTranslationSources,
+    container: Record<string, unknown>,
+    bundle: unknown,
+    options: ReturnType<typeof metaTranslateOptions>,
+): Promise<Record<string, unknown>> {
+    const object = deriveViewContainerObject(container);
+    // The registrars file nothing they cannot bind, so no read serves such a container.
+    if (object === undefined) return container;
+    const [{ translateView }, { expandViewContainer }] = await Promise.all([
+        import('@objectstack/spec/system'),
+        import('@objectstack/spec/ui'),
+    ]);
+    const protocol = await sources.resolveProtocol();
+    const translate = (view: Record<string, unknown>, baseName: unknown): Record<string, unknown> =>
+        translateView(view as any, bundle as any, {
+            ...options,
+            packagedBase: packagedObjectBaseOf(protocol, 'view', baseName),
+        }) as unknown as Record<string, unknown>;
+
+    // The container's own strings. The key the registry files it under is its
+    // `name` when it carries one (a source registrar refuses a `name` that is
+    // not the object, a save stamps the save name), else the object.
+    const ownName = typeof container.name === 'string' && container.name !== '' ? container.name : object;
+    const ownInput = { ...container, name: object, object };
+    let next = projectViewTranslation(container, ownInput, translate(ownInput, ownName));
+
+    // Each view, by the item the composer expands its slot into.
+    const items = expandViewContainer(object, container) as ExpandedViewItem[];
+    const lists = items.filter((item) => item.viewKind === 'list');
+    const forms = items.filter((item) => item.viewKind === 'form');
+    const slotTranslation = (slot: unknown, item: ExpandedViewItem | undefined): unknown => {
+        if (item === undefined || !slot || typeof slot !== 'object' || Array.isArray(slot)) return slot;
+        const input = item as unknown as Record<string, unknown>;
+        return projectViewTranslation(slot as Record<string, unknown>, input, translate(input, item.name));
+    };
+    const put = (key: string, value: unknown): void => {
+        if (value === next[key]) return;
+        if (next === container) next = { ...container };
+        next[key] = value;
+    };
+    const slotRecord = (key: string, itemFor: (slotKey: string, slot: unknown) => ExpandedViewItem | undefined): void => {
+        const record = next[key];
+        if (!record || typeof record !== 'object' || Array.isArray(record)) return;
+        let out = record as Record<string, unknown>;
+        for (const [slotKey, slot] of Object.entries(record)) {
+            const translated = slotTranslation(slot, itemFor(slotKey, slot));
+            if (translated === slot) continue;
+            if (out === record) out = { ...(record as Record<string, unknown>) };
+            out[slotKey] = translated;
+        }
+        put(key, out);
+    };
+    // The composer's order, from its docblock: each family's NAMED views first,
+    // in entry order, then the default. A `listViews` entry is the first claim
+    // on its `<object>.<key>`, so it is never renamed and is found by name. The
+    // default `list` and the default `form` are the items the composer flags
+    // `isDefault` (a `list` restating a named list collapses into that item; a
+    // named list is flagged only when there is no `list`). A `formViews` entry
+    // can be renamed by a list that took its name, so it is found by position
+    // among the named forms — entries that are not objects expand to nothing.
+    slotRecord('listViews', (slotKey) => lists.find((item) => item.name === `${object}.${slotKey}`));
+    if (next.list && typeof next.list === 'object') {
+        put('list', slotTranslation(next.list, lists.find((item) => item.isDefault)));
+    }
+    const namedForms = forms.filter((item) => !item.isDefault);
+    let formPosition = 0;
+    slotRecord('formViews', (_slotKey, slot) =>
+        slot && typeof slot === 'object' ? namedForms[formPosition++] : undefined);
+    if (next.form && typeof next.form === 'object') {
+        put('form', slotTranslation(next.form, forms.find((item) => item.isDefault)));
+    }
+    return next;
+}
+
+/**
+ * [#22614] Land what `translateView` changed on `input` onto `target` — the
+ * container itself, or the slot `input` was expanded from — copy on write,
+ * `target` itself when nothing changed.
+ *
+ * Every top-level string the translator overlays (`label`, `description`)
+ * lands on `target`, and so does every key it replaced in the view's `config`
+ * (`bulkActionDefs`): an expanded view nests its whole list or form body under
+ * `config`, and the slot IS that body. The expansion's own identity keys are
+ * never copied. A `label` that equals `input.name` where `input` had none is
+ * the translator's fallback, not a translation, and is dropped.
+ */
+function projectViewTranslation(
+    target: Record<string, unknown>,
+    input: Record<string, unknown>,
+    translated: Record<string, unknown>,
+): Record<string, unknown> {
+    let out = target;
+    const set = (key: string, value: unknown): void => {
+        if (value === out[key]) return;
+        if (out === target) out = { ...target };
+        out[key] = value;
+    };
+    for (const [key, value] of Object.entries(translated)) {
+        if (key === 'config' || VIEW_EXPANSION_IDENTITY_KEYS.has(key) || value === input[key]) continue;
+        if (key === 'label' && input.label == null && value === input.name) continue;
+        set(key, value);
+    }
+    const config = translated.config;
+    const inputConfig = input.config;
+    if (config !== inputConfig && config && typeof config === 'object' && inputConfig && typeof inputConfig === 'object') {
+        for (const [key, value] of Object.entries(config)) {
+            if (value !== (inputConfig as Record<string, unknown>)[key]) set(key, value);
+        }
+    }
+    return out;
+}
+
+/** The keys `expandViewContainer` stamps on an item — its identity, never the view's own content. */
+const VIEW_EXPANSION_IDENTITY_KEYS: ReadonlySet<string> = new Set([
+    'name', 'object', 'viewKind', 'order', 'scope', 'isDefault', '_diagnostics',
+]);
 
 /**
  * [#5563 · #10235 · #20408] The one place a single-item read rebuilds its
