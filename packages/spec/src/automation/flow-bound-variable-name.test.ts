@@ -65,7 +65,8 @@ function issuesOf(flow: unknown) {
 }
 
 describe('outputVariable — a `$` name is the engine\'s, on every contract that binds one', () => {
-  it.each(OUTPUT_VARIABLE_CONTRACTS)('$type refuses `$x` with the remedy: `x`, read as `{{ x }}`', ({ schema, base }) => {
+  // No `$x` in the title: `it.each` would read it as a property of the row.
+  it.each(OUTPUT_VARIABLE_CONTRACTS)('$type refuses a dollar-led name with the remedy: `x`, read as `{{ x }}`', ({ schema, base }) => {
     const message = refusalAt(schema, { ...base, outputVariable: '$x' }, 'outputVariable');
     expect(message).toBeDefined();
     expect(message).toContain('`$x` is a `$` name');
