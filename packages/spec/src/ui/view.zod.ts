@@ -2555,6 +2555,97 @@ export function checkListViewCalendarVisualization(
   }
 }
 
+/** The remedy both chart-binding refusals close with — the top-level block, spelled out. */
+const LIST_VIEW_CHART_BINDING_REMEDY =
+  "Declare `chart: { dataset: '<dataset_name>', values: ['<measure_name>'] }`: `dataset` names the "
+  + 'ADR-0021 dataset to plot, `values` at least one of its measures, and `dimensions` (the X / group '
+  + 'axis) is optional. There is no default binding to fall back on: the renderer plots only the names '
+  + 'the author wrote.';
+
+/** [#22491] `type: 'chart'` with no binding at all — refused at `chart`. */
+const LIST_VIEW_CHART_NEEDS_BINDING =
+  "This list view is `type: 'chart'` but declares no `chart` block, so it binds no dataset and there is "
+  + `nothing to plot. ${LIST_VIEW_CHART_BINDING_REMEDY} A view that is not meant to be a chart takes another \`type\`.`;
+
+/**
+ * [#22491] `type: 'chart'` whose only binding is the legacy `options.chart`
+ * bag, missing a key the `chart` block requires — refused at that key.
+ */
+const listViewChartBagMissing = (key: (typeof LIST_CHART_BINDING_KEYS)[number]): string =>
+  "This list view is `type: 'chart'` and its only chart binding is the legacy `options.chart` bag, "
+  + `which names no ${key === 'dataset' ? '`dataset`' : 'measure in `values`'}, so there is nothing to plot. `
+  + 'With no top-level `chart` block the bag IS the binding, so it must carry what that block requires. '
+  + `${LIST_VIEW_CHART_BINDING_REMEDY} The top-level block replaces the bag whole; prefer it to completing the bag.`;
+
+/**
+ * [#22491] The keys that make a chart block a binding: the required keys of
+ * {@link ListChartConfigSchema} (`chartType` defaults, `dimensions` is
+ * optional). Hand-listed for the messages above; `view-chart-binding.test.ts`
+ * derives the block's required keys from the schema and fails if the two part.
+ */
+const LIST_CHART_BINDING_KEYS = ['dataset', 'values'] as const;
+
+/**
+ * [#22491] A `type: 'chart'` list view must bind a dataset — the view's
+ * EFFECTIVE chart binding names a `dataset` and at least one measure.
+ *
+ * The effective binding is read the way the renderer reads it: the top-level
+ * `chart` block, else the legacy `options.chart` bag, and the block replaces
+ * the bag WHOLE — objectui `plugin-list/src/ListView.tsx`
+ * `resolveListChartBinding`, `schema.chart || schema.options?.chart || {}`
+ * (`:207` at this repo's `.objectui-sha` pin `f0268ad7`, `:260` at objectui
+ * `2a48bd40`). So, unlike the merged per-key underlays
+ * {@link listViewKindBlocks} describes, the bag is not one layer of the chart
+ * block: when no block is declared it is the whole of it, and it owes what
+ * the block requires.
+ *
+ * - No block and no bag ⇒ one issue at `chart`.
+ * - No block, a bag missing `dataset` / `values` ⇒ one issue per missing key,
+ *   at `options.chart.KEY` (the bag lives on the flattened overlay only; the
+ *   two authoring doors refuse `options` by name).
+ * - A declared `chart` block ⇒ nothing here: its own strict schema already
+ *   requires both keys, at `chart.dataset` / `chart.values`.
+ *
+ * What such a view renders is a dead screen either way: at the pin the
+ * renderer fabricates a binding nobody wrote (an aggregate over `'name'` /
+ * `'value'`); from objectui#6152 round 15 (objectui `0253416`) that floor is
+ * retired and `ObjectChart` refuses on screen (`chart-missing-category-axis`).
+ * ⛔ Never fabricate a default here either — only the author knows the dataset.
+ *
+ * Reads `type` as the door hands it: the authoring shapes apply the `grid`
+ * default first; the overlay member reads the input side (no default), so a
+ * PATCH that names no `type` is not judged — it shadows a view whose own
+ * binding decides.
+ *
+ * ⚠️ Scope: `type: 'chart'` only. A view of another type that merely OFFERS a
+ * chart (`appearance.allowedVisualizations`) is not judged: objectui's
+ * `availableViews` gate asks the same resolver and never offers an unbound
+ * chart, so that view degrades to its own type rather than rendering dead.
+ *
+ * Attached at the same three list-view doors as
+ * {@link checkListViewCalendarVisualization}, and exported for the same
+ * reason: a mirror built from `ListViewSchema.shape` re-attaches it.
+ */
+export function checkListViewChartBinding(
+  view: { type?: unknown; chart?: unknown; options?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (view.type !== 'chart' || view.chart !== undefined) return;
+  const bag = view.options !== null && typeof view.options === 'object'
+    ? (view.options as { chart?: unknown }).chart
+    : undefined;
+  if (bag === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['chart'], message: LIST_VIEW_CHART_NEEDS_BINDING });
+    return;
+  }
+  // A bag that is not an object is refused by the bag's own schema.
+  if (bag === null || typeof bag !== 'object') return;
+  for (const key of LIST_CHART_BINDING_KEYS) {
+    if ((bag as Record<string, unknown>)[key] !== undefined) continue;
+    ctx.addIssue({ code: 'custom', path: ['options', 'chart', key], message: listViewChartBagMissing(key) });
+  }
+}
+
 /**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
@@ -2590,8 +2681,9 @@ export function checkListViewCalendarVisualization(
  * containing refinements"`, thrown at construction), and
  * {@link ObjectListViewSchema} is built by omitting `userFilters` from this
  * shape. So the shape stays refinement-free and BOTH terminals attach
- * {@link checkListViewCalendarVisualization} themselves — one check function,
- * two attachment points, no second copy of the rule.
+ * {@link checkListViewCalendarVisualization} and {@link checkListViewChartBinding}
+ * themselves — one function per check, attached at each door, no second copy
+ * of either rule.
  *
  * ⛔ Not exported, deliberately: a top-level EXPORTED schema binding mints a
  * new protocol def in `json-schema.manifest/` and a full set of ratcheted
@@ -2754,7 +2846,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   gantt: GanttConfigSchema.optional().describe('Gantt-timeline configuration — applies when the view renders as a gantt layout'),
   gallery: GalleryConfigSchema.optional(),
   timeline: TimelineConfigSchema.optional(),
-  chart: ListChartConfigSchema.optional(),
+  chart: ListChartConfigSchema.optional()
+    .describe('Chart binding — applies when the view renders as a chart. A `type: \'chart\'` view must bind one: it names the ADR-0021 `dataset` and the measures (`values`) the chart plots, and there is no default binding'),
   map: ListMapConfigSchema.optional().describe('Map configuration — applies when the view renders as a map layout'),
   tree: TreeConfigSchema.optional().describe('Tree/hierarchy configuration — applies when the view renders as a tree layout'),
 
@@ -2990,16 +3083,17 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * List View Schema (Expanded) — {@link ListViewShapeSchema} plus the
- * `allowedVisualizations` ⇄ `calendar` binding check. See that shape for why
- * shape and checks are separate bindings, and
- * {@link checkListViewCalendarVisualization} for what the check refuses.
- * (#17063 removed the `type: 'page'` ⇄ `pageName` binding check with the mount
- * it policed.)
+ * List View Schema (Expanded) — {@link ListViewShapeSchema} plus two binding
+ * checks: `allowedVisualizations` ⇄ `calendar`
+ * ({@link checkListViewCalendarVisualization}) and `type: 'chart'` ⇄ a dataset
+ * binding ({@link checkListViewChartBinding}). See that shape for why shape and
+ * checks are separate bindings. (#17063 removed the `type: 'page'` ⇄
+ * `pageName` binding check with the mount it policed.)
  */
 export const ListViewSchema = lazySchema(() =>
   ListViewShapeSchema
-    .superRefine(checkListViewCalendarVisualization));
+    .superRefine(checkListViewCalendarVisualization)
+    .superRefine(checkListViewChartBinding));
 
 /**
  * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
@@ -4745,11 +4839,12 @@ export const ObjectListViewSchema = lazySchema(() =>
   ListViewShapeSchema.omit({ userFilters: true })
     .extend({ userFilters: ObjectUserFiltersSchema.optional() })
     // Derived from the UNREFINED shape (zod 4 refuses `.omit()` on a refined
-    // object), so the binding check is re-attached here rather than inherited.
-    // Dropping this line would leave `objects[].listViews.*` — the ADR-0047
+    // object), so the binding checks are re-attached here rather than inherited.
+    // Dropping either line would leave `objects[].listViews.*` — the ADR-0047
     // authoring surface — as the one door where a calendar-enabled view with
-    // no `calendar:` block parses clean.
-    .superRefine(checkListViewCalendarVisualization));
+    // no `calendar:` block, or a chart view binding no dataset, parses clean.
+    .superRefine(checkListViewCalendarVisualization)
+    .superRefine(checkListViewChartBinding));
 
 /**
  * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
@@ -6227,8 +6322,10 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
  * `'form'` only), and it judges a column-less PATCH as well as a full inline
  * config — see {@link listOverlayPatchFields}. A column-less body that names a
  * `type` is a full config missing its columns and is refused at `columns`
- * ({@link checkListOverlayTypeNeedsColumns}). The three attached checks run in
+ * ({@link checkListOverlayTypeNeedsColumns}). The attached checks run in
  * order: that refusal reads the input side, the calendar check is unchanged,
+ * the chart-binding check ({@link checkListViewChartBinding}, #22491) reads the
+ * input side too and is the one door check that sees the `options.chart` bag,
  * and {@link applyListOverlayTypeDefault} restores the `grid` default last.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
@@ -6250,6 +6347,7 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   }).strip()
     .superRefine(checkListOverlayTypeNeedsColumns)
     .superRefine(checkListViewCalendarVisualization)
+    .superRefine(checkListViewChartBinding)
     .overwrite(applyListOverlayTypeDefault),
 );
 
