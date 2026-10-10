@@ -482,36 +482,40 @@ jobs:
     # was killed at the 30-minute wall; held at 45 until #22075 cut the CLI
     # into 3 slices (5919483472).
     #
-    # ⚠ RE-SIZED 45 -> 40 (#22075), from the measured post-change job walls.
-    # Window: every completed, non-cancelled CI run whose tested tree carries
-    # 5919483472, runs 37917885267 to 37956350887 (2026-10-09 10:29Z-16:03Z):
-    # 5 schedule, 6 push, 30 merge_group and 25 pull_request runs, 396
-    # `Test Core (N/6)` jobs; 24 cancelled runs excluded. Slowest job wall per
-    # event, in minutes: schedule 21.0, push 20.9, merge_group 24.1,
-    # pull_request 27.1; p90 of all 396 is 22.0. The slowest is 27m05s, run
-    # 37923333449 `Test Core (3/6)` (70 packages executed, the CLI as all 3
-    # slices). Two measured rules set the value, and the larger answer wins:
-    #   * wall margin, the 80% of the revert condition below: 27.1 is within
-    #     80% of 35 (28.0) and of 40 (32.0);
-    #   * the stall guard speaks first: on that same job "Run this shard's
-    #     tests" ended 26m38s after the job started, so the guard's window
-    #     verdict (+10m) lands at 36m38s -- after a 35 wall, 3m22s inside 40
-    #     (`node scripts/measure-stall-guard-headroom.mjs`). Its cap-deferred
-    #     verdict (+20m) already missed 45 on that job by 1m38s; no value this
-    #     re-size could pick restores it.
-    # So 40, not 35.
+    # ⚠ RE-SIZED 45 -> 50 (#22075), derived so that BOTH stall-guard verdicts
+    # land before this wall on every observed run. Window: every completed,
+    # non-cancelled CI run whose tested tree carries 5919483472, runs
+    # 37917885267 to 37956350887 (2026-10-09 10:29Z-16:03Z): 5 schedule,
+    # 6 push, 30 merge_group and 25 pull_request runs, 396 `Test Core (N/6)`
+    # jobs; 24 cancelled runs excluded. Slowest job wall per event, in
+    # minutes: schedule 21.0, push 20.9, merge_group 24.1, pull_request 27.1;
+    # p90 of all 396 is 22.0. Measured with
+    # `node scripts/measure-stall-guard-headroom.mjs` over those jobs, the
+    # worst p + s (job start to the end of "Run this shard's tests") is
+    # 26m38s, on run 37923333449 `Test Core (3/6)`. Three readings set the
+    # value, and the largest answer wins:
+    #   * the window verdict, a silent freeze killed 10m after the last
+    #     output: p + s + 10m = 36m38s;
+    #   * the cap-deferred verdict, when the liveness probe sees the suite
+    #     still writing: p + s + 20m = 46m38s, inside 50 by 3m22s. It missed
+    #     45 on 8 of the 396 jobs and would miss 40 on 60;
+    #   * the 80% wall margin: the slowest job wall, 27m05s on that same job
+    #     (70 packages executed, the CLI as all 3 slices), is within 80% of
+    #     50 (40.0).
     #
-    # ⛔ REVERT CONDITION, restated against measured wall time, not a card:
-    # back to `30` only when the slowest shard's JOB wall time stays at or
-    # under 24 minutes (80% of 30, so the margin the old wall lacked is
-    # there) on every scheduled run for a week. It does not today: 17 of the
-    # 396 jobs above read over 24 minutes (15 pull_request, 2 merge_group).
-    # Read every `Test Core (N/6)` job's started and completed times, and
-    # re-take the stall guard's headroom, before touching this value. It
-    # carries no other expiry — a raise with no revert condition beside it
-    # becomes permanent by forgetting — and the stall guard stays the primary
-    # hang detector.
-    timeout-minutes: 40
+    # ⛔ REVERT CONDITION, restated against measurement, not a card: a value
+    # below 50 is allowed only when, on a re-measured window of Test Core
+    # runs (`node scripts/measure-stall-guard-headroom.mjs` over the jobs
+    # payloads of every completed pull_request, merge_group, push and
+    # schedule run in it), BOTH guard verdicts -- the window path
+    # (p + s + 10m) and the cap-deferred path (p + s + 20m) -- land before the
+    # new value on every observation, AND the slowest `Test Core (N/6)` job
+    # wall is at or under 80% of it. Read the pull_request and merge_group
+    # runs, not the hourly schedule alone: scheduled runs mostly replay the
+    # cache their commit's push run saved. It carries no other expiry — a
+    # raise with no revert condition beside it becomes permanent by
+    # forgetting — and the stall guard stays the primary hang detector.
+    timeout-minutes: 50
     permissions:
       contents: read
     strategy:
