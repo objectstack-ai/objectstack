@@ -3,8 +3,9 @@
 /**
  * [ADR-0066 ⑨] Authoring-time validation for capability references.
  *
- * `requiredPermissions` (on objects, fields, apps, and actions) and
- * `systemPermissions` (on permission sets) are free capability strings. A typo
+ * `requiredPermissions` (on objects, fields, apps, actions, list views and
+ * dashboards) and `systemPermissions` (on permission sets) are free capability
+ * strings. A typo
  * — `mange_users` for `manage_users` — is Zod-valid and fails CLOSED at runtime
  * (the caller is denied), which is the safe direction but UNDISCOVERABLE: nothing
  * tells the author the referenced capability exists nowhere. This rule closes
@@ -122,6 +123,21 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
     });
   };
 
+  // [#22639] A list view's `requiredPermissions` is an AUDIENCE gate: the
+  // `/meta` read gate serves a gated list view only to a caller who holds every
+  // capability it names, so a misspelled one hides the view from everyone,
+  // silently. Each named entry of a `listViews` map is resolved like any other
+  // reference.
+  const flagListViews = (listViews: unknown, owner: string, path: string) => {
+    if (!listViews || typeof listViews !== 'object' || Array.isArray(listViews)) return;
+    for (const [key, view] of Object.entries(listViews as AnyRec)) {
+      if (!view || typeof view !== 'object') continue;
+      for (const cap of asCapArray((view as AnyRec).requiredPermissions)) {
+        flag(cap, `list view "${owner}.${key}"`, `${path}.${key}.requiredPermissions`);
+      }
+    }
+  };
+
   // ── Objects (D3) + their fields (D3) + embedded actions (D4) ──
   const objects = recordsOf(stack.objects);
   for (let i = 0; i < objects.length; i++) {
@@ -148,6 +164,10 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
         flag(cap, `action "${objName}.${aName}"`, `${objPath}.actions[${ai}].requiredPermissions`);
       }
     }
+
+    // [#22639] An object's own list views — the audience gate the `/meta`
+    // read gate applies to them inside the object definition.
+    flagListViews(obj.listViews, objName, `${objPath}.listViews`);
   }
 
   // ── Top-level actions (D4) ──
@@ -188,6 +208,44 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
       if (rec.items) walk(rec.items, `${path}.items`);
     };
     walk(app, `apps[${i}]`);
+  }
+
+  // ── [#22639] Views: a container's default `list` and each `listViews` entry,
+  //    or ONE view — a view item (its list body under `config`) or a
+  //    flattened list view (the key at the top level). Every position the key
+  //    is declared at is resolved; a view carries the one its shape declares. ──
+  const views = recordsOf(stack.views);
+  for (let i = 0; i < views.length; i++) {
+    const view = views[i];
+    if (!view || typeof view !== 'object') continue;
+    const viewPath = `views[${i}]`;
+    const viewName = typeof view.name === 'string' ? view.name
+      : typeof view.object === 'string' ? view.object
+        : `(view ${i})`;
+    for (const cap of asCapArray(view.requiredPermissions)) {
+      flag(cap, `view "${viewName}"`, `${viewPath}.requiredPermissions`);
+    }
+    const config = view.config;
+    if (config && typeof config === 'object' && !Array.isArray(config)) {
+      for (const cap of asCapArray((config as AnyRec).requiredPermissions)) {
+        flag(cap, `view "${viewName}"`, `${viewPath}.config.requiredPermissions`);
+      }
+    }
+    const list = view.list;
+    if (list && typeof list === 'object' && !Array.isArray(list)) {
+      for (const cap of asCapArray((list as AnyRec).requiredPermissions)) {
+        flag(cap, `list view "${viewName}"`, `${viewPath}.list.requiredPermissions`);
+      }
+    }
+    flagListViews(view.listViews, viewName, `${viewPath}.listViews`);
+  }
+
+  // ── [#22639] Dashboards: the audience gate on the whole board. ──
+  for (const [i, board] of recordsOf(stack.dashboards).entries()) {
+    const bName = typeof board.name === 'string' ? board.name : `(dashboard ${i})`;
+    for (const cap of asCapArray(board.requiredPermissions)) {
+      flag(cap, `dashboard "${bName}"`, `dashboards[${i}].requiredPermissions`);
+    }
   }
 
   return findings;

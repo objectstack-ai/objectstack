@@ -481,8 +481,8 @@ function metaItemReadGateSources(
  *  - `absent` → the SAME `deps.error('Not found', 404)` this handler answers
  *    for a name with nothing behind it, so an unpublished app stays externally
  *    unobservable (ADR-0045 §3);
- *  - `app-permission` / `docs-audience` → `403 PERMISSION_DENIED` /
- *    `401 UNAUTHENTICATED` with the gate's message.
+ *  - `app-permission` / `audience-permission` / `docs-audience` →
+ *    `403 PERMISSION_DENIED` / `401 UNAUTHENTICATED` with the gate's message.
  *
  * A gate input that could not be read (the books or doc list read threw) is
  * answered as that fault — its own status, `500` for a shapeless one — ⛔ never
@@ -1954,8 +1954,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // the legacy spelling is not a way around the projection.
             const obj = qlService.registry.getObject(typeOrName);
             if (obj) {
+                // [#22639] The per-caller read gate first, as on every other
+                // object exit: an object's own `listViews` the caller does not
+                // hold are not served (`createMetaItemReadGate`'s `object` arm).
+                const gated = await gateMetaItemDocument(
+                    deps, _context, await resolveProtocol(deps, _context), 'object', typeOrName, obj,
+                );
+                if (!gated.ok) return { handled: true, response: gated.response };
                 const masked = await maskObjectSchema(
-                    await resolveObjectMasker(deps, _context, 'object'), typeOrName, obj,
+                    await resolveObjectMasker(deps, _context, 'object'), typeOrName, gated.document,
                 );
                 if (!masked.ok) return fieldVisibilityFault(deps, typeOrName);
                 // [#20408] ADR-0106 D6 tier 2's `private, no-store`, as every
