@@ -594,7 +594,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       currencyConfig: {
         label: "货币配置",
-        helpText: "此字段使用哪种货币。未设置时为 dynamic 模式。两种模式下存储的值都是一个纯数字。"
+        helpText: "此字段使用哪种货币——货币字段，或返回类型为“货币”的公式字段。未设置时为 dynamic 模式。两种模式下值都是一个纯数字。"
       },
       "currencyConfig.currencyMode": {
         label: "货币模式",
@@ -744,7 +744,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       returnType: {
         label: "公式返回类型",
-        helpText: "公式声明的值类型，按推断出的 CEL 类型写入。消费方直接读它，无需重新解析表达式。"
+        helpText: "公式声明的值类型，按推断出的 CEL 类型写入。消费方直接读它，无需重新解析表达式。货币：一笔金额，其货币由此字段的货币配置声明（未设置时为 dynamic）。"
       },
       summaryOperations: {
         label: "汇总操作",

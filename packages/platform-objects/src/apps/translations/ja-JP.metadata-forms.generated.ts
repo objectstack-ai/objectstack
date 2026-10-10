@@ -594,7 +594,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       currencyConfig: {
         label: "通貨設定",
-        helpText: "このフィールドの通貨。未設定の場合は dynamic モードです。どちらのモードでも、保存される値は単なる数値です。"
+        helpText: "このフィールドの通貨（通貨フィールド、または戻り値型が「通貨」の数式フィールド）。未設定の場合は dynamic モードです。どちらのモードでも、値は単なる数値です。"
       },
       "currencyConfig.currencyMode": {
         label: "通貨モード",
@@ -744,7 +744,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       returnType: {
         label: "数式の戻り値型",
-        helpText: "数式が宣言する値の型。推論された CEL の型から記録され、利用側は式を解析し直さずにこの値を読みます。"
+        helpText: "数式が宣言する値の型。推論された CEL の型から記録され、利用側は式を解析し直さずにこの値を読みます。通貨：金額で、その通貨はこのフィールドの通貨設定が宣言します（未設定の場合は dynamic）。"
       },
       summaryOperations: {
         label: "集計操作",
