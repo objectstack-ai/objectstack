@@ -100,7 +100,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -1784,14 +1784,42 @@ export class SecurityPlugin implements Plugin {
     // id — the provenance the manifest stamps on `permissions`. Here, on the
     // engine handle `start()` already holds, before `kernel:ready` runs the
     // seeders and before any request reaches the metadata door. Rows keep
-    // seeding from the same list (`bootstrapBuiltinRoles`); nothing here writes
-    // a row or moves a grant.
-    if (registerBuiltinPositions((ql as { registry?: unknown }).registry, SECURITY_PLUGIN_ID) === 0) {
+    // seeding from the same list (`bootstrapBuiltinRoles`).
+    //
+    // [ADR-0090 D5, ADR-0131 D3/D4] `everyone` declares the deployment's
+    // baseline in its `permissionSets` — the binding the authorization resolver
+    // reads. A platform set carrying high-privilege bits is never declared
+    // there, with the same check and the same report the boot-time binding
+    // made before.
+    const everyoneSets = this.baselinePermissionSets.filter((name) => {
+      const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
+      const offending = boot ? describeHighPrivilegeBits(boot) : null;
+      if (offending) {
+        ctx.logger.warn('[security] refusing to bind fallback set to everyone — high-privilege bits', { set: name, offending });
+      }
+      return !offending;
+    });
+    if (registerBuiltinPositions((ql as { registry?: unknown }).registry, SECURITY_PLUGIN_ID, everyoneSets) === 0) {
       ctx.logger.warn(
         '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
           + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
-          + 'them. Their sys_position rows still seed and no grant changes, but the security catalog read and '
-          + 'GET /api/v1/meta/position will not list them.',
+          + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
+          + '`everyone` baseline sets are granted through no position.',
+      );
+    }
+
+    // [ADR-0131 D3/D4] Bind the security catalog read to this engine: every
+    // authorization resolution over it (`resolveUserAuthzGrants`, core) reads
+    // positions, the sets they name and the set bodies through this reader.
+    // An engine with no reader bound resolves an empty catalog — no position
+    // distributes a set and no set grants — so a failure here is said at once.
+    try {
+      bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: (ql as any).registry, metadata: metadata as any }));
+    } catch (e) {
+      ctx.logger.warn(
+        '[security] the security catalog read was NOT bound to the ObjectQL engine: '
+          + `${(e as Error).message} Every permission set and every position-bound set resolves to nothing `
+          + 'until the engine exposes its registry and the metadata service is registered.',
       );
     }
 
