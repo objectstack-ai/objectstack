@@ -355,12 +355,12 @@ describe('#22477 — a text-slot hole may root only at a `$` variable the engine
         const withUser = harness();
         withUser.engine.registerFlow('by_user', flow('current_user.id') as never);
         expect((await withUser.engine.execute('by_user', ctx())).success).toBe(true);
-        expect(withUser.emitted[0]!.payload).toMatchObject({ message: 'By usr_7' });
+        expect(withUser.emitted[0]!.payload).toMatchObject({ body: 'By usr_7' });
 
         const userless = harness();
         userless.engine.registerFlow('by_user', flow('current_user != null ? current_user.id : null') as never);
         const noUser = { event: 'manual', object: 'account', record: ACME } as unknown as AutomationContext;
         expect((await userless.engine.execute('by_user', noUser)).success).toBe(true);
-        expect(userless.emitted[0]!.payload).toMatchObject({ message: 'By ' });
+        expect(userless.emitted[0]!.payload).toMatchObject({ body: 'By ' });
     });
 });

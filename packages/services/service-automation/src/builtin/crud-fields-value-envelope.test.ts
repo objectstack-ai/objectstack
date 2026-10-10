@@ -274,10 +274,12 @@ describe.each(NODE_TYPES)('%s `fields.*` — the retired `{…}` template dialec
     expect(writes0(withUser.writes).subject).toBe(before.subject);
     expect(before.subject).toBe('u1');
 
+    // A user-less run writes data only under an explicit `runAs: 'system'` (ADR-0049).
     const userless = await makeStack();
-    userless.automation.registerFlow('price_quote', writeFlow(nodeType, {
-      subject: { dialect: 'cel', source: 'current_user != null ? current_user.id : null' },
-    }));
+    userless.automation.registerFlow('price_quote', {
+      ...writeFlow(nodeType, { subject: { dialect: 'cel', source: 'current_user != null ? current_user.id : null' } }),
+      runAs: 'system',
+    });
     const res2 = await userless.automation.execute('price_quote', { params: PARAMS } as any);
     expect(res2.success, res2.error).toBe(true);
     expect(interpolate({ subject: '{$User.Id}' }, new Map(), {} as any).subject).toBeUndefined();

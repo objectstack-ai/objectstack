@@ -34,7 +34,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { valueSlotTemplateRefusals } from '@objectstack/spec/automation';
+import { VALUE_SLOT_TEMPLATE_REFUSAL, valueSlotTemplateRefusals } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { interpolateString } from './template.js';
 
@@ -67,8 +67,9 @@ describe('the run user — `{$User.*}` — is REFUSED, and its remedy reads what
   /** A run context the way the trigger doors build one: no `user` object, ever. */
   const SHIPPED = { userId: 'usr_1', positions: ['org_member'], tenantId: 'org_1' } as never;
   const USERLESS = {} as never;
+  /** The CEL sources the refusal of `token` prints, in order — read after the rule sentence, whose own `'…'` is not a remedy. */
   const sources = (token: string): string[] => {
-    const message = valueSlotTemplateRefusals(token)[0]?.message ?? '';
+    const message = (valueSlotTemplateRefusals(token)[0]?.message ?? '').slice(VALUE_SLOT_TEMPLATE_REFUSAL.length);
     return [...message.matchAll(/\{ dialect: 'cel', source: '([^']*)' \}/g)].map((m) => m[1]!);
   };
 
