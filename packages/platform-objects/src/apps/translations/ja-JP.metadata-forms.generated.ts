@@ -2365,6 +2365,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       description: {
         label: "説明"
       },
+      permissionSets: {
+        label: "Permission Sets",
+        helpText: "Permission sets this position distributes, by name (snake_case)."
+      },
       delegatable: {
         label: "セルフ委任を許可",
         helpText: "保有者が自分でこのポジションを委任できるようにします。期間を区切り、理由の記入が必要です（ADR-0091 D3）。既定は false で、委任は管理者のみです。"

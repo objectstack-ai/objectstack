@@ -19,7 +19,12 @@ const engineWith = (rows: Array<Record<string, unknown>>) => {
     reads,
     async find(_object: string, query: any) {
       reads.push(query?.where);
-      return rows.filter((r) => r.id === query?.where?.id);
+      const where: Record<string, unknown> = query?.where ?? {};
+      const matched = rows.filter((r) => Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`fake engine: unsupported where '${k}'`);
+        return r[k] === v;
+      }));
+      return typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
     },
   };
 };

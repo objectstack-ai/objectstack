@@ -2365,6 +2365,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       description: {
         label: "Descripción"
       },
+      permissionSets: {
+        label: "Permission Sets",
+        helpText: "Permission sets this position distributes, by name (snake_case)."
+      },
       delegatable: {
         label: "Delegable",
         helpText: "Quienes la ocupan pueden delegar esta posición por sí mismos, con un plazo y un motivo (ADR-0091 D3). false por defecto: la delegación es solo para administradores."
