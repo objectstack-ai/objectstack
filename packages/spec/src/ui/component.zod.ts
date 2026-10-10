@@ -408,8 +408,11 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
  * `nav:breadcrumb`, `global:search`, `global:notifications`,
  * `element:divider`, the three plugin console widgets
  * `cloud-connection:panel` and `marketplace:installed-list` (#11575) and
- * `mcp:connect-agent` (#12344), and `record:approval_decision` (#22472), which
- * reads the record context alone. `user:profile` left this list at #14159 — it
+ * `mcp:connect-agent` (#12344), and `record:approval_decision` (#22472) and
+ * `record:attachments` (#22537), which read the record context alone.
+ * (`record:approvals` declares no props either, but its row is its own
+ * {@link RecordApprovalsProps}, which names the two host-channel keys its
+ * renderer reads.) `user:profile` left this list at #14159 — it
  * is not author-placeable at all, so its row refuses the whole bag
  * ({@link retiredComponentProps}).
  *
@@ -2352,6 +2355,50 @@ export type RecordLineItemsProps = z.input<typeof RecordLineItemsProps>;
  * Expression envelopes at parse.
  */
 export type RecordLineItemsPropsParsed = z.infer<typeof RecordLineItemsProps>;
+
+/**
+ * `record:approvals` (#22537): the record page's approval timeline, which
+ * shows the step the record's approval sits at, who it waits on and what has
+ * been decided. Measured by the renderer read-point method at the
+ * `.objectui-sha` pin `47b1f0bb71`. objectui registers it in
+ * `app-shell/src/views/record-approvals-renderer.tsx:80` (namespace `record`)
+ * and draws it through `RecordApprovalsPanel`, and `SchemaRenderer` hoists
+ * `properties` onto the schema that renderer reads. It reads two
+ * `schema.<key>`s, and both are the HOST's runtime channel, the
+ * `record:history` `entries` / `loading` class:
+ *
+ *  - `approvals` (`:61`): the default record page threads its LIVE approvals
+ *    read through it (`RecordDetailView.tsx:2492-2501`, emitted by
+ *    `buildDefaultPageSchema({ approvals })`, `plugin-detail/src/synth/
+ *    buildDefaultPageSchema.ts:931`), the same read behind the record's
+ *    decision actions. With no host payload the renderer self-fetches the
+ *    record's requests from the record context (`:64-68`).
+ *  - `currentUserId` (`:71`): the host passes the signed-in user's id, which
+ *    the panel's Remind gate falls back to (`RecordApprovalsPanel.tsx:287`).
+ *    Without it the renderer reads the signed-in user itself.
+ *
+ * Neither is authorable surface, so the accepted key set is EMPTY and both
+ * keys are refused with their prescription. Studio's page create never writes
+ * either: it seeds from `buildDefaultPageSchema(objectDef)` with no options
+ * (`app-shell/src/views/metadata-admin/anchors.ts:208`), and so never emits
+ * this node at all. `className` and the designer attributes the renderer
+ * reads are node-level, never `properties`.
+ */
+export const RecordApprovalsProps = strictObject({
+  surface: 'this `record:approvals`',
+  history: `\`record:approvals\` declares no props at all. ${PROPS_HISTORY}`,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  guidance: {
+    approvals: '`approvals` is the HOST\'s data channel, not authorable surface: the default record '
+      + 'page passes the approval requests it fetched through it at runtime. Hand-authored requests '
+      + 'would show a static, fake approval history that never updates. Omit it: with no host '
+      + 'payload the block fetches the record\'s own approval requests.',
+    currentUserId: '`currentUserId` is the host\'s channel for the signed-in user, not authorable '
+      + 'surface: an authored id would decide for every viewer who counts as the submitter. Omit '
+      + 'it: the block reads the signed-in user itself.',
+  },
+}, {});
+export type RecordApprovalsProps = z.input<typeof RecordApprovalsProps>;
 
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
@@ -9465,9 +9512,11 @@ export const ComponentPropsMap = {
   'record:alert': RecordAlertProps,
   'record:quick_actions': RecordQuickActionsProps,
   'record:history': RecordHistoryProps,
-  // #21142 — the last registered `record:*` renderer without a row: it sat on
-  // the string-arm registration ledger instead (`component-type-vocabulary.ts`),
-  // so the gate skipped its props and a column keyed `field` published green.
+  // #21142 — a registered `record:*` renderer without a row, though not the
+  // last one: `record:approvals` and `record:attachments` (#22537, below) were
+  // registered without rows too. This one sat on the string-arm registration
+  // ledger instead (`component-type-vocabulary.ts`), so the gate skipped its
+  // props and a column keyed `field` published green.
   // Not a `PageComponentType` member: it reaches the type union through the
   // open string arm, as `element:metadata_viewer` does, and the row is what
   // makes it known. Key set measured at the `.objectui-sha` pin; see the
@@ -9489,6 +9538,23 @@ export const ComponentPropsMap = {
   // `component-props-unknown-key` finding instead of a silently dropped one.
   // The panel draws nothing outside a `sys_approval_request` record page.
   'record:approval_decision': emptyProps('record:approval_decision'),
+  // #22537 — the record page's Approvals and Attachments panels. objectui
+  // registered both inside this reserved namespace with no enum member and no
+  // row, so `component-type-unknown` refused a node its own default-page
+  // synthesizer emits, and Studio's page create seeds the Attachments tab onto
+  // every record page of an `enable.files` object. Both are `PageComponentType`
+  // members now. Each key set is measured from the renderer's read points at
+  // the `.objectui-sha` pin `47b1f0bb71`, and both are EMPTY:
+  //  - `record:approvals` reads `approvals` and `currentUserId`, and both are
+  //    the host's runtime channel, refused with a prescription (see the
+  //    schema's own header);
+  //  - `record:attachments` (`app-shell/src/views/
+  //    record-attachments-renderer.tsx`, registered at `:69`) discards the
+  //    schema node (`schema: _schema`) and draws the record context's
+  //    attachments; `className` and the designer attributes it reads are
+  //    node-level, never `properties`.
+  'record:approvals': RecordApprovalsProps,
+  'record:attachments': emptyProps('record:attachments'),
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),
