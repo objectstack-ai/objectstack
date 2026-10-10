@@ -67,17 +67,32 @@
  *
  * "No declaration accounts for this table" is only answerable when the composed
  * object set actually MIRRORS what this deployment's `os serve` boot registers.
- * On a project with a compiled artifact and no host config, the composed set is
- * the artifact plus the platform FLOOR — measured: `sys_metadata` and its four
- * siblings, `sys_migration`, `sys_migration_journal`, `sys_metadata_activation`,
- * `sys_secret`, and nothing else — so a database carrying the other ~40
- * platform tables would have every one of them reported. That is the cry-wolf
- * failure, from a knowingly partial premise rather than from a wrong predicate.
+ * Against a knowingly partial set — a host config that did not load, a project
+ * with nothing to compose, a stack composed without what `serve` mounts around
+ * it — a database carrying the rest of the platform's tables would have every
+ * one of them reported. That is the cry-wolf failure, from a knowingly partial
+ * premise rather than from a wrong predicate.
  *
- * So the sweep runs only when `composition.hostConfigLoaded` is true — the same
- * discriminator #12953's ruling kept for consumers, and for the same reason: a
- * composition that does not mirror the deployment produces an UNMEASURED
- * result, and an unmeasured result must say so rather than render as findings.
+ * So the sweep runs only when the composition says it mirrors the served boot
+ * (`composition.servedBoot`, #22580): a fact the composition records once,
+ * where it decides it, and that this module reads rather than re-derives. It
+ * used to be inferred from `composition.hostConfigLoaded`, which is `false` on
+ * a project with a compiled artifact and no config too — a project whose
+ * composition has been the served platform since #22506, so the sweep was
+ * withheld there for a reason that no longer held. A composition that does not
+ * mirror the deployment produces an UNMEASURED result, and an unmeasured result
+ * must say so rather than render as findings — giving the reason the
+ * composition recorded, so the reason it states is one that holds.
+ *
+ * ## Every database the plan covers (#22580)
+ *
+ * The plan diffs the primary and, when the serving boot keeps one, the
+ * `telemetry` sibling lifecycle-classed objects live in (ADR-0057 §3.6,
+ * #22579). The sweep reads every one of those catalogs: an object retired
+ * from the sibling strands its table THERE, and a sweep of the primary alone
+ * answered `read` beside a database it never looked at. The known set is the
+ * union of every planned driver's managed set and the declared names, so no
+ * table is judged against a set that leaves out its own database's.
  *
  * ## Why this lives in `utils/` and not beside `plan.ts`
  *
@@ -105,6 +120,8 @@ import { PLATFORM_OBJECT_PREFIXES, StorageNameMapping, hasPlatformObjectPrefix }
 // costs nothing `plan.ts` does not already load — that module's own heavy value
 // imports are deliberately lazy, for the reason its header gives.
 import { isResultSet } from '../commands/migrate/duplicates.js';
+import { describeDriverConnection } from './connection-display.js';
+import type { SchemaMigrationComposition } from './schema-migration-plugins.js';
 
 /** How a raw SELECT is issued against the driver the plan diffed. */
 export type PlannedDriverExec = (sql: string, params?: unknown[]) => Promise<unknown>;
@@ -129,7 +146,7 @@ export interface UnmanagedTablesRead {
   status: 'read';
   /** Namespace prefixes the sweep considered. */
   prefixes: readonly string[];
-  /** How many physical base tables the sweep enumerated, of any prefix. */
+  /** How many physical base tables the sweep enumerated, of any prefix, over every database the plan covers. */
   physicalTables: number;
   /** Sorted, and empty when everything physical is declared. */
   tables: UnmanagedTableFinding[];
@@ -265,7 +282,9 @@ export function selectUnmanagedTables(
       // base name is ever a `managedObjectFields` key.
       if (known.has(base)) continue;
       const existing = findings.get(base) ?? { table: base };
-      (existing.rotationShards ??= []).push(table);
+      const shards = (existing.rotationShards ??= []);
+      // The same shard in two planned databases is one name to report.
+      if (!shards.includes(table)) shards.push(table);
       findings.set(base, existing);
       continue;
     }
@@ -290,11 +309,11 @@ function tableNameOf(row: Record<string, unknown>): string | null {
  *
  * ⛔ Deliberately NOT `resolveSeedTenancyExec(engine)`, which walks the engine
  * for ANY raw-capable driver: on a deployment with more than one datasource
- * that can be a different database entirely, and this sweep would then compare
- * database A's tables against database B's managed set — every row a false
- * positive. The identity that matters is the same one `measureComposedCoverage`
- * uses (`driver !== plannedDriver`), so the seam is taken from that driver and
- * nowhere else.
+ * that can be a database the plan never diffed, and this sweep would then
+ * compare its tables against managed sets that do not include its own — every
+ * row a false positive. The identity that matters is the same one
+ * `measureComposedCoverage` uses (the planned drivers), so each seam is taken
+ * from a planned driver and nowhere else.
  */
 export function resolvePlannedDriverExec(driver: unknown): PlannedDriverExec | null {
   const d = driver as {
@@ -312,89 +331,138 @@ const unreadable = (detail: string): UnmanagedTablesUnreadable => ({
   detail,
 });
 
+/** Why a composition does not mirror the served boot, as the composition recorded it. */
+type NotMirroredReason = Extract<SchemaMigrationComposition['servedBoot'], { mirrored: false }>['reason'];
+
 /**
- * Sweep the physical database for platform-namespaced tables no declaration
- * accounts for.
- *
- * Reads only — one SELECT against a catalog. Every failure lands as
- * {@link UnmanagedTablesUnreadable}; none of them throws, because this section
- * is informational and must never turn a working `os migrate plan` into a
- * failing one.
- *
- * @param driver the driver whose managed set the plan diffed.
- * @param declaredObjects everything the booted stack registered (`stack.allObjects()`).
- * @param composition what the boot composed — read for `hostConfigLoaded`, the
- *   premise above.
- * @param normalize `normalizeRows` — flattens the three dialect result shapes.
+ * The reason the sweep did not run, one sentence per reason the composition can
+ * record — so the reason stated is the one that holds, and a reason added there
+ * fails to compile here until it is given its own sentence.
  */
-export async function collectUnmanagedTables(opts: {
-  driver: unknown;
-  declaredObjects: readonly unknown[];
-  composition: { hostConfigLoaded: boolean; hostConfigPath: string | null };
-  normalize: (result: unknown) => Record<string, unknown>[];
-}): Promise<UnmanagedTablesReport> {
-  if (!opts.composition.hostConfigLoaded) {
-    return unreadable(
-      opts.composition.hostConfigPath === null
-        ? 'this project has no host config, so the composed object set is the compiled artifact plus the '
-          + 'platform floor rather than what `os serve` registers — against a knowingly partial declaration '
-          + 'set, "declared by nothing" is UNMEASURED rather than false'
-        : `the host config ${opts.composition.hostConfigPath} did not load, so the composed object set covers `
-          + 'only a fraction of this deployment — "declared by nothing" is UNMEASURED against it',
-    );
-  }
+const NOT_MIRRORED: Record<NotMirroredReason, (hostConfigPath: string | null) => string> = {
+  'config-unloadable': (hostConfigPath) =>
+    `the host config${hostConfigPath ? ` ${hostConfigPath}` : ''} did not load, so the composed object set `
+    + 'covers only a fraction of this deployment — "declared by nothing" is UNMEASURED against it',
+  'nothing-to-compose': () =>
+    'this project has neither a host config nor a compiled artifact, so this plan\'s object set is the data '
+    + 'stack alone, not a deployment\'s — "declared by nothing" is UNMEASURED against it',
+  'stack-only': () =>
+    'this boot composed the stack but not what `os serve` mounts around it (its auth family and capability '
+    + 'providers), so their tables would read as declared by nothing — "declared by nothing" is UNMEASURED '
+    + 'against this object set',
+  'not-composed': () =>
+    'this boot did not compose the deployment\'s object set, only the data stack — "declared by nothing" is '
+    + 'UNMEASURED against it',
+};
 
-  const managed = readManagedTableNames(opts.driver);
-  if (managed === null) {
-    return unreadable(
-      'the planned driver exposes no readable managed-table map, so "declared by nothing" could not be '
-      + 'decided — reporting nothing rather than reporting every platform table as unmanaged',
-    );
-  }
-
-  const exec = resolvePlannedDriverExec(opts.driver);
+/**
+ * Read one planned driver's physical BASE TABLE names — or say why not.
+ *
+ * Every failure is a `detail`, never an empty list: see this module's header,
+ * "Could not look" is never reported as "nothing found".
+ */
+async function readPhysicalTableNames(
+  driver: unknown,
+  normalize: (result: unknown) => Record<string, unknown>[],
+): Promise<{ names: string[] } | { detail: string }> {
+  const exec = resolvePlannedDriverExec(driver);
   if (exec === null) {
-    return unreadable('the planned driver exposes no raw SQL seam, so its table catalog could not be read');
+    return { detail: 'the planned driver exposes no raw SQL seam, so its table catalog could not be read' };
   }
 
-  const client = (opts.driver as { config?: { client?: unknown } } | null | undefined)?.config?.client;
+  const client = (driver as { config?: { client?: unknown } } | null | undefined)?.config?.client;
   const clientName = typeof client === 'string' ? client : '';
   const sql = physicalTableListSql(clientName);
   if (sql === null) {
-    return unreadable(
-      `the connected dialect (${clientName || 'unnamed client'}) is not one this sweep enumerates tables on `
-      + '(sqlite / postgres / mysql)',
-    );
+    return {
+      detail: `the connected dialect (${clientName || 'unnamed client'}) is not one this sweep enumerates tables on `
+        + '(sqlite / postgres / mysql)',
+    };
   }
 
   let result: unknown;
   try {
     result = await exec(sql, []);
   } catch (error: unknown) {
-    return unreadable(
-      `the table-catalog read failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    return { detail: `the table-catalog read failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 
   // #10677's distinction, restated for this probe: a seam that returns no
   // RESULT SET did not answer "no tables" — it did not answer.
   if (!isResultSet(result)) {
-    return unreadable(
-      'the raw SQL seam returned no result set — a seam that cannot answer is not a seam that answered '
-      + '"no unmanaged tables"',
-    );
+    return {
+      detail: 'the raw SQL seam returned no result set — a seam that cannot answer is not a seam that answered '
+        + '"no unmanaged tables"',
+    };
   }
 
-  const rows = opts.normalize(result);
+  const rows = normalize(result);
   const names: string[] = [];
   for (const row of rows) {
     const name = tableNameOf(row);
     if (name !== null) names.push(name);
   }
   if (rows.length > 0 && names.length === 0) {
-    return unreadable(
-      `the table catalog answered ${rows.length} row(s) carrying no recognised table-name column`,
-    );
+    return { detail: `the table catalog answered ${rows.length} row(s) carrying no recognised table-name column` };
+  }
+  return { names };
+}
+
+/**
+ * Sweep the physical databases the plan covers for platform-namespaced tables
+ * no declaration accounts for.
+ *
+ * Reads only — one SELECT against each database's catalog. Every failure lands
+ * as {@link UnmanagedTablesUnreadable}; none of them throws, because this
+ * section is informational and must never turn a working `os migrate plan`
+ * into a failing one. One database that cannot be read makes the whole report
+ * `unreadable`: a `read` answer is a claim about every database the plan
+ * covers.
+ *
+ * @param drivers every driver the plan diffed (`SchemaStack.drivers`): the
+ *   primary, then the `telemetry` sibling when the serving boot keeps one.
+ * @param declaredObjects everything the booted stack registered (`stack.allObjects()`).
+ * @param composition what the boot composed — read for `servedBoot`, the
+ *   premise above, and for the host config the reason may name.
+ * @param normalize `normalizeRows` — flattens the three dialect result shapes.
+ */
+export async function collectUnmanagedTables(opts: {
+  drivers: readonly unknown[];
+  declaredObjects: readonly unknown[];
+  composition: Pick<SchemaMigrationComposition, 'servedBoot' | 'hostConfigPath'>;
+  normalize: (result: unknown) => Record<string, unknown>[];
+}): Promise<UnmanagedTablesReport> {
+  const { servedBoot } = opts.composition;
+  if (!servedBoot.mirrored) return unreadable(NOT_MIRRORED[servedBoot.reason](opts.composition.hostConfigPath));
+
+  if (opts.drivers.length === 0) {
+    return unreadable('the plan holds no SQL driver, so no table catalog could be read');
+  }
+  // With more than one database, a failure names the one it is about.
+  const about = (driver: unknown, detail: string): string => {
+    if (opts.drivers.length === 1) return detail;
+    const config = (driver as { config?: unknown } | null | undefined)?.config;
+    return `${describeDriverConnection(config) ?? 'a planned database'}: ${detail}`;
+  };
+
+  const managed = new Set<string>();
+  for (const driver of opts.drivers) {
+    const own = readManagedTableNames(driver);
+    if (own === null) {
+      return unreadable(about(
+        driver,
+        'the planned driver exposes no readable managed-table map, so "declared by nothing" could not be '
+        + 'decided — reporting nothing rather than reporting every platform table as unmanaged',
+      ));
+    }
+    for (const name of own) managed.add(name);
+  }
+
+  const names: string[] = [];
+  for (const driver of opts.drivers) {
+    const read = await readPhysicalTableNames(driver, opts.normalize);
+    if ('detail' in read) return unreadable(about(driver, read.detail));
+    names.push(...read.names);
   }
 
   return {
@@ -426,7 +494,7 @@ export function renderUnmanagedTables(report: UnmanagedTablesReport): string[] {
   }
   if (report.tables.length === 0) return [];
   return [
-    `${report.tables.length} table(s) in this database carry a reserved platform prefix `
+    `${report.tables.length} table(s) in the database(s) this plan covers carry a reserved platform prefix `
     + `(${report.prefixes.join(', ')}) and are declared by no object in this plan:`,
     ...report.tables.map((finding) => `  • ${describeUnmanagedTable(finding)}`),
     'They are reported for information only — nothing here drops them, and a plan writes nothing.',
