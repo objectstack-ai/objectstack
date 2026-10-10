@@ -134,6 +134,7 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
     type SearchFieldMeta,
+    canServeApiOperation,
     classifyDottedFilterHead,
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
@@ -13624,6 +13625,22 @@ export class ObjectStackProtocolImplementation implements
      * RBAC/RLS is enforced by forwarding the caller's `context` to
      * `engine.find` so users only see records they are entitled to read.
      *
+     * ## [#22640] An object whose declared exposure refuses `search` is outside the sweep
+     *
+     * Which objects this door may serve at all is not decided here. It is the
+     * spec's one exposure decision, `canServeApiOperation(enable, 'search')`
+     * (`@objectstack/spec/data`), the same one the REST data routes, the
+     * dispatcher, MCP and the analytics door turn into their refusals. It
+     * judges `apiEnabled: false` first, then the `apiMethods` whitelist, where
+     * `search` derives from `list`. The sweep used to spell its own
+     * predicate and read only the off switch, so an object whose whitelist
+     * withholds `list` was still swept. A refused object leaves nothing
+     * behind, exactly like an unreadable one below. The decision takes no
+     * caller, so the answer is the same for every persona.
+     *
+     * `searchable: false` stays as its own skip, because the decision answers
+     * an object with no whitelist without reading that flag.
+     *
      * ## An object the caller may not READ is outside the sweep
      *
      * The REST door checks authentication only, so the object-level read
@@ -13778,10 +13795,18 @@ export class ObjectStackProtocolImplementation implements
             if (!obj?.name) continue;
             if (objectsFilter && !objectsFilter.has(obj.name)) continue;
 
-            // Skip platform/system tables and opt-outs
-            const enable = obj.enable ?? {};
-            if (enable.searchable === false) continue;
-            if (enable.apiEnabled === false) continue;
+            // [#22640] The object's declared exposure, asked of the ONE decision
+            // every door judges (`canServeApiOperation`, ADR-0049) for the
+            // `search` operation. See the method doc. Asked first, so a refused
+            // object is never queried, named or counted.
+            if (!canServeApiOperation(obj.enable, 'search')) continue;
+            // `searchable: false` keeps its own meaning beside the decision, and
+            // only because the decision does not cover it everywhere: it answers
+            // an object with NO whitelist (`unrestricted`) without reading the
+            // flag, which the derivation table folds into `search` only under a
+            // whitelist. So this is the opt-out for such an object, not a second
+            // exposure rule.
+            if (obj.enable?.searchable === false) continue;
             // Skip noisy system tables by name prefix
             if (obj.name.startsWith('sys_audit_log')
                 || obj.name.startsWith('sys_activity')
