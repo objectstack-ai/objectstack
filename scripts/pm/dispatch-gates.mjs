@@ -475,6 +475,7 @@ import {
   CHANGE_KIND_ROWS,
   MANDATORY_TIER_GLOB_ROWS,
   SUSPECT_TIER_GLOB_ROWS,
+  GENERATED_MODULE_SOURCES,
 } from './dispatch-gates.data.mjs';
 
 export {
@@ -489,6 +490,7 @@ export {
   TIER_FLOOR,
   TIER_DEFAULT,
   RETIRED_TIER_WORDS,
+  GENERATED_MODULE_SOURCES,
 };
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
@@ -6966,54 +6968,10 @@ export function collapseHint(hint) {
   return hint.replace(/\*\*?/g, '').replace(/\/+$/, '');
 }
 
-/**
- * ## A GENERATED, git-ignored module is reached through its committed SOURCES (#22554)
- *
- * `packages/spec/src/migrations/registry.ts` left git under ruling B on #22554:
- * it is generated whole, on install and at build, from `registry.ts.template`
- * and the per-entry files under `entries/`, and git never sees it. So the hint a
- * gate's import yields — `packages/spec/src/migrations/registry`, or the
- * module's full path where a gate spells it — names a file no card can touch.
- * A card that changes what the module CONTAINS edits its sources instead, and
- * with nothing here such a card derived none of the families that import the
- * registry: the silent under-derivation #12514 repaired, back by another door.
- *
- * Each row names a generated module and its committed sources. The module's
- * hint, spelled with or without a `MODULE_SPECIFIER_EXTENSIONS` extension,
- * covers a source FILE or anything under a source DIRECTORY, and nothing more:
- * not a sibling, not the generator, not the package manifest.
- *
- * DECLARED rather than derived, and why. That a module is generated and
- * git-ignored IS derivable from the tree (an untracked path `git check-ignore`
- * covers). WHICH files it is generated from is written in one place only, its
- * turbo task's `inputs` — and those also name the package manifest and the
- * generator script, so reading them would hand every card that touches the spec
- * manifest the registry's families: a widening this file prices per pair, and
- * not the mapping ruled. So the sources are a declared row, and the self-test
- * proves every row against the tree on each run — the module untracked and
- * ignored by a TRACKED ignore file, every source tracked — so a row that stops
- * being true reds instead of quietly matching nothing.
- */
-export const GENERATED_MODULE_SOURCES = Object.freeze([
-  Object.freeze({
-    module: 'packages/spec/src/migrations/registry.ts',
-    sources: Object.freeze([
-      'packages/spec/src/migrations/registry.ts.template',
-      'packages/spec/src/migrations/entries',
-    ]),
-  }),
-]);
-
-/**
- * The declared committed sources a collapsed hint reaches because it names a
- * `GENERATED_MODULE_SOURCES` module — by its full path, or as its module
- * specifier with the extension dropped — or `null` for every other hint.
- */
+/** The committed sources a collapsed hint reaches as a `GENERATED_MODULE_SOURCES` module, by either spelling, or `null`. */
 export function generatedModuleSources(plain) {
-  for (const row of GENERATED_MODULE_SOURCES) {
-    if (plain === row.module || MODULE_SPECIFIER_EXTENSIONS.some((ext) => plain + ext === row.module)) return row.sources;
-  }
-  return null;
+  const row = GENERATED_MODULE_SOURCES.find((r) => plain === r.module || MODULE_SPECIFIER_EXTENSIONS.some((ext) => plain + ext === r.module));
+  return row ? row.sources : null;
 }
 
 /**
@@ -7248,9 +7206,7 @@ export function hintCovers(hint, inputPath) {
     // `MODULE_SPECIFIER_EXTENSIONS` rather than a second copy of it. See the
     // section above for the price and for what this deliberately cannot do.
     MODULE_SPECIFIER_EXTENSIONS.some((ext) => inputPath === plain + ext) ||
-    // A generated, git-ignored module is reached through its committed sources,
-    // declared in `GENERATED_MODULE_SOURCES` (#22554): a source file, or a path
-    // under a source directory.
+    // A generated, git-ignored module reaches its committed sources (`GENERATED_MODULE_SOURCES`, #22554).
     (generatedModuleSources(plain)?.some((source) => inputPath === source || inputPath.startsWith(`${source}/`)) ?? false)
   );
 }
