@@ -40,7 +40,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           user: "Usuario",
           tenant: "Inquilino",
-          public: "Público",
           private: "Privado",
           temp: "Temporal",
           attachments: "Adjuntos"
