@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   findHostConfig,
   composeForDeclarations,
+  composeProviderForDeclarations,
   createDeclarationBootLifecycle,
   buildSchemaMigrationPlugins,
   measureComposedCoverage,
@@ -745,5 +746,187 @@ describe('measureComposedCoverage (#13028)', () => {
     expect(synced).toBe(0);
     expect(out.notes.join(' ')).toContain('did not defer schema DDL');
     expect(out.notes.join(' ')).toContain('UNMEASURED');
+  });
+});
+
+/**
+ * [#22506] What `os migrate plan` / `apply` compose AROUND the stack
+ * (`servedPlatform`): the auth family behind `serve`'s auth gate, the provider
+ * of every capability `serve` mounts, the REST API plugin — each for its
+ * declarations only — plus the entry rule and the pinyin stamp the config path
+ * shares with `serve`. The boot-level proof is
+ * `commands/migrate/plan.boot-parity.integration.test.ts`; these cases pin each
+ * decision on its own.
+ */
+describe('servedPlatform (#22506)', () => {
+  const ENV_KEYS = ['OS_AUTH_SECRET', 'AUTH_SECRET', 'BETTER_AUTH_SECRET', 'NODE_ENV', 'OS_SEARCH_PINYIN_ENABLED'] as const;
+  const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
+  beforeEach(() => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
+    for (const key of ['OS_AUTH_SECRET', 'AUTH_SECRET', 'BETTER_AUTH_SECRET', 'OS_SEARCH_PINYIN_ENABLED'] as const) {
+      delete process.env[key];
+    }
+    process.env.NODE_ENV = 'production';
+  });
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  const SECRET = 'os22506-unit-secret-at-least-32-characters';
+  const AUTH_FAMILY = ['com.objectstack.auth.identity-objects', 'com.objectstack.security', 'com.objectstack.audit'];
+
+  function project(config: string): string {
+    const dir = tempProject();
+    writeFileSync(join(dir, 'objectstack.config.ts'), config);
+    return dir;
+  }
+  const APP = [
+    'export default {',
+    "  manifest: { id: 'com.example.os22506unit', name: 'served platform', version: '0.0.0', type: 'app' },",
+    "  requires: ['auth'],",
+    "  objects: [{ name: 'os22506_thing', fields: { title: { type: 'text' } } }],",
+    '};',
+    '',
+  ].join('\n');
+
+  it('composes the auth family behind the gate, ahead of the host plugins — plugin-auth\'s objects through its declaration twin', async () => {
+    process.env.OS_AUTH_SECRET = SECRET;
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP), servedPlatform: {} });
+    const names = out.plugins.map((p: any) => p?.name);
+    // Where `serve` registers the family: right behind the write guard, so a
+    // config's own instance of one of these names would supersede it.
+    expect(names.slice(0, 4)).toEqual([WRITE_GUARD, ...AUTH_FAMILY]);
+    // No AuthPlugin: this boot signs nobody in and constructs no auth manager.
+    expect(names).not.toContain('com.objectstack.auth');
+    expect(out.notes.join(' ')).toContain('Composed the auth family `os serve` composes behind its auth gate');
+  }, 60_000);
+
+  it('composes the provider of every capability `serve` mounts — `requires` and the always-on slate — and the REST API plugin', async () => {
+    process.env.OS_AUTH_SECRET = SECRET;
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP), servedPlatform: {} });
+    const ctors = out.plugins.map((p: any) => p?.constructor?.name);
+    for (const provider of [
+      'QueueServicePlugin', 'JobServicePlugin', 'CacheServicePlugin', 'SettingsServicePlugin', 'EmailServicePlugin',
+      'StorageServicePlugin', 'SmsServicePlugin', 'SharingServicePlugin', 'MessagingServicePlugin',
+      'AnalyticsServicePlugin', 'PackageServicePlugin',
+    ]) {
+      expect(ctors, provider).toContain(provider);
+    }
+    expect(out.plugins.map((p: any) => p?.name)).toContain('com.objectstack.rest.api');
+  }, 60_000);
+
+  it('a provider the host already supplies wins, as under `serve` — never a second instance', async () => {
+    process.env.OS_AUTH_SECRET = SECRET;
+    const dir = project([
+      "class OwnQueue { name = 'com.objectstack.service.queue'; async init() {} }",
+      'export default { plugins: [new OwnQueue()] };',
+      '',
+    ].join('\n'));
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir, servedPlatform: {} });
+    expect(out.plugins.filter((p: any) => p?.name === 'com.objectstack.service.queue')).toHaveLength(1);
+    expect(out.plugins.some((p: any) => p?.constructor?.name === 'QueueServicePlugin')).toBe(false);
+  }, 60_000);
+
+  it('no secret and not a development boot: no auth family, and the note names the command that composes it', async () => {
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP), servedPlatform: {} });
+    const names = out.plugins.map((p: any) => p?.name);
+    for (const name of AUTH_FAMILY) expect(names).not.toContain(name);
+    const said = out.notes.join(' ');
+    expect(said).toContain('Did not compose the auth family');
+    expect(said).toContain('re-run with that OS_AUTH_SECRET exported');
+  }, 60_000);
+
+  it('a stack that mounts its own AuthPlugin gets no platform family', async () => {
+    process.env.OS_AUTH_SECRET = SECRET;
+    const dir = project([
+      "class OwnAuth { name = 'com.objectstack.auth'; async init() {} }",
+      'export default { plugins: [new OwnAuth()] };',
+      '',
+    ].join('\n'));
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir, servedPlatform: {} });
+    const names = out.plugins.map((p: any) => p?.name);
+    for (const name of AUTH_FAMILY) expect(names).not.toContain(name);
+    expect(out.notes.join(' ')).toContain('the stack mounts its own AuthPlugin');
+  }, 60_000);
+
+  it('a `plugins` bundle entry is wrapped into an AppPlugin, by `serve`\'s entry rule — not composed raw', async () => {
+    const dir = project([
+      'export default { plugins: [',
+      "  { manifest: { id: 'com.example.os22506bundle', name: 'bundle', version: '0.0.0', type: 'app' },",
+      "    objects: [{ name: 'os22506_bundled', fields: { title: { type: 'text' } } }] },",
+      '] };',
+      '',
+    ].join('\n'));
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    const bundled = out.plugins.find((p: any) => p?.name === 'plugin.app.com.example.os22506bundle') as any;
+    expect(bundled?.constructor?.name).toBe('AppPlugin');
+  }, 60_000);
+
+  it('a `plugins` entry that cannot be loaded makes the config unloadable, naming the entry', async () => {
+    const dir = project("export default { plugins: ['@objectstack-fixture/os22506-absent'] };\n");
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    expect(out.hostConfigLoaded).toBe(false);
+    expect(out.hostConfigError).toContain("its plugins[0] ('@objectstack-fixture/os22506-absent') could not be loaded");
+  }, 60_000);
+
+  it('stamps the config\'s pinyin-search decision, as `serve` does', async () => {
+    const dir = project([
+      'export default {',
+      "  objects: [{ name: 'os22506_zh', fields: { title: { type: 'text' } } }],",
+      "  i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },",
+      '};',
+      '',
+    ].join('\n'));
+    await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBe('true');
+  }, 60_000);
+
+  it('control: without servedPlatform nothing around the stack is composed', async () => {
+    process.env.OS_AUTH_SECRET = SECRET;
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP) });
+    expect(out.plugins.map((p: any) => p?.name)).toEqual([
+      WRITE_GUARD,
+      'plugin.app.com.example.os22506unit',
+      'com.objectstack.platform-objects',
+    ]);
+  }, 60_000);
+});
+
+describe('composeProviderForDeclarations (#22506)', () => {
+  it('runs init with a context that registers NO hook — kernel:ready included — and suppresses start', async () => {
+    const registered: string[] = [];
+    const calls: string[] = [];
+    const provider = {
+      name: 'com.example.provider',
+      async init(ctx: any) {
+        calls.push('init');
+        ctx.hook('kernel:ready', async () => { calls.push('dispatcher armed'); });
+        ctx.hook('kernel:bootstrapped', async () => { /* never */ });
+        ctx.registerService('svc', {});
+      },
+      async start() { calls.push('start'); },
+    };
+    const wrapped = composeProviderForDeclarations(provider);
+    const services: string[] = [];
+    await wrapped.init({
+      hook: (name: string) => { registered.push(name); },
+      registerService: (name: string) => { services.push(name); },
+    } as any);
+    await wrapped.start();
+    expect(calls).toEqual(['init']);
+    expect(registered).toEqual([]);
+    // Everything that is not a hook still reaches the kernel's context.
+    expect(services).toEqual(['svc']);
+    expect(wrapped.name).toBe('com.example.provider');
+  });
+
+  it('control: the host posture still registers kernel:ready', async () => {
+    const registered: string[] = [];
+    const host = { name: 'com.example.host', async init(ctx: any) { ctx.hook('kernel:ready', async () => {}); } };
+    await composeForDeclarations(host).init({ hook: (name: string) => { registered.push(name); } } as any);
+    expect(registered).toEqual(['kernel:ready']);
   });
 });

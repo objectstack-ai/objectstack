@@ -54,35 +54,46 @@ import {
  * The set is derived from `serve`'s own assembly rather than hand-picked:
  *
  *  - **The host config's plugins**, when an `objectstack.config.{ts,js,mjs}` is
- *    present — this is `serve`'s `plugins = config.plugins` step. On a
- *    deployment whose whole object set comes from its config (ObjectStack
- *    Cloud's control plane is the measured one: `createCloudStack()` returns the
- *    plugins, and the app has no compiled artifact at all) this is the ONLY half
- *    that matters.
+ *    present — this is `serve`'s `plugins = config.plugins` step, each entry by
+ *    `serve`'s rule for one (`materializeStackPlugin`, `@objectstack/core`;
+ *    #22506, {@link materializeHostPlugins}). On a deployment whose whole object
+ *    set comes from its config (ObjectStack Cloud's control plane is the
+ *    measured one: `createCloudStack()` returns the plugins, and the app has no
+ *    compiled artifact at all) this is the ONLY half that matters.
  *  - **`AppPlugin(config)`**, when the config carries top-level metadata and
  *    brings no `AppPlugin` of its own — `serve` step 3, same presence test
  *    ({@link isAppPluginLike}), so top-level `objects`/`flows` reach the
- *    registry here exactly as they do there.
- *  - **`PlatformObjectsPlugin`**, when absent — `serve` step 5c. It is the one
- *    plugin `serve` composes UNCONDITIONALLY; everything else it injects
- *    (the auth family, i18n, observability, the HTTP server) sits behind a tier,
- *    an env var or a capability, and the auth family additionally behind "the
- *    config brought no `AuthPlugin`". Composing a tier-gated plugin here would
- *    be inventing an object set no boot of this deployment has.
- *  - **A `requires`-supplied provider a composed plugin hard-depends on**
- *    (#21732) — `serve` step 5's token lookup, narrowed to the providers the
+ *    registry here exactly as they do there. The config's pinyin-search
+ *    decision is stamped as `serve` stamps it (#22506), so the `__search`
+ *    companion columns its boot provisions are in the schema view too.
+ *  - **`PlatformObjectsPlugin`**, when absent — `serve` step 5c, composed on
+ *    every served boot.
+ *  - **What `os serve` mounts AROUND the stack — `os migrate plan` and `apply`
+ *    only** (`servedPlatform`, #22506, {@link composeServedPlatform}): the auth
+ *    family behind `serve`'s auth gate, the provider of every capability its
+ *    resolver mounts (the stack's `requires` and the always-on slate), and the
+ *    REST API plugin — each through the rule `serve` reads, each for its
+ *    declarations only ({@link composeProviderForDeclarations}). Without it an
+ *    app declaring `requires: ['auth']` planned 9 of the 68 tables its boot
+ *    created, `sys_account` among the missing, so the retired
+ *    `sys_account.issuer` column was never a drop and the upgrade step that
+ *    prescribes one looped.
+ *  - **Otherwise, a `requires`-supplied provider a composed plugin hard-depends
+ *    on** (#21732) — `serve` step 5's token lookup, narrowed to the providers the
  *    kernel cannot order the composition without, each in a measured inert
  *    posture ({@link resolveRequiredProviders}). Without it every config that
  *    lists a connector in `plugins` and `automation` in `requires` — the blank
- *    template and the showcase among them — could not boot this command.
+ *    template and the showcase among them — could not boot this command. This
+ *    is the path of the one caller that does not ask for `servedPlatform`.
  *  - **The security plugin behind `serve`'s auth gate — only when the caller
  *    asks** (`authGatedSecurity`, #22371). `os migrate
  *    security-catalog-overlays` needs the permission-set names the deployment's
  *    boot holds, and the security plugin declares its shipped sets only where
  *    `serve`'s auth gate composes it. The gate is the one rule `serve` asks
  *    (`resolvePlatformAuthComposition`, `@objectstack/core`), so this is not an
- *    invented object set: it is the one this deployment's boot has. `plan` and
- *    `apply` do not ask, and compose nothing tier-gated, as before.
+ *    invented object set: it is the one this deployment's boot has. That
+ *    command also boots NON-deferred under `--apply`, which is why it does not
+ *    ask for the whole served platform: schema sync would create its tables.
  *
  * ## Phase 1 only for host plugins — and why that is the contract, not a dodge
  *
@@ -487,7 +498,7 @@ export function composeForDeclarations<T extends object>(
  * dispatchers and seeding belong to a served boot.
  *
  * Whether every provider declares its objects in `init()` is not assumed: the
- * parity pin (`migrate-plan-boot-parity.integration.test.ts`) compares the
+ * parity pin (`commands/migrate/plan.boot-parity.integration.test.ts`) compares the
  * object set a plan examines with the one a real `os serve` boot registers, per
  * example app shape, so a provider that declares from a hook fails one test.
  */
