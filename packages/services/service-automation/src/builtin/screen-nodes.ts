@@ -7,6 +7,7 @@ import type { AutomationEngine } from '../engine.js';
 import { flowScreenCopyKey, type FlowScreenCopyKey } from '@objectstack/spec/system';
 import { interpolate, renderTextSlot } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { resolveValueSlotMap } from './value-slot-map.js';
 import { judgeHeadlessScreen } from '../screen-input-contract.js';
 
 /**
@@ -381,14 +382,18 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           };
         }
 
-        // Map declared inputs (`config.inputs`) to the function, interpolating
-        // `{var}` references against the live flow variables (so a function can
-        // consume a prior node's output, e.g. `{aiResult.id}`).
-        const input = interpolate(cfg.inputs ?? {}, variables, context) as Record<string, unknown>;
+        // [#19939] Map declared inputs (`config.inputs`) to the function —
+        // `inputs.*` is a value slot (#11182 ruling D): an envelope is
+        // evaluated against the live flow variables and handed over as the raw
+        // value it computes, so a function can consume a prior node's output
+        // with its type kept (`{ dialect: 'cel', source: 'aiResult.id' }`);
+        // every other value is a literal (`parseNodeConfig` above has already
+        // refused a `{token}` of the retired template dialect).
+        const input = resolveValueSlotMap(engine, cfg.inputs, variables, 'inputs', context);
         const outputVariable = cfg.outputVariable?.trim() || undefined;
         // Pure-function pattern: the function RETURNS its result; `outputVariable`
         // exposes it as a flow variable so a later declarative node persists it
-        // (e.g. `update_record fields: { ai_category: '{aiResult.ai_category}' }`).
+        // (e.g. `update_record fields: { ai_category: { dialect: 'cel', source: 'aiResult.ai_category' } }`).
         // Data I/O stays on the flow graph — the function itself does no writes.
         // The descriptor above publishes that as `handlerContract: 'pure'`, and
         // `FlowFunctionContext` hands the function no data engine to write with.

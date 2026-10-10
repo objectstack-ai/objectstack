@@ -3,14 +3,37 @@
 import { describe, it, expect } from 'vitest';
 import { SEARCH_VIRTUAL_TYPES, COMPUTED_VALUE_TYPES } from '@objectstack/spec/data';
 import {
-  validateSortableFields,
-  checkSortDeclaration,
+  validateSortableFields as validateSortableFieldsUnrecorded,
+  checkSortDeclaration as checkSortDeclarationUnrecorded,
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
 } from './validate-sortable-fields.js';
 import { indexObjectSearchTargets } from './validate-searchable-fields.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the three ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — so the pin covers every firing variant
+// this suite exercises, not a chosen few. Run the whole file: those cases read
+// what the cases above fired.
+const SORT_IDS: readonly string[] = [SORT_FIELD_UNKNOWN, SORT_FIELD_UNSORTABLE, SORT_FIELD_UNPROVISIONED];
+const fired: Array<{ rule: string; message: string }> = [];
+const validateSortableFields: typeof validateSortableFieldsUnrecorded = (...args) => {
+  const findings = validateSortableFieldsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+const checkSortDeclaration: typeof checkSortDeclarationUnrecorded = (...args) => {
+  const findings = checkSortDeclarationUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 /**
  * The object the whole file judges against. It carries one field of each of the
@@ -554,9 +577,13 @@ describe('validateSortableFields — the provenance verdict (#10474)', () => {
     expect(f.message).toContain('created_at');
     // The CAUSE clause is the package-shared sentence, not a re-typed one:
     // a rule that re-words it drifts from the runtime guards whose verdict it
-    // reports (`unprovisionedAnchorCause`).
-    expect(f.message).toContain('injected system column with NO storage behind it');
-    expect(f.message).toContain('ADR-0015');
+    // reports — [#22161] the one-clause `unprovisionedAnchorVerdict`, whose long
+    // form (ADR-0015 federation) is the id's `os explain` entry.
+    expect(f.message).toBe(
+      "list-view sort: 'created_at' is an injected column with no storage on external object " +
+        "'showcase_ext_customer', so its ORDER BY is dropped and every fetch returns rows in an " +
+        'arbitrary order',
+    );
     // The SORT-axis consequence, which is this rule's own half of the sentence.
     expect(f.message).toContain('ORDER BY');
     expect(f.hint).toContain('columnMap');
@@ -685,5 +712,49 @@ describe('checkSortDeclaration — the provenance parameter is OPTIONAL (#10474)
     expect(findings[0].rule).toBe(SORT_FIELD_UNPROVISIONED);
     expect(findings[0].where).toBe('page "customers"');
     expect(findings[0].message).toContain('page sort');
+  });
+});
+
+describe('[#22161] one-line verdicts — the three sort ids', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each id fired at least once, so the shape
+    // assertion below cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...SORT_IDS].sort());
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the virtual verdict states the storage fact in the SEARCH axis\' wording', () => {
+    const [f] = validateSortableFields(withListView([{ field: 'expected_revenue', order: 'desc' }]));
+    expect(f.message).toBe(
+      "list-view sort orders by \"expected_revenue\" on object \"crm_opportunity\", a virtual 'formula' " +
+        'field: its value is computed on read and never stored, so there is no column to ORDER BY',
+    );
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [SORT_FIELD_UNKNOWN]: ['FIRST fetch', '`assertSortFieldsExist`', 'HEAD segment', 'flattened list overlay', 'introspected datasource'],
+    [SORT_FIELD_UNSORTABLE]: ['byte-identical', '`assertOrderByIsMaterializable`', '`SEARCH_VIRTUAL_TYPES`', '`COMPUTED_VALUE_TYPES`'],
+    [SORT_FIELD_UNPROVISIONED]: ['ADR-0015', 'byte-identical', 'judge only `formula`', '`limit` / `offset`', 'warning'],
+  };
+
+  it('covers exactly the three ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SORT_IDS].sort());
+  });
+
+  it.each([...SORT_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanationOf(rule);
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+
+  it('the explanation\'s virtual-type claim matches the spec predicate it names', () => {
+    // The explanation module imports nothing, so the one fact it states about
+    // the predicate is held to the predicate here.
+    expect([...SEARCH_VIRTUAL_TYPES]).toEqual(['formula']);
+    expect(explanationOf(SORT_FIELD_UNSORTABLE)).toContain('`formula` alone');
   });
 });

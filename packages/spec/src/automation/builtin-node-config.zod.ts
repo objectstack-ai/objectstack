@@ -253,7 +253,8 @@ const CRUD_BULK_INTENT_GUIDANCE = {
  * The one sentence a refused value envelope leads with — the same words for
  * every way an envelope can be malformed AND for every `value`-role slot the
  * expression ledger declares (`assignment.assignments.*`,
- * `create_record.fields.*`, `update_record.fields.*`), so an author (or an
+ * `create_record.fields.*`, `update_record.fields.*`, and since #19939
+ * `subflow.input.*`, `map.input.*`, `script.inputs.*`), so an author (or an
  * agent reading the issue) learns the rule before the detail.
  *
  * Slot-neutral on purpose (#19938): the refusal's LOCATION names the slot
@@ -406,7 +407,10 @@ function celValueSlotSchema(description: string) {
  * is refused, naming `isoDate(daysFromNow(7))`). No `{…}` spelling is kept.
  *
  * The slot-neutral contract. The CRUD `fields` map's values take it
- * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, #19938), and it is
+ * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, #19938), so do
+ * the three maps a node hands to a callee since #19939 (`MapConfigSchema`'s
+ * `input`; `SubflowConfigSchema`'s `input` and `ScriptConfigSchema`'s
+ * `inputs` in `schemaless-node-config.zod.ts`), and it is
  * what a consumer judging ANY value-role slot applies (`AutomationEngine`'s
  * `valueEnvelopeRefusals`, the lint's `checkDeclaredValue`). The `assignment`
  * map's {@link AssignmentValueSchema} is the same rule under a
@@ -1058,9 +1062,18 @@ export const MapConfigSchema = lazySchema(() => strictObject({
   /** When items are records, the object they belong to (exposes each item as the child's record). */
   itemObject: z.string().optional()
     .describe("When items are records, the object they belong to (exposes each item as the child's record)"),
-  /** Params passed to each item's subflow; interpolated with the item variable bound. */
-  input: z.record(z.string(), z.unknown()).optional()
-    .describe("Params passed to each item's subflow (interpolated per item)"),
+  /**
+   * Params passed to each item's subflow — a `value` slot per key (#19939):
+   * a CEL value envelope evaluated once per item, in the parent's scope with
+   * the item (and index) variable bound, or a literal; a `{token}` template
+   * is refused ({@link FlowValueSlotSchema}).
+   */
+  input: z.record(z.string(), FlowValueSlotSchema).optional()
+    .describe(
+      "Params passed to each item's subflow, keyed by its input variables: each value a CEL value envelope "
+      + '`{ dialect: \'cel\', source }` evaluated per item (the item variable is in scope), or a literal written '
+      + 'as it is — a `{…}` template token is refused',
+    ),
   /** Variable the ordered list of per-item outputs is bound to — never a `$` name: those are the engine's (#22502). */
   outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
     .describe("Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
