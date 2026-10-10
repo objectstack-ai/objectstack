@@ -86,7 +86,8 @@ const Case = ObjectSchema.create({
       type: 'script',
       severity: 'error',
       message: 'Priority must be 1 to 5',
-      condition: 'record.priority > 5',
+      // A case is born without a priority, so the rule guards the null.
+      condition: 'record.priority != null && record.priority > 5',
     },
   ],
 });
