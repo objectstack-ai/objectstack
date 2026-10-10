@@ -1702,7 +1702,9 @@ function fixtureSelfTest() {
     const stuckPush = runHook('clean', ['--pre-push']);
     check('  …and the push is refused with the same remedy',
       stuckPush.code === 1 && stuckPush.out.includes(`--release ${unrouted}`));
-    const released = runHook('clean', ['--release', printed?.[1] ?? unrouted]);
+    // ONLY the printed command is run: a remedy the refusal does not print is not
+    // one a reader can follow, so no fallback spelling stands in for it here.
+    const released = printed ? runHook('clean', ['--release', printed[1]]) : { code: -1, out: '' };
     check('THE PRINTED REMEDY WORKS: `--release` exits 0 and clears the marker',
       released.code === 0 && !existsSync(marker));
     const after = runHook('stale', ['--pre-push']);
