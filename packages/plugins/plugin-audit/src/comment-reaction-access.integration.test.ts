@@ -106,10 +106,10 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
   const comments: Record<string, string> = {};
 
   const react = (caller: Caller | typeof NO_USER, commentId: unknown, emoji: string, extra: Row = {}) =>
-    engine.insert(REACTION, { comment_id: commentId, emoji, ...extra }, { context: caller } as any);
+    engine.insert(REACTION, { comment_id: commentId, emoji, ...extra }, { context: caller });
   const readableCommentIds = async (caller: Caller): Promise<string[]> =>
-    (await engine.find(COMMENT, { context: caller } as any)).map((r: Row) => String(r.id)).sort();
-  const allReactions = async (): Promise<Row[]> => engine.find(REACTION, { context: SYS } as any);
+    (await engine.find(COMMENT, { context: caller })).map((r: Row) => String(r.id)).sort();
+  const allReactions = async (): Promise<Row[]> => engine.find(REACTION, { context: SYS });
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
@@ -190,10 +190,10 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
 
     it('user_id is stamped from the session — a client-supplied value never wins', async () => {
       const created = await react(MEMBER, comments.onBoard, '😂', { user_id: OTHER.userId });
-      const row = await engine.findOne(REACTION, { where: { id: created.id }, context: SYS } as any);
+      const row = await engine.findOne(REACTION, { where: { id: created.id }, context: SYS });
       expect(row?.user_id).toBe(MEMBER.userId);
       expect(row?.created_by).toBe(MEMBER.userId);
-      await engine.delete(REACTION, { where: { id: created.id }, context: SYS } as any);
+      await engine.delete(REACTION, { where: { id: created.id }, context: SYS });
     });
 
     it('a comment the member cannot read is refused, on the envelope, and nothing is written', async () => {
@@ -231,13 +231,13 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
     ] as const)('%s: the comments its reactions point at are the reacted comments it can read', async (_n, caller) => {
       const reacted = new Set((await allReactions()).map((r) => String(r.comment_id)));
       const readable = (await readableCommentIds(caller)).filter((id) => reacted.has(id));
-      const seen = [...new Set((await engine.find(REACTION, { context: caller } as any)).map((r: Row) => String(r.comment_id)))];
+      const seen = [...new Set((await engine.find(REACTION, { context: caller })).map((r: Row) => String(r.comment_id)))];
       expect(seen.sort()).toEqual(readable.sort());
       expect(seen.length).toBeGreaterThan(0);
     });
 
     it('find: a member reads the reactions on its readable comments, and not on another member’s ledger', async () => {
-      const rows = await engine.find(REACTION, { context: MEMBER } as any);
+      const rows = await engine.find(REACTION, { context: MEMBER });
       expect(rows.map((r: Row) => `${r.comment_id}:${r.user_id}:${r.emoji}`).sort()).toEqual(
         [
           `${comments.onBoard}:${MEMBER.userId}:👍`,
@@ -248,21 +248,21 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
     });
 
     it('count: the total is narrowed identically to the rows', async () => {
-      expect(await engine.count(REACTION, {}, { context: MEMBER } as any)).toBe(3);
-      expect(await engine.count(REACTION, {}, { context: OTHER } as any)).toBe(3);
+      expect(await engine.count(REACTION, {}, { context: MEMBER })).toBe(3);
+      expect(await engine.count(REACTION, {}, { context: OTHER })).toBe(3);
     });
 
     it('findOne: a reaction on an unreadable comment is absent by id', async () => {
       const hidden = (await allReactions()).find((r) => r.comment_id === comments.onTheirs)!;
       const shown = (await allReactions()).find((r) => r.comment_id === comments.onMine)!;
-      expect(await engine.findOne(REACTION, { where: { id: hidden.id }, context: MEMBER } as any)).toBeNull();
-      expect((await engine.findOne(REACTION, { where: { id: shown.id }, context: MEMBER } as any))?.id).toBe(shown.id);
+      expect(await engine.findOne(REACTION, { where: { id: hidden.id }, context: MEMBER })).toBeNull();
+      expect((await engine.findOne(REACTION, { where: { id: shown.id }, context: MEMBER }))?.id).toBe(shown.id);
     });
 
     it('aggregate: a grouped count sees only the readable rows', async () => {
       const groups = await engine.aggregate(
         REACTION,
-        { groupBy: ['comment_id'], aggregations: [{ function: 'count', alias: 'n' }], context: MEMBER } as any,
+        { groupBy: ['comment_id'], aggregations: [{ function: 'count', alias: 'n' }], context: MEMBER },
       );
       const byComment = Object.fromEntries(groups.map((g: Row) => [String(g.comment_id), Number(g.n)]));
       expect(byComment).toEqual({ [comments.onBoard]: 2, [comments.onMine]: 1 });
@@ -271,7 +271,7 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
     it('the reader’s one batched read: comment_id $in the feed, grouped client-side, one comment probe', async () => {
       commentProbes.length = 0;
       const feed = [comments.onMine, comments.onTheirs, comments.onBoard, comments.unreacted];
-      const rows = await engine.find(REACTION, { where: { comment_id: { $in: feed } }, context: MEMBER } as any);
+      const rows = await engine.find(REACTION, { where: { comment_id: { $in: feed } }, context: MEMBER });
       const grouped: Record<string, Record<string, string[]>> = {};
       for (const r of rows) {
         ((grouped[r.comment_id] ??= {})[r.emoji] ??= []).push(r.user_id);
@@ -287,12 +287,12 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
     });
 
     it('a query scoped to a comment the member cannot read returns nothing', async () => {
-      const rows = await engine.find(REACTION, { where: { comment_id: comments.onTheirs }, context: MEMBER } as any);
+      const rows = await engine.find(REACTION, { where: { comment_id: comments.onTheirs }, context: MEMBER });
       expect(rows).toEqual([]);
     });
 
     it('a system read is not narrowed', async () => {
-      const rows = await engine.find(REACTION, { context: SYS } as any);
+      const rows = await engine.find(REACTION, { context: SYS });
       expect(rows.map((r: Row) => r.comment_id)).toEqual(expect.arrayContaining([comments.onTheirs, comments.onMine]));
     });
   });
@@ -320,7 +320,7 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
     it('a different emoji from the same member is a second row', async () => {
       const created = await react(MEMBER, comments.onBoard, '❤️');
       expect(created.id).toBeTruthy();
-      await engine.delete(REACTION, { where: { id: created.id }, context: SYS } as any);
+      await engine.delete(REACTION, { where: { id: created.id }, context: SYS });
     });
   });
 
@@ -332,13 +332,13 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
       await react(MEMBER, doomed, '👍');
       // The comment's author deletes it: the gate admits its own author, and a
       // reaction is not a reference that restricts or cascades.
-      const deleted = await attempt(() => engine.delete(COMMENT, { where: { id: doomed }, context: OTHER } as any));
+      const deleted = await attempt(() => engine.delete(COMMENT, { where: { id: doomed }, context: OTHER }));
       expect(deleted).toMatchObject({ ok: true });
       for (const caller of [MEMBER, OTHER, ADMIN]) {
-        const rows = await engine.find(REACTION, { where: { comment_id: doomed }, context: caller } as any);
+        const rows = await engine.find(REACTION, { where: { comment_id: doomed }, context: caller });
         expect(rows, caller.userId).toEqual([]);
       }
-      expect((await engine.find(REACTION, { where: { comment_id: doomed }, context: SYS } as any)).length).toBe(1);
+      expect((await engine.find(REACTION, { where: { comment_id: doomed }, context: SYS })).length).toBe(1);
     });
   });
 });

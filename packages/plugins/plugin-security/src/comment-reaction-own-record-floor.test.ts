@@ -81,7 +81,7 @@ const member = (userId: string) => ({
   tenantId: 'org_acme',
   positions: ['org_member', 'everyone'],
   permissions: [REACTOR_SET.name],
-  posture: 'MEMBER',
+  posture: 'MEMBER' as const,
 });
 const ALICE = member('usr_alice');
 const BOB = member('usr_bob');
@@ -162,8 +162,8 @@ const attempt = async (run: () => Promise<unknown>): Promise<Outcome> => {
 };
 
 const react = (ql: ObjectQL, caller: ReturnType<typeof member>, emoji: string) =>
-  ql.insert(REACTION, { comment_id: BOBS_COMMENT, emoji, user_id: caller.userId }, { context: caller } as any);
-const rowById = (ql: ObjectQL, id: string) => ql.findOne(REACTION, { where: { id }, context: SYSTEM } as any);
+  ql.insert(REACTION, { comment_id: BOBS_COMMENT, emoji, user_id: caller.userId }, { context: caller });
+const rowById = (ql: ObjectQL, id: string) => ql.findOne(REACTION, { where: { id }, context: SYSTEM });
 
 describe('[#22566] a reaction is its reactor’s own record — the own-record floor, as shipped', () => {
   it('a member reacts to another member’s comment and removes the reaction again', async () => {
@@ -172,7 +172,7 @@ describe('[#22566] a reaction is its reactor’s own record — the own-record f
     // The column the floor keys on carries the reactor.
     expect((await rowById(ql, created.id))?.created_by).toBe(ALICE.userId);
 
-    const removed = await attempt(() => ql.delete(REACTION, { where: { id: created.id }, context: ALICE } as any));
+    const removed = await attempt(() => ql.delete(REACTION, { where: { id: created.id }, context: ALICE }));
     expect(removed).toEqual({ ok: true });
     expect(await rowById(ql, created.id)).toBeNull();
   }, 60_000);
@@ -181,14 +181,14 @@ describe('[#22566] a reaction is its reactor’s own record — the own-record f
     const ql = await boot();
     const created = await react(ql, ALICE, '🎉');
     // Bob can SEE Alice's reaction (the floor narrows writes, never reads)…
-    expect((await ql.findOne(REACTION, { where: { id: created.id }, context: BOB } as any))?.id).toBe(created.id);
+    expect((await ql.findOne(REACTION, { where: { id: created.id }, context: BOB }))?.id).toBe(created.id);
 
     // …and may not remove it.
-    const byId = await attempt(() => ql.delete(REACTION, { where: { id: created.id }, context: BOB } as any));
+    const byId = await attempt(() => ql.delete(REACTION, { where: { id: created.id }, context: BOB }));
     expect(byId).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
 
     await attempt(() =>
-      ql.delete(REACTION, { where: { comment_id: BOBS_COMMENT }, multi: true, context: BOB } as any),
+      ql.delete(REACTION, { where: { comment_id: BOBS_COMMENT }, multi: true, context: BOB }),
     );
     expect((await rowById(ql, created.id))?.id).toBe(created.id);
   }, 60_000);
@@ -196,16 +196,16 @@ describe('[#22566] a reaction is its reactor’s own record — the own-record f
   it('two members reacting at once keep two rows, each deletable only by its reactor', async () => {
     const ql = await boot();
     const [a, b] = await Promise.all([react(ql, ALICE, '❤️'), react(ql, BOB, '❤️')]);
-    const rows = await ql.find(REACTION, { where: { comment_id: BOBS_COMMENT }, context: SYSTEM } as any);
+    const rows = await ql.find(REACTION, { where: { comment_id: BOBS_COMMENT }, context: SYSTEM });
     expect(rows.map((r: any) => r.created_by).sort()).toEqual([ALICE.userId, BOB.userId].sort());
 
-    expect(await attempt(() => ql.delete(REACTION, { where: { id: a.id }, context: BOB } as any))).toMatchObject({
+    expect(await attempt(() => ql.delete(REACTION, { where: { id: a.id }, context: BOB }))).toMatchObject({
       ok: false,
       code: 'PERMISSION_DENIED',
       status: 403,
     });
-    expect(await attempt(() => ql.delete(REACTION, { where: { id: b.id }, context: BOB } as any))).toEqual({ ok: true });
-    const left = await ql.find(REACTION, { where: { comment_id: BOBS_COMMENT }, context: SYSTEM } as any);
+    expect(await attempt(() => ql.delete(REACTION, { where: { id: b.id }, context: BOB }))).toEqual({ ok: true });
+    const left = await ql.find(REACTION, { where: { comment_id: BOBS_COMMENT }, context: SYSTEM });
     expect(left.map((r: any) => r.id)).toEqual([a.id]);
   }, 60_000);
 });
