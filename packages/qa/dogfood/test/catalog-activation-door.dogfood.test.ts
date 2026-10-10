@@ -14,7 +14,7 @@
 //   - the write goes through the engine, so the last-admin guard's ledger hook
 //     really refuses switching `admin_full_access` off;
 //   - the resolver over the booted engine stops granting through a position
-//     the door switched off, for a persona the app really provisions.
+//     the door switched off, for a holder of that position.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { resolveUserAuthzGrants } from '@objectstack/core';
@@ -28,11 +28,14 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 /** A showcase position (`src/security/positions.ts`) and the set it names. */
 const POSITION = 'auditor';
 const POSITION_SET = 'showcase_auditor';
-/** The persona `seed-approval-demo.ts` provisions holding ONLY `auditor`. */
-const AUDITOR_USER = 'usr_showcase_auditor_demo';
+/** A second showcase position, held by this file's own holder for the resolver leg. */
+const HELD_POSITION = 'exec';
+const HELD_POSITION_SET = 'showcase_executive';
+const HOLDER_EMAIL = 'exec.holder@example.com';
 
 interface Engine {
     find(object: string, options?: unknown): Promise<Array<Record<string, unknown>>>;
+    insert(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
 }
 
 describe('the catalog activation door, on a booted showcase', () => {
@@ -67,26 +70,37 @@ describe('the catalog activation door, on a booted showcase', () => {
         expect(rows[0].active === false || rows[0].active === 0).toBe(true);
     });
 
-    it('the resolver over the booted engine stops granting through it, and grants again once it is back on', async () => {
-        const held = await ql.find('sys_user_position', {
-            where: { user_id: AUDITOR_USER, position: POSITION },
-            context: SYSTEM_CTX,
-        });
-        // Anti-vacuity: the persona really holds the position on this boot.
-        expect(held.length, `no '${POSITION}' assignment for ${AUDITOR_USER}`).toBeGreaterThan(0);
-        const tenantId = (held[0].organization_id as string | null | undefined) ?? undefined;
+    it('the resolver over the booted engine stops granting through a switched-off position, and grants again once it is back on', async () => {
+        // Its own holder, so the leg depends on nothing a boot seeds later: a
+        // signed-up member, assigned the `exec` position unscoped.
+        await stack.signUp(HOLDER_EMAIL);
+        const [user] = await ql.find('sys_user', { where: { email: HOLDER_EMAIL }, limit: 1, context: SYSTEM_CTX });
+        expect(user?.id, `no sys_user row for ${HOLDER_EMAIL}`).toBeTruthy();
+        const holder = String(user.id);
+        await ql.insert(
+            'sys_user_position',
+            { id: 'usp_catalog_activation_exec', user_id: holder, position: HELD_POSITION },
+            { context: SYSTEM_CTX },
+        );
 
-        const off = await resolveUserAuthzGrants(ql as never, AUDITOR_USER, { tenantId });
-        expect(off.positions).not.toContain(POSITION);
-        expect(off.permissions).not.toContain(POSITION_SET);
+        // CONTROL: before the flip the position grants its set — without it the
+        // two assertions below would pass on a holder that was never granted.
+        const before = await resolveUserAuthzGrants(ql as never, holder, {});
+        expect(before.positions).toContain(HELD_POSITION);
+        expect(before.permissions).toContain(HELD_POSITION_SET);
 
-        const res = await flip('position', POSITION, { enabled: true });
-        expect(res.status, await res.clone().text()).toBe(200);
-        expect(await rowsOf('position', POSITION)).toHaveLength(1);
+        const offRes = await flip('position', HELD_POSITION, { enabled: false });
+        expect(offRes.status, await offRes.clone().text()).toBe(200);
+        const off = await resolveUserAuthzGrants(ql as never, holder, {});
+        expect(off.positions).not.toContain(HELD_POSITION);
+        expect(off.permissions).not.toContain(HELD_POSITION_SET);
 
-        const on = await resolveUserAuthzGrants(ql as never, AUDITOR_USER, { tenantId });
-        expect(on.positions).toContain(POSITION);
-        expect(on.permissions).toContain(POSITION_SET);
+        const onRes = await flip('position', HELD_POSITION, { enabled: true });
+        expect(onRes.status, await onRes.clone().text()).toBe(200);
+        expect(await rowsOf('position', HELD_POSITION)).toHaveLength(1);
+        const on = await resolveUserAuthzGrants(ql as never, holder, {});
+        expect(on.positions).toContain(HELD_POSITION);
+        expect(on.permissions).toContain(HELD_POSITION_SET);
     });
 
     it('a declared permission set switches off and back on', async () => {
