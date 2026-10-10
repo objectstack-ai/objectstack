@@ -356,15 +356,16 @@
 #
 # ## Class 3 is not ONE instruction, and the ledger is what shows it
 #
-# "Resolve by regeneration" is correct for three of the ledger's thirty tracked
+# "Resolve by regeneration" is correct for two of the ledger's thirty tracked
 # entries and WRONG for the rest, so membership alone cannot carry the message:
 #
-#   `packages/spec/src/migrations/registry.ts`, `skills/README.md` and
-#   `content/docs/ai/skills-reference.mdx` are MIXED — a generator owns the text
-#   between a marker pair, a human owns everything outside it. A conflict INSIDE
-#   a region is resolved by rerunning that generator and by nothing else; the
-#   prose outside it is a hand merge. The module's own header names these three
-#   as the files `NOT_DRIVER_MANAGED` "turns away", and one more of that shape
+#   `skills/README.md` and `content/docs/ai/skills-reference.mdx` are MIXED (the
+#   migration registry was the third until #22554 made it git-ignored build
+#   output) — a generator owns the text between a marker pair, a human owns
+#   everything outside it. A conflict INSIDE a region is resolved by rerunning
+#   that generator and by nothing else; the prose outside it is a hand merge.
+#   The module's own header names these two as the files `NOT_DRIVER_MANAGED`
+#   "turns away", and one more of that shape
 #   (`content/docs/permissions/tenant-audit-census.mdx`) is reached through a
 #   directory entry rather than named outright.
 #
