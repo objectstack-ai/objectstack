@@ -466,9 +466,9 @@ describe('assignment value contract — a CEL envelope beside literals; the `{to
         list: ['a', 2],
         obj: { nested: 'x', source: 'not an envelope without a dialect' },
         empty: '',
-        // The two `{…}` spellings the retirement keeps until CEL can write them.
+        // The one `{…}` spelling the retirement keeps until CEL can write it
+        // (the run user is refused since #19939 pass 2: `current_user.id`).
         due: '{TODAY() + 7}',
-        by: '{$User.Id}',
       },
     }).success).toBe(true);
     // An envelope-shaped object with a non-string `dialect` is a literal, as it always was.
@@ -850,7 +850,6 @@ describe('CRUD `fields` value contract — the CEL value envelope beside literal
     const fields = {
       subject: 'Follow up',                    // text
       due_date: '{TODAY() + 7}',               // a date macro — kept until CEL can write it
-      owner: '{$User.Id}',                     // the run user — kept until the flow CEL scope binds it
       cel_looking_text: 'a + b',               // a STRING is never CEL here
       n: 3, ok: true, nothing: null, empty: '',
       tags: ['a', 2, { dialect: 'cel' }],      // arrays are data, envelope-shaped members included

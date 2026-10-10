@@ -12,6 +12,7 @@ import type {
 } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
+import { createEvalUser, type EvalUserParsed } from '@objectstack/spec/identity';
 import {
     validateScreenInputs,
     screenDeclaresInputContract,
@@ -141,6 +142,34 @@ function templateHoles(source: string): string[] {
 function unquoteLiteral(operand: string): string {
     const m = QUOTED_LITERAL.exec(operand);
     return m ? (m[1] ?? m[2] ?? '') : operand;
+}
+
+/**
+ * The value the flow CEL scope binds as `current_user` for a run (#19939 —
+ * the maintainer's ruling on its second pass, Q1 A and Q2 A): the run's
+ * `EvalUser` when the run has a user, else `null`.
+ *
+ * Built through `createEvalUser`, the one factory every surface builds the
+ * canonical user with (ADR-0068), from what the run context holds and
+ * nothing else: `id` from `userId`, `positions`, and `organizationId` from
+ * `tenantId`; `isPlatformAdmin` is derived from the positions there. No run
+ * context carries an email or a name, so neither is bound — a read of either
+ * is the user record's (`current_user.id`), not the run's.
+ *
+ * A run with no user — a schedule, a record change made by a system write, a
+ * caller that passed no context — answers `null`, never a pseudo-user
+ * (ADR-0118 D1, D4): `current_user.id` then fails the run loudly, and the
+ * author's guard `current_user != null ? current_user.id : null` can be
+ * written.
+ */
+function runUserOf(context: AutomationContext | undefined): EvalUserParsed | null {
+    const userId = context?.userId;
+    if (typeof userId !== 'string' || userId === '') return null;
+    return createEvalUser({
+        id: userId,
+        positions: Array.isArray(context?.positions) ? context.positions : [],
+        ...(typeof context?.tenantId === 'string' ? { organizationId: context.tenantId } : {}),
+    });
 }
 
 /**
@@ -6384,7 +6413,7 @@ export class AutomationEngine implements IAutomationService {
             if (startCondition !== undefined && startCondition !== null && startCondition !== '') {
                 const condExpr =
                     typeof startCondition === 'string' ? { dialect: 'cel', source: startCondition } : startCondition;
-                if (!this.evaluateCondition(condExpr, variables)) {
+                if (!this.evaluateCondition(condExpr, variables, runContext)) {
                     this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
                     // `flowLabel` rides even here, unlike `successMessage` /
                     // `summary`: it names the flow, it claims no work done, and
@@ -8368,7 +8397,7 @@ export class AutomationEngine implements IAutomationService {
 
         const visibility = (field: ScreenFieldSpec): ScreenFieldVisibility => {
             try {
-                return this.evaluateCondition(String(field.visibleWhen), scope);
+                return this.evaluateCondition(String(field.visibleWhen), scope, run.context);
             } catch (err) {
                 // #6499 — BOTH spliced pieces were uncontrolled: the author's
                 // own `visibleWhen` source (metadata text of any shape) and
@@ -11692,7 +11721,7 @@ export class AutomationEngine implements IAutomationService {
                 if (nextNode) recordSkipped(nextNode, edge);
                 continue;
             }
-            if (this.evaluateCondition(edge.condition!, variables)) {
+            if (this.evaluateCondition(edge.condition!, variables, context)) {
                 anyConditionMet = true;
                 if (nextNode) {
                     await this.executeNode(nextNode, flow, variables, context, steps);
@@ -11997,8 +12026,27 @@ export class AutomationEngine implements IAutomationService {
      *
      * Shared deliberately: a predicate and a value expression that disagreed
      * about what `rows` means would be two dialects wearing one name.
+     *
+     * ## `current_user` — the run's user, or `null` (#19939)
+     *
+     * The scope also binds `current_user`, ADR-0068's canonical user root, from
+     * the run context the caller passes ({@link runUserOf}): the run's
+     * `EvalUser` when the run has a user, and `null` when it has none — never
+     * a pseudo-user (ADR-0118 D1, D4). It carries only what the run holds:
+     * `id`, `positions`, `organizationId` and the `isPlatformAdmin` flag
+     * derived from them; no run carries an email or a name. This is what the
+     * retired `{$User.Id}` value-slot token is refused in favour of, so it
+     * reads the same context the interpolator's `$User.Id` branch reads.
+     *
+     * `vars` and `current_user` are bound AFTER the variables are spread, so
+     * each wins over a flow variable of the same name — which is then read as
+     * `vars["vars"]` / `vars["current_user"]` (the spec's
+     * `FLOW_SCOPE_CLAIMED_IDENTIFIERS`, measured from here).
      */
-    private celScope(variables: Map<string, unknown>): { extra: Record<string, unknown>; record: Record<string, unknown> } {
+    private celScope(
+        variables: Map<string, unknown>,
+        context?: AutomationContext,
+    ): { extra: Record<string, unknown>; record: Record<string, unknown> } {
         const vars: Record<string, unknown> = {};
         for (const [key, value] of variables) {
             // Convert "step.result" keys into nested object paths.
@@ -12012,7 +12060,7 @@ export class AutomationEngine implements IAutomationService {
             }
             cursor[segs[segs.length - 1]] = value;
         }
-        return { extra: { ...vars, vars }, record: vars };
+        return { extra: { ...vars, vars, current_user: runUserOf(context) }, record: vars };
     }
 
     /**
@@ -12133,8 +12181,17 @@ export class AutomationEngine implements IAutomationService {
      * `assignments: [{ variable, value }]` array and the bare
      * `{ <variable>: <value> }` config) are deliberately NOT declared, so an
      * envelope-shaped object there stays the literal object it always was.
+     *
+     * `context` is the run's: it decides what `current_user` is in the scope
+     * ({@link celScope}) — the run's user, or `null` when the run has none or
+     * no context is passed. Every executor passes the one it was handed.
      */
-    evaluateValueEnvelope(envelope: { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>, where: string): unknown {
+    evaluateValueEnvelope(
+        envelope: { dialect?: string; source?: string; ast?: unknown },
+        variables: Map<string, unknown>,
+        where: string,
+        context?: AutomationContext,
+    ): unknown {
         const refusals = this.valueEnvelopeRefusals(envelope);
         if (refusals.length > 0) {
             throw new Error(
@@ -12142,7 +12199,7 @@ export class AutomationEngine implements IAutomationService {
             );
         }
         const source = envelope.source ?? '';
-        const result = ExpressionEngine.evaluate({ dialect: 'cel', source }, this.celScope(variables));
+        const result = ExpressionEngine.evaluate({ dialect: 'cel', source }, this.celScope(variables, context));
         if (!result.ok) {
             // Reached by the shapes the two validators above cannot judge — an
             // `ast`-only envelope (`ExpressionSchema` accepts `source`-or-`ast`;
@@ -12221,8 +12278,17 @@ export class AutomationEngine implements IAutomationService {
      * refuses it at authoring, and `structuralConditionRefusal` refuses it on
      * both structural slots, so it is refused here as well, through the same
      * shared constructor rather than a second rule.
+     *
+     * `context` is the run's: it decides what `current_user` is in a CEL
+     * predicate's scope ({@link celScope}) — the run's user, or `null` when
+     * the run has none or no context is passed. Every engine site and the
+     * `decision` executor pass the run's.
      */
-    evaluateCondition(expression: string | { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>): boolean {
+    evaluateCondition(
+        expression: string | { dialect?: string; source?: string; ast?: unknown },
+        variables: Map<string, unknown>,
+        context?: AutomationContext,
+    ): boolean {
         const shapeRefusal = structuralConditionRefusal(expression);
         if (shapeRefusal) {
             // ADR-0032 §1d — the error carries its source. `structuralConditionRefusal`
@@ -12262,7 +12328,7 @@ export class AutomationEngine implements IAutomationService {
             try {
                 const result = ExpressionEngine.evaluate(
                     { dialect: 'cel', source: exprStr },
-                    this.celScope(variables),
+                    this.celScope(variables, context),
                 );
                 // ADR-0032 §Decision 1c — NO silent fallback. A non-`ok` result is a
                 // real fault (malformed predicate, or — pre build-validation — a

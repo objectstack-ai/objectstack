@@ -56,12 +56,15 @@
  *
  * ## No spelling is kept
  *
- * Unlike the value slots, which keep the date macros and `{$User.*}` because
- * CEL cannot write them yet, a text slot keeps nothing: each of those has a
- * remedy that renders the same text — compute it into a variable with an
- * `assignment` node, whose value slot still reads that spelling, and write the
- * variable as a hole. So the single brace is deleted from the text slots
- * whole, and the two dialects never share one string.
+ * Unlike the value slots, which keep the date macros because CEL cannot write
+ * them yet, a text slot keeps nothing: each has a remedy that renders the same
+ * text — compute it into a variable with an `assignment` node, whose value
+ * slot still reads the date macro, and write the variable as a hole. The run
+ * user's id is computed the same way, with the CEL value envelope
+ * `current_user.id` (the value slots refuse `{$User.*}` since #19939's second
+ * pass); every other `{$User.<path>}` never resolved, and its remedy says so.
+ * So the single brace is deleted from the text slots whole, and the two
+ * dialects never share one string.
  *
  * ## A `$` root is the engine's (#22477)
  *
@@ -75,13 +78,23 @@
  * name the engine does not bind ({@link FLOW_ENGINE_VARIABLES}), and a
  * single-brace path token over one gets the same remedy instead of a
  * `{{ }}` rewrite that would be refused in turn. `{{ $User.<path> }}` gets
- * the very sentence `{$User.<path>}` gets: compute it with an `assignment`
- * node, then write `{{ v }}`. ⛔ The template engine does not learn `$User`
+ * the very sentence `{$User.<path>}` gets: for `$User.Id`, compute
+ * `current_user.id` with an `assignment` node's CEL envelope, then write
+ * `{{ v }}`. ⛔ The template engine does not learn `$User`
  * (or any new `$` root) instead — that would widen the flow's variable set
  * with no declaration behind it.
  */
 
-import { celExpression, templateTokenKind, templateTokensOf, type TemplateToken } from './flow-template-token';
+import {
+  CEL_RUN_USER_ID,
+  CEL_RUN_USER_ID_GUARDED,
+  celExpression,
+  isRunUserIdToken,
+  runUserPathNeverResolved,
+  templateTokenKind,
+  templateTokensOf,
+  type TemplateToken,
+} from './flow-template-token';
 
 /**
  * The one sentence every refusal of a `{…}` token in a text slot leads with —
@@ -287,10 +300,17 @@ function doubled(text: string, tokens: readonly TemplateToken[]): string {
 function unspellableRemedy(token: TemplateToken): string {
   switch (token.kind) {
     case 'date-macro':
-    case 'user':
       return (
         `\`${token.text}\` is not a variable, so no hole spells it: compute it into a variable with an \`assignment\` `
         + `node, whose value slot still reads it (\`assignments: { v: '${token.text}' }\`), and write \`{{ v }}\` here.`
+      );
+    case 'user':
+      if (!isRunUserIdToken(token.inner)) return runUserPathNeverResolved(token.text, (path) => `\`{{ ${path} }}\``);
+      return (
+        `\`${token.text}\` is not a variable, so no hole spells it: compute the run user's id into a variable with an `
+        + `\`assignment\` node's CEL value envelope (\`assignments: { v: { dialect: 'cel', source: '${CEL_RUN_USER_ID}' } }\`) `
+        + 'and write `{{ v }}` here. In a flow that can run without a user `current_user` is `null` and that read '
+        + `fails the run, so compute \`${CEL_RUN_USER_ID_GUARDED}\` there, which renders nothing where the template did.`
       );
     case 'expression':
       return (

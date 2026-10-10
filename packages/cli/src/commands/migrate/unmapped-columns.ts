@@ -285,14 +285,18 @@ export default class MigrateUnmappedColumns extends Command {
     try {
       // The `os migrate plan` boot, so the differ runs over the plan's object
       // set: schema DDL deferred and no seed (`deferSchemaDdl`), no database
-      // file brought into existence (`readOnlyProbe`), and the deployment's
-      // own composition (`composeHostStack`).
+      // file brought into existence (`readOnlyProbe`), the deployment's own
+      // composition (`composeHostStack`), and what `os serve` mounts around it
+      // (`composeServedPlatform`, #22506) — or a platform object the plan
+      // reports an `unmapped_column` on, such as `sys_account`, is one this
+      // command cannot resolve.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
         deferSchemaDdl: true,
         readOnlyProbe: true,
         composeHostStack: true,
+        composeServedPlatform: true,
       });
     } catch (error: any) {
       if (flags.json) {

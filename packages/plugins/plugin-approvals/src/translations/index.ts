@@ -4,9 +4,11 @@
  * ApprovalsTranslations — i18n bundle owned by this plugin (ADR-0029 D8).
  *
  * Object label/field/view/action translations for the sys_* objects this
- * plugin owns. Loaded at runtime via the plugin's `kernel:ready` hook
- * (`i18n.loadTranslations`). Regenerate with `os i18n extract` against
- * `scripts/i18n-extract.config.ts`.
+ * plugin owns, plus the `pages` entry of the record page it ships. Loaded at
+ * runtime via the plugin's `kernel:ready` hook (`i18n.loadTranslations`).
+ * Regenerate the `objects` bundles with `os i18n extract` against
+ * `scripts/i18n-extract.config.ts`; the `pages` entry is hand-authored in
+ * `./pages.ts`.
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
@@ -18,6 +20,7 @@ import { esESObjects } from './es-ES.objects.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+import { approvalsPageTranslations, pageSourceHashes } from './pages.js';
 
 /**
  * ## The provenance companions are READ here, not merely recorded
@@ -36,21 +39,32 @@ import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
  * before it can testify. So the only reader-visible consequence was the wrong
  * string on the page.
  *
- * `recorded` (3rd argument) stays `undefined` on purpose: it judges the
- * HAND-AUTHORED sections (`apps` / `dashboards` / `pages`), which this set does
- * not have — its bundles are entirely generated. The companion goes in the 4th
- * slot, which judges the generated ones. This is the shape
- * `@objectstack/platform-objects`'s own `metadata-translations/index.ts` uses.
+ * `recorded` (3rd argument) judges the HAND-AUTHORED sections (`apps` /
+ * `dashboards` / `pages`). This set has exactly one: the `pages` entry of the
+ * record page the plugin ships (`./pages.ts`), whose recorded digests go there.
+ * The generated companion goes in the 4th slot, which judges the generated
+ * `objects` bundles. Two tables, two predicates — the shape
+ * `@objectstack/platform-objects`'s own Setup bundle uses for its hand-authored
+ * `pages` beside its generated `objects`.
  *
  * ⛔ Do not drop the 4th argument to quiet a staleness report. Serving the
  * superseded draft is the bug; `check:i18n-stale-fill`'s UNSERVED PROVENANCE
  * verdict fails the build if a committed companion stops being consulted here.
  */
-const enSource: TranslationData = { objects: enObjects };
+const enSource: TranslationData = { objects: enObjects, pages: approvalsPageTranslations.en };
 
 export const ApprovalsTranslations: TranslationBundle = {
   en: enSource,
-  'zh-CN': withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
-  'ja-JP': withSourceFallback({ objects: jaJPObjects }, enSource, undefined, jaJPGeneratedSourceHashes),
-  'es-ES': withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),
+  'zh-CN': withSourceFallback(
+    { objects: zhCNObjects, pages: approvalsPageTranslations['zh-CN'] },
+    enSource, pageSourceHashes['zh-CN'], zhCNGeneratedSourceHashes,
+  ),
+  'ja-JP': withSourceFallback(
+    { objects: jaJPObjects, pages: approvalsPageTranslations['ja-JP'] },
+    enSource, pageSourceHashes['ja-JP'], jaJPGeneratedSourceHashes,
+  ),
+  'es-ES': withSourceFallback(
+    { objects: esESObjects, pages: approvalsPageTranslations['es-ES'] },
+    enSource, pageSourceHashes['es-ES'], esESGeneratedSourceHashes,
+  ),
 };
