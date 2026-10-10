@@ -2678,7 +2678,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         ['$User.Email', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
         ['$error.message', 'update_record', (v: unknown) => ({ objectName: 'task', filter: { id: '{record.id}' }, fields: { v } })],
         ['$User.Id', 'assignment', (v: unknown) => ({ assignments: { v } })],
-      ] as const)('`%s` in a %s value slot: each envelope it prescribes passes every judge with 0 refusals', (ref, type, configOf) => {
+      ] as const)('`%s` in the %s value slot: each envelope it prescribes passes every judge with 0 refusals', (ref, type, configOf) => {
         const fnds = bareDollar(valueFlow(type, configOf(ref)));
         expect(fnds).toHaveLength(1);
         const prescribed = prescribedSources(fnds[0]!.hint!);
