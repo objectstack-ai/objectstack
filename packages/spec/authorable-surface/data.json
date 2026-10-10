@@ -692,6 +692,7 @@
     "data/ObjectCapabilities:activities",
     "data/ObjectCapabilities:apiEnabled",
     "data/ObjectCapabilities:apiMethods",
+    "data/ObjectCapabilities:approvalsVisibleToReaders",
     "data/ObjectCapabilities:clone",
     "data/ObjectCapabilities:feeds",
     "data/ObjectCapabilities:files",
