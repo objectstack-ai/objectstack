@@ -82,7 +82,8 @@ describe('validatePageFieldBindings — highlights / KPI cards', () => {
       pages: [pageWith([
         {
           type: 'element:number',
-          properties: { object: 'crm_account', field: 'amount', aggregate: 'sum' },
+          dataSource: { object: 'crm_account' },
+          properties: { field: 'amount', aggregate: 'sum' },
         },
       ])],
     });

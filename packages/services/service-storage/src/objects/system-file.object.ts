@@ -1,6 +1,28 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { UploadScopeSchema, type UploadScope } from '@objectstack/spec/api';
+
+/**
+ * Display labels of the `scope` select, one per upload scope.
+ *
+ * The VALUES are not listed here: the select reads them off
+ * `UploadScopeSchema`, the one upload-scope list `@objectstack/spec` declares
+ * for the upload requests and the upload doors too (#22470), so the store, the
+ * request and the doors cannot drift apart. `Record<UploadScope, …>` makes a
+ * member added to that enum without a label here a compile error.
+ */
+const UPLOAD_SCOPE_LABELS: Record<UploadScope, string> = {
+  user: 'User',
+  tenant: 'Tenant',
+  private: 'Private',
+  temp: 'Temp',
+  // Files uploaded through the generic Attachments surface (#2727).
+  // Their only legitimate referrers are sys_attachment join rows, so
+  // this scope is the discriminator for orphan tombstoning (#2755) —
+  // field-attachment scopes above are never tombstoned.
+  attachments: 'Attachments',
+};
 
 /**
  * System File Object
@@ -62,19 +84,12 @@ export const SystemFile = ObjectSchema.create({
     // are rewritten to `user` by `backfill-sys-file-public-scope.ts`, the
     // operator step that must run before a copy of such a row can succeed.
     // Anonymous download is `acl: 'public_read'` and nothing else.
+    //
+    // The options are `UploadScopeSchema`'s values, in its order, each with
+    // its label above — the list the upload requests and doors read (#22470).
     scope: Field.select({
       label: 'Scope',
-      options: [
-        { label: 'User', value: 'user' },
-        { label: 'Tenant', value: 'tenant' },
-        { label: 'Private', value: 'private' },
-        { label: 'Temp', value: 'temp' },
-        // Files uploaded through the generic Attachments surface (#2727).
-        // Their only legitimate referrers are sys_attachment join rows, so
-        // this scope is the discriminator for orphan tombstoning (#2755) —
-        // field-attachment scopes above are never tombstoned.
-        { label: 'Attachments', value: 'attachments' },
-      ],
+      options: UploadScopeSchema.options.map((value) => ({ label: UPLOAD_SCOPE_LABELS[value], value })),
     }),
 
     bucket: Field.text({
