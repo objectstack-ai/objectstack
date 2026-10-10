@@ -102,6 +102,9 @@ import { valueSlotTemplateRefusals } from './flow-value-slot-template';
 // the single-brace tokens they still carry, composed into the screen and end
 // contracts below rather than re-spelled here.
 import { textSlotTemplateRefusal } from './flow-text-slot-template';
+// [#22502] The `$` names are the flow engine's at the binding keys too — the
+// one rule, composed into every `outputVariable` below rather than re-spelled.
+import { flowBoundVariableNameSchema } from './flow-bound-variable-name';
 // The one key a screen field's option is addressed by as text — the option
 // collision refusal below reads it, as `translateFlow` and the extractor do.
 import { flowScreenFieldOptionKey } from './flow-screen-option-key';
@@ -446,8 +449,9 @@ export const GetRecordConfigSchema = lazySchema(() => strictObject({
   /** Max records; >1 returns a `records` list, otherwise a single `record`. */
   limit: z.number().optional()
     .describe('Max records to return; >1 switches to a multi-record query'),
-  /** Flow variable the result is bound to. */
-  outputVariable: z.string().optional().describe('Flow variable the result is bound to'),
+  /** Flow variable the result is bound to — never a `$` name: those are the engine's (#22502). */
+  outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
+    .describe('Flow variable the result is bound to — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),
 }));
 
 export type GetRecordConfig = z.input<typeof GetRecordConfigSchema>;
@@ -472,9 +476,12 @@ export const CreateRecordConfigSchema = lazySchema(() => strictObject({
    */
   fields: z.record(z.string(), FlowValueSlotSchema).optional()
     .describe('Field values to write on the new record: each key is a field name, each value a CEL value envelope or a literal'),
-  /** Flow variable bound to the created record (`{var.id}` works even when the driver returns a bare id). */
-  outputVariable: z.string().optional()
-    .describe('Flow variable bound to the created record'),
+  /**
+   * Flow variable bound to the created record (`{var.id}` works even when the
+   * driver returns a bare id) — never a `$` name: those are the engine's (#22502).
+   */
+  outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
+    .describe('Flow variable bound to the created record — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),
 }));
 
 export type CreateRecordConfig = z.input<typeof CreateRecordConfigSchema>;
@@ -1054,9 +1061,9 @@ export const MapConfigSchema = lazySchema(() => strictObject({
   /** Params passed to each item's subflow; interpolated with the item variable bound. */
   input: z.record(z.string(), z.unknown()).optional()
     .describe("Params passed to each item's subflow (interpolated per item)"),
-  /** Variable the ordered list of per-item outputs is bound to. */
-  outputVariable: z.string().optional()
-    .describe("Each item's subflow output, collected in order"),
+  /** Variable the ordered list of per-item outputs is bound to — never a `$` name: those are the engine's (#22502). */
+  outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
+    .describe("Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
 }));
 
 export type MapConfig = z.input<typeof MapConfigSchema>;

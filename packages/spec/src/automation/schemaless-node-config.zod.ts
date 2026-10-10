@@ -111,6 +111,9 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
+// [#22502] The `$` names are the flow engine's at the binding keys too — the
+// one rule, composed into both `outputVariable` keys below.
+import { flowBoundVariableNameSchema } from './flow-bound-variable-name';
 import {
   AssignmentConfigSchema,
   CreateRecordConfigSchema,
@@ -301,9 +304,13 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
   /** Inputs passed to the function; values interpolate `{token}` templates against the live flow variables. */
   inputs: z.record(z.string(), z.unknown()).optional()
     .describe('Inputs passed to the function (values interpolate {token} templates)'),
-  /** Flow variable the function's RETURN value is bound to (pure-function pattern — data I/O stays on the graph). */
-  outputVariable: z.string().optional()
-    .describe("Flow variable the function's return value is bound to"),
+  /**
+   * Flow variable the function's RETURN value is bound to (pure-function
+   * pattern — data I/O stays on the graph) — never a `$` name: those are the
+   * engine's (#22502).
+   */
+  outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
+    .describe("Flow variable the function's return value is bound to — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
 
   // The four retired dispatch branches (#4343). Each tombstone carries its own
   // prescription because the three replacements are different mechanisms, not
@@ -380,9 +387,9 @@ export const SubflowConfigSchema = lazySchema(() => strictObject({
   /** Values passed to the child's input variables; `{token}` templates resolve against the parent's variables. */
   input: z.record(z.string(), z.unknown()).optional()
     .describe("Values passed to the subflow's input variables (interpolate {token} templates)"),
-  /** Parent flow variable the child's output is bound to. */
-  outputVariable: z.string().optional()
-    .describe("Parent flow variable the subflow's output is bound to"),
+  /** Parent flow variable the child's output is bound to — never a `$` name: those are the engine's (#22502). */
+  outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
+    .describe("Parent flow variable the subflow's output is bound to — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
 }));
 
 export type SubflowConfig = z.input<typeof SubflowConfigSchema>;
