@@ -427,10 +427,11 @@ describe('#15068 · 1 · the two rungs resolve to one read', () => {
         }
     });
 
-    it('[CONTROL] the same comparison DOES separate the two rungs for an overridable type', async () => {
-        // Anti-vacuity, and the reason the assertion above is a reading rather
-        // than a tautology: on `view` — `allowOrgOverride: true` — the org-first
-        // rung reads a partition the env-wide rung never touches.
+    it('[ADR-0131 D6] no type separates the two rungs any more — the formerly overridable `view` included', async () => {
+        // Before S5 this was the anti-vacuity control: on `view` the org-first
+        // rung read a partition the env-wide rung never touched. Every read is
+        // environment → code now, so the comparison is equal for every type —
+        // and the reads it compares were really issued (non-empty).
         const engine = seededStore();
         const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
 
@@ -439,8 +440,9 @@ describe('#15068 · 1 · the two rungs resolve to one read', () => {
         await protocol.getMetaItem({ type: 'view', name: 'anything' });
         const envWideReads = engine.metaReads.splice(0);
 
-        expect(JSON.stringify(orgFirstReads)).not.toBe(JSON.stringify(envWideReads));
-        expect(orgFirstReads.map((w: any) => w.organization_id)).toContain(ORG);
+        expect(orgFirstReads.length).toBeGreaterThan(0);
+        expect(JSON.stringify(orgFirstReads)).toBe(JSON.stringify(envWideReads));
+        expect(orgFirstReads.map((w: any) => w.organization_id ?? null)).not.toContain(ORG);
     });
 
     it('every partition the publish path touches for a seed is env-wide', async () => {
