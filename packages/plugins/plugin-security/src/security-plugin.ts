@@ -84,7 +84,7 @@ import {
   listSeedOrganizationIds,
   resolveOwnOrganizationRow,
   seedCtx,
-} from './per-organization-catalog.js';
+} from './organization-scope.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
@@ -4610,9 +4610,10 @@ export class SecurityPlugin implements Plugin {
     // The four steps are named ONCE and driven from two places (the boot sweep
     // below, and the organization-creation hook further down) so a newly
     // created organization can never be seeded differently from one present at
-    // boot. See `per-organization-catalog.ts` for the doctrine, the loud guard
-    // that stands in place of a reap, and why the boot sweep is O(changed
-    // declarations) rather than O(organizations x rows) of blind writes.
+    // boot. See `organization-scope.ts` for the doctrine and the loud guard
+    // that stands in place of a reap, and `rowMatchesDeclaration` for why the
+    // boot sweep is O(changed declarations) rather than O(organizations x rows)
+    // of blind writes.
     //
     // `organizationId` undefined is the `single`-posture pass and reproduces
     // the pre-existing organization-less behaviour exactly.

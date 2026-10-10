@@ -92,6 +92,24 @@
  * Any other status is FAILED as every REST 4xx is. The PUT is paced like
  * every other write verb.
  *
+ * ## The assignees leg — `pr_create` with `assignees`, the one request that reads an earlier answer
+ *
+ * The op table spells that leg's path with a placeholder and `fromAnswer:
+ * 'number'` (`ops.mjs`, its header). Within one action the requests run in
+ * order and each answer is kept; a descriptor carrying `fromAnswer` is
+ * filled from the PREVIOUS request's answer — `fillFromAnswer`: the field
+ * must be a positive integer, and the path is the placeholder replaced by
+ * it, so the pull the assignee lands on is the one the platform answered,
+ * ⛔ never one the request named. An answer without it is a FAILED action
+ * with the leg NOT SENT — its row says so, status `not sent` — and the
+ * stroke stops there as on any failure. The leg's landing is judged by its
+ * answer's `assignees` against `assigned`, the logins sent (`requestLanded`):
+ * GitHub documents a login the caller cannot apply as "silently ignored",
+ * the 201 still answered, so an answer listing fewer than sent is a FAILED
+ * action naming the missing login, never a quiet partial — and the row
+ * prints the assignees as the platform lists them (`resultOf`). The leg is
+ * paced like every other write verb.
+ *
  * ## The step summary — what a person reads back
  *
  * `$GITHUB_STEP_SUMMARY` gets one table per run: request id · sender and its
@@ -143,7 +161,7 @@ import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
 import { ANNOTATED_OPS, parseRelayAnnotation, RELAY_ANNOTATION_PREFIX, relayAnnotationMessage } from './dispatch.mjs';
-import { OPS, PERMISSIONS, PR_LANDED_STATE, transferRemedy } from './ops.mjs';
+import { OPS, PERMISSIONS, PR_LANDED_STATE, answerPlaceholder, transferRemedy } from './ops.mjs';
 import { PAYLOAD_ENV, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -216,9 +234,40 @@ export function requestLanded(req, { status, json } = {}) {
     }
     return { ok: true, why: '' };
   }
-  if (status >= 200 && status < 300) return { ok: true, why: '' };
+  if (status >= 200 && status < 300) {
+    // The assignees leg (header): a 2xx whose answer lists fewer logins than sent is a FAILED action, never a quiet partial.
+    if (Array.isArray(req.assigned)) {
+      const listed = assigneeLogins(json);
+      const missing = req.assigned.filter((login) => !listed.some((l) => l.toLowerCase() === login.toLowerCase()));
+      if (missing.length) {
+        return { ok: false, why: `HTTP ${status}, but the answer lists ${listed.length ? listed.join(', ') : 'no assignees'} — ${missing.join(', ')} not assigned (GitHub ignores a login the repository cannot assign without a word: it must be a collaborator the repository can assign)` };
+      }
+    }
+    return { ok: true, why: '' };
+  }
   if (status === 404 && req.idempotent404) return { ok: true, why: 'already absent', idempotent: true };
   return { ok: false, why: `HTTP ${status}${typeof json?.message === 'string' ? ` — ${json.message}` : ''}` };
+}
+
+/** The logins an issue or pull answer lists as assigned, in the platform's order; `[]` when it lists none. Pure. */
+export function assigneeLogins(json) {
+  return Array.isArray(json?.assignees) ? json.assignees.map((u) => (typeof u?.login === 'string' ? u.login : null)).filter(Boolean) : [];
+}
+
+/**
+ * A descriptor carrying `fromAnswer` filled from the PREVIOUS request's answer
+ * (header): `{ req }` with the placeholder replaced by the positive integer
+ * that answer carries at the field, or `{ fail }` — the sentence the row
+ * prints — when no answer carries it. Pure; never throws.
+ */
+export function fillFromAnswer(req, prev) {
+  const field = req.fromAnswer;
+  const placeholder = answerPlaceholder(field);
+  if (typeof req.path !== 'string' || !req.path.includes(placeholder)) return { fail: `the op table spells a fromAnswer leg whose path ${req.path} carries no ${placeholder} placeholder — a bug in ops.mjs, not in the payload` };
+  if (!prev) return { fail: `the op table spells a fromAnswer leg as the FIRST request of its action, so no answer carries ${field} yet — a bug in ops.mjs, not in the payload` };
+  const value = prev.json?.[field];
+  if (!Number.isInteger(value) || value < 1) return { fail: `${prev.call} answered HTTP ${prev.status} without a positive integer ${field} (got ${JSON.stringify(value ?? null)}), so the leg ${req.verb} ${req.path} was NOT SENT — read the pull on the board before anything else` };
+  return { req: { ...req, path: req.path.replaceAll(placeholder, String(value)) } };
 }
 
 /**
@@ -304,6 +353,8 @@ export function resultOf(req, json, status = null) {
   if (Number.isInteger(json.number)) bits.push(`#${json.number}`);
   else if (Number.isInteger(json.id)) bits.push(`id ${json.id}`);
   if (typeof json.html_url === 'string') bits.push(json.html_url);
+  // The assignees leg's row prints the assignees as the platform lists them (header).
+  if (Array.isArray(req.assigned)) bits.push(`· assignees ${assigneeLogins(json).join(', ') || 'none'}`);
   return bits.join(' ') || 'ok';
 }
 
@@ -501,7 +552,18 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   for (let i = 0; i < payload.actions.length && stoppedAt === null; i++) {
     const action = payload.actions[i];
     const requests = OPS[action.op].requests(action, payload.repo);
-    for (const req of requests) {
+    let prev = null;
+    for (const spelled of requests) {
+      // A leg that reads an earlier answer (header) is filled from the previous request's answer, or NOT SENT.
+      const filled = spelled.fromAnswer === undefined ? { req: spelled } : fillFromAnswer(spelled, prev);
+      if (filled.fail) {
+        const why = scrub(filled.fail, [token]);
+        rows.push({ action: i + 1, op: action.op, call: `${spelled.verb} ${spelled.path}`, status: 'not sent', result: `FAILED: ${why}` });
+        stoppedAt = { action: i + 1, op: action.op, why };
+        log(`  ✗ action ${i + 1} ${action.op}: ${why}`);
+        break;
+      }
+      const req = filled.req;
       let body = req.body ?? null;
       if (req.graphql) {
         const resolved = await graphqlVariables(req, payload, api, t);
@@ -516,6 +578,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       }
       // The GraphQL leg is spelled with its literal verb: every mutation is a POST to one path.
       const r = req.graphql ? await rest(api, '/graphql', { method: 'POST', body }, t) : await rest(api, req.path, { method: req.verb, body }, t);
+      prev = r;
       // The base sync is confirmed by MEASURE (header): the head polled off the expected sha, or a 422 judged by the compare.
       const landed = req.updateBranch ? await confirmUpdateBranch(req, r, payload, api, t, ub) : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
@@ -558,6 +621,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the GraphQL ops: the node id first, then the mutation; an errors array is a failure': 5,
   'the PR-state landing: a 200 lands only when the answer SHOWS the state the op asked for — armed or queued for auto-merge, off for its disable, ready and draft for the flips': 12,
   "the base sync: the PUT carries the expected head; a 202 is confirmed by polling the head off that sha inside the window and reading the merge commit's author; a 422 is a no-op only when the compare measures the head not behind its base; a moved head, a head still behind, an unreadable measure or an expired window is FAILED with nothing after it attempted": 10,
+  "the assignees leg: pr_create with assignees is the create, then ONE POST to the created pull's issue-assignees endpoint at the number the create ANSWERED — never the request; the answer must list every login sent; no assignees, no second request; an answer without a number stops the stroke with the leg not sent": 11,
   'the summary: request, sender and role, session, target, one row per request': 5,
   'redaction: the token reaches no summary line, log line or error': 3,
   'the wiring: both halves around every write verb, on the roster': 4,
@@ -566,7 +630,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
   'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
 });
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 15;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -821,6 +885,35 @@ export async function selfTest() {
       t("any other answer is FAILED with the platform's sentence, nothing polled", [denied.exit, denied.rows[0]?.result.includes('Resource not accessible by integration'), polls(denied)], [EXIT_ACTION_FAILED, true, 0]);
     }
 
+    // ── the assignees leg ───────────────────────────────────────────────────
+    battery("the assignees leg: pr_create with assignees is the create, then ONE POST to the created pull's issue-assignees endpoint at the number the create ANSWERED — never the request; the answer must list every login sent; no assignees, no second request; an answer without a number stops the stroke with the leg not sent");
+    {
+      const PULLS = `POST /repos/${REPO}/pulls`;
+      const ASSIGN = (n) => `POST /repos/${REPO}/issues/${n}/assignees`;
+      const create = (assignees, extra = []) => base([{ op: 'pr_create', title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', ...(assignees ? { assignees } : {}) }, ...extra]);
+      const opened = { status: 201, json: { number: 22700, html_url: `https://github.test/${REPO}/pull/22700` } };
+      const assignedTo = (logins, n = 22700) => ({ status: 201, json: { number: n, html_url: `https://github.test/${REPO}/pull/${n}`, assignees: logins.map((login) => ({ login })) } });
+
+      const legs = OPS.pr_create.requests({ op: 'pr_create', title: 'T', head: 'h', base: 'main', assignees: ['marchtian'] }, REPO);
+      t('the table half: with assignees the row is two requests — the draft create, then a POST to the issue-assignees path at the placeholder, carrying fromAnswer number and the logins as assigned', legs.map((r) => [r.verb, r.path, r.body, r.fromAnswer ?? null, r.assigned ?? null]), [['POST', `/repos/${REPO}/pulls`, { title: 'T', head: 'h', base: 'main', draft: true }, null, null], ['POST', `/repos/${REPO}/issues/${answerPlaceholder('number')}/assignees`, { assignees: ['marchtian'] }, 'number', ['marchtian']]]);
+      t('the fill: the placeholder becomes the positive integer the previous answer carries at that field, and nothing else about the leg changes', fillFromAnswer(legs[1], { call: 'POST /x', status: 201, json: { number: 22700 } }).req, { ...legs[1], path: `/repos/${REPO}/issues/22700/assignees` });
+      t('…a previous answer without it — absent, a numeric string, zero, a float — or no previous answer at all, is a refusal to send that names the field', [{ json: {} }, { json: { number: '22700' } }, { json: { number: 0 } }, { json: { number: 1.5 } }, null].map((prev) => { const f = fillFromAnswer(legs[1], prev ? { call: 'POST /x', status: 201, ...prev } : null).fail; return typeof f === 'string' && f.includes('number'); }), [true, true, true, true, true]);
+
+      const ok = await run(create(['marchtian']), { ...allowed, [PULLS]: opened, [ASSIGN(22700)]: assignedTo(['marchtian']) }, { file: paceFile });
+      t('the run: the create, then the assignee POST at the number the create ANSWERED, both under the App token — exit 0', [ok.exit, writes(ok.seen).map((s) => [s.call, s.body, s.auth === `Bearer ${TOKEN}`])], [EXIT_OK, [[PULLS, { title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', draft: true }, true], [ASSIGN(22700), { assignees: ['marchtian'] }, true]]]);
+      t("…and the leg's row prints the pull and the assignees as the platform lists them", ok.rows.map((r) => [r.action, r.op, r.call, r.status, r.result]), [[1, 'pr_create', PULLS, 201, `#22700 https://github.test/${REPO}/pull/22700`], [1, 'pr_create', ASSIGN(22700), 201, `#22700 https://github.test/${REPO}/pull/22700 · assignees marchtian`]]);
+      const plain = await run(create(null), { ...allowed, [PULLS]: opened }, { file: paceFile });
+      t('no assignees, no second request: the create alone, as before', [plain.exit, writes(plain.seen).map((s) => s.call)], [EXIT_OK, [PULLS]]);
+      const dropped = await run(create(['marchtian', 'nobody-here'], [{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: opened, [ASSIGN(22700)]: assignedTo(['marchtian']), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
+      t('⛔ a 201 whose answer lists fewer logins than sent is a FAILED action naming the one not assigned — never a quiet partial — and the stroke stops there', [dropped.exit, dropped.rows[1]?.result.includes('nobody-here not assigned'), dropped.rows[1]?.result.includes('lists marchtian'), writes(dropped.seen).length, dropped.summary.includes('1 later action(s) NOT attempted')], [EXIT_ACTION_FAILED, true, true, 2, true], dropped.rows[1]?.result);
+      t('…a login is matched as GitHub matches one, case-insensitively', requestLanded({ verb: 'POST', path: '/x', assigned: ['MarchTian'] }, { status: 201, json: { assignees: [{ login: 'marchtian' }] } }).ok, true);
+      const blank = await run(create(['marchtian'], [{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: { status: 201, json: { html_url: 'https://github.test/x' } }, [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
+      t('a create whose answer carries no number: the create landed, the leg was NOT SENT (its row says so, no assignee POST left), exit 5, the later action never attempted', [blank.exit, blank.rows.map((r) => [r.status, r.result.startsWith('FAILED') ? r.result.includes('NOT SENT') : r.result]), writes(blank.seen).map((s) => s.call)], [EXIT_ACTION_FAILED, [[201, 'https://github.test/x'], ['not sent', true]], [PULLS]]);
+      const refused = await run(create(['marchtian']), { ...allowed, [PULLS]: opened, [ASSIGN(22700)]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t("a refused assignee POST is a FAILED action with the platform's sentence, the pull already open", [refused.exit, refused.rows.map((r) => r.status), refused.rows[1]?.result.includes('Resource not accessible by integration')], [EXIT_ACTION_FAILED, [201, 403], true]);
+      t('no annotation is emitted for it — pr_create is not an annotated op, assignees or not', [ok.annotations, ok.logs.some((l) => l.startsWith('::notice'))], [[], false]);
+    }
+
     // ── the transfer ────────────────────────────────────────────────────────
     battery('the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure');
     {
@@ -1053,7 +1146,7 @@ export async function selfTest() {
   console.log(
     `✓ fleet-write/execute self-test: ${cases.length} cases pass across ${declared.length} batteries — the sender gate from the target repo's answer, ` +
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
-      'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, a transfer gated on both repositories and landing only on its target, one summary row per request, ' +
+      'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, an assignees leg sent to the number the create answered and landing only when its answer lists every login sent, a transfer gated on both repositories and landing only on its target, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, and a known " +
       'token that came back out of NO summary, log or error.',
   );
