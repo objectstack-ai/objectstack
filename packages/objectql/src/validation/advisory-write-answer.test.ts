@@ -127,7 +127,9 @@ function makeMemoryDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      return [...storeFor(object).values()].filter((r) => matches(r, ast?.where));
+      const rows = [...storeFor(object).values()].filter((r) => matches(r, ast?.where));
+      // The caller's bound, AFTER the filter and by PRESENCE.
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;

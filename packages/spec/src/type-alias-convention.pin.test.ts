@@ -789,6 +789,7 @@ export type Iso_data_dataEngine__DroppedFieldsEventSchema = Assert<Eq< z.input< 
 export type Iso_data_dataEngine__EngineCountOptionsSchema = Assert<Eq< z.input< typeof M56.EngineCountOptionsSchema >, z.infer< typeof M56.EngineCountOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineDeleteOptionsSchema = Assert<Eq< z.input< typeof M56.EngineDeleteOptionsSchema >, z.infer< typeof M56.EngineDeleteOptionsSchema > >>;
 export type Iso_data_dataEngine__EngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.EngineUpdateOptionsSchema >, z.infer< typeof M56.EngineUpdateOptionsSchema > >>;
+export type Iso_data_dataEngine__ValidationAdvisoryEventSchema = Assert<Eq< z.input< typeof M56.ValidationAdvisoryEventSchema >, z.infer< typeof M56.ValidationAdvisoryEventSchema > >>;
 
 // data/datasource.zod.ts
 export type Iso_data_datasource__DriverDefinitionSchema = Assert<Eq< z.input< typeof M57.DriverDefinitionSchema >, z.infer< typeof M57.DriverDefinitionSchema > >>;
