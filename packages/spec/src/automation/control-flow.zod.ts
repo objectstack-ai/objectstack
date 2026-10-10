@@ -86,6 +86,9 @@ import { strictObject } from '../shared/strict-object';
 import { FlowNodeSchema, FlowEdgeSchema } from './flow.zod';
 import type { FlowNodeParsed, FlowEdgeParsed } from './flow.zod';
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
+// [#22502] The `$` names are the flow engine's at the binding keys too — the
+// one rule, composed into `try_catch`'s `errorVariable` below.
+import { ENGINE_ERROR_VARIABLE, flowBoundVariableNameSchema } from './flow-bound-variable-name';
 
 /**
  * Shared history sentence for the five shapes in this file — one silence, one
@@ -325,8 +328,13 @@ export const TryCatchConfigSchema = lazySchema(() => strictObject(
   {
     try: FlowRegionSchema.describe('Protected region'),
     catch: FlowRegionSchema.optional().describe('Handler region run when the try region fails'),
-    /** Variable the caught error is bound to inside the catch region. */
-    errorVariable: z.string().default('$error').describe('Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, `code` when the failing node carried a platform-classified error code (ADR-0112 — branch on `$error.code` to tell "the row is already there" from "the store is down"), and `iteration` / `item` when the failure happened inside a loop body'),
+    /**
+     * Variable the caught error is bound to inside the catch region: the
+     * engine's own `$error` (the default), or a name without a leading `$` —
+     * any other `$` name is the engine's, and a text slot could not read it
+     * (#22502).
+     */
+    errorVariable: flowBoundVariableNameSchema('errorVariable').default(ENGINE_ERROR_VARIABLE).describe('Variable holding the caught error in the catch region — `$error` (the default), or a name without a leading `$` read as `{{ name.message }}`; any other `$` name is the flow engine\'s own and refused. The value is a `TryCatchErrorValue`: `nodeId`, `message`, `code` when the failing node carried a platform-classified error code (ADR-0112 — branch on `$error.code` to tell "the row is already there" from "the store is down"), and `iteration` / `item` when the failure happened inside a loop body'),
     retry: RetryPolicySchema.optional().describe('Optional retry policy for the try region'),
   },
 ));
