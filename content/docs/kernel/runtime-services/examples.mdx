@@ -82,7 +82,7 @@ export const RollUpOrderTotals = defineFlow({
       label: 'Sum the lines',
       config: {
         function: 'sales.orderTotals',
-        inputs: { lines: '{lines}' },
+        inputs: { lines: { dialect: 'cel', source: 'lines' } }, // the list itself, type kept
         outputVariable: 'totals',
       },
     },
