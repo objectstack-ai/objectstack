@@ -2,6 +2,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema, HttpConfigSchema, FlowSchema, NotifyConfigSchema, textSlotTemplateRefusal } from '@objectstack/spec/automation';
+// [#19939] The value-slot judge, asked by the `flow-bare-dollar-reference` pins
+// below for the spelling its hint must carry and for the verdict on it.
+import { flowNodeValueTemplateRefusals, VALUE_SLOT_TEMPLATE_REFUSAL, valueSlotTemplateRefusals } from '@objectstack/spec/automation';
 import { TYPED_EXPRESSION_DIALECT_ONLY, TYPED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
 // [#5659] The shared identity reduction, asserted beside the rule that consumes
 // it — the rule's verdict and the drivers' verdict are one object now.
@@ -2543,7 +2546,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         const refusal = textSlotTemplateRefusal('{{ $User.Id }}');
         expect(refusal).toBeDefined();
         expect(fnds[0].hint).toContain(refusal!);
-        expect(fnds[0].hint).toContain("assignments: { v: '{$User.Id}' }");
+        expect(fnds[0].hint).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
         expect(fnds[0].hint).not.toContain('{{ $User.Id }}');
       });
 
@@ -2560,6 +2563,141 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(fnds[0].hint).toContain('`{{ $error.message }}`');
         expect(fnds[0].hint).toContain(textSlotTemplateRefusal('{{ $User.Id }}')!);
         expect(fnds[0].hint).not.toContain('{{ $User.Id }}');
+      });
+      // [#19939] What the hint prescribes in a text slot, put back in the
+      // slot, is refused by no judge the slot has: the hole for an
+      // engine-bound reference, and for the run user the judge's own remedy —
+      // its id computed by an `assignment` node's CEL envelope, written as a hole.
+      it('each spelling it prescribes passes the text-slot judge and the build door with 0 refusals', () => {
+        const [errorRef] = notifyText('Failed: $error.message');
+        const hole = /`(\{\{ [^`]* \}\})`/.exec(errorRef!.hint!)?.[1];
+        expect(hole).toBe('{{ $error.message }}');
+        const [userRef] = notifyText('Closed by $User.Id');
+        const computed = /assignments: \{ v: \{ dialect: 'cel', source: '([^']*)' \} \}/.exec(userRef!.hint!)?.[1];
+        expect(computed).toBe('current_user.id');
+        const title = `Failed: ${hole}, closed by {{ v }}`;
+        expect(textSlotTemplateRefusal(title)).toBeUndefined();
+        const stack = {
+          flows: [{
+            name: 'fault_notice', label: 'Fault notice', type: 'autolaunched',
+            nodes: [
+              { id: 'start', type: 'start', label: 'Start' },
+              { id: 'who', type: 'assignment', label: 'Who', config: { assignments: { v: CEL(computed!) } } },
+              { id: 'tell', type: 'notify', label: 'Tell', config: { recipients: ['u1'], title } },
+              { id: 'done', type: 'end', label: 'Done' },
+            ],
+            edges: [
+              { id: 'e1', source: 'start', target: 'who' },
+              { id: 'e2', source: 'who', target: 'tell' },
+              { id: 'e3', source: 'tell', target: 'done' },
+            ],
+          }],
+        };
+        expect(validateStackExpressions(stack).filter((i) => i.severity === 'error')).toEqual([]);
+        expect(lintFlowPatterns(stack).filter((f) => f.rule === FLOW_BARE_DOLLAR_REF || f.rule === FLOW_DOUBLE_BRACE_INTERP)).toEqual([]);
+      });
+    });
+
+    // [#19939] A value slot (`create_record` / `update_record` `fields.*`,
+    // `assignment` values) reads the CEL value envelope, and refuses every
+    // `{…}` token but the date macros — `{$User.*}` since the second pass. So
+    // the hint there names the envelope the spec's value-slot judge writes for
+    // the token the reference names, asked of the judge and never re-spelled,
+    // and each envelope it prescribes, put back in the slot, passes every
+    // judge the slot has: the value-slot judge, the build door, the flow
+    // contract and this rule.
+    describe('in a value slot', () => {
+      /** A start → write → end flow, the whole shape the build door judges. */
+      function valueFlow(type: string, config: Record<string, unknown>) {
+        return {
+          flows: [{
+            name: 'stamp_owner', label: 'Stamp owner', type: 'autolaunched',
+            nodes: [
+              { id: 'start', type: 'start', label: 'Start' },
+              { id: 'write', type, label: 'Write', config },
+              { id: 'done', type: 'end', label: 'Done' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'write' }, { id: 'e2', source: 'write', target: 'done' }],
+          }],
+        };
+      }
+      const bareDollar = (stack: ReturnType<typeof valueFlow>) =>
+        lintFlowPatterns(stack).filter((f) => f.rule === FLOW_BARE_DOLLAR_REF);
+      /** The value-slot judge's own CEL spelling of a `{…}` token — what the hint carries word for word. */
+      const judgeSpelling = (token: string) =>
+        valueSlotTemplateRefusals(token)[0]!.message.slice(VALUE_SLOT_TEMPLATE_REFUSAL.length).trim();
+      /** Every concrete envelope source a hint prescribes; the `'…'` of its lead sentence is a placeholder. */
+      function prescribedSources(hint: string): string[] {
+        const out: string[] = [];
+        for (const m of hint.matchAll(/\{ dialect: 'cel', source: (?:'([^']*)'|("(?:[^"\\]|\\.)*")) \}/g)) {
+          const source = m[1] ?? (JSON.parse(m[2]!) as string);
+          if (source !== '…') out.push(source);
+        }
+        return out;
+      }
+      /** The refusals of the slot's judges on `stack`'s write node. */
+      function refusalsOf(stack: ReturnType<typeof valueFlow>) {
+        const node = stack.flows[0]!.nodes[1]!;
+        const parsed = FlowSchema.safeParse(stack.flows[0]);
+        return {
+          valueJudge: flowNodeValueTemplateRefusals(node.type, node.config).length,
+          buildDoor: validateStackExpressions(stack).filter((i) => i.severity === 'error').length,
+          contract: parsed.success ? 0 : parsed.error.issues.length,
+          lint: lintFlowPatterns(stack).filter((f) => f.rule === FLOW_BARE_DOLLAR_REF || f.rule === FLOW_DOUBLE_BRACE_INTERP).length,
+        };
+      }
+      const NONE = { valueJudge: 0, buildDoor: 0, contract: 0, lint: 0 };
+
+      it('names the CEL envelope, not a `{…}` token the slot refuses (`fields: { owner: \'$User.Id\', who: \'$source.id\' }`)', () => {
+        const fnds = bareDollar(valueFlow('create_record', { objectName: 'task', fields: { owner: '$User.Id', who: '$source.id' } }));
+        expect(fnds).toHaveLength(2);
+        for (const f of fnds) {
+          expect(f.message).toContain('in the create_record field value');
+          expect(f.hint).toContain('A value slot reads a CEL value envelope');
+          expect(f.hint).not.toContain('Wrap it and bind a variable');
+        }
+        const [owner, who] = fnds;
+        // The run user: the judge's remedy for `{$User.Id}` — `current_user.id`, and the guard.
+        expect(owner!.hint).toContain(judgeSpelling('{$User.Id}'));
+        expect(prescribedSources(owner!.hint!)).toEqual(['current_user.id', 'current_user != null ? current_user.id : null']);
+        // `$source` is no `$` variable the engine binds: the flow's own `source`, written without the `$`.
+        expect(who!.hint).toContain(judgeSpelling('{source.id}'));
+        expect(prescribedSources(who!.hint!)).toEqual(['source.id']);
+      });
+
+      it('reads a `$` root the engine binds as that variable (`$error.message`)', () => {
+        const [f] = bareDollar(valueFlow('update_record', { objectName: 'task', filter: { id: '{record.id}' }, fields: { note: '$error.message' } }));
+        expect(f!.message).toContain('in the update_record field value');
+        expect(f!.hint).toContain(judgeSpelling('{$error.message}'));
+        expect(prescribedSources(f!.hint!)).toEqual(['vars["$error"].message']);
+      });
+
+      it.each([
+        ['$User.Id', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
+        ['$source.id', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
+        ['$User.Email', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
+        ['$error.message', 'update_record', (v: unknown) => ({ objectName: 'task', filter: { id: '{record.id}' }, fields: { v } })],
+        ['$User.Id', 'assignment', (v: unknown) => ({ assignments: { v } })],
+      ] as const)('`%s` in the %s value slot: each envelope it prescribes passes every judge with 0 refusals', (ref, type, configOf) => {
+        const fnds = bareDollar(valueFlow(type, configOf(ref)));
+        expect(fnds).toHaveLength(1);
+        const prescribed = prescribedSources(fnds[0]!.hint!);
+        expect(prescribed.length, fnds[0]!.hint).toBeGreaterThan(0);
+        for (const source of prescribed) {
+          expect(refusalsOf(valueFlow(type, configOf(CEL(source)))), `${ref} → ${source}`).toEqual(NONE);
+        }
+      });
+
+      it('control: both spellings the hint used to prescribe are refused in the same slot', () => {
+        for (const old of ['{source.id}', '{$User.Id}']) {
+          expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { v: old } })).valueJudge, old).toBe(1);
+        }
+      });
+
+      it('control: outside the value and text slots the single brace still resolves, and the hint still names it', () => {
+        const [f] = lintFlowPatterns(httpFlow({ ticket: '$source.id' })).filter((x) => x.rule === FLOW_BARE_DOLLAR_REF);
+        expect(f!.hint).toContain('Wrap it and bind a variable: `{source.id}`');
+        expect(flowNodeValueTemplateRefusals('http', httpPushConfig({ ticket: '{source.id}' }))).toEqual([]);
       });
     });
   });

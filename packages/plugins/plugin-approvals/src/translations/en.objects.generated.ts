@@ -206,6 +206,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             label: "What changed?"
           }
         }
+      },
+      approval_comment: {
+        label: "Reply",
+        successMessage: "Reply posted.",
+        params: {
+          comment: {
+            label: "Comment"
+          },
+          attachments: {
+            label: "Attachments"
+          }
+        }
       }
     }
   },
