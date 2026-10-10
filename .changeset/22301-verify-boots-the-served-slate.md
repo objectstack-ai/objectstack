@@ -8,7 +8,7 @@
 
 `bootStack` mounts the always-on capability slate `objectstack serve` mounts for every app, and builds each provider from the app's configuration the way `serve` builds it
 
-Clause-②: yes (narrowing)
+Clause-②: yes (narrowing: a configuration whose mail or SMS settings, or the OS_EMAIL_* / OS_SMS_* environment, name a transport that cannot deliver, or whose analytics cubes the analytics service refuses, now fails bootStack where it booted; widening: bootStack mounts the always-on slate objectstack serve mounts for every app and hands each provider the app's configuration, where it mounted fewer and built them with defaults)
 
 <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the in-process verification boot of @objectstack/verify: a configuration whose mail or SMS settings (or the OS_EMAIL_* / OS_SMS_* environment) name a transport that cannot deliver, or whose analytics cubes the analytics service refuses, now fails the boot where the provider was absent or built with defaults. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the narrowed surface is a runtime boot function, not an interface or a type (not runtime-interface-only / type-surface-only). -->
 
