@@ -25,10 +25,10 @@
  * - a comment and a request-info question ARE the body their recipient gets;
  * - every notification carries a non-empty `body` and no field outside the
  *   payload `notify()` declares — so a second spelling of the text is red;
- * - the battery reaches every call site that can notify anyone — eleven of
- *   the twelve — so neither pin passes over a site it never drove.
+ * - the battery reaches every call site that can notify anyone — twelve of
+ *   the thirteen — so neither pin passes over a site it never drove.
  *
- * The twelfth, the reminder to a slot literal (`position:<p>`), never reaches
+ * The thirteenth, the reminder to a slot literal (`position:<p>`), never reaches
  * messaging at all: `notify()` drops every audience entry that is a slot
  * address, and that reminder's audience is nothing else. Its payload is held
  * to the same declared shape by the compiler, not by this battery.
@@ -205,8 +205,16 @@ describe('every approval notification carries its text in body', () => {
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
-  it('the battery reaches every call site that can notify anyone — eleven of the twelve', () => {
+  it('the battery reaches every call site that can notify anyone — twelve of the thirteen', () => {
     expect(new Set(emits.map(siteOf))).toEqual(new Set([
+      // The opening tells each concrete approver on every request the battery
+      // opens — all but `ooo`, whose one approver is the delegate, told once
+      // by `approval.ooo_substituted` instead.
+      'approval.requested@thread',
+      'approval.requested@revise',
+      'approval.requested@budget',
+      'approval.requested@sla_notify',
+      'approval.requested@sla_reassign',
       'approval.ooo_substituted@ooo',
       'approval.ooo_skipped@ooo',
       'approval.returned@budget',

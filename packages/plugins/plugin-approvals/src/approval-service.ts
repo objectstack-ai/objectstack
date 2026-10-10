@@ -2962,6 +2962,9 @@ export class ApprovalService implements IApprovalService {
    * on the node's declared `fallbackApprovers` instead, resolved through the
    * same expansion as `approvers`. The return type is unchanged for that
    * policy: from the flow node's side it is an ordinary pending request.
+   *
+   * A request that opens tells each concrete approver on its slate, once, on
+   * the `approval.requested` topic (see the fan-out at the end of the body).
    */
   async openNodeRequest(
     input: {
@@ -3268,6 +3271,47 @@ export class ApprovalService implements IApprovalService {
         input.object, input.recordId, input.config.approvalStatusField, 'pending',
         row.submitter_id ?? null,
       );
+    }
+
+    // [#22607] Tell each approver the step landed on them — the one lifecycle
+    // step that used to publish nothing, so an approval ladder waited in
+    // silence until someone happened to open the inbox. It goes out through
+    // `notify()`, the same single ingress (ADR-0030) and the same payload
+    // shape as `approval.reminder` and every other sibling: ⛔ no second
+    // notification path. Sent last, once every write above has landed, so no
+    // one is told about a request that failed half-way through opening; and
+    // best-effort like every `notify()` — a failing channel logs and never
+    // fails the opening.
+    //
+    // Who is told is the reminder's recipient rule, read off the slate this
+    // request actually opened on (after OOO delegation and after an
+    // `onEmptyApprovers: 'fallback'` replacement):
+    //  - each CONCRETE approver (a user id or an email), once — a person the
+    //    slate lists under two groups (per_group tagging) is one person;
+    //  - never a `type:value` literal: an unstaffed position / team names no
+    //    one, and `notify()` drops every slot address anyway. So a slate of
+    //    literals only — what `admin_rescue` opens — notifies nobody, and an
+    //    `auto_approve` / `fail` empty slate opened no request to tell anyone
+    //    about: `onEmptyApprovers` decides that case, not this fan-out;
+    //  - not an out-of-office DELEGATE, who was already told above by
+    //    `approval.ooo_substituted` — one message per approver, not two.
+    // No one-tap decision links: ADR-0043 mints those on `remind()` only, and
+    // minting bearer tokens on every opening is a decision this does not make.
+    const toldByOoo = new Set(substitutions.map((sub) => sub.to));
+    const openedOn = new Set(approvers.filter((a) => a && !a.includes(':') && !toldByOoo.has(a)));
+    for (const approver of openedOn) {
+      await this.notify({
+        topic: 'approval.requested',
+        audience: [approver],
+        actorContext: context,
+        source: { object: 'sys_approval_request', id },
+        dedupKey: `approval-requested-${id}-${approver}`,
+        payload: {
+          title: 'Approval requested',
+          body: `A decision on ${input.object}/${input.recordId} is waiting on you.`,
+          actionUrl: '/system/approvals',
+        },
+      });
     }
 
     return rowFromRequest(row);
