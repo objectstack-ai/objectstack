@@ -2687,6 +2687,11 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         ['$User.Email', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
         ['$error.message', 'update_record', (v: unknown) => ({ objectName: 'task', filter: { id: '{record.id}' }, fields: { v } })],
         ['$User.Id', 'assignment', (v: unknown) => ({ assignments: { v } })],
+        // [#19939] The maps a node hands to a callee joined the value slots:
+        // the hint flips there by asking the judge, with no line of its own.
+        ['$source.id', 'subflow', (v: unknown) => ({ flowName: 'child_flow', input: { v } })],
+        ['$User.Id', 'map', (v: unknown) => ({ flowName: 'child_flow', collection: '{rows}', input: { v } })],
+        ['$error.message', 'script', (v: unknown) => ({ function: 'score', inputs: { v } })],
       ] as const)('`%s` in the %s value slot: each envelope it prescribes passes every judge with 0 refusals', (ref, type, configOf) => {
         const fnds = bareDollar(valueFlow(type, configOf(ref)));
         expect(fnds).toHaveLength(1);
@@ -2695,6 +2700,26 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         for (const source of prescribed) {
           expect(refusalsOf(valueFlow(type, configOf(CEL(source)))), `${ref} → ${source}`).toEqual(NONE);
         }
+      });
+
+      // [#19939] `subflow.input`, `map.input` and `script.inputs` are value
+      // slots now. Before, the hint there named `{source.id}` — the single
+      // brace the interpolator resolved — and that spelling is refused there
+      // now; the hint names the envelope, with the callee sentence the judge
+      // gives at that position.
+      it.each([
+        ['subflow', 'subflow input value', { flowName: 'child_flow', input: { who: '$source.id' } }, "the child flow's input variable `who`"],
+        ['map', 'map item input value', { flowName: 'child_flow', collection: '{rows}', input: { who: '$source.id' } }, "each item's child flow's input variable `who`"],
+        ['script', 'script input value', { function: 'score', inputs: { who: '$source.id' } }, "the function's `input.who`"],
+      ] as const)('%s: names the CEL envelope and what the callee is handed, not `{source.id}`', (type, label, config, callee) => {
+        const [f] = bareDollar(valueFlow(type, config));
+        expect(f!.message).toContain(`in the ${label}`);
+        expect(f!.hint).toContain('A value slot reads a CEL value envelope');
+        expect(f!.hint).not.toContain('Wrap it and bind a variable');
+        expect(prescribedSources(f!.hint!)).toEqual(['source.id']);
+        expect(f!.hint).toContain(callee);
+        expect(refusalsOf(valueFlow(type, { ...config, [type === 'script' ? 'inputs' : 'input']: { who: '{source.id}' } })).valueJudge)
+          .toBe(1);
       });
 
       it('control: both spellings the hint used to prescribe are refused in the same slot', () => {
@@ -2809,6 +2834,20 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         const [f] = doubleBrace(valueFlow('assignment', { assignments: { o: { t: '{{ record.title }}' } } }));
         expect(f!.message).toContain('the assignment value reads a CEL value envelope');
         expect(prescribedSources(f!.hint!)).toEqual(["{'t': record.title}"]);
+      });
+
+      // [#19939] A callee's input map is a value slot now: the hint names the
+      // envelope there too, by asking the judge — no line of its own.
+      it.each([
+        ['subflow', 'subflow input value', (v: unknown) => ({ flowName: 'child_flow', input: { subject: v } })],
+        ['map', 'map item input value', (v: unknown) => ({ flowName: 'child_flow', collection: '{rows}', input: { subject: v } })],
+        ['script', 'script input value', (v: unknown) => ({ function: 'score', inputs: { subject: v } })],
+      ] as const)('in a %s input: names the envelope for the hole it means', (type, label, configOf) => {
+        const [f] = doubleBrace(valueFlow(type, configOf('Re: {{ record.title }}')));
+        expect(f!.message).toContain(`the ${label} reads a CEL value envelope, not a template`);
+        expect(f!.hint).not.toContain('Use `{var}`');
+        expect(prescribedSources(f!.hint!)).toEqual(["'Re: ' + record.title"]);
+        expect(refusalsOf(valueFlow(type, configOf(CEL("'Re: ' + record.title"))))).toEqual(NONE);
       });
 
       it('control: outside the value and text slots the single brace still resolves, and the double-brace hint still names it', () => {
