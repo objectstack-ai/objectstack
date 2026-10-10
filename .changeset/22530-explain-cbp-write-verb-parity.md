@@ -1,0 +1,11 @@
+---
+'@objectstack/plugin-security': patch
+---
+
+`security/explain` answers a delete and a transfer of a `controlled_by_parent` record the way each verb's own door answers it: their record verdicts now come from the master-detail write check (ADR-0055), as the update's already did.
+
+- **What was wrong.** The write path runs the master-detail write check on every by-id write of such a record (an update, a delete, a transfer), and hands the record's platform ownership floor over to that check. explain asked the check for an update only.
+  - A delete kept its `owner_only_deletes` floor. A principal who may edit the master but did not create the record was explained as refused (`decidedBy: 'rls'`) beside a `DELETE` that answers `200`. A principal who may not edit the master was refused on that floor, with no word about the master, beside a `DELETE` whose `403` names the master.
+  - A transfer asked only the sharing service's per-record gate, which abstains on such a record. A principal who may not edit the master was explained as allowed to transfer it, beside the `PATCH` that writes `owner_id` and answers `403`.
+- **What it does now.** For an update, a delete or a transfer of a record that exists (and a restore or a purge, which the object gate still refuses to everyone), explain asks the security service's `checkControlledByParentWrite` with the context it is explaining. The check judges edit access to the master whatever the record's own verb, so its answer is each verb's answer. A `deny` or `unresolvable` outcome makes the record not writable, decided by the `sharing` layer, whose record attribution names the verb and the refusing leg (or the reason no verdict was reached). A delete's row-level composition carries the write path's master-gate coverage vouch, as an update's does, so the ownership floor is handed over as the write path hands it, and never on behalf of a delegator.
+- **What is unchanged.** Every object that is not `controlled_by_parent`. Object-level reports (no `recordId`). The `allowed` field. A `create` asks no master check: the write path reads an insert's master from the request body, which an explanation does not carry. The `ExplainEngineDeps` type: the `checkControlledByParentWrite` dependency keeps its signature and is now asked for every by-id write, not only an update.

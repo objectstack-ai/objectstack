@@ -141,6 +141,21 @@ function hasStorageDriverPlugin(plugins: readonly unknown[]): boolean {
 }
 
 /**
+ * [#22371] `os serve`'s `plugins`: the stack's own, and under `--dev` its
+ * `devPlugins` after them — the list `serve` registers, and the one its auth
+ * gate reads. `os migrate security-catalog-overlays --dev` composes the same
+ * list, so the merge is declared once, here. Keyed on the FLAG, as on `serve`:
+ * `NODE_ENV=development` alone merges nothing.
+ *
+ * With nothing to merge, the answer is the stack's own array itself.
+ */
+export function stackBootPlugins(stack: unknown, dev: boolean | undefined): unknown[] {
+  const bag = asBag(stack);
+  const plugins = (bag?.plugins || []) as unknown[];
+  return dev && bag?.devPlugins ? [...plugins, ...(bag.devPlugins as unknown[])] : plugins;
+}
+
+/**
  * `os serve` step 1 — should this boot auto-register the ObjectQL engine?
  *
  * ⚠️ The answer is the WHOLE gate, not just the collection read: a probe that
