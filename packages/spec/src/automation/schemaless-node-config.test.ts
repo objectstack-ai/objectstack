@@ -27,6 +27,8 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
 import { objectStackErrorMap } from '../shared/error-map.zod.js';
+import { MapConfigSchema, VALUE_ENVELOPE_REFUSAL } from './builtin-node-config.zod.js';
+import { VALUE_SLOT_TEMPLATE_REFUSAL } from './flow-value-slot-template.js';
 import {
   DecisionConditionSchema,
   DecisionConfigSchema,
@@ -63,13 +65,14 @@ const SCRIPT_RETIRED: ReadonlyArray<[string, unknown]> = [
 
 describe('ScriptConfigSchema (converged to a function call)', () => {
   it('accepts the one shape the executor runs', () => {
+    // [#19939] `inputs.*` is a value slot: a CEL envelope, or a literal.
     expect(ScriptConfigSchema.parse({
       function: 'score_lead',
-      inputs: { leadId: '{record.id}' },
+      inputs: { leadId: { dialect: 'cel', source: 'record.id' }, weight: 2 },
       outputVariable: 'score',
     })).toEqual({
       function: 'score_lead',
-      inputs: { leadId: '{record.id}' },
+      inputs: { leadId: { dialect: 'cel', source: 'record.id' }, weight: 2 },
       outputVariable: 'score',
     });
   });
@@ -121,13 +124,14 @@ describe('ScriptConfigSchema (converged to a function call)', () => {
 
 describe('SubflowConfigSchema (parsed at execute time)', () => {
   it('accepts the executor-read shape', () => {
+    // [#19939] `input.*` is a value slot: a CEL envelope, or a literal.
     expect(SubflowConfigSchema.parse({
       flowName: 'escalation_flow',
-      input: { caseId: '{record.id}' },
+      input: { caseId: { dialect: 'cel', source: 'record.id' }, reason: 'manual' },
       outputVariable: 'subResult',
     })).toEqual({
       flowName: 'escalation_flow',
-      input: { caseId: '{record.id}' },
+      input: { caseId: { dialect: 'cel', source: 'record.id' }, reason: 'manual' },
       outputVariable: 'subResult',
     });
   });
@@ -486,5 +490,64 @@ describe('structural contract — what the downstream walkers require', () => {
     const branch = ((json.properties as Record<string, Record<string, Record<string, Record<string, unknown>>>>)
       .conditions.items.properties).expression;
     expect(branch.xExpression).toBe('expression');
+  });
+});
+
+/**
+ * [#19939] The maps a node hands to a CALLEE — `script.inputs`,
+ * `subflow.input` and `map.input` — are `value` slots: each value is a CEL
+ * value envelope or a literal, judged by the one value-slot rule
+ * (`FlowValueSlotSchema`), so the executor's contract parse refuses a `{token}`
+ * of the retired template dialect with the same refusal `registerFlow` and
+ * `objectstack validate` give, and the expression ledger's ratchet reads the
+ * `value` marker off the map's `additionalProperties`.
+ */
+describe('the callee input maps are value slots (#19939)', () => {
+  interface Judged {
+    safeParse(v: unknown): { success: boolean; error?: { issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> } };
+  }
+  const CALLEE_MAPS: ReadonlyArray<readonly [string, Judged, string, Record<string, unknown>]> = [
+    ['script', ScriptConfigSchema as unknown as Judged, 'inputs', { function: 'f' }],
+    ['subflow', SubflowConfigSchema as unknown as Judged, 'input', { flowName: 'child_flow' }],
+    ['map', MapConfigSchema as unknown as Judged, 'input', { flowName: 'child_flow', collection: '{rows}' }],
+  ];
+
+  it.each(CALLEE_MAPS)('%s: a `{token}` is refused at its key, naming its CEL envelope', (_type, schema, key, base) => {
+    const result = schema.safeParse({ ...base, [key]: { id: '{record.id}' } });
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues;
+    expect(issues.map((i) => i.path)).toEqual([[key, 'id']]);
+    expect(issues[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(issues[0]!.message).toContain("{ dialect: 'cel', source: 'record.id' }");
+  });
+
+  it.each(CALLEE_MAPS)('%s: an envelope, and every literal, is accepted', (_type, schema, key, base) => {
+    const value = {
+      list: { dialect: 'cel', source: 'rows' },
+      text: 'plain text',
+      n: 3,
+      flag: false,
+      none: null,
+      nested: { deep: [1, 'two'] },
+    };
+    expect(schema.safeParse({ ...base, [key]: value }).success).toBe(true);
+  });
+
+  it.each(CALLEE_MAPS)('%s: a malformed envelope is refused, not handed over as an object', (_type, schema, key, base) => {
+    const result = schema.safeParse({ ...base, [key]: { id: { dialect: 'cel' } } });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message.startsWith(VALUE_ENVELOPE_REFUSAL)).toBe(true);
+  });
+
+  it('marks each map\'s values `xExpression: \'value\'` in the JSON projection the ratchet walks', () => {
+    const projected = getSchemalessNodeConfigJsonSchemas() as Record<string, {
+      properties?: Record<string, { additionalProperties?: Record<string, unknown> }>;
+    }>;
+    expect(projected.script!.properties?.inputs?.additionalProperties?.xExpression).toBe('value');
+    expect(projected.subflow!.properties?.input?.additionalProperties?.xExpression).toBe('value');
+    expect(projected.map!.properties?.input?.additionalProperties?.xExpression).toBe('value');
+    // `map.collection` carries no marker on this channel: its `flow-template`
+    // slot arrives through the descriptor, never twice.
+    expect((projected.map!.properties as Record<string, Record<string, unknown>>).collection!.xExpression).toBeUndefined();
   });
 });

@@ -507,6 +507,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.data-door-stored-content-hash.test.ts",
       "verb": "findOne",
       "pinned": 2

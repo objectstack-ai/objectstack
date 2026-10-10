@@ -18,6 +18,7 @@ import {
   normalizeDecisionOutputs,
 } from './approval.zod';
 import { BUILTIN_MEMBERSHIP_ROLES } from '../identity/membership-role';
+import { MetadataTypeSchema } from '../kernel/metadata-plugin.zod';
 
 describe('ApproverType', () => {
   it('should accept all valid approver types', () => {
@@ -147,9 +148,25 @@ describe('APPROVER_VALUE_BINDINGS — an approver value is picked from the recor
     // find('sys_business_unit', { id: value }) — a sys_business_unit id
     // (deliberately NOT a `sys_department`).
     expect(APPROVER_VALUE_BINDINGS.department).toEqual({ source: 'record', object: 'sys_business_unit', valueField: 'id' });
+  });
+
+  it('binds position to the registry by machine name — a catalog item, not a sys_position row (ADR-0131 D4)', () => {
     // find('sys_user_position', { position: value }) — the position machine
-    // NAME, not an id (portable across environments).
-    expect(APPROVER_VALUE_BINDINGS.position).toEqual({ source: 'record', object: 'sys_position', valueField: 'name' });
+    // NAME, the only reference a registry item has. No `valueField`: there is
+    // no other column a catalog item could commit.
+    expect(APPROVER_VALUE_BINDINGS.position).toEqual({ source: 'registry', type: 'position' });
+    // Every registry binding names a type the registry actually serves — the
+    // compile-time check the binding forgoes to keep approval.zod.ts free of
+    // the kernel module graph.
+    for (const [type, binding] of Object.entries(APPROVER_VALUE_BINDINGS)) {
+      if (binding.source !== 'registry') continue;
+      expect(MetadataTypeSchema.safeParse(binding.type).success, `'${type}' binds unknown metadata type '${binding.type}'`)
+        .toBe(true);
+    }
+    // No binding names the retiring table as its source.
+    for (const [type, binding] of Object.entries(APPROVER_VALUE_BINDINGS)) {
+      expect((binding as { object?: string }).object, `'${type}' binds sys_position rows`).not.toBe('sys_position');
+    }
   });
 
   it('keeps the non-record kinds off the record-lookup path', () => {
@@ -189,8 +206,17 @@ describe('APPROVER_VALUE_SOURCES — where each picker finds its candidates, pub
     expect(APPROVER_VALUE_SOURCES.user).toEqual({ source: 'data', object: 'sys_user', valueField: 'id' });
     expect(APPROVER_VALUE_SOURCES.team).toEqual({ source: 'data', object: 'sys_team', valueField: 'id' });
     expect(APPROVER_VALUE_SOURCES.department).toEqual({ source: 'data', object: 'sys_business_unit', valueField: 'id' });
-    // The one kind that commits something other than the primary key.
-    expect(APPROVER_VALUE_SOURCES.position).toEqual({ source: 'data', object: 'sys_position', valueField: 'name' });
+  });
+
+  it('routes position to the metadata registry, where positions are declared items (ADR-0131 D4)', () => {
+    // `GET /api/v1/meta/position` serves both provenances; the picker commits
+    // the item's name, which is what the engine filters sys_user_position by.
+    expect(APPROVER_VALUE_SOURCES.position).toEqual({ source: 'registry', type: 'position' });
+    // `registry` is position's alone: every directory kind stays on the data API.
+    const registryKinds = Object.entries(APPROVER_VALUE_SOURCES)
+      .filter(([, s]) => s.source === 'registry')
+      .map(([type]) => type);
+    expect(registryKinds).toEqual(['position']);
   });
 
   it('keeps the non-record kinds off the lookup path and carries the closed enum inline', () => {
@@ -207,7 +233,26 @@ describe('APPROVER_VALUE_SOURCES — where each picker finds its candidates, pub
     const sources = schema?.properties?.approvers?.items?.properties?.value?.xRef?.sources;
     expect(sources).toBeDefined();
     expect(sources.department).toEqual({ source: 'data', object: 'sys_business_unit', valueField: 'id' });
-    expect(sources.position).toEqual({ source: 'data', object: 'sys_position', valueField: 'name' });
+    expect(sources.position).toEqual({ source: 'registry', type: 'position' });
+  });
+});
+
+// A typed decision output's picker is read downstream by an `expression`
+// approver's `resolveAs` of the same name, so it must source and commit what
+// that approver type takes. The docblock says so; this holds it: every picker
+// kind is an approver type whose binding is a lookup (record or registry).
+describe('DecisionOutputDef picker kinds follow the approver bindings of the same name', () => {
+  const pickerKinds = (DecisionOutputDefSchema as any).shape.type.unwrap().options
+    .filter((k: string) => k !== 'text') as string[];
+
+  it('names only approver types that are looked up, and covers the four it always had', () => {
+    expect([...pickerKinds].sort()).toEqual(['department', 'position', 'team', 'user']);
+    for (const kind of pickerKinds) {
+      const binding = (APPROVER_VALUE_BINDINGS as Record<string, { source: string }>)[kind];
+      expect(binding, `decision output '${kind}' has no approver binding`).toBeDefined();
+      expect(['record', 'registry'], `decision output '${kind}' is bound to '${binding.source}'`)
+        .toContain(binding.source);
+    }
   });
 });
 

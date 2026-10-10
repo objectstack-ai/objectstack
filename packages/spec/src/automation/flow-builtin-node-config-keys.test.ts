@@ -42,8 +42,9 @@ const TRY_CATCH_ENTRY_ID = 'try-catch-and-retry-policy-undeclared-keys-refused';
 type Config = Record<string, unknown>;
 
 /** The measured node: `summarize` in the showcase's `showcase_task_completed`. */
-const MEASURED: Config = { function: 'summarizeCompletedTask', inputs: { taskId: '{record.id}' }, outputVariable: 'summary' };
-const SUBFLOW: Config = { flowName: 'child_flow', input: { id: '{record.id}' }, outputVariable: 'out' };
+// [#19939] `inputs.*` / `input.*` are value slots: the id is a CEL envelope.
+const MEASURED: Config = { function: 'summarizeCompletedTask', inputs: { taskId: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'summary' };
+const SUBFLOW: Config = { flowName: 'child_flow', input: { id: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'out' };
 /** The remainder's measured node: a `notify` with `bogusKey` (#21982's pass-1 report). */
 const NOTIFY: Config = { recipients: '{record.owner}', title: 'Done', message: '{summary}' };
 
@@ -58,7 +59,7 @@ const VALID: Readonly<Record<string, Config>> = {
   screen: { title: 'T', fields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a' }] }] },
   script: MEASURED,
   subflow: SUBFLOW,
-  map: { collection: '{rows}', flowName: 'child_flow', input: { id: '{item.id}' } },
+  map: { collection: '{rows}', flowName: 'child_flow', input: { id: { dialect: 'cel', source: 'item.id' } } },
   loop: { collection: '{rows}', body: { nodes: [], edges: [] } },
   parallel: { branches: [{ name: 'a', nodes: [], edges: [] }, { name: 'b', nodes: [], edges: [] }] },
   try_catch: { try: { nodes: [], edges: [] }, retry: { maxRetries: 1, backoffMs: 10 } },

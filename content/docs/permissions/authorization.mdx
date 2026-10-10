@@ -34,7 +34,7 @@ Authorization splits into three concerns that stay decoupled:
    resource merely *references* one by name (see Requirement, below).
 2. **Assignment** — *who holds it* — permission sets / positions / user
    bindings (`sys_permission_set`, `sys_position`, `sys_user_permission_set`,
-   `sys_position_permission_set`, `sys_user_position`). Runtime records,
+   `sys_user_position`, and the sets a position names in its `permissionSets`). Runtime records,
    maintained by admins in Setup — and, since ADR-0090 D12, a **governed**
    surface: writing them requires tenant-level administration or a covering
    delegated `adminScope`, never just CRUD on the tables.
@@ -232,8 +232,9 @@ one of two doors, each writing only what it owns:
   unaffected while a set is still a draft (drafts never enter the active
   resolve).
 - **Environment-admin door** (`metadata-admin`) — the cross-package all-objects
-  matrix plus subject **assignment** (`sys_user_permission_set`,
-  `sys_position_permission_set`), edited **live** (config). It owns env-authored
+  matrix plus subject **assignment** (`sys_user_permission_set`), edited
+  **live** (config); the sets a position distributes are its definition's
+  `permissionSets`. It owns env-authored
   sets (`managedBy` `platform`/`user`) and assignments — not package sets.
   Since ADR-0094 the set **definition** itself has one authoritative store —
   the metadata layer: an env-door write to `sys_permission_set` (the Setup
