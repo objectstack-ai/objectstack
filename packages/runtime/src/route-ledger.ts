@@ -277,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 82 rows.
+ * CENSUS (generated): this list holds 84 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -474,6 +474,12 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── auth (better-auth passthrough) ────────────────────────────────────────
   { route: '* /auth/**', domain: '/auth', disposition: 'sdk', client: 'auth.me',
     note: 'wholesale delegate to the auth service. Not enumerable route-by-route HERE, but no longer unenumerated: plugin-auth/src/auth-route-ledger.ts carries the 55 SDK-reached routes plus the full mounted inventory, read off better-auth\'s live auth.api table' },
+
+  // ── approvals action page (ADR-0043, the hosted door) ─────────────────────
+  { route: 'GET /approvals/act', domain: '/approvals/act', disposition: 'public',
+    note: 'the session-less ADR-0043 action page an e-mail / IM approve or reject link opens: renders the confirm page for the `token` query parameter and never decides. Forwarded unread to the approvals slot\'s IApprovalService.handleActionPage and its Response returned as it is; HEAD is answered as this GET with no body, as the self-hosted mount answers it. The token is the only credential (the ADR-0069 gate allow-lists the exact path, the membership gate skips it), and an absent slot or member answers 501 NOT_IMPLEMENTED, never ROUTE_NOT_FOUND. This is the door for a kernel with no raw app; a self-hosted kernel serves the same path from plugin-approvals\' raw-app mount, which never passes through the dispatcher. Pinned in `domains/approvals-act.test.ts`' },
+  { route: 'POST /approvals/act', domain: '/approvals/act', disposition: 'public',
+    note: 'the redemption half of the ADR-0043 action page: the `token` rides in the form body, so the request is forwarded with its body UNREAD (the @objectstack/hono catch-all leaves the raw request readable) to IApprovalService.handleActionPage, which decides as the approver the token binds. A body consumed before it got here is a transport fault, answered 500 and logged rather than shown to the approver as an invalid link. Same credential, absence and door notes as the GET row' },
 
   // ── ai (dynamic route table, owned by another repo) ───────────────────────
   { route: '* /ai/**', domain: '/ai', disposition: 'dynamic',
