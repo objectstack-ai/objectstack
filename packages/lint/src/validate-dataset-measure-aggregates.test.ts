@@ -19,6 +19,7 @@ import {
   BOOLEAN_VALUE_TYPES,
   FieldType,
   MULTI_CAPABLE_TYPES,
+  MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
   STRUCTURED_JSON_TYPES,
   isAggregateCompatibleWithFieldType,
@@ -26,11 +27,28 @@ import {
 } from '@objectstack/spec/data';
 
 import { runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
 import {
   DIMENSION_JSON_STORED_FIELD_REFUSED,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
-  validateDatasetMeasureAggregates,
+  validateDatasetMeasureAggregates as validateDatasetMeasureAggregatesUnrecorded,
 } from './validate-dataset-measure-aggregates.js';
+
+// [#22161] Each finding of the two ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — so the pin covers every firing variant
+// this suite exercises, not a chosen few. Run the whole file: those cases read
+// what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateDatasetMeasureAggregates: typeof validateDatasetMeasureAggregatesUnrecorded = (...args) => {
+  const found = validateDatasetMeasureAggregatesUnrecorded(...args);
+  fired.push(...found);
+  return found;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 const RULE = MEASURE_AGGREGATE_FIELD_TYPE_REFUSED;
 
@@ -93,13 +111,16 @@ describe('measure-aggregate-field-type-refused — refuses a pair the spec table
     expect(issue.rule).toBe(RULE);
     expect(issue.path).toBe('datasets[0].measures[0].aggregate');
     // The author must be able to act without opening the spec: the AGGREGATE,
-    // the FIELD, its declared TYPE, and the set that aggregate accepts.
-    expect(issue.message).toContain('avg');
-    expect(issue.message).toContain('measured');
-    expect(issue.message).toContain('datetime');
-    for (const accepted of AGGREGATE_FIELD_TYPE_COMPATIBILITY.avg) {
-      expect(issue.message, `accepted type ${accepted} named`).toContain(accepted);
-    }
+    // the FIELD and its declared TYPE…
+    expect(issue.message).toBe(
+      'aggregate "avg" over field "measured" (`datetime` on object "crm_opportunity") is refused by the ' +
+        'aggregate × field-type table: the number would depend on the SQL dialect',
+    );
+    // …and [#22161] the set that aggregate accepts is the table's row, which
+    // `os explain` writes out (held to the table below).
+    expect(explanationOf(RULE)).toContain(
+      `\`avg\`: ${AGGREGATE_FIELD_TYPE_COMPATIBILITY.avg.join(', ')};`,
+    );
     // And the way out, computed from the same table rather than prose: which
     // aggregates WOULD accept a `datetime`.
     expect(issue.hint).toContain('min');
@@ -315,7 +336,7 @@ describe('measure-aggregate-field-type-refused — the positions only authoring-
     expect(found[0].message).toContain('datetime');
     // The message must say which object the LEAF lives on, or the author reads
     // the type as a claim about the dataset's own object.
-    expect(found[0].message).toContain('crm_account');
+    expect(found[0].message).toContain('on joined object "crm_account"');
   });
 
   it('accepts an accepted pair on that same joined field', () => {
@@ -419,7 +440,9 @@ describe('measure-aggregate-field-type-refused — reads the declaration, not th
     // The DECLARATION is named, flag included, or the author reads the verdict
     // as a claim about `select` that the table plainly does not make.
     expect(issue.message).toContain('`select` with `multiple: true`');
-    expect(issue.message).toContain('none of them with `multiple: true`');
+    expect(issue.message).toContain('a list stored as JSON');
+    // [#22161] "none of the accepted types with `multiple: true`" is `os explain`'s now.
+    expect(explanationOf(RULE)).toContain('flagged that way is refused by the declaration');
     // The way out is computed from the same predicate: only `count` is left.
     expect(issue.hint).toContain('accepts: count.');
 
@@ -509,9 +532,13 @@ describe('dimension-json-stored-field-refused — a dimension over a JSON-stored
     expect(issue.rule).toBe(DIMENSION_RULE);
     expect(issue.path).toBe('datasets[0].dimensions[0].field');
     expect(issue.where).toBe('dataset "opportunity_metrics" › dimension "the_dimension"');
-    // The author can act without opening the analytics service: the DIMENSION,
-    // the FIELD, its declared TYPE, the class, and what the door answers.
-    expect(issue.message).toContain('"the_dimension"');
+    // The author can act without opening the analytics service: the DIMENSION
+    // (`where`, above), the FIELD, its declared TYPE, the class, and what the
+    // door answers.
+    expect(issue.message).toBe(
+      'groups by field "grouped" (`json` on object "crm_opportunity"), a structured-JSON value, so every ' +
+        'query grouping by it is refused (400 INVALID_FIELD)',
+    );
     expect(issue.message).toContain('"grouped"');
     expect(issue.message).toContain('`json`');
     expect(issue.message).toContain('structured-JSON');
@@ -590,7 +617,7 @@ describe('dimension-json-stored-field-refused — a dimension over a JSON-stored
     const found = dimensionFindings(joined('json'));
     expect(found).toHaveLength(1);
     expect(found[0].message).toContain('account.hq');
-    expect(found[0].message).toContain('crm_account');
+    expect(found[0].message).toContain('on joined object "crm_account"');
     expect(dimensionFindings(joined('text'))).toEqual([]);
   });
 
@@ -694,10 +721,10 @@ describe('the cube leg — an analyticsCubes member the analytics door refuses i
     expect(issue.rule).toBe(DIMENSION_RULE);
     expect(issue.path).toBe('analyticsCubes[0].dimensions.meta.sql');
     expect(issue.where).toBe('cube "fx_cube" › dimension "meta"');
-    expect(issue.message).toContain('object "fx_ledger" declares as `json`');
+    expect(issue.message).toContain('(`json` on object "fx_ledger")');
     expect(issue.message).toContain('structured-JSON');
     expect(issue.message).toContain('400 INVALID_FIELD');
-    expect(issue.message).toContain('so a query that selects it gets that refusal');
+    expect(issue.message).toContain('every query grouping by it is refused');
     expect(issue.hint).toContain('scalar value');
 
     expect(validateDatasetMeasureAggregates(cubeStack({ dimensions: { name: dim('name') } }))).toEqual([]);
@@ -720,7 +747,7 @@ describe('the cube leg — an analyticsCubes member the analytics door refuses i
     expect(json?.severity).toBe('error');
     expect(json?.path).toBe('analyticsCubes[0].measures.distinct_meta.type');
     expect(json?.where).toBe('cube "fx_cube" › measure "distinct_meta"');
-    expect(json?.message).toContain('aggregate "count_distinct" to field "meta"');
+    expect(json?.message).toContain('aggregate "count_distinct" over field "meta"');
     expect(json?.message).toContain('`json`');
     // The door that refuses it later is the cube's, never the dataset compile leg.
     expect(json?.hint).toContain('on the cube with `400 INVALID_FIELD`');
@@ -792,7 +819,7 @@ describe('the cube leg — an analyticsCubes member the analytics door refuses i
   it('reads a relationship path on the object the last hop reaches — the lookup\'s reference, or the join the cube declares for it', () => {
     // No declared join: the lookup's `reference` (`fx_account.hq` is json).
     const [byReference] = cubeDimensionFindings(cubeStack({ dimensions: { acct_hq: dim('account.hq') } }));
-    expect(byReference?.message).toContain('object "fx_account" (reached through this cube\'s join chain)');
+    expect(byReference?.message).toContain('on joined object "fx_account"');
     expect(cubeDimensionFindings(cubeStack({ dimensions: { acct_region: dim('account.region') } }))).toEqual([]);
 
     // A declared join wins over the reference, as at the door: keyed `account`,
@@ -911,9 +938,9 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
     expect(issue.rule).toBe(RULE);
     expect(issue.path).toBe('analyticsCubes[0].measures.sum_name.type');
     expect(issue.where).toBe('cube "fx_cube" › measure "sum_name"');
-    expect(issue.message).toContain('aggregate "sum" to field "name"');
-    expect(issue.message).toContain('object "fx_ledger" declares as `text`');
-    expect(issue.message).toContain(`"sum" accepts: ${AGGREGATE_FIELD_TYPE_COMPATIBILITY.sum.join(', ')}.`);
+    expect(issue.message).toContain('aggregate "sum" over field "name"');
+    expect(issue.message).toContain('(`text` on object "fx_ledger")');
+    expect(explanationOf(RULE)).toContain(`\`sum\`: ${AGGREGATE_FIELD_TYPE_COMPATIBILITY.sum.join(', ')};`);
     // The door that refuses it later is the cube's, never the dataset compile leg.
     expect(issue.hint).toContain('on the cube with `400 INVALID_FIELD`');
     expect(issue.hint).not.toContain('DATASET_INVALID');
@@ -930,7 +957,7 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
     for (const [type, column] of [['avg', 'name'], ['min', 'name'], ['max', 'name'], ['sum', 'opened_at'], ['avg', 'opened_at']]) {
       const [issue] = findings(cubeStack({ measures: { m: measure(type, column) } }, {}, datetime));
       expect(issue?.path, `${type}(${column})`).toBe('analyticsCubes[0].measures.m.type');
-      expect(issue?.message, `${type}(${column})`).toContain(`aggregate "${type}" to field "${column}"`);
+      expect(issue?.message, `${type}(${column})`).toContain(`aggregate "${type}" over field "${column}"`);
     }
     for (const type of ['min', 'max', 'count', 'count_distinct']) {
       expect(findings(cubeStack({ measures: { m: measure(type, 'opened_at') } }, {}, datetime)), type).toEqual([]);
@@ -991,7 +1018,7 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
     // No declared join: the lookup's `reference`, `fx_account`, where `name` is text and `revenue` a number.
     const [byReference] = findings(cubeStack({ measures: { s: measure('sum', 'account.name') } }));
     expect(byReference?.path).toBe('analyticsCubes[0].measures.s.type');
-    expect(byReference?.message).toContain('object "fx_account" (reached through this cube\'s join chain)');
+    expect(byReference?.message).toContain('on joined object "fx_account"');
     expect(findings(cubeStack({ measures: { s: measure('sum', 'account.revenue') } }))).toEqual([]);
 
     // A declared join wins over the reference, as at the door: keyed `account`,
@@ -999,7 +1026,7 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
     const joined = { joins: { account: { name: 'fx_branch' } } };
     const [byJoin] = findings(cubeStack({ measures: { s: measure('sum', 'account.revenue') } }, joined));
     expect(byJoin?.message).toContain('object "fx_branch"');
-    expect(byJoin?.message).toContain('declares as `text`');
+    expect(byJoin?.message).toContain('(`text` on joined object "fx_branch")');
   });
 
   it('never hands the predicate a guess: no type, a type outside the table, the row wildcard, an unresolved column', () => {
@@ -1055,5 +1082,61 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
     expect(
       runAuthoringRules('lint', { normalized: control, parsed: control }).filter((f) => f.rule === RULE),
     ).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — the two ids', () => {
+  const IDS = [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, DIMENSION_JSON_STORED_FIELD_REFUSED];
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each id fired at least once, so the shape
+    // assertion below cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]: ['property of the SQL dialect', 'average YEAR', 'COMPARES', '400 DATASET_INVALID', '`measure-aggregate-incoherent`'],
+    [DIMENSION_JSON_STORED_FIELD_REFUSED]: ['GROUP KEY', 'one groups each serialized value apart', 'before any SQL is built', 'instead of an answer'],
+  };
+
+  it('covers exactly the two ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...IDS].sort());
+  });
+
+  it.each(IDS)('`os explain %s` carries what its verdict no longer says', (rule) => {
+    expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanationOf(rule);
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+
+  // `rule-explanations.ts` imports nothing, so the lists it spells out are held
+  // to the spec's constants here.
+  it("the measure explanation writes out the table's rows exactly", () => {
+    const text = explanationOf(MEASURE_AGGREGATE_FIELD_TYPE_REFUSED);
+    const table = AGGREGATE_FIELD_TYPE_COMPATIBILITY;
+    // `count` is every type; `count_distinct` every type but the JSON-stored ones.
+    expect([...table.count].sort()).toEqual([...FieldType.options].sort());
+    const jsonStored = new Set<string>([...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES]);
+    expect([...table.count_distinct].sort()).toEqual(table.count.filter((t) => !jsonStored.has(t)).sort());
+    expect(text).toContain('`count` accepts every type');
+    expect(text).toContain('`count_distinct` every type but the JSON-stored ones');
+    expect(text).toContain(`\`sum\`: ${table.sum.join(', ')};`);
+    expect(text).toContain(`\`avg\`: ${table.avg.join(', ')};`);
+    expect(table.max).toEqual(table.min);
+    expect(text).toContain(`\`min\` and \`max\`: ${table.min.join(', ')}.`);
+  });
+
+  it('both explanations name the JSON-stored types the spec declares', () => {
+    for (const rule of IDS) {
+      const text = explanationOf(rule);
+      expect(text, rule).toContain(`a structured-JSON type — ${[...STRUCTURED_JSON_TYPES].join(', ')} —`);
+      expect(text, rule).toContain(`an inherently multi option type (${[...MULTI_OPTION_TYPES].join(', ')})`);
+      expect(text, rule).toContain(`a multi-capable type (${[...MULTI_CAPABLE_TYPES].join(', ')}) flagged`);
+    }
   });
 });

@@ -365,14 +365,22 @@ const DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/**
+ * What an unprovisioned anchor is — the cause half of every read-side anchor
+ * id (`dashboard-filter-field-unprovisioned`, `react-chart-field-unprovisioned`).
+ * The rule files share its verdict clause, `unprovisionedAnchorVerdict()`.
+ */
+const UNPROVISIONED_ANCHOR_CAUSE =
+  'The registry injects system columns — the ownership and audit anchors such as `owner_id`, ' +
+  '`created_at` and `created_by` — into objects. On an ADR-0015 external object the remote ' +
+  'database owns the schema, so the platform registers these anchors without provisioning a ' +
+  'column: the name resolves, but no storage stands behind it.';
+
 const DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   rule: 'dashboard-filter-field-unprovisioned',
   covers: 'why a filter on an unprovisioned anchor matches nothing',
   paragraphs: [
-    'The registry injects system columns — the ownership and audit anchors such as `owner_id`, ' +
-      '`created_at` and `created_by` — into objects. On an ADR-0015 external object the remote ' +
-      'database owns the schema, so the platform registers these anchors without provisioning a ' +
-      'column: the name resolves, but no storage stands behind it.',
+    UNPROVISIONED_ANCHOR_CAUSE,
     'A dashboard filter whose effective field lands on such an anchor is ANDed into the widget\'s ' +
       'analytics query and can never match a real value: on SQLite it silently degrades to ' +
       'constant-false and the widget renders empty (HTTP 200, zero rows, no error).',
@@ -1320,6 +1328,397 @@ const SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Flow trigger readiness (the never-fire family) ──────────────────────────
+// `validate-flow-trigger-readiness.ts`: five ids whose verdict is settled by a
+// contract this repository ships, so no installed package can make the flow
+// fire. The engine's routing chain, the record-trigger grammar, the
+// time-relative partition and the publish-gate reach are shared, so each is
+// written ONCE below and referenced by every entry that needs it. The rule
+// file shares its verdict clause the same way (`NEVER_FIRES`).
+
+/** How the engine picks a flow's trigger — the routing chain every flow id reads. */
+const FLOW_TRIGGER_ROUTING =
+  'The automation engine picks a flow\'s trigger from its start node in one fixed chain ' +
+  '(`resolveTriggerBinding`): a `triggerType` starting with \'record-\' routes to the record-change ' +
+  'trigger (an array-form `triggerType` holding such a token is routed there too, to be refused); a ' +
+  '`config.timeRelative` that is an object routes to the time-relative sweep; a `config.schedule` or ' +
+  '`type: \'schedule\'` to the schedule trigger; `type: \'api\'` or `triggerType: \'api\'` to the inbound ' +
+  'api trigger. Every test in the chain is a literal string or `typeof` check with no registry lookup, so ' +
+  'no installed package can teach the engine a new token, and a flow that matches none of them is a ' +
+  'manual flow.';
+
+/** The record trigger's closed token grammar — the two triggerType ids. */
+const RECORD_TRIGGER_GRAMMAR =
+  'The record-change trigger maps a token to ObjectQL hook events only on the grammar ' +
+  'record-{before,after}-{create,insert,update,delete,write}: `insert` is a synonym for `create`, and ' +
+  '`write` fires on create OR update in one flow. Any other token maps to no hook event, and there is no ' +
+  '"any change" token.';
+
+/** The routing predicate that splits the two time-relative ids. */
+const TIME_RELATIVE_PARTITION =
+  'The engine routes a flow to the time-relative sweep only when `config.timeRelative` is present and ' +
+  '`typeof` says \'object\' (arrays and dates included). The two time-relative ids partition the key\'s ' +
+  'values along that predicate, so exactly one of them can fire on a descriptor: ' +
+  '`flow-time-relative-descriptor-invalid` for a routed value the descriptor schema refuses, ' +
+  '`flow-time-relative-descriptor-unroutable` for a value the engine never routes.';
+
+/** Where the never-fire family gates, and what the runtime door judges — every flow error id. */
+const FLOW_GATE_REACH =
+  'The finding is an error, so it fails `os validate` and `os build`, and the runtime publish gate ' +
+  'refuses an active flow write that carries it. That gate judges only the flow being written, against ' +
+  'the findings the stored stack already had, so a dead flow already stored never blocks another flow\'s ' +
+  'save; what is refused is the dead flow\'s own publish.';
+
+const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-descriptor-invalid',
+  covers: 'why a refused timeRelative descriptor never binds',
+  paragraphs: [
+    TIME_RELATIVE_PARTITION,
+    'The time-relative trigger safeParses the descriptor against `TimeRelativeTriggerSchema` ' +
+      '(`@objectstack/spec/automation`) when it binds, and a descriptor the schema refuses is not bound: ' +
+      'the sweep is never installed, so the flow declares a time-relative trigger and then never runs. ' +
+      'Before this rule the only trace was one warn in the server log at bind time — a channel an ' +
+      'authoring loop never reads.',
+    'The rule asks that same schema; it restates none of the descriptor\'s contract. The verdict quotes ' +
+      'the schema\'s own words for ONE issue — an unrecognized key first, since its rename usually ' +
+      'explains the others (a misspelled `field` is also the missing `dateField`) — and counts the rest; ' +
+      'the bind-time warn prints the whole list. Each issue is quoted to its verdict: the key or value ' +
+      'that is wrong, and the schema\'s rename when it has one.',
+    'Two keys the schema answers with a prescription rather than a rename, because each is real one ' +
+      'layer out: `schedule` is a sibling of `timeRelative` on the START node\'s `config`, not a key ' +
+      'inside it (omitting it means daily at 08:00 UTC), and `runAs` is a FLOW-level key: a sweep has no ' +
+      'trigger user, so declare `runAs: \'system\'` beside `nodes` and `edges`.',
+    FLOW_GATE_REACH,
+  ],
+};
+
+const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-descriptor-unroutable',
+  covers: 'why a non-object timeRelative is never routed',
+  paragraphs: [
+    TIME_RELATIVE_PARTITION,
+    'A `config.timeRelative` that is a string, a number, a boolean or a function — `\'daily\'` is the ' +
+      'usual one, a cadence written into the descriptor slot — is never routed to the sweep, so the ' +
+      'descriptor schema never sees it and the sweep is never installed. A node\'s `config` is an open ' +
+      'slot, so the scalar parses everywhere, and nothing at any layer says a word: not the schema, not ' +
+      'the engine, not even the one bind-time warn a descriptor that IS an object gets when it is refused.',
+    FLOW_TRIGGER_ROUTING,
+    'What follows depends on the rest of the start node, so the verdict names it. When the node also ' +
+      'declares a trigger the engine does route — a record-change token, a `config.schedule` cadence, the ' +
+      'api trigger — the flow fires on THAT trigger\'s terms (once per firing, with no record on the ' +
+      'context) instead of once per matching record, and the descriptor is silently dropped. When nothing ' +
+      'else declares a trigger the flow binds to nothing and never fires.',
+    'A descriptor is an object: `{ object, dateField, and exactly one of withinDays | offsetDays }`, plus ' +
+      'an optional `filter` and `maxRecords`. HOW OFTEN the sweep runs is the sibling key ' +
+      '`config.schedule` on the same start node.',
+    FLOW_GATE_REACH,
+  ],
+};
+
+const FLOW_TRIGGER_UNROUTABLE_EXPLANATION: RuleExplanation = {
+  rule: 'flow-trigger-unroutable',
+  covers: 'why a record_change flow with no record token never fires',
+  paragraphs: [
+    FLOW_TRIGGER_ROUTING,
+    'A flow that declares `type: \'record_change\'` has stated its intent, so a start node whose ' +
+      '`triggerType` is off that chain (`onCreate`, `on_update`, an empty string) or absent altogether is ' +
+      'a defect, not a manual flow: the engine routes it to no trigger, the flow is demoted to a manual ' +
+      'one, and it never fires. A plugin cannot rescue it — triggers are registered by the RESOLVED type, ' +
+      'and this flow never resolves one.',
+    'Nothing names it at run time. The unbound-flow audit resolves the same binding and skips the flow ' +
+      'as "manual — nothing to bind", so neither the boot warning nor the startup summary lists it; the ' +
+      'only trace is the banner\'s flow count being one higher than its bound count.',
+    RECORD_TRIGGER_GRAMMAR,
+    'Not reported: a `record_change` flow that ALSO declares something the engine routes ' +
+      '(`config.schedule`, `triggerType: \'api\'`) — it binds and fires, on the wrong trigger\'s terms, ' +
+      'which is a different defect. A flow that really is launched by hand or from a screen declares ' +
+      '`type: \'autolaunched\'` or `\'screen\'`, which have no trigger to be missing.',
+    FLOW_GATE_REACH,
+  ],
+};
+
+const FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-trigger-unknown-event',
+  covers: 'which record trigger tokens fire',
+  paragraphs: [
+    RECORD_TRIGGER_GRAMMAR,
+    'A token that starts with \'record-\' but is off that grammar — a typo (`record-after-updated`), a ' +
+      'phase-less noun (`record-change`), a bad phase (`record-during-update`) — is still routed to the ' +
+      'record-change trigger, which maps it to no hook event: the flow binds and never fires, with one ' +
+      'bind-time warn in the server log as the only trace.',
+    'An array-form `triggerType` (`[\'record-after-create\', \'record-after-delete\']`) is a multi-event ' +
+      'shape the engine does not support: a start node takes one trigger event, so the flow binds to ' +
+      'nothing and never fires. For "created or updated" use `record-after-write`; any other combination ' +
+      'is one flow per event.',
+    FLOW_GATE_REACH,
+  ],
+};
+
+const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-api-trigger-secret-missing',
+  covers: 'why an inbound api flow needs a secret',
+  paragraphs: [
+    'An inbound api hook is armed only with a per-flow secret that every post is HMAC-verified against ' +
+      '(ADR-0041): the `x-objectstack-signature` header carries \'sha256=\' and the hex HMAC-SHA256 of ' +
+      'the raw body. A usable secret is a string that is not blank after trimming, on the start node\'s ' +
+      '`config.secret`; absent, blank and non-string are one verdict.',
+    'The automation engine refuses to register a flow bound to the api trigger without one — a ' +
+      'hardcoded check in `registerFlow`, before any trigger is consulted and whatever the flow\'s ' +
+      '`status` — and the trigger refuses to arm it, so the flow never receives a post. The `/automation` ' +
+      'write doors answer 400, and a boot skips the flow with a warning.',
+    'Which flows bind the api trigger is the engine\'s answer, not a reading of `type`: the chain ranks a ' +
+      'record token, a time-relative descriptor and a schedule ahead of `api`, so a `type: \'api\'` flow ' +
+      'whose start node also carries one of those is bound to THAT trigger and needs no secret. The ' +
+      'verdict names which declaration binds the flow; the secret\'s value is never printed, only its type.',
+    'At the runtime publish gate a signed flow\'s ordinary edit arrives without its secret, because the ' +
+      'read path withholds it; the gate passes the positions the stored secret will be restored to, and ' +
+      'the rule reads those as present. A secretless api flow is refused there.',
+  ],
+};
+
+// ── Validation rules that compile at publish time ───────────────────────────
+// `validate-rule-compilability.ts` and `validate-rule-schema-formats.ts`: the
+// write path's fail-open skip and the runtime's ajv environment are shared,
+// so each is written ONCE below. The compile verdicts share their closing
+// clause in the rule file (`SKIPPED_ON_EVERY_WRITE`).
+
+/** What the write path does with a rule whose artifact does not compile — the two compile ids. */
+const VALIDATION_RULE_FAIL_OPEN =
+  'On the write path (`rule-validator.ts`), `checkFormat` builds a `format` rule\'s `regex` with ' +
+  '`new RegExp(rule.regex)` and `checkJsonSchema` compiles a `json_schema` rule\'s `schema` with ajv, ' +
+  'each inside a `try/catch` whose catch logs "… — skipped" and returns no error. A rule whose artifact ' +
+  'does not compile is therefore declared, listed in the metadata and in every listing of what protects ' +
+  'the object, and enforces nothing on any record, forever; one WARN line in the server log is the only ' +
+  'trace. Both artifacts are static, so the rule refuses them before they ship. Rules nested in a ' +
+  '`conditional`\'s `then` / `otherwise` are judged too: they reach the same checks.';
+
+/** The ajv the runtime compiles with, mirrored by the gate — the two `json_schema` ids. */
+const RUNTIME_AJV_ENVIRONMENT =
+  'The runtime compiles every `json_schema` rule with one shared ajv: `new Ajv({ allErrors: true, ' +
+  'strict: false })` plus the `ajv-formats` plugin. The gate builds the same environment (its test pins ' +
+  'both halves against `rule-validator.ts`), so it never invents a verdict the runtime does not share: ' +
+  '`strict: false` lets an author\'s vendor keywords through, and `ajv-formats` registers the format ' +
+  'names and the `formatMinimum` / `formatMaximum` keywords.';
+
+const VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION: RuleExplanation = {
+  rule: 'validation-rule-regex-uncompilable',
+  covers: 'what the write path does with a regex that does not compile',
+  paragraphs: [
+    VALIDATION_RULE_FAIL_OPEN,
+    'The pattern is compiled exactly as `checkFormat` compiles it — `new RegExp(source)`, no flags — and ' +
+      'the verdict quotes the engine\'s reason; the `fix:` line quotes the source. The source is a STRING, ' +
+      'so a backslash in it is written twice in TypeScript.',
+  ],
+};
+
+const VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION: RuleExplanation = {
+  rule: 'validation-rule-json-schema-uncompilable',
+  covers: 'what the write path does with a schema ajv refuses',
+  paragraphs: [
+    VALIDATION_RULE_FAIL_OPEN,
+    RUNTIME_AJV_ENVIRONMENT,
+    'Under `allErrors: true` a schema that fails ajv\'s metaschema lists every violation; the verdict ' +
+      'quotes the first, which names the offending keyword, and counts the rest.',
+    'Each schema is compiled on a fresh instance, so a duplicate `$id` between two deployed rules — an ' +
+      'outcome that depends on which schema the runtime happened to compile first — is not judged here. ' +
+      'A misspelled `format` name compiles in both environments; that is ' +
+      '`validation-rule-json-schema-unknown-format`\'s verdict, not this one\'s.',
+  ],
+};
+
+const VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION: RuleExplanation = {
+  rule: 'validation-rule-json-schema-unknown-format',
+  covers: 'why an unregistered format name enforces nothing',
+  paragraphs: [
+    RUNTIME_AJV_ENVIRONMENT,
+    'Under `strict: false` an unregistered `format` name is not an error: ajv logs ' +
+      '`unknown format "NAME" ignored in schema at path …` once at compile time and DROPS the keyword — in ' +
+      'the write path and at the publish gate alike. The schema compiles, the rule ships and runs on every ' +
+      'write, its other keywords (`type`, `required`) are enforced, and this constraint is enforced on no ' +
+      'record, ever. The record is ACCEPTED, the silent direction, so nothing downstream reports the gap.',
+    'The registered names are read off a live instance of that ajv, never written down, so the rule ' +
+      'follows `ajv-formats` across an upgrade. Names are case-sensitive and hyphenated (`date-time`, not ' +
+      '`datetime`); the `fix:` line names the nearest registered one and lists them all.',
+    'Only positions JSON Schema defines as subschemas are walked (`properties`, `items`, `$defs`, ' +
+      '`allOf` / `anyOf` / `oneOf`, `if` / `then` / `else` and the rest), because those are the places ' +
+      'ajv applies the keyword; a `format` inside `default`, `const`, `enum` or `examples` is data. A ' +
+      'non-string `format` is the compile gate\'s refusal (`validation-rule-json-schema-uncompilable`), ' +
+      'not this rule\'s.',
+  ],
+};
+
+// ── Dataset and cube members the analytics doors refuse ─────────────────────
+// `validate-dataset-measure-aggregates.ts`: two ids on one walk. What a
+// JSON-stored column is, the cube leg and the shared skips are written ONCE.
+
+/** What "JSON-stored" means — both ids. Held to the spec's three type sets by the rule's test. */
+const JSON_STORED_COLUMN =
+  'A JSON-stored column is a structured-JSON type — json, composite, repeater, record, location, ' +
+  'address, vector — or a multi-value field: an inherently multi option type (multiselect, checkboxes, ' +
+  'tags), or a multi-capable type (select, radio, lookup, user, file, image) flagged `multiple: true`. ' +
+  'The same multi-capable type without the flag stores one value.';
+
+/** Where the rule reads its columns, and what it never judges — both ids. */
+const ANALYTICS_MEMBER_WALK =
+  'Dataset measures and dimensions name their column with `field`; authored cubes (`analyticsCubes`) ' +
+  'name it with a member\'s `sql`, resolved the way the analytics door resolves it — a hop the cube ' +
+  'declares a join for reaches that join\'s object, any other hop is walked on the object graph ' +
+  '("joined object" in the verdict), and the row wildcard `\'*\'` names no column. Never judged: an ' +
+  'object this stack does not define or that has no readable field map, a path that does not resolve ' +
+  '(`dataset-field-unknown` reports it), a leaf with no declared type, and, for a measure, an aggregate ' +
+  'outside the table\'s vocabulary. At the runtime publish gate a `dataset` write carries no `analyticsCubes`, so ' +
+  'the cube leg speaks on the CLI doors.';
+
+const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'measure-aggregate-field-type-refused',
+  covers: 'which aggregates each field type accepts',
+  paragraphs: [
+    'A measure pairs an aggregate with a column, and the aggregate × field-type compatibility table ' +
+      '(`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, `@objectstack/spec/data`) decides which pairs are coherent. ' +
+      'For a refused pair the number a backend returns is a property of the SQL dialect rather than of the ' +
+      'data: SQLite coerces a `datetime` column\'s stored text by its leading digits, so `avg` over it ' +
+      'returns the average YEAR with no error and no log, while another backend has no such function and ' +
+      'fails at query time.',
+    // Held equal to `AGGREGATE_FIELD_TYPE_COMPATIBILITY` by `validate-dataset-measure-aggregates.test.ts`.
+    'The table\'s rows: `count` accepts every type, because it reads no value; `count_distinct` every ' +
+      'type but the JSON-stored ones; `sum`: number, currency, rating, slider, progress, summary, ' +
+      'boolean, toggle; `avg`: number, currency, percent, rating, slider, progress, summary, boolean, ' +
+      'toggle; `min` and `max`: number, currency, percent, rating, slider, progress, summary, date, ' +
+      'datetime, time, boolean, toggle.',
+    JSON_STORED_COLUMN,
+    'The per-type row cannot see `multiple: true`, so `count_distinct` over a multi-capable field ' +
+      'flagged that way is refused by the declaration: the value is a list stored as JSON, and ' +
+      '`count_distinct` compares values for equality, which no two backends do alike for JSON — one ' +
+      'counts every row apart, one compares the serialized text, another has no equality for the type ' +
+      'and fails at query time.',
+    'The same pair is refused later by the doors the member reaches: a dataset\'s by its compile ' +
+      '(`400 DATASET_INVALID`), a cube\'s by the analytics door when a query names the measure ' +
+      '(`400 INVALID_FIELD`). This rule makes the same refusal where the author is standing. A dotted ' +
+      'path is judged on the leaf\'s own declaration, which the compile leg cannot see.',
+    ANALYTICS_MEMBER_WALK,
+    'Its advisory neighbour `measure-aggregate-incoherent` judges whether a number MEANS anything, so ' +
+      '`sum` over a `percent` field is reported by both: an advisory about meaning, and this refusal ' +
+      'about the contract.',
+  ],
+};
+
+const DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'dimension-json-stored-field-refused',
+  covers: 'why analytics does not group by a JSON-stored column',
+  paragraphs: [
+    'A dimension is a GROUP KEY: a dataset dimension compiles to a cube dimension whose `sql` is its ' +
+      '`field`, and a query that selects it groups by that column. The analytics door refuses a grouped ' +
+      'member whose column is JSON-stored with `400 INVALID_FIELD`, before any SQL is built, because a ' +
+      'JSON value is no group key the SQL dialects share: one groups each serialized value apart, another ' +
+      'refuses the statement. Every report, dashboard or query that selects the dimension gets that ' +
+      'refusal instead of an answer, and no selection of it is served as a group.',
+    JSON_STORED_COLUMN,
+    ANALYTICS_MEMBER_WALK,
+  ],
+};
+
+// ── React page props (`validate-react-page-props.ts`) ───────────────────────
+// Two ids forward `@objectstack/spec`'s own refusal of a chart prop. The
+// verdict quotes it to its head — the key or value, and the schema's rename
+// (`schemaRefusalHead()`); the shape note below is shared, and each entry
+// names the keys its schema answers with a prescription instead.
+
+/** How a forwarded chart-prop refusal is quoted — the two `<ObjectChart>` schema ids. */
+const CHART_PROP_REFUSAL =
+  'The prop is judged by PARSING its `@objectstack/spec/ui` schema, never by a second copy of its rules, ' +
+  'so the vocabulary, the refinements and the unknown-key handling all arrive from the spec. Only a ' +
+  'fully static literal is judged: a value built at run time is unknowable here, not wrong. The verdict ' +
+  'quotes the schema\'s refusal to its verdict — the key or value that is wrong, and the schema\'s ' +
+  'rename when it has one — and leaves out the sentence on why the key used to be dropped silently.';
+
+const REACT_CHART_DRILLDOWN_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'react-chart-drilldown-invalid',
+  covers: 'what an ObjectChart drillDown block accepts',
+  paragraphs: [
+    '`<ObjectChart drillDown={{…}}>` is checked against `ChartDrillDownSchema`, a closed shape. Until it ' +
+      'was closed every key inside it, right or wrong, reached the renderer unchecked, and a misspelling ' +
+      'was simply ignored at click time.',
+    CHART_PROP_REFUSAL,
+    'Keys the schema answers with a prescription rather than a rename, because each is real on another ' +
+      'surface: `drilldown` (all lowercase) is `ReportSchema.drilldown`, a boolean on a summary or matrix ' +
+      'report, while the chart\'s is `drillDown` and takes an object; `mode` is objectui\'s ' +
+      '`object-data-table` drill key, and a chart drill is always the filtered-list kind, so delete it; ' +
+      '`report` is a metric or pivot widget capability `<ObjectChart>` does not read; `view` and `sort` ' +
+      'are declared by objectui\'s renderer-side type and read by no renderer, so delete them.',
+  ],
+};
+
+const REACT_CHART_AGGREGATE_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'react-chart-aggregate-invalid',
+  covers: 'what an ObjectChart aggregate accepts',
+  paragraphs: [
+    '`<ObjectChart aggregate={{…}}>` is checked against `ChartAggregateSchema`, a closed shape whose ' +
+      '`groupBy` is a bare field name or a closed `{ field, dateGranularity?, alias? }`. Until both were ' +
+      'closed an undeclared key was dropped at parse: `groupby` for `groupBy` degraded the chart to a ' +
+      'single ungrouped point, `fn` for `function` fell back to the default, and `dateGranularty` for ' +
+      '`dateGranularity` cost the date bucketing, all with `build` and `validate` green.',
+    CHART_PROP_REFUSAL,
+    'When no form of a union matches, the verdict keeps the forms whose complaint is about the value\'s ' +
+      'content and drops one whose only complaint is that the whole value is another type — for an object, ' +
+      'the bare-field-name form\'s "expected string" — unless every form says only that.',
+    'Keys the schema answers with a prescription rather than a rename, because each is real one layer ' +
+      'out: on the aggregate, `dateGranularity` and `alias` go inside the structured `groupBy`, `filter` ' +
+      'and `objectName` are props of the chart itself, and `measures` is the dataset path\'s (an inline ' +
+      'aggregate is one function over one field); inside `groupBy`, `function` belongs on the aggregate ' +
+      'and a nested `groupBy` is the one you are already in.',
+    'Every refusal the schema, the published react-blocks type and objectui\'s renderer agree on is an ' +
+      'error. An absent `groupBy` is a warning, and it is a tolerance, not a supported shape: the ' +
+      'aggregate returns one ungrouped row and the chart plots a single point; a single number belongs ' +
+      'in an object-metric block.',
+  ],
+};
+
+const REACT_CHART_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'react-chart-field-unprovisioned',
+  covers: 'why a chart over an unprovisioned anchor shows nothing',
+  paragraphs: [
+    UNPROVISIONED_ANCHOR_CAUSE,
+    'An `<ObjectChart>` aggregate whose `field` or `groupBy` names such an anchor reads a column that ' +
+      'is empty on every row: grouping by it puts every row into one empty bucket, and aggregating it ' +
+      'yields nothing. The query does not fail, so the chart renders and says nothing true.',
+    'Only a name that resolved BECAUSE it is injected is judged: an author-declared column of the same ' +
+      'name maps a remote column the author vouches for and is never reported. The finding is a warning ' +
+      'because the rule cannot see the remote table, only that the platform provisions no storage for ' +
+      'the anchor.',
+  ],
+};
+
+const REACT_BLOCK_NEEDS_RECORD_CONTEXT_EXPLANATION: RuleExplanation = {
+  rule: 'react-block-needs-record-context',
+  covers: 'why a record block renders empty on a react page',
+  paragraphs: [
+    'The `record:*` blocks — `<RecordDetails>`, `<RecordHighlights>`, `<RecordRelatedList>`, ' +
+      '`<RecordActivity>` and the rest, or `<Block type="record:…">` — render the record that a record ' +
+      'page puts in context. A `kind:\'react\'` page never mounts that context, so the block renders ' +
+      'empty however it is bound: the renderer does not read its `objectName` or `recordId`.',
+    'They were withdrawn from the react tier for that reason, and the finding is an error because no ' +
+      'binding makes the block render. A component the page declares itself under the same name ' +
+      'shadows the injected one and is not judged. The `fix:` line names the block\'s react-tier ' +
+      'replacement, or a record page.',
+  ],
+};
+
+const REACT_PAGE_SOURCE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
+  rule: 'react-page-source-unparseable',
+  covers: 'what a react source that does not parse leaves unchecked',
+  paragraphs: [
+    'A `kind:\'react\'` page\'s source is parsed with TypeScript — never executed — so its component ' +
+      'contract can be checked: props, field bindings, chart aggregates. A source with syntax errors is ' +
+      'only partially recovered, and the checks read that recovered tree, so a problem in the part the ' +
+      'parser could not read is reported by no rule.',
+    'It is a warning, not a second syntax verdict. The syntax verdict on a react page is ' +
+      '`react-page-syntax`\'s, which transpiles the source with Sucrase, the parser that actually compiles it, ' +
+      'and the two parsers accept different sets: an octal literal such as `0755` parses in Sucrase and ' +
+      'not in TypeScript, and `with (o) {}` the other way round. Erroring here would fail builds the ' +
+      'platform\'s own transpiler accepts.',
+  ],
+};
+
 /**
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
@@ -1385,6 +1784,21 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION.rule]: SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION,
   [SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION.rule]: SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION,
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
+  [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
+  [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
+  [FLOW_TRIGGER_UNROUTABLE_EXPLANATION.rule]: FLOW_TRIGGER_UNROUTABLE_EXPLANATION,
+  [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
+  [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,
+  [VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION,
+  [VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION,
+  [VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION,
+  [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION.rule]: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION,
+  [DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION.rule]: DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION,
+  [REACT_CHART_DRILLDOWN_INVALID_EXPLANATION.rule]: REACT_CHART_DRILLDOWN_INVALID_EXPLANATION,
+  [REACT_CHART_AGGREGATE_INVALID_EXPLANATION.rule]: REACT_CHART_AGGREGATE_INVALID_EXPLANATION,
+  [REACT_CHART_FIELD_UNPROVISIONED_EXPLANATION.rule]: REACT_CHART_FIELD_UNPROVISIONED_EXPLANATION,
+  [REACT_BLOCK_NEEDS_RECORD_CONTEXT_EXPLANATION.rule]: REACT_BLOCK_NEEDS_RECORD_CONTEXT_EXPLANATION,
+  [REACT_PAGE_SOURCE_UNPARSEABLE_EXPLANATION.rule]: REACT_PAGE_SOURCE_UNPARSEABLE_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

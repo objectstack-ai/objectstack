@@ -29,7 +29,8 @@
 //      judge it, and until this rule the only place it ran was BIND time, so an
 //      unparseable descriptor produced one warn in a server log and nothing at
 //      all in `os validate`. The judgement is not re-implemented here: the rule
-//      runs that schema and forwards its issue list verbatim.
+//      runs that schema and forwards its refusal — one issue, to its verdict,
+//      and a count of the rest (see `descriptorRefusal`).
 //
 //   4. A `config.timeRelative` that is not an OBJECT at all — `timeRelative:
 //      'daily'` (#5647). One step worse than 3, and it needs its own criterion
@@ -259,6 +260,12 @@ export const FLOW_API_TRIGGER_SECRET_MISSING = 'flow-api-trigger-secret-missing'
 type AnyRec = Record<string, unknown>;
 
 /**
+ * [#22161] The outcome every never-fire verdict in this file closes on. Why
+ * nothing reports it at run time is each id's `os explain` entry.
+ */
+const NEVER_FIRES = 'never fires';
+
+/**
  * The record-change trigger fires only for a `triggerType` matching this exact
  * grammar — the same set its `triggerTypeToHookEvents` maps to ObjectQL hooks.
  * `insert` is a synonym for `create`; `write` is the create-OR-update union
@@ -338,6 +345,50 @@ function isArrayRecordTriggerType(config: AnyRec): boolean {
     Array.isArray(config.triggerType) &&
     (config.triggerType as unknown[]).some((t) => typeof t === 'string' && t.startsWith('record-'))
   );
+}
+
+/**
+ * [#22161] The verdict half of a refusal `@objectstack/spec` wrote: its first
+ * sentence — which key or value is wrong — and, when the next sentence is the
+ * schema's rename (`Did you mean \`field\` → \`dateField\`?`), that question
+ * too. A strict shape orders its refusal "which key → how to fix it → why it
+ * used to be silent" so a one-line reader can stop early; what follows the
+ * rename — a wrong-layer prescription bullet, then the sentence on why the key
+ * used to be dropped — is the reasoning, and each id that forwards one names
+ * those keys in its `os explain` entry. Whitespace is collapsed first (a
+ * prescription arrives on its own bulleted line). A refusal of one sentence is
+ * quoted whole.
+ *
+ * Exported for `validate-react-page-props.ts`, which forwards the same
+ * producer's refusals for `<ObjectChart drillDown>` and `aggregate`.
+ */
+export function schemaRefusalHead(message: string): string {
+  const text = message.replace(/\s+/g, ' ').trim();
+  const cut = text.indexOf('. ');
+  if (cut === -1) return text;
+  const rest = text.slice(cut + 2);
+  const rename = rest.startsWith('Did you mean ') ? rest.slice(0, rest.indexOf('?') + 1) : '';
+  return rename.endsWith('?') ? `${text.slice(0, cut + 1)} ${rename}` : text.slice(0, cut);
+}
+
+/** The issues after the first, which a verdict counts rather than quotes. */
+function moreIssues(count: number): string {
+  return count > 1 ? ` (and ${count - 1} more)` : '';
+}
+
+/**
+ * [#22161] `TimeRelativeTriggerSchema`'s refusal of a descriptor, as the
+ * verdict quotes it: ONE issue, at its path (none for the descriptor itself),
+ * cut to its head ({@link schemaRefusalHead}), and a count of the rest. An
+ * unrecognized key is quoted first when there is one, because its rename
+ * usually explains the others — a misspelled `field` is also the missing
+ * `dateField`. The full list is what the trigger's bind-time warn prints.
+ */
+function descriptorRefusal(issues: ReadonlyArray<{ code: string; path: ReadonlyArray<PropertyKey>; message: string }>): string {
+  const first = issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0];
+  if (!first) return 'refused';
+  const at = first.path.length ? `${first.path.join('.')}: ` : '';
+  return `${at}${schemaRefusalHead(first.message)}${moreIssues(issues.length)}`;
 }
 
 /** The start node of a flow definition, if any. */
@@ -472,14 +523,6 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
       //     when the descriptor gains a key.
       const parsed = TimeRelativeTriggerSchema.safeParse(tr);
       if (!parsed.success) {
-        // Rendered exactly as the bind-time warn renders the same issue list
-        // (`TimeRelativeTrigger.start`), so an author who sees both channels sees
-        // one story told twice, not two dialects. Whitespace is collapsed because
-        // a finding is one line here (the CLI prints `• where: message`) while a
-        // log line is free to wrap — the schema's guidance bullets carry newlines.
-        const problems = parsed.error.issues
-          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message.replace(/\s+/g, ' ').trim()}`)
-          .join('; ');
         findings.push({
           // `error` (#5762): the verdict is `TimeRelativeTriggerSchema`'s, and it
           // is the same schema the trigger safeParses at bind time. A descriptor
@@ -490,10 +533,11 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           rule: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
           where: `flow "${flowName}" › start node`,
           path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative`,
-          message:
-            `has a config.timeRelative descriptor the time-relative trigger REFUSES at bind time, so the ` +
-            `sweep is never installed — the flow declares a time-relative trigger and then never runs ` +
-            `(the only trace is one warn in the server log). ${problems}`,
+          // [#22161] One verdict sentence, quoting the schema's own words for one
+          // issue: the bind-time warn (`TimeRelativeTrigger.start`) prints the
+          // whole list, and why the sweep is never installed is
+          // `os explain flow-time-relative-descriptor-invalid`.
+          message: `config.timeRelative never binds, so the flow never runs: ${descriptorRefusal(parsed.error.issues)}`,
           // [#22161] `hint` is the CLI's `fix:` line: the instruction first, the
           // reason it is sufficient after it.
           hint:
@@ -525,9 +569,11 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         rule: FLOW_TRIGGER_UNKNOWN_EVENT,
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
+        // [#22161] One verdict sentence; the token grammar and the silence are
+        // `os explain flow-trigger-unknown-event`.
         message:
-          `triggerType '${triggerType}' is not a recognized record trigger — the flow binds to the ` +
-          `record-change trigger but never fires (the runtime stays silent about it).`,
+          `triggerType '${triggerType}' is not a recognized record trigger, so the flow binds to the ` +
+          `record-change trigger and ${NEVER_FIRES}`,
         hint:
           `Use record-{before,after}-{create,update,delete,write}. 'write' fires on create OR update in one ` +
           `flow; create/insert are synonyms. There is no "any change" token — pick the specific event(s).`,
@@ -553,8 +599,8 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
         message:
-          `triggerType is an array (${JSON.stringify(config.triggerType)}), which is not supported — a start ` +
-          `node takes a single trigger event, so the flow binds to nothing and never fires (the runtime stays silent about it).`,
+          `triggerType is an array (${JSON.stringify(config.triggerType)}), but a start node takes one ` +
+          `trigger event, so the flow binds to nothing and ${NEVER_FIRES}`,
         hint:
           `Use one triggerType string. For "created or updated" use record-after-write (one flow, both events). ` +
           `For any other combination, author one flow per event — multi-event arrays are deferred until ` +
@@ -604,17 +650,16 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         isRecordTriggered || isArrayRecordTriggered
           ? 'its record-change trigger'
           : config.schedule != null || flow.type === 'schedule'
-            ? 'its plain `config.schedule` cadence'
+            ? 'its `config.schedule` cadence'
             : triggerType === 'api' || flow.type === 'api'
               ? 'its api trigger'
               : undefined;
+      // [#22161] The consequence closes the one verdict sentence; what each
+      // means — the firing terms of the fallback trigger, and the silence at
+      // every layer — is `os explain flow-time-relative-descriptor-unroutable`.
       const consequence = fallback
-        ? `The flow still binds through ${fallback}, so the descriptor is silently DROPPED — it fires on ` +
-          `that trigger's terms (once per firing, with no record on the context) instead of once per ` +
-          `matching record, and nothing anywhere reports the difference.`
-        : `Nothing else on this start node declares a trigger either, so the flow binds to NOTHING and ` +
-          `never fires — with zero diagnostics at any layer, not even the one bind-time warn a ` +
-          `descriptor that IS an object gets when the trigger refuses it.`;
+        ? `the flow fires through ${fallback}, dropping the descriptor`
+        : `with no other trigger declared the flow binds to nothing and ${NEVER_FIRES}`;
       findings.push({
         // `error` (#5762). The criterion IS the engine's routing predicate, so a
         // value that fails it is not routed to the time-relative trigger by any
@@ -628,10 +673,8 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative`,
         message:
-          `has config.timeRelative = ${renderNonObject(config.timeRelative)}, which is not the descriptor ` +
-          `OBJECT this slot takes — the engine routes a flow to the time-relative sweep only when ` +
-          `config.timeRelative is an object, so this one is never routed there and the sweep is never ` +
-          `installed. ${consequence}`,
+          `has config.timeRelative = ${renderNonObject(config.timeRelative)}, not a descriptor object, so ` +
+          `the sweep is never installed and ${consequence}`,
         hint:
           `config.timeRelative describes WHICH records to sweep — an object: ` +
           `{ object, dateField, and exactly one of withinDays | offsetDays } (plus optional filter / ` +
@@ -732,16 +775,15 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         rule: FLOW_TRIGGER_UNROUTABLE,
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
+        // [#22161] One verdict sentence; the routing chain and why no runtime
+        // channel names the flow are `os explain flow-trigger-unroutable`.
         message:
           `declares type: 'record_change' but ` +
           (hasTriggerType
             ? `its start node's triggerType is ${renderTriggerToken(config.triggerType)}, which the engine ` +
-              `routes to NO trigger`
-            : `its start node has no triggerType at all, so there is nothing for the engine to route`) +
-          ` — it binds a record-change flow only for a token starting with 'record-', so this flow is demoted ` +
-          `to a manual one and never fires. Nothing NAMES it: the unbound-flow audit resolves the same binding ` +
-          `and skips the flow as "manual — nothing to bind", so neither the boot warning nor the startup ` +
-          `summary lists it; the only trace is the banner's flow count being one higher than its bound count.`,
+              `routes to no trigger`
+            : `its start node has no triggerType at all, so the engine routes it to no trigger`) +
+          `, so the flow is demoted to a manual one and ${NEVER_FIRES}`,
         hint:
           `Use record-{before,after}-{create,update,delete,write} ('write' is create OR update in one flow; ` +
           `create/insert are synonyms). If the flow really is launched by hand or from a screen, ` +
@@ -885,10 +927,11 @@ export function validateFlowApiTriggerSecret(
       rule: FLOW_API_TRIGGER_SECRET_MISSING,
       where: start ? `flow "${flowName}" › start node` : `flow "${flowName}"`,
       path: secretPath ?? `flows[${flowIndex}].nodes`,
+      // [#22161] One verdict sentence; why the engine refuses a secretless
+      // inbound hook, and where, is `os explain flow-api-trigger-secret-missing`.
       message:
-        `binds the inbound api trigger (${binds.join(' and ')}) but ${secretProblem}. An inbound hook ` +
-        `is armed only with a per-flow secret that every post is HMAC-verified against (ADR-0041), so the ` +
-        `automation engine refuses to register this flow, whatever its status, and it never receives a post.`,
+        `binds the inbound api trigger (${binds.join(' and ')}) but ${secretProblem}, so the engine ` +
+        `refuses to register the flow`,
       hint:
         `Set a non-blank string config.secret on the start node, and sign each post with it: the ` +
         `x-objectstack-signature header carries 'sha256=' and the hex HMAC-SHA256 of the raw body. A flow that is ` +

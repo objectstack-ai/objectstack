@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
 import {
-  validateFlowTriggerReadiness,
+  validateFlowTriggerReadiness as validateFlowTriggerReadinessUnrecorded,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
@@ -11,10 +11,40 @@ import {
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
-  validateFlowApiTriggerSecret,
+  validateFlowApiTriggerSecret as validateFlowApiTriggerSecretUnrecorded,
+  schemaRefusalHead,
 } from './validate-flow-trigger-readiness.js';
 import { AUTHORING_COMMANDS, AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the five never-fire ids is one verdict sentence;
+// the reasoning it used to carry is the id's `os explain` entry. Every call
+// below records what it fired, and the last cases in this file hold each
+// recorded verdict to one line of at most 200 characters — so the pin covers
+// every firing variant this suite exercises, not a chosen few. Run the whole
+// file: those cases read what the cases above fired.
+const NEVER_FIRE_IDS: readonly string[] = [
+  FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
+  FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+  FLOW_TRIGGER_UNROUTABLE,
+  FLOW_API_TRIGGER_SECRET_MISSING,
+  FLOW_TRIGGER_UNKNOWN_EVENT,
+];
+const fired: Array<{ rule: string; message: string }> = [];
+const validateFlowTriggerReadiness: typeof validateFlowTriggerReadinessUnrecorded = (...args) => {
+  const findings = validateFlowTriggerReadinessUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+const validateFlowApiTriggerSecret: typeof validateFlowApiTriggerSecretUnrecorded = (...args) => {
+  const findings = validateFlowApiTriggerSecretUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 /**
  * [#20553] The flow-trigger family as the CLI table runs it: two registry
@@ -267,32 +297,36 @@ describe('validateFlowTriggerReadiness', () => {
       expect(f.path).toBe('flows[0].nodes[0].config.timeRelative');
       expect(f.message).toContain('config.timeRelative');
       expect(f.where).toBe('flow "task_due_reminder" › start node');
-      // …and carries zod's own key names: the missing `dateField`, the scalar
-      // `offsetDays`, and the unrecognized `field` with the schema's suggestion.
-      expect(f.message).toContain('dateField: Invalid input: expected string, received undefined');
-      expect(f.message).toContain('offsetDays: Invalid input: expected array, received number');
-      expect(f.message).toContain('Unrecognized key(s)');
-      expect(f.message).toContain('`field`');
-      expect(f.message).toContain('Did you mean `field` → `dateField`?');
+      // …and carries zod's own words for one issue — [#22161] the unrecognized
+      // `field` with the schema's suggestion first, since that rename is also
+      // the missing `dateField` — and counts the other two (the missing
+      // `dateField`, the scalar `offsetDays`), which the bind-time warn lists.
+      expect(f.message).toBe(
+        'config.timeRelative never binds, so the flow never runs: Unrecognized key(s) on this flow start ' +
+          "node's `config.timeRelative` descriptor: `field`. Did you mean `field` → `dateField`? (and 2 more)",
+      );
       // The consequence, which is the whole reason this is not just a log line.
       expect(f.message).toMatch(/never runs/);
       expect(f.hint).toContain('TimeRelativeTriggerSchema');
     });
 
     it('forwards the schema verbatim rather than restating it (anti-drift pin)', () => {
-      // Every problem segment is `TimeRelativeTriggerSchema`'s own text, rendered
-      // the way `TimeRelativeTrigger.start()` renders the identical issue list at
-      // bind time. Derived from the schema HERE too, so this assertion tracks the
-      // contract instead of freezing today's wording: if the schema's message for
-      // a rejected descriptor changes, the rule's output changes with it and this
-      // test keeps passing — but a hand-written copy in the rule would not.
+      // The quoted issue is `TimeRelativeTriggerSchema`'s own text — [#22161]
+      // cut to its verdict (the key and the rename), the cut the module's
+      // `schemaRefusalHead` makes for every forwarded refusal. Derived from the
+      // schema HERE too, so this assertion tracks the contract instead of
+      // freezing today's wording: if the schema's message for a rejected
+      // descriptor changes, the rule's output changes with it and this test
+      // keeps passing — but a hand-written copy in the rule would not.
       const parsed = TimeRelativeTriggerSchema.safeParse(badDescriptor);
       expect(parsed.success).toBe(false);
-      const expected = parsed.error!.issues
-        .map((i) => `${i.path.join('.') || '(root)'}: ${i.message.replace(/\s+/g, ' ').trim()}`)
-        .join('; ');
+      const issues = parsed.error!.issues;
+      const quoted = issues.find((i) => i.code === 'unrecognized_keys')!;
+      const head = schemaRefusalHead(quoted.message);
+      // The head is a PREFIX of the schema's own sentence — nothing reworded.
+      expect(quoted.message.replace(/\s+/g, ' ').startsWith(head)).toBe(true);
       const [f] = validateFlowTriggerReadiness(timeRelativeStack(badDescriptor));
-      expect(f.message).toContain(expected);
+      expect(f.message).toContain(`: ${head} (and ${issues.length - 1} more)`);
       // Single-line, so the CLI's bulleted list stays aligned (the schema's
       // guidance bullets arrive with newlines in them).
       expect(f.message).not.toContain('\n');
@@ -353,7 +387,7 @@ describe('validateFlowTriggerReadiness', () => {
       expect(findings[0].message).not.toContain('dateField');
       // …and the shape warning only about the shape (it never echoes the name).
       expect(findings[1].message).toContain('dateField');
-      expect(findings[1].message).not.toContain("'contract'");
+      expect(findings[1].message).not.toContain('contract');
     });
 
     it('forwards the exactly-one-window rule (both modes, and neither)', () => {
@@ -380,7 +414,18 @@ describe('validateFlowTriggerReadiness', () => {
         }),
       );
       expect(findings.map((f) => f.rule)).toEqual([FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID]);
-      expect(findings[0].message).toContain('`schedule` is a sibling of `timeRelative`');
+      // [#22161] The verdict names the key; the schema's wrong-layer
+      // prescription for it is longer than one line, so `os explain` carries it…
+      expect(findings[0].message).toContain("descriptor: `schedule`");
+      expect(explanationOf(FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID)).toContain(
+        '`schedule` is a sibling of `timeRelative` on the START node\'s `config`',
+      );
+      // …and the schema still answers this key with that prescription, so the
+      // explanation is not describing a guidance entry the spec has dropped.
+      const refusal = TimeRelativeTriggerSchema.safeParse({
+        object: 'task', dateField: 'due_at', withinDays: 3, schedule: { type: 'cron', expression: '0 8 * * *' },
+      });
+      expect(refusal.error!.issues.map((i) => i.message).join('\n')).toContain('`schedule` is a sibling of `timeRelative`');
     });
 
     it('flags an array descriptor — the engine routes it, so the trigger refuses it', () => {
@@ -456,12 +501,15 @@ describe('validateFlowTriggerReadiness', () => {
         expect(f.message).toContain('(a string)');
         expect(f.message).toContain('config.timeRelative');
         // The consequence chain, which is the whole reason this is not a nit:
-        // never routed → sweep never installed → this flow never fires at all,
-        // and no layer says so.
-        expect(f.message).toMatch(/never routed/);
-        expect(f.message).toMatch(/sweep is never\s+installed/);
-        expect(f.message).toMatch(/binds to NOTHING and\s+never fires/);
-        expect(f.message).toMatch(/zero diagnostics at any layer/);
+        // not an object → sweep never installed → this flow never fires at all…
+        expect(f.message).toBe(
+          'has config.timeRelative = "daily" (a string), not a descriptor object, so the sweep is never ' +
+            'installed and with no other trigger declared the flow binds to nothing and never fires',
+        );
+        // …and [#22161] that no layer says so, and why the engine never routes
+        // it, is `os explain`'s.
+        expect(explanationOf(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE)).toMatch(/is never routed to the sweep/);
+        expect(explanationOf(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE)).toMatch(/nothing at any layer says a word/);
         // Single-line, like every other finding this rule emits (the CLI prints
         // `• where: message` on one line).
         expect(f.message).not.toContain('\n');
@@ -528,10 +576,14 @@ describe('validateFlowTriggerReadiness', () => {
         const [f] = validateFlowTriggerReadiness(withSchedule);
         expect(f.rule).toBe(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE);
         expect(f.message).toContain('config.schedule');
-        expect(f.message).toMatch(/silently DROPPED/);
+        expect(f.message).toMatch(/dropping the descriptor/);
         expect(f.message).not.toMatch(/never fires/);
         // …and the certain half is still stated.
-        expect(f.message).toMatch(/never routed/);
+        expect(f.message).toMatch(/sweep is never installed/);
+        // The terms it fires on are `os explain`'s.
+        expect(explanationOf(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE)).toContain(
+          'once per firing, with no record on the context',
+        );
       });
 
       it('names each fallback the engine would actually reach', () => {
@@ -806,12 +858,17 @@ describe('validateFlowTriggerReadiness', () => {
       // whose flow DOES bind and DOES get a bind-time warn. The distinguishing
       // claim is that nothing names this one, and the rule has to make it.
       const [f] = validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' }));
-      expect(f.message).toMatch(/record_change/);
-      expect(f.message).toMatch(/never fires/i);
-      expect(f.message).toMatch(/audit/i);
-      // …and it must NOT overclaim: the flow count line does move, so the
-      // message says "nothing NAMES it" rather than "no signal anywhere".
-      expect(f.message).toMatch(/count/i);
+      expect(f.message).toBe(
+        "declares type: 'record_change' but its start node's triggerType is 'onCreate', which the engine " +
+          'routes to no trigger, so the flow is demoted to a manual one and never fires',
+      );
+      // [#22161] The distinguishing claim — nothing NAMES this flow — is the
+      // id's `os explain` text now…
+      const explanation = explanationOf(FLOW_TRIGGER_UNROUTABLE);
+      expect(explanation).toMatch(/audit/i);
+      // …and it must NOT overclaim: the flow count line does move, so it says
+      // "nothing names it" rather than "no signal anywhere".
+      expect(explanation).toMatch(/count/i);
       expect(f.hint).toMatch(/record-\{before,after\}/);
       expect(f.hint).toMatch(/autolaunched/);
     });
@@ -875,11 +932,12 @@ describe('validateFlowTriggerReadiness', () => {
       expect(absent.rule).toBe(present.rule);
       expect(absent.severity).toBe(present.severity);
       expect(absent.path).toBe(present.path);
-      // Both still carry the measured audit claim from 1f's comment.
-      expect(absent.message).toMatch(/record_change/);
-      expect(absent.message).toMatch(/never fires/i);
-      expect(absent.message).toMatch(/audit/i);
-      expect(absent.message).toMatch(/count/i);
+      // Both state the same outcome; the measured audit claim from 1f's comment
+      // is their one `os explain` entry [#22161].
+      for (const f of [present, absent]) {
+        expect(f.message).toMatch(/record_change/);
+        expect(f.message).toMatch(/demoted to a manual one and never fires$/);
+      }
     });
 
     describe('does NOT flag (each paired with the mutation that makes it fire)', () => {
@@ -1587,5 +1645,72 @@ describe('validateFlowTriggerReadiness', () => {
       flows: { hired: recordFlow({ name: undefined, status: 'active' }) },
     });
     expect(findings).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — the never-fire family', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each of the five ids fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    const firedIds = new Set(fired.map((f) => f.rule));
+    for (const id of NEVER_FIRE_IDS) expect(firedIds.has(id), `${id} fired`).toBe(true);
+    for (const f of fired.filter((x) => NEVER_FIRE_IDS.includes(x.rule))) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  describe('schemaRefusalHead — the verdict half of a forwarded spec refusal', () => {
+    const SURFACE = "Unrecognized key(s) on this flow start node's `config.timeRelative` descriptor: `field`.";
+    const HISTORY = 'Until this shape was closed, these were dropped silently — the descriptor still parsed.';
+
+    it('keeps the key sentence and the rename question, and drops the history', () => {
+      expect(schemaRefusalHead(`${SURFACE} Did you mean \`field\` → \`dateField\`? ${HISTORY}`)).toBe(
+        `${SURFACE} Did you mean \`field\` → \`dateField\`?`,
+      );
+    });
+
+    it('drops a prescription bullet and the history after it, keeping the key', () => {
+      expect(schemaRefusalHead(`${SURFACE}\n  • \`field\` is a sibling of the descriptor. ${HISTORY}`)).toBe(
+        SURFACE.slice(0, -1),
+      );
+    });
+
+    it('quotes a one-sentence refusal whole', () => {
+      for (const message of [
+        'Invalid input: expected string, received undefined',
+        'Provide exactly one of `withinDays` (range mode) or `offsetDays` (offset mode).',
+      ]) {
+        expect(schemaRefusalHead(message)).toBe(message);
+      }
+    });
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID]: ['TimeRelativeTriggerSchema', 'one warn in the server log', 'the bind-time warn prints the whole list', 'FLOW-level key', 'partition'],
+    [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE]: ['`typeof` says \'object\'', 'nothing at any layer says a word', 'once per firing, with no record on the context', 'silently dropped', '`resolveTriggerBinding`'],
+    [FLOW_TRIGGER_UNROUTABLE]: ['`resolveTriggerBinding`', 'manual — nothing to bind', 'one higher than its bound count', 'RESOLVED type', 'record-{before,after}-{create,insert,update,delete,write}'],
+    [FLOW_TRIGGER_UNKNOWN_EVENT]: ['record-{before,after}-{create,insert,update,delete,write}', 'bind-time warn', 'multi-event shape', '`record-after-write`'],
+    [FLOW_API_TRIGGER_SECRET_MISSING]: ['ADR-0041', 'HMAC', '`registerFlow`', 'whatever the flow\'s `status`', 'never receives a post', 'withholds'],
+  };
+
+  it('covers exactly the five ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...NEVER_FIRE_IDS].sort());
+  });
+
+  it.each([...NEVER_FIRE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanationOf(rule);
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+
+  it("the runAs prescription the explanation names is still the schema's answer for that key", () => {
+    const refusal = TimeRelativeTriggerSchema.safeParse({
+      object: 'task', dateField: 'due_at', withinDays: 3, runAs: 'system',
+    });
+    expect(refusal.success).toBe(false);
+    expect(refusal.error!.issues.map((i) => i.message).join('\n')).toContain('`runAs` is a FLOW-level key');
+    expect(explanationOf(FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID)).toContain('`runAs` is a FLOW-level key');
   });
 });
