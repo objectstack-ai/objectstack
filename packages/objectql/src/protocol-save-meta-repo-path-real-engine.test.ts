@@ -157,16 +157,16 @@ describe('saveMetaItem — repository write path against real ObjectQL (PR-10d.4
 
     it('insert → update writes the second body and bumps version (id-based update on real engine)', async () => {
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x',
+            type: 'view', name: 'cases',
             item: viewBody('A'),
         });
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x',
+            type: 'view', name: 'cases',
             item: viewBody('B'),
         });
 
         const rows = await engine.find('sys_metadata', {
-            where: { type: 'view', organization_id: 'org_x' },
+            where: { type: 'view', organization_id: null },
         });
         expect(rows.length).toBe(1);
         const row = rows[0] as any;
@@ -177,20 +177,20 @@ describe('saveMetaItem — repository write path against real ObjectQL (PR-10d.4
 
     it('stale parentVersion → 409 metadata_conflict; stored body unchanged', async () => {
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x',
+            type: 'view', name: 'cases',
             item: viewBody('Original'),
         });
 
         await expect(
             protocol.saveMetaItem({
-                type: 'view', name: 'cases', organizationId: 'org_x',
+                type: 'view', name: 'cases',
                 item: viewBody('Should not land'),
                 parentVersion: 'sha256:stale',
             }),
         ).rejects.toMatchObject({ code: 'METADATA_CONFLICT', status: 409 });
 
         const rows = await engine.find('sys_metadata', {
-            where: { type: 'view', organization_id: 'org_x' },
+            where: { type: 'view', organization_id: null },
         });
         const body = JSON.parse((rows[0] as any).metadata);
         expect(body.label).toBe('Original');
@@ -198,11 +198,11 @@ describe('saveMetaItem — repository write path against real ObjectQL (PR-10d.4
 
     it('checksum column holds the full sha256:<hex> hash (71 chars)', async () => {
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x',
+            type: 'view', name: 'cases',
             item: viewBody('A'),
         });
         const rows = await engine.find('sys_metadata', {
-            where: { type: 'view', organization_id: 'org_x' },
+            where: { type: 'view', organization_id: null },
         });
         const checksum = (rows[0] as any).checksum as string;
         expect(checksum).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -211,11 +211,11 @@ describe('saveMetaItem — repository write path against real ObjectQL (PR-10d.4
 
     it('plural type "views" is normalized to singular and stored as "view"', async () => {
         await protocol.saveMetaItem({
-            type: 'views', name: 'cases', organizationId: 'org_x',
+            type: 'views', name: 'cases',
             item: viewBody('Plural'),
         });
         const rows = await engine.find('sys_metadata', {
-            where: { type: 'view', organization_id: 'org_x' },
+            where: { type: 'view', organization_id: null },
         });
         expect(rows.length).toBe(1);
     });
@@ -259,13 +259,13 @@ describe('deleteMetaItem — repository write path against real ObjectQL (PR-10d
 
     it('deletes the overlay row AND appends a delete tombstone to sys_metadata_history', async () => {
         const save = await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x',
+            type: 'view', name: 'cases',
             item: viewBody('A'), actor: 'alice',
         });
         expect((save as any).seq).toBe(1);
 
         const result = await protocol.deleteMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', actor: 'alice',
+            type: 'view', name: 'cases', actor: 'alice',
         });
         expect(result.success).toBe(true);
         expect(result.reset).toBe(true);
@@ -273,13 +273,13 @@ describe('deleteMetaItem — repository write path against real ObjectQL (PR-10d
 
         // sys_metadata row gone
         const rows = await engine.find('sys_metadata', {
-            where: { type: 'view', organization_id: 'org_x' },
+            where: { type: 'view', organization_id: null },
         });
         expect(rows.length).toBe(0);
 
         // sys_metadata_history has a create + a delete tombstone
         const history = await engine.find('sys_metadata_history', {
-            where: { type: 'view', name: 'cases', organization_id: 'org_x' },
+            where: { type: 'view', name: 'cases', organization_id: null },
         });
         expect(history.length).toBe(2);
         const ops = history.map((h: any) => h.operation_type).sort();
@@ -296,24 +296,24 @@ describe('deleteMetaItem — repository write path against real ObjectQL (PR-10d
 
     it('returns reset=false (no history write) when no overlay exists', async () => {
         const result = await protocol.deleteMetaItem({
-            type: 'view', name: 'never_existed', organizationId: 'org_x',
+            type: 'view', name: 'never_existed',
         });
         expect(result.success).toBe(true);
         expect(result.reset).toBe(false);
         expect(result.seq).toBeUndefined();
 
         const history = await engine.find('sys_metadata_history', {
-            where: { organization_id: 'org_x' },
+            where: { organization_id: null },
         });
         expect(history.length).toBe(0);
     });
 
     it('plural type "views" is normalized to singular for the tombstone', async () => {
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('A'),
+            type: 'view', name: 'cases', item: viewBody('A'),
         });
         await protocol.deleteMetaItem({
-            type: 'views', name: 'cases', organizationId: 'org_x',
+            type: 'views', name: 'cases',
         });
         const tombstone = await engine.findOne('sys_metadata_history', {
             where: { name: 'cases', operation_type: 'delete' },

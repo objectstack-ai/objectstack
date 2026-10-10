@@ -492,7 +492,7 @@ describe('protocol.publishMetaItem — seed self-apply', () => {
     const body = { object: 'project', records: [{ name: 'Apollo' }] };
     const { protocol, applySeedBodies } = makePublishable(body);
     const res = await protocol.publishMetaItem({ type: 'seed', name: 'project_sample' });
-    expect(applySeedBodies).toHaveBeenCalledWith([body], null);
+    expect(applySeedBodies).toHaveBeenCalledWith([body]);
     expect(res.seedApplied).toEqual({ success: true, inserted: 3, updated: 0 });
     expect(res.success).toBe(true);
   });

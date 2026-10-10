@@ -307,10 +307,7 @@ describe('`api` runtime writes are refused at the inlet — the retired gate’s
         const { engine, rows } = makeStubEngine('showcase');
         const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test');
 
-        const err = await attemptApiWrite(protocol, 'list_things', validEndpoint(), {
-            mode: 'draft',
-            organizationId: 'org_1',
-        });
+        const err = await attemptApiWrite(protocol, 'list_things', validEndpoint(), { mode: 'draft' });
 
         expectCodeOnlyRefusal(err, 'NOT_CREATABLE');
         expect(rows.size).toBe(0);

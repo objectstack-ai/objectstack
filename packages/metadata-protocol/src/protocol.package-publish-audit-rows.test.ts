@@ -368,7 +368,6 @@ const viewBody = (name: string, label: string, extra: Record<string, unknown> = 
     ...extra,
 });
 
-const ORG = 'org_alpha';
 const PKG = 'com.example.helpdesk';
 
 /** Audit rows for one operation, in write order. */
@@ -379,21 +378,17 @@ const publishRows = (h: Harness, outcome: 'allowed' | 'denied') =>
     opRows(h, 'publish').filter((a) => a.outcome === outcome);
 
 /**
- * Stage one package-bound draft through the ordinary save path.
- *
- * `org: null` stages it ENV-WIDE (`organization_id IS NULL`), which is how
- * Studio and AI authoring actually write — see the scope cases below.
+ * Stage one package-bound draft through the ordinary save path — ENV-WIDE
+ * (`organization_id IS NULL`), the only scope a write lands in (ADR-0131 D6).
  */
 async function stageDraft(
     protocol: ObjectStackProtocolImplementation,
     name: string,
     extra: Record<string, unknown> = {},
-    org: string | null = ORG,
 ) {
     await protocol.saveMetaItem({
         type: 'view',
         name,
-        ...(org ? { organizationId: org } : {}),
         item: viewBody(name, `${name} staged`, extra),
         mode: 'draft',
         packageId: PKG,
@@ -414,7 +409,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
 
         expect(h.auditRows).toHaveLength(0);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: ORG,
+            type: 'view', name: 'case_grid',
             item: viewBody('case_grid', 'v1'), actor: 'admin',
         } as any);
 
@@ -425,7 +420,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         expect(opRows(h, 'save')[0]).toMatchObject({
             type: 'view',
             name: 'case_grid',
-            organization_id: ORG,
+            organization_id: null,
             operation: 'save',
             outcome: 'allowed',
             code: 'ok',
@@ -465,7 +460,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         expect(publishRows(h, 'allowed')).toHaveLength(0);
 
         const res = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
         expect(res.publishedCount).toBe(2);
         expect(res.success).toBe(true);
@@ -478,7 +473,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         for (const row of allowed) {
             expect(row).toMatchObject({
                 type: 'view',
-                organization_id: ORG,
+                organization_id: null,
                 operation: 'publish',
                 outcome: 'allowed',
                 code: 'ok',
@@ -496,7 +491,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         await stageDraft(protocol, 'case_grid');
         await stageDraft(protocol, 'ticket_grid');
         await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
 
         // The counter shape the #7748 QA run took — which, on the batch route,
@@ -515,7 +510,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
 
         await stageDraft(protocol, 'case_grid');
         await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
 
         const { events } = await protocol.auditMetaItem({ type: 'view', name: 'case_grid' });
@@ -525,75 +520,6 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             actor: 'admin',
             source: 'protocol.publishPackageDrafts',
         });
-    });
-
-    // ── scope: the row is keyed on the DRAFT's org, not the caller's ────────
-    // Both fixtures above use `ORG` for the draft AND the publishing session,
-    // so they cannot tell the two apart — an audit row keyed on either would
-    // pass. These two pin it, and they are the only cases in this file where
-    // the two values differ.
-    //
-    // Studio and AI authoring write drafts ENV-WIDE (`organization_id IS NULL`)
-    // while the publishing session may carry a non-null active org.
-    // `listDrafts` surfaces those env-wide rows to such a caller via its `$or`,
-    // and `promoteDraftForPublish` is called with the DRAFT's scope (#3115), so
-    // the active row lands env-wide. An audit row keyed on the caller's active
-    // org would therefore record the publish against a partition the active row
-    // never entered.
-    it('scope: an env-wide draft published by an org-scoped caller audits ENV-WIDE, not to the caller org', async () => {
-        const h = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(h.engine);
-
-        // Draft is env-wide…
-        await stageDraft(protocol, 'envwide_grid', {}, null);
-        // …but the publishing session carries a non-null active org.
-        const res = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
-        } as any);
-        expect(res.publishedCount).toBe(1);
-
-        const allowed = publishRows(h, 'allowed');
-        expect(allowed).toHaveLength(1);
-        expect(allowed[0].name).toBe('envwide_grid');
-        expect(allowed[0].organization_id).toBeNull();
-        expect(allowed[0].organization_id).not.toBe(ORG);
-    });
-
-    it('scope: an env-wide draft REFUSED under an org-scoped caller audits ENV-WIDE too', async () => {
-        const h = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(h.engine, undefined, 'env_test');
-
-        await stageDraft(protocol, 'envwide_locked', {}, null);
-        // Lock the ENV-WIDE active row — the scope `promoteDraftForPublish`
-        // reads the lock from for an env-wide draft.
-        await protocol.saveMetaItem({
-            type: 'view', name: 'envwide_locked',
-            item: viewBody('envwide_locked', 'protected', { _lock: 'no-overlay' }),
-            packageId: PKG, actor: 'admin',
-        } as any);
-
-        const res = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
-        } as any);
-        expect(res.publishedCount).toBe(0);
-
-        // Membership, not length: [#8594] a lock refusal now leaves BOTH the
-        // batch row and the inner verdict's own row, and the scope claim under
-        // test here is about each row's `organization_id`, not about how many
-        // rows one refusal produces.
-        const denied = publishRows(h, 'denied');
-        expect(denied.map((a) => a.code).sort()).toEqual(['batch_aborted', 'item_locked']);
-        for (const row of denied) {
-            expect(row.name).toBe('envwide_locked');
-            // The denied rows read their scope from the draft's OWN scope — the
-            // `listDrafts` row (`__batchItem` for the batch row, the promote
-            // request for the inner one), the same source the allowed row's
-            // `draftOrgId` comes from. Keyed on the caller's active org these
-            // would be `ORG` and the two outcomes would disagree about where the
-            // publish was refused.
-            expect(row.organization_id).toBeNull();
-            expect(row.organization_id).not.toBe(ORG);
-        }
     });
 
     // ── the denied outcome, and the placement that makes it durable ──────────
@@ -613,14 +539,14 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         // Lock the ACTIVE row AFTER both drafts are staged — locking first
         // would refuse the draft save itself.
         await protocol.saveMetaItem({
-            type: 'view', name: 'locked_grid', organizationId: ORG,
+            type: 'view', name: 'locked_grid',
             item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
         } as any);
 
         const auditedBefore = h.auditRows.length;
         const res = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
 
         // The batch is all-or-nothing (ADR-0067 D2).
@@ -649,7 +575,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         expect(batchAborted[0]).toMatchObject({
             type: 'view',
             name: 'locked_grid',
-            organization_id: ORG,
+            organization_id: null,
             operation: 'publish',
             outcome: 'denied',
             // The persisted audit column's own vocabulary, lower-case like
@@ -694,7 +620,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             // `sys_metadata` write and must succeed.
             h.faults.failMetadataWriteFor = 'broken_grid';
             const res = await protocol.publishPackageDrafts({
-                packageId: PKG, organizationId: ORG, actor: 'admin',
+                packageId: PKG, actor: 'admin',
             } as any);
             expect(res.publishedCount).toBe(0);
 
@@ -733,7 +659,7 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             await stageDraft(protocol, 'case_grid');
             await stageDraft(protocol, 'ticket_grid');
             const res = await protocol.publishPackageDrafts({
-                packageId: PKG, organizationId: ORG, actor: 'admin',
+                packageId: PKG, actor: 'admin',
             } as any);
 
             // The publish still succeeds — best-effort, by contract.
@@ -809,7 +735,7 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
 
         await stageDraft(protocol, 'solo_locked');
         await protocol.saveMetaItem({
-            type: 'view', name: 'solo_locked', organizationId: ORG,
+            type: 'view', name: 'solo_locked',
             item: viewBody('solo_locked', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
         } as any);
@@ -817,7 +743,7 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
         let caught: any;
         try {
             await protocol.publishMetaItem({
-                type: 'view', name: 'solo_locked', organizationId: ORG, actor: 'admin',
+                type: 'view', name: 'solo_locked', actor: 'admin',
             } as any);
         } catch (e) { caught = e; }
 
@@ -830,7 +756,7 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
         expect(locked[0]).toMatchObject({
             type: 'view',
             name: 'solo_locked',
-            organization_id: ORG,
+            organization_id: null,
             operation: 'publish',
             outcome: 'denied',
             // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -850,13 +776,13 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
         await stageDraft(protocol, 'case_grid');
         await stageDraft(protocol, 'locked_grid');
         await protocol.saveMetaItem({
-            type: 'view', name: 'locked_grid', organizationId: ORG,
+            type: 'view', name: 'locked_grid',
             item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
         } as any);
 
         const res = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
 
         // ── THE DELIVERABLE ──────────────────────────────────────────────────
@@ -867,7 +793,7 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
         expect(locked[0]).toMatchObject({
             type: 'view',
             name: 'locked_grid',
-            organization_id: ORG,
+            organization_id: null,
             operation: 'publish',
             outcome: 'denied',
             // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -916,12 +842,12 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
 
         await stageDraft(protocol, 'locked_grid');
         await protocol.saveMetaItem({
-            type: 'view', name: 'locked_grid', organizationId: ORG,
+            type: 'view', name: 'locked_grid',
             item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
         } as any);
         await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
 
         const { events } = await protocol.auditMetaItem({ type: 'view', name: 'locked_grid' });
@@ -954,7 +880,7 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
             // An active row for the draft to advance PAST — with no active row
             // the parent version is null on both reads and there is no race.
             await protocol.saveMetaItem({
-                type: 'view', name: 'raced_grid', organizationId: ORG,
+                type: 'view', name: 'raced_grid',
                 item: viewBody('raced_grid', 'head'), packageId: PKG, actor: 'admin',
             } as any);
 
@@ -962,7 +888,7 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
             h.faults.advanceActiveOnRead = 'raced_grid';
 
             const res = await protocol.publishPackageDrafts({
-                packageId: PKG, organizationId: ORG, actor: 'admin',
+                packageId: PKG, actor: 'admin',
             } as any);
 
             // ── THE DELIVERABLE ──────────────────────────────────────────────
@@ -971,7 +897,7 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
             expect(conflict[0]).toMatchObject({
                 type: 'view',
                 name: 'raced_grid',
-                organization_id: ORG,
+                organization_id: null,
                 operation: 'publish',
                 outcome: 'denied',
                 // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -1014,13 +940,13 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
 
         await stageDraft(protocol, 'locked_grid');
         await protocol.saveMetaItem({
-            type: 'view', name: 'locked_grid', organizationId: ORG,
+            type: 'view', name: 'locked_grid',
             item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
         } as any);
 
         const res = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
         expect(res.publishedCount).toBe(0);
 
@@ -1135,7 +1061,7 @@ describe('[#8595] a PRE-FLIGHT refused publish leaves a row per violation', () =
         expect(publishRows(h, 'denied')).toHaveLength(0);
 
         const res = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
 
         // The whole batch is refused pre-flight — nothing promoted.
@@ -1167,13 +1093,10 @@ describe('[#8595] a PRE-FLIGHT refused publish leaves a row per violation', () =
             expect(String(row.note)).toContain(`${NS}_`);
         }
 
-        // Scope: the DRAFT's own partition (env-wide), not the caller's active
-        // org — the same rule the promoted rows follow. Keyed on the caller's
-        // org these would be `ORG` and the trail would record the refusal
-        // against a partition the item never lived in.
+        // Scope: the DRAFT's own partition (env-wide) — the same rule the
+        // promoted rows follow.
         for (const row of denied) {
             expect(row.organization_id).toBeNull();
-            expect(row.organization_id).not.toBe(ORG);
         }
 
         // The COMPLIANT sibling gets no row of either kind: the batch is
@@ -1225,7 +1148,7 @@ describe('[#8595] a PRE-FLIGHT refused publish leaves a row per violation', () =
         await stageObjectDraft(protocol, 'ticket');
         declareNamespace(h);
         await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
 
         // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -1254,7 +1177,7 @@ describe('[#8595] a PRE-FLIGHT refused publish leaves a row per violation', () =
         await stageObjectDraft(protocol, 'escalation');
         declareNamespace(h);
         await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
 
         const { events } = await protocol.auditMetaItem({ type: 'object', name: 'ticket' });
@@ -1287,7 +1210,7 @@ describe('[#8595] a PRE-FLIGHT refused publish leaves a row per violation', () =
         declareNamespace(h);
 
         const res = await protocol.publishPackageDrafts({
-            packageId: PKG, organizationId: ORG, actor: 'admin',
+            packageId: PKG, actor: 'admin',
         } as any);
         expect(res.success).toBe(true);
         expect(res.publishedCount).toBe(1);

@@ -436,9 +436,9 @@ describe('[#12405] `declaredCode` is ABSENT unless the demote actually happened'
     },
     {
       name: 'a REGISTERED standard-catalog code, same rule',
-      error: thrown('package scope is required', { status: 400, code: 'TENANT_SCOPE_REQUIRED' }),
+      error: thrown('a retired request key', { status: 400, code: 'INVALID_REQUEST' }),
       status: 400,
-      code: 'TENANT_SCOPE_REQUIRED',
+      code: 'INVALID_REQUEST',
     },
     {
       name: 'a producer that declared NO code has nothing to declare',

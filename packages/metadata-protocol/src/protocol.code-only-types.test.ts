@@ -319,6 +319,8 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                 });
 
                 it(`refuses an org-scoped ${type} create too`, async () => {
+                    // [ADR-0131 D6] Every organization-scoped write is refused
+                    // first, before the code-only gate is consulted.
                     const { protocol, rows } = makeProtocol(environmentId);
                     const err = await protocol
                         .saveMetaItem({
@@ -326,10 +328,11 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                             name: probe.name,
                             item: probe.item,
                             organizationId: 'org_alpha',
-                        })
+                        } as any)
                         .then(() => null, (e: any) => e);
 
-                    expect(err?.code).toBe('NOT_CREATABLE');
+                    expect(err?.code).toBe('NOT_OVERRIDABLE');
+                    expect(err?.status).toBe(403);
                     expect(metaRows(rows)).toEqual([]);
                 });
 

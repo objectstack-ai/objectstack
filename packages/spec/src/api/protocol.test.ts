@@ -1802,8 +1802,8 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
   // request shape stayed undeclared — the half-declared door. Maintainer
   // ruling 2026-08-22 (option B): declare the request and the interface
   // member. The measure is the implementation's parameter type in
-  // `@objectstack/metadata-protocol` — `{ type, name, organizationId?,
-  // actor?, message?, packageId? }` — and the REST door's actual reads;
+  // `@objectstack/metadata-protocol` — `{ type, name, actor?, message?,
+  // packageId? }` — and the REST door's actual reads;
   // nothing else is declared because nothing else is enforced.
   // As in the #9726 / commit 2a29caa53 blocks above, accept-pins assert the parsed VALUE:
   // this is a non-strict object, so `success` alone is exactly the
@@ -1814,7 +1814,6 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
   it('accepts the full request and PRESERVES every member through parse', () => {
     const full = {
       ...base,
-      organizationId: 'org_alpha',
       actor: 'admin',
       message: 'publish from designer',
       packageId: 'pkg_crm',
@@ -1850,8 +1849,20 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
     expect(PublishMetaItemRequestSchema.safeParse({ ...base, packageId: 42 }).success).toBe(false);
   });
 
-  it('the three optional strings stay optional and reject non-strings — values, not bags', () => {
-    for (const key of ['organizationId', 'actor', 'message'] as const) {
+  it('[ADR-0131 D6] a retired organizationId is STRIPPED at parse — the protocol, not the schema, refuses it', () => {
+    // The schema is not `.strict()`: the key retired with the per-organization
+    // overlay axis is dropped at parse, and an organization-scoped write is
+    // refused 403 NOT_OVERRIDABLE by the protocol itself (its identity pin,
+    // `protocol.org-scoped-write-refused.test.ts` in @objectstack/metadata-protocol).
+    const result = PublishMetaItemRequestSchema.safeParse({ ...base, organizationId: 'org_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('organizationId' in (result.data as object)).toBe(false);
+    }
+  });
+
+  it('the two optional strings stay optional and reject non-strings — values, not bags', () => {
+    for (const key of ['actor', 'message'] as const) {
       const absent = PublishMetaItemRequestSchema.safeParse(base);
       expect(absent.success).toBe(true);
       if (absent.success) {
@@ -2266,8 +2277,7 @@ describe('DeleteMetaItemRequestSchema declares the contract members the reset do
   // which is why the call-site cast could not come off (TS2353 on six keys,
   // the opposite half of the publish door's TS2339). The measure is the
   // implementation's parameter type in `@objectstack/metadata-protocol` —
-  // `{ type, name, organizationId?, parentVersion?, actor?, state?,
-  // dropStorage? }` — and the REST door's actual sends. As in the sibling
+  // `{ type, name, parentVersion?, actor?, state?, dropStorage? }` — and the REST door's actual sends. As in the sibling
   // blocks above, accept-pins assert the parsed VALUE: this is a non-strict
   // object, so `success` alone is exactly the silent-strip state this family
   // of cards closes.
@@ -2277,7 +2287,6 @@ describe('DeleteMetaItemRequestSchema declares the contract members the reset do
   it('accepts the full request and PRESERVES every member through parse', () => {
     const full = {
       ...base,
-      organizationId: 'org_alpha',
       parentVersion: 'sha256:abc123',
       actor: 'admin@objectos.ai',
       state: 'draft',
@@ -2296,8 +2305,20 @@ describe('DeleteMetaItemRequestSchema declares the contract members the reset do
     expect(DeleteMetaItemRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
   });
 
-  it('the three optional strings stay optional and reject non-strings — values, not bags', () => {
-    for (const key of ['organizationId', 'parentVersion', 'actor'] as const) {
+  it('[ADR-0131 D6] a retired organizationId is STRIPPED at parse — the protocol, not the schema, refuses it', () => {
+    // The schema is not `.strict()`: the key retired with the per-organization
+    // overlay axis is dropped at parse, and an organization-scoped write is
+    // refused 403 NOT_OVERRIDABLE by the protocol itself (its identity pin,
+    // `protocol.org-scoped-write-refused.test.ts` in @objectstack/metadata-protocol).
+    const result = DeleteMetaItemRequestSchema.safeParse({ ...base, organizationId: 'org_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('organizationId' in (result.data as object)).toBe(false);
+    }
+  });
+
+  it('the two optional strings stay optional and reject non-strings — values, not bags', () => {
+    for (const key of ['parentVersion', 'actor'] as const) {
       const absent = DeleteMetaItemRequestSchema.safeParse(base);
       expect(absent.success).toBe(true);
       if (absent.success) {
@@ -2351,7 +2372,6 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
     const good: DeleteMetaItemRequest = {
       type: 'view',
       name: 'account_list',
-      organizationId: 'org_alpha',
       parentVersion: 'sha256:abc123',
       actor: 'admin',
       state: 'draft',
@@ -2361,6 +2381,9 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
     // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
     const withEnv: DeleteMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error `organizationId` is retired (ADR-0131 D6): no metadata write is organization-scoped.
+    const withOrg: DeleteMetaItemRequest = { type: 'view', name: 'account_list', organizationId: 'org_alpha' };
+    expect(withOrg.name).toBe('account_list');
     // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
     const misspelt: DeleteMetaItemRequest = { type: 'view', name: 'account_list', dropstorage: true };
     expect(misspelt.name).toBe('account_list');
@@ -2378,8 +2401,8 @@ describe('SaveMetaItemRequestSchema declares the contract members the save door 
   // call-site cast could not come off (TS2353 on every undeclared key, pure
   // request-shape smuggling, never feature detection). The measure is the
   // implementation's parameter type in `@objectstack/metadata-protocol` —
-  // `{ type, name, item?, organizationId?, parentVersion?, actor?, force?,
-  // mode?, packageId?, source?, writeFace? }` — and the REST door's actual
+  // `{ type, name, item?, parentVersion?, actor?, force?, mode?, packageId?,
+  // source?, writeFace? }` — and the REST door's actual
   // sends. As in the sibling blocks above, accept-pins assert the parsed
   // VALUE: this is a non-strict object, so `success` alone is exactly the
   // silent-strip state this family of cards closes.
@@ -2393,7 +2416,6 @@ describe('SaveMetaItemRequestSchema declares the contract members the save door 
   it('accepts the full request and PRESERVES every member through parse', () => {
     const full = {
       ...base,
-      organizationId: 'org_alpha',
       parentVersion: 'sha256:abc123',
       actor: 'admin@objectos.ai',
       force: true,
@@ -2424,8 +2446,20 @@ describe('SaveMetaItemRequestSchema declares the contract members the save door 
     expect(SaveMetaItemRequestSchema.safeParse({ type: 'view', name: 'account_list', item: null }).success).toBe(true);
   });
 
-  it('the two optional strings stay optional and reject non-strings — values, not bags', () => {
-    for (const key of ['organizationId', 'actor'] as const) {
+  it('[ADR-0131 D6] a retired organizationId is STRIPPED at parse — the protocol, not the schema, refuses it', () => {
+    // The schema is not `.strict()`: the key retired with the per-organization
+    // overlay axis is dropped at parse, and an organization-scoped write is
+    // refused 403 NOT_OVERRIDABLE by the protocol itself (its identity pin,
+    // `protocol.org-scoped-write-refused.test.ts` in @objectstack/metadata-protocol).
+    const result = SaveMetaItemRequestSchema.safeParse({ ...base, organizationId: 'org_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('organizationId' in (result.data as object)).toBe(false);
+    }
+  });
+
+  it('the optional string stays optional and rejects non-strings — a value, not a bag', () => {
+    for (const key of ['actor'] as const) {
       const absent = SaveMetaItemRequestSchema.safeParse(base);
       expect(absent.success).toBe(true);
       if (absent.success) {
@@ -2531,7 +2565,6 @@ describe('MetadataProtocol.saveMetaItem types against the caught-up request sche
       type: 'view',
       name: 'account_list',
       item: { label: 'Account list' },
-      organizationId: 'org_alpha',
       parentVersion: null,
       actor: 'admin',
       force: true,
@@ -2543,6 +2576,9 @@ describe('MetadataProtocol.saveMetaItem types against the caught-up request sche
     // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
     const withEnv: SaveMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error `organizationId` is retired (ADR-0131 D6): no metadata write is organization-scoped.
+    const withOrg: SaveMetaItemRequest = { type: 'view', name: 'account_list', item: {}, organizationId: 'org_alpha' };
+    expect(withOrg.name).toBe('account_list');
     // @ts-expect-error `source` is implementation-internal provenance — no producer on this contract sends it, and the REST layer never reads it off the wire.
     const withSource: SaveMetaItemRequest = { type: 'view', name: 'account_list', source: 'studio' };
     expect(withSource.name).toBe('account_list');

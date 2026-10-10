@@ -344,7 +344,7 @@ describe('#6483 — the nine ADR-0005 divergences: allowOrgOverride rolled back 
 
     // ── the control that makes the red half mean something ────────────────
 
-    it('view — still allowOrgOverride:true — is still accepted over a packaged artifact', async () => {
+    it('view is still accepted over a packaged artifact — env-wide (ADR-0131 D6 retired the org axis)', async () => {
         // Without this, the refusals above would also pass on a harness that
         // could not save ANYTHING over an artifact.
         const { protocol, rows } = makeProtocol([{ type: 'view', name: 'probe_view' }], 'env_prod');
@@ -353,7 +353,6 @@ describe('#6483 — the nine ADR-0005 divergences: allowOrgOverride rolled back 
             type: 'view',
             name: 'probe_view',
             item: VIEW,
-            organizationId: 'org_alpha',
         });
 
         expect(result.success).toBe(true);

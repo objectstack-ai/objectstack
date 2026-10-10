@@ -171,8 +171,6 @@ const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, colum
  */
 const seedBody = { object: 'sys_metadata', records: [{ name: 'row_a', type: 'view' }] };
 
-const ORG = 'org_x';
-
 /**
  * Stage a draft and promote it — the two-step the REST pair
  * `PUT /:type/:name?mode=draft` + `POST /:type/:name/publish` spells. There is
@@ -187,12 +185,10 @@ async function stageAndPublish(
     const type = opts.type ?? 'view';
     const name = opts.name ?? 'cases';
     const item = opts.item ?? viewBody('A');
-    // `org: null` writes env-wide. Not a stylistic choice: ADR-0005 /#6190 refuse
-    // an org-scoped write for a type whose registry entry says
-    // `allowOrgOverride: false`, and `seed` is one — the row would not survive a
-    // restart, so the platform declines to mint it. The seed cases below are
-    // therefore env-wide, which is the only channel that type has.
-    const scope = opts.org === undefined ? ORG : opts.org;
+    // Env-wide by default: [ADR-0131 D6] every organization-scoped write is
+    // refused (403 NOT_OVERRIDABLE), so environment-wide is the only channel
+    // any type has.
+    const scope = opts.org === undefined ? null : opts.org;
     const orgArg = scope === null ? {} : { organizationId: scope };
     await (p as any).saveMetaItem({ type, name, ...orgArg, item, mode: 'draft' });
     return (p as any).publishMetaItem({ type, name, ...orgArg });
@@ -349,7 +345,7 @@ describe('publishMetaItem response conforms to PublishMetaItemResponseSchema (#7
         // stay required.
         const p = await makeProtocol();
         await expect(
-            (p as any).publishMetaItem({ type: 'agent', name: 'helper', organizationId: ORG }),
+            (p as any).publishMetaItem({ type: 'agent', name: 'helper' }),
         ).rejects.toMatchObject({ status: 403 });
     });
 });
