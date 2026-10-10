@@ -91,7 +91,8 @@ multi-organization deployment every organization's rows compete for one 2,000-ro
   `packages/objectql/src/relation-filter-lowering.ts#RELATION_FILTER_ID_CAP` (`INVALID_FILTER` / 400 past 1,000 ids).
   Letter C applies that posture to the six probes as the interim; it is honest and it serves no rows.
 - The two halves of a read are one contract already: `packages/spec/src/contracts/security-service.ts#ISecurityService`
-  answers `#canReadObject` (object admission, fail closed) and `#getReadFilter` (tenant Layer 0, authored RLS,
+  answers `packages/spec/src/contracts/security-service.ts#canReadObject` (object admission, fail closed) and
+  `packages/spec/src/contracts/security-service.ts#getReadFilter` (tenant Layer 0, authored RLS,
   `controlled_by_parent`, OWD and record shares; deny sentinel on any failure), and the analytics raw-SQL door asks both
   and applies the filter to every joined object (`packages/services/service-analytics/src/read-admission.ts`). What is
   missing is only the last step: evaluating that filter against P's table from inside a query on another object —
@@ -106,10 +107,11 @@ multi-organization deployment every organization's rows compete for one 2,000-ro
 the comparand of `$in` on the pointer field: `{ record_id: { $in: ReadableIds.of('cpz_doc') } }`. Three properties
 follow from that position, and they are the whole reason for it:
 
-- **No request can spell it.** A request's `where` arrives as JSON and is lowered by `#parseFilterAST`; a plain object
-  in a `$in` comparand is refused today by `#assertListComparandShapes` (`INVALID_FILTER` / 400). The leaf adds no
-  operator to `#FieldOperatorsSchema` or `#VALID_AST_OPERATORS`, so no author — human or AI — gains a spelling, and
-  nothing new has to be refused at ingress: the refusal that exists is the refusal.
+- **No request can spell it.** A request's `where` arrives as JSON and is lowered by
+  `packages/spec/src/data/filter.zod.ts#parseFilterAST`; a plain object in a `$in` comparand is refused today by
+  `packages/objectql/src/filter-comparand-shape.ts#assertListComparandShapes` (`INVALID_FILTER` / 400). The leaf adds no
+  operator to `packages/spec/src/data/filter.zod.ts#FieldOperatorsSchema` or `#VALID_AST_OPERATORS`, so no author —
+  human or AI — gains a spelling, and nothing new has to be refused at ingress: the refusal that exists is the refusal.
 - **Losing the brand fails closed.** The brand is a `Symbol.for` key (the device
   `packages/spec/src/data/filter-subtree-provenance.ts#markFilterSubtreeProvenance` already uses). A copy that crosses
   JSON, structured clone or a serializing wire arrives unbranded and is refused as a non-list comparand — ⛔ never
@@ -131,8 +133,9 @@ before any driver sees it:
 2. otherwise `scope = getReadFilter(P, caller)`: `undefined` ⇒ no row restriction; the deny sentinel
    (`packages/plugins/plugin-security/src/rls-compiler.ts#RLS_DENY_FILTER`) ⇒ `$in: []`; any other filter is run
    through the same lowering P's own direct read runs (comparand doors, relation lowering, the shared temporal lowering)
-   so the driver receives a lowered scope, and is marked `'policy'` with `#markFilterSubtreeProvenance`, so a driver's
-   refusal diagnostic withholds its operands exactly as it does for an injected RLS predicate.
+   so the driver receives a lowered scope, and is marked `'policy'` with
+   `packages/spec/src/data/filter-subtree-provenance.ts#markFilterSubtreeProvenance`, so a driver's refusal diagnostic
+   withholds its operands exactly as it does for an injected RLS predicate.
 3. The composed leaf carries `{ object: P, scope }`. **The tenant wall is not composed here**: the driver applies its
    own tenant scope to the subquery's table with the outer read's options (D3). The engine never re-derives it.
 
@@ -144,9 +147,10 @@ restriction".
 ### D3 — Driver obligations: compile it, or refuse loudly — no capability bit
 
 - **`driver-sql`** (`packages/drivers/driver-sql/src/sql-driver.ts#SqlDriver`) compiles the composed leaf in its filter
-  compiler (`#applyFilterCondition`) to `field IN (SELECT id FROM P_TABLE WHERE SCOPE AND TENANT)`, the subquery scoped
-  by `#applyTenantScope` with the outer read's options. One statement, so `find`, `count` and `aggregate` agree by
-  construction. `packages/drivers/driver-sqlite-wasm/src/sqlite-wasm-driver.ts#SqliteWasmDriver` and the local
+  compiler (`packages/drivers/driver-sql/src/sql-driver.ts#applyFilterCondition`) to
+  `field IN (SELECT id FROM P_TABLE WHERE SCOPE AND TENANT)`, the subquery scoped by
+  `packages/drivers/driver-sql/src/sql-driver.ts#applyTenantScope` with the outer read's options. One statement, so
+  `find`, `count` and `aggregate` agree by construction. `packages/drivers/driver-sqlite-wasm/src/sqlite-wasm-driver.ts#SqliteWasmDriver` and the local
   transport of `packages/drivers/driver-turso/src/turso-driver.ts#TursoDriver` inherit it.
 - **The Turso remote transport** (`packages/drivers/driver-turso/src/remote-transport.ts#RemoteTransport`, an
   independent compiler) implements the same compilation: it serves a production deployment class and is SQL.
@@ -165,8 +169,9 @@ restriction".
 
 ### D4 — The six consumers emit one leaf per parent object, and no pre-scan
 
-- **The activity stream and the compliance ledger** keep `#computeParentRecordFilter` as the one mechanism and replace
-  its body: the parent objects are enumerated from the metadata registry (every registered object outside
+- **The activity stream and the compliance ledger** keep
+  `packages/plugins/plugin-audit/src/parent-record-read-gate.ts#computeParentRecordFilter` as the one mechanism and
+  replace its body: the parent objects are enumerated from the metadata registry (every registered object outside
   `packages/plugins/plugin-audit/src/audit-writers.ts#AUDIT_EXCLUDED_OBJECTS` and outside the gated object itself);
   for each, one branch `{ object_name: P, record_id: { $in: ReadableIds.of(P) } }`, ANDed into the read's `where` as
   today. Rows naming no parent, a non-machine name, an unregistered object, the gated object itself, or a parent that no
@@ -273,8 +278,8 @@ and none changes `packages/spec` before it.
 |:--|:--|:--|:--|:--|
 | **E1** — the leaf | D1 | `ReadableIds` in `packages/spec/src/data/`; the comparand door admits the branded value and refuses the unbranded one | a JSON round-trip of a `where` holding the leaf is refused; the plain-object spelling is refused 400 | first |
 | **E2** — composition | D2, D5 | the engine seam composes the leaf, refuses it on write verbs and for D5's three classes, marks the scope `'policy'`; the conformance case-set | `canReadObject` false ⇒ no row; deny sentinel ⇒ no row; a delegated, middleware-gated or federated parent ⇒ the loud refusal | after E1 |
-| **E3** — SQL family | D3 | `driver-sql` compiles the leaf inside `#applyTenantScope`; wasm and local Turso inherit; the remote transport compiles it | a reader with more than 2,000 readable candidates gets every visible row; an unreadable row stays hidden; a deleted parent is excluded; `count` equals the rows served | after E2 |
+| **E3** — SQL family | D3 | `driver-sql` compiles the leaf inside `packages/drivers/driver-sql/src/sql-driver.ts#applyTenantScope`; wasm and local Turso inherit; the remote transport compiles it | a reader with more than 2,000 readable candidates gets every visible row; an unreadable row stays hidden; a deleted parent is excluded; `count` equals the rows served | after E2 |
 | **E4** — memory and mongodb | D3 | memory implements; mongodb refuses with the envelope | the conformance table records both | with E3 |
-| **E5** — the activity and ledger switch | D4, D5 | `#computeParentRecordFilter` emits leaves, no pre-scan; D5's classes keep the probe; letter C's refusal retired from these two | the measured scenario answers 1,808 of 1,808; the exemption capability unchanged; the outside class as a predicate | after E3 |
+| **E5** — the activity and ledger switch | D4, D5 | `packages/plugins/plugin-audit/src/parent-record-read-gate.ts#computeParentRecordFilter` emits leaves, no pre-scan; D5's classes keep the probe; letter C's refusal retired from these two | the measured scenario answers 1,808 of 1,808; the exemption capability unchanged; the outside class as a predicate | after E3 |
 | **E6** — `changed_fields` | D4 | the column, the writer stamp, the backfill migration, the rule as a predicate | the org-peer sign-in case stays withheld; an empty change is unaffected; the backfill is idempotent | after E5 |
 | **E7** — comments, reactions, attachments | D4 | the three gates switched | each gate's own bound case | after E5 |
