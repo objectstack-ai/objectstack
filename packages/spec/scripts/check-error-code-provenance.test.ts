@@ -22,7 +22,11 @@ import {
   deriveFindings,
   type StampSite,
 } from './check-error-code-provenance';
-import { ERROR_CODE_LEDGER, type ProvenanceWaiver } from '../src/api/error-code-ledger.zod';
+import {
+  ERROR_CODE_LEDGER,
+  PROVENANCE_WAIVERS,
+  type ProvenanceWaiver,
+} from '../src/api/error-code-ledger.zod';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -62,6 +66,29 @@ describe('STAMP_PATTERNS (published, one pin per pattern)', () => {
     // initializer is read.
     expect(scanSourceText("const MY_CODE: 'REGISTERED_ONE' | 'X' = 'REGISTERED_ONE';", registered))
       .toEqual([{ code: 'REGISTERED_ONE', pattern: 'constdef', line: 1 }]);
+  });
+
+  it('constdef: a DECLARED constant of any name is a site — the binding, not its name, says "code"', () => {
+    // The shape the `*_CODE` name rule could not see: a constant named after
+    // the code it holds (the stdio bridge), exported, `as const`, `let`, typed.
+    expect(scanSourceText("const OBJECT_API_DISABLED = 'REGISTERED_ONE';", registered))
+      .toEqual([{ code: 'REGISTERED_ONE', pattern: 'constdef', line: 1 }]);
+    expect(scanSourceText("export const SELF_REGISTRATION_CLOSED = 'REGISTERED_ONE' as const;", registered))
+      .toEqual([{ code: 'REGISTERED_ONE', pattern: 'constdef', line: 1 }]);
+    expect(scanSourceText("let code = 'REGISTERED_ONE';", registered))
+      .toEqual([{ code: 'REGISTERED_ONE', pattern: 'constdef', line: 1 }]);
+    expect(scanSourceText("const DATASET_INVALID: RegisteredErrorCode = 'REGISTERED_ONE';", registered))
+      .toEqual([{ code: 'REGISTERED_ONE', pattern: 'constdef', line: 1 }]);
+  });
+
+  it('constdef keeps the keyword-less *_CODE limb, so the widening is a superset of the name rule', () => {
+    expect(scanSourceText("static readonly MY_CODE = 'REGISTERED_ONE';", registered))
+      .toEqual([{ code: 'REGISTERED_ONE', pattern: 'constdef', line: 1 }]);
+  });
+
+  it('constdef reads a declaration: a re-assignment to a non-*_CODE name and a comparison are not sites', () => {
+    expect(scanSourceText("status = 'REGISTERED_ONE';", registered)).toEqual([]);
+    expect(scanSourceText("if (e.code === 'REGISTERED_ONE') return;", registered)).toEqual([]);
   });
 
   it('an unregistered code is out of population — the dispatcher-vocabulary gate owns it', () => {
@@ -147,6 +174,48 @@ describe('deriveFindings — the reconciliation, both directions', () => {
     };
     const { waiverProblems } = deriveFindings([site('@objectstack/rogue', 'REGISTERED_ONE')], ledger, [waiver, { ...waiver }]);
     expect(waiverProblems.some((p) => p.includes('duplicate'))).toBe(true);
+  });
+});
+
+describe('@objectstack/mcp: the stdio bridge\'s exposure constants are seen, and their rows hold them', () => {
+  // The bridge's two declarations, verbatim (`packages/mcp/src/stdio-data-bridge.ts`),
+  // driven through the scan and the REAL ledger — copied rather than read, so
+  // this suite still reads nothing outside its package. The repo-wide CI run of
+  // the gate is what holds the file itself.
+  const BRIDGE_SOURCE = [
+    "const OBJECT_API_DISABLED = 'OBJECT_API_DISABLED';",
+    "const OBJECT_API_METHOD_NOT_ALLOWED = 'OBJECT_API_METHOD_NOT_ALLOWED';",
+  ].join('\n');
+  const realRegistered = new Set<string>(Object.values(ERROR_CODE_LEDGER).flat());
+  const bridgeSites = (): StampSite[] =>
+    scanSourceText(BRIDGE_SOURCE, realRegistered).map((hit) => ({
+      file: 'packages/mcp/src/stdio-data-bridge.ts',
+      package: '@objectstack/mcp',
+      ...hit,
+    }));
+
+  it('the scan sees both constants', () => {
+    expect(bridgeSites().map((s) => `${s.code} (${s.pattern})`)).toEqual([
+      'OBJECT_API_DISABLED (constdef)',
+      'OBJECT_API_METHOD_NOT_ALLOWED (constdef)',
+    ]);
+  });
+
+  it('the real ledger lists both under @objectstack/mcp', () => {
+    const findings = deriveFindings(bridgeSites(), ERROR_CODE_LEDGER, PROVENANCE_WAIVERS);
+    expect(findings.violations).toEqual([]);
+    expect(findings.listed).toHaveLength(2);
+  });
+
+  it('RED LEG: with the @objectstack/mcp rows removed the gate reports both sites — no waiver stands in', () => {
+    const withoutMcp = Object.fromEntries(
+      Object.entries(ERROR_CODE_LEDGER).filter(([owner]) => owner !== '@objectstack/mcp'),
+    );
+    const findings = deriveFindings(bridgeSites(), withoutMcp, PROVENANCE_WAIVERS);
+    expect(findings.violations.map((v) => `${v.package} → ${v.code}`)).toEqual([
+      '@objectstack/mcp → OBJECT_API_DISABLED',
+      '@objectstack/mcp → OBJECT_API_METHOD_NOT_ALLOWED',
+    ]);
   });
 });
 
