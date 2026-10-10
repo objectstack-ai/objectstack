@@ -9,7 +9,7 @@ import { explainAccess, buildContextForUser, resolveDelegatorContext, type Expla
 import { RLS_DENY_FILTER } from './rls-compiler';
 import { unresolvedPostureRemedy } from './unresolved-posture';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
-import { bindCatalogFromTables, ledgerFromTables } from './__tests__/security-catalog.testkit.js';
+import { bindCatalogFromTables, bindTestSecurityCatalog, ledgerFromTables } from './__tests__/security-catalog.testkit.js';
 
 // [commit a68c61267] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
 // (ADR-0122), in which every `.default([])` member is OPTIONAL before a parse:
@@ -873,10 +873,10 @@ function makeGrantQl(tables: Rows) {
   return bindCatalogFromTables({
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
-      // [ADR-0131 D3] The resolver reads deactivation from the activation
-      // ledger: a fixture's `active: false` rows reach it as the ledger rows the
-      // upgrade ceremony converts them to. The explainer's own "deactivated"
-      // annotation still reads the row (stage 2 moves it).
+      // [ADR-0131 D3] The resolver AND the explainer's "deactivated"
+      // annotation read deactivation from the activation ledger: a fixture's
+      // `active: false` rows reach both as the ledger rows the upgrade ceremony
+      // converts them to, unless the fixture states its ledger itself.
       const stored = object === 'sys_metadata_activation' && !tables[object] ? ledgerFromTables(tables) : tables[object];
       return (stored ?? []).filter((row) =>
         Object.entries(where).every(([key, cond]) => { if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`); 
@@ -1085,6 +1085,65 @@ describe('buildContextForUser', () => {
     expect(ctx.droppedGrants).toEqual([
       { kind: 'permission_set', name: 'crm_full', state: 'expired', until: '2026-06-01T00:00:00Z' },
     ]);
+  });
+
+  // [ADR-0131 D3, ADR-0126 §4] Explain and enforce read ONE switch: the
+  // activation ledger, through the resolver's own `readDisabledCatalogNames`.
+  // Each case below states the ledger and the rows apart, so the two disagree,
+  // and the explainer must side with what the resolver enforces.
+  it('a set and a position the LEDGER switched off are reported deactivated, whatever their rows say', async () => {
+    const ql = makeGrantQl({
+      sys_user_position: [{ user_id: 'u2', position: 'field_auditor' }],
+      sys_position: [{ id: 'pos_fa', name: 'field_auditor', active: true }],
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full' }],
+      sys_permission_set: [{ id: 'psOff', name: 'crm_full', active: true }],
+      sys_metadata_activation: [
+        { metadata_type: 'position', name: 'field_auditor', active: false },
+        { metadata_type: 'permission', name: 'crm_full', active: 0 },
+      ],
+    });
+    const ctx = await buildContextForUser(ql, 'u2', NOW);
+    // Enforcement dropped both…
+    expect(ctx.positions).toEqual(['everyone']);
+    expect(ctx.permissions).toEqual([]);
+    // …and explain says why, from the same ledger.
+    expect(ctx.droppedGrants).toEqual([
+      { kind: 'position', name: 'field_auditor', state: 'deactivated' },
+      { kind: 'permission_set', name: 'crm_full', state: 'deactivated' },
+    ]);
+  });
+
+  it("a catalog ROW's `active: false` with no ledger row is in effect, and explain reports nothing dropped", async () => {
+    const ql = makeGrantQl({
+      sys_user_position: [{ user_id: 'u2', position: 'field_auditor' }],
+      sys_position: [{ id: 'pos_fa', name: 'field_auditor', active: false }],
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full' }],
+      sys_permission_set: [{ id: 'psOff', name: 'crm_full', active: false }],
+      sys_metadata_activation: [],
+    });
+    const ctx = await buildContextForUser(ql, 'u2', NOW);
+    expect(ctx.positions).toEqual(['field_auditor', 'everyone']);
+    expect(ctx.permissions).toEqual(['crm_full']);
+    expect(ctx.droppedGrants).toEqual([]);
+  });
+
+  it('a grant naming a set the catalog does not hold is reported neither expired nor deactivated — there is no set to lose', async () => {
+    const ql = bindTestSecurityCatalog({
+      async find(object: string, opts: any) {
+        const rows: Rows = {
+          sys_user_permission_set: [
+            { user_id: 'u2', permission_set_id: 'ps_gone', permission_set: 'gone_set', valid_until: '2026-06-01T00:00:00Z' },
+            { user_id: 'u2', permission_set_id: 'ps_gone2', permission_set: 'gone_off' },
+          ],
+          sys_metadata_activation: [{ metadata_type: 'permission', name: 'gone_off', active: false }],
+        };
+        const where = opts?.where ?? {};
+        return (rows[object] ?? []).filter((row) => Object.entries(where).every(([k, c]) =>
+          c && typeof c === 'object' && '$in' in (c as any) ? ((c as any).$in as unknown[]).includes(row[k]) : row[k] === c));
+      },
+    }, { permissions: [], positions: [] });
+    const ctx = await buildContextForUser(ql, 'u2', NOW);
+    expect(ctx.droppedGrants).toEqual([]);
   });
 
   it('an absent `active` column keeps granting and is NOT reported — absent is ACTIVE (ADR-0049)', async () => {
