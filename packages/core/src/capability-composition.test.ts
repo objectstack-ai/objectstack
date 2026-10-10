@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { resolveCapabilityArgument, resolveServedCapabilities } from './capability-composition.js';
+import { stackDeclaredCapabilities } from './stack-collections.js';
 
 const SLATE = [...PLATFORM_ALWAYS_ON_CAPABILITIES];
 
@@ -38,7 +39,7 @@ const twoPackages = (svcExtra: Record<string, unknown>): Record<string, unknown>
 
 describe('resolveServedCapabilities — which tokens a served boot mounts', () => {
   it('an app that declares nothing gets the always-on slate, in the slate\'s order', () => {
-    const served = resolveServedCapabilities({});
+    const served = resolveServedCapabilities([]);
     // Anti-vacuity: the slate is the spec's, and it is not empty.
     expect(SLATE.length).toBeGreaterThan(0);
     expect(served.tokens).toEqual(SLATE);
@@ -46,7 +47,7 @@ describe('resolveServedCapabilities — which tokens a served boot mounts', () =
   });
 
   it('the declared tokens come first, deduplicated, and a slate member declared is not repeated', () => {
-    const served = resolveServedCapabilities({ requires: ['automation', 'cache', 'automation'] });
+    const served = resolveServedCapabilities(['automation', 'cache', 'automation']);
     expect(served.tokens.slice(0, 2)).toEqual(['automation', 'cache']);
     expect(served.tokens.filter((token) => token === 'cache')).toEqual(['cache']);
     expect(served.tokens.slice(2)).toEqual(SLATE.filter((token) => token !== 'cache'));
@@ -54,34 +55,34 @@ describe('resolveServedCapabilities — which tokens a served boot mounts', () =
   });
 
   it('`--preset minimal` mounts no slate — only what the stack declares', () => {
-    expect(resolveServedCapabilities({ requires: ['automation'] }, { preset: 'minimal' }).tokens).toEqual(['automation']);
+    expect(resolveServedCapabilities(['automation'], { preset: 'minimal' }).tokens).toEqual(['automation']);
     // Control: any other preset name keeps the slate.
-    expect(resolveServedCapabilities({ requires: ['automation'] }, { preset: 'default' }).tokens).toEqual([
+    expect(resolveServedCapabilities(['automation'], { preset: 'default' }).tokens).toEqual([
       'automation',
       ...SLATE,
     ]);
   });
 
   it('a declared `auth` brings `email`, and `job` / `queue` move ahead of what schedules background work', () => {
-    const served = resolveServedCapabilities({ requires: ['auth'] }, { preset: 'minimal' });
+    const served = resolveServedCapabilities(['auth'], { preset: 'minimal' });
     expect(served.tokens).toEqual(['job', 'queue', 'auth', 'email']);
     // `email` was appended by the platform, not declared by the stack.
     expect([...served.declared]).toEqual(['auth']);
     // Control: nothing that schedules background work, nothing moved.
-    expect(resolveServedCapabilities({ requires: ['automation'] }, { preset: 'minimal' }).tokens).toEqual(['automation']);
+    expect(resolveServedCapabilities(['automation'], { preset: 'minimal' }).tokens).toEqual(['automation']);
   });
 
   it('the host defaults land after the declared tokens and before the slate', () => {
-    const served = resolveServedCapabilities({ requires: ['automation'] }, { hostDefaults: ['mcp', 'pinyin-search'] });
+    const served = resolveServedCapabilities(['automation'], { hostDefaults: ['mcp', 'pinyin-search'] });
     expect(served.tokens).toEqual(['automation', 'mcp', 'pinyin-search', ...SLATE]);
     expect(served.declared.has('mcp')).toBe(false);
   });
 
-  it('a package body\'s `requires` is read when the top level carries none', () => {
+  it('a package body\'s `requires`, as `stackDeclaredCapabilities` reads it for the boots, is what the rule mounts', () => {
     const stack = twoPackages({ requires: ['approvals'] });
     // Anti-vacuity: the producer really left `requires` out of the top level.
     expect(stack.requires).toBeUndefined();
-    const served = resolveServedCapabilities(stack, { preset: 'minimal' });
+    const served = resolveServedCapabilities(stackDeclaredCapabilities(stack), { preset: 'minimal' });
     expect(served.tokens).toEqual(['job', 'queue', 'approvals']);
     expect([...served.declared]).toEqual(['approvals']);
   });

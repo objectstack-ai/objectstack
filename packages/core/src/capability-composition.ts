@@ -58,7 +58,7 @@
 import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { CAPABILITY_PROVIDERS } from './capability-providers.js';
-import { resolveStackCollection, stackDeclaredCapabilities } from './stack-collections.js';
+import { resolveStackCollection } from './stack-collections.js';
 
 type Bag = Record<string, unknown>;
 
@@ -70,7 +70,7 @@ export interface ServedCapabilities {
   /** Every token, deduplicated, in the order a served boot mounts its provider. */
   readonly tokens: readonly string[];
   /**
-   * The tokens the stack itself declares in `requires` — the "required" intent
+   * The tokens the stack itself declares — the "required" intent
    * (#1597): under `serve` a declared token whose provider cannot be provided
    * is a hard boot error, where a token the platform appended is best-effort.
    */
@@ -84,12 +84,17 @@ export interface ServedCapabilities {
 const NEEDS_JOB_AND_QUEUE: readonly string[] = ['email', 'approvals', 'auth'];
 
 /**
- * The capability tokens a served boot of `stack` mounts providers for, in
- * mount order — the rule `os serve` reads, in its order:
+ * The capability tokens a served boot mounts providers for, in mount order,
+ * given the tokens the stack DECLARES — the rule `os serve` reads, in its
+ * order:
  *
- *  1. the tokens the stack declares in `requires`
- *     ({@link stackDeclaredCapabilities}: the top-level list, otherwise each
- *     package body's), deduplicated in first-seen order;
+ *  1. the declared tokens, deduplicated in first-seen order. A reader hands
+ *     them in as it reads them: `serve` and the handle by
+ *     `stackDeclaredCapabilities` (the top-level `requires`, otherwise each
+ *     package body's); `os migrate plan`'s declaration boot by the same reader,
+ *     or off a compiled artifact for a host config. Reading `requires` stays
+ *     each boot's own step, so it is ONE call shared with the other readers of
+ *     `requires`, never a second copy inside this rule;
  *  2. `email` when `auth` is declared — auth callbacks (password reset, email
  *     verification, magic link, invitation) depend on the email service, which
  *     falls back to its log transport when no provider is configured;
@@ -106,7 +111,7 @@ const NEEDS_JOB_AND_QUEUE: readonly string[] = ['email', 'approvals', 'auth'];
  * which tokens mount nothing is each reader's lookup in `CAPABILITY_PROVIDERS`.
  */
 export function resolveServedCapabilities(
-  stack: unknown,
+  declaredTokens: readonly string[],
   opts: {
     /** `serve`'s `--preset`; `minimal` mounts no slate. */
     readonly preset?: string;
@@ -114,7 +119,7 @@ export function resolveServedCapabilities(
     readonly hostDefaults?: readonly string[];
   } = {},
 ): ServedCapabilities {
-  const tokens = [...new Set(stackDeclaredCapabilities(stack))];
+  const tokens = [...new Set(declaredTokens)];
   const declared: ReadonlySet<string> = new Set(tokens);
   if (tokens.includes('auth') && !tokens.includes('email')) tokens.push('email');
   for (const token of opts.hostDefaults ?? []) {

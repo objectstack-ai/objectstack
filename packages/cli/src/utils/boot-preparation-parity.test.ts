@@ -61,6 +61,7 @@ import {
   providesCapability,
   resolveAuthSecret,
   resolvePlatformAuthComposition,
+  resolveServedCapabilities,
   resolveStackTiers,
 } from '@objectstack/core';
 import { createStandaloneStack } from '@objectstack/runtime';
@@ -110,6 +111,9 @@ const STEPS: readonly Step[] = [
       stackDeclaresMetadata,
       resolveStackCollection,
       stackDeclaredCapabilities,
+      // [#22301] Which tokens get a provider — the declared ones, `email` for
+      // `auth`, the always-on slate, `job` / `queue` ahead — read by both boots.
+      resolveServedCapabilities,
       stampSearchPinyinEnabled,
       providesCapability,
     ],
@@ -156,6 +160,11 @@ const SERVE_ONLY: Record<string, string> = {
   stackSuppliesAuthPlugin:
     'serve\'s own "is an AuthPlugin already composed" read ahead of its auth block; the auth-family gate '
     + '(resolvePlatformAuthComposition, called by both boots) asks the same predicate first',
+  resolveCapabilityArgument:
+    'what serve constructs each capability provider WITH (the app\'s cubes, its mail and SMS configuration, '
+    + 'the storage root; [#22301], shared with @objectstack/verify\'s bootStack): the declaration boot constructs '
+    + 'each provider for its declarations only, with a measured posture per token '
+    + '(DECLARATION_PROVIDER_POSTURES), and runs no start() that would read a configuration',
   findSqlDriverForKernel:
     'the artifact boot migration gate, a kernel:ready hook over a booted kernel — a serving-boot policy that '
     + 'runs after preparation, not a step that shapes what is prepared',

@@ -15,9 +15,10 @@
 //
 // ## What is `serve`'s, read from where `serve` reads it (`@objectstack/core`)
 //
-//   · WHICH tokens: `resolveServedCapabilities` — the tokens the app declares
-//     (the top-level `requires` when the stack carries one, otherwise each
-//     package body's), `email` for a declared `auth`, the always-on slate
+//   · WHICH tokens: `resolveServedCapabilities` over the tokens the app
+//     declares as `stackDeclaredCapabilities` reads them (the top-level
+//     `requires` when the stack carries one, otherwise each package body's) —
+//     `email` for a declared `auth`, the always-on slate
 //     (`PLATFORM_ALWAYS_ON_CAPABILITIES`), and `job` / `queue` ahead of the
 //     tokens that schedule background work. No preset: `bootStack` takes none,
 //     so the slate is always mounted, as on a `serve` with no `--preset`.
@@ -62,6 +63,7 @@ import {
   providesCapability,
   resolveCapabilityArgument,
   resolveServedCapabilities,
+  stackDeclaredCapabilities,
 } from '@objectstack/core';
 
 /** Why this boot constructs a provider, as a refusal names it. */
@@ -133,7 +135,7 @@ export async function constructServedProviders(opts: {
   held: readonly unknown[];
   packageRoot: string;
 }): Promise<unknown[]> {
-  const { tokens, declared } = resolveServedCapabilities(opts.config);
+  const { tokens, declared } = resolveServedCapabilities(stackDeclaredCapabilities(opts.config));
   const constructed: unknown[] = [];
   const all = (): unknown[] => [...opts.held, ...constructed];
 

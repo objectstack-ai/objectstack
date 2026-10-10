@@ -117,6 +117,7 @@ import {
   stackDeclaresMetadata,
   bundleDeclaresTranslations,
   resolveStackCollection,
+  stackDeclaredCapabilities,
   stackBootPlugins,
 } from '../utils/stack-collections.js';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
@@ -2700,10 +2701,11 @@ export default class Serve extends Command {
       // instance wins over the auto-loader).
       const presetName = flags.preset ?? (isDev ? 'default' : 'default');
       // [#22301] WHICH tokens a served boot mounts providers for is ONE rule,
-      // `resolveServedCapabilities` (`@objectstack/core`), read by this command
-      // and by `@objectstack/verify`'s `bootStack`, so an app's tests mount the
-      // services its users' server mounts. In its order: the tokens the stack
-      // declares (`stackDeclaredCapabilities` — the top-level list, otherwise
+      // `resolveServedCapabilities` (`@objectstack/core`), read by this command,
+      // by `@objectstack/verify`'s `bootStack` and by `os migrate plan`'s
+      // declaration boot, so an app's tests mount the services its users'
+      // server mounts. In its order: the tokens the stack declares, as
+      // `stackDeclaredCapabilities` reads them (the top-level list, otherwise
       // each package body's, #22288), deduplicated; `email` when `auth` is
       // declared; the host defaults below; the always-on slate
       // (`Serve.ALWAYS_ON_CAPABILITIES`) unless `--preset minimal`; and `job`
@@ -2735,7 +2737,7 @@ export default class Serve extends Command {
       const hostDefaults: string[] = [];
       if (isMcpServerEnabled()) hostDefaults.push('mcp');
       if (stampSearchPinyinEnabled((config as any).i18n)) hostDefaults.push('pinyin-search');
-      const served = resolveServedCapabilities(config, { preset: presetName, hostDefaults });
+      const served = resolveServedCapabilities(stackDeclaredCapabilities(config), { preset: presetName, hostDefaults });
       const requires: string[] = [...served.tokens];
       const declaredRequires: ReadonlySet<string> = served.declared;
       // Capability → tier: any capability that is gated by a tier
