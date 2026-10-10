@@ -1893,6 +1893,11 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
         const authored = key === 'title'
           ? (asAuthoredLabel(cfg[key]) ?? asAuthoredLabel(node.label))
           : asAuthoredLabel(cfg[key]);
+        // [#22507] Body text is read only where the screen authors one (the
+        // engine never adds it), so an unauthored `description` is not even a
+        // seed-less entry: a bundle externalizing one would otherwise be
+        // demanded in every locale for a string nothing shows.
+        if (key === 'description' && authored === undefined) continue;
         pushOptional(out, [...screenRoot, key], authored, 'flow', scope);
       }
 

@@ -209,7 +209,6 @@ describe('what the walker harvests from a screen flow', () => {
       'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.label',
       'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.placeholder',
       'flows.lead_conversion.screens.conversion_details.title',
-      'flows.lead_conversion.screens.summary.description',
       'flows.lead_conversion.screens.summary.title',
     ]);
   });
@@ -680,6 +679,14 @@ describe('a screen\'s body text is a key where the screen authors one (#22507)',
 
   it('goes quiet once the body text template is translated', () => {
     expect(userIssues(computeI18nCoverage(config({ description: '任务“{{ subject }}”已创建。' })))).toEqual([]);
+  });
+
+  it('is no entry at all for a screen without body text — a bundle carrying one is demanded nowhere', () => {
+    // The engine never reads it there, so the key is not even a seed-less
+    // entry: an externalized `description` must not be demanded per locale.
+    const keys = collectExpectedEntries({ flows: [templated] }).map((e) => e.path.join('.'));
+    expect(keys).toContain('flows.quick_add_task.screens.success_screen.description');
+    expect(keys).not.toContain('flows.quick_add_task.screens.bare.description');
   });
 
   it('scaffolds the authored template, holes and all, and no row for the screen without one', () => {
