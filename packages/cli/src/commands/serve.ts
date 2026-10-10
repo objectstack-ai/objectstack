@@ -174,6 +174,7 @@ import {
   formatConsoleDistMissingWarning,
   createConsoleStaticPlugin,
   createConsoleNotBuiltPlugin,
+  createConsoleShaDriftRefusalPlugin,
   createRuntimeAssetsPlugin,
   type ConsoleShaDrift,
 } from '../utils/console.js';
@@ -4954,25 +4955,27 @@ export default class Serve extends Command {
         // present, it owns the root `/` redirect (preferred default UI). It is
         // optional — we only mount it when the package resolves and a
         // pre-built `dist/` is present, and — in dev — only when that build
-        // matches the repo's objectui pin (#7752). A package that resolves
-        // with no `dist/` gets the not-built answer on those same routes, so
-        // `/_console/` names the remedy the boot warning prints instead of
-        // answering a bare 404.
-        if (consolePath) {
-          if (consoleWillMount) {
-            if (consoleDrift) {
-              console.warn(chalk.yellow(formatConsoleShaDriftWarning(consoleDrift)));
-            }
-            const consoleDistPath = path.join(consolePath, 'dist');
-            await kernel.use(createConsoleStaticPlugin(consoleDistPath, { isDev }));
-            trackPlugin('ConsoleUI');
-          } else if (refusedForDrift && consoleDrift) {
-            console.error(chalk.red(formatConsoleShaDriftRefusal(consoleDrift)));
-          } else {
-            console.warn(chalk.yellow(formatConsoleDistMissingWarning(consolePath)));
-            await kernel.use(createConsoleNotBuiltPlugin(consolePath));
-            trackPlugin('ConsoleNotBuilt');
+        // matches the repo's objectui pin (#7752). Every other boot that wants
+        // a Console gets a responder on those same routes instead, so
+        // `/_console/` answers `503` naming the remedy its boot message prints
+        // rather than a bare 404 (#22420): the drift refusal; a package with no
+        // `dist/`; no package at all (`consolePath` null). Only `--no-ui` /
+        // `--no-console` mount nothing, by the operator's own choice.
+        if (consolePath && consoleWillMount) {
+          if (consoleDrift) {
+            console.warn(chalk.yellow(formatConsoleShaDriftWarning(consoleDrift)));
           }
+          const consoleDistPath = path.join(consolePath, 'dist');
+          await kernel.use(createConsoleStaticPlugin(consoleDistPath, { isDev }));
+          trackPlugin('ConsoleUI');
+        } else if (refusedForDrift && consoleDrift) {
+          console.error(chalk.red(formatConsoleShaDriftRefusal(consoleDrift)));
+          await kernel.use(createConsoleShaDriftRefusalPlugin(consoleDrift));
+          trackPlugin('ConsoleShaDriftRefused');
+        } else if (consoleEnabled) {
+          console.warn(chalk.yellow(formatConsoleDistMissingWarning(consolePath)));
+          await kernel.use(createConsoleNotBuiltPlugin(consolePath));
+          trackPlugin('ConsoleNotBuilt');
         }
       }
 
