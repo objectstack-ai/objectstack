@@ -143,8 +143,8 @@ describe('the upload-starting doors refuse a scope outside the vocabulary (#2247
     await server.handler('POST', door)({ params: {}, query: {}, headers: {}, method: 'POST', path: door, body } as IHttpRequest, res);
     return res;
   };
-  const storedFiles = () => engine.find('sys_file', { context: { isSystem: true } } as any);
-  const storedSessions = () => engine.find('sys_upload_session', { context: { isSystem: true } } as any);
+  const storedFiles = () => engine.find('sys_file', {});
+  const storedSessions = () => engine.find('sys_upload_session', {});
 
   it("refuses scope 'avatars' on both doors with 400 INVALID_REQUEST naming the allowed values, before any row, URL or backend call", async () => {
     const presign = vi.spyOn(adapter, 'getPresignedUpload');
