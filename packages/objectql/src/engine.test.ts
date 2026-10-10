@@ -129,17 +129,21 @@ describe('ObjectQL Engine', () => {
             const manifest = {
                 id: 'com.example.app',
                 namespace: 'example',
+                version: '1.2.0',
                 objects: [
                     { name: 'task', fields: {} }
                 ]
             };
             
             engine.registerApp(manifest);
+            // The manifest's version rides along as the trailing `packageVersion`.
             expect(SchemaRegistry.registerObject).toHaveBeenCalledWith(
                 expect.objectContaining({ name: 'task' }), 
                 'com.example.app',
                 'example',
-                'own'
+                'own',
+                undefined,
+                '1.2.0'
             );
         });
 
@@ -156,7 +160,9 @@ describe('ObjectQL Engine', () => {
                 expect.objectContaining({ name: 'item' }), 
                 'com.legacy.app',
                 undefined,
-                'own'
+                'own',
+                undefined,
+                undefined
             );
         });
 
@@ -164,6 +170,7 @@ describe('ObjectQL Engine', () => {
             const manifest = {
                 id: 'com.extender.app',
                 namespace: 'ext',
+                version: '3.0.0',
                 objectExtensions: [
                     { extend: 'contact', fields: { custom_field: { type: 'text' } }, priority: 250 }
                 ]
@@ -175,7 +182,8 @@ describe('ObjectQL Engine', () => {
                 'com.extender.app',
                 undefined,
                 'extend',
-                250
+                250,
+                '3.0.0'
             );
         });
 
