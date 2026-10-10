@@ -25,6 +25,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const VAULT: ServiceObject = {
@@ -58,7 +59,10 @@ const ROWS: Record<string, Record<string, unknown>[]> = {
 
 function makeProtocol() {
     const find = vi.fn(async (object: string, _o: any) => (ROWS[object] ?? []).map((r) => ({ ...r })));
-    const findOne = vi.fn(async (object: string) => ({ ...(ROWS[object]?.[0] ?? {}) }));
+    const findOne = vi.fn(async (object: string, o: any) => {
+        assertEngineFindOnePredicate(object, o);
+        return { ...(ROWS[object]?.[0] ?? {}) };
+    });
     const aggregate = vi.fn(async () => [{ n: 1 }]);
     const count = vi.fn(async () => (ROWS.pv_vault?.length ?? 0));
     const engine: any = { registry: { getObject: (n: string) => SCHEMAS[n] }, find, findOne, count, aggregate };

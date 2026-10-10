@@ -135,7 +135,7 @@ describe('[#22646] a $search never scans an `internal: true` column', () => {
 
     it('the generated search filter names the ordinary text columns, never the flagged one', async () => {
         await ctx.engine.insert('itest_vault', { name: 'alpha', prefix: 'osk_', rank: 1, token: 'h1' }, SYSTEM as any);
-        await ctx.engine.find('itest_vault', { search: 'alp', context: { isSystem: true } } as any);
+        await ctx.engine.find('itest_vault', { search: 'alp' }, SYSTEM);
         const blob = JSON.stringify(lastSearchWhere() ?? null);
         expect(blob).toContain('name');
         expect(blob).not.toContain('token');
@@ -143,7 +143,7 @@ describe('[#22646] a $search never scans an `internal: true` column', () => {
 
     it('an explicit searchFields naming the flagged column is intersected away at the engine (withheld)', async () => {
         await ctx.engine.insert('itest_vault', { name: 'alpha', prefix: 'osk_', rank: 1, token: 'h1' }, SYSTEM as any);
-        await ctx.engine.find('itest_vault', { search: 'h1', searchFields: ['token'], context: { isSystem: true } } as any);
+        await ctx.engine.find('itest_vault', { search: 'h1', searchFields: ['token'] }, SYSTEM);
         const blob = JSON.stringify(lastSearchWhere() ?? null);
         // The override narrowed to nothing scannable, so the engine falls back
         // to the (internal-free) default set — never a clause on `token`.
@@ -152,7 +152,7 @@ describe('[#22646] a $search never scans an `internal: true` column', () => {
 
     it('CONTROL: an object with no flagged field scans its text columns including `token`', async () => {
         await ctx.engine.insert('itest_plain', { name: 'alpha', token: 'h1' }, SYSTEM as any);
-        await ctx.engine.find('itest_plain', { search: 'alp', context: { isSystem: true } } as any);
+        await ctx.engine.find('itest_plain', { search: 'alp' }, SYSTEM);
         const blob = JSON.stringify(lastSearchWhere() ?? null);
         expect(blob).toContain('token');
     });
