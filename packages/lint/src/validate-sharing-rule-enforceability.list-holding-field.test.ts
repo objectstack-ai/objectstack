@@ -23,11 +23,24 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  validateSharingRuleEnforceability,
+  validateSharingRuleEnforceability as validateSharingRuleEnforceabilityUnrecorded,
   SHARING_RULE_UNLOWERABLE_CONDITION,
 } from './validate-sharing-rule-enforceability.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
 import { runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is the id's `os explain` entry. Every call below records what it
+// fired, and the last case in this file holds each recorded verdict to one
+// line of at most 200 characters. Run the whole file: that case reads what the
+// cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateSharingRuleEnforceability: typeof validateSharingRuleEnforceabilityUnrecorded = (...args) => {
+  const findings = validateSharingRuleEnforceabilityUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 const deal = {
   name: 'deal',
@@ -76,26 +89,16 @@ const OPERATORS: ReadonlyArray<{ op: string; spell: (a: string, b: string) => st
 ];
 
 const COLUMNS = [
-  { column: 'a json field', field: 'tags', declared: "`tags` is declared `type: 'json'`" },
-  { column: 'a multiple lookup', field: 'reviewers', declared: "`reviewers` is declared `type: 'lookup'`, `multiple: true`" },
+  { column: 'a json field', field: 'tags' },
+  { column: 'a multiple lookup', field: 'reviewers' },
 ] as const;
 
-/** The family's class sentence — the RLS arm's words, kept identical. */
-const CLASS_SENTENCE =
-  'A column that holds a list or an object is not one comparable value, on either side of a field-to-field ' +
-  'comparison, so the platform refuses the comparison instead of evaluating it';
-
-/** The measured runtime consequence on the sharing path. */
-const CONSEQUENCE =
-  'the rule is seeded into `sys_sharing_rule`, but every criteria query it runs is refused on the SQL drivers ' +
-  '(`INVALID_FILTER` / 400: driver-sql refuses a cross-field comparison against such a column by its declared ' +
-  'type), and `SharingRuleService` reads a refused query as matching no record. No `sys_record_share` grant is ' +
-  'ever materialised, at boot or on any later write, and the only signal is a WARN line in the server log. The ' +
-  'rule is declared and grants nothing.';
+/** What the refusal costs on the sharing path — the verdict's closing clause. */
+const CONSEQUENCE = 'so its criteria query is refused (INVALID_FILTER / 400) and it grants nothing';
 
 describe('validateSharingRuleEnforceability — a condition comparing a field with a json / multiple field is REFUSED (#19886)', () => {
   for (const { op, spell, quoted } of OPERATORS) {
-    for (const { column, field, declared } of COLUMNS) {
+    for (const { column, field } of COLUMNS) {
       for (const order of ['scalar first', 'list first'] as const) {
         const [left, right] = order === 'scalar first' ? ['status', field] : [field, 'status'];
         const condition = spell(left, right);
@@ -110,8 +113,8 @@ describe('validateSharingRuleEnforceability — a condition comparing a field wi
             },
           ]);
           expect(findings[0].message).toBe(
-            `Sharing-rule condition \`${condition}\` lowers, but compares a field with a field that holds a list or ` +
-              `an object: \`record.${left} ${quoted} record.${right}\`, where ${declared}. ${CLASS_SENTENCE}: ${CONSEQUENCE}`,
+            `condition compares \`record.${left} ${quoted} record.${right}\`, where \`${field}\` holds a list or an ` +
+              `object, ${CONSEQUENCE}`,
           );
           expect(findings[0].hint).toMatch(/^A field compared with a `json` or `multiple` field has no row-filter form/);
         });
@@ -126,7 +129,7 @@ describe('validateSharingRuleEnforceability — a condition comparing a field wi
   it('the parsed tier (`{ dialect, source }`) is refused identically', () => {
     const findings = validateSharingRuleEnforceability(stackWith({ dialect: 'cel', source: 'record.status != record.tags' }));
     expect(findings.map((f) => f.rule)).toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
-    expect(findings[0].message).toContain('Sharing-rule condition `record.status != record.tags` lowers');
+    expect(findings[0].message).toContain('condition compares `record.status != record.tags`, where `tags` holds');
   });
 
   it('an offending comparison inside a compound condition is refused, and a second one is named in the same finding', () => {
@@ -135,11 +138,7 @@ describe('validateSharingRuleEnforceability — a condition comparing a field wi
 
     const two = validateSharingRuleEnforceability(stackWith('record.status != record.tags || record.reviewers == record.tags'));
     expect(two).toHaveLength(1);
-    expect(two[0].message).toContain(
-      "object: `record.status != record.tags`, where `tags` is declared `type: 'json'`; " +
-        "`record.reviewers == record.tags`, where `reviewers` is declared `type: 'lookup'`, `multiple: true` and " +
-        "`tags` is declared `type: 'json'`. ",
-    );
+    expect(two[0].message).toContain('compares `record.status != record.tags`, where `tags` holds a list or an object (and 1 more), ');
   });
 
   it('an inactive rule is judged too — the seeder compiles and seeds it regardless of `active`', () => {
@@ -147,14 +146,19 @@ describe('validateSharingRuleEnforceability — a condition comparing a field wi
     expect(findings.map((f) => f.rule)).toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
   });
 
-  it('speaks the RLS arm\'s class sentence, word for word — one class, one sentence, two surfaces', () => {
+  it('speaks the RLS arm\'s verdict and class paragraph, word for word — one class, one sentence, two surfaces', () => {
     const rls = validateRlsPredicateEnforceability({
       objects: [deal, account],
       permissions: [{ name: 'sales', label: 'Sales', rowLevelSecurity: [{ name: 'p', object: 'deal', operation: 'select', using: 'record.status != record.tags' }] }],
     });
     const sharing = validateSharingRuleEnforceability(stackWith('record.status != record.tags'));
-    expect(rls[0].message).toContain(`${CLASS_SENTENCE}: `);
-    expect(sharing[0].message).toContain(`${CLASS_SENTENCE}: `);
+    const verdict = 'compares `record.status != record.tags`, where `tags` holds a list or an object, ';
+    expect(rls[0].message).toContain(verdict);
+    expect(sharing[0].message).toContain(verdict);
+    const classParagraph = (rule: string) =>
+      explainRule(rule)?.paragraphs.find((p) => p.startsWith('A column that holds a list or an object'));
+    expect(classParagraph(SHARING_RULE_UNLOWERABLE_CONDITION)).toBeDefined();
+    expect(classParagraph(SHARING_RULE_UNLOWERABLE_CONDITION)).toBe(classParagraph(rls[0].rule));
   });
 });
 
@@ -180,12 +184,12 @@ describe('validateSharingRuleEnforceability — every declared list-or-object cl
     ['multiple file', { type: 'file', multiple: true }, "`type: 'file'`, `multiple: true`"],
     ['multiple image', { type: 'image', multiple: true }, "`type: 'image'`, `multiple: true`"],
   ];
-  for (const [label, def, declared] of LIST_HOLDING) {
-    it(`${label}: refused, naming the declaration`, () => {
+  for (const [label, def] of LIST_HOLDING) {
+    it(`${label}: refused, naming the column`, () => {
       const objects = [{ ...deal, fields: { ...deal.fields, subject: { label: 'Subject', ...def } } }, account];
       const findings = validateSharingRuleEnforceability(stackWith('record.status != record.subject', objects));
       expect(findings.map((f) => f.rule)).toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
-      expect(findings[0].message).toContain(`\`record.status != record.subject\`, where \`subject\` is declared ${declared}.`);
+      expect(findings[0].message).toContain('`record.status != record.subject`, where `subject` holds a list or an object,');
     });
   }
 });
@@ -223,7 +227,7 @@ describe('validateSharingRuleEnforceability — the one-value spellings stay CLE
     const findings = validateSharingRuleEnforceability(stackWith('record.status != record.subject', objects));
     expect(findings.map((f) => f.rule)).toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
     expect(findings[0].message).not.toContain('holds a list or');
-    expect(findings[0].message).toContain('share no comparison class');
+    expect(findings[0].message).toContain('which no comparison class spans (text vs a file field)');
   });
 });
 
@@ -238,8 +242,8 @@ describe('validateSharingRuleEnforceability — the arm is the graph\'s, and rep
     const findings = validateSharingRuleEnforceability(stackWith('size(record.tags) > 0 && record.status != record.tags'));
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(SHARING_RULE_UNLOWERABLE_CONDITION);
-    expect(findings[0].message).toMatch(/is outside the pushdown subset/);
-    expect(findings[0].message).not.toMatch(/lowers, but compares/);
+    expect(findings[0].message).toMatch(/^condition is not lowerable/);
+    expect(findings[0].message).not.toMatch(/holds a list or an object/);
   });
 
   it('reports beside the anchor arm, independently — two fields, two findings', () => {
@@ -257,6 +261,24 @@ describe('validateSharingRuleEnforceability — the arm is the graph\'s, and rep
     expect(cli.map((f) => ({ rule: f.rule, path: f.path }))).toEqual([
       { rule: SHARING_RULE_UNLOWERABLE_CONDITION, path: 'sharingRules[0].condition' },
     ]);
-    expect(cli[0].message).toContain('`record.reviewers == record.status`, where `reviewers` is declared');
+    expect(cli[0].message).toContain('`record.reviewers == record.status`, where `reviewers` holds a list or an object');
+  });
+});
+
+describe('[#22161] one-line verdicts', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: the cases above fired the list-holding
+    // verdict, so the shape assertion cannot pass over an empty record.
+    expect(fired.some((f) => f.message.includes('holds a list or an object'))).toBe(true);
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries the measured consequence the verdict no longer states', () => {
+    const text = explainRule(SHARING_RULE_UNLOWERABLE_CONDITION)?.paragraphs.join('\n') ?? '';
+    expect(text).toContain('`SharingRuleService` reads a refused query as matching no record');
+    expect(text).toContain('at boot or on any later write');
   });
 });

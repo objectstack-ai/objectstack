@@ -1156,20 +1156,43 @@ avatar:
   multiple: false  # set true to store an array of file references
 ```
 
-**Stored value:** an opaque `sys_file` id string. The expanded read form is the
-media metadata object, whose only required member is `url`:
+**Stored value:** an opaque `sys_file` id string. What a read returns leaves it
+unchanged: the stored form is the id alone, and the two object forms below are
+read forms only. A record read expands each stored id in place (each element,
+with `multiple: true`) into one of **three** forms, and none of them fails the
+record read that asked for it.
+
+**The file object** — the caller's `sys_file` read found the file (a committed
+row, or a tombstone something still holds). `url` is its only required member,
+derived from the id rather than stored:
 
 ```json
 {
-  "url": "https://cdn.example.com/files/abc123.jpg",
+  "id": "abc123",
   "name": "profile.jpg",
   "size": 1024000,
-  "mimeType": "image/jpeg"
+  "mimeType": "image/jpeg",
+  "url": "/api/v1/storage/files/abc123"
 }
 ```
 
 `alt` and `durationSeconds` are the other optional members. The keys are `name` and
 `mimeType` — not `filename` / `content_type`.
+
+**The bare id, as stored** — the engine had nothing to resolve it against: the
+read found no such file, `sys_file` is not registered or its table is not
+provisioned yet, or the read failed for any reason other than a refusal (an
+outage, which the engine logs as a warning).
+
+**`{ "id": "abc123", "metadataRefused": true }`** — the caller may read the record
+but is refused the `sys_file` read. The value is the id the record holds plus the
+marker, nothing else: no `url`, `name`, `size` or `mimeType`, because none was
+read, and it says nothing about whether the file exists. It is distinct from an
+empty field, which holds no file at all, and from the file object, which always
+carries `url`.
+[`FileRefusedValueSchema`](/docs/references/data/field-value#filerefusedvalue)
+declares it, closed to exactly those two keys. Download access is judged on its
+own, by the record that owns the file rather than by `sys_file` read.
 
 <Callout>
 Deployments predating the file-as-reference migration may still hold the inline

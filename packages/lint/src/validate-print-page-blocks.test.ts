@@ -117,7 +117,7 @@ describe('admits a print page built only from printable blocks', () => {
               { type: 'record:highlights', properties: { fields: ['name', 'invoice_date', 'due_date'] } },
               { type: 'record:details', properties: { fields: ['customer', 'billing_address'] } },
               { type: 'record:line_items', properties: { childObject: 'invoice_line', relationshipField: 'invoice', columns: [{ name: 'description' }, { name: 'amount', type: 'currency' }], readonly: true } },
-              { type: 'element:number', properties: { object: 'invoice_line', field: 'amount', aggregate: 'sum' } },
+              { type: 'element:number', dataSource: { object: 'invoice_line' }, properties: { field: 'amount', aggregate: 'sum' } },
             ],
           },
           { name: 'footer', components: [{ type: 'element:divider' }, { type: 'element:text', properties: { content: 'Payment due within 30 days.' } }] },

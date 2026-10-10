@@ -159,6 +159,38 @@ You cannot take a platform name. A declaration whose `name` collides with a
 curated platform capability (`manage_users`, `manage_metadata`,
 `setup.access`, …) is refused loudly at boot — those are platform-owned.
 
+## "Or" is one capability, granted twice
+
+`requiredPermissions` is the one way to require a capability on an entry — an
+app, a navigation item, an action, a record block, and a list view or a
+dashboard — and everywhere it means the same thing: a list of names the user
+must **all** hold. There is no any-of form. To show an entry to two audiences —
+the legal team **or** an administrator — declare one capability for the entry
+and grant it to both permission sets:
+
+```typescript
+capabilities: [
+  defineCapability({ name: 'clm_legal_workbench.view', label: 'Open the legal workbench' }),
+],
+permissions: [
+  { name: 'clm_legal', systemPermissions: ['clm_legal_workbench.view'] },
+  { name: 'clm_admin', systemPermissions: ['clm_legal_workbench.view'] },
+],
+// …and on the entry itself:  requiredPermissions: ['clm_legal_workbench.view']
+```
+
+Listing each audience's own capability instead —
+`requiredPermissions: ['clm_legal.access', 'clm_admin.access']` — requires both,
+so it shuts out everyone who holds only one of them.
+
+<Callout type="warn">
+**A list view's and a dashboard's `requiredPermissions` are not enforced yet.**
+The key is declared, so it validates and is stored, but no server reads it
+today: the view or the dashboard is still served to every user who can read
+it. Do not rely on it to keep a view or a dashboard from an audience until the
+platform enforces it.
+</Callout>
+
 ## What the seeder does, and what it refuses
 
 `bootstrapDeclaredCapabilities` runs on `kernel:ready` and is idempotent: it

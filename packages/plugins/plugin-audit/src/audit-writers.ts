@@ -26,6 +26,9 @@ import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from 
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
 import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+// [#22510] The acting user's object, named by the registry constant rather
+// than a literal — `sys_activity.actor_name` is resolved from its title.
+import { SystemObjectName } from '@objectstack/spec/system';
 // [#21120] The family-wide stored-metadata-body seam. `sys_metadata` /
 // `sys_metadata_history` rows carry a serialized metadata BODY in their
 // `metadata` column (a datasource body holds stored credential material), and
@@ -1271,6 +1274,18 @@ export function installAuditWriters(
   };
 
   /**
+   * A title column's value as the text an activity row writes, or `null` when
+   * it carries none (absent, `null`, or blank once trimmed). ONE rule for both
+   * readers of a title: {@link resolveLookupTitles} and the acting user's name
+   * in {@link resolveActorSnapshot}.
+   */
+  const titleTextOf = (value: unknown): string | null => {
+    if (value === null || value === undefined) return null;
+    const text = String(value).trim();
+    return text ? text : null;
+  };
+
+  /**
    * [#7230, #7290] Referenced record TITLES for a summary — id → title, per
    * target object — resolved from a read PLAN its caller built.
    *
@@ -1352,10 +1367,8 @@ export function installAuditWriters(
         const titles = new Map<string, string>();
         for (const row of rows ?? []) {
           const id = row?.id;
-          const title = row?.[titleField];
           if (id === null || id === undefined) continue;
-          if (title === null || title === undefined) continue;
-          const text = String(title).trim();
+          const text = titleTextOf(row?.[titleField]);
           if (text) titles.set(String(id), text);
         }
         if (titles.size > 0) out.set(objectName, titles);
@@ -1364,6 +1377,81 @@ export function installAuditWriters(
       }
     }
     return out.size > 0 ? out : undefined;
+  };
+
+  /**
+   * [#22510, #22527] The acting user's snapshot for `sys_activity`'s two
+   * denormalized actor columns — `actor_name` and `actor_avatar_url` — read
+   * from ONE `sys_user` row.
+   *
+   * The object declares both columns because "activity entries are
+   * denormalized snapshots" read chronologically (`sys-activity.object.ts`).
+   * No writer filled them, so every record History entry read "Unknown user"
+   * (#22510) and showed the generic avatar (#22527) while its `actor_id` named
+   * the user. Both are written HERE, at write time; nothing resolves them on
+   * read (ADR-0049: a declared column is enforced by its writer).
+   *
+   * - **Name:** `sys_user`'s title column by {@link titleFieldOf} — the
+   *   ADR-0079 answer for that object (`nameField: 'name'`, the profile
+   *   display-name column the approval timeline resolves its actors from), with
+   *   the same masking and `internal` skips — and its text by
+   *   {@link titleTextOf}, the rule {@link resolveLookupTitles} applies to a
+   *   `user` reference in a tracked-change summary. One title resolution for a
+   *   user in this file.
+   * - **Avatar:** `sys_user.image` (ADR-0092 Tier 1: "avatar URL"), a
+   *   `Field.url` holding the URL a renderer puts in an image `src` — the
+   *   console's avatar uploader stores the upload's URL there — copied
+   *   VERBATIM, never rewritten: `actor_avatar_url` is a `Field.url` too, and
+   *   both renderers of the column use it as an image `src` as it stands.
+   *   Selected only when `sys_user` declares the column, so a projection can
+   *   never name a column the object does not have (which would cost the name
+   *   as well).
+   *
+   * Either value that cannot be read — no row, a blank name, no image, an
+   * unregistered `sys_user`, a failing read — answers `null`, never the id: an
+   * id in a name column is a plausible wrong value no reader can tell from a
+   * name (the class `actor-user.ts` describes), while `null` is the empty every
+   * reader already handles, and `actor_id` still says who acted.
+   *
+   * Cost: one read for BOTH columns — the avatar widens the projection of the
+   * read the name already paid for; it adds none. Memoized per user for
+   * {@link ACTOR_SNAPSHOT_TTL_MS}, and the PROMISE is what is kept, so
+   * concurrent rows share one read. A predicate write over N rows dispatches
+   * `writeAudit` once per row; its actor costs one `sys_user` read, not N — the
+   * hot path #6656 / PR #6977 took reads off. A rename or a new avatar shows on
+   * rows written after the window; rows already written keep what they were
+   * written with, which is what a snapshot is.
+   */
+  type ActorSnapshot = { name: string | null; avatarUrl: string | null };
+  const NO_ACTOR_SNAPSHOT: ActorSnapshot = { name: null, avatarUrl: null };
+  /** `sys_user`'s profile-image column (ADR-0092 Tier 1: "`image` — avatar URL"). */
+  const USER_AVATAR_FIELD = 'image';
+  const ACTOR_SNAPSHOT_TTL_MS = 30_000;
+  const actorSnapshotCache = new Map<string, { value: Promise<ActorSnapshot>; expires: number }>();
+  const readActorSnapshot = async (api: any, userId: string): Promise<ActorSnapshot> => {
+    const titleField = titleFieldOf(SystemObjectName.USER);
+    const avatarField = objectHasField(SystemObjectName.USER, USER_AVATAR_FIELD) ? USER_AVATAR_FIELD : undefined;
+    if (!titleField && !avatarField) return NO_ACTOR_SNAPSHOT;
+    const rows: any[] = await api.sudo().object(SystemObjectName.USER).find({
+      where: { id: { $in: [userId] } },
+      fields: ['id', ...(titleField ? [titleField] : []), ...(avatarField ? [avatarField] : [])],
+      limit: 1,
+    });
+    const row = (rows ?? []).find((r) => r?.id !== null && r?.id !== undefined && String(r.id) === userId);
+    if (!row) return NO_ACTOR_SNAPSHOT;
+    const avatar = avatarField ? row[avatarField] : undefined;
+    return {
+      name: titleField ? titleTextOf(row[titleField]) : null,
+      avatarUrl: typeof avatar === 'string' && avatar.trim() ? avatar : null,
+    };
+  };
+  const resolveActorSnapshot = (api: any, userId: string): Promise<ActorSnapshot> => {
+    const now = Date.now();
+    const hit = actorSnapshotCache.get(userId);
+    if (hit && hit.expires > now) return hit.value;
+    const value = readActorSnapshot(api, userId).catch(() => NO_ACTOR_SNAPSHOT);
+    actorSnapshotCache.set(userId, { value, expires: now + ACTOR_SNAPSHOT_TTL_MS });
+    return value;
   };
 
   /**
@@ -1854,6 +1942,21 @@ export function installAuditWriters(
     }
     const textSources: ActivityTextSources = { summary: summarySources, record_label: labelSources };
 
+    // `enable.activities` is an opt-OUT capability (#2707): absent block/flag
+    // = mirror on (spec default `true`), explicit `false` = this object's CRUD
+    // is not mirrored into the sys_activity timeline. This is the per-object
+    // lever for activity-row growth (ADR-0057). The compliance audit row is
+    // NOT gated — sys_audit_log capture stays unconditional.
+    const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
+    // [#22510, #22527] The name and avatar of the user `actor_id` names — the
+    // SAME `userId`, so the columns cannot disagree about who acted — from one
+    // memoized `sys_user` read. Read only when an activity row will be
+    // written. No user ⇒ no name and no avatar: ADR-0118 D1 keeps the system
+    // actor `null`, and rendering it as "System" (with its icon) is the UI's
+    // rule, not data this writer persists.
+    const actor: ActorSnapshot =
+      activitiesEnabled && userId ? await resolveActorSnapshot(api, userId) : NO_ACTOR_SNAPSHOT;
+
     const activityRow: Record<string, any> = {
       type: activityType,
       // Explicit ISO timestamp — `defaultValue: 'NOW()'` on the column
@@ -1862,6 +1965,11 @@ export function installAuditWriters(
       timestamp: new Date().toISOString(),
       summary,
       actor_id: userId ?? null,
+      // [#22510, #22527] Each present only when it resolved: an unresolved
+      // actor, or one with no image, leaves the column exactly as every row
+      // before these changes left it.
+      ...(actor.name ? { actor_name: actor.name } : {}),
+      ...(actor.avatarUrl ? { actor_avatar_url: actor.avatarUrl } : {}),
       object_name: ctx.object,
       record_id: recordId ?? null,
       record_label: label,
@@ -1876,12 +1984,6 @@ export function installAuditWriters(
       activityRow.organization_id = tenantId ?? null;
     }
 
-    // `enable.activities` is an opt-OUT capability (#2707): absent block/flag
-    // = mirror on (spec default `true`), explicit `false` = this object's CRUD
-    // is not mirrored into the sys_activity timeline. This is the per-object
-    // lever for activity-row growth (ADR-0057). The compliance audit row is
-    // NOT gated — sys_audit_log capture stays unconditional.
-    const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
     const activityRowToWrite = activitiesEnabled ? activityRow : undefined;
     // [#21262] The ledger row is written first; the writer advances this
     // before the activity row, so after a throw it names the refused table.

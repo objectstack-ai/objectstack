@@ -57,6 +57,7 @@ import type {
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
+import type { ObjectCapabilitiesParsed } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
@@ -86,6 +87,9 @@ import {
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
+// The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
+// self-hosted mount and by `handleActionPage` alike.
+import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 
 /**
  * Node-era approval runtime (ADR-0019).
@@ -814,6 +818,18 @@ export interface StrandedApprovalRequest {
 /** Default lifetime of an actionable-link token (ADR-0043). */
 export const ACTION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
 
+/**
+ * The ADR-0043 action page's path: where {@link ApprovalService.actionLinkUrl}
+ * points, and where the confirm page's form posts the token back. Relative on
+ * purpose, as the self-hosted mount's form action is.
+ */
+const ACTION_PAGE_PATH = '/api/v1/approvals/act';
+
+/** An action page, answered the way the self-hosted mount answers it. */
+function actionPageResponse(html: string): Response {
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+}
+
 /** Outcome of redeeming (or peeking) an actionable-link token. */
 export type ActionTokenOutcome =
   | { ok: true; action: 'approve' | 'reject'; request: ApprovalRequestRow; approverId: string }
@@ -1256,8 +1272,12 @@ export interface ApprovalServiceOptions {
   /**
    * [#8652] Objects on which a user holding READ access to the target business
    * record may also see that record's approval requests and action history —
-   * read-only. Empty or absent (the default) leaves visibility exactly as it
-   * was. See {@link ApprovalService.recordReaderVisibleIds} for the rule and
+   * read-only. This is the HOST's half of the opt-in; the other half is the
+   * object's own declaration, `enable.approvalsVisibleToReaders: true`, which
+   * the service reads from the live registry on every call (#22560). Either
+   * source turns the tier on for an object. Empty or absent here, with no
+   * object declaring the flag (the default), leaves visibility exactly as it
+   * was. See {@link ApprovalService.addRecordReaderVisibleIds} for the rule and
    * its boundaries.
    */
   recordReaderVisibleObjects?: string[];
@@ -1356,9 +1376,11 @@ export class ApprovalService implements IApprovalService {
   /** [#11993] Lazily-resolved deployment i18n lookup for refusal copy. */
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
   /**
-   * [#8652] The enabled object set for the record-reader visibility tier.
-   * EMPTY means the tier is off — the default, and the shape every existing
-   * deployment gets on upgrade.
+   * [#8652] The HOST-named object set for the record-reader visibility tier
+   * (the constructor option). EMPTY is the default, and the tier is then off
+   * for every object that does not declare it itself — see
+   * {@link ApprovalService.recordReaderTierOn}, the one place both sources are
+   * asked.
    */
   private readonly recordReaderVisibleObjects: ReadonlySet<string>;
   /**
@@ -4843,7 +4865,7 @@ export class ApprovalService implements IApprovalService {
 
   /** Build the session-less confirm-page URL for a raw token. */
   actionLinkUrl(rawToken: string): string {
-    return `${this.publicBaseUrl}/api/v1/approvals/act?token=${encodeURIComponent(rawToken)}`;
+    return `${this.publicBaseUrl}${ACTION_PAGE_PATH}?token=${encodeURIComponent(rawToken)}`;
   }
 
   /**
@@ -4944,6 +4966,59 @@ export class ApprovalService implements IApprovalService {
       comment: 'Via action link',
     }, person ? { ...SYSTEM_CTX, userId: person } : SYSTEM_CTX);
     return { ok: true, action: res.token.action, request: out.request, approverId: res.token.approver_id };
+  }
+
+  /**
+   * [#22578] `IApprovalService.handleActionPage` — the ADR-0043 action page,
+   * from a web-standard `Request` to a `Response`, for a host with no raw app
+   * to mount pages on (a hosted tenant kernel). Its one caller is the runtime
+   * HTTP dispatcher's `/approvals/act` domain (ruling A on #22438, segment 2).
+   *
+   * It answers exactly what the plugin's self-hosted raw-app mount
+   * (`approvals-plugin.ts`, `mountActionPages`) answers for the same token and
+   * method — the same status, `Content-Type` and bytes — because it is built
+   * from the same parts: {@link peekActionToken} / {@link redeemActionToken}
+   * hold the ONE token check and redemption chain, and `action-link-pages.ts`
+   * holds the ONE copy of the page text. The mount is not a caller and is not
+   * rewritten onto this member; the two doors share a token store, so a token
+   * one of them consumed is dead at the other.
+   *
+   *  - `GET` renders: the token comes from the `token` query parameter, and it
+   *    never decides (mail gateways prefetch every link in a message).
+   *  - `POST` redeems: the token comes from the `token` field of the form body.
+   *    A body that is not a form carries no token, and is told "invalid".
+   *  - A dead link is told on the page, with `200`, never as an error status.
+   *  - Any other method: `405` with `Allow: GET, POST`. The contract and
+   *    ADR-0043 name only these two methods, and answering a third as either
+   *    would be inventing what it means.
+   *
+   * The token is the only credential: no {@link ExecutionContext}, and no
+   * session, cookie or `Authorization` header is read. The decision is made,
+   * and audited, as the approver the token binds (`redeemActionToken`).
+   */
+  async handleActionPage(request: Request): Promise<Response> {
+    if (request.method === 'GET') {
+      const token = new URL(request.url).searchParams.get('token') ?? '';
+      const peek = await this.peekActionToken(token);
+      if (!peek.ok) return actionPageResponse(renderResultPage(peek.reason, peek.request));
+      return actionPageResponse(renderConfirmPage({
+        request: peek.request, action: peek.action, approverId: peek.approverId,
+        token, actPath: ACTION_PAGE_PATH,
+      }));
+    }
+    if (request.method === 'POST') {
+      let token = '';
+      try {
+        // The LAST `token` field, as the self-hosted mount's body parser reads
+        // a repeated field — so the two doors agree on every body.
+        const fields = (await request.formData()).getAll('token');
+        token = String(fields[fields.length - 1] ?? '');
+      } catch { /* not a form body: no token, told "invalid" below */ }
+      const out = await this.redeemActionToken(token);
+      if (!out.ok) return actionPageResponse(renderResultPage(out.reason, out.request));
+      return actionPageResponse(renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request));
+    }
+    return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
   }
 
   /**
@@ -6921,13 +6996,16 @@ export class ApprovalService implements IApprovalService {
     tenantOrg: string | null,
     target?: { object?: string | null; recordId?: string | null },
   ): Promise<void> {
-    // Default OFF: a deployment that declares nothing must see no behaviour
-    // change at all — not even a probe whose answer is discarded.
-    if (this.recordReaderVisibleObjects.size === 0) return;
     const object = String(target?.object ?? '').trim();
     const recordId = String(target?.recordId ?? '').trim();
     if (!object || !recordId) return;
-    if (!this.recordReaderVisibleObjects.has(object)) return;
+    // Default OFF: a deployment that declares nothing must see no behaviour
+    // change at all — not even a probe whose answer is discarded. What it pays
+    // is one in-memory registry lookup on a read that names a record.
+    // ⛔ No `recordReaderVisibleObjects.size === 0` early return above this
+    // line: with the host's set empty, an object that DECLARES the flag must
+    // still widen (#22560).
+    if (!this.recordReaderTierOn(object)) return;
     // [#22559] An approval request is never the anchor, even when the opt-in
     // names its object: the anchor read below runs as the caller, so on this
     // object it passes through the generic door's read gate, which asks this
@@ -6966,6 +7044,48 @@ export class ApprovalService implements IApprovalService {
         object, error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  /**
+   * [#8652 / #22560] Is the record-reader tier on for `object`? Two sources,
+   * and either one suffices:
+   *
+   *  - the HOST's set, the constructor option
+   *    {@link ApprovalServiceOptions.recordReaderVisibleObjects}, for a host
+   *    that builds the plugin itself;
+   *  - the object's OWN declaration, `enable.approvalsVisibleToReaders: true`
+   *    in its live registered definition — what a config-driven app, whose
+   *    host builds the plugin with no options, can write.
+   *
+   * ## Why the declaration is read here, on every call
+   *
+   * Never collected once at `start()`: the registry is still filling then.
+   * Objects from installed packages arrive on `kernel:ready`, Studio edits and
+   * dev reloads re-register an object at any later moment, and a set frozen at
+   * start would leave such a declaration inert — and, worse, keep a REMOVED one
+   * in force until restart, an exposure its author believes is closed
+   * (AGENTS.md "Startup registry reads", cure 1: resolve where the value is
+   * used). `getSchema` answers the registry as it is at the call.
+   *
+   * ## Fails closed
+   *
+   * An engine with no `getSchema`, a name the registry does not hold, a lookup
+   * that throws, or any value but literal `true` reads as "not declared". The
+   * spec default is `false`, so an absent block or flag is the default, not a
+   * gap.
+   */
+  private recordReaderTierOn(object: string): boolean {
+    if (this.recordReaderVisibleObjects.has(object)) return true;
+    let schema: { enable?: Partial<ObjectCapabilitiesParsed> | null } | null | undefined;
+    try {
+      schema = this.engine.getSchema?.(object) as typeof schema;
+    } catch (err) {
+      this.logger?.debug?.('[approvals] record-reader opt-in lookup failed; the tier stays off', {
+        object, error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+    return schema?.enable?.approvalsVisibleToReaders === true;
   }
 
   /** Intersect an existing `where.id` constraint with the participant set. */

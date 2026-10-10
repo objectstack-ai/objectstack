@@ -426,6 +426,11 @@ export const objectForm = defineForm({
             { field: 'feeds', type: 'boolean' },
             { field: 'activities', type: 'boolean' },
             { field: 'clone', type: 'boolean' },
+            {
+              field: 'approvalsVisibleToReaders',
+              type: 'boolean',
+              helpText: 'Readers of a record see its approval requests and history, read-only, with no approval action',
+            },
           ],
         },
       ],

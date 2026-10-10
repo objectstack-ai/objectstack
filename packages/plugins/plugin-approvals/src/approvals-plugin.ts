@@ -66,11 +66,20 @@ export interface ApprovalsPluginOptions {
    * new ApprovalsServicePlugin({ recordReaderVisibleObjects: ['exam_sheet'] })
    * ```
    *
-   * **Default OFF.** Omitted (or empty) leaves visibility precisely as it is
-   * today — submitter ∪ current approver ∪ historical actor, plus the admin
-   * override — so an existing deployment's confidentiality posture is unchanged
-   * on upgrade. Opting in is per object and deliberate: enabling it for a
-   * ledger object does not enable it anywhere else.
+   * **Two sources, either one suffices.** This option is the HOST's half, for a
+   * host that builds the plugin itself. The other half is the object's own
+   * metadata — `enable: { approvalsVisibleToReaders: true }` — which a
+   * config-driven app (whose host builds this plugin with no options) can
+   * write. The service reads that declaration from the object's live
+   * registered definition on every read, so an object registered after boot
+   * takes effect and a removed flag stops widening, with no restart.
+   *
+   * **Default OFF.** Omitted (or empty), with no object declaring the flag,
+   * leaves visibility precisely as it is today — submitter ∪ current approver ∪
+   * historical actor, plus the admin override — so an existing deployment's
+   * confidentiality posture is unchanged on upgrade. Opting in is per object
+   * and deliberate: enabling it for a ledger object does not enable it anywhere
+   * else.
    *
    * **What an enabled object exposes**, so the opt-in is informed — on the
    * approvals door and, for a deployment that grants read on
@@ -209,7 +218,10 @@ export class ApprovalsServicePlugin implements Plugin {
       logger: ctx.logger,
       publicBaseUrl: this.options.publicBaseUrl,
       // [#8652] Read-only record-reader visibility. Default OFF — an absent
-      // declaration reaches the service as an empty set and changes nothing.
+      // option reaches the service as an empty set. This is the host's half
+      // only: an object's own `enable.approvalsVisibleToReaders` is read by
+      // the service per call, from the live registry (#22560), never folded
+      // into this set here, where the registry is still filling.
       recordReaderVisibleObjects: this.options.recordReaderVisibleObjects,
       // [ADR-0105 D9] Cross-organization approver targeting is a `group`-posture
       // capability. Read LAZILY (not captured at start) because the tenancy
@@ -414,6 +426,7 @@ export class ApprovalsServicePlugin implements Plugin {
         };
         const http = readServer('http.server') ?? readServer('http-server');
         const rawApp = http && typeof http.getRawApp === 'function' ? http.getRawApp() : null;
+        if (!rawApp) ctx.logger.info('ApprovalsServicePlugin: no raw HTTP app on this kernel — the actionable-link pages are not mounted here; they are served through the HTTP dispatcher\'s /approvals/act domain, which calls the approvals service\'s handleActionPage');
         if (!rawApp || !this.service) return;
         const svc = this.service;
         const ACT_PATH = '/api/v1/approvals/act';
