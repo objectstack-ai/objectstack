@@ -383,9 +383,27 @@ a queue entry resolves to nobody. Route to a `team`, `department`, or
 Set Manager** — see [the `manager` callout above](#3-the-approval-node). `position`, `department`,
 `org_membership_level` and `expression` may additionally name which
 organization's directory resolves them — see
-[Approving across organizations](#cross-org-approvers). An entry that resolves
-to nobody is not an error: the request opens with an empty `pending_approvers`
-and nothing can move it, so the run parks forever.
+[Approving across organizations](#cross-org-approvers).
+
+What an entry that resolves to nobody leaves on the slate depends on its kind:
+
+- **A person entry** (`manager`, `field`) adds no slot. Nor does an
+  `expression` that yields no ids. A `user` entry never resolves to nobody: its
+  value is the slot.
+- **A group entry** (`position`, `team`, `department`, `org_membership_level`)
+  keeps its `<type>:<value>` literal as a slot, and so do a `queue` entry and an
+  `expression` value that `resolveAs` re-expands into a group with nobody in it.
+  A `position:<name>` slot is decided by whoever is staffed into that position
+  later. No person ever holds any other literal, so only an administrator can
+  decide it (the admin-override callout under
+  [Acting on requests in the console](#acting-on-requests-in-the-console)).
+  Beside entries that do resolve, a literal is a slot like any other, so a
+  `behavior` that needs every slot (`unanimous`) waits on it too.
+- **A slate left empty, or holding only literals,** goes to the node's
+  `onEmptyApprovers` policy, whose four values are listed under
+  [Approving across organizations](#cross-org-approvers). Under the default,
+  `admin_rescue`, the request opens on that slate and waits for an
+  administrator, or for a holder of a `position:` literal on it.
 
 ### The approver finds it in their queue
 
@@ -420,8 +438,8 @@ curl -b cookies.txt \
 ```
 
 `approverId` accepts a user id, an email, or a `<type>:<value>` approver literal
-(`position:finance_manager` — the form an entry falls back to when it resolves
-to no users) — and takes several values (comma-separated or repeated) to cover
+(`position:finance_manager` — the form a group entry falls back to when it
+resolves to no users) — and takes several values (comma-separated or repeated) to cover
 a person's identities in one call. A position literal matches under
 `position:<name>`, the one spelling the service admits a holder of that
 position under as their own identity. The deprecated pre-rename prefix is no

@@ -184,10 +184,11 @@ import { referenceCarrierOf } from '@objectstack/spec/data';
 import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
 import {
   CROSS_CLASS_REMEDY,
-  CROSS_CLASS_SENTENCE,
   crossClassComparisons,
-  describeCrossClassComparisons,
+  crossClassVerdict,
   listHoldingComparisons,
+  listHoldingVerdict,
+  refusalVerdict,
 } from './validate-rls-predicate-enforceability.js';
 
 /**
@@ -249,17 +250,25 @@ function toCompilerInput(condition: unknown): string | { source?: string } | nul
   return null;
 }
 
-/** What the author sees quoted back at them. */
-function sourceOf(condition: unknown): string {
-  const input = toCompilerInput(condition);
-  if (typeof input === 'string') return input;
-  return str(input?.source);
-}
-
 const PUSHDOWN_SUBSET =
   'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, ' +
   'and the string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column `record.<field>` ' +
   'paths (ADR-0058 D2).';
+
+/*
+ * [#22161] The verdict clauses. Every finding of the four ids prints one
+ * verdict sentence; what the seeder, the criteria query and the grant
+ * pre-flight do with the rule — and the measurements behind it — is each id's
+ * `os explain` entry (`rule-explanations.ts`, the "Row-level security and
+ * sharing rules" block). The finding does not echo the condition: its `path`
+ * names it, and the condition is author text of any length.
+ */
+
+/** A condition that does not lower: the seeder skips the rule — both condition ids. */
+const NEVER_SEEDED = 'so the rule is never seeded and grants nothing';
+
+/** A lowered condition the driver refuses on every criteria query — both comparison arms. */
+const CRITERIA_QUERY_REFUSED = 'so its criteria query is refused (INVALID_FILTER / 400) and it grants nothing';
 
 /**
  * The finding for a lowered `condition` that compares a field with a field
@@ -271,7 +280,7 @@ function listHoldingFinding(
   graph: ObjectGraph,
   object: string,
   filter: Record<string, unknown>,
-  at: { where: string; path: string; source: string },
+  at: { where: string; path: string },
 ): SharingRuleEnforceabilityFinding | null {
   const comparisons = listHoldingComparisons(graph, object, filter);
   if (comparisons.length === 0) return null;
@@ -280,16 +289,7 @@ function listHoldingFinding(
     rule: SHARING_RULE_UNLOWERABLE_CONDITION,
     where: at.where,
     path: at.path,
-    message:
-      `Sharing-rule condition \`${at.source}\` lowers, but compares a field with a field that holds a list or ` +
-      `an object: ${comparisons.map((c) => `\`${c.written}\`, where ${c.columns.join(' and ')}`).join('; ')}. ` +
-      'A column that holds a list or an object is not one comparable value, on either side of a ' +
-      'field-to-field comparison, so the platform refuses the comparison instead of evaluating it: the rule ' +
-      'is seeded into `sys_sharing_rule`, but every criteria query it runs is refused on the SQL drivers ' +
-      '(`INVALID_FILTER` / 400: driver-sql refuses a cross-field comparison against such a column by its ' +
-      'declared type), and `SharingRuleService` reads a refused query as matching no record. No ' +
-      '`sys_record_share` grant is ever materialised, at boot or on any later write, and the only signal is ' +
-      'a WARN line in the server log. The rule is declared and grants nothing.',
+    message: `condition ${listHoldingVerdict(comparisons)}, ${CRITERIA_QUERY_REFUSED}`,
     hint:
       'A field compared with a `json` or `multiple` field has no row-filter form: a row filter compares one ' +
       'value with one value, and cannot test membership in a list another column holds. Compare with a ' +
@@ -310,7 +310,7 @@ function crossClassFinding(
   graph: ObjectGraph,
   object: string,
   filter: Record<string, unknown>,
-  at: { where: string; path: string; source: string },
+  at: { where: string; path: string },
 ): SharingRuleEnforceabilityFinding | null {
   const comparisons = crossClassComparisons(graph, object, filter);
   if (comparisons.length === 0) return null;
@@ -319,14 +319,7 @@ function crossClassFinding(
     rule: SHARING_RULE_UNLOWERABLE_CONDITION,
     where: at.where,
     path: at.path,
-    message:
-      `Sharing-rule condition \`${at.source}\` lowers, but compares two fields that share no comparison class: ` +
-      `${describeCrossClassComparisons(comparisons)}. ${CROSS_CLASS_SENTENCE}: the rule is seeded into ` +
-      '`sys_sharing_rule`, but every criteria query it runs is refused on the SQL drivers (`INVALID_FILTER` / ' +
-      "400: driver-sql refuses the comparison by the two columns' declared types), and `SharingRuleService` " +
-      'reads a refused query as matching no record. No `sys_record_share` grant is ever materialised, at boot ' +
-      'or on any later write, and the only signal is a WARN line in the server log. The rule is declared and ' +
-      'grants nothing.',
+    message: `condition ${crossClassVerdict(comparisons)}, ${CRITERIA_QUERY_REFUSED}`,
     hint:
       `${CROSS_CLASS_REMEDY} To keep the rule without a second column, compare with a literal — "one of these ` +
       "values\" is `record.status in ['open', 'pending']` — or test a file field with `!= null`.",
@@ -487,15 +480,11 @@ function anchorFindings(
       rule: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT,
       where,
       path,
+      // [#22161] One verdict sentence; why a detail holds no shares, and what
+      // the refused grant leaves the recipients, is the `os explain` entry's.
       message:
-        `Sharing rule "${name}" is anchored on object "${object}", which declares ` +
-        `sharingModel 'controlled_by_parent'. A detail record has no record-level access of its own — ` +
-        `its visibility is DERIVED from its master (ADR-0055), so it holds no shares to widen. ` +
-        `\`SharingService.assertNotInertGrant\` refuses the grant with ` +
-        `SHARING_NOT_ENABLED ("'${object}' is controlled by its parent (master-detail); share the ` +
-        `master record instead"), so the rule's boot backfill fails, no \`sys_record_share\` row is ` +
-        `ever written, and the recipients this rule names get whatever the MASTER grants them — ` +
-        `which may be nothing. The grant is declared and does not exist.`,
+        `anchor object "${object}" declares sharingModel 'controlled_by_parent', so its access is derived ` +
+        'from its master and the grant is refused (SHARING_NOT_ENABLED)',
       hint:
         `Move the rule onto the MASTER object` +
         (master ? ` — "${object}" derives from "${master}" through its master_detail field, so share ` +
@@ -515,22 +504,18 @@ function anchorFindings(
   const declared =
     owd === 'public_read_write'
       ? `declares sharingModel 'public_read_write'`
-      : `declares no sharingModel and is a system object (\`isSystem: true\` or a \`sys_\` name), ` +
-        `which ADR-0090 D1 resolves to public`;
+      : 'declares no sharingModel and is a system object, which resolves to public';
 
   return [{
     severity: 'error',
     rule: SHARING_RULE_OBJECT_NOT_SHAREABLE,
     where,
     path,
+    // [#22161] One verdict sentence; why a public baseline has nothing to
+    // widen, and the measured read filter, is the `os explain` entry's.
     message:
-      `Sharing rule "${name}" is anchored on object "${object}", which ${declared}. Its effective ` +
-      `sharing model is therefore \`public\`, and sharing only ever WIDENS an OWD baseline — on the ` +
-      `widest baseline there is nothing left to widen. \`SharingService.assertNotInertGrant\` refuses ` +
-      `the grant with SHARING_NOT_ENABLED ("'${object}' is not under record-sharing enforcement"), so ` +
-      `the rule's boot backfill fails and no \`sys_record_share\` row is ever written. Measured: ` +
-      `\`buildReadFilter\` returns \`null\` for this object, i.e. NO record-level filter at all — every ` +
-      `principal already reads every row, so this rule advertises a restriction that does not exist.`,
+      `anchor object "${object}" ${declared}, so the grant is refused (SHARING_NOT_ENABLED) and the rule ` +
+      'restricts nothing',
     hint:
       `Decide which half is wrong. If the ACCESS is right — everyone should read and write these ` +
       `records — the rule is dead metadata: delete it (ADR-0049 enforce-or-remove). If the RULE is ` +
@@ -585,7 +570,6 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
     const object = str(rule.object);
     const where = `sharing rule "${name}"${object ? ` on object "${object}"` : ''}`;
     const path = `sharingRules[${index}].condition`;
-    const source = sourceOf(rule.condition);
 
     // The seeder's exact call: `compileCelToFilter(r.condition, { variables: {} })`
     // in `bootstrap-declared-sharing-rules.ts`. Same function, same options —
@@ -597,13 +581,13 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
       // when it compares with a list- or object-holding field (file header).
       const graph = object ? anchorGraph(object) : null;
       const listHolding = graph
-        ? listHoldingFinding(graph, object, result.filter as Record<string, unknown>, { where, path, source })
+        ? listHoldingFinding(graph, object, result.filter as Record<string, unknown>, { where, path })
         : null;
       if (listHolding) findings.push(listHolding);
       // [#20347] …and when it compares two fields that share no comparison
       // class — refused by the same driver check, the same way (file header).
       const crossClass = graph
-        ? crossClassFinding(graph, object, result.filter as Record<string, unknown>, { where, path, source })
+        ? crossClassFinding(graph, object, result.filter as Record<string, unknown>, { where, path })
         : null;
       if (crossClass) findings.push(crossClass);
       return;
@@ -611,12 +595,6 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
     // Syntax belongs to `validateStackExpressions`, which already gates this
     // same field with a message written about syntax.
     if (result.reason === 'parse-error') return;
-
-    const skipped =
-      'so `bootstrapDeclaredSharingRules` SKIPS the rule at boot: it is never written to ' +
-      '`sys_sharing_rule`, no `sys_record_share` grant is ever materialised, and the only signal is one ' +
-      'WARN line in the boot log. The rule is declared and grants nothing (ADR-0049: an unlowerable ' +
-      'condition is never seeded as a permissive match-all).';
 
     if (result.reason === 'unresolved-variable') {
       // The record-relative-recipient gap the hint's last sentence describes is
@@ -629,8 +607,7 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
         rule: SHARING_RULE_RUNTIME_VARIABLE_CONDITION,
         where,
         path,
-        message:
-          `Sharing-rule condition \`${source}\` reads a runtime variable (${result.detail}), ` + skipped,
+        message: `condition reads a runtime variable (${result.detail}), ${NEVER_SEEDED}`,
         hint:
           'A criteria sharing rule is MATERIALISED: the seeder compiles ONE static `criteria_json` per ' +
           'rule and the evaluator writes `sys_record_share` rows from it, so there is no "current user" ' +
@@ -667,9 +644,7 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
       rule: SHARING_RULE_UNLOWERABLE_CONDITION,
       where,
       path,
-      message:
-        `Sharing-rule condition \`${source}\` is outside the pushdown subset the runtime can compile ` +
-        `(${result.detail}), ` + skipped,
+      message: `condition is not lowerable (${refusalVerdict(result.detail)}), ${NEVER_SEEDED}`,
       hint:
         'Rewrite the predicate inside the lowerable subset. ' + PUSHDOWN_SUBSET + ' Two traps in ' +
         'particular: (1) `has(record.x)` is correct in an object VALIDATION rule, which is INTERPRETED, ' +

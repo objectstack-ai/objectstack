@@ -197,8 +197,11 @@
  *   defect earns one finding.
  *
  * The finding keeps the id {@link RLS_PREDICATE_UNENFORCEABLE} and quotes the
- * engine's message verbatim, with its code and status: at authoring time the
- * text is the author's own, so nothing is withheld.
+ * engine's verdict with its code and status: at authoring time the text is the
+ * author's own, so nothing is withheld. [#22161] It quotes the verdict half of
+ * the engine's leading sentence ({@link refusalVerdict}), as it does for the
+ * shared filter check; the engine's reasoning and remedy are the `os explain`
+ * entry's and the hint's.
  *
  * ## A field compared with a field that holds a list or an object (#19886)
  *
@@ -355,78 +358,43 @@ function boundsOverrunOf(bridged: string): CelBoundsOverrun | null {
   return !parsed.ok && parsed.kind === 'bounds' ? parsed.overrun : null;
 }
 
-/**
- * An over-budget predicate is by definition long, so the diagnostic quotes a
- * bounded prefix rather than the whole source — the same 200-char courtesy
- * `cel-to-filter.ts`'s grace WARN extends for the same reason.
- */
-function quote(source: string): string {
-  return source.length > 200 ? `${source.slice(0, 197)}...` : source;
+/* ────────────────────────────────────────────────────────────────────────────
+ * [#22161] The verdict clauses. Every finding of the five ids prints one
+ * verdict sentence; what a dropped policy, a refused comparison or an engine
+ * refusal does at request time — and the measurements behind it — is each id's
+ * `os explain` entry (`rule-explanations.ts`, the "Row-level security and
+ * sharing rules" block). The finding does not echo the predicate: its `path`
+ * names the clause, and the predicate is author text of any length.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** What a dropped policy no longer does, per clause. */
+const DROPPED_OUTCOME: Readonly<Record<'using' | 'check', string>> = {
+  using: 'grants no access',
+  check: 'admits no write',
+};
+
+/** The clause that closes every verdict whose policy the runtime drops. */
+function droppedClause(clause: 'using' | 'check'): string {
+  return `so the policy is dropped and ${DROPPED_OUTCOME[clause]}`;
+}
+
+/** The same outcome as a sentence, after a verdict that ends one of its own. */
+function droppedSentence(clause: 'using' | 'check'): string {
+  return `The policy is dropped and ${DROPPED_OUTCOME[clause]}.`;
 }
 
 /**
- * The INSERT half of a dropped `using`, appended to every `using` consequence
- * below. The ADR-0058 D4 write check takes its set from `writeCheckPolicies`:
- * when no applicable policy for the insert declares a `check`, every applicable
- * policy's `using` is compiled as its check, so the same drop reaches the
- * single-record insert too. Measured through the real `SecurityPlugin` on an
- * `insert` and an `all` policy, for all three kinds of drop (an unlowerable shape, an unresolved
- * `current_user.*`, an undeclared column): with nothing else compiling in that
- * set, every single-record insert is refused (403); with another applicable
- * policy's `using` compiling, that one alone decides; with a declared `check`
- * beside it, the declared check alone decides and this `using` takes no part.
+ * The verdict half of a quoted refusal: the text up to the first ` — `, where
+ * the producer's own elaboration or suggested rewrite begins. That half is the
+ * `fix:` line's and the `os explain` entry's job, and keeping it would carry
+ * the verdict past one line. A refusal with no ` — ` is quoted whole.
+ *
+ * Exported for `validate-sharing-rule-enforceability.ts`, which quotes the
+ * same compiler.
  */
-const USING_INSERT_CONSEQUENCE =
-  ' On an `insert` or `all` policy the same `using` is also the single-record INSERT check ' +
-  'whenever no applicable policy for the insert declares a `check` (ADR-0058 D4): when nothing ' +
-  'else in that set compiles, every single-record insert it governs fails with ' +
-  "`PermissionDeniedError`; when another policy's `using` compiles, that one alone decides the insert.";
-
-/**
- * Qualifies every `check` consequence below. The write check OR-combines the
- * declared checks of all the applicable policies for the operation, so a
- * dropped `check` is a blanket refusal only when no other declared `check` in
- * that set compiles (measured: beside a compiling declared `check`, that one
- * alone decided; beside a USING-only sibling, every single-record insert was
- * refused, because a USING-only sibling takes no part once any policy declares
- * a `check`).
- */
-const CHECK_SET_QUALIFIER =
-  ' That holds when no other applicable policy for the operation declares a `check` that compiles; ' +
-  'when one does, that `check` alone decides and this one contributes nothing.';
-
-/** How an UNCOMPILABLE predicate is dropped: the runtime's own WARN names the predicate. */
-const DROPPED_UNCOMPILABLE =
-  'so `RLSCompiler` DROPS the policy at request time (one WARN line — "has an uncompilable predicate ' +
-  '… and was DROPPED (no enforcement)" — is the only signal, and nothing reports it at authoring time). ';
-
-/**
- * How a predicate the compiler refuses PER REQUEST is dropped. The shape check
- * `compileFilter` consults passes (the refused value exists only per request),
- * so it never logs the "uncompilable predicate" line: it collects the policy as
- * that request's denial and WARNs only when that denial is what the request gets.
- */
-const DROPPED_EVERY_REQUEST =
-  'so `RLSCompiler` DROPS the policy on EVERY request (a request that resolves no value drops it too). The ' +
-  'shape check passes, so the "uncompilable predicate" WARN is never logged; the only signal is a per-request ' +
-  '"DENY (fail closed)" WARN, emitted only when nothing else applicable compiles, and nothing reports it at ' +
-  'authoring time. ';
-
-/** What the runtime does with a predicate it cannot compile, per clause. */
-function consequence(clause: 'using' | 'check', dropped: string = DROPPED_UNCOMPILABLE): string {
-  return clause === 'using'
-    ? dropped +
-        'When it is the only applicable policy for that object and operation, `compileFilter` returns the ' +
-        '`RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause: every select / update / ' +
-        'delete on the object matches ZERO rows. When other policies also apply, this one just vanishes ' +
-        'from the OR and grants none of the access it appears to.' +
-        USING_INSERT_CONSEQUENCE
-    : dropped +
-        'On the ADR-0058 D4 write path that leaves the post-image `check` as the `RLS_DENY_FILTER` ' +
-        'sentinel, which no record can satisfy: every single-record insert and by-id update the policy ' +
-        'governs fails with `PermissionDeniedError`. The policy reads as a write rule and behaves as a ' +
-        'blanket refusal.' +
-        CHECK_SET_QUALIFIER;
+export function refusalVerdict(detail: string): string {
+  const cut = detail.indexOf(' — ');
+  return cut === -1 ? detail : detail.slice(0, cut);
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -899,15 +867,16 @@ function typeFaultRewrite(fault: TypeFault, site: LoweredSite): string {
   return `rewrite the comparison on \`${f}\` so \`${v}\` sits where its value fits`;
 }
 
-const HOLDING_SENTENCE: Readonly<Record<RuntimeHolding, (variable: string) => string>> = {
-  list: (v) =>
-    `\`${v}\` is a membership set: \`ExecutionContext\` declares it, and the kernel resolves it, as a LIST on ` +
-    'every request, so no request can ever put one value in this position.',
-  'one value': (v) =>
-    `\`${v}\` holds ONE value: \`ExecutionContext\` declares it, and the kernel resolves it, as a scalar on ` +
-    'every request, so no request can ever put a list in this position.',
+/**
+ * What the reference holds and where it was used — the type-fault verdict.
+ * That `ExecutionContext` declares, and the kernel resolves, each kernel key
+ * with this type on every request is the `os explain` entry's.
+ */
+const HOLDING_VERDICT: Readonly<Record<RuntimeHolding, (variable: string) => string>> = {
+  list: (v) => `\`${v}\` is a membership set, a list on every request, used where one value belongs`,
+  'one value': (v) => `\`${v}\` holds ONE value on every request, used where a set belongs`,
   'context object': () =>
-    '`current_user` alone is the whole caller context object on every request, never one value and never one set.',
+    '`current_user` alone is the whole caller context object, used where one value or one set belongs',
 };
 
 /** The one-sentence rule each holding breaks, leading its hint. */
@@ -999,19 +968,6 @@ function firstSentence(message: string): string {
 }
 
 /**
- * How a face-refused comparand is dropped at request time. [#20212]
- * `RLSCompiler.compileFilter` runs the same two faces on every compiled policy
- * filter, for `using` and `check` alike, so the policy joins the per-request
- * denial route before any backend or the in-process `check` evaluator sees the
- * comparand: the same drop, WARN and per-clause consequence as a TYPE fault.
- */
-const DROPPED_FACE_REFUSED =
-  'so `RLSCompiler` DROPS the policy on EVERY request: it runs that same check on every compiled policy ' +
-  'filter, before any backend sees it. The shape check passes, so the "uncompilable predicate" WARN is never ' +
-  'logged; the only signal is a per-request "DENY (fail closed)" WARN, emitted only when nothing else ' +
-  'applicable compiles. ';
-
-/**
  * The lowered field-to-field operators, back to the CEL operator an author
  * writes. They are the six `cel-to-filter.ts` emits with a `{ $field }`
  * comparand, and the six the write check and driver-sql refuse against a
@@ -1024,24 +980,21 @@ const FIELD_COMPARISON_SYMBOL: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * The declaration that makes a field hold a list or an object, spelled as the
- * author wrote it, or `null` when the field holds one value (see this file's
- * header for the two spec classes).
+ * Is the field declared to hold a list or an object (see this file's header
+ * for the two spec classes)?
  */
-function listHoldingDeclaration(meta: GraphField | undefined): string | null {
+function holdsListOrObject(meta: GraphField | undefined): boolean {
   const type = meta?.type;
-  if (!type) return null;
-  if (STRUCTURED_JSON_TYPES.has(type)) return `\`type: '${type}'\``;
-  if (!isMultiValueField({ type, multiple: meta.multiple === true })) return null;
-  return meta.multiple === true ? `\`type: '${type}'\`, \`multiple: true\`` : `\`type: '${type}'\``;
+  if (!type) return false;
+  return STRUCTURED_JSON_TYPES.has(type) || isMultiValueField({ type, multiple: meta.multiple === true });
 }
 
 /** One lowered comparison between two columns, at least one of which holds a list or an object. */
 export interface ListHoldingComparison {
   /** The comparison as the author wrote it, back in CEL. */
   written: string;
-  /** Each list-holding column, with what it is declared as. */
-  columns: string[];
+  /** The column(s) of the comparison declared to hold a list or an object. */
+  holders: string[];
 }
 
 /**
@@ -1066,38 +1019,48 @@ export function listHoldingComparisons(
     typeof (operand as Record<string, unknown>).$field === 'string');
   for (const site of sites) {
     const referenced = (site.operand as { $field: string }).$field;
-    const columns: string[] = [];
+    const holders: string[] = [];
     for (const name of new Set([site.field, referenced])) {
       const verdict = resolveFieldPath(graph, object, name);
-      const held = verdict?.kind === 'ok' ? listHoldingDeclaration(verdict.meta) : null;
-      if (held) columns.push(`\`${name}\` is declared ${held}`);
+      if (verdict?.kind === 'ok' && holdsListOrObject(verdict.meta)) holders.push(name);
     }
-    if (columns.length === 0) continue;
+    if (holders.length === 0) continue;
     const written = `record.${site.field} ${FIELD_COMPARISON_SYMBOL.get(site.op)} record.${referenced}`;
-    found.set(written, { written, columns });
+    found.set(written, { written, holders });
   }
   return [...found.values()];
 }
 
-/**
- * What a comparison against a list-holding column does at request time, per
- * clause. Measured through the real plugin-security on driver-sql, every
- * clause and operation: see this file's header.
- */
-function listHoldingConsequence(clause: 'using' | 'check'): string {
-  const write =
-    'every single-record insert and by-id update whose record holds a list or an object in that column is ' +
-    'refused (`INVALID_FILTER` / 400) and stores nothing, because the write check compares one value with ' +
-    'one value and will not guess what a list means';
-  return clause === 'using'
-    ? 'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql ' +
-        'refuses a cross-field comparison against such a column by its declared type), and every by-id ' +
-        'update or delete it scopes fails closed (`PERMISSION_DENIED` / 403). On an `insert`, `update` or ' +
-        '`all` policy the same `using` is also the write check whenever no applicable policy for that ' +
-        `operation declares a \`check\` (ADR-0058 D4): then ${write}.`
-    : `${write}. The policy reads as a comparison and behaves as a refusal of every write that leaves a list ` +
-        'or an object in that column.';
+/** The comparisons after the first, which a verdict counts rather than quotes. */
+function moreComparisons(count: number): string {
+  return count > 1 ? ` (and ${count - 1} more)` : '';
 }
+
+/**
+ * [#22161] The list-holding verdict, after its subject: the first comparison,
+ * the column(s) in it that hold a list or an object, and a count of the rest.
+ * Why such a column is not one comparable value, and what the refusal costs,
+ * is the `os explain` entry's. Shared with the sharing-rule arm.
+ */
+export function listHoldingVerdict(comparisons: readonly ListHoldingComparison[]): string {
+  const [first] = comparisons;
+  const holders = first.holders.map((name) => `\`${name}\``).join(' and ');
+  return (
+    `compares \`${first.written}\`, where ${holders} ${first.holders.length > 1 ? 'hold' : 'holds'} a list ` +
+    `or an object${moreComparisons(comparisons.length)}`
+  );
+}
+
+/**
+ * What a refused field-to-field comparison costs, per clause — the list-holding
+ * and the cross-class arm alike. Measured through the real plugin-security on
+ * driver-sql, every clause and operation (this file's header); the full account
+ * is the `os explain` entry's.
+ */
+const REFUSED_COMPARISON: Readonly<Record<'using' | 'check', string>> = {
+  using: 'so the SQL drivers refuse every read it scopes (INVALID_FILTER / 400)',
+  check: 'so the write check refuses the writes it judges (INVALID_FILTER / 400)',
+};
 
 /* ────────────────────────────────────────────────────────────────────────────
  * #20347 — a field compared with a field of ANOTHER comparison class (see the
@@ -1114,10 +1077,10 @@ const CLASS_PHRASE: Readonly<Record<CrossFieldComparisonClass, string>> = {
   time: 'a time of day',
 };
 
-/** Why a single-valued column has no class, as a sentence (a list or an object is the arm above's). */
-const NO_CLASS_PHRASE: Readonly<Record<'file' | 'formula', string>> = {
-  file: 'a file field, which no row filter can compare with another column',
-  formula: 'a formula field, which has no stored column a row filter can read',
+/** A single-valued column with no class, as a noun (a list or an object is the arm above's). */
+const NO_CLASS_NOUN: Readonly<Record<'file' | 'formula', string>> = {
+  file: 'a file field',
+  formula: 'a formula field',
 };
 
 /**
@@ -1143,19 +1106,18 @@ function declaredColumn(
   return { name, type: verdict.meta.type, multiple: verdict.meta.multiple === true, meta: verdict.meta };
 }
 
-/** One column's part in a refused comparison, as the author declared it. */
-function describeColumn(column: { name: string; type: string }, verdict: CrossFieldColumnVerdict): string {
-  const declared = `\`${column.name}\` is declared \`type: '${column.type}'\``;
-  if (verdict.kind === 'class') return `${declared}, compared as ${CLASS_PHRASE[verdict.class]}`;
-  return verdict.reason === 'list-or-object' ? declared : `${declared}, ${NO_CLASS_PHRASE[verdict.reason]}`;
+/** One side of a refused comparison: its class, or why it has none. */
+function sidePhrase(verdict: CrossFieldColumnVerdict): string {
+  if (verdict.kind === 'class') return CLASS_PHRASE[verdict.class];
+  return verdict.reason === 'list-or-object' ? 'a list or an object' : NO_CLASS_NOUN[verdict.reason];
 }
 
 /** One lowered comparison between two columns that share no comparison class. */
 export interface CrossClassComparison {
   /** The comparison as the author wrote it, back in CEL. */
   written: string;
-  /** The column(s) at fault, with what each is declared as. */
-  columns: string[];
+  /** The two sides, in the written order: each one's class, or why it has none (`text vs a number`). */
+  why: string;
 }
 
 /**
@@ -1186,59 +1148,34 @@ export function crossClassComparisons(
     const target = declaredColumn(graph, object, site.field);
     const ref = declaredColumn(graph, object, referenced);
     if (!target || !ref) continue;
-    if (listHoldingDeclaration(target.meta) || listHoldingDeclaration(ref.meta)) continue;
+    if (holdsListOrObject(target.meta) || holdsListOrObject(ref.meta)) continue;
     const verdict = crossFieldComparisonVerdict(target, ref);
-    let columns: string[];
+    let why: string;
     if (verdict.verdict === 'cross-class') {
-      columns = [
-        describeColumn(target, { kind: 'class', class: verdict.left }),
-        describeColumn(ref, { kind: 'class', class: verdict.right }),
-      ];
+      why = `${CLASS_PHRASE[verdict.left]} vs ${CLASS_PHRASE[verdict.right]}`;
     } else if (verdict.verdict === 'no-class') {
-      columns = [
-        ...(verdict.left.kind === 'no-class' ? [describeColumn(target, verdict.left)] : []),
-        ...(verdict.right.kind === 'no-class' && ref.name !== target.name ? [describeColumn(ref, verdict.right)] : []),
-      ];
+      why = `${sidePhrase(verdict.left)} vs ${sidePhrase(verdict.right)}`;
     } else {
       continue;
     }
     const written = `record.${site.field} ${FIELD_COMPARISON_SYMBOL.get(site.op)} record.${referenced}`;
-    found.set(written, { written, columns });
+    found.set(written, { written, why });
   }
   return [...found.values()];
 }
 
-/** The comparisons, quoted back with the declarations behind them. */
-export function describeCrossClassComparisons(comparisons: readonly CrossClassComparison[]): string {
-  return comparisons.map((c) => `\`${c.written}\`, where ${c.columns.join(' and ')}`).join('; ');
-}
-
-/** The sentence both rules state before their per-surface consequence. */
-export const CROSS_CLASS_SENTENCE =
-  'Two columns are compared only within one comparison class — the class decides how their stored values ' +
-  'order and equal, and across classes SQL and the in-memory evaluator answer differently — and a file field ' +
-  'or a formula field has no class at all, so the platform defines no comparison between these columns';
-
 /**
- * What a cross-class comparison does at request time, per clause. Measured
- * through the real plugin-security and ObjectQL on driver-sql (see this file's
- * header).
- *
- * The WRITE half is the in-process write check's behaviour, which reads the
- * same classification since the engine lane moved it onto
- * `crossFieldComparisonVerdict` (#20355): it refuses where the read refuses.
+ * [#22161] The cross-class verdict, after its subject: the first comparison,
+ * why its two fields share no class, and a count of the rest. Why classes
+ * decide comparability, and what the refusal costs, is the `os explain`
+ * entry's. Shared with the sharing-rule arm.
  */
-function crossClassConsequence(clause: 'using' | 'check'): string {
-  const write =
-    'the in-process write check refuses the comparison by the same classification (`INVALID_FILTER` / 400), ' +
-    'so every insert or update it judges is refused and nothing is stored';
-  return clause === 'using'
-    ? 'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses ' +
-        'the comparison by the two columns\' declared types), and every by-id update or delete it scopes fails ' +
-        'closed (`PERMISSION_DENIED` / 403). On an `insert`, `update` or `all` policy the same `using` is also ' +
-        'the write check whenever no applicable policy for that operation declares a `check` (ADR-0058 D4), and ' +
-        `there ${write}.`
-    : `${write[0].toUpperCase()}${write.slice(1)}. The policy reads as a write rule and admits no write at all.`;
+export function crossClassVerdict(comparisons: readonly CrossClassComparison[]): string {
+  const [first] = comparisons;
+  return (
+    `compares \`${first.written}\`, which no comparison class spans (${first.why})` +
+    moreComparisons(comparisons.length)
+  );
 }
 
 /** The prescription both rules share, ahead of their per-surface alternatives. */
@@ -1246,80 +1183,6 @@ export const CROSS_CLASS_REMEDY =
   `Compare a field only with a field of the same comparison class: ${CROSS_FIELD_CLASS_LISTING}. ` +
   'A file field and a formula field cannot be compared with another column at all. If the two columns do ' +
   'hold comparable values, one of them is declared with the wrong type: fix the declaration, not the predicate.';
-
-/**
- * What a reference miss costs at request time, per clause. Measured, not inferred.
- *
- * ⚠️ This text was rewritten once, and the reason it was wrong is worth keeping:
- * it said the field half had TWO directions — fail-closed in the leading
- * position `extractTargetField` recognises, fail-OPEN everywhere else — and it
- * attributed the WRITE leg's fail-closed to that same safety net. Both halves
- * were wrong to leave standing. The runtime now judges column existence on the
- * COMPILED predicate, inside `RLSCompiler.compileFilter`, which both the read
- * layer and the ADR-0058 D4 write gate pass through: position and polarity are
- * normalised away before the check runs, so a miss fails CLOSED everywhere, on
- * both clauses. And the write path never had an `extractTargetField` net to
- * credit — `computeWriteCheckFilter` compiled `check` with no field-existence
- * check at all, which is why a negated miss there PERMITTED the write until the
- * compiler-side guard landed.
- *
- * ⇒ Both KINDS now have one direction each, and it is the same direction. What
- * this text still owes an author is that the miss is not a harmless typo: it
- * turns the policy into a blanket refusal for every holder of the set.
- */
-function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variable'): string {
-  if (kind === 'variable') {
-    const dropped =
-      'The pushdown compiler answers `unresolved-variable` in EVERY position — including under `!` and in ' +
-      'a trailing `||` arm — so `RLSCompiler` DROPS the policy at request time, and one WARN line is the ' +
-      'only signal. ';
-    return clause === 'using'
-      ? dropped +
-          'When it is the only applicable policy for that object and operation the layer falls back to the ' +
-          '`RLS_DENY_FILTER` sentinel, which is AND-ed onto the where clause: every select / update / ' +
-          'delete matches ZERO rows, so the object DISAPPEARS for every holder of this permission set — ' +
-          'not because they were denied, but because the narrowing they were granted resolves to nothing. ' +
-          'When other policies also apply, this one vanishes from the OR and grants none of the access it ' +
-          'appears to.' +
-          USING_INSERT_CONSEQUENCE
-      : dropped +
-          'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every ' +
-          'single-record insert and by-id update the policy governs fails with `PermissionDeniedError`. ' +
-          'The policy reads as a write rule and behaves as a blanket refusal for every holder of this ' +
-          'permission set.' +
-          CHECK_SET_QUALIFIER;
-  }
-
-  // ── The FIELD half. ONE direction, in every position and every polarity,
-  // since the runtime moved the column check onto the COMPILED predicate. The
-  // tracker id stays HERE and never in the returned string, because that string
-  // reaches authors, operators and generated surfaces, none of whom can resolve
-  // `#NNNN` (`check:doc-authoring`, maintainer ruling 2026-08-12).
-  const dropped =
-    '`RLSCompiler` judges column existence on the COMPILED predicate, so the position and the polarity ' +
-    'you wrote it in make no difference — a leading `field ==`, a negation (`field != x`, ' +
-    '`!(field == x)`, `!(field in [...])`) and any arm after the first all lower to the same tree and ' +
-    'all DROP the policy at request time, with one WARN line as the only signal. ';
-  return clause === 'using'
-    ? dropped +
-        'When it is the only applicable policy for that object and operation the layer falls back to the ' +
-        '`RLS_DENY_FILTER` sentinel: every select / update / delete matches ZERO rows, so the object ' +
-        'DISAPPEARS for every holder of this permission set — not because they were denied, but because ' +
-        'the narrowing they were granted names a column that is not there. When other policies also ' +
-        'apply, this one vanishes from the OR and grants none of the access it appears to.' +
-        USING_INSERT_CONSEQUENCE
-    : dropped +
-        'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every ' +
-        'single-record insert and by-id update the policy governs fails with `PermissionDeniedError`. ' +
-        'The policy reads as a write rule and behaves as a blanket refusal for every holder of this ' +
-        'permission set.' +
-        CHECK_SET_QUALIFIER +
-        ' ⚠️ On a runtime older ' +
-        'than that guard this clause failed OPEN rather than closed — the write path had no ' +
-        'field-existence check at all, so a negated miss was satisfied VACUOUSLY by the post-image and ' +
-        'PERMITTED exactly the writes the policy was written to refuse, on every driver. Fix the name ' +
-        'rather than relying on either behaviour.';
-}
 
 /**
  * The engine's judge-only filter admission, as the caller hands it in
@@ -1391,16 +1254,6 @@ function engineRefusal(
   return verdict.ok ? null : verdict;
 }
 
-/**
- * What an engine-refused read scope does at request time. The analytics face
- * composes the read scope into the `where` it hands the engine, so the same
- * admission that produced this verdict refuses the query there.
- */
-const ENGINE_REFUSED_CONSEQUENCE =
-  'This clause is part of the object\'s row-level READ SCOPE, and the analytics face hands the read ' +
-  'scope to this same engine admission before it runs a query: every analytics query over the object ' +
-  'that this policy scopes is refused.';
-
 /** The prescription for an engine refusal, keyed by the engine's `code` (never by its prose). */
 function engineRefusalHint(code: string): string {
   if (code === 'FILTER_TOKEN_UNKNOWN' || code === 'FILTER_TOKEN_UNRESOLVED') {
@@ -1458,9 +1311,7 @@ function referenceFindings(
       rule: RLS_PREDICATE_UNKNOWN_FIELD,
       where,
       path,
-      message:
-        `RLS ${clause} \`${quote(source)}\` lowers correctly but does not name a real column: ` +
-        `${account.message} ` + referenceConsequence(clause, 'field'),
+      message: `${account.message} ${droppedSentence(clause)}`,
       hint:
         `${account.detail} Point the predicate at a column the object really declares, or delete the ` +
         `policy if the narrowing is gone — a policy naming a column that does not exist is not ` +
@@ -1480,12 +1331,8 @@ function referenceFindings(
       where,
       path,
       message:
-        `RLS ${clause} \`${quote(source)}\` reads \`${variablePath}\`, which nothing pre-resolves. The ` +
-        `kernel-resolved \`current_user\` keys are exactly ${listNames(PRERESOLVED_USER_KEYS)}, and the ` +
-        `only other keys that can EVER appear are §7.3.1 membership sets, which the runtime stages as ` +
-        `ARRAYS and which are therefore usable only as \`field in current_user.<key>\` — this reference ` +
-        `is in a scalar position, so no request can ever supply it. ` +
-        referenceConsequence(clause, 'variable'),
+        `RLS ${clause} reads \`${variablePath}\`, which nothing pre-resolves, in a scalar position no request ` +
+        `can ever fill, ${droppedClause(clause)}`,
       hint:
         `Use one of the pre-resolved context values (${listNames(PRERESOLVED_USER_KEYS)})${suggestName(
           key,
@@ -1508,10 +1355,7 @@ function referenceFindings(
       rule: RLS_PREDICATE_UNENFORCEABLE,
       where,
       path,
-      message:
-        `RLS ${clause} \`${quote(source)}\` passes the shape check, but the compiler refuses it for the value ` +
-        `\`${fault.variable}\` holds on every request (${refusal}). ${HOLDING_SENTENCE[fault.holds](fault.variable)} ` +
-        consequence(clause, DROPPED_EVERY_REQUEST),
+      message: `RLS ${clause}: ${HOLDING_VERDICT[fault.holds](fault.variable)}, ${droppedClause(clause)}`,
       hint:
         `${HOLDING_RULE[fault.holds]} In this predicate: ` +
         `${fault.sites.map((site) => typeFaultRewrite(fault, site)).join('; ')}.`,
@@ -1526,9 +1370,10 @@ function referenceFindings(
       rule: RLS_PREDICATE_UNENFORCEABLE,
       where,
       path,
-      message:
-        `RLS ${clause} \`${quote(source)}\` lowers, but to a comparand the platform's shared filter check ` +
-        `refuses (${firstSentence(faced)}), ${consequence(clause, DROPPED_FACE_REFUSED)}`,
+      // [#20212] `RLSCompiler.compileFilter` runs the same two faces on every
+      // compiled policy filter, `using` and `check` alike, so the policy is
+      // dropped on every request, exactly as a TYPE fault is.
+      message: `RLS ${clause} lowers to a refused comparand (${firstSentence(faced)}), ${droppedClause(clause)}`,
       hint:
         rewrites.length > 0
           ? '`null` has no place inside a list or opposite an ordering operator — the platform refuses both in ' +
@@ -1548,12 +1393,7 @@ function referenceFindings(
       rule: RLS_PREDICATE_UNENFORCEABLE,
       where,
       path,
-      message:
-        `RLS ${clause} \`${quote(source)}\` lowers, but compares a field with a field that holds a list or an ` +
-        `object: ${listComparisons.map((c) => `\`${c.written}\`, where ${c.columns.join(' and ')}`).join('; ')}. ` +
-        'A column that holds a list or an object is not one comparable value, on either side of a ' +
-        'field-to-field comparison, so the platform refuses the comparison instead of evaluating it: ' +
-        listHoldingConsequence(clause),
+      message: `RLS ${clause} ${listHoldingVerdict(listComparisons)}, ${REFUSED_COMPARISON[clause]}`,
       hint:
         'A field compared with a `json` or `multiple` field has no row-filter form: a row filter compares ' +
         'one value with one value, and cannot test membership in a list another column holds. Compare ' +
@@ -1574,9 +1414,7 @@ function referenceFindings(
       rule: RLS_PREDICATE_UNENFORCEABLE,
       where,
       path,
-      message:
-        `RLS ${clause} \`${quote(source)}\` lowers, but compares two fields that share no comparison class: ` +
-        `${describeCrossClassComparisons(crossClass)}. ${CROSS_CLASS_SENTENCE}: ${crossClassConsequence(clause)}`,
+      message: `RLS ${clause} ${crossClassVerdict(crossClass)}, ${REFUSED_COMPARISON[clause]}`,
       hint:
         `${CROSS_CLASS_REMEDY} To keep the rule without a second column, compare with a literal or a ` +
         '`current_user` value, test a file field with `!= null`, or store the value you mean in a field of the ' +
@@ -1586,8 +1424,9 @@ function referenceFindings(
 
   // [#20158] The engine's own admission of the lowered read scope — run only
   // on a clause every pass above left clean, so one defect earns one finding.
-  // The verdict and its sentence are the engine's; this rule adds the clause,
-  // the object and what the refusal costs.
+  // The verdict and its sentence are the engine's; this rule adds the clause.
+  // What the refusal costs (every analytics query the read scope reaches) is
+  // the `os explain` entry's.
   const refused = judge && filter && findings.length === 0
     ? engineRefusal(judge, object, bridged, filter, probe)
     : null;
@@ -1598,8 +1437,7 @@ function referenceFindings(
       where,
       path,
       message:
-        `RLS ${clause} \`${quote(source)}\` lowers, but the engine refuses to run the lowered filter on ` +
-        `"${object}" (${refused.code} / ${refused.status}): ${refused.message} ${ENGINE_REFUSED_CONSEQUENCE}`,
+        `RLS ${clause} (${refused.code} / ${refused.status}): ${refusalVerdict(firstSentence(refused.message))}`,
       hint: engineRefusalHint(refused.code),
     });
   }
@@ -1700,9 +1538,8 @@ export function validateRlsPredicateEnforceability(
             where,
             path,
             message:
-              `RLS ${clause} \`${quote(source)}\` is syntactically valid, lowerable CEL but overruns the ` +
-              `platform parse bound ${bound}${budget}${measured} (${overrun.summary}), ` +
-              consequence(clause),
+              `RLS ${clause} is valid CEL but overruns the parse bound ${bound}${budget}${measured} ` +
+              `(${overrun.summary}), ${droppedClause(clause)}`,
             hint:
               `There is no syntax or dialect error to correct here — the predicate is well-formed CEL and ` +
               `is simply too large for ${bound}${budget}, so the fix is to make it smaller or to move the ` +
@@ -1727,8 +1564,8 @@ export function validateRlsPredicateEnforceability(
             where,
             path,
             message:
-              `RLS ${clause} \`${source}\` does not parse as CEL even after the legacy SQL bridge ` +
-              `(\`=\` → \`==\`, \`IN\` → \`in\`) has been applied (${detail}), ` + consequence(clause),
+              `RLS ${clause} does not parse as CEL, even after the legacy SQL bridge (${detail}), ` +
+              droppedClause(clause),
             hint:
               'Author the predicate in canonical CEL (ADR-0058 D1). The bridge covers only the historic ' +
               'SQL subset — a bare `=` and `IN` — so everything else must already be CEL: combine with ' +
@@ -1745,9 +1582,7 @@ export function validateRlsPredicateEnforceability(
           rule: RLS_PREDICATE_UNENFORCEABLE,
           where,
           path,
-          message:
-            `RLS ${clause} \`${source}\` is outside the pushdown subset the runtime can compile ` +
-            `(${detail}), ` + consequence(clause),
+          message: `RLS ${clause} is not lowerable (${refusalVerdict(detail)}), ${droppedClause(clause)}`,
           hint:
             'Rewrite the predicate inside the lowerable subset. ' + PUSHDOWN_SUBSET + ' Three traps in ' +
             'particular: (1) a function call — `size(record.tags) > 0`, `has(record.x)` — is correct in an ' +

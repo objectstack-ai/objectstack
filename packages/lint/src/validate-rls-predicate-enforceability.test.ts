@@ -6,7 +6,7 @@ import { compileCelToFilter, isSupportedRlsExpression, setCelPushdownLimitsModeF
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 
 import {
-  validateRlsPredicateEnforceability,
+  validateRlsPredicateEnforceability as validateRlsPredicateEnforceabilityUnrecorded,
   RLS_PREDICATE_UNENFORCEABLE,
   RLS_PREDICATE_UNPARSEABLE,
   RLS_PREDICATE_OVER_BUDGET,
@@ -14,6 +14,30 @@ import {
   RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
 } from './validate-rls-predicate-enforceability.js';
 import { AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the five ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — so the pin covers every firing variant
+// this suite exercises, not a chosen few. Run the whole file: those cases read
+// what the cases above fired.
+const RLS_RULE_IDS: readonly string[] = [
+  RLS_PREDICATE_UNENFORCEABLE,
+  RLS_PREDICATE_UNPARSEABLE,
+  RLS_PREDICATE_OVER_BUDGET,
+  RLS_PREDICATE_UNKNOWN_FIELD,
+  RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
+];
+const fired: Array<{ rule: string; message: string }> = [];
+const validateRlsPredicateEnforceability: typeof validateRlsPredicateEnforceabilityUnrecorded = (...args) => {
+  const findings = validateRlsPredicateEnforceabilityUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 const ids = (stack: unknown) => validateRlsPredicateEnforceability(stack).map((f) => f.rule);
 
@@ -56,10 +80,12 @@ describe('validateRlsPredicateEnforceability — predicates the runtime can only
       path: 'permissions[0].rowLevelSecurity[0].using',
       where: 'permission set "sales_rep" policy "own_leads" on object "lead"',
     });
-    // The message must say what the runtime DOES, not merely "unsupported".
-    expect(findings[0].message).toMatch(/DROPS the policy at request time/);
-    expect(findings[0].message).toMatch(/RLS_DENY_FILTER/);
-    expect(findings[0].message).toMatch(/ZERO rows/);
+    // The verdict says what the runtime DOES, not merely "unsupported"…
+    expect(findings[0].message).toMatch(/^RLS using is not lowerable \(.+\), so the policy is dropped and grants no access$/);
+    // …and `os explain` says how: the drop, the deny sentinel, the zero rows.
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/DROPS a policy/);
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/RLS_DENY_FILTER/);
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/ZERO rows/);
     // …and prescribe the fix that works on THIS surface.
     expect(findings[0].hint).toMatch(/field != null/);
     expect(findings[0].hint).toMatch(/INTERPRETED/);
@@ -93,9 +119,10 @@ describe('validateRlsPredicateEnforceability — predicates the runtime can only
       path: 'permissions[0].rowLevelSecurity[0].check',
     });
     // ADR-0058 D4: the post-image check becomes the deny sentinel → every write denied.
-    expect(findings[0].message).toMatch(/PermissionDeniedError/);
-    expect(findings[0].message).toMatch(/blanket refusal/);
-    expect(findings[0].message).not.toMatch(/ZERO rows/);
+    expect(findings[0].message).toMatch(/so the policy is dropped and admits no write$/);
+    expect(findings[0].message).not.toMatch(/grants no access/);
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/PermissionDeniedError/);
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/blanket refusal/);
   });
 
   it('reports `using` and `check` on one policy separately', () => {
@@ -383,12 +410,13 @@ describe('validateRlsPredicateEnforceability — a bounds overrun is its own id 
     expect(findings[0].message).toMatch(/maxAstNodes/);
     expect(findings[0].message).toMatch(/platform limit 256/);
     expect(findings[0].message).toMatch(/Exceeded maxAstNodes \(256\)/);
-    // The verdict is unchanged, so the consequence prose must still be there.
-    expect(findings[0].message).toMatch(/DROPS the policy at request time/);
-    expect(findings[0].message).toMatch(/ZERO rows/);
-    // An over-budget predicate is long by definition — the quote is bounded.
-    expect(findings[0].message).toContain('...');
-    expect(findings[0].message.length).toBeLessThan(OVER_BUDGET.maxAstNodes.length + 1200);
+    // The verdict is unchanged, so the consequence must still be there.
+    expect(findings[0].message).toMatch(/so the policy is dropped and grants no access$/);
+    expect(explanationOf(RLS_PREDICATE_OVER_BUDGET)).toMatch(/ZERO rows/);
+    // An over-budget predicate is long by definition — the finding does not
+    // echo it; its `path` locates it.
+    expect(findings[0].message).not.toContain('record.f0 == 0');
+    expect(findings[0].message.length).toBeLessThanOrEqual(200);
   });
 
   it('prescribes shrinking, and never sends the author to check their dialect', () => {
@@ -432,8 +460,8 @@ describe('validateRlsPredicateEnforceability — a bounds overrun is its own id 
       rule: RLS_PREDICATE_OVER_BUDGET,
       path: 'permissions[0].rowLevelSecurity[0].check',
     });
-    expect(f.message).toMatch(/PermissionDeniedError/);
-    expect(f.message).not.toMatch(/ZERO rows/);
+    expect(f.message).toMatch(/so the policy is dropped and admits no write$/);
+    expect(f.message).not.toMatch(/grants no access/);
   });
 
   // ── The discrimination, which IS the card ─────────────────────────
@@ -630,13 +658,15 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     // polarity are normalised away before the check runs. An author told "one
     // of these directions is fail-OPEN" would now harden against a hole that
     // no longer exists, and would not fix the name.
-    expect(f.message).not.toMatch(/fail-OPEN/);
-    expect(f.message).toMatch(/judges column existence on the COMPILED predicate/);
-    expect(f.message).toMatch(/the position and the polarity you wrote it in make no difference/);
+    // [#22161] The account of WHY is `os explain`'s now; it is pinned there.
+    const why = explanationOf(RLS_PREDICATE_UNKNOWN_FIELD);
+    expect(why).not.toMatch(/fail-OPEN/);
+    expect(why).toMatch(/judges column existence on the COMPILED predicate/);
+    expect(why).toMatch(/the position and the polarity it is written in make no difference/);
     // …and every shape the old text split across two directions is named in
     // the one direction, so an author recognises their own predicate in it.
-    expect(f.message).toMatch(/`field != x`/);
-    expect(f.message).toMatch(/any arm after the first/);
+    expect(why).toMatch(/`field != x`/);
+    expect(why).toMatch(/any arm after the first/);
     // ⛔ …and NOT by citing a tracker id. This string reaches authors,
     // operators and generated surfaces, none of whom can resolve `#NNNN`
     // (`check:doc-authoring`); the id lives in the adjacent `//` comment, which
@@ -644,19 +674,21 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     // author does not re-add it and learn this from CI instead.
     expect(f.message).not.toMatch(/#\d{3,}/);
     expect(f.hint).not.toMatch(/#\d{3,}/);
+    expect(why).not.toMatch(/#\d{3,}/);
     // the cost, which is the same cost the variable half carries
-    expect(f.message).toMatch(/DROP the policy at request time/);
-    expect(f.message).toMatch(/RLS_DENY_FILTER/);
-    expect(f.message).toMatch(/ZERO rows/);
-    expect(f.message).toMatch(/DISAPPEARS for every holder of this permission set/);
+    expect(f.message).toMatch(/The policy is dropped and grants no access\.$/);
+    expect(why).toMatch(/DROP the policy at request time/);
+    expect(why).toMatch(/RLS_DENY_FILTER/);
+    expect(why).toMatch(/ZERO rows/);
+    expect(why).toMatch(/disappears for every holder of the permission set/);
     // ⛔ …and NOT the three claims the rewritten text retired. The
     // cross-tenant sentence went with them: it was there to bound a leak
-    // reading that the message no longer makes, and a denial needs no such
+    // reading that the text no longer makes, and a denial needs no such
     // disclaimer. Overstating the old defect was the risk; restating a bound
     // on a defect the text does not describe is just noise.
-    expect(f.message).not.toMatch(/leaves the policy KEPT/);
-    expect(f.message).not.toMatch(/DEFEATED/);
-    expect(f.message).not.toMatch(/driver-sql is NOT MEASURED/);
+    expect(why).not.toMatch(/leaves the policy KEPT/);
+    expect(why).not.toMatch(/DEFEATED/);
+    expect(why).not.toMatch(/driver-sql is NOT MEASURED/);
     // …and the miss itself, with the platform's own "did you mean".
     expect(f.message).toMatch(/"is_private_nope" is not a field on object "crm_opportunity"/);
     expect(f.message).toMatch(/Did you mean "is_private"\?/);
@@ -669,13 +701,14 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     const [f] = validateRlsPredicateEnforceability(siteWith('using', 'owner_id == current_user.nope'));
     expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_USER_VARIABLE);
     expect(f.message).toMatch(/reads `current_user\.nope`, which nothing pre-resolves/);
-    expect(f.message).toMatch(/scalar position, so no request can ever supply it/);
+    expect(f.message).toMatch(/in a scalar position no request can ever fill, so the policy is dropped/);
     // The variable half really is fail-closed in EVERY position — the compiler
     // refuses it under `!` and in a trailing `||` arm alike — so unlike the
     // field half it may say so without qualification.
-    expect(f.message).toMatch(/unresolved-variable` in EVERY position/);
-    expect(f.message).toMatch(/DISAPPEARS for every holder of this permission set/);
-    expect(f.message).not.toMatch(/fail-OPEN/);
+    const why = explanationOf(RLS_PREDICATE_UNKNOWN_USER_VARIABLE);
+    expect(why).toMatch(/unresolved-variable` for it in EVERY position/);
+    expect(why).toMatch(/disappears for every holder of the permission set/);
+    expect(why).not.toMatch(/fail-OPEN/);
     expect(f.hint).toMatch(/IRlsMembershipResolver/);
     expect(f.hint).toMatch(/never compared with `==`/);
   });
@@ -684,17 +717,19 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     const [f] = validateRlsPredicateEnforceability(siteWith('check', 'nope_field == 1'));
     expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_FIELD);
     expect(f.path).toBe('permissions[0].rowLevelSecurity[0].check');
-    expect(f.message).toMatch(/PermissionDeniedError/);
+    expect(f.message).toMatch(/The policy is dropped and admits no write\.$/);
     // ⚠️ The write leg says the SAME thing the read leg does — one direction —
     // and it is the leg whose old text was not merely stale but misattributed:
     // it credited a fail-closed to the `extractTargetField` safety net, and
     // `computeWriteCheckFilter` never had one. The vacuous-permit sentence
-    // survives as an explicit statement about an OLDER runtime, so an operator
-    // reading this against a deployment that predates the guard is not told the
-    // wrong thing.
-    expect(f.message).toMatch(/On a runtime older than that guard this clause failed OPEN/);
-    expect(f.message).toMatch(/PERMITTED exactly the writes the policy was written to refuse/);
-    expect(f.message).not.toMatch(/select \/ update \/ delete matches ZERO/);
+    // survives in `os explain` as an explicit statement about an OLDER runtime,
+    // so an operator reading it against a deployment that predates the guard
+    // is not told the wrong thing.
+    const why = explanationOf(RLS_PREDICATE_UNKNOWN_FIELD);
+    expect(why).toMatch(/PermissionDeniedError/);
+    expect(why).toMatch(/On a runtime older than that compiled-predicate guard a `check` miss failed OPEN/);
+    expect(why).toMatch(/PERMITTED exactly the writes the policy was written to refuse/);
+    expect(f.message).not.toMatch(/ZERO/);
   });
 });
 
@@ -895,23 +930,37 @@ describe('validateRlsPredicateEnforceability — the refusals the SHAPE check ca
 
   it('a TYPE fault names the reference, what it holds, and a DROP with the clause’s own consequence', () => {
     const [using] = validateRlsPredicateEnforceability(siteWith('using', TYPE_FAULTS[0][0]));
-    expect(using.message).toContain('`current_user.org_user_ids` is a membership set');
-    expect(using.message).toMatch(/DROPS the policy on EVERY request/);
-    expect(using.message).toMatch(/RLS_DENY_FILTER/);
+    expect(using.message).toBe(
+      'RLS using: `current_user.org_user_ids` is a membership set, a list on every request, used where one value ' +
+        'belongs, so the policy is dropped and grants no access',
+    );
 
     const [check] = validateRlsPredicateEnforceability(siteWith('check', 'record.assigned_to_id in current_user.id'));
-    expect(check.message).toContain('`current_user.id` holds ONE value');
-    expect(check.message).toMatch(/PermissionDeniedError/);
+    expect(check.message).toBe(
+      'RLS check: `current_user.id` holds ONE value on every request, used where a set belongs, so the policy is ' +
+        'dropped and admits no write',
+    );
+
+    const [root] = validateRlsPredicateEnforceability(siteWith('using', 'record.assigned_to_id in current_user'));
+    expect(root.message).toContain('`current_user` alone is the whole caller context object');
+
+    const why = explanationOf(RLS_PREDICATE_UNENFORCEABLE);
+    expect(why).toMatch(/drops the policy on every request/);
+    expect(why).toMatch(/per-request "DENY \(fail closed\)" WARN/);
+    expect(why).toMatch(/RLS_DENY_FILTER/);
+    expect(why).toMatch(/PermissionDeniedError/);
   });
 
   it('a NULL comparand is reported as a DROP with the clause’s own consequence, as the runtime drops it', () => {
     const [using] = validateRlsPredicateEnforceability(siteWith('using', NULL_COMPARANDS[2][0]));
-    expect(using.message).toMatch(/DROPS the policy on EVERY request/);
-    expect(using.message).toMatch(/RLS_DENY_FILTER/);
+    expect(using.message).toMatch(/^RLS using lowers to a refused comparand \(Operator "\$in" on field "status" /);
+    expect(using.message).toMatch(/so the policy is dropped and grants no access$/);
 
     const [check] = validateRlsPredicateEnforceability(siteWith('check', NULL_COMPARANDS[2][0]));
-    expect(check.message).toMatch(/DROPS the policy on EVERY request/);
-    expect(check.message).toMatch(/PermissionDeniedError/);
+    expect(check.message).toMatch(/so the policy is dropped and admits no write$/);
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(
+      /runs that check on every compiled policy filter before any backend sees it/,
+    );
   });
 
   it('rewrites EVERY site the fault lands in, in one finding', () => {
@@ -1118,5 +1167,52 @@ describe('validateRlsPredicateEnforceability — the field set is read off the C
       RLS_PREDICATE_UNKNOWN_FIELD,
       RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
     ]);
+  });
+});
+
+describe('[#22161] one-line verdicts — the five ids', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each id fired at least once, so the shape
+    // assertion below cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...RLS_RULE_IDS].sort());
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [RLS_PREDICATE_UNENFORCEABLE]: ['pushdown subset', 'One WARN line', 'ZERO rows', 'single-record INSERT check', 'PERMISSION_DENIED', 'analytics query'],
+    [RLS_PREDICATE_UNPARSEABLE]: ['legacy SQL bridge', '`IN` to `in`', 'ZERO rows', 'PermissionDeniedError', 'rls-predicate-over-budget'],
+    [RLS_PREDICATE_OVER_BUDGET]: ['maxAstNodes', 'no syntax or dialect error', 'ZERO rows', 'PermissionDeniedError'],
+    [RLS_PREDICATE_UNKNOWN_FIELD]: ['RENAME', 'COMPILED predicate', 'ZERO rows', 'failed OPEN'],
+    [RLS_PREDICATE_UNKNOWN_USER_VARIABLE]: ['§7.3.1 membership sets', 'ARRAYS', 'EVERY position', 'never reported'],
+  };
+
+  it('covers exactly the five ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...RLS_RULE_IDS].sort());
+  });
+
+  it.each([...RLS_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+
+  it('the explanations name exactly the kernel-resolved `current_user` keys, each with its runtime type', () => {
+    // The explanation module imports nothing, so the keys are written out
+    // there; this holds them to the contract and to this file's type table.
+    expect(explanationOf(RLS_PREDICATE_UNKNOWN_USER_VARIABLE)).toContain(
+      `The kernel-resolved \`current_user\` keys are exactly ${[...RESERVED_RLS_MEMBERSHIP_KEYS].sort().join(', ')}.`,
+    );
+    const spell = (keys: string[]) =>
+      keys.sort().map((k) => `\`${k}\``).reduce((acc, k, i, all) => (i === 0 ? k : `${acc}${i === all.length - 1 ? ' and ' : ', '}${k}`), '');
+    const ofType = (type: 'scalar' | 'array') =>
+      Object.entries(KERNEL_KEY_RUNTIME_TYPE).filter(([, t]) => t === type).map(([k]) => k);
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toContain(
+      `the membership sets ${spell(ofType('array'))} as LISTS and ${spell(ofType('scalar'))} as one value each`,
+    );
   });
 });

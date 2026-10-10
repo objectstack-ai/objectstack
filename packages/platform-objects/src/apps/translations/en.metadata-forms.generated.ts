@@ -293,6 +293,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "enable.clone": {
         label: "Clone"
       },
+      "enable.approvalsVisibleToReaders": {
+        label: "Approvals Visible To Readers",
+        helpText: "Readers of a record see its approval requests and history, read-only, with no approval action"
+      },
       validations: {
         label: "Validations",
         helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"

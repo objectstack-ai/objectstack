@@ -1,8 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The ten converged rule-array `filter` doors name the new spelling when
- * they refuse the old one.
+ * The converged rule-array `filter` doors name the new spelling when they
+ * refuse the old one — eight of them since v18, when `element:number`'s and
+ * `element:record_picker`'s flat `filter` (two of the original ten) retired
+ * onto the binding's own door, `dataSource.filter` (#11509); a retired door
+ * answers every value with its removal prescription instead.
  *
  * Seven doors converged on `z.array(ViewFilterRuleSchema)` (the objectui#6206
  * family) and each one refused the record form an author used to write with a
@@ -39,7 +42,7 @@ import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 const RECORD_FORM = { status: 'active' } as const;
 
 /**
- * The ten doors, each with enough sibling props to reach a clean reading —
+ * The doors, each with enough sibling props to reach a clean reading —
  * the other required keys are filled so the only issue under test is `filter`.
  *
  * Seven at the convergence; `object-map`, `object-gantt` and `object-tree`
@@ -104,19 +107,6 @@ const DOORS: readonly {
     surface: 'this `object-tree`',
     migration: 'element-data-source-and-object-block-filter-rule-array',
     parse: (filter) => ComponentPropsMap['object-tree'].safeParse({ objectName: 'task', filter }),
-  },
-  {
-    name: "ComponentPropsMap['element:number'].filter",
-    surface: 'this `element:number`',
-    migration: 'element-number-filter-rule-array',
-    parse: (filter) =>
-      ComponentPropsMap['element:number'].safeParse({ object: 'task', aggregate: 'count', filter }),
-  },
-  {
-    name: "ComponentPropsMap['element:record_picker'].filter",
-    surface: 'this `element:record_picker`',
-    migration: 'element-record-picker-filter-rule-array',
-    parse: (filter) => ComponentPropsMap['element:record_picker'].safeParse({ object: 'task', filter }),
   },
 ];
 
