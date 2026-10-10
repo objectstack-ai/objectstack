@@ -75,8 +75,8 @@ export const MEMBERSHIP_ROLE_MEMBER = 'member';
  * `/organization/invite-member` **without** being an org admin.
  *
  * It carries NO ObjectStack authority by construction: `mapMembershipRole`
- * passes it through as a position name, and with no
- * `sys_position_permission_set` binding that name resolves to nothing.
+ * passes it through as a position name, and with no position of that name
+ * declaring `permissionSets` that name resolves to nothing.
  * Reaching the endpoint is not authority to place — placement authority comes
  * solely from a separately-granted `adminScope`. Role = *can reach the
  * endpoint*; adminScope = *what the endpoint permits*.

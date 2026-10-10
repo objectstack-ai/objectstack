@@ -312,6 +312,14 @@ const PREDICATE_KEYS = ['visibleWhen', 'visibleOn'] as const;
 /** The binding root this rule resolves. Metadata-editing forms only — see the module note. */
 const ROOT = 'data';
 
+/**
+ * [#22161] The consequence clause both path-RESOLUTION verdicts end with, one
+ * wording for the two: a reference that resolves to nothing never evaluates,
+ * and the console fails open. Why it fails open, and what "open" looks like,
+ * is the ids' `os explain` entries.
+ */
+const FAILS_OPEN = 'so the predicate never evaluates and the console fails open: the element always renders';
+
 // ── Zod introspection ───────────────────────────────────────────────
 //
 // Reads `.def` directly rather than importing zod's internals, and tolerates
@@ -646,11 +654,8 @@ function checkPredicate(
           where,
           path,
           message:
-            `predicate references \`${full}\`, which the target schema does not declare — `
-            + `\`${segment}\` is not a key of \`${container}\`. The reference resolves to nothing, `
-            + `so the predicate can never evaluate and the console falls OPEN: the element renders `
-            + `unconditionally and looks exactly like one carrying no predicate at all (failing open is the `
-            + `console's settled behaviour).`,
+            `predicate references \`${full}\`, but \`${segment}\` is not a key of \`${container}\`, `
+            + FAILS_OPEN,
           hint:
             `${formatSuggestion(findClosestMatches(segment, step.declared))
             || `\`${container}\` declares: ${step.declared.slice(0, 12).sort().join(', ')}`}`
@@ -688,11 +693,8 @@ function checkPredicate(
         where,
         path,
         message:
-          `predicate references \`${id}\` as a bare identifier, but \`${id}\` is a key of the schema `
-          + `this form edits — the binding root was dropped. Values are bound under \`${ROOT}\` and are `
-          + `never flattened to top level, so \`${id}\` resolves to nothing, the predicate can never `
-          + `evaluate and the console falls OPEN: the element renders unconditionally and looks exactly `
-          + `like one carrying no predicate at all (failing open is the console's settled behaviour).`,
+          `predicate names \`${id}\` bare, but it is a key of the edited schema with its \`${ROOT}.\` `
+          + `root dropped, ${FAILS_OPEN}`,
         hint:
           `Write \`${ROOT}.${id}\` instead of \`${id}\`. A metadata-editing form binds the row under `
           + `edit as \`${ROOT}\` at every depth — inside a repeater \`${ROOT}\` is the ROW, but it is `
@@ -722,23 +724,14 @@ function checkPredicate(
       rule: PREDICATE_RHS_PATH_SHAPED,
       where,
       path,
+      // [#22161] One verdict sentence per arm; the evaluator's left/right
+      // split, the subset and the two readings are the id's `os explain` entry.
       message: dotted
-        ? `predicate compares against \`${text}\` on the RIGHT of \`${op}\`, which is a path but is `
-          + `not evaluated as one. A metadata-editing form resolves paths on the LEFT of \`${op}\` `
-          + `only; the right-hand side goes to the literal parser, so \`${text}\` is compared as the `
-          + `literal string "${text}". The verdict therefore does not depend on the right-hand path `
-          + `at all: \`a == ${text}\` is FALSE even when both sides hold the same value, and `
-          + `\`a != ${text}\` is correspondingly TRUE. An \`==\` written this way hides the element `
-          + `on every row: the form evaluator keeps its right-hand side a literal by design, and says `
-          + `why only in a development build.`
-        : `predicate compares against the unquoted word \`${text}\` on the RIGHT of \`${op}\`. The `
-          + `right-hand side of \`${op}\` is a literal, never a reference, so this is read as the `
-          + `literal string "${text}" — which is probably what you meant, and is why it appears to `
-          + `work. It is outside the declared subset all the same (\`path == 'literal'\`), and it `
-          + `stops working when this surface moves to the real CEL evaluator, where a bare `
-          + `\`${text}\` resolves to nothing. The token also reads as a \`${ROOT}.\` `
-          + `root someone dropped, so this one finding carries BOTH readings: which one you meant `
-          + `is the thing no linter can know, and it changes the fix.`,
+        ? `predicate compares against \`${text}\` on the RIGHT of \`${op}\`, which this form reads `
+          + `as the literal string "${text}", so the result never depends on that path's value`
+        : `predicate compares against the unquoted word \`${text}\` on the RIGHT of \`${op}\`, `
+          + `which reads as a literal today but is outside the declared subset and breaks under `
+          + `the real CEL evaluator`,
       hint: dotted
         ? `Two sanctioned spellings. (1) If you meant the TEXT, quote it: \`${op} '${text}'\`. `
           + `(2) If you meant the PATH, restructure so the path is on the LEFT and a literal is on `
