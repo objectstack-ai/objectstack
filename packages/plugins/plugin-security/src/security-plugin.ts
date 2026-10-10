@@ -85,7 +85,6 @@ import {
   resolveOwnOrganizationRow,
   seedCtx,
 } from './per-organization-catalog.js';
-import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
@@ -4983,41 +4982,26 @@ export class SecurityPlugin implements Plugin {
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
         }
-        // [ADR-0066 D1] Seed the capability registry (sys_capability) in two
-        // passes. FIRST the EXPLICIT package declarations (`defineCapability` /
-        // `stack.capabilities`) land with `managed_by:'package'` + package_id
-        // provenance — the formal replacement for the implicit derive-from-
-        // systemPermissions back-door. THEN the platform curated set + the
-        // back-compat derived defaults, SKIPPING any name that already HAS a row
-        // (so the placeholder never clobbers the authored capability).
-        // [#4967 Part 1] The skip list is the names the first pass confirmed are
-        // materialized — not every name it read. A declaration the first pass
-        // REFUSES (no owning package) writes no row, so skipping its derivation
-        // too left the capability existing nowhere and every grant naming it
-        // inert; it now falls through to the placeholder. The permission sets are
-        // passed to the first pass as well, so a refusal can name the grantor(s)
-        // it affects (#4967 Part 3).
-        let materializedCapabilityNames: string[] = [];
+        // [ADR-0066 D1] Seed the EXPLICIT package capability declarations
+        // (`defineCapability` / `stack.capabilities`) into `sys_capability` with
+        // `managed_by:'package'` + package_id provenance. The permission sets are
+        // passed as well, so a refusal can name the grantor(s) it affects (#4967
+        // Part 3).
+        // [ADR-0131 D3] The platform's curated capabilities get no row here: they
+        // are served by the registry (`registerBuiltinCapabilities`,
+        // `GET /api/v1/meta/capability`), and the curated + derived-default
+        // capability seeder is retired.
         try {
           // [ADR-0131 D3] Handed the engine WITHOUT this plugin's own curated
           // declarations (`builtin-capabilities.ts`): they are not a package's,
-          // the curated pass below seeds their rows, and read here each would be
-          // refused as a package claiming a curated name.
-          const capOutcome = await bootstrapDeclaredCapabilities(withoutPlatformCapabilityDeclarations(ql), this.metadata, {
+          // and read here each would be refused as a package claiming a curated
+          // name.
+          await bootstrapDeclaredCapabilities(withoutPlatformCapabilityDeclarations(ql), this.metadata, {
             logger: ctx.logger,
             permissionSets: this.bootstrapPermissionSets,
           });
-          materializedCapabilityNames = capOutcome.materializedNames;
         } catch (e) {
           ctx.logger.warn('[security] declared-capability seeding failed', { error: (e as Error).message });
-        }
-        try {
-          await bootstrapSystemCapabilities(ql, this.bootstrapPermissionSets, {
-            logger: ctx.logger,
-            materializedCapabilityNames,
-          });
-        } catch (e) {
-          ctx.logger.warn('[security] capability seeding failed', { error: (e as Error).message });
         }
         // [A4 #2920] Heal residual legacy `managed_by` values (env sets stamped
         // 'user'; older positions stamped system/config/user) onto the unified
@@ -7612,13 +7596,11 @@ export class SecurityPlugin implements Plugin {
    *
    * A name in `PLATFORM_CAPABILITY_NAMES` is a capability the PLATFORM
    * defines: grants (`systemPermissions`) and requirements
-   * (`requiredPermissions`) resolve it by name, and the curated seeder owns
-   * the row for it in the NULL-organization bucket
-   * (`bootstrap-system-capabilities.ts`). A Setup-authored row claiming such
-   * a name is a declaration the platform cannot honour — it can never BE the
-   * curated capability (provenance forging is refused by the gate above), and
-   * once it holds the name's bucket slot the seeder must decline the
-   * collision on every boot (`blockedCurated`, #8470). Maintainer ruling on
+   * (`requiredPermissions`) resolve it by name, and its definition is served
+   * by the registry (`builtin-capabilities.ts`, ADR-0131 D3), not by a row. A
+   * Setup-authored row claiming such a name is a declaration the platform
+   * cannot honour — it can never BE the curated capability (provenance
+   * forging is refused by the gate above). Maintainer ruling on
    * #8552 (2026-08-13): refuse the collision AT THE WRITE DOOR — create and
    * rename both — naming the colliding curated name; never answer 200.
    *
