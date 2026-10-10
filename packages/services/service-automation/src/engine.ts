@@ -12097,11 +12097,40 @@ export class AutomationEngine implements IAutomationService {
      * each wins over a flow variable of the same name — which is then read as
      * `vars["vars"]` / `vars["current_user"]` (the spec's
      * `FLOW_SCOPE_CLAIMED_IDENTIFIERS`, measured from here).
+     *
+     * ## `record` — the record the run was handed, or unbound (#22642)
+     *
+     * This builder binds no `record` of its own. `record` resolves through the
+     * spread like any other name, so it is bound exactly when the variable map
+     * holds a `record` key:
+     *
+     *  - an entrance handed the run a record. {@link seedRunVariables} binds
+     *    `context.record` as `record` (and `$record`), and every entrance hands
+     *    its record there: a record-change trigger's row, a time-relative
+     *    sweep's row, the inbound hook's request body (`trigger-api`), a
+     *    `type: 'flow'` action's record (the row it loaded, or an empty record
+     *    carrying at most the `id` it was given), a parent's (`subflow` and
+     *    `map` spread the parent's context into the child's) and a `map` item
+     *    that carries a string `id`. The REST trigger route, a declared
+     *    endpoint and a cron schedule hand none;
+     *  - or the flow binds a variable named `record` itself: a declared
+     *    variable that has a value, or an assignment target.
+     *
+     * With neither, `record.X` faults `Unknown variable: record`, as every
+     * other unbound root does. It used to be bound to the variables map
+     * (`record: vars`, the formula engine's `record` slot, which `extra`
+     * overrides only when a `record` variable exists), so with no record in
+     * hand `record.assignee` silently read a variable named `assignee`. A
+     * variable is read by its name (`assignee`) or through `vars`
+     * (`vars.assignee`). ⛔ Never bind `record` to the variable map again: a
+     * record root that answers when the run holds no record is a second
+     * spelling of every variable, and it hides the author's mistake instead
+     * of naming it.
      */
     private celScope(
         variables: Map<string, unknown>,
         context?: AutomationContext,
-    ): { extra: Record<string, unknown>; record: Record<string, unknown> } {
+    ): { extra: Record<string, unknown> } {
         const vars: Record<string, unknown> = {};
         for (const [key, value] of variables) {
             // Convert "step.result" keys into nested object paths.
@@ -12115,7 +12144,9 @@ export class AutomationEngine implements IAutomationService {
             }
             cursor[segs[segs.length - 1]] = value;
         }
-        return { extra: { ...vars, vars, current_user: runUserOf(context) }, record: vars };
+        // [#22642] No `record` slot: `record` is bound by the spread when the
+        // run holds one, and unbound otherwise (see the docblock).
+        return { extra: { ...vars, vars, current_user: runUserOf(context) } };
     }
 
     /**
