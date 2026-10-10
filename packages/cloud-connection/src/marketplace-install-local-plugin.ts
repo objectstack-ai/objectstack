@@ -38,6 +38,12 @@
  *            answers `OS_PROTOCOL_INCOMPATIBLE` (422) with the handshake's
  *            diagnostic in `error.details`, the answer `POST /api/v1/packages`
  *            gives (ADR-0087 D1, #21762), and nothing is registered or written.
+ *            The answer's `hotLoaded` says whether the running kernel's
+ *            `manifest.register` resolved (#22695). An inline manifest whose
+ *            register throws is refused (`PLUGIN_REGISTER_FAILED`, 422); a
+ *            cloud-fetched one is still installed (the lenient path) and answers
+ *            `200` with `hotLoaded: false` and the register error's message as
+ *            `hotLoadError` — in the ledger, loaded at the next restart.
  *
  *   GET    /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
@@ -1249,6 +1255,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // 3. Hot-register FIRST so a malformed inline manifest fails the
         //    install loudly rather than persisting a broken record that
         //    would also fail on every subsequent rehydrate.
+        //
+        //    [#22695] What this step did is RECORDED here and carried to the
+        //    answer: `hotLoadError` stays `undefined` exactly when the
+        //    register resolved, and the answer's `hotLoaded` is derived from
+        //    it — never a literal. Before this, `hotLoaded: true` was written
+        //    unconditionally, so the lenient path below answered that the
+        //    running kernel held a package it did not, and the console read
+        //    that answer as "the app should now appear".
+        let hotLoadError: string | undefined;
         try {
             const manifestService = ctx.getService('manifest') as any;
             // Awaited: register also bridges the manifest's objects into the
@@ -1256,6 +1271,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // 200 (AI describe_object, Studio object list) must see them.
             await manifestService.register(manifest);
         } catch (err: any) {
+            const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard
             // failure (don't persist). Cloud installs historically tolerated
             // this (the on-disk record survives a restart), so keep that path
@@ -1263,10 +1279,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             if (inlineManifest) {
                 return c.json({
                     success: false,
-                    error: { code: 'PLUGIN_REGISTER_FAILED', message: `Failed to register imported manifest: ${err?.message ?? err}` },
+                    error: { code: 'PLUGIN_REGISTER_FAILED', message: `Failed to register imported manifest: ${registerError}` },
                 }, 422);
             }
-            ctx.logger?.warn?.(`[MarketplaceInstallLocal] hot-register failed for ${manifestId} (will load on next restart): ${err?.message ?? err}`);
+            // [#22695] The lenient path stays lenient — whether it should is a
+            // separate decision, ⛔ not made here. What changes is that the
+            // caller is TOLD: the answer carries `hotLoaded: false` and this
+            // message, so a reader can say "installed, loads at the next
+            // restart" instead of a false success.
+            hotLoadError = registerError;
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] hot-register failed for ${manifestId} (will load on next restart): ${registerError}`);
         }
 
         // 4. Persist on disk
@@ -1345,7 +1367,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 version,
                 versionId: resolvedVersionId,
                 installedAt: entry.installedAt,
-                hotLoaded: true,
+                // [#22695] Whether step 3's register resolved — `false` only on
+                // the lenient path, where the package is in the ledger and the
+                // running kernel does not hold it until the next restart.
+                hotLoaded: hotLoadError === undefined,
+                // The register error's message, beside `hotLoaded: false` and
+                // ONLY there: omitted, not nulled, on a hot-loaded install, so
+                // the success answer's key set is unchanged.
+                ...(hotLoadError !== undefined ? { hotLoadError } : {}),
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
@@ -1358,7 +1387,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // Keep the two endpoints reading `this.storageDir` — a second
                 // derivation is how they diverged in the first place.
                 storageDir: this.storageDir,
-                note: 'App is now available in this runtime. Refresh the console to see it in the app switcher.',
+                // [#22695] The note makes the same claim `hotLoaded` does, so it
+                // follows the same record: it never says "now available" over a
+                // kernel that does not hold the package.
+                note: hotLoadError === undefined
+                    ? 'App is now available in this runtime. Refresh the console to see it in the app switcher.'
+                    : 'App installed and cached on this runtime, but the running kernel could not load it '
+                        + '(`hotLoadError` says why). The runtime registers it again at its next restart.',
             },
         }, 200);
     };
