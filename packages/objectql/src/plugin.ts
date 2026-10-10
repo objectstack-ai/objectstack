@@ -11,6 +11,7 @@ import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopin
 import { unclaimedTopLevel } from '@objectstack/metadata';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
 import { isFederatedObject } from './federated-object.js';
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
@@ -2327,8 +2328,13 @@ export class ObjectQLPlugin implements Plugin {
         continue;
       }
       try {
-        // The `(ownerId, ownerVersion)` pair the metadata door stamps the residual with.
-        ql.registry.registerObject(object, residual.ownerId, undefined, 'own', undefined, residual.ownerVersion);
+        // The metadata door stamps the residual with `(ownerId, ownerVersion)`. The
+        // registry's own stamp knows the id only and keeps a key already set, so
+        // the version is stamped here first.
+        if (residual.ownerVersion !== undefined) {
+          applyProtection(object as any, { packageId: residual.ownerId, packageVersion: residual.ownerVersion });
+        }
+        ql.registry.registerObject(object, residual.ownerId, undefined, 'own');
       } catch (e) {
         if (!(e instanceof ObjectOwnershipConflictError)) throw e;
         unserved.push(`'${object.name}' (package '${e.existingPackageId}' already owns that name)`);

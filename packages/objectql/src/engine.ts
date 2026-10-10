@@ -250,7 +250,7 @@ import {
 } from './secret-fields.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
-import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
+import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
@@ -4069,6 +4069,20 @@ function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unkn
   return true;
 }
 
+/**
+ * [ADR-0010 §3.7] Stamp a manifest item with its owning package's
+ * `(packageId, packageVersion)` before the registry stores it: the call the
+ * artifact loader makes (`metadata/plugin.ts`), so both load paths serve one
+ * envelope. The registry's own `applyProtection` knows the id only, and
+ * `applyProtection` stamps a key only while it is unset, so the version
+ * stamped here is the one the item keeps. With no version this does nothing:
+ * the registry stamps the id, exactly as before.
+ */
+function stampPackage<T>(item: T, packageId: string, packageVersion: string | undefined): T {
+  if (packageVersion !== undefined) applyProtection(item as any, { packageId, packageVersion });
+  return item;
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -7295,8 +7309,7 @@ export class ObjectQL implements IObjectQLEngine {
   registerApp(manifest: any, scope?: ArtifactInstallScope) {
       const id = manifest.id || manifest.name;
       const namespace = manifest.namespace as string | undefined;
-      // The package's version, stamped beside `id` on every item below as
-      // ADR-0010 `_packageVersion` — the pair the artifact loader stamps, so an
+      // Stamped beside `id` on every item below ({@link stampPackage}), so an
       // item served from this path tells an upgrade's new item from its old one.
       const version = manifest.version as string | undefined;
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
@@ -7333,7 +7346,7 @@ export class ObjectQL implements IObjectQLEngine {
           if (Array.isArray(manifest.objects)) {
              this.logger.debug('Registering objects from manifest (Array)', { id, objectCount: manifest.objects.length });
              for (const objDef of manifest.objects) {
-                const fqn = this._registry.registerObject(objDef, id, namespace, 'own', undefined, version);
+                const fqn = this._registry.registerObject(stampPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           } else {
@@ -7346,7 +7359,7 @@ export class ObjectQL implements IObjectQLEngine {
              for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
                 objDef.name = name;
-                const fqn = this._registry.registerObject(objDef, id, namespace, 'own', undefined, version);
+                const fqn = this._registry.registerObject(stampPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           }
@@ -7369,7 +7382,7 @@ export class ObjectQL implements IObjectQLEngine {
                   indexes: ext.indexes,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              this._registry.registerObject(extDef, id, undefined, 'extend', priority, version);
+              this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);
               this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
           }
       }
@@ -7383,7 +7396,7 @@ export class ObjectQL implements IObjectQLEngine {
               const appName = app.name || app.id;
               if (appName) {
                   const resolved = namespace ? this.resolveNavObjectNames(app, namespace) : app;
-                  this._registry.registerApp(resolved, id, version);
+                  this._registry.registerApp(stampPackage(resolved, id, version), id);
                   this.logger.debug('Registered App', { app: appName, from: id });
               }
           }
@@ -7393,7 +7406,7 @@ export class ObjectQL implements IObjectQLEngine {
       //    This handles the case where the manifest IS the app definition (legacy/simple packages)
       if (manifest.name && manifest.navigation && !manifest.apps?.length) {
           const resolved = namespace ? this.resolveNavObjectNames(manifest, namespace) : manifest;
-          this._registry.registerApp(resolved, id, version);
+          this._registry.registerApp(stampPackage(resolved, id, version), id);
           this.logger.debug('Registered manifest-as-app', { app: manifest.name, from: id });
       }
 
@@ -7422,7 +7435,7 @@ export class ObjectQL implements IObjectQLEngine {
           this.logger.debug('Registering seed data datasets', { id, count: seedData.length });
           for (const dataset of seedData) {
               if (dataset.object) {
-                  this._registry.registerItem('data', dataset, 'object' as any, id, version);
+                  this._registry.registerItem('data', stampPackage(dataset, id, version), 'object' as any, id);
               }
           }
       }
@@ -7492,10 +7505,9 @@ export class ObjectQL implements IObjectQLEngine {
    * @param plugin - The plugin config object
    * @param parentId - The parent package ID (for ownership tracking)
    * @param parentNamespace - The parent package's namespace (for FQN resolution)
-   * @param parentVersion - The parent package's version — the owning package's,
-   *   like `parentId`, so it is the `_packageVersion` stamped here too
    */
   private registerPlugin(plugin: any, parentId: string, parentNamespace?: string, parentVersion?: string) {
+      // `parentVersion` is the owning package's version, stamped like `parentId`.
       const pluginName = plugin.name || plugin.id || 'unnamed';
       const pluginNamespace = plugin.namespace || parentNamespace;
 
@@ -7510,7 +7522,7 @@ export class ObjectQL implements IObjectQLEngine {
               if (Array.isArray(plugin.objects)) {
                   this.logger.debug('Registering plugin objects (Array)', { pluginName, count: plugin.objects.length });
                   for (const objDef of plugin.objects) {
-                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own', undefined, parentVersion);
+                      const fqn = this._registry.registerObject(stampPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               } else {
@@ -7520,7 +7532,7 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
                   for (const [name, objDef] of entries) {
                       objDef.name = name;
-                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own', undefined, parentVersion);
+                      const fqn = this._registry.registerObject(stampPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               }
@@ -7533,7 +7545,7 @@ export class ObjectQL implements IObjectQLEngine {
       if (plugin.name && plugin.navigation) {
           try {
               const resolved = pluginNamespace ? this.resolveNavObjectNames(plugin, pluginNamespace) : plugin;
-              this._registry.registerApp(resolved, ownerId, parentVersion);
+              this._registry.registerApp(stampPackage(resolved, ownerId, parentVersion), ownerId);
               this.logger.debug('Registered plugin-as-app', { app: plugin.name, from: pluginName });
           } catch (err: any) {
               this.logger.warn('Failed to register plugin as app', { pluginName, error: err.message });
@@ -7593,9 +7605,9 @@ export class ObjectQL implements IObjectQLEngine {
    * @param source   The manifest or nested-plugin config to read collections from.
    * @param ownerId  The owning package id — stamped as ADR-0010 provenance.
    * @param sourceLabel Human-readable source name for the `debug` line.
-   * @param ownerVersion The owning package's version — stamped beside `ownerId`.
    */
   private registerMetadataCollections(source: any, ownerId: string, sourceLabel: string, ownerVersion?: string) {
+      // `ownerVersion` is the owning package's version, stamped like `ownerId`.
       for (const key of METADATA_ARRAY_KEYS) {
           const items = (source as any)?.[key];
           if (!Array.isArray(items) || items.length === 0) continue;
@@ -7692,7 +7704,7 @@ export class ObjectQL implements IObjectQLEngine {
                   err.httpStatus = 422;
                   throw err;
               }
-              this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, ownerId, ownerVersion);
+              this._registry.registerItem(pluralToSingular(key), stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
               // "Object has-many View" (ADR-0017): a `defineView` document
               // aggregates an object's views. Register the container under the
               // bare <object> key (above, back-compat) AND expand it into
@@ -7704,7 +7716,7 @@ export class ObjectQL implements IObjectQLEngine {
                       for (const w of vi._diagnostics?.warnings ?? []) {
                           this.logger.warn(`View expansion warning for '${vi.name}': ${w.message}`, { from: ownerId });
                       }
-                      this._registry.registerItem('view', vi, 'name' as any, ownerId, ownerVersion);
+                      this._registry.registerItem('view', stampPackage(vi, ownerId, ownerVersion), 'name' as any, ownerId);
                   }
               }
           }
@@ -7747,7 +7759,7 @@ export class ObjectQL implements IObjectQLEngine {
                   continue;
               }
               const toRegister = body.name === itemName ? body : { ...body, name: itemName };
-              this._registry.registerItem('view', toRegister, 'name' as any, ownerId, ownerVersion);
+              this._registry.registerItem('view', stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
           }
       }
   }

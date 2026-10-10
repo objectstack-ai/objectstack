@@ -136,14 +136,13 @@ describe('ObjectQL Engine', () => {
             };
             
             engine.registerApp(manifest);
-            // The manifest's version rides along as the trailing `packageVersion`.
+            // The engine stamps the manifest's version before the registry sees
+            // the object; the registry's own signature is unchanged.
             expect(SchemaRegistry.registerObject).toHaveBeenCalledWith(
-                expect.objectContaining({ name: 'task' }), 
+                expect.objectContaining({ name: 'task', _packageId: 'com.example.app', _packageVersion: '1.2.0' }), 
                 'com.example.app',
                 'example',
-                'own',
-                undefined,
-                '1.2.0'
+                'own'
             );
         });
 
@@ -160,9 +159,7 @@ describe('ObjectQL Engine', () => {
                 expect.objectContaining({ name: 'item' }), 
                 'com.legacy.app',
                 undefined,
-                'own',
-                undefined,
-                undefined
+                'own'
             );
         });
 
@@ -170,7 +167,6 @@ describe('ObjectQL Engine', () => {
             const manifest = {
                 id: 'com.extender.app',
                 namespace: 'ext',
-                version: '3.0.0',
                 objectExtensions: [
                     { extend: 'contact', fields: { custom_field: { type: 'text' } }, priority: 250 }
                 ]
@@ -182,8 +178,7 @@ describe('ObjectQL Engine', () => {
                 'com.extender.app',
                 undefined,
                 'extend',
-                250,
-                '3.0.0'
+                250
             );
         });
 

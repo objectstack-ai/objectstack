@@ -10,7 +10,9 @@
  * `registerObject` — stamped the id alone, so `GET /meta/app` served a
  * registry-registered app with `_packageId` and no version, and a console
  * could not tell an upgrade's new app from the old one a stale kernel still
- * serves. `registerApp` now hands `manifest.version` to every stamping call.
+ * serves. `registerApp` now stamps `(id, manifest.version)` on every item before
+ * handing it over — the artifact loader's own call — and the registry's id-only
+ * stamp keeps the version it finds; the registry's signatures are unchanged.
  *
  * "Served" is read through the real list door (`getMetaItems`) over the real
  * registry; its engine is a `find`-only stand-in that answers "no stored rows".
