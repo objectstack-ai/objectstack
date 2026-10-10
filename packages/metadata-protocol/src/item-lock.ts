@@ -58,10 +58,9 @@
  * reported that package's row while the `_lock` gate bound whichever row
  * `findOne` returned first.
  *
- *  - **The rows in scope.** ADR-0005 precedence, as the reads resolve it: the
- *    organization's rows when it holds any row of the item, else the env-wide
- *    rows. Within that scope every row of the item, whichever package it is
- *    bound to: the address's own package row, the package-less row, and any
+ *  - **The rows in scope.** The environment's rows of the item (ADR-0131 D6:
+ *    a legacy organization-scoped row is reported at boot, never read), every
+ *    one of them, whichever package it is bound to: the address's own package row, the package-less row, and any
  *    other package's row. Those are every row the doors could bind before this
  *    rule (they asked with no package, so `findOne` could return any of them).
  *    A row stored under the type's other spelling is in scope only for a
@@ -143,7 +142,7 @@ import {
  *    §3.3, "an overlay cannot loosen a packaged lock"), one per installed
  *    package that ships the name, as {@link resolveArtifactLockLayer} selects
  *    them from the item's address;
- *  - `overlay`: the stored `sys_metadata` rows in the item's scope (ADR-0005),
+ *  - `overlay`: the item's stored environment `sys_metadata` rows,
  *    as {@link resolveOverlayLockLayer} selects them from the item's address.
  */
 export const ITEM_LOCK_LAYERS = Object.freeze(['artifact', 'overlay'] as const);
@@ -251,7 +250,7 @@ export async function resolveItemLockLazily(read: {
  * axis, so a field added here without one turns that pin's completeness check
  * red, naming the field.
  */
-export const ITEM_ADDRESS_FIELDS = Object.freeze(['type', 'name', 'organizationId', 'packageId'] as const);
+export const ITEM_ADDRESS_FIELDS = Object.freeze(['type', 'name', 'packageId'] as const);
 
 /** One of {@link ITEM_ADDRESS_FIELDS}. */
 export type ItemAddressField = (typeof ITEM_ADDRESS_FIELDS)[number];
@@ -261,9 +260,6 @@ export type ItemAddressField = (typeof ITEM_ADDRESS_FIELDS)[number];
  *
  *  - `type`: the canonical metadata type (#4432);
  *  - `name`: the item's name;
- *  - `organizationId`: the organization the request is scoped to, already
- *    gated by `organizationIdForMetaRead` (ADR-0005), or `undefined` for the
- *    env-wide scope alone;
  *  - `packageId`: the package the request names (ADR-0048 `?package=`), or
  *    `undefined`. It decides which row's prose the lock carries when several
  *    rows in scope declare the strictest lock, never which rows are in scope.
@@ -271,7 +267,6 @@ export type ItemAddressField = (typeof ITEM_ADDRESS_FIELDS)[number];
 export type ItemAddress = {
     readonly type: string;
     readonly name: string;
-    readonly organizationId: string | undefined;
     readonly packageId: string | undefined;
 } & { readonly [F in ItemAddressField]: unknown };
 
@@ -283,14 +278,13 @@ export interface StoredOverlayRow {
 }
 
 /**
- * The stored rows of the addressed item in one scope (`organizationId`, or
- * `null` for env-wide) under one spelling of its type: `'canonical'`, or
- * `'other'` (the type's singular/plural twin, pre-#4432 residue). Every row of
- * the item there, whichever package it is bound to. A failed read throws: each
- * caller owns its #5532 / #5706 discrimination.
+ * The stored environment rows of the addressed item (ADR-0131 D6) under one
+ * spelling of its type: `'canonical'`, or `'other'` (the type's
+ * singular/plural twin, pre-#4432 residue). Every row of the item there,
+ * whichever package it is bound to. A failed read throws: each caller owns its
+ * #5532 / #5706 discrimination.
  */
 export type StoredOverlayRowReader = (
-    organizationId: string | null,
     spelling: 'canonical' | 'other',
 ) => readonly StoredOverlayRow[] | Promise<readonly StoredOverlayRow[]>;
 
@@ -343,22 +337,16 @@ const LOCK_FAMILY_KEYS = Object.freeze(['_lock', '_lockReason', '_lockDocsUrl', 
  *
  * Every caller that enforces or reports an item's lock passes its address
  * here: the `_lock` gate (`otherSpelling: false`, #4432), both item reads and
- * the list (`otherSpelling: true`). Rows are read scope by scope and stop at
- * the first scope that holds one, so the gate reads no more than it did when
- * it read one row.
+ * the list (`otherSpelling: true`).
  */
 export async function resolveOverlayLockLayer(
     address: ItemAddress,
     rowsIn: StoredOverlayRowReader,
     options: { readonly otherSpelling: boolean },
 ): Promise<unknown> {
-    const scopes: Array<string | null> = address.organizationId ? [address.organizationId, null] : [null];
-    for (const scope of scopes) {
-        let rows = await rowsIn(scope, 'canonical');
-        if (rows.length === 0 && options.otherSpelling) rows = await rowsIn(scope, 'other');
-        if (rows.length > 0) return strictestRowLockDocument(rows, address.packageId);
-    }
-    return undefined;
+    let rows = await rowsIn('canonical');
+    if (rows.length === 0 && options.otherSpelling) rows = await rowsIn('other');
+    return rows.length > 0 ? strictestRowLockDocument(rows, address.packageId) : undefined;
 }
 
 function strictestRowLockDocument(rows: readonly StoredOverlayRow[], packageId: string | undefined): unknown {
@@ -426,8 +414,7 @@ export function resolveArtifactLockLayer(address: ItemAddress, artifactsOf: Ship
  * and no `_lock*` key it does not. So a served body states exactly the lock the
  * envelope reports, whichever document it was served from: a row the address
  * prefers for content while other rows in scope bind ([#21761]), the address's
- * own package's artifact while another package's lock binds ([#21803]), or a
- * row served by content precedence from a scope the lock is not read from (a
+ * own package's artifact while another package's lock binds ([#21803]) (a
  * family the answer does not carry is removed). Returns `document` itself when
  * nothing changes, and a copy otherwise.
  */

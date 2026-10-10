@@ -1321,8 +1321,10 @@ export class SeedLoaderService implements ISeedLoaderService {
             `column, this seed load names no organization (config.organizationId) and none can be derived — ` +
             `the install holds ${count === 0 ? 'no organization at all' : 'several organizations'}. Every seed ` +
             `row of an organization-owned object is stamped with its organization or refused; writing it would ` +
-            `store a row no organization owns. Fix it by passing the organization the seed populates as ` +
-            `config.organizationId, or by setting organization_id on the record. Under the 'single' tenancy ` +
+            `store a row no organization owns. Fix it by setting organization_id on the record — a seed ` +
+            `published through a package carries no caller organization (ADR-0131 D12), so the record is ` +
+            `where its owner is named; a direct SeedLoader caller may instead pass config.organizationId. ` +
+            `Under the 'single' tenancy ` +
             `posture the Default Organization is created at boot, before seeds load, so a single-tenant ` +
             `deployment that reaches this has lost that organization.`,
         };

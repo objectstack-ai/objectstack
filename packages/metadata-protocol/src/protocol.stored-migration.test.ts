@@ -789,9 +789,12 @@ describe('migrateStoredMetadata — a site the chain leaves as stored is a TODO,
             grid({ stage: 'open' }),
             { type: 'object-kanban', dataSource: { object: 'deal', filter: COMBINATOR }, properties: { objectName: 'deal' } },
         ]);
-        // The third door: `defaultFilters` on the grid, the same open bag.
+        // The third shape: the grid's `defaultFilters`, the same open bag. The key
+        // retired in v18 (#11509): with no `filter` beside it the fallback WAS the
+        // filter, so its retirement moves it onto `filter` — where the combinator
+        // is the record-form conversion's TODO, at the door it moved to.
         const defaultsMixed = pageRow('deal_grid', [
-            { type: 'object-grid', properties: { objectName: 'deal', filter: { stage: 'open' }, defaultFilters: COMBINATOR } },
+            { type: 'object-grid', properties: { objectName: 'deal', defaultFilters: COMBINATOR } },
         ]);
         const { engine, tables } = makeStubEngine([mixedPage, bindingMixed, defaultsMixed]);
         const protocol = new ObjectStackProtocolImplementation(engine);
@@ -806,9 +809,10 @@ describe('migrateStoredMetadata — a site the chain leaves as stored is a TODO,
         expect(binding.todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[1].dataSource.filter']);
         const defaults = report.rows.find((r) => r.name === 'deal_grid')!;
         expect(defaults.outcome).toBe('rewritten');
-        expect(defaults.todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[0].properties.defaultFilters']);
+        expect(defaults.todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[0].properties.filter']);
         const storedDefaults = JSON.parse(metaRows(tables).find((r) => r.name === 'deal_grid')!.metadata);
-        expect(storedDefaults.regions[0].components[0].properties.defaultFilters).toEqual(COMBINATOR);
+        expect(storedDefaults.regions[0].components[0].properties.filter).toEqual(COMBINATOR);
+        expect(storedDefaults.regions[0].components[0].properties).not.toHaveProperty('defaultFilters');
 
         // The rewritten row persisted its lossless half; the combinator is byte-identical.
         const stored = JSON.parse(metaRows(tables).find((r) => r.name === 'deal_desk')!.metadata);

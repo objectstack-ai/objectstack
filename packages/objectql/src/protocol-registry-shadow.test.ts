@@ -247,7 +247,7 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
         engine.registry.registerItem('app', artifactApp(lock), 'name', PKG);
     }
 
-    it('GET list while the overlay row exists: overlay content wins, artifact envelope wins', async () => {
+    it('GET list while the overlay row exists: [ADR-0131 D6] the package content wins, and its envelope', async () => {
         await overlayRowThenLockedArtifact('full');
         // A further PUT is refused. [ADR-0131 D6] By the package door now, ahead
         // of the item lock: the hatch opens no write onto an app a managed
@@ -258,7 +258,10 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
         const res = await protocol.getMetaItems({ type: 'app' });
         const setup = findByName((res as any).items, 'setup');
         expect(setup).toBeDefined();
-        expect(setup.label).toBe('Setup HACKED');     // overlay content
+        // [ADR-0131 D6, triage ruling Q1 → C] An `app` a managed package ships
+        // is sealed: the stored row (written before the package arrived) is not
+        // served — the package's definition is.
+        expect(setup.label).toBe('Setup');
         expect(setup._lock).toBe('full');             // artifact envelope (ADR-0010 §3.3)
         expect(setup._packageId).toBe(PKG);
         expect(setup._provenance).toBe('package');

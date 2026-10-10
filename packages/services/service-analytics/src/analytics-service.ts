@@ -61,6 +61,15 @@ import {
 // body column of `sys_metadata` / `sys_metadata_history` as a member is refused
 // here, on the one family seam, before any strategy runs.
 import { storedMetadataBodyAnalyticsRefusal } from './stored-metadata-body-refusal.js';
+// The generic-exit declarations — `enable` (ADR-0049) and a field's `internal`
+// flag — asked at this door as every other door asks them.
+import {
+  assertDefinitionExposed,
+  assertNoInternalFieldNamed,
+  assertObjectsExposed,
+  type ObjectDeclarationProvider,
+  type RegisteredDefinitionKind,
+} from './api-exposure-door.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -1047,6 +1056,28 @@ export interface AnalyticsServiceConfig {
    */
   getObjectFieldNames?: (objectName: string) => readonly string[] | undefined;
   /**
+   * What `objectName` declares — its registered definition's `enable` block
+   * and field map — or `undefined` when it declares nothing (not registered).
+   *
+   * Consulted by the generic-exit gates (`api-exposure-door.ts`): every object
+   * a query reads is judged by the spec's one exposure decision
+   * (`apiExposureDenialReason`, ADR-0049) for the `aggregate` operation, and a
+   * member that reads a field declared `internal: true` is refused in every
+   * position — for every caller, administrators included.
+   *
+   * Access-narrowing, so a throw REFUSES the query (fail-closed). Absence means
+   * no gate, reported once at the first query: that is a host constructing
+   * this service by hand. The production bridge in `plugin.ts` always wires it,
+   * from the same schema registry `/data` reads.
+   *
+   * [#22663] Also asked when a definition enters the shared registry: a
+   * configured cube, or a dataset `registerDataset` compiled, whose base
+   * object or declared join is denied is refused there, and `getMeta` never
+   * lists it. A throw at registration is no answer, and registers the
+   * definition as before; the query face still refuses fail-closed.
+   */
+  getObjectDeclaration?: ObjectDeclarationProvider;
+  /**
    * ADR-0021 — optional object-graph resolver used when compiling datasets:
    * `(baseObject, relationshipName) => relatedObjectName | undefined`. When
    * provided, `queryDataset` validates that every declared `include` exists.
@@ -1383,6 +1414,10 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly getObjectDatasource?: AnalyticsServiceConfig['getObjectDatasource'];
   /** ADR-0062 D6 — federated-object probe (strategy routing + #5115's gate). */
   private readonly isExternalObject?: AnalyticsServiceConfig['isExternalObject'];
+  /** The generic-exit declaration probe (`api-exposure-door.ts`). */
+  private readonly objectDeclarationProvider?: ObjectDeclarationProvider;
+  /** One-shot flag for the no-declaration-probe stand-down warning. */
+  private warnedNoObjectDeclaration = false;
   /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
   private warnedNoObjectRegistry = false;
   /** [#19995] One-shot flag for the {@link reportUnjudgedReadScope} warning. */
@@ -1409,17 +1444,16 @@ export class AnalyticsService implements IAnalyticsService {
 
   constructor(config: AnalyticsServiceConfig = {}) {
     this.logger = config.logger || createLogger({ level: 'info', format: 'pretty' });
-    this.cubeRegistry = new CubeRegistry();
+    // [#22663] Every write to the shared registry is admitted by the
+    // generic-exit gate's registration face: a cube that reads an object the
+    // API does not serve for the aggregate operation can never answer a query,
+    // so it is refused rather than published by `getMeta`.
+    this.cubeRegistry = new CubeRegistry((cube) => this.assertRegistrable('cube', cube));
     this.sharedScope = {
       getCube: (name) => this.cubeRegistry.get(name),
       getCompiledDataset: (name) => this.datasetRegistry.get(name),
       register: (cube) => this.cubeRegistry.register(cube),
     };
-
-    // Register pre-defined cubes
-    if (config.cubes) {
-      this.cubeRegistry.registerAll(config.cubes);
-    }
 
     this.readScopeProvider = config.getReadScope;
     this.readAdmissionProvider = config.admitObjectRead;
@@ -1439,12 +1473,29 @@ export class AnalyticsService implements IAnalyticsService {
     this.draftRowsResolver = config.draftRowsResolver;
     this.isRegisteredObject = config.isRegisteredObject;
     this.getObjectFieldNames = config.getObjectFieldNames;
+    this.objectDeclarationProvider = config.getObjectDeclaration;
     this.getObjectDatasource = config.getObjectDatasource;
     this.isExternalObject = config.isExternalObject;
     // [#8286] Resolved ONCE, at construction, from the host's explicit choice
     // or from `NODE_ENV`. An unset `NODE_ENV` is not development — see the
     // field's doc for the ruling this inherits.
     this.debugSql = config.debugSql ?? (getEnv('NODE_ENV') === 'development');
+
+    // Register pre-defined cubes. After the probes above are assigned, so the
+    // registry's admission can ask `getObjectDeclaration`. [#22663] A refused
+    // cube takes the same per-definition channel the pre-registered datasets
+    // below take: warned with the refusal's own words (the cube, the object,
+    // the declaration) and skipped, so one bad definition does not take the
+    // boot down and every other cube still registers.
+    if (config.cubes) {
+      for (const cube of config.cubes) {
+        try {
+          this.cubeRegistry.register(cube);
+        } catch (e) {
+          this.logger?.warn?.(`[Analytics] Failed to register cube "${cube?.name}": ${String((e as Error)?.message ?? e)}`);
+        }
+      }
+    }
 
     // Compile + register pre-defined datasets (ADR-0021).
     if (config.datasets) {
@@ -1703,6 +1754,10 @@ export class AnalyticsService implements IAnalyticsService {
     // [#20933] The set is derived ONCE here and handed to both questions, so
     // the objects admitted and the objects scoped are one value, not two calls.
     const objects = this.queryObjects(query, scope);
+    // The generic-exit gate's object half over the FULL set — relationship
+    // hops included, which only the resolved cube can name — ahead of the read
+    // admission, in the data door's order: exposure first, permission second.
+    this.assertQueryObjectsExposed(objects);
     await this.assertReadAdmitted(objects, context);
     // [#21120] …and the stored-metadata-body refusal — a hard product refusal,
     // not a permission check, so it runs ahead of (and independent of) the
@@ -1712,6 +1767,14 @@ export class AnalyticsService implements IAnalyticsService {
     // is refused here on the same seam every other door uses. See
     // `stored-metadata-body-refusal.ts`.
     this.assertStoredMetadataBodyNotQueried(
+      query,
+      query.cube ? scope.getCube(query.cube) : undefined,
+      query.cube ? reads.getDatasetScope(query.cube) : undefined,
+    );
+    // …and the generic-exit gate's field half, beside it for the same reason:
+    // a field declared `internal: true` is refused in every member position,
+    // for every caller, whether or not a security provider is wired.
+    this.assertNoInternalFieldsQueried(
       query,
       query.cube ? scope.getCube(query.cube) : undefined,
       query.cube ? reads.getDatasetScope(query.cube) : undefined,
@@ -1914,6 +1977,90 @@ export class AnalyticsService implements IAnalyticsService {
     const provider = this.readAdmissionProvider;
     if (!provider) return;
     await assertObjectsReadable(objects, provider, context, this.logger);
+  }
+
+  /**
+   * The OBJECT half of the generic-exit gate (`api-exposure-door.ts`): every
+   * object in `objects` must be exposed for the aggregate operation by the
+   * spec's one decision, or the query is refused with the data door's code —
+   * `404 OBJECT_API_DISABLED` / `405 OBJECT_API_METHOD_NOT_ALLOWED`.
+   *
+   * Asked twice per call, on purpose. Once at each door's entry, over the
+   * objects the request names before any cube is inferred or compiled — so a
+   * refused request mints nothing, not even in its own request scope — and once
+   * in {@link callCtx} over the full {@link queryObjects} set (relationship
+   * hops included), ahead of the read admission: the data door judges the
+   * exposure declaration before the permission check, and so does this one.
+   */
+  private assertQueryObjectsExposed(objects: Iterable<string>): void {
+    const provider = this.objectDeclarationProvider;
+    if (!provider) {
+      if (!this.warnedNoObjectDeclaration) {
+        this.warnedNoObjectDeclaration = true;
+        this.logger.warn(
+          '[Analytics] no getObjectDeclaration hook configured — the generic-exit gates (an object\'s ' +
+            '`enable.apiEnabled` / `apiMethods`, a field\'s `internal: true`) are INACTIVE for this service. ' +
+            'AnalyticsServicePlugin wires the hook from the data engine; a host constructing AnalyticsService ' +
+            'by hand supplies getObjectDeclaration. Reported once.',
+        );
+      }
+      return;
+    }
+    assertObjectsExposed(objects, provider, this.logger);
+  }
+
+  /**
+   * [#22663] The REGISTRATION face of the object half: a definition entering
+   * the shared registry — a configured cube, a dataset {@link registerDataset}
+   * compiled, a cube written to {@link cubeRegistry} directly — is refused when
+   * its base object or a declared join ({@link cubeObjects}, the set the query
+   * face's first ask reads) is one the spec's decision denies the aggregate
+   * operation. Such a cube could never answer: every query of it is refused
+   * `404 OBJECT_API_DISABLED` / `405 OBJECT_API_METHOD_NOT_ALLOWED`, so
+   * publishing it through `getMeta` advertised a cube that does not work.
+   *
+   * Thrown, located, in the query face's codes; the constructor turns it into
+   * its per-definition warning. Cannot answer, do not block — the
+   * compile-time probes' tiering (#5115): an object with no declaration yet
+   * (registration runs inside the plugin's `init()`, before a later plugin's
+   * objects are registered) or a lookup that throws is not refused here, and
+   * the query face still judges it at every query. No provider wired: no gate,
+   * as on the query face, which reports that once at the first query.
+   */
+  private assertRegistrable(kind: RegisteredDefinitionKind, cube: Cube): void {
+    const provider = this.objectDeclarationProvider;
+    if (!provider) return;
+    assertDefinitionExposed(kind, cube.name, this.cubeObjects(cube), provider);
+  }
+
+  /**
+   * The FIELD half of the generic-exit gate: a member that reads a field its
+   * object declares `internal: true` — a dimension, a measure's input, a
+   * filter or sort key, a dataset filter, a relationship hop's column — is
+   * refused `400 INVALID_FIELD`. The members are resolved by
+   * {@link namedQueryFields}, the resolver the field gate and the strategies
+   * share, so the gate and the statement can never disagree about which field
+   * a member reads.
+   */
+  private assertNoInternalFieldsQueried(
+    query: AnalyticsQuery,
+    cube: Cube | undefined,
+    datasetScope: DatasetScope | undefined,
+  ): void {
+    const provider = this.objectDeclarationProvider;
+    if (!provider || !cube) return;
+    assertNoInternalFieldNamed(namedQueryFields(query, cube, datasetScope, this.hopReference), provider, this.logger);
+  }
+
+  /**
+   * The objects a request names before any cube is inferred or compiled: an
+   * authored cube's base object and declared joins, or — for a name no cube
+   * answers — the name itself, which is the object the ad-hoc path would infer
+   * a cube over.
+   */
+  private namedCubeObjects(name: string, scope: CubeScope): Set<string> {
+    const cube = scope.getCube(name);
+    return cube ? this.cubeObjects(cube) : new Set([name]);
   }
 
   /**
@@ -2218,6 +2365,10 @@ export class AnalyticsService implements IAnalyticsService {
     // cube runs as itself instead of being refused — a refusal there would
     // be an oracle for which names are hidden.
     this.assertCubePublic(queryInput.cube, scope);
+    // The generic-exit gate's object half, before any cube is inferred: an
+    // `apiEnabled: false` object answers the data door's 404 here, and the
+    // request mints nothing.
+    this.assertQueryObjectsExposed(this.namedCubeObjects(queryInput.cube, scope));
 
     // [#12230] Expand `{current_user_id}` / date-macro placeholders at THIS
     // seam — before strategy selection — so every strategy compiles the same
@@ -2354,9 +2505,17 @@ export class AnalyticsService implements IAnalyticsService {
    * under the name, which is why no request path calls it: `queryDataset`
    * compiles into a request scope instead (#20356). Idempotent. Returns the
    * compiled dataset.
+   *
+   * [#22663] Throws, registering nothing, when the dataset's base object or a
+   * joined object is one the API does not serve for the aggregate operation
+   * ({@link assertRegistrable}).
    */
   registerDataset(dataset: Dataset): CompiledDataset {
     const compiled = this.compile(dataset);
+    // Judged as the DATASET first, so the refusal names what the caller
+    // registered. The registry's own admission asks the same question of the
+    // same compiled cube on the next line, and answers the same.
+    this.assertRegistrable('dataset', compiled.cube);
     this.cubeRegistry.register(compiled.cube);
     this.datasetRegistry.set(dataset.name, compiled);
     return compiled;
@@ -2448,6 +2607,9 @@ export class AnalyticsService implements IAnalyticsService {
     // column reference is refused ahead of compile and the draft-preview branch,
     // so no such expression reaches a strategy (`PERMISSION_DENIED` / 403, the one
     // judge, every tier). See {@link assertDatasetFieldsJudgeable}.
+    // The generic-exit gate's object half, on the dataset's base object, before
+    // it is compiled and before the draft-preview branch reads seed rows.
+    this.assertQueryObjectsExposed([dataset.object]);
     this.assertDatasetFieldsJudgeable(dataset, context);
     const compiled = this.compile(dataset);
     this.logger.debug(`[Analytics] queryDataset "${dataset.name}" (object=${dataset.object}, include=${(dataset.include ?? []).join(',') || '—'})`);
@@ -2473,6 +2635,7 @@ export class AnalyticsService implements IAnalyticsService {
         // second implementation — drafted seed rows are still this object's
         // rows, and a caller who may not read the object may not read its
         // pending seed either.
+        this.assertQueryObjectsExposed(this.cubeObjects(compiled.cube));
         await this.assertReadAdmitted(this.cubeObjects(compiled.cube), context);
         this.logger.debug(`[Analytics] queryDataset "${dataset.name}" → preview over ${seedRows.length} drafted seed row(s)`);
         // [#20917] …and the field-level gate, per query the executor issues,
@@ -2484,6 +2647,13 @@ export class AnalyticsService implements IAnalyticsService {
             // a drafted seed row carries the same stored body the published
             // ones do.
             this.assertStoredMetadataBodyNotQueried(
+              q,
+              compiled.cube,
+              { filter: compiled.filter, measureFilters: compiled.measureFilters },
+            );
+            // …and the generic-exit gate's field half: a drafted seed row
+            // carries the same `internal` fields the published ones do.
+            this.assertNoInternalFieldsQueried(
               q,
               compiled.cube,
               { filter: compiled.filter, measureFilters: compiled.measureFilters },
@@ -3050,6 +3220,10 @@ export class AnalyticsService implements IAnalyticsService {
     // [#20381] Same request scope as `query()`: nothing minted here reaches the
     // shared registry, admitted or refused.
     const scope = this.requestScope();
+    // Same generic-exit gate as `query()`, before any cube is inferred: the
+    // dry-run door must not compile a statement over an object the data door
+    // does not expose.
+    this.assertQueryObjectsExposed(this.namedCubeObjects(queryInput.cube, scope));
     // …and the same declared default bucket, so the dry run shows the
     // statement `query()` would run rather than an unbucketed one.
     const query = withDeclaredGranularityDefaults(

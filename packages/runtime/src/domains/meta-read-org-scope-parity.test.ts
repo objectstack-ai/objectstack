@@ -36,17 +36,16 @@
  *
  * ## The protocol double
  *
- * It applies the read gate the real `metadata-protocol` applies to
- * `getMetaItem`, `getMetaItems` and `getMetaItemLayered`
- * (`organizationIdForMetaRead` over the folded type): an organization reaches a
- * read only for an org-overridable type. So a transport that hands down a raw
- * organization for `object` is answered what one that pre-gates it is — the
- * `object` control below — and the difference measured is the organization
- * VALUE, not where the gate runs.
+ * It models the read gate `metadata-protocol` applied before ADR-0131 D6
+ * (an organization reached a read only for a type the registry declared
+ * `allowOrgOverride`), so a transport that still handed down an organization
+ * would be answered that organization's overlay — the double is the detector.
+ * The real protocol reads no organization at all since D6; what this file
+ * measures is that neither transport sends one.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { organizationIdForMetaRead } from '@objectstack/metadata-core';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -77,9 +76,14 @@ const ENV_DRAFTS: any[] = [{ type: 'view', name: 'env_board', label: 'Env board 
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
+/** The types the registry declares `allowOrgOverride` — the pre-D6 gate the double models. */
+const ORG_OVERRIDABLE = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowOrgOverride).map((e) => e.type));
+
 function protocolDouble() {
-    const gate = (type: string, organizationId: unknown) =>
-        organizationIdForMetaRead(canonicalMetaUrlType(type), typeof organizationId === 'string' ? organizationId : undefined);
+    const gate = (type: string, organizationId: unknown) => {
+        const t = canonicalMetaUrlType(type);
+        return typeof organizationId === 'string' && ORG_OVERRIDABLE.has(t) ? organizationId : undefined;
+    };
     const resolve = (type: string, name: string, organizationId: unknown) => {
         const t = canonicalMetaUrlType(type);
         const org = gate(type, organizationId);

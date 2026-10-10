@@ -90,12 +90,18 @@ manager, close a cycle in the reporting chain, run past the chain depth cap, or 
 who is provably outside every organization the user belongs to — each with the reason in the
 response. It is platform-admin gated, like every other `/api/v1/auth/admin/*` route.
 
+For many users at once, the admin bulk import (`POST /api/v1/auth/admin/import-users`) reads a
+`manager_id` column holding the manager's email address (or phone number, where phone sign-in is
+enabled) — someone in the same file or an existing user. It links each row once every row in the
+file exists, through the same refusals as the endpoint above, and reports each outcome on the
+row's `manager` result: a link it cannot make never fails the user it imported.
+
 The column is also written by a seed, or by any other system-context write, which bypasses the
 managed-update whitelist. SCIM provisioning and directory sync can populate it too, but only
 through a provisioning path your own deployment supplies: this platform declares the SCIM
-`manager` attribute without projecting it onto the column, and its admin bulk import does not
-write it either. Where an identity carries `source: 'idp_provisioned'` the admin operation
-**refuses**, so that directory stays the one surface that authors its manager.
+`manager` attribute without projecting it onto the column. Where an identity carries
+`source: 'idp_provisioned'` the admin operation **refuses**, so that directory stays the one
+surface that authors its manager.
 
 Setting the column is still something you have to *do*. Where `manager_id` is unset the rung
 expands to nobody, the request opens on a slate no one can act on, and under the default
@@ -383,9 +389,27 @@ a queue entry resolves to nobody. Route to a `team`, `department`, or
 Set Manager** — see [the `manager` callout above](#3-the-approval-node). `position`, `department`,
 `org_membership_level` and `expression` may additionally name which
 organization's directory resolves them — see
-[Approving across organizations](#cross-org-approvers). An entry that resolves
-to nobody is not an error: the request opens with an empty `pending_approvers`
-and nothing can move it, so the run parks forever.
+[Approving across organizations](#cross-org-approvers).
+
+What an entry that resolves to nobody leaves on the slate depends on its kind:
+
+- **A person entry** (`manager`, `field`) adds no slot. Nor does an
+  `expression` that yields no ids. A `user` entry never resolves to nobody: its
+  value is the slot.
+- **A group entry** (`position`, `team`, `department`, `org_membership_level`)
+  keeps its `<type>:<value>` literal as a slot, and so do a `queue` entry and an
+  `expression` value that `resolveAs` re-expands into a group with nobody in it.
+  A `position:<name>` slot is decided by whoever is staffed into that position
+  later. No person ever holds any other literal, so only an administrator can
+  decide it (the admin-override callout under
+  [Acting on requests in the console](#acting-on-requests-in-the-console)).
+  Beside entries that do resolve, a literal is a slot like any other, so a
+  `behavior` that needs every slot (`unanimous`) waits on it too.
+- **A slate left empty, or holding only literals,** goes to the node's
+  `onEmptyApprovers` policy, whose four values are listed under
+  [Approving across organizations](#cross-org-approvers). Under the default,
+  `admin_rescue`, the request opens on that slate and waits for an
+  administrator, or for a holder of a `position:` literal on it.
 
 ### The approver finds it in their queue
 
@@ -420,8 +444,8 @@ curl -b cookies.txt \
 ```
 
 `approverId` accepts a user id, an email, or a `<type>:<value>` approver literal
-(`position:finance_manager` — the form an entry falls back to when it resolves
-to no users) — and takes several values (comma-separated or repeated) to cover
+(`position:finance_manager` — the form a group entry falls back to when it
+resolves to no users) — and takes several values (comma-separated or repeated) to cover
 a person's identities in one call. A position literal matches under
 `position:<name>`, the one spelling the service admits a holder of that
 position under as their own identity. The deprecated pre-rename prefix is no

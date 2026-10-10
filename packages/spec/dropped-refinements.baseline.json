@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 226,
-    "droppedRefinementSites": 696,
+    "publishedSchemasWithDroppedRefinements": 223,
+    "droppedRefinementSites": 701,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -104,6 +104,7 @@
         "manifest.skills.element.triggerConditions.element",
         "manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
+        "manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "manifest.views.element.form",
         "manifest.views.element.form.sections.element.in",
         "manifest.views.element.form.submitBehavior.options[1].url",
@@ -238,7 +239,8 @@
     "api/GetTranslationsResponse": {
       "sites": [
         "translations.flows.valueType.refusals.valueType.message",
-        "translations.flows.valueType.screens.valueType.description"
+        "translations.flows.valueType.screens.valueType.description",
+        "translations.flows.valueType.screens.valueType.title"
       ]
     },
     "api/GetUiViewResponse": {
@@ -316,6 +318,7 @@
         "options[1].manifest.skills.element.triggerConditions.element",
         "options[1].manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
+        "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "options[1].manifest.views.element.form",
         "options[1].manifest.views.element.form.sections.element.in",
         "options[1].manifest.views.element.form.submitBehavior.options[1].url",
@@ -1166,13 +1169,15 @@
     "system/PlatformTranslationBundle": {
       "sites": [
         "valueType.flows.valueType.refusals.valueType.message",
-        "valueType.flows.valueType.screens.valueType.description"
+        "valueType.flows.valueType.screens.valueType.description",
+        "valueType.flows.valueType.screens.valueType.title"
       ]
     },
     "system/PlatformTranslationData": {
       "sites": [
         "flows.valueType.refusals.valueType.message",
-        "flows.valueType.screens.valueType.description"
+        "flows.valueType.screens.valueType.description",
+        "flows.valueType.screens.valueType.title"
       ]
     },
     "system/Schedule": {
@@ -1218,19 +1223,22 @@
     "system/TranslationBundle": {
       "sites": [
         "valueType.flows.valueType.refusals.valueType.message",
-        "valueType.flows.valueType.screens.valueType.description"
+        "valueType.flows.valueType.screens.valueType.description",
+        "valueType.flows.valueType.screens.valueType.title"
       ]
     },
     "system/TranslationData": {
       "sites": [
         "flows.valueType.refusals.valueType.message",
-        "flows.valueType.screens.valueType.description"
+        "flows.valueType.screens.valueType.description",
+        "flows.valueType.screens.valueType.title"
       ]
     },
     "system/TranslationItem": {
       "sites": [
         "flows.valueType.refusals.valueType.message",
-        "flows.valueType.screens.valueType.description"
+        "flows.valueType.screens.valueType.description",
+        "flows.valueType.screens.valueType.title"
       ]
     },
     "ui/Action": {
@@ -1314,21 +1322,6 @@
       ]
     },
     "ui/ElementDataSource": {
-      "sites": [
-        "filter.element"
-      ]
-    },
-    "ui/ElementNumberProps": {
-      "sites": [
-        "filter.element"
-      ]
-    },
-    "ui/ElementRecordPickerProps": {
-      "sites": [
-        "filter.element"
-      ]
-    },
-    "ui/ElementRepeaterProps": {
       "sites": [
         "filter.element"
       ]

@@ -835,7 +835,7 @@ export interface ProjectionDeps {
 export async function projectPermissionMutation(
   protocol: any,
   deps: ProjectionDeps,
-  evt: { type?: string; name?: string; state?: string; organizationId?: string | null } | null | undefined,
+  evt: { type?: string; name?: string; state?: string } | null | undefined,
   /**
    * [#11097] Forwarded to {@link upsertEnvPermissionSet} so a boot pass over
    * many overlay names pays ONE existence read for the whole set. The live
@@ -851,11 +851,9 @@ export async function projectPermissionMutation(
   // second source, exactly as the write doors hand it theirs.
   let layeredProbe: LayeredProbe | undefined;
   if (protocol && typeof protocol.getMetaItemLayered === 'function') {
-    const layered = await protocol.getMetaItemLayered({
-      type: 'permission',
-      name: evt.name,
-      ...(evt.organizationId ? { organizationId: evt.organizationId } : {}),
-    });
+    // [ADR-0131 D6] The environment → code read: no organization is part
+    // of a metadata read, so the projection reads what every reader reads.
+    const layered = await protocol.getMetaItemLayered({ type: 'permission', name: evt.name });
     // `getMetaItemLayered` may return a layered envelope (`{ effective | code }`)
     // OR the effective body directly (top-level `name`) — accept both. The
     // envelope carries `name` too, so detect it by its layer keys: an envelope
@@ -1136,7 +1134,7 @@ export function createPermissionSetWriteThrough(
     // The awaited projector inside saveMetaItem/deleteMetaItem normally did
     // this already — re-running is an idempotent upsert, and covers the
     // window where the projector isn't registered yet (pre-kernel:ready).
-    await projectPermissionMutation(protocol, deps, { type: 'permission', name, state: 'active', organizationId: null });
+    await projectPermissionMutation(protocol, deps, { type: 'permission', name, state: 'active' });
     return (await tryFind(ql, 'sys_permission_set', { name }, 1))[0] ?? null;
   };
 
@@ -1475,7 +1473,7 @@ export function createPermissionSetWriteThrough(
     for (const row of targets) {
       await protocol.deleteMetaItem({ type: 'permission', name: row.name, ...actorArg });
       const res = await projectPermissionMutation(protocol, deps, {
-        type: 'permission', name: row.name, state: 'deleted', organizationId: null,
+        type: 'permission', name: row.name, state: 'deleted',
       });
       if (res && (res.seeded + res.updated) > 0) {
         logger?.info?.('[security] permission set reset to its declared baseline (artifact-backed; ADR-0094)', { name: row.name });
@@ -1607,7 +1605,7 @@ export async function reconcilePermissionSetProjection(
   );
   for (const name of overlayNames) {
     const res = await projectPermissionMutation(protocol, deps, {
-      type: 'permission', name, state: 'active', organizationId: null,
+      type: 'permission', name, state: 'active',
     }, { existing: existingByName });
     // ⚠️ `unchanged` is deliberately NOT summed in. This counter reports records
     // this pass CREATED OR CHANGED, and now that an already-matching record is
