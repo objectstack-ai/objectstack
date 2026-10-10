@@ -192,15 +192,17 @@ describe('#6602 — WRITE seam: applyRegistryWriteThrough refuses org-scoped row
     });
 
     it('an ORG-scoped view write does not reach the process-wide registry (PROBE P3)', async () => {
-        const saved = await protocol.saveMetaItem({
-            type: 'view',
-            name: 'org_grid',
-            item: viewBody('org_grid', 'Org A grid'),
-            organizationId: ORG_A,
-        });
-        expect(saved.success).toBe(true);
-        // The row IS persisted — this fix closes a registry leak, never a write.
-        expect(engine.getRows().some((r: any) => r.name === 'org_grid' && r.organization_id === ORG_A)).toBe(true);
+        // [ADR-0131 D6] The org-scoped write is now refused outright, for every
+        // type, so the leak is closed one layer earlier and no row is persisted.
+        await expect(
+            protocol.saveMetaItem({
+                type: 'view',
+                name: 'org_grid',
+                item: viewBody('org_grid', 'Org A grid'),
+                organizationId: ORG_A,
+            } as any),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(engine.getRows().some((r: any) => r.name === 'org_grid')).toBe(false);
 
         // Pre-fix: the body sits here under the PLAIN key, visible to every
         // registry-direct reader in the process.
@@ -227,7 +229,7 @@ describe('#6602 — WRITE seam: applyRegistryWriteThrough refuses org-scoped row
                 name: 'org_sweep',
                 item: flowBody('org_sweep', 'Org A sweep'),
                 organizationId: ORG_A,
-            }),
+            } as any),
         ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
         expect(registry.getItem('flow', 'org_sweep')).toBeUndefined();
@@ -254,12 +256,14 @@ describe('#6602 — WRITE seam: applyRegistryWriteThrough refuses org-scoped row
             name: 'shared_grid',
             item: viewBody('shared_grid', 'Env grid'),
         });
-        await protocol.saveMetaItem({
-            type: 'view',
-            name: 'shared_grid',
-            item: viewBody('shared_grid', 'Org A grid'),
-            organizationId: ORG_A,
-        });
+        await expect(
+            protocol.saveMetaItem({
+                type: 'view',
+                name: 'shared_grid',
+                item: viewBody('shared_grid', 'Org A grid'),
+                organizationId: ORG_A,
+            } as any),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
         // Pre-fix the org body OVERWROTE the env-wide plain-key entry, so
         // every org (and the control plane) started reading org A's body.
         expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
@@ -359,18 +363,6 @@ describe('#6602 — the disclosure shape, end to end', () => {
         protocol = new ObjectStackProtocolImplementation(engine);
     });
 
-    it("org B's listing never contains org A's item — write then list", async () => {
-        await protocol.saveMetaItem({
-            type: 'view',
-            name: 'org_a_only',
-            item: viewBody('org_a_only', 'Org A only'),
-            organizationId: ORG_A,
-        });
-
-        const listedB = await protocol.getMetaItems({ type: 'view', organizationId: ORG_B });
-        expect(namesOf(listedB as any)).not.toContain('org_a_only');
-    });
-
     it("org B's listing never contains org A's item — org A LISTS first", async () => {
         // The seam the write-side fix alone would not have closed: one
         // org-scoped listing call used to graft org A's body, and every
@@ -431,19 +423,6 @@ describe('#6602 — the on-demand per-org read still serves org readers', () => 
         const forOrgB: any = await protocol.getMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_B });
         expect(forOrgB.item.label).toBe('Env grid');
     });
-
-    it('a write-then-read round trip works for an org author (write seam, read seam)', async () => {
-        await protocol.saveMetaItem({
-            type: 'view',
-            name: 'org_grid',
-            item: viewBody('org_grid', 'Org A grid'),
-            organizationId: ORG_A,
-        });
-
-        const got: any = await protocol.getMetaItem({ type: 'view', name: 'org_grid', organizationId: ORG_A });
-        expect(got.item.label).toBe('Org A grid');
-        expect(registry.getItem('view', 'org_grid')).toBeUndefined();
-    });
 });
 
 describe('#6602 — the delete chain needs no re-keying under this fix', () => {
@@ -468,33 +447,6 @@ describe('#6602 — the delete chain needs no re-keying under this fix', () => {
 
         await protocol.deleteMetaItem({ type: 'view', name: 'env_grid' });
         expect(registry.getItem('view', 'env_grid')).toBeUndefined();
-    });
-
-    it('an org-scoped delete has no plain-key entry of its own to retire', async () => {
-        // The argument for leaving `restoreArtifactRegistryView` alone: the
-        // delete chain is `(type, name)`-addressed and org-blind, but with both
-        // entry seams refusing org rows there is nothing org-scoped in the
-        // registry for it to mis-address.
-        //
-        // [#6780] TRUE OF THIS CASE, AND ONLY THIS CASE — measured later, and
-        // the correction is the next describe block. The name here is org A's
-        // alone, so the plain key really is empty and the org-blind heal has
-        // nothing to hit. Give the name an ENV-WIDE row as well and the same
-        // heal addresses that row's entry instead: `(type, name)` cannot tell
-        // the two apart, so "no entry of its own" was never "no entry". The
-        // fix keeps this file's conclusion (no org-scoped registry keys) and
-        // adds the missing half (an org-scoped delete may not heal at all).
-        await protocol.saveMetaItem({
-            type: 'view',
-            name: 'org_grid',
-            item: viewBody('org_grid', 'Org A grid'),
-            organizationId: ORG_A,
-        });
-        expect(registry.getItem('view', 'org_grid')).toBeUndefined();
-
-        const deleted = await protocol.deleteMetaItem({ type: 'view', name: 'org_grid', organizationId: ORG_A });
-        expect(deleted.success).toBe(true);
-        expect(registry.getItem('view', 'org_grid')).toBeUndefined();
     });
 });
 
@@ -598,42 +550,18 @@ describe('#6780 — the registry heal is org-gated: an org DELETE never evicts t
 
     it("org A deleting its OWN overlay leaves the env-wide entry standing (the card's sequence)", async () => {
         await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
-        await protocol.saveMetaItem({
-            type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Org A grid'), organizationId: ORG_A,
-        });
-        // #6602 holding: the org write never reached the shared registry.
+        engine.plant(metaRow('view', viewBody('shared_grid', 'Org A grid'), ORG_A));
+        // #6602 holding: the org row never reached the shared registry.
         expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
 
-        await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
+        // [ADR-0131 D6] An org-scoped delete is now refused before any read.
+        await expect(
+            protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A } as any),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
         // Pre-fix this read was `undefined` — the whole defect, in one line.
         expect(registry.getItem('view', 'shared_grid')).toBeDefined();
         expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
-    });
-
-    it('the same delete still removes the ORG ROW — row-level behaviour is untouched', async () => {
-        // The control that keeps the case above from passing for the wrong
-        // reason: a "fix" that skipped the delete entirely would also leave the
-        // env-wide entry standing. The reset must still reset.
-        await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
-        await protocol.saveMetaItem({
-            type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Org A grid'), organizationId: ORG_A,
-        });
-        const beforeDelete: any = await protocol.getMetaItem({
-            type: 'view', name: 'shared_grid', organizationId: ORG_A,
-        });
-        expect(beforeDelete.item.label).toBe('Org A grid');
-
-        const deleted = await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
-
-        expect(deleted.success).toBe(true);
-        expect(deleted.reset).toBe(true);
-        // Org A now falls through to the env-wide body — ADR-0005's "reset to
-        // default", which is what the org author actually asked for.
-        const afterDelete: any = await protocol.getMetaItem({
-            type: 'view', name: 'shared_grid', organizationId: ORG_A,
-        });
-        expect(afterDelete.item.label).toBe('Env grid');
     });
 
     it('the SELF-HEAL branch respects the same scope — a no-op org DELETE is inert', async () => {
@@ -646,9 +574,9 @@ describe('#6780 — the registry heal is org-gated: an org DELETE never evicts t
         await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
         expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
 
-        const deleted = await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
-
-        expect(deleted.reset).toBe(false);
+        await expect(
+            protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A } as any),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
         expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
     });
 
@@ -662,7 +590,9 @@ describe('#6780 — the registry heal is org-gated: an org DELETE never evicts t
         });
         expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
 
-        await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
+        await expect(
+            protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A } as any),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
         expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
         // The artifact is still there under its composite key, unharmed.
@@ -697,9 +627,7 @@ describe('#6780 — the registry heal is org-gated: an org DELETE never evicts t
         // reason to leave the env-wide entry stale. Scope is read from the
         // DELETE, never from what else happens to be stored.
         await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
-        await protocol.saveMetaItem({
-            type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Org A grid'), organizationId: ORG_A,
-        });
+        engine.plant(metaRow('view', viewBody('shared_grid', 'Org A grid'), ORG_A));
 
         await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid' });
 

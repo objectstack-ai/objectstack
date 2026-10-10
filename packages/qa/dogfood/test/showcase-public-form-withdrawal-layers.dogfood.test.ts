@@ -15,8 +15,8 @@
 // its withdrawals, fail-closed, until ADR-0131 C7 carries those rows to the
 // environment layer (triage ruling Q3 A on the retirement card). No door can
 // write such a row any more, so this file PLANTS legacy organization rows
-// straight through the protocol, the way a door wrote them before the
-// retirement, and pins:
+// at rest in `sys_metadata`, as a door left them before the retirement, and
+// pins:
 //
 //   - a legacy organization overlay that keeps the form open does not survive
 //     an environment withdrawal: both anonymous doors answer
@@ -42,8 +42,6 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
   let ql: any;
   let published: Record<string, any>;
   let organizationId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let protocol: any;
   let probeSeq = 0;
 
   /** Both anonymous doors, plus how many rows a submit with a unique marker left. */
@@ -82,10 +80,17 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
   const plantLegacyOrgOverlay = async (allowAnonymous: boolean) => {
     const item = structuredClone(published);
     item.config.sharing.allowAnonymous = allowAnonymous;
-    const result = await protocol.saveMetaItem({
-      type: 'view', name: 'showcase_inquiry.contact', item, organizationId,
-    });
-    expect(String(result?.message ?? ''), JSON.stringify(result)).toContain(`org=${organizationId}`);
+    const at = { type: 'view', name: 'showcase_inquiry.contact', organization_id: organizationId };
+    const now = new Date().toISOString();
+    const [existing] = await ql.find('sys_metadata', { where: { ...at, state: 'active' }, context: SYS });
+    if (existing) {
+      await ql.update('sys_metadata', { metadata: JSON.stringify(item), updated_at: now }, { where: { id: existing.id }, context: SYS });
+    } else {
+      await ql.insert('sys_metadata', {
+        ...at, package_id: null, state: 'active', version: 1, checksum: null,
+        created_at: now, updated_at: now, metadata: JSON.stringify(item),
+      }, { context: SYS });
+    }
   };
 
   const saved = async (allowAnonymous: boolean) => {
@@ -110,7 +115,6 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
     const orgs = await ql.find('sys_organization', { fields: ['id'], limit: 2, context: SYS });
     expect(orgs, 'the showcase boot holds exactly one organization').toHaveLength(1);
     organizationId = orgs[0].id;
-    protocol = await stack.kernel.getServiceAsync('protocol');
   }, 120_000);
 
   afterAll(async () => {

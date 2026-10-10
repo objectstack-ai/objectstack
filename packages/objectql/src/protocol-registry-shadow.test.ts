@@ -371,12 +371,12 @@ describe('registry shadow — scoped-kernel lock enforcement is shadow-immune', 
         // shadow-immunity stays pinned on the delete, which the #6960
         // carve-out (an `app` overlay merges at read) carries to the lock.
         await expect(protocol.saveMetaItem({
-            type: 'app', name: 'setup', organizationId: 'org_a',
+            type: 'app', name: 'setup',
             item: { ...overlayBody },
         })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
         await expect(protocol.deleteMetaItem({
-            type: 'app', name: 'setup', organizationId: 'org_a',
+            type: 'app', name: 'setup',
         })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
     });
 });

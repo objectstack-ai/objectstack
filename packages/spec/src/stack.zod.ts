@@ -2402,7 +2402,7 @@ class StackSingleAppViolationError extends StackRefusalError {
  * omits `hierarchy-security` — {@link validateHierarchyScopeCapability}, the
  * declared-capability class that fails CLOSED. Spelled `_REQUIRED` like the
  * ledger's other "a declaration is owed and absent" refusals
- * (`TENANT_SCOPE_REQUIRED`, `WRITABLE_PACKAGE_REQUIRED`).
+ * (`WRITABLE_PACKAGE_REQUIRED`).
  */
 class StackHierarchyScopeCapabilityRequiredError extends StackRefusalError {
   readonly code = 'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED';

@@ -78,7 +78,7 @@ import {
  * an org at all (`packages/qa/dogfood/.../package-first-authoring.dogfood.test.ts`),
  * which is exactly why none of them could see this family. This file lives in
  * `packages/runtime` for the same reason its tier-1 sibling
- * `package-revert-commit-org-scope.integration.test.ts` does: `metadata-protocol`
+ * the org-scoped revert-commit integration suite (retired with ADR-0131 D6) does: `metadata-protocol`
  * cannot import `objectql` (dependency cycle).
  *
  * ⚠️ For the next author: this suite resolves `@objectstack/metadata-protocol`
@@ -91,8 +91,6 @@ const SRC = 'app.iojn';
 const DST = 'app.iojn2';
 const OTHER_PKG = 'app.other';
 const PLATFORM_PKG = '@objectstack/platform-objects';
-const ACTIVE_ORG = 'org_active';
-const OTHER_ORG = 'org_other';
 
 let cleanup: Array<() => void> = [];
 afterEach(() => {
@@ -155,13 +153,14 @@ const objectBody = (name: string) => ({
 });
 
 /**
- * Publish one item. Omitting `organizationId` reproduces exactly what the
- * dispatcher sends when the session has no active organization — and lands the
- * row env-wide.
+ * Publish one item, env-wide. [ADR-0131 D6] Every write is env-wide now — the
+ * protocol refuses an organization-scoped one, and `duplicatePackage` /
+ * `reassignOrphanedMetadata` take no organization — so the org-scoped cases
+ * this suite once carried are retired; what remains is what holds env-wide.
  */
 async function publish(
   p: any,
-  args: { type: 'view' | 'object'; name: string; packageId: string; organizationId?: string; item?: unknown },
+  args: { type: 'view' | 'object'; name: string; packageId: string; item?: unknown },
 ): Promise<void> {
   const res = await p.saveMetaItem({
     type: args.type,
@@ -169,7 +168,6 @@ async function publish(
     item: args.item ?? (args.type === 'object' ? objectBody(args.name) : viewBody(args.name)),
     packageId: args.packageId,
     mode: 'publish',
-    ...(args.organizationId ? { organizationId: args.organizationId } : {}),
   });
   expect(res?.success ?? true).toBeTruthy();
 }
@@ -190,50 +188,6 @@ const namesIn = (rows: Array<Record<string, any>>, pkg: string): string[] =>
   rows.filter((r) => r.pkg === pkg).map((r) => r.name).sort();
 
 describe('#7819 tier 2 — duplicatePackage must copy the source’s env-wide rows', () => {
-  it('the premise, measured: a no-org publish really does land an env-wide row', async () => {
-    const { engine, protocol } = await boot();
-    await publish(protocol as any, { type: 'view', name: 'iojn_env', packageId: SRC });
-    await publish(protocol as any, {
-      type: 'view', name: 'iojn_own', packageId: SRC, organizationId: ACTIVE_ORG,
-    });
-
-    // Straight out of SQLite: the column really is NULL on the first row, so
-    // the strict equality this card removes really had nothing to match.
-    expect((await rowsOf(engine)).map((r) => ({ name: r.name, org: r.org }))).toEqual([
-      { name: 'iojn_env', org: null },
-      { name: 'iojn_own', org: ACTIVE_ORG },
-    ]);
-  });
-
-  it('copies BOTH the env-wide and the org-scoped rows (was: a partial copy reporting success)', async () => {
-    const { engine, protocol } = await boot();
-    const p = protocol as any;
-    await publish(p, { type: 'view', name: 'iojn_env', packageId: SRC });
-    await publish(p, { type: 'view', name: 'iojn_own', packageId: SRC, organizationId: ACTIVE_ORG });
-
-    const res = await p.duplicatePackage({
-      sourcePackageId: SRC, targetPackageId: DST, targetNamespace: 'iojn2',
-      organizationId: ACTIVE_ORG,
-    });
-
-    // MEASURED BEFORE THE FIX: `{success: true, copiedCount: 1, failedCount: 0}`
-    // with only `iojn2_own` present — the env-wide row silently absent from a
-    // copy that reported itself complete. The CONSEQUENCE, not the call: both
-    // items exist in the duplicate.
-    expect(res.failed).toEqual([]);
-    expect(res.success).toBe(true);
-    expect(res.copiedCount).toBe(2);
-
-    // Each copy lands in the scope of the row it came from, not the request's
-    // — see the object case below for why that is load-bearing rather than
-    // tidy.
-    const copied = (await rowsOf(engine)).filter((r) => r.pkg === DST);
-    expect(copied.map((r) => ({ name: r.name, org: r.org }))).toEqual([
-      { name: 'iojn2_env', org: null },
-      { name: 'iojn2_own', org: ACTIVE_ORG },
-    ]);
-  });
-
   it('rewrites references INTO the copy — the rename map is built from the scan (the sharper defect)', async () => {
     const { engine, protocol } = await boot();
     const p = protocol as any;
@@ -241,13 +195,12 @@ describe('#7819 tier 2 — duplicatePackage must copy the source’s env-wide ro
     // the view that references it published after.
     await publish(p, { type: 'object', name: 'iojn_widget', packageId: SRC });
     await publish(p, {
-      type: 'view', name: 'iojn_list', packageId: SRC, organizationId: ACTIVE_ORG,
+      type: 'view', name: 'iojn_list', packageId: SRC,
       item: viewBody('iojn_list', 'List', 'iojn_widget'),
     });
 
     const res = await p.duplicatePackage({
       sourcePackageId: SRC, targetPackageId: DST, targetNamespace: 'iojn2',
-      organizationId: ACTIVE_ORG,
     });
 
     // MEASURED BEFORE THE FIX: `{success: true, copiedCount: 1}` — the env-wide
@@ -272,94 +225,27 @@ describe('#7819 tier 2 — duplicatePackage must copy the source’s env-wide ro
     const copied = (await rowsOf(engine)).filter((r) => r.pkg === DST);
     expect(copied.map((r) => ({ name: r.name, org: r.org })).sort((a, b) => a.name.localeCompare(b.name)))
       .toEqual([
-        { name: 'iojn2_list', org: ACTIVE_ORG },
+        { name: 'iojn2_list', org: null },
         { name: 'iojn2_widget', org: null },
       ]);
     const list = copied.find((r) => r.name === 'iojn2_list');
     expect(list?.body?.data?.object).toBe('iojn2_widget');
   });
 
-  it('the caller’s own org SHADOWS env-wide when both scopes carry the same item', async () => {
-    const { engine, protocol } = await boot();
-    const p = protocol as any;
-    // A collision that could not occur while the scan was a strict equality,
-    // and therefore a hazard this fix introduces rather than inherits: one item
-    // present twice. Both copies would be written under the SAME target key
-    // (`type, name, organization_id, COALESCE(package_id, '')`), so without the
-    // precedence rule the surviving body would be decided by driver row order.
-    // ADR-0005 order — the caller's own org shadows env-wide — is what
-    // `resolveMetaItemOrgScope` applies to history lineages, and what this
-    // caller already reads everywhere else.
-    await publish(p, {
-      type: 'view', name: 'iojn_dup', packageId: SRC,
-      item: viewBody('iojn_dup', 'ENV BODY'),
-    });
-    await publish(p, {
-      type: 'view', name: 'iojn_dup', packageId: SRC, organizationId: ACTIVE_ORG,
-      item: viewBody('iojn_dup', 'ORG BODY'),
-    });
-
-    const res = await p.duplicatePackage({
-      sourcePackageId: SRC, targetPackageId: DST, targetNamespace: 'iojn2',
-      organizationId: ACTIVE_ORG,
-    });
-
-    expect(res.copiedCount).toBe(1);
-    const copied = (await rowsOf(engine)).filter((r) => r.pkg === DST);
-    expect(copied).toHaveLength(1);
-    expect(copied[0]?.body?.label).toBe('ORG BODY');
-  });
-
-  it('does NOT copy another organization’s rows', async () => {
-    const { engine, protocol } = await boot();
-    const p = protocol as any;
-    await publish(p, { type: 'view', name: 'iojn_own', packageId: SRC, organizationId: ACTIVE_ORG });
-    await publish(p, { type: 'view', name: 'iojn_foreign', packageId: SRC, organizationId: OTHER_ORG });
-
-    // The direction that must not widen. `$or` admits env-wide rows and refuses
-    // this one; dropping the predicate outright would have copied it.
-    const res = await p.duplicatePackage({
-      sourcePackageId: SRC, targetPackageId: DST, targetNamespace: 'iojn2',
-      organizationId: ACTIVE_ORG,
-    });
-
-    expect(res.copiedCount).toBe(1);
-    expect(namesIn(await rowsOf(engine), DST)).toEqual(['iojn2_own']);
-  });
-
   it('does NOT reach into another package’s rows', async () => {
     const { engine, protocol } = await boot();
     const p = protocol as any;
-    await publish(p, { type: 'view', name: 'iojn_own', packageId: SRC, organizationId: ACTIVE_ORG });
+    await publish(p, { type: 'view', name: 'iojn_own', packageId: SRC });
     // Env-wide AND in a different package, so it clears the org filter the fix
     // widened and is refused by the package one alone.
     await publish(p, { type: 'view', name: 'iojn_elsewhere', packageId: OTHER_PKG });
 
     const res = await p.duplicatePackage({
       sourcePackageId: SRC, targetPackageId: DST, targetNamespace: 'iojn2',
-      organizationId: ACTIVE_ORG,
     });
 
     expect(res.copiedCount).toBe(1);
     expect(namesIn(await rowsOf(engine), DST)).toEqual(['iojn2_own']);
-  });
-
-  it('a caller with NO org still copies org-scoped rows (the other door, un-narrowed)', async () => {
-    const { engine, protocol } = await boot();
-    const p = protocol as any;
-    await publish(p, { type: 'view', name: 'iojn_env', packageId: SRC });
-    await publish(p, { type: 'view', name: 'iojn_own', packageId: SRC, organizationId: ACTIVE_ORG });
-
-    // The no-org branch is deliberately NOT narrowed to `organization_id IS
-    // NULL`, exactly as #7705 / #7779 / tier 1 left theirs. Narrowing it would
-    // drop every org-scoped row from this door's copy — the same bug pointed
-    // the other way.
-    const res = await p.duplicatePackage({
-      sourcePackageId: SRC, targetPackageId: DST, targetNamespace: 'iojn2',
-    });
-
-    expect(res.success).toBe(true);
-    expect(namesIn(await rowsOf(engine), DST)).toEqual(['iojn2_env', 'iojn2_own']);
   });
 });
 
@@ -387,52 +273,6 @@ describe('#7819 tier 2 — reassignOrphanedMetadata must see env-wide orphans', 
     ]);
   });
 
-  it('adopts the env-wide orphan as well as its own (was: structurally invisible)', async () => {
-    const { engine, protocol } = await boot();
-    const p = protocol as any;
-    await publish(p, { type: 'view', name: 'iojn_owned', packageId: SRC, organizationId: ACTIVE_ORG });
-    // Two orphans, one per scope. The env-wide one is minted through the real
-    // write path pinned above, not hand-inserted.
-    await p.saveMetaItem({ type: 'view', name: 'orph_env', item: viewBody('orph_env'), mode: 'publish' });
-    await p.saveMetaItem({
-      type: 'view', name: 'orph_own', item: viewBody('orph_own'), mode: 'publish',
-      organizationId: ACTIVE_ORG,
-    });
-
-    const res = await p.reassignOrphanedMetadata({
-      targetPackageId: DST, organizationId: ACTIVE_ORG,
-    });
-
-    // MEASURED BEFORE THE FIX: `{success: true, reassignedCount: 1}` — only
-    // `orph_own` moved, with the env-wide orphan left at `package_id = null`
-    // and nothing reporting that it had been skipped. Finding orphans is this
-    // method's entire purpose, so a class of orphan it cannot see is a wrong
-    // answer rather than a partial one.
-    expect(res.reassignedCount).toBe(2);
-    expect(res.reassigned.map((r: any) => r.name).sort()).toEqual(['orph_env', 'orph_own']);
-    expect(namesIn(await rowsOf(engine), DST)).toEqual(['orph_env', 'orph_own']);
-  });
-
-  it('does NOT adopt another organization’s orphans', async () => {
-    const { engine, protocol } = await boot();
-    const p = protocol as any;
-    await p.saveMetaItem({ type: 'view', name: 'orph_env', item: viewBody('orph_env'), mode: 'publish' });
-    await p.saveMetaItem({
-      type: 'view', name: 'orph_foreign', item: viewBody('orph_foreign'), mode: 'publish',
-      organizationId: OTHER_ORG,
-    });
-
-    const res = await p.reassignOrphanedMetadata({
-      targetPackageId: DST, organizationId: ACTIVE_ORG,
-    });
-
-    // The direction that must not widen.
-    expect(res.reassigned.map((r: any) => r.name)).toEqual(['orph_env']);
-    const rows = await rowsOf(engine);
-    expect(namesIn(rows, DST)).toEqual(['orph_env']);
-    expect(rows.find((r) => r.name === 'orph_foreign')?.pkg).toBeNull();
-  });
-
   it('leaves OWNED rows alone — an env-wide row bound to a real package is not an orphan', async () => {
     const { engine, protocol } = await boot();
     const p = protocol as any;
@@ -443,33 +283,10 @@ describe('#7819 tier 2 — reassignOrphanedMetadata must see env-wide orphans', 
     await p.saveMetaItem({ type: 'view', name: 'orph_env', item: viewBody('orph_env'), mode: 'publish' });
 
     const res = await p.reassignOrphanedMetadata({
-      targetPackageId: DST, organizationId: ACTIVE_ORG,
+      targetPackageId: DST,
     });
 
     expect(res.reassigned.map((r: any) => r.name)).toEqual(['orph_env']);
     expect((await rowsOf(engine)).find((r) => r.name === 'iojn_env')?.pkg).toBe(SRC);
-  });
-
-  it('a caller with NO org still adopts every scope’s orphans (the widest door, un-narrowed)', async () => {
-    const { engine, protocol } = await boot();
-    const p = protocol as any;
-    await p.saveMetaItem({ type: 'view', name: 'orph_env', item: viewBody('orph_env'), mode: 'publish' });
-    await p.saveMetaItem({
-      type: 'view', name: 'orph_a', item: viewBody('orph_a'), mode: 'publish', organizationId: ACTIVE_ORG,
-    });
-    await p.saveMetaItem({
-      type: 'view', name: 'orph_b', item: viewBody('orph_b'), mode: 'publish', organizationId: OTHER_ORG,
-    });
-
-    // ⛔ `where` stays `{}` for this door — the card named it the family's worst
-    // exposure precisely because it already scans EVERY organization's rows,
-    // and narrowing it to `organization_id IS NULL` would re-create this bug
-    // pointed the other way. This case pins the behaviour as it stands so the
-    // door cannot drift silently; whether it SHOULD be this wide is #7780's
-    // open product question, which is a maintainer call and not decided here.
-    const res = await p.reassignOrphanedMetadata({ targetPackageId: DST });
-
-    expect(res.reassignedCount).toBe(3);
-    expect(namesIn(await rowsOf(engine), DST)).toEqual(['orph_a', 'orph_b', 'orph_env']);
   });
 });

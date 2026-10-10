@@ -192,7 +192,7 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
     let protocol: ObjectStackProtocolImplementation;
 
     const historyRows = async () =>
-        (await engine.find('sys_metadata_history', { where: { organization_id: 'org_x' } })) as any[];
+        (await engine.find('sys_metadata_history', { where: { organization_id: null } })) as any[];
 
     beforeEach(async () => {
         engine = new ObjectQL();
@@ -208,7 +208,7 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
 
     it('saveMetaItem with NO actor lands recorded_by = NULL', async () => {
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('A'),
+            type: 'view', name: 'cases', item: viewBody('A'),
         });
 
         const rows = await historyRows();
@@ -221,7 +221,7 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
 
     it('saveMetaItem WITH an actor still stores that user id', async () => {
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('A'), actor: 'usr_alice',
+            type: 'view', name: 'cases', item: viewBody('A'), actor: 'usr_alice',
         });
         const rows = await historyRows();
         expect(rows[0].recorded_by).toBe('usr_alice');
@@ -229,9 +229,9 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
 
     it('deleteMetaItem with NO actor writes a tombstone with recorded_by = NULL', async () => {
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('A'), actor: 'usr_alice',
+            type: 'view', name: 'cases', item: viewBody('A'), actor: 'usr_alice',
         });
-        await protocol.deleteMetaItem({ type: 'view', name: 'cases', organizationId: 'org_x' });
+        await protocol.deleteMetaItem({ type: 'view', name: 'cases' });
 
         const tombstone = (await historyRows()).find((h) => h.operation_type === 'delete');
         expect(tombstone).toBeDefined();
@@ -241,9 +241,9 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
 
     it('publishMetaItem with NO actor records the publish event with recorded_by = NULL', async () => {
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('draft'), mode: 'draft',
+            type: 'view', name: 'cases', item: viewBody('draft'), mode: 'draft',
         });
-        await protocol.publishMetaItem({ type: 'view', name: 'cases', organizationId: 'org_x' });
+        await protocol.publishMetaItem({ type: 'view', name: 'cases' });
 
         const publishRow = (await historyRows()).find((h) => h.operation_type === 'publish');
         expect(publishRow).toBeDefined();
@@ -254,13 +254,13 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
     it('no history row on ANY path carries a value that is not a sys_user id', async () => {
         // The three authoring paths #4441 was bitten by: create, publish, delete.
         await protocol.saveMetaItem({
-            type: 'view', name: 'a', organizationId: 'org_x', item: viewBody('a', 'a'), mode: 'draft',
+            type: 'view', name: 'a', item: viewBody('a', 'a'), mode: 'draft',
         });
-        await protocol.publishMetaItem({ type: 'view', name: 'a', organizationId: 'org_x' });
+        await protocol.publishMetaItem({ type: 'view', name: 'a' });
         await protocol.saveMetaItem({
-            type: 'view', name: 'b', organizationId: 'org_x', item: viewBody('b', 'b'), actor: 'usr_alice',
+            type: 'view', name: 'b', item: viewBody('b', 'b'), actor: 'usr_alice',
         });
-        await protocol.deleteMetaItem({ type: 'view', name: 'b', organizationId: 'org_x' });
+        await protocol.deleteMetaItem({ type: 'view', name: 'b' });
 
         const rows = await historyRows();
         expect(rows.length).toBeGreaterThan(0);
@@ -295,7 +295,7 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
         // field was target-less, so the guard skipped it whether or not the
         // exemption existed. Delete the exemption now and this goes red.
         await protocol.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('A'), actor: 'usr_not_a_row',
+            type: 'view', name: 'cases', item: viewBody('A'), actor: 'usr_not_a_row',
         });
 
         const rows = await historyRows();

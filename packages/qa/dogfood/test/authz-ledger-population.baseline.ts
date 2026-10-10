@@ -96,7 +96,8 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
 
   // ── dispatcher domains (`packages/runtime/src/route-ledger.ts`) ─────────
   // Absent because classified: `/meta`, `/actions`, `/automation`,
-  // `/packages`, `/mcp`, `/analytics`. The other 15 domains are here.
+  // `/packages`, `/mcp`, `/analytics`, `/i18n` (#22432). The other 14 domains
+  // are here.
   'dispatcher-domain:route-ledger.ts:/.well-known/objectstack',
   'dispatcher-domain:route-ledger.ts:/ai',
   'dispatcher-domain:route-ledger.ts:/apps',
@@ -104,7 +105,6 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   'dispatcher-domain:route-ledger.ts:/data',
   'dispatcher-domain:route-ledger.ts:/discovery',
   'dispatcher-domain:route-ledger.ts:/health',
-  'dispatcher-domain:route-ledger.ts:/i18n',
   'dispatcher-domain:route-ledger.ts:/keys',
   // ⚠️ Separate from `/mcp`, deliberately. The `/mcp` key is classified by
   // `mcp-http-identity`, whose enforcement site is `handleMcp`; `/mcp/skill`
@@ -129,6 +129,8 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
  * (#21061): `dispatcher-domain:route-ledger.ts:/analytics` left classified, by
  * the `anonymous-deny-analytics` row and its domain gate pin. 31 at 2026-10-09
  * (#22430): `rest-family:rest-route-ledger.ts:openapi` left classified, by the
- * `anonymous-deny-api-description` row and its booted-showcase proof.
+ * `anonymous-deny-api-description` row and its booted-showcase proof. 30 at
+ * 2026-10-09 (#22432): `dispatcher-domain:route-ledger.ts:/i18n` left
+ * classified, by the `anonymous-deny-i18n` row and its domain gate pin.
  */
-export const LEDGER_POPULATION_BASELINE_MAX = 31;
+export const LEDGER_POPULATION_BASELINE_MAX = 30;

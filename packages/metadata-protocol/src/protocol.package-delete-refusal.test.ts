@@ -134,9 +134,9 @@ function boot(world: World, storeDelete: StoreDelete = landed, opts: { uninstall
   const engine = {
     registry,
     // Scalar equality on every `where` key, and the caller's `limit` by
-    // presence after the filter. A combinator (`$or`, the org-scoped
-    // uninstall's) is not implemented here, so it is refused, never answered
-    // as "no rows" — these pins uninstall with `allTenants: true`.
+    // presence after the filter. A combinator (`$or`) is not implemented
+    // here, so it is refused, never answered as "no rows" — the uninstall is
+    // package-wide (ADR-0131 D6), which states no combinator.
     find: async (object: string, query?: { where?: Record<string, unknown>; limit?: number }) => {
       if (object !== 'sys_metadata') return [];
       const where = query?.where ?? {};
@@ -212,7 +212,7 @@ describe('#21276 deletePackage — a refused sys_packages delete fails the unins
     const before = snapshot(world);
     const { impl, registry } = boot(world, refusal);
 
-    const err = await rejectionOf(impl.deletePackage({ packageId: PKG, allTenants: true }));
+    const err = await rejectionOf(impl.deletePackage({ packageId: PKG }));
 
     expect(door(err)).toMatchObject({ status: 500, code });
     // The driver's words stay on `cause` for the operator, never in the caller's sentence.
@@ -232,11 +232,31 @@ describe('#21276 deletePackage — a refused sys_packages delete fails the unins
       throw refusal;
     });
 
-    const err = await rejectionOf(impl.deletePackage({ packageId: PKG, allTenants: true }));
+    const err = await rejectionOf(impl.deletePackage({ packageId: PKG }));
 
     expect(err).toBe(refusal);
     expect(door(err)).toMatchObject({ status: 409, code: 'DESTRUCTIVE_CHANGE' });
     expect(world.steps).toEqual(['sys_packages.delete']);
+    expect(snapshot(world)).toEqual(before);
+    expect(registry.getPackage(PKG)).toBeDefined();
+  });
+});
+
+describe('[ADR-0131 D6] deletePackage — the retired organization request keys', () => {
+  it.each([
+    ['organizationId', { organizationId: 'org_a' }],
+    ['allTenants: true', { allTenants: true }],
+    ['allTenants: false', { allTenants: false }],
+    ['allTenants: undefined', { allTenants: undefined }],
+  ] as const)('a request carrying %s is refused 400 INVALID_REQUEST, and nothing is removed', async (_label, keys) => {
+    const world = makeWorld();
+    const before = snapshot(world);
+    const { impl, registry } = boot(world);
+
+    const err = await rejectionOf(impl.deletePackage({ packageId: PKG, ...keys } as any));
+
+    expect(door(err)).toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+    expect(world.steps).toEqual([]);
     expect(snapshot(world)).toEqual(before);
     expect(registry.getPackage(PKG)).toBeDefined();
   });
@@ -251,7 +271,7 @@ describe('#21276 deletePackage — the registry\'s uninstall refusal is asked BE
     const before = snapshot(world);
     const { impl, registry } = boot(world, landed, { uninstallRefusal: extender });
 
-    const err = await rejectionOf(impl.deletePackage({ packageId: PKG, allTenants: true }));
+    const err = await rejectionOf(impl.deletePackage({ packageId: PKG }));
 
     // The registry's own error, unwrapped: the door answers it as it always did.
     expect(err).toBe(extender);
@@ -267,7 +287,7 @@ describe('#21276 deletePackage — the registry\'s uninstall refusal is asked BE
 describe('#21276 the restart — a fresh process over the same store holds the package as the uninstall reported it', () => {
   it.each(REFUSALS)('after a %s refusal, the package comes back WITH its metadata and grants', async (_label, _code, refusal) => {
     const world = makeWorld();
-    await rejectionOf(boot(world, refusal).impl.deletePackage({ packageId: PKG, allTenants: true }));
+    await rejectionOf(boot(world, refusal).impl.deletePackage({ packageId: PKG }));
 
     const restarted = boot(world);
 
@@ -284,7 +304,7 @@ describe('#21276 the restart — a fresh process over the same store holds the p
     const world = makeWorld();
     const first = boot(world);
 
-    const res = await first.impl.deletePackage({ packageId: PKG, allTenants: true });
+    const res = await first.impl.deletePackage({ packageId: PKG });
 
     expect(res).toMatchObject({ success: true, deletedCount: 2, failedCount: 0 });
     expect(res.cleanups).toEqual([{ name: 'security.package-permissions', success: true, removed: 1 }]);

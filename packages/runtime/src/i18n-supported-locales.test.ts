@@ -101,9 +101,17 @@ async function bootStack(i18nConfig: Record<string, unknown> | undefined) {
     return { i18n, ctx, dispatcher: new HttpDispatcher(kernel as never) };
 }
 
+/**
+ * [#22432] `/i18n` stands on the anonymous-deny floor now. These cases are
+ * about WHICH locales a served caller is offered, not about who may call, so
+ * they carry a session; anonymity is pinned in
+ * `domains/i18n-anonymous-deny.test.ts`.
+ */
+const SIGNED_IN = { request: {}, executionContext: { userId: 'u_test', isSystem: false } } as never;
+
 /** `GET /i18n/locales`, parsed with the schema that declares its body. */
 async function getLocales(dispatcher: HttpDispatcher) {
-    const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} } as never);
+    const result = await dispatcher.handleI18n('/locales', 'GET', {}, SIGNED_IN);
     expect(result.response?.status).toBe(200);
     const parsed = GetLocalesResponseSchema.safeParse(result.response?.body?.data);
     expect(
@@ -184,7 +192,7 @@ describe('GET /i18n/locales reports the app\'s declared supportedLocales (#7679)
         // unloading bundles: `GET /i18n/translations/ja-JP` still answers.
         const { dispatcher } = await bootStack({ defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] });
 
-        const result = await dispatcher.handleI18n('/translations/ja-JP', 'GET', {}, { request: {} } as never);
+        const result = await dispatcher.handleI18n('/translations/ja-JP', 'GET', {}, SIGNED_IN);
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.translations)
             .toEqual({ objects: { sys_user: { label: 'ユーザー' } } });

@@ -178,7 +178,7 @@ describe('saveMetaItem response conforms to SaveMetaItemResponseSchema (#5745)',
     it('publish-mode save: parses green and strips nothing', async () => {
         const p = await makeProtocol();
         const raw: any = await p.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('A'),
+            type: 'view', name: 'cases', item: viewBody('A'),
         });
 
         expect(strippedKeys(raw)).toEqual([]);
@@ -195,7 +195,7 @@ describe('saveMetaItem response conforms to SaveMetaItemResponseSchema (#5745)',
     it('draft-mode save: state is "draft" and still strips nothing', async () => {
         const p = await makeProtocol();
         const raw: any = await p.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('D'), mode: 'draft',
+            type: 'view', name: 'cases', item: viewBody('D'), mode: 'draft',
         });
 
         expect(strippedKeys(raw)).toEqual([]);
@@ -207,7 +207,7 @@ describe('saveMetaItem response conforms to SaveMetaItemResponseSchema (#5745)',
         p.registerMutationProjector('view', async () => { throw new Error('boom-from-projector'); });
 
         const raw: any = await p.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('P'),
+            type: 'view', name: 'cases', item: viewBody('P'),
         });
 
         expect(Object.keys(raw)).toContain('projectionApplied');
@@ -222,7 +222,7 @@ describe('saveMetaItem response conforms to SaveMetaItemResponseSchema (#5745)',
     it('no projector registered â†’ projectionApplied is absent, which is why it alone is optional', async () => {
         const p = await makeProtocol();
         const raw: any = await p.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('N'),
+            type: 'view', name: 'cases', item: viewBody('N'),
         });
 
         expect(raw.projectionApplied).toBeUndefined();
@@ -245,7 +245,7 @@ describe('saveMetaItem response conforms to SaveMetaItemResponseSchema (#5745)',
         // fields can stay required.
         const p = await makeProtocol();
         await expect(
-            p.saveMetaItem({ type: 'agent', name: 'helper', organizationId: 'org_x', item: { name: 'helper' } }),
+            p.saveMetaItem({ type: 'agent', name: 'helper', item: { name: 'helper' } }),
         ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
     });
 });
@@ -431,7 +431,7 @@ describe('saveMetaItem carries the runtime authoring gate\'s advisories (#4717 â
     it('GUARD (green either way): a clean view save is untouched by the new field', async () => {
         const p = await makeProtocol();
         const raw: any = await p.saveMetaItem({
-            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('A'),
+            type: 'view', name: 'cases', item: viewBody('A'),
         });
 
         expect('advisories' in raw).toBe(false);

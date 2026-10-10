@@ -177,11 +177,11 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('Published'),
         });
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('Pending'),
             mode: 'draft',
         });
@@ -201,15 +201,15 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v1'),
         });
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v2-draft'), mode: 'draft',
         });
         const result = await protocol.publishMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha', actor: 'admin',
+            type: 'view', name: 'case_grid', actor: 'admin',
         });
         expect((result as any).success).toBe(true);
         // Only the active row remains.
@@ -223,12 +223,12 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v1'),
         });
         await expect(
             protocol.publishMetaItem({
-                type: 'view', name: 'case_grid', organizationId: 'org_alpha', actor: 'admin',
+                type: 'view', name: 'case_grid', actor: 'admin',
             }),
         ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
     });
@@ -242,7 +242,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v1'),
             // `mode` defaults to publish, so this writes the active row;
             // no draft row exists after this save.
@@ -267,12 +267,12 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v1'),
         });
         // Write a draft row in addition to the active row.
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v2-draft'),
             mode: 'draft',
         } as any);
@@ -291,15 +291,15 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const { engine, historyRows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v1'),
         });
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v2'),
         });
         const result = await protocol.rollbackMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             toVersion: 1, actor: 'admin',
         });
         expect((result as any).success).toBe(true);
@@ -317,12 +317,12 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: sampleBody('v1'),
         });
         await expect(
             protocol.rollbackMetaItem({
-                type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+                type: 'view', name: 'case_grid',
                 toVersion: 99, actor: 'admin',
             }),
         ).rejects.toMatchObject({ code: 'VERSION_NOT_FOUND', status: 404 });
@@ -332,15 +332,15 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: { name: 'case_grid', type: 'grid', label: 'A', columns: ['id'], object: 'case', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
         });
         await protocol.saveMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             item: { name: 'case_grid', type: 'grid', label: 'B', columns: ['id', 'title'], rowHeight: 'compact', extra: 1, object: 'case', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
         });
         const diff = await protocol.diffMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             fromVersion: 1, toVersion: 2,
         });
         // [#20051] Re-judged at stage (iv): the added key is a DECLARED one

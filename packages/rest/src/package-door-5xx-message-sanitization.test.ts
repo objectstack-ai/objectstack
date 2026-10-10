@@ -355,14 +355,14 @@ describe('[#8086] a 5xx that does NOT look like a leak passes through unchanged'
 describe('[#8086] a 4xx message is never withheld, even when it trips the predicate', () => {
   const FOUR_XX: Array<{ name: string; error: unknown; status: number; code: string }> = [
     {
-      name: "the protocol's TENANT_SCOPE_REQUIRED refusal, wording that trips the predicate",
+      name: "the protocol's INVALID_REQUEST refusal, wording that trips the predicate",
       error: thrown(
-        "[tenant_scope_required] Refusing to uninstall 'com.acme.crm': foreign key rows in sys_metadata "
-        + 'would be orphaned — pass organizationId to scope it, or allTenants: true to confirm.',
-        { status: 400, code: 'TENANT_SCOPE_REQUIRED' },
+        "Refusing to uninstall 'com.acme.crm': the 'allTenants' request key is retired — foreign key rows "
+        + 'in sys_metadata are removed environment-wide. Retry without allTenants.',
+        { status: 400, code: 'INVALID_REQUEST' },
       ),
       status: 400,
-      code: 'TENANT_SCOPE_REQUIRED',
+      code: 'INVALID_REQUEST',
     },
     {
       name: 'the established 409 DESTRUCTIVE_CHANGE, naming the tables it would drop',

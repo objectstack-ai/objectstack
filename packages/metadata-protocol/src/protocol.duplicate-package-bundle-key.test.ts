@@ -57,6 +57,16 @@
  * goes red under the revert would mean this change altered a key it promised
  * not to. The precedence cases must also stay GREEN: they assert org-over-env
  * for the SAME member, which both keys agree on. Measured per arm in the PR.
+ *
+ * ---------------------------------------------------------------------------
+ * [ADR-0131 D6] What remains
+ * ---------------------------------------------------------------------------
+ * An organization-scoped duplicate is now refused (403 NOT_OVERRIDABLE), and
+ * the scan reads ENVIRONMENT rows only (`organization_id IS NULL`), so the two
+ * tiers no longer meet here and the cross-tier dedup above is gone with them.
+ * The cases that drove it are deleted; what this file still pins is that every
+ * environment bundle member is copied, a legacy organization-scoped row is
+ * not, and another package's row is never scanned.
  */
 import { describe, expect, it, vi } from 'vitest';
 // [#7774] The identity table's home is `@objectstack/metadata-core`, not the
@@ -162,12 +172,13 @@ describe('[#7932] duplicatePackage keeps every i18n bundle member', () => {
             expect(Object.keys(ITEM_KEY_DISCRIMINATORS)).toEqual(['email_template']);
         });
 
-        it('the dedup block does not run at all on the no-org door', async () => {
-            // Without `organizationId` there is no `$or`, no dedup, and every
-            // scanned row is copied verbatim. That door is deliberately left
-            // byte-identical by this change, exactly as #7819 tier 2 left it.
+        it('copies every environment bundle member, and never a legacy organization-scoped row', async () => {
+            // [ADR-0131 D6] The scan is `organization_id IS NULL`: both env-wide
+            // members are copied verbatim (no dedup collapses them), and the
+            // legacy org row waits for the promotion ceremony (ADR-0131 C7).
             const { protocol, saveMetaItem } = makeProtocol([
                 { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', 'en-US') },
+                { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', 'ja-JP') },
                 {
                     type: 'email_template', name: 'auth.welcome', organization_id: ORG,
                     metadata: tpl('auth.welcome', 'zh-CN'),
@@ -179,193 +190,24 @@ describe('[#7932] duplicatePackage keeps every i18n bundle member', () => {
             expect(res).toMatchObject({ success: true, copiedCount: 2, failedCount: 0 });
             expect(written(saveMetaItem)).toEqual([
                 'email_template/auth.welcome@en-US→env',
-                'email_template/auth.welcome@zh-CN→env',
+                'email_template/auth.welcome@ja-JP→env',
             ]);
         });
-    });
 
-    describe('the defect — two tiers customizing DIFFERENT members of one bundle', () => {
-        it('copies BOTH locales, each into the scope of the row it came from', async () => {
-            // ⭐ The case the card measured. Before the fix this answered
-            // `copiedCount: 1` — the org `zh-CN` row displaced the env-wide
-            // `en-US` one, and the duplicate shipped one locale of a two-locale
-            // customization while reporting success.
+        it('an organization-scoped duplicate is refused 403 NOT_OVERRIDABLE and copies nothing', async () => {
             const { protocol, saveMetaItem } = makeProtocol([
                 { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', 'en-US') },
-                {
-                    type: 'email_template', name: 'auth.welcome', organization_id: ORG,
-                    metadata: tpl('auth.welcome', 'zh-CN'),
-                },
             ]);
 
-            const res = await duplicate(protocol, ORG);
+            const err = await duplicate(protocol, ORG).then(() => null, (e: any) => e);
 
-            expect(res).toMatchObject({ success: true, copiedCount: 2, failedCount: 0 });
-            expect(written(saveMetaItem)).toEqual([
-                'email_template/auth.welcome@en-US→env',
-                `email_template/auth.welcome@zh-CN→${ORG}`,
-            ]);
-        });
-
-        it('keeps a three-member bundle split across the two tiers', async () => {
-            const { protocol, saveMetaItem } = makeProtocol([
-                { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', 'en-US') },
-                { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', 'ja-JP') },
-                {
-                    type: 'email_template', name: 'auth.welcome', organization_id: ORG,
-                    metadata: tpl('auth.welcome', 'zh-CN'),
-                },
-            ]);
-
-            const res = await duplicate(protocol, ORG);
-
-            expect(res).toMatchObject({ success: true, copiedCount: 3, failedCount: 0 });
-            expect(written(saveMetaItem)).toEqual([
-                'email_template/auth.welcome@en-US→env',
-                'email_template/auth.welcome@ja-JP→env',
-                `email_template/auth.welcome@zh-CN→${ORG}`,
-            ]);
-        });
-
-        it('a member with NO locale is the canonical member, not a fourth slot', async () => {
-            // `itemDiscriminator` keys a declared-nothing member as `canonical`
-            // (`en-US`), so the bundle-blind and bundle-aware answers agree for
-            // a single-member "bundle" — an env-wide row declaring no locale and
-            // an org row declaring `en-US` are the SAME member, and collapse.
-            const { protocol, saveMetaItem } = makeProtocol([
-                { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', undefined) },
-                {
-                    type: 'email_template', name: 'auth.welcome', organization_id: ORG,
-                    metadata: tpl('auth.welcome', 'en-US'),
-                },
-            ]);
-
-            const res = await duplicate(protocol, ORG);
-
-            expect(res).toMatchObject({ success: true, copiedCount: 1, failedCount: 0 });
-            expect(written(saveMetaItem)).toEqual([
-                `email_template/auth.welcome@en-US→${ORG}`,
-            ]);
+            expect(err?.code).toBe('NOT_OVERRIDABLE');
+            expect(err?.status).toBe(403);
+            expect(written(saveMetaItem)).toEqual([]);
         });
     });
 
-    describe('precedence — unchanged everywhere it was ever meaningful', () => {
-        it('the org row still overrides the env-wide row of the SAME member', async () => {
-            // ⭐ The guard that catches an over-split. A key change is trivially
-            // satisfiable by splitting keys that should merge; this is the case
-            // that refuses that shortcut.
-            const { protocol, saveMetaItem } = makeProtocol([
-                {
-                    type: 'email_template', name: 'auth.welcome',
-                    metadata: tpl('auth.welcome', 'en-US', { label: 'ENV-WIDE' }),
-                },
-                {
-                    type: 'email_template', name: 'auth.welcome', organization_id: ORG,
-                    metadata: tpl('auth.welcome', 'en-US', { label: 'ORG-OVERRIDE' }),
-                },
-            ]);
-
-            const res = await duplicate(protocol, ORG);
-
-            expect(res).toMatchObject({ success: true, copiedCount: 1, failedCount: 0 });
-            expect(labels(saveMetaItem)).toEqual(['ORG-OVERRIDE']);
-        });
-
-        it('overrides the matching member and leaves the others alone', async () => {
-            // Both halves in one fixture: `en-US` exists at both tiers and the
-            // org body wins it; `ja-JP` exists only env-wide and survives
-            // untouched; `zh-CN` exists only org-side and is carried over.
-            const { protocol, saveMetaItem } = makeProtocol([
-                {
-                    type: 'email_template', name: 'auth.welcome',
-                    metadata: tpl('auth.welcome', 'en-US', { label: 'ENV-WIDE en' }),
-                },
-                {
-                    type: 'email_template', name: 'auth.welcome',
-                    metadata: tpl('auth.welcome', 'ja-JP', { label: 'ENV-WIDE ja' }),
-                },
-                {
-                    type: 'email_template', name: 'auth.welcome', organization_id: ORG,
-                    metadata: tpl('auth.welcome', 'en-US', { label: 'ORG en' }),
-                },
-                {
-                    type: 'email_template', name: 'auth.welcome', organization_id: ORG,
-                    metadata: tpl('auth.welcome', 'zh-CN', { label: 'ORG zh' }),
-                },
-            ]);
-
-            const res = await duplicate(protocol, ORG);
-
-            expect(res).toMatchObject({ success: true, copiedCount: 3, failedCount: 0 });
-            expect(labels(saveMetaItem)).toEqual(['ENV-WIDE ja', 'ORG en', 'ORG zh']);
-            expect(written(saveMetaItem)).toEqual([
-                `email_template/auth.welcome@en-US→${ORG}`,
-                'email_template/auth.welcome@ja-JP→env',
-                `email_template/auth.welcome@zh-CN→${ORG}`,
-            ]);
-        });
-    });
-
-    describe('byte-identical keys for every undiscriminated type', () => {
-        it('a same-name `page` at both tiers still dedups to ONE row, org winning', async () => {
-            // ⭐ `page` is absent from `ITEM_KEY_DISCRIMINATORS`, so
-            // `storedRowDiscriminator` returns `undefined` before any JSON work
-            // and the key is the exact two-component string it has always been.
-            // This case is what proves nothing was changed that was promised
-            // unchanged — it must stay GREEN under the reverse-verification.
-            const { protocol, saveMetaItem } = makeProtocol([
-                { type: 'page', name: 'home', metadata: { name: 'home', label: 'ENV-WIDE' } },
-                {
-                    type: 'page', name: 'home', organization_id: ORG,
-                    metadata: { name: 'home', label: 'ORG-OVERRIDE' },
-                },
-            ]);
-
-            const res = await duplicate(protocol, ORG);
-
-            expect(res).toMatchObject({ success: true, copiedCount: 1, failedCount: 0 });
-            expect(labels(saveMetaItem)).toEqual(['ORG-OVERRIDE']);
-        });
-
-        it('a `page` carrying a locale-ish body key is STILL undiscriminated', async () => {
-            // The table is declared per type rather than duck-typed off a
-            // `locale` property precisely so that another type growing such a
-            // field is not silently re-keyed. Two `page/home` rows collapse to
-            // one even though their bodies disagree on `locale`.
-            const { protocol, saveMetaItem } = makeProtocol([
-                { type: 'page', name: 'home', metadata: { name: 'home', locale: 'en-US', label: 'ENV-WIDE' } },
-                {
-                    type: 'page', name: 'home', organization_id: ORG,
-                    metadata: { name: 'home', locale: 'zh-CN', label: 'ORG-OVERRIDE' },
-                },
-            ]);
-
-            const res = await duplicate(protocol, ORG);
-
-            expect(res).toMatchObject({ success: true, copiedCount: 1, failedCount: 0 });
-            expect(labels(saveMetaItem)).toEqual(['ORG-OVERRIDE']);
-        });
-
-        it('two DIFFERENT types sharing one name never collapse', async () => {
-            // The key's FIRST component. ADR-0048's package dimension is carried
-            // at this site by the scan filter rather than by the key (every
-            // scanned row shares `package_id = sourcePackageId`), so `type` is
-            // the separating component the dedup itself owns.
-            const { protocol, saveMetaItem } = makeProtocol([
-                { type: 'page', name: 'home', metadata: { name: 'home', label: 'PAGE env' } },
-                {
-                    type: 'page', name: 'home', organization_id: ORG,
-                    metadata: { name: 'home', label: 'PAGE org' },
-                },
-                { type: 'dashboard', name: 'home', metadata: { name: 'home', label: 'DASHBOARD env' } },
-            ]);
-
-            const res = await duplicate(protocol, ORG);
-
-            expect(res).toMatchObject({ success: true, copiedCount: 2, failedCount: 0 });
-            expect(labels(saveMetaItem)).toEqual(['DASHBOARD env', 'PAGE org']);
-        });
-
+    describe('the package dimension', () => {
         it("ADR-0048 — another package's same-name row is never scanned", async () => {
             // The package dimension at this site: the scan is keyed on
             // `package_id = sourcePackageId`, so a second package shipping
@@ -379,36 +221,10 @@ describe('[#7932] duplicatePackage keeps every i18n bundle member', () => {
                 },
             ]);
 
-            const res = await duplicate(protocol, ORG);
+            const res = await duplicate(protocol);
 
             expect(res).toMatchObject({ success: true, copiedCount: 1, failedCount: 0 });
             expect(labels(saveMetaItem)).toEqual(['SOURCE PKG']);
-        });
-
-        it('an email_template bundle and an undiscriminated type in ONE copy', async () => {
-            // The two behaviours composing in a single duplication: the bundle
-            // splits into its members, the `page` still collapses to one.
-            const { protocol, saveMetaItem } = makeProtocol([
-                { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', 'en-US') },
-                {
-                    type: 'email_template', name: 'auth.welcome', organization_id: ORG,
-                    metadata: tpl('auth.welcome', 'zh-CN'),
-                },
-                { type: 'page', name: 'home', metadata: { name: 'home', label: 'ENV-WIDE' } },
-                {
-                    type: 'page', name: 'home', organization_id: ORG,
-                    metadata: { name: 'home', label: 'ORG-OVERRIDE' },
-                },
-            ]);
-
-            const res = await duplicate(protocol, ORG);
-
-            expect(res).toMatchObject({ success: true, copiedCount: 3, failedCount: 0 });
-            expect(written(saveMetaItem)).toEqual([
-                'email_template/auth.welcome@en-US→env',
-                `email_template/auth.welcome@zh-CN→${ORG}`,
-                `page/home@(none)→${ORG}`,
-            ]);
         });
     });
 });
