@@ -52,7 +52,9 @@
 # a recollection. Reproduced 2026-09-17 in a scratch repo with this clone's real
 # driver registered, on the routed path `packages/spec/spec-changes.json`, both
 # sides editing it, plus one ordinary hand-written file edited on the INCOMING
-# side as a firing control:
+# side as a firing control. (That path left git and the route at #22485; the
+# readings below, and the two tables further down taken over it, describe any
+# path `.gitattributes` still routes — this script reads that list at run time.)
 #
 #   git merge, driver ON                        exit 0
 #   incoming side's token in the merged file    0 occurrences   <- THE LOSS

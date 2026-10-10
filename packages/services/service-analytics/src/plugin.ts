@@ -1498,6 +1498,24 @@ export class AnalyticsServicePlugin implements Plugin {
         const names = Object.keys(fields);
         return names.length > 0 ? names : undefined;
       },
+      // The generic-exit declarations (`api-exposure-door.ts`): the object's
+      // `enable` block and field map, read from the SAME schema registry the
+      // data door's exposure gate and its `internal` strip read, so "is this
+      // object exposed, is this field internal" has one answer across `/data`
+      // and `/analytics`. Access-narrowing, so it fails CLOSED: unlike the two
+      // existence probes above, an engine that cannot answer is a THROW (the
+      // query is refused), never "nothing declared" — `ObjectQLPlugin`'s engine,
+      // registered as "data", is the one place the declarations live.
+      getObjectDeclaration: (objectName: string) => {
+        const engine = dataEngine();
+        if (!engine) {
+          throw new Error(
+            'no "data" engine with getObject() is registered, so the object\'s exposure declaration cannot ' +
+              'be read. Register ObjectQLPlugin\'s engine as "data".',
+          );
+        }
+        return engine.getObject?.(objectName) as { enable?: unknown; fields?: unknown } | undefined;
+      },
       draftRowsResolver,
     };
 

@@ -86,7 +86,14 @@ const GATED: ReadonlyArray<{
     gen: 'gen:migration-registry',
     artifact: 'src/migrations/registry.ts — its generated regions, from src/migrations/entries/',
   },
-  { check: 'check:spec-changes', gen: 'gen:spec-changes', artifact: 'spec-changes.json' },
+  // Its committed copy is gone too (#22485): the publish lane writes the shipped one
+  // into the package, `gen:spec-changes` writes the same gitignored file locally,
+  // and the gate generates in memory, so it never reports stale.
+  {
+    check: 'check:spec-changes',
+    gen: 'gen:spec-changes',
+    artifact: 'spec-changes.json (gitignored; written into the package at publish)',
+  },
   // Its committed copy is gone: `docs/protocol-upgrade-guide.md` is a hand-written
   // pointer stub, and `gen:upgrade-guide` writes the docs pages that are the
   // guide's address. The gate generates in memory, so it never reports stale.
