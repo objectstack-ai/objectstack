@@ -193,12 +193,17 @@ describe('declared = enforced — the published JSON Schema states the rule', ()
 });
 
 describe('ADR-0087 — the narrowing is registered as a D3 semantic entry of protocol 18', () => {
-  it('names both keys and the remedy, with no D2 conversion', () => {
-    const step = MIGRATIONS_BY_MAJOR.get(18);
-    const entry = step?.semantic.find((e) => e.id === 'flow-binding-variable-dollar-name-refused');
-    expect(entry).toBeDefined();
-    expect(entry!.surface).toContain('outputVariable');
-    expect(entry!.surface).toContain('errorVariable');
-    expect(entry!.conversionIds).toBeUndefined();
+  const ENTRY_ID = 'flow-binding-variable-dollar-name-refused';
+
+  it('names both keys, with no D2 conversion', () => {
+    const entries = MIGRATIONS_BY_MAJOR[18]!.semantic.filter((e) => e.id === ENTRY_ID);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.surface).toContain('outputVariable');
+    expect(entries[0]!.surface).toContain('errorVariable');
+    expect(entries[0]!.conversionIds ?? []).toEqual([]);
+  });
+
+  it('names the step-18 rationale fragment for it', () => {
+    expect(MIGRATIONS_BY_MAJOR[18]!.rationale).toContain(ENTRY_ID);
   });
 });
