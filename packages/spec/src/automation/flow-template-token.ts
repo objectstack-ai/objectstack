@@ -125,18 +125,43 @@ export const CEL_CLAIMED_IDENTIFIERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * **Every identifier the flow CEL scope binds over a flow variable of the same
+ * name** — the flow runtime's claims, beside CEL's own
+ * ({@link CEL_CLAIMED_IDENTIFIERS}). `service-automation`'s
+ * `AutomationEngine.celScope` spreads the flow's variables at the top level
+ * and then binds these two after the spread, so each wins over a variable
+ * that shares its name:
+ *
+ *  - `vars` — the variables namespace itself (`vars.x`, `vars["$error"]`), so
+ *    for a variable named `vars`, `vars[0]` reads the namespace and fails
+ *    `No such key: 0`;
+ *  - `current_user` — the run's user (ADR-0068's canonical root), or `null`
+ *    when the run has none, so for a variable named `current_user`,
+ *    `current_user.name` reads the run user.
+ *
+ * {@link celPath} reads a path whose head is one of these through `vars`
+ * (`vars["vars"][0]`, `vars["current_user"].name`), the route a CEL-claimed
+ * head already takes. The spec cannot import the runtime, so this list is
+ * measured from `celScope`; `value-slot-template-grammar.test.ts` in that
+ * package evaluates both spellings for a variable of each name, so a name the
+ * scope starts binding without a line here reddens there.
+ */
+export const FLOW_SCOPE_CLAIMED_IDENTIFIERS: ReadonlySet<string> = new Set(['vars', 'current_user']);
+
+/**
  * Whether a path's head is read through `vars` — a `$`-named variable (CEL has
- * no identifier spelling for one) or one of {@link CEL_CLAIMED_IDENTIFIERS}.
+ * no identifier spelling for one), one of {@link CEL_CLAIMED_IDENTIFIERS}, or
+ * one of {@link FLOW_SCOPE_CLAIMED_IDENTIFIERS}.
  */
 export function celHeadReadsThroughVars(head: string): boolean {
-  return head.startsWith('$') || CEL_CLAIMED_IDENTIFIERS.has(head);
+  return head.startsWith('$') || CEL_CLAIMED_IDENTIFIERS.has(head) || FLOW_SCOPE_CLAIMED_IDENTIFIERS.has(head);
 }
 
 /**
  * A template path as CEL: `a.b.0` → `a.b[0]`. A head CEL cannot read as the
  * variable is read through `vars` ({@link celHeadReadsThroughVars}:
- * `vars["$error"].message`, `vars["list"][0]`), and a later segment that is a
- * keyword is indexed by name (`record["in"]`).
+ * `vars["$error"].message`, `vars["list"][0]`, `vars["vars"][0]`), and a
+ * later segment that is a keyword is indexed by name (`record["in"]`).
  */
 export function celPath(path: string): string {
   const [head, ...rest] = path.split('.');
@@ -149,7 +174,105 @@ export function celPath(path: string): string {
   return out;
 }
 
-/** A template expression as CEL: every integer divisor written as a double, so CEL divides as the template did. */
+/**
+ * The CEL spelling of the run user's id — what `{$User.Id}` read
+ * (`resolveToken` answers it with the run's `userId`). The flow CEL scope
+ * binds `current_user` to the run's `EvalUser`, and to `null` when the run has
+ * no user (ADR-0068, ADR-0118 D1, D4), so in a user-less run this read fails.
+ */
+export const CEL_RUN_USER_ID = 'current_user.id';
+
+/**
+ * {@link CEL_RUN_USER_ID} guarded for a run with no user — a schedule, or a
+ * record change made by a system write. It answers `null` there, where the
+ * template answered nothing.
+ */
+export const CEL_RUN_USER_ID_GUARDED = 'current_user != null ? current_user.id : null';
+
+/**
+ * Whether a `user` token reads the run user's id — `$User.Id`, the one
+ * `$User` path `resolveToken` answers from the run (its first segment is
+ * `Id`, and the rest is ignored). Every other path reads a user object no
+ * run carries.
+ */
+export function isRunUserIdToken(inner: string): boolean {
+  return inner.trim().slice('$User.'.length).split('.')[0] === 'Id';
+}
+
+/**
+ * Why a `$User.<path>` token other than the id ({@link isRunUserIdToken}) has
+ * nothing to convert, and what to write for the value it meant: it never
+ * resolved, and `current_user` carries only what the run holds, so an email
+ * or a name is read from the user record by `current_user.id`. `write` is how
+ * the remedy's last step spells the record's field — an envelope in a value
+ * slot, a hole in a text slot.
+ */
+export function runUserPathNeverResolved(text: string, write: (path: string) => string): string {
+  return (
+    `\`${text}\` never resolved in any shipped run: it read a user object no run carries, so the template `
+    + 'wrote nothing here. `current_user` carries only what the run holds — `id`, '
+    + '`positions`, `organizationId`, `isPlatformAdmin`. For the user\'s email or name, read the user record by '
+    + `\`current_user.id\`: compute the id into a variable with an \`assignment\` node (\`assignments: { uid: `
+    + `{ dialect: 'cel', source: '${CEL_RUN_USER_ID}' } }\`), read the record with a \`get_record\` node `
+    + '(`objectName: \'sys_user\'`, `filter: { id: \'{uid}\' }`, `outputVariable: \'me\'`), and write '
+    + `${write('me.email')} or ${write('me.name')}.`
+  );
+}
+
+/**
+ * One lexeme of a template expression, in the order the alternatives are
+ * tried: a quoted string (its content is never rewritten), a number, a
+ * variable path in the interpolator's own spelling ({@link VARIABLE_PATH},
+ * numeric segments included), or any single other character.
+ */
+const EXPRESSION_LEXEME =
+  /(["'])(?:\\[\s\S]|(?!\1)[^\\])*\1|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[A-Za-z_$][\w$]*(?:\.(?:[A-Za-z_$][\w$]*|\d+))*|[\s\S]/g;
+
+/**
+ * A template expression as CEL — what the interpolator computed, spelled so
+ * the CEL value envelope evaluates it:
+ *
+ *  - every variable path is written by {@link celPath}'s rule, the one a
+ *    lone path token gets: `int * 2` → `vars["int"] * 2` (a head CEL claims),
+ *    `items.0 * 2` → `items[0] * 2` (an index), `$error.code + 1` →
+ *    `vars["$error"].code + 1`. A name in call position (`round(`) is a
+ *    function, a member selected off something else (`(x).y`) is not a head,
+ *    and the keywords (`true`, `false`, `null`, `in`) are CEL's own, so each
+ *    of those is left as written;
+ *  - every integer divisor is written as a double (`/ 100` → `/ 100.0`), so
+ *    CEL divides as the template did.
+ *
+ * Text inside a quoted string is never rewritten.
+ */
 export function celExpression(inner: string): string {
-  return inner.replace(/\/\s*(\d+)(?![\d.])/g, '/ $1.0');
+  const lexemes = inner.match(EXPRESSION_LEXEME) ?? [];
+  const significant = (from: number, step: 1 | -1): string | undefined => {
+    for (let at = from + step; at >= 0 && at < lexemes.length; at += step) {
+      if (!/^\s$/.test(lexemes[at]!)) return lexemes[at];
+    }
+    return undefined;
+  };
+  let out = '';
+  for (let at = 0; at < lexemes.length; at++) {
+    const lexeme = lexemes[at]!;
+    if (lexeme === '/') {
+      const next = lexemes.findIndex((candidate, index) => index > at && !/^\s$/.test(candidate));
+      if (next !== -1 && /^\d+$/.test(lexemes[next]!) && lexemes[next + 1] !== '.') {
+        out += `/ ${lexemes[next]}.0`;
+        at = next;
+        continue;
+      }
+      out += lexeme;
+      continue;
+    }
+    if (/^[A-Za-z_$]/.test(lexeme)) {
+      const isCall = significant(at, 1) === '(';
+      const isMember = significant(at, -1) === '.';
+      const isKeyword = CEL_KEYWORDS.has(lexeme);
+      out += isCall || isMember || isKeyword ? lexeme : celPath(lexeme);
+      continue;
+    }
+    out += lexeme;
+  }
+  return out;
 }

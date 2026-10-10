@@ -206,6 +206,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "¿Qué ha cambiado?"
           }
         }
+      },
+      approval_comment: {
+        label: "Responder",
+        successMessage: "Respuesta publicada.",
+        params: {
+          comment: {
+            label: "Comentario"
+          },
+          attachments: {
+            label: "Adjuntos"
+          }
+        }
       }
     }
   },

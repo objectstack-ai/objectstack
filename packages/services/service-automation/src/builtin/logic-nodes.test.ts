@@ -116,12 +116,25 @@ describe('assignment node — config-shape parity (Studio + examples)', () => {
         expect(variables.has('kept'), 'nothing is assigned once the node is refused').toBe(false);
     });
 
-    it('[#19939] the two spellings CEL cannot write yet keep resolving — a date macro and `$User`', async () => {
-        engine.registerFlow('assign_flow', assignmentFlow({ assignments: { day: '{TODAY()}', who: '{$User.Id}' } }, ['day', 'who']));
+    it('[#19939] the one spelling CEL cannot write yet keeps resolving — a date macro; the run user is `current_user`', async () => {
+        engine.registerFlow('assign_flow', assignmentFlow({
+            assignments: { day: '{TODAY()}', who: { dialect: 'cel', source: 'current_user.id' } },
+        }, ['day', 'who']));
         const result = await engine.execute('assign_flow', { userId: 'usr_1' } as any);
         expect(result.success).toBe(true);
         const output = result.output as Record<string, unknown>;
         expect(output.who).toBe('usr_1');
         expect(String(output.day)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('[#19939] refuses `{$User.Id}` at registration, naming `current_user.id` and its guard', () => {
+        let message = '';
+        try {
+            engine.registerFlow('assign_flow', assignmentFlow({ assignments: { who: '{$User.Id}' } }, ['who']));
+        } catch (err) { message = (err as Error).message; }
+        expect(message).toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+        expect(message).toContain("node 'assign' (assignment) assignment value at config.assignments.who");
+        expect(message).toContain("{ dialect: 'cel', source: 'current_user.id' }");
+        expect(message).toContain("{ dialect: 'cel', source: 'current_user != null ? current_user.id : null' }");
     });
 });

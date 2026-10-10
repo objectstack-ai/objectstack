@@ -130,7 +130,7 @@ describe('`objectstack validate` — a flow text slot reads `{{ }}` holes (#2211
       expect(findings, JSON.stringify(config)).toHaveLength(1);
       expect(findings[0]!.severity).toBe('error');
       expect(findings[0]!.where).toContain(where);
-      expect(findings[0]!.message).toContain("assignments: { v: '{$User.Id}' }");
+      expect(findings[0]!.message).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
       expect(findings[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(false);
     }
     // Control: the engine-bound `$error` and an ordinary hole stay clean at the same door.

@@ -13,8 +13,11 @@
  *     `has()` can take it, arithmetic with every divisor a double
  *     (`/ 100.0`), text with holes as one concatenation, a token that
  *     resolves to nothing with the literal-text escape.
- *  2. **Kept.** The date macros and `$User` paths, which CEL cannot spell yet,
- *     are not refused — alone or beside another token.
+ *  2. **Kept.** The date macros, which CEL cannot spell yet, are not refused —
+ *     alone or beside another token. The run user (`{$User.*}`) is refused
+ *     (#19939 pass 2): `{$User.Id}` names `current_user.id` and its guard for
+ *     a user-less run, and every other `$User` path says it never resolved and
+ *     names the read of the user record.
  *  3. **Controls.** A token-free literal, every non-string literal and a CEL
  *     envelope pass; only value slots are judged (a `filter` value is not).
  *  4. **Every door's contract.** `FlowValueSlotSchema`, `AssignmentValueSchema`
@@ -33,7 +36,13 @@ import {
   FlowValueSlotSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
-import { CEL_CLAIMED_IDENTIFIERS, CEL_KEYWORDS, celPath } from './flow-template-token';
+import {
+  CEL_CLAIMED_IDENTIFIERS,
+  CEL_KEYWORDS,
+  FLOW_SCOPE_CLAIMED_IDENTIFIERS,
+  celExpression,
+  celPath,
+} from './flow-template-token';
 import {
   VALUE_SLOT_TEMPLATE_REFUSAL,
   flowNodeValueTemplateRefusals,
@@ -153,7 +162,7 @@ describe('a head CEL claims is read through `vars`, the route a `$`-named head t
   });
 
   it('controls: an ordinary head is unchanged, and so is a `$`-named head', () => {
-    for (const ordinary of ['items', 'record', 'timestamp', 'duration', 'dyn', 'lists', 'map_of', 'vars']) {
+    for (const ordinary of ['items', 'record', 'timestamp', 'duration', 'dyn', 'lists', 'map_of', 'variables', 'user']) {
       expect(CEL_CLAIMED_IDENTIFIERS.has(ordinary)).toBe(false);
       expect(celPath(`${ordinary}.0.key`)).toBe(`${ordinary}[0].key`);
     }
@@ -162,7 +171,29 @@ describe('a head CEL claims is read through `vars`, the route a `$`-named head t
   });
 });
 
-describe('the two spellings CEL cannot write yet are KEPT — not refused', () => {
+/**
+ * A head the FLOW scope binds over a variable of the same name — `vars` (the
+ * namespace) and `current_user` (the run user) — is read through `vars` too.
+ * That each printed spelling evaluates, and the bare one reads the binding
+ * instead, is pinned through the engine in `service-automation`'s
+ * `value-slot-template-grammar.test.ts`.
+ */
+describe('a head the flow CEL scope claims is read through `vars`', () => {
+  it('the claimed set is exactly `vars` and `current_user`, and neither is CEL\'s', () => {
+    expect([...FLOW_SCOPE_CLAIMED_IDENTIFIERS].sort()).toEqual(['current_user', 'vars']);
+    for (const name of FLOW_SCOPE_CLAIMED_IDENTIFIERS) expect(CEL_CLAIMED_IDENTIFIERS.has(name)).toBe(false);
+  });
+
+  it.each(['vars', 'current_user'])('%s', (name) => {
+    expect(celPath(name)).toBe(`vars["${name}"]`);
+    expect(celPath(`${name}.0`)).toBe(`vars["${name}"][0]`);
+    expect(celPath(`${name}.tags`)).toBe(`vars["${name}"].tags`);
+    expect(refusalOf(`{${name}.0}`)).toContain(`source: 'vars["${name}"][0]' }`);
+    expect(refusalOf(`{${name}.tags}`)).toContain(`\`has(vars.${name}.tags) ? vars.${name}.tags : null\``);
+  });
+});
+
+describe('the one spelling CEL cannot write yet is KEPT — not refused', () => {
   it.each([
     '{NOW()}',
     '{TODAY()}',
@@ -170,12 +201,97 @@ describe('the two spellings CEL cannot write yet are KEPT — not refused', () =
     '{TODAY() - 3}',
     '{TODAY() + expirationDays}',
     '{NOW() + 2}',
-    '{$User.Id}',
-    '{$User.Email}',
     'Due {TODAY()} for {name}',
-    'Owner: {$User.Id}',
+    // The kept-spelling leak: a run-user token beside a date macro rides the
+    // macro until the macros are retired too.
+    'Due {TODAY()} by {$User.Id}',
   ])('%s', (value) => {
     expect(valueSlotTemplateRefusals(value)).toEqual([]);
+  });
+});
+
+/**
+ * #19939 pass 2 — the maintainer's ruling: Q1 A (`current_user` is the run's
+ * user, or `null` when it has none; `{$User.*}` refused with the bare read and
+ * the guard, and the guard's `update_record` consequence), Q2 A (every other
+ * `$User` path never resolved; read the user record by `current_user.id`).
+ */
+describe('the run user — `{$User.*}` is refused, with the ruled remedies', () => {
+  it('`{$User.Id}`: `current_user.id`, and for a user-less run the guard, with what it changes on `update_record`', () => {
+    const message = refusalOf('{$User.Id}');
+    expect(message).toContain("Write `{$User.Id}` as { dialect: 'cel', source: 'current_user.id' }");
+    expect(message).toContain("{ dialect: 'cel', source: 'current_user != null ? current_user.id : null' }");
+    expect(message).toContain('The guarded form writes `null` where the template wrote nothing');
+    expect(message).toContain('on `update_record` clears a stored value the template left alone');
+  });
+
+  it.each(['{$User.Email}', '{$User.Name}', '{$User.id}', '{$User.Profile.title}'])(
+    '%s: it never resolved, and the email or name is read from the user record by `current_user.id`',
+    (token) => {
+      const message = refusalOf(token);
+      expect(message).toContain(`\`${token}\` never resolved in any shipped run`);
+      expect(message).toContain('`current_user` carries only what the run holds — `id`, `positions`, `organizationId`, `isPlatformAdmin`');
+      expect(message).toContain("assignments: { uid: { dialect: 'cel', source: 'current_user.id' } }");
+      expect(message).toContain("objectName: 'sys_user'");
+      expect(message).toContain("{ dialect: 'cel', source: 'me.email' }");
+      expect(message).not.toContain("Write `");
+    },
+  );
+
+  it('text with the run user\'s id: one concatenation reading `current_user.id`, and the hole\'s guard', () => {
+    const message = refusalOf('Owner: {$User.Id}');
+    expect(message).toContain(`{ dialect: 'cel', source: "'Owner: ' + current_user.id" }`);
+    expect(message).toContain("`(current_user != null ? current_user.id : '')`");
+  });
+
+  it('text with another `$User` path: the concatenation leaves it out, as the template did, and says what to read', () => {
+    const message = refusalOf('Contact {$User.Email} about {name}');
+    expect(message).toContain(`{ dialect: 'cel', source: "'Contact ' + ' about ' + name" }`);
+    expect(message).toContain('`{$User.Email}` never resolved in any shipped run');
+    expect(message).toContain('`me.email`');
+  });
+
+  it('the remedies name no tracker number', () => {
+    for (const token of ['{$User.Id}', '{$User.Email}', 'Owner: {$User.Id}']) {
+      expect(refusalOf(token)).not.toMatch(/#\d/);
+    }
+  });
+});
+
+/**
+ * The EXPRESSION remedy rewrites every variable path inside the expression by
+ * `celPath`'s rule — not only the divisors — so the printed envelope
+ * evaluates (that it does is pinned through the built engine in
+ * `service-automation`'s `value-slot-template-grammar.test.ts`).
+ */
+describe('an expression token\'s remedy reads each variable path the way a path token\'s does', () => {
+  it.each([
+    ['{int * 2}', 'vars["int"] * 2'],
+    ['{items.0 * 2}', 'items[0] * 2'],
+    ['{$error.code + 1}', 'vars["$error"].code + 1'],
+    ['{round(list.0 * 100) / 100}', 'round(vars["list"][0] * 100) / 100.0'],
+    ['{vars.0 + 1}', 'vars["vars"][0] + 1'],
+    ['{record.in + 1}', 'record["in"] + 1'],
+  ])('%s → %s', (token, source) => {
+    expect(refusalOf(token)).toContain(`source: ${source.includes("'") ? JSON.stringify(source) : `'${source}'`} }`);
+  });
+
+  it('leaves a call, a keyword, a quoted string and a member of a call as written', () => {
+    expect(celExpression('max(price, 10)')).toBe('max(price, 10)');
+    expect(celExpression('flag == true ? 1 : null')).toBe('flag == true ? 1 : null');
+    expect(celExpression("name + ' int.0 / 2'")).toBe("name + ' int.0 / 2'");
+    expect(celExpression('size(rows).int')).toBe('size(rows).int');
+  });
+
+  it('keeps the divisor rule exactly: an integer divisor only, a double or a member left alone', () => {
+    expect(celExpression('price/100')).toBe('price/ 100.0');
+    expect(celExpression('price / 100.5')).toBe('price / 100.5');
+    expect(celExpression('price / 2e3')).toBe('price / 2e3');
+    expect(celExpression('10 / 4')).toBe('10 / 4.0');
+  });
+
+  it('a text hole holding an expression is rewritten the same way', () => {
+    expect(refusalOf('Total {int * 2}')).toContain(`source: "'Total ' + (vars[\\"int\\"] * 2)" }`);
   });
 });
 
