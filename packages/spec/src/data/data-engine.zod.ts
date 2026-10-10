@@ -313,6 +313,48 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
 }).describe('A write-path strip event: caller-supplied fields legally dropped from the payload'));
 
 // --------------------------------------------------------------------------
+// Write observability: advisory validation-rule hits (#22726)
+// --------------------------------------------------------------------------
+
+/**
+ * One ADVISORY validation-rule hit on a write: a `severity: 'warning'` or
+ * `'info'` rule (`ValidationRuleSchema`) whose verdict on the written record was
+ * "violated". Only `error` blocks a write, so the write still succeeds; this
+ * event is how its caller learns what the rule said, so a client can show the
+ * advisory to the person who made the write. The rule semantics are unchanged —
+ * the server still logs the hit, and a seed / boot load still folds it into one
+ * summary line per rule (#13889).
+ *
+ * Delivered in-process through `WriteObservabilityOptions.onValidationAdvisory`
+ * (`contracts/data-engine.ts`), once per hit, to the write those options were
+ * passed to and to no other: a nested write a hook or a flow makes inside it
+ * carries its own options, so its hits never reach the outer write's listener.
+ *
+ * A rule that could not be EVALUATED is not a hit — it has no verdict, and its
+ * fault text is written for the operator, not for the person writing — so it is
+ * reported in the server log only, as before.
+ *
+ * Every member is a member of `ValidateDataIssueSchema` (`api/protocol.zod.ts`),
+ * which takes `rule` and `severity` from this schema: an event IS an issue. The
+ * protocol's create / update / clone answers carry these events as `warnings`,
+ * and the validate-only preview appends them to a row's `warnings`, so a write
+ * and the preview that predicts it answer in one vocabulary.
+ */
+export const ValidationAdvisoryEventSchema = lazySchema(() => z.object({
+  rule: z.string().describe('The advisory validation rule\'s declared `name`'),
+  severity: z.enum(['warning', 'info']).describe(
+    'The rule\'s declared severity. Never `error`: an `error` rule refuses the write instead.',
+  ),
+  field: z.string().describe(
+    'The field the rule is about: its first declared field, or `_record` for an object-level rule',
+  ),
+  code: z.string().describe(
+    'Machine-readable finding code, the one a refused write reports for the same rule (`rule_violation` for a predicate rule)',
+  ),
+  message: z.string().describe('The rule\'s author-written message, in the caller\'s locale'),
+}).describe('An advisory (warning or info) validation-rule hit on a write that still succeeded'));
+
+// --------------------------------------------------------------------------
 // Legacy: DataEngineUpdateOptionsSchema (DEPRECATED)
 // --------------------------------------------------------------------------
 
@@ -1416,6 +1458,7 @@ export type EngineQueryOptions = z.input<typeof EngineQueryOptionsSchema>;
 export type EngineQueryOptionsParsed = z.infer<typeof EngineQueryOptionsSchema>;
 export type EngineUpdateOptions = z.input<typeof EngineUpdateOptionsSchema>;
 export type DroppedFieldsEvent = z.input<typeof DroppedFieldsEventSchema>;
+export type ValidationAdvisoryEvent = z.input<typeof ValidationAdvisoryEventSchema>;
 export type EngineDeleteOptions = z.input<typeof EngineDeleteOptionsSchema>;
 export type EngineAggregateOptions = z.input<typeof EngineAggregateOptionsSchema>;
 /**

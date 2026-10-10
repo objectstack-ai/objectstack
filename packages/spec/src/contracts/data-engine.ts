@@ -9,6 +9,7 @@ import {
   EngineAggregateOptions,
   EngineCountOptions,
   DroppedFieldsEvent,
+  ValidationAdvisoryEvent,
 } from '../data/index.js';
 import type { IDataDriver } from './data-driver.js';
 import type { IntrospectedSchema } from './schema-diff-service.js';
@@ -66,6 +67,32 @@ import type { IntrospectedSchema } from './schema-diff-service.js';
 export interface WriteObservabilityOptions {
   /** Called once per strip pass that dropped ≥1 caller-supplied field. */
   onFieldsDropped?: (event: DroppedFieldsEvent) => void;
+
+  /**
+   * Called once per ADVISORY validation-rule hit on this write (#22726): a
+   * `severity: 'warning'` or `'info'` rule whose verdict on the written record
+   * was "violated" (`ValidationAdvisoryEventSchema`). Advisory rules never
+   * block, so the write proceeds; this listener is how a caller that answers a
+   * person learns what the rule said. `metadata-protocol`'s `createData`,
+   * `updateData` and `cloneData` pass one and answer the hits as `warnings`.
+   *
+   * The engine calls it for every evaluation of the object's rules on the write
+   * the options were passed to: per row on `insert`, and on `update` both by id
+   * and per matched row of a `multi` update. A nested write a hook or a flow
+   * makes inside this one carries its own options, so its hits never reach this
+   * listener. An unevaluable rule is not a hit and is not reported here.
+   *
+   * It fires when the rules are evaluated, BEFORE the driver write, so a hit is
+   * provisional until the write resolves: a caller reports hits only from a
+   * write that succeeded (a refused write answers its error, never `warnings`).
+   * The server-side reporting is unchanged by passing it — the per-write `warn`
+   * line, and the seed / boot load's one summary line per rule (#13889).
+   *
+   * Same constraints as `onFieldsDropped`: in-process only (a function cannot
+   * cross the RPC boundary), and a listener that throws never breaks the write —
+   * engines catch and log.
+   */
+  onValidationAdvisory?: (event: ValidationAdvisoryEvent) => void;
 
   /**
    * Refuse the write instead of stripping (#5126). Default `false` — off.

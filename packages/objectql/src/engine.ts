@@ -278,7 +278,7 @@ import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
-import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { collectPredicateRelationships, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -612,7 +612,7 @@ const ENGINE_FIND_OPTION_KEYS: ReadonlySet<string> = new Set([
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_UPDATE_OPTION_KEYS: ReadonlySet<string> = new Set([
-  'context', 'where', 'multi', 'returning', 'onFieldsDropped', 'strictReadonlyWrites',
+  'context', 'where', 'multi', 'returning', 'onFieldsDropped', 'onValidationAdvisory', 'strictReadonlyWrites',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
@@ -13849,7 +13849,7 @@ export class ObjectQL implements IObjectQLEngine {
           // preview admits exactly what the write would.
           keptOptionValues: options?.context?.keptOptionValues,
         });
-        evaluateValidationRules(schemaForValidation as any, row, mode, {
+        warnings.push(...evaluateValidationRules(schemaForValidation as any, row, mode, {
           // [#22445] The stored row, when this row named one: the by-id
           // update's `previous: priorRecord`. Absent, the record is the patch.
           ...(storedRows[i] ? { previous: storedRows[i] } : {}),
@@ -13861,7 +13861,7 @@ export class ObjectQL implements IObjectQLEngine {
           previousParent: previewParents?.previousParents[i],
           related: previewRelatedForRow(judgedViews[i]),
           permissions: previewPermissionsFor(row),
-        });
+        }));
       } catch (e) {
         if (e instanceof ValidationError) {
           return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
@@ -14785,7 +14785,7 @@ export class ObjectQL implements IObjectQLEngine {
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
             validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) });
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
@@ -16373,7 +16373,7 @@ export class ObjectQL implements IObjectQLEngine {
                // resolution failure fails this write closed right here.
                const updatePayload = hookContext.input.data as Record<string, unknown>;
                const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], permissionResolution))(updatePayload);
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate });
+               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
@@ -16676,7 +16676,7 @@ export class ObjectQL implements IObjectQLEngine {
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions });
+                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions }), this.logger, object);
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -16692,7 +16692,7 @@ export class ObjectQL implements IObjectQLEngine {
                    // every such object down the per-row branch above, where the
                    // binding is supplied. This branch only ever runs for the
                    // rule families that never read a header.
-                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions });
+                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions }), this.logger, object);
                }
                // [#4441] The bulk call site too — a guard wired into single-id
                // writes only is still a hole one call site over (AGENTS.md

@@ -18,7 +18,7 @@ import { retiredKey } from '../shared/retired-key';
 // through it, so `api/UpdateAiConversationRequest.json` states it.
 import { requiredOneOf } from '../shared/refinement-projection';
 import { MetadataItemNameSchema } from '../shared/identifiers.zod';
-import { DroppedFieldsEventSchema, QueryWithTransportSchema } from '../data/data-engine.zod';
+import { DroppedFieldsEventSchema, QueryWithTransportSchema, ValidationAdvisoryEventSchema } from '../data/data-engine.zod';
 import { 
   AnalyticsQueryRequestSchema,  
   AnalyticsResultResponseSchema, 
@@ -2043,6 +2043,44 @@ export const CreateDataRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One field-level finding from a validate-only run — the same
+ * `{ field, code, message }` triple the engine's `ValidationError.fields`
+ * carries, so a caller reads one vocabulary whether the verdict arrived from a
+ * preview or from a rejected write.
+ *
+ * [#22726] It is also the element of every single-record write answer's
+ * `warnings`, and an ADVISORY validation-rule hit additionally names its `rule`
+ * and `severity` — both members taken from `ValidationAdvisoryEventSchema`
+ * (`data/data-engine.zod.ts`), the event the engine reports the hit through,
+ * so an event IS an issue and the write and its preview answer in one
+ * vocabulary. Declared before the write answers that reference it: a schema
+ * built eagerly (`OS_EAGER_SCHEMAS=1`) would otherwise read it before it exists.
+ */
+export const ValidateDataIssueSchema = lazySchema(() => z.object({
+  field: z.string().describe('The field the finding is about (`_record` for an object-level rule).'),
+  code: z.string().describe('Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`.'),
+  message: z.string().describe('Human-readable message — a validation rule\'s author-written text where one exists.'),
+  rule: ValidationAdvisoryEventSchema.shape.rule.optional().describe(
+    'The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit.',
+  ),
+  severity: ValidationAdvisoryEventSchema.shape.severity.optional().describe(
+    'The advisory rule\'s declared severity, `warning` or `info`. Present only on an advisory rule hit.',
+  ),
+}));
+
+/**
+ * The `warnings` member every single-record write answer declares (#22726) —
+ * one sentence, so the create, clone and update answers cannot drift apart.
+ */
+const WRITE_ANSWER_WARNINGS_DESCRIPTION =
+  'The advisory validation-rule hits of THIS write: each `severity: \'warning\'` or `\'info\'` rule whose ' +
+  'verdict on the written record was "violated", with its `rule` name, `severity`, `field`, `code` and ' +
+  'author-written `message` — the same element the validate-only preview reports in a row\'s `warnings`. ' +
+  'Advisory rules never block, so the write succeeded; this is the advisory to show the person who made it. ' +
+  'Present ONLY when at least one advisory rule hit; a write with no hit omits the key. Hits of a nested write ' +
+  'a hook or a flow made inside this one are not included, and a rule that could not be evaluated is not a hit.';
+
+/**
  * Create Data Response
  */
 export const CreateDataResponseSchema = lazySchema(() => z.object({
@@ -2059,6 +2097,7 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
     '`X-ObjectStack-Dropped-Fields` response header. Optional — omit-when-empty keeps the ' +
     'shape backward-compatible for existing clients.'
   ),
+  warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
 }));
 
 /**
@@ -2106,18 +2145,7 @@ export const CloneDataResponseSchema = lazySchema(() => z.object({
     + 'relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. '
     + 'Optional — omit-when-empty keeps the shape backward-compatible for existing clients.'
   ),
-}));
-
-/**
- * One field-level finding from a validate-only run — the same
- * `{ field, code, message }` triple the engine's `ValidationError.fields`
- * carries, so a caller reads one vocabulary whether the verdict arrived from a
- * preview or from a rejected write.
- */
-export const ValidateDataIssueSchema = lazySchema(() => z.object({
-  field: z.string().describe('The field the finding is about (`_record` for an object-level rule).'),
-  code: z.string().describe('Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`.'),
-  message: z.string().describe('Human-readable message — a validation rule\'s author-written text where one exists.'),
+  warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
 }));
 
 /**
@@ -2166,6 +2194,12 @@ export const ValidateDataRequestSchema = lazySchema(() => z.object({
  * vocabulary the write reports, ⛔ never a second enum — so a preview and the
  * write it predicts answer in one vocabulary, exactly as `errors` / `warnings`
  * share {@link ValidateDataIssueSchema} with a rejected write.
+ *
+ * [#22726] A row's `warnings` also carries the ADVISORY validation-rule hits of
+ * the evaluation the write itself runs, appended after the admitted value
+ * shapes: the same elements a create / update / clone answers as its own
+ * `warnings`, so the preview fills the key the write fills, from the same
+ * `evaluateValidationRules` call.
  */
 export const ValidateDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('The object name.'),
@@ -2175,8 +2209,12 @@ export const ValidateDataResponseSchema = lazySchema(() => z.object({
     valid: z.boolean().describe('True when this row would be accepted by the write path.'),
     errors: z.array(ValidateDataIssueSchema).describe('Findings that would REJECT this row. Empty when valid.'),
     warnings: z.array(ValidateDataIssueSchema).describe(
-      'Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a ' +
-      'warn-first posture. The row is valid; the write would store it and log the same complaint.',
+      'Findings the target deployment ADMITS rather than rejects; the row is valid, and the write would store it. ' +
+      'Two populations, in this order: ADR-0104 value shapes admitted under a warn-first posture (the write logs ' +
+      'the same complaint), then the hits of ADVISORY validation rules (`severity: \'warning\'` or `\'info\'`), ' +
+      'each naming its `rule` and `severity` — the same elements the write answers as its own `warnings`. ' +
+      'An advisory hit is reported only on a row the verdict accepts, as on the write, which answers a refused ' +
+      'row with its error.',
     ),
     droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
       'Write-observability for the preview: caller-supplied fields the write would LEGALLY strip from THIS ' +
@@ -2240,6 +2278,7 @@ export const UpdateDataResponseSchema = lazySchema(() => z.object({
     'header. Optional — omit-when-empty keeps the shape backward-compatible for existing ' +
     'clients that only read `record`.'
   ),
+  warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
 }));
 
 /**
