@@ -2,6 +2,7 @@
 '@objectstack/spec': major
 '@objectstack/service-automation': major
 '@objectstack/cli': patch
+'@objectstack/lint': patch
 ---
 
 A flow VALUE slot now refuses the run-user template token `{$User.<path>}` as well, and every CEL expression in a flow sees **`current_user`**, the run's user. `{$User.Id}` in a `create_record` / `update_record` `fields` value or an `assignment` value is refused at `objectstack validate`, at `registerFlow` and by the executor, naming `current_user.id` and, for a flow that can run without a user, its guard; every other `$User` path is refused saying it never resolved.
@@ -40,3 +41,5 @@ Clause-②: no (narrowing)
 - **The refusal.** `valueSlotTemplateRefusals` / `flowNodeValueTemplateRefusals` (`@objectstack/spec/automation`); the text-slot judge's run-user remedy (`textSlotTemplateRefusal`) now computes the id with the CEL envelope.
 - **The ledger.** The step-18 D3 entries `flow-value-slot-template-dialect-refused` (amended to refuse the run-user paths), `flow-text-slot-single-brace-refused` and `flow-text-slot-unbound-dollar-root-refused` (their run-user remedy). No key is removed, so there is no tombstone, and there is no D2 conversion.
 - **`@objectstack/cli`.** `os explain flow`'s example writes `current_user.id` and gates on `current_user != null`.
+- **`@objectstack/lint`.** `flow-bare-dollar-reference`'s hint for a bare `$name.path` in a value slot names the CEL envelope the value-slot refusal writes for it — `current_user.id` and its guard for `$User.Id`, the variable the reference names for any other — where it named `{source.id}` and `{$User.Id}`, both refused there. A text slot's hint keeps the `{{ }}` hole, and every other position keeps the single brace.
+- **`@objectstack/service-automation`'s README.** Its *Expressions* section states the value-slot envelope, `current_user`, and the date macros still read until CEL can write them.
