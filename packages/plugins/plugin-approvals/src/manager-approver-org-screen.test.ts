@@ -162,17 +162,20 @@ describe('#10153 manager approver org screen', () => {
   const storedOrg = () => (engine._tables['sys_approval_request'] ?? [])[0]?.organization_id;
 
   // `{ type: 'manager' }` and `{ type: 'manager', value: 'owner_id' }` resolve
-  // through the same line (`record[a.value] ?? record.owner_id`); the explicit
-  // spelling is used from here on only so the unresolved fallback slot reads as
-  // `manager:owner_id` rather than `manager:undefined`.
+  // through the same line (`record[a.value] ?? record.owner_id`). The explicit
+  // spelling was chosen so the unresolved fallback slot read `manager:owner_id`
+  // rather than `manager:undefined`; since #22558 an unresolved manager adds no
+  // slot at all, so neither spelling reaches the slate any more.
   const MGR = { type: 'manager', value: 'owner_id' };
 
   it('A — a manager whose membership is in ANOTHER organization is screened OUT', async () => {
     const req = opened(await svc.openNodeRequest(input([MGR]), CTX_A));
     console.log('[PROBE A] request org =', storedOrg(), 'pending_approvers =', JSON.stringify(req.pending_approvers));
-    // Inverted from round 1, which measured ['u_mgr_b'] here.
-    expect(req.pending_approvers).toEqual(['manager:owner_id']);
-    expect((req.pending_approvers ?? []).some((x: string) => !x.includes(':'))).toBe(false);
+    // Inverted from round 1, which measured ['u_mgr_b'] here. Screened out, the
+    // manager rung resolves to nobody and adds no slot (#22558) — it used to
+    // leave the dead `manager:owner_id` literal.
+    expect(req.pending_approvers).not.toContain('u_mgr_b');
+    expect(req.pending_approvers).toEqual([]);
   });
 
   it('A2 — a manager who IS a member of the request org still resolves', async () => {
@@ -226,7 +229,8 @@ describe('#10153 manager approver org screen', () => {
     const req = opened(await svc.openNodeRequest(input([MGR]), CTX_A)); // onEmptyApprovers absent => admin_rescue
     console.log('[PROBE C-a2] status =', req.status, 'approvers =', JSON.stringify(req.pending_approvers));
     expect(req.status).toBe('pending');
-    expect(req.pending_approvers).toEqual(['manager:owner_id']);
+    // An empty slate since #22558 (was the dead `manager:owner_id` literal).
+    expect(req.pending_approvers).toEqual([]);
   });
 
   it('CLAUSE-2 (b) — a SCREENED sibling in the same shape THROWS NO_APPROVERS', async () => {
