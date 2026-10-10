@@ -6407,7 +6407,7 @@ function selfTest() {
       git(['commit', '-qm', 'base'], dir);
       return { dir, w };
     };
-    const ids = (witness) => (witness.json ? projectedMigrationIds(witness.json) : null);
+    const ids = (witness) => (witness?.json ? projectedMigrationIds(witness.json) : null);
 
     // W1, THE PIN: a withdrawn id no longer false-reds. HEAD's registry dropped
     // `withdrawn-one`; a stale committed copy -- the shape the deleted file had --
@@ -6425,7 +6425,7 @@ function selfTest() {
     assert(p1.length === 0, `W1: a withdrawn migration id must NOT red the gate -- got: ${p1.join('|')}`);
     assert(
       JSON.stringify(ids(used)) === JSON.stringify(['kept-one']),
-      `W1: the witness is generated from HEAD's registry (only \`kept-one\`), not read from the stale copy -- got ${JSON.stringify(ids(used))} ${used?.problem ?? ''}`,
+      `W1: the gate consulted the GENERATED witness, built from HEAD's registry (only \`kept-one\`), never the stale copy -- got ${used === null ? 'no witness consulted at all' : `${JSON.stringify(ids(used))} ${used.problem ?? ''}`}`,
     );
 
     // W2: the witness describes HEAD, never the working tree. An uncommitted edit
