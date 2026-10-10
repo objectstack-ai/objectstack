@@ -2379,11 +2379,14 @@ export class ObjectQLPlugin implements Plugin {
    * Read the ACTIVE runtime-authored hook rows from `sys_metadata`.
    *
    * Reads the table directly (like `protocol.getMetaItems` does) instead of
-   * going through the metadata service, because (a) env-scoped kernels have
-   * no DatabaseLoader so the service never surfaces these rows, and (b) rows
-   * published from a Studio session are org-scoped — engine hooks fire
-   * process-wide, so we take active rows across ALL organizations rather
-   * than one org's overlay view.
+   * going through the metadata service, because env-scoped kernels have no
+   * DatabaseLoader so the service never surfaces these rows.
+   *
+   * [ADR-0131 D6] The environment's rows only (`organization_id IS NULL`),
+   * the rule every metadata read follows: a legacy organization-scoped hook
+   * row is not bound — the protocol's boot report
+   * (`reportUnhydratableOrgScopedRows`) names it, and the v18 migration
+   * ceremony carries it.
    *
    * Returns `null` when the read failed (e.g. no sys_metadata table on this
    * kernel) — callers must treat that as "couldn't read", NOT "zero hooks",
@@ -2395,20 +2398,20 @@ export class ObjectQLPlugin implements Plugin {
       // No environment filter: per ADR-0005 (revised 2026-05) each
       // environment has its own physical DB, so this kernel's sys_metadata
       // only ever holds its own rows (saveMetaItem no longer stamps
-      // environment_id). Rows across ALL organizations are taken — engine
-      // hooks fire process-wide, matching flow-trigger semantics.
+      // environment_id). [ADR-0131 D6] The environment's rows only — see
+      // the TSDoc.
       //
       // [#21911, ADR-0096] The explicit system opt-in: a boot / resync read
       // of the platform store with no caller behind it, never a principal-less
       // engine context.
       let rows: any[] = (await this.ql.find('sys_metadata', {
-        where: { type: 'hook', state: 'active' },
+        where: { type: 'hook', state: 'active', organization_id: null },
         context: { isSystem: true },
       })) ?? [];
       if (rows.length === 0) {
         // Legacy plural rows — mirrors getMetaItems' singular/plural fallback.
         rows = (await this.ql.find('sys_metadata', {
-          where: { type: 'hooks', state: 'active' },
+          where: { type: 'hooks', state: 'active', organization_id: null },
           context: { isSystem: true },
         })) ?? [];
       }
@@ -2564,9 +2567,9 @@ export class ObjectQLPlugin implements Plugin {
    *      handler still needs registering.
    *
    * Same read discipline as {@link readAuthoredHookRows}: direct table read
-   * (env-scoped kernels surface authored rows nowhere else), all
-   * organizations (engine actions are process-wide), `null` on a failed
-   * read so callers never tear down live registrations on an error.
+   * (env-scoped kernels surface authored rows nowhere else), the
+   * environment's rows only (ADR-0131 D6), `null` on a failed read so callers
+   * never tear down live registrations on an error.
    */
   private async readAuthoredActionRows(ctx: PluginContext): Promise<any[] | null> {
     if (!this.ql) return null;
@@ -2589,12 +2592,12 @@ export class ObjectQLPlugin implements Plugin {
       // [#21911, ADR-0096] The explicit system opt-in on all three reads — see
       // readAuthoredHookRows.
       let rows: any[] = (await this.ql.find('sys_metadata', {
-        where: { type: 'action', state: 'active' },
+        where: { type: 'action', state: 'active', organization_id: null },
         context: { isSystem: true },
       })) ?? [];
       if (rows.length === 0) {
         rows = (await this.ql.find('sys_metadata', {
-          where: { type: 'actions', state: 'active' },
+          where: { type: 'actions', state: 'active', organization_id: null },
           context: { isSystem: true },
         })) ?? [];
       }
@@ -2608,7 +2611,7 @@ export class ObjectQLPlugin implements Plugin {
       // Converting the OBJECT row canonicalizes the embedded actions too —
       // the chain's action walker covers `objects[].actions[]`.
       const objectRows: any[] = (await this.ql.find('sys_metadata', {
-        where: { type: 'object', state: 'active' },
+        where: { type: 'object', state: 'active', organization_id: null },
         context: { isSystem: true },
       })) ?? [];
       for (const row of objectRows) {

@@ -1547,13 +1547,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // true` on the next restart, because the env-wide row it left
                     // untouched is the only one cold boot loads. The
                     // `getMetaItems` read below is env-wide for the same
-                    // reason, and since commit 96326040f it is so by construction: that
-                    // method applies `organizationIdForMetaRead` to
-                    // `request.type` itself, and the predicate answers
-                    // `undefined` for every type the registry declares
-                    // non-overridable — `app` among them, rolled back to
-                    // `allowOrgOverride: false` in commit ee58392e1. [ADR-0131 D6]
-                    // This route hands it no organization at all any more.
+                    // reason, and by construction: [ADR-0131 D6] every
+                    // metadata read is environment → code, and this route
+                    // hands it no organization at all.
                     //
                     // ⛔ Dropping it is the REPAIR, not an oversight to undo.
                     // An org-scoped `app` row is an unhydratable phantom —
@@ -2362,15 +2358,11 @@ _context: HttpProtocolContext,
     const datasets: any[] = [];
     const readErrors: string[] = [];
     for (const name of names) {
-        // Read the just-published seed body. THE REGISTRY DECIDES THE SCOPE,
-        // not this call site: `seed` declares `allowOrgOverride: false`, and
-        // since commit d5cbb44f3 `getMetaItem` opens by resolving
-        // `organizationIdForMetaRead(request.type, request.organizationId)`
-        // and spends THAT binding — never the raw argument — on every read
-        // beneath it. The predicate answers `undefined` for every type the
-        // registry declares non-overridable, so this read is env-wide by
-        // construction: `organization_id IS NULL`, the partition a workspace
-        // seed is stored in and the only one cold boot hydrates.
+        // Read the just-published seed body. The protocol decides the scope,
+        // not this call site: [ADR-0131 D6] every metadata read is
+        // environment → code, so this read is env-wide by construction:
+        // `organization_id IS NULL`, the partition a workspace seed is stored
+        // in and the only one cold boot hydrates.
         //
         // [commit 8744de9e9] This used to be a two-attempt org-then-env ladder, written
         // when resolving the wrong scope here is what silently produced "0

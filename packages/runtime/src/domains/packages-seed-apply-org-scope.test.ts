@@ -23,13 +23,11 @@
  *
  * ## The mechanism, in one line
  *
- * `getMetaItem` opens with `organizationIdForMetaRead(request.type,
- * request.organizationId)` (commit d5cbb44f3, the singular twin of commit 96326040f's plural
- * gate) and spends that binding — never `request.organizationId` — on every
- * read below it. `seed` declares `allowOrgOverride: false`
- * (`metadata-plugin.zod.ts`), so the predicate answers `undefined` whatever
- * organization arrives. ⇒ `{ type:'seed', name, organizationId }` and
- * `{ type:'seed', name }` differ in a field the callee provably drops.
+ * `getMetaItem` reads no organization at all (ADR-0131 D6: every metadata
+ * read is environment → code; before it, commit d5cbb44f3's gate already
+ * dropped an organization for `seed`, which declares `allowOrgOverride:
+ * false`). ⇒ `{ type:'seed', name, organizationId }` and `{ type:'seed', name }`
+ * differ in a field the callee provably drops.
  *
  * ⛔ The repair is NOT to restore org-awareness to this read. An org-scoped
  * `seed` row is the unhydratable phantom `reportUnhydratableOrgScopedRows`
@@ -80,7 +78,6 @@ import {
     assertEngineDeleteDispatch,
     assertEngineFindOnePredicate,
     assertEngineUpdateDispatch,
-    organizationIdForMetaRead,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
@@ -403,15 +400,11 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('#15068 · 1 · the two rungs resolve to one read', () => {
-    it('`seed` is non-overridable, so the read gate drops the organization', () => {
+    it('`seed` is non-overridable — and since ADR-0131 D6 no read takes an organization', () => {
         // The registry fact the card rests on, read from the registry rather
         // than restated.
         expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'seed')?.allowOrgOverride)
             .toBe(false);
-        expect(organizationIdForMetaRead('seed', ORG)).toBeUndefined();
-        // ⇒ and the control that makes that reading mean something: the same
-        // predicate DOES carry an organization for an overridable type.
-        expect(organizationIdForMetaRead('view', ORG)).toBe(ORG);
     });
 
     it('the two rungs issue the same predicates and serve the same answer', async () => {
