@@ -79,7 +79,7 @@ const BINDINGS: Array<[string, Record<string, unknown>]> = [
 describe('#8990 — sys_approval_request decision actions never fault on a sparse binding', () => {
   it('every action predicate reads record.* and is has()-guarded on each path', () => {
     const predicates = ACTIONS.map((a) => sourceOf(a.visible)).filter((v): v is string => typeof v === 'string');
-    expect(predicates.length).toBe(8);
+    expect(predicates.length).toBe(9);
     const unguarded: string[] = [];
     for (const source of predicates) {
       for (const m of source.matchAll(/record((?:\.[a-z_][a-z0-9_]*)+)/gi)) {
@@ -107,14 +107,14 @@ describe('#8990 — sys_approval_request decision actions never fault on a spars
 describe('#8990 — the fail-closed intent survives as a real false, and the levers still open', () => {
   it('an absent viewer block closes every viewer-gated lever', () => {
     const row = { status: 'pending' };
-    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_send_back', 'approval_request_info', 'approval_remind', 'approval_recall', 'approval_resubmit']) {
+    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_send_back', 'approval_request_info', 'approval_remind', 'approval_recall', 'approval_resubmit', 'approval_comment']) {
       expect([name, evaluate(visibleOf(name), row)]).toEqual([name, false]);
     }
   });
 
-  it('a current pending approver still gets approve / reject / reassign / send back / request info', () => {
+  it('a current pending approver still gets approve / reject / reassign / send back / request info, and the reply', () => {
     const approver = { status: 'pending', viewer: { can_act: true, can_override: false, is_submitter: false } };
-    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_send_back', 'approval_request_info']) {
+    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_send_back', 'approval_request_info', 'approval_comment']) {
       expect([name, evaluate(visibleOf(name), approver)]).toEqual([name, true]);
     }
     // Submitter levers stay closed for them.
@@ -144,6 +144,9 @@ describe('#8990 — the fail-closed intent survives as a real false, and the lev
     // moved, and remind/resubmit stay shut for an actor who is not the submitter.
     expect(evaluate(visibleOf('approval_remind'), admin)).toBe(false);
     expect(evaluate(visibleOf('approval_resubmit'), { ...admin, status: 'returned' })).toBe(false);
+    // Nor into the thread reply: the comment route admits the submitter and the
+    // slot holders only, so an override admin on no slot gets no reply button.
+    expect(evaluate(visibleOf('approval_comment'), admin)).toBe(false);
   });
 
   it('the recall override arm is pending-only in effect, because `can_override` is itself pending-scoped (#12716)', () => {
@@ -181,6 +184,16 @@ describe('#8990 — the fail-closed intent survives as a real false, and the lev
     expect(evaluate(visibleOf('approval_remind'), { status: 'approved', viewer: submitter })).toBe(false);
     expect(evaluate(visibleOf('approval_recall'), { status: 'approved', viewer: submitter })).toBe(false);
     expect(evaluate(visibleOf('approval_resubmit'), { status: 'pending', viewer: submitter })).toBe(false);
+  });
+
+  it('the submitter gets the reply while the request is pending, and only then', () => {
+    // `is_submitter` carries no status test where it is computed, so the
+    // reply's submitter arm states the `pending` the comment route requires.
+    const submitter = { can_act: false, can_override: false, is_submitter: true };
+    expect(evaluate(visibleOf('approval_comment'), { status: 'pending', viewer: submitter })).toBe(true);
+    for (const status of ['returned', 'approved', 'rejected', 'recalled', 'cancelled']) {
+      expect([status, evaluate(visibleOf('approval_comment'), { status, viewer: submitter })]).toEqual([status, false]);
+    }
   });
 });
 
