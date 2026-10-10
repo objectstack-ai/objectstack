@@ -875,12 +875,14 @@ describe('servedPlatform (#22506)', () => {
   it('stamps the config\'s pinyin-search decision, as `serve` does', async () => {
     const dir = project([
       'export default {',
+      "  manifest: { id: 'com.example.os22506zh', name: 'zh locales', version: '0.0.0', type: 'app' },",
       "  objects: [{ name: 'os22506_zh', fields: { title: { type: 'text' } } }],",
       "  i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },",
       '};',
       '',
     ].join('\n'));
-    await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
+    expect(out.hostConfigLoaded).toBe(true);
     expect(process.env.OS_SEARCH_PINYIN_ENABLED).toBe('true');
   }, 60_000);
 
