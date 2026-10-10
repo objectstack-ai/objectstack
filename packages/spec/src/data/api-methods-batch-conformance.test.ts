@@ -61,7 +61,14 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `47b1f0bb7`, re-read there 2026-10-09:
+  // (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+  // every objectui file this record cites is byte-identical across the hop
+  // from `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved:
+  // `ObjectGrid.tsx:4868-4895` still hashes to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` and
+  // `hooks/useBulkExecutor.ts:298-303` to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `47b1f0bb7`, re-read there
+  // 2026-10-09:
   // in `packages/plugin-grid`, on the hop off `f0268ad78`, `ObjectGrid.tsx`
   // changed again (19 insertions, 11 deletions: objectui#11865 slice m,
   // objectui `2063f7a96`: one import line, and the grouped pager's

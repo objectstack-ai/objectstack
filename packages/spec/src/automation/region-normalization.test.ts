@@ -124,14 +124,14 @@ describe('FlowSchema.parse canonicalizes regions with no second call', () => {
   it('normalizes both try_catch regions', () => {
     const flow = flowWith({
       id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-      config: { try: gatedRegion(), catch: gatedRegion('_c'), errorVariable: '$err' },
+      config: { try: gatedRegion(), catch: gatedRegion('_c'), errorVariable: 'err' },
     });
 
     const cfg = (flow.nodes[1]!.config as any);
     expect(cfg.try.edges[0].condition).toEqual(ENVELOPE);
     expect(cfg.catch.edges[0].condition).toEqual(ENVELOPE);
     // Sibling config keys are untouched — only the region slots are rewritten.
-    expect(cfg.errorVariable).toBe('$err');
+    expect(cfg.errorVariable).toBe('err');
   });
 
   it('recurses — a condition three containers deep is enveloped too', () => {

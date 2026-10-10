@@ -13500,6 +13500,31 @@ export class SqlDriver implements IDataDriver {
       const declared = Object.entries<any>(obj.fields ?? {})
         .filter(([, field]) => fieldHasColumn(field ?? {}))
         .map(([name]) => name);
+      // [#22506] A rotation-declared object (ADR-0057 P2) is not a table under
+      // its base name: the rotator keeps it as the CURRENT shard
+      // (`<table>__r<key>`) plus a read VIEW under the base name, so the
+      // `hasTable` probe below — false for a view — listed it as `create_table`
+      // on every plan, and the flush (which takes the sync's rotation branch)
+      // then created nothing: a finding no apply could clear. It is answered
+      // from the rotator's own facts instead — its shard key for now, and the
+      // two names in `sqlite_master`: the current shard and the read view
+      // present means nothing is pending. Anything else falls through to the
+      // probes below (no shard yet: `create_table`, which the flush performs).
+      // The deferral stores the whole definition (`{ ...obj, name }`), so its
+      // `lifecycle` is here even though the map's declared value type omits it.
+      const rotation = (obj as { lifecycle?: { storage?: { strategy?: string; unit?: 'day' | 'week' | 'month' } } })
+        .lifecycle?.storage;
+      if (rotation?.strategy === 'rotation' && rotation.unit && this.supportsRotation) {
+        const current = `${tableName}__r${this.rotationShardKey(Date.now(), rotation.unit)}`;
+        const raw: any = await this.knex.raw(
+          'SELECT name, type FROM sqlite_master WHERE name IN (?, ?)',
+          [tableName, current],
+        );
+        const rows: Array<{ name: string; type: string }> = Array.isArray(raw) ? raw : raw?.rows ?? [];
+        const readView = rows.some((r) => r.name === tableName && r.type === 'view');
+        const currentShard = rows.some((r) => r.name === current && r.type === 'table');
+        if (readView && currentShard) continue;
+      }
       if (!(await this.knex.schema.hasTable(tableName))) {
         // A table that does not exist yet is created empty, so nothing to converge.
         out.push({ table: tableName, kind: 'create_table', columns: declared });
