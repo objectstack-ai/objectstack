@@ -208,8 +208,8 @@ const CAPABILITIES_HISTORY =
  *
  * Opt-out flags (`feeds`, `activities`, `clone`, `searchable`, `apiEnabled`)
  * default to `true`: absent block/flag = enabled, and consumers gate on
- * explicit `false` only. Opt-in flags (`trackHistory`, `files`) default to
- * `false`.
+ * explicit `false` only. Opt-in flags (`trackHistory`, `files`,
+ * `approvalsVisibleToReaders`) default to `false`.
  *
  * `.strict()`: unknown keys (incl. the retired `trash` / `mru`, #2377) are
  * rejected with guidance, not stripped (#1535).
@@ -308,6 +308,31 @@ export const ObjectCapabilities = strictObject({
 
   /** Allow cloning records */
   clone: z.boolean().default(true).describe('Allow record deep cloning'),
+
+  /**
+   * Record-reader approval visibility — opt-in, default OFF (#8652).
+   *
+   * Contract: `true` lets a caller who can READ a record of this object see
+   * that record's approval requests and their full action history, READ-ONLY.
+   * Readability is the object's own CRUD, sharing and RLS, asked as the
+   * caller; no new permission is granted. It holds on the approvals API and on
+   * the generic data API alike (`sys_approval_request`, `sys_approval_action`
+   * and `sys_approval_approver` answer by one visibility rule), and only on a
+   * read that names the record — the inbox is not widened. No approval action
+   * is offered: approve, reject, reassign, recall and comment keep authorizing
+   * on the pending approver slate, the submitter, or administrator override.
+   * What becomes visible: the request row (with its snapshot of the record at
+   * submission) and each action's actor, decision, time, comment text and
+   * attachments.
+   *
+   * Read by `@objectstack/plugin-approvals` on every such read, from the
+   * object's live registered definition: an object registered or edited after
+   * boot takes effect, and removing the flag turns the tier off, with no
+   * restart. A host that builds the plugin itself may also name objects in
+   * `ApprovalsPluginOptions.recordReaderVisibleObjects`; either source turns
+   * the tier on for an object.
+   */
+  approvalsVisibleToReaders: z.boolean().default(false).describe('Opt-in: true lets a caller who can read a record of this object see that record\'s approval requests and full action history (comments and attachments included), read-only, on the approvals API and the generic data API alike, on a read that names the record. No approval action is offered. Default false: only the request\'s participants (submitter, approvers, past actors) and administrators see it'),
 });
 
 /**
