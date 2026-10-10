@@ -35,11 +35,11 @@ import Database from 'better-sqlite3';
  *
  *  - `pending` is empty — every object the plan examines has the table the
  *    boot created (plan ⊆ boot);
- *  - the unmanaged-tables sweep names nothing but `sys_packages` — no platform
- *    table the boot created is undeclared by the plan;
  *  - the boot's tables, a rotation shard read as its object, number exactly
  *    the plan's examined objects plus `sys_packages` (boot ⊆ plan, app tables
- *    included).
+ *    included) — with `pending` empty, equal counts are equal sets;
+ *  - where the unmanaged-tables sweep runs (a project with a host config), it
+ *    names nothing but `sys_packages`.
  *
  * `sys_packages` is the one table outside the object set, by construction:
  * `PackageServicePlugin.start()` creates it with raw DDL (`package-table.ts`),
@@ -134,12 +134,18 @@ function expectParity(r: Reading): void {
   expect(r.plan.pending).toEqual([]);
   expect(r.plan.changes).toEqual([]);
   expect(r.plan.composition?.coverage?.unexaminedObjects).toBe(0);
-  // boot ⊆ plan, platform tables by name …
-  const unmanaged = (r.plan.unmanagedTables?.tables ?? []).map((t: any) => (typeof t === 'string' ? t : t.table ?? t.name));
-  expect(unmanaged).toEqual(NOT_AN_OBJECT);
-  // … and every table by count: the boot's tables are the examined objects plus the raw-DDL ones.
-  expect(r.tables.length).toBe(r.plan.managedTables + NOT_AN_OBJECT.length);
-  expect(r.tables).toEqual(expect.arrayContaining(NOT_AN_OBJECT));
+  // boot ⊆ plan, every table by count: the boot's tables are the examined
+  // objects plus the raw-DDL ones. With `pending` empty above, equal counts
+  // are equal sets.
+  const rawDdl = r.tables.filter((t) => NOT_AN_OBJECT.includes(t));
+  expect(rawDdl).toEqual(NOT_AN_OBJECT);
+  expect(r.tables.length).toBe(r.plan.managedTables + rawDdl.length);
+  // … and platform tables by name, where the unmanaged sweep runs (it reports
+  // itself `unreadable` on a project with no host config).
+  if (r.plan.unmanagedTables?.status === 'read') {
+    const unmanaged = (r.plan.unmanagedTables.tables ?? []).map((t: any) => (typeof t === 'string' ? t : t.table ?? t.name));
+    expect(unmanaged.filter((t: string) => !NOT_AN_OBJECT.includes(t))).toEqual([]);
+  }
 }
 
 describe('os migrate plan examines exactly what os serve registers, per app shape (#22506)', () => {
@@ -159,7 +165,7 @@ describe('os migrate plan examines exactly what os serve registers, per app shap
     expect(r.tables).toEqual(expect.arrayContaining(['os22506_parity_app', 'sys_account', 'sys_automation_run']));
   }, CASE_TIMEOUT_MS);
 
-  it('a host config — instances in plugins, declaring through the manifest service', () => {
+  it('a host config — instances in plugins beside its own metadata, the showcase\'s shape', () => {
     const dir = project({
       'objectstack.config.ts': [
         'class HostPlugin {',
@@ -171,13 +177,17 @@ describe('os migrate plan examines exactly what os serve registers, per app shap
         '    });',
         '  }',
         '}',
-        'export default { plugins: [new HostPlugin()] };',
+        'export default {',
+        "  manifest: { id: 'com.example.os22506parityhostapp', name: 'host app', version: '0.0.0', type: 'app' },",
+        "  objects: [{ name: 'os22506_parity_hostapp', fields: { title: { type: 'text' } } }],",
+        '  plugins: [new HostPlugin()],',
+        '};',
         '',
       ].join('\n'),
     });
     const r = bootThenPlan(dir);
     expectParity(r);
-    expect(r.tables).toEqual(expect.arrayContaining(['os22506_parity_host', 'sys_account']));
+    expect(r.tables).toEqual(expect.arrayContaining(['os22506_parity_host', 'os22506_parity_hostapp', 'sys_account']));
   }, CASE_TIMEOUT_MS);
 
   it('a standalone stack — a compiled artifact and no config', () => {
