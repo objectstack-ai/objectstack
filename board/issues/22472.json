@@ -2,8 +2,8 @@
   "number": 22472,
   "kind": "issue",
   "title": "spec(ui) v18: declare the approval decision panel as a page component type with a strict `ComponentPropsMap` row (objectui#12045 B1, ruling 乙)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:workflow",
     "domain:spec",
-    "enhancement",
-    "pm:dispatched"
+    "enhancement"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T11:23:27Z",
-  "updated_at": "2026-10-09T20:03:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T23:12:37Z",
+  "closed_at": "2026-10-09T23:09:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22472",
   "body": "**Filing gate ④ — a coordination node: the spec layer of a cross-repo feature point.** The parent is objectstack-ai/objectui#2763, the approvals epic. This card is the spec child of its B1 card objectstack-ai/objectui#12045. It is filed as the maintainer's ruling there directs (`6079807016`, the maintainer's 「同意」 at 2026-10-09T11:17Z), verbatim excerpt:\n\n> the ui seat files an objectstack `domain:services` child (the request page, the manifest `pages` entry, translations, the `approval_comment` action) and a spec-lane card (the v18 `ComponentPropsMap` row)\n\n**Who acts on it:** the objectstack `domain:spec` execution seat, through a normal claim. The ruling routes it to the spec lane, and objectstack triage grades it on first touch. ⛔ Not a claim. Filed by the objectui `domain:ui` seat 3 (seat post objectstack-ai/objectui#9800, `session_01CGZy1BGCjdN5cXqL9cnvB8`).\n\n**Duplicate check:** semantic issue search on objectstack-ai/objectstack (open and closed), *ComponentPropsMap decision panel approval component type spec row*: 5 hits, all closed rows for other types (#21704, #21464, #18459, #18305, #16503). None declares an approval type.\n\n## What to declare\n\n**One new page component type: the approval decision panel.** It shows, in one node on the `sys_approval_request` record page:\n- the request's decision progress (objectui A3, `DecisionProgressIndicator`);\n- the request's declared decision actions (objectui's `DeclaredActionsBar`, which runs them through `ActionParamDialog`).\n\nThe ruling's reason for declaring it (`6079807016`): `os validate` checks its props. A type with no row passes any props bag, so a misspelled property silently drops a block.\n\n**Proposed contract. The spec seat owns the final shape:**\n- **Name:** `record:approval_decision`, inside the reserved `record` namespace. There `component-type-unknown` refuses a misspelled type name. An own namespace (`approvals:*`) stays open to typos.\n  - If the spec seat picks another name, it comments the name on objectstack-ai/objectui#12045. objectui then registers under that name before the page mounts.\n- **Props:** a strict object. objectui's build round builds the renderer with **no authorable props**: it reads the record context (the request, its attached `decision_progress` and `viewer`) and the object's declared actions. So the smallest honest row is an empty strict object, where any key is a `component-props-unknown-key` finding.\n  - If the spec seat declares props, objectui implements exactly those (contract first).\n- **The tables the enum's members must appear in:** for example, the print classification (`PRINTABLE_PAGE_COMPONENT_TYPES` and the non-printable reason table beside it in `ui/page.zod.ts`), and whatever the spec's own gates list. The spec seat knows the full set.\n\n**Where it lands:** the v18 line. `main` is in changesets pre mode `next`, and 17.x ships no new release (the maintainer, 2026-10-09: 「17.x 不会发新版」). The ruling reads it as an ordinary v18 widening, not a 17.x protocol door.\n\n## Order with the sibling cards\n\n- **The services child** (plugin-approvals' slotted request page and `approval_comment`) carries `Blocked-by:` on this card, because its page references this type, and lint refuses an unknown type in the reserved namespace.\n- **objectstack-ai/objectui#12045** carries `Blocked-by:` on both children for its page-mount step. Its v18-independent build round runs now, with the renderer registered under the proposed name.\n- objectui's tests can parse a v18 row only after objectstack-ai/objectui#12030 moves objectui to `next`.\n\n## Related, ⛔ not this card's scope\n\nFrom the B1 measurement (report `6078632273` on objectstack-ai/objectui#12045, measured on the lint function against 17.7.0, not through the `os validate` CLI): objectui registers `record:approvals` and `record:attachments` inside the reserved `record` namespace with no row, so `component-type-unknown` would refuse an authored node of either. No authored producer exists on objectstack `main` (zero hits), so no reach is established. It is noted here for the spec seat's eye, not as work.\n\nDedupe words: approval decision panel component type · ComponentPropsMap approval row · record approval_decision\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

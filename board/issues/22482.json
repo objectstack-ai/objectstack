@@ -2,8 +2,8 @@
   "number": 22482,
   "kind": "issue",
   "title": "spec(changes): generate the per-major spec-changes section and the protocol upgrade guide at publish; the pull request still generates both in memory and renders the diff (#22449 B′, condition 1)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:devpath",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T12:37:27Z",
-  "updated_at": "2026-10-09T18:31:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T23:13:34Z",
+  "closed_at": "2026-10-09T23:09:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22482",
   "body": "Blocked-by: objectstack-ai/cloud#2750\n\nFiling gate: **③ a maintainer-directed task.** Ruling `6078203801` on #22449 (B′, the maintainer's 「同意」 2026-10-09T09:27Z). Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, as that ruling's 裁后执行 card ① and triage `6078734415` item 1. Parent: #22449. ⛔ Not a claim.\n\n## What the ruling sets\n\n\"The per-major section of `spec-changes.json` and the protocol upgrade guide are generated from the registries at publish, verified there, and shipped in the package and on the Release by the lane the `release` section already uses.\"\nCondition (1): \"the pull-request stage still generates both in memory, fails loudly when generation fails, and renders the generated diff on the pull request (a check artifact or a comment), so the review value #6957 named is kept; a B without this check is not taken.\"\n\n## This card\n\n- **At publish:** extend the lane `scripts/release-spec-changes.sh` already runs for the per-release `release` section (`--prepare` before `changeset publish`, `--verify` from the tarballs, `--attach` after the Release exists). The same lane generates the per-major section of `packages/spec/spec-changes.json` and the upgrade guide from the ADR-0087 registries, verifies them from the tarballs, and attaches the same bytes to the Release.\n- **At pull request:** `check:spec-changes` and `check:upgrade-guide` stop comparing a committed copy. They generate both in memory and fail loudly when generation fails. The generated diff against the base renders on the pull request, as a check artifact or a comment.\n- ⛔ Not this card: deleting the committed copies and their `merge=os-regen` routes (card ③, which waits for this one), and the guide's public address (card ②).\n\n## Confidence gaps the ruling names (measure first)\n\n- The hook that generates the major section before `npm pack` of `@objectstack/spec` is unmeasured; `--prepare` already rewrites the same file at the same point.\n- Which consumers read the committed copy today. In this repo, `packages/spec/scripts/check-generated.ts` and the two checks. In cloud, `scripts/audit-spec-changes.mjs:92`–`:93`, which is the cloud seat's card.\n\n## Acceptance\n\n- A publish dry run (`--prepare` then `--verify`) produces the per-major section and the guide from the registries alone.\n- A pull request that adds a step-18 entry needs no regeneration commit. Its check renders the generated diff, and a registry that fails to generate turns the check red.\n- `release` section behaviour is unchanged.\n"

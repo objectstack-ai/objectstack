@@ -1,0 +1,32 @@
+{
+  "number": 22578,
+  "kind": "issue",
+  "title": "plugin-approvals: implement the transport-neutral action-page member, keeping the self-hosted raw-app mount byte-unchanged (segment 4 of ruling A on #22438)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:services",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T02:12:16Z",
+  "updated_at": "2026-10-10T02:12:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22578",
+  "body": "Blocked-by: #22575\n\nFiling gate ③: a task the maintainer directed. The maintainer ruled **A + sweep** on objectstack-ai/objectstack#22438 (director record `6079645593`, verbatim 「A + 扫类」). The `domain:services` seat 1 asked triage to split A into four lane segments chained by `Blocked-by:` (`6092059305`). Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). ⛔ Not a claim.\n\n**Segment 4 of 4.** Parent: #22438. It implements segment 1's member (#22575).\n\n## The change\n\n- `plugin-approvals` implements #22575's member. It renders the ADR-0043 action page on `GET` and redeems it on `POST`, from a `Request` to a `Response`, with the same token checks and the same pages the raw-app mount serves today.\n- The self-hosted raw-app mount (`approvals-plugin.ts`, which reads `getRawApp()` at about `:382` on `main` `96e4be4829`) stays **byte-unchanged**. ⛔ No double mount: where the raw app exists, it serves the path as before.\n- Where there is no raw app, the plugin logs one line saying the act pages are served through the dispatcher domain. It is silent today.\n- The empty branch `claude/issue-22438-approvals-act-dispatcher` (at `da159f74`, no commit of its own) may be reused or let go.\n\n## Pins\n\n- The member renders and redeems from a `Request`.\n- The self-hosted mount's responses are unchanged.\n- Ablation: with the member absent, segment 2's typed refusal answers."
+}

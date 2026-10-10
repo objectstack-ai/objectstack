@@ -1,0 +1,33 @@
+{
+  "number": 22571,
+  "kind": "issue",
+  "title": "security(explain): `explain` transfer reports a row the caller cannot read as visible — its read-absent rewrite (#21771 ruling A) keys on update and delete only, while the transfer door answers 404",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T01:45:04Z",
+  "updated_at": "2026-10-10T02:07:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22571",
+  "body": "Filing gate: ① a product defect, `finding` class (a), `security`-adjacent (`explain` misreports; it grants nothing). reach: measured once through a public door. Found and measured by the dev of #22550 (PR #22570, report `6092306160` on #22550, `out_of_scope_findings[0]`). Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. The fix is in `plugin-security`'s `explain-engine.ts`, which is `domain:services`. It is the same `explain` ≠ door family as #22514, #22530 (both closed) and #22550 (PR #22570, in review).\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created):\n- `explain transfer unreadable record not found recordAbsentToCaller read-absent rewrite` → 0 hits.\n- `explain write verdict row caller cannot read 404 RECORD_NOT_FOUND Ruling A #21771` → 36 hits. The nearest is #19986 (closed; explain's `read` verdict and read depth), which is a different verb and mechanism. None carries this.\n\n## The defect\n\n`POST /api/v1/security/explain` with `operation: 'transfer'` and a `recordId` reports the record as visible when the caller cannot read the row. The door answers that same row as missing.\n\n**Measured** (a scratch dogfood probe on the `cpg` fixture, at PR #22570's `1465c4928`, deleted after): the permission set had select policy `name == 'open'` and update policy `name != 'nothing'`, on a board named `closed`.\n- `explain` transfer → record `{ visible: true, decidedBy: rls }`.\n- `explain` update on the same row → `{ visible: false }`, the missing-record shape.\n- `GET` and the `PATCH` that writes `owner_id` → **404 `RECORD_NOT_FOUND`**.\n\n## Where\n\n`explain-engine.ts` `explainAccess`, the #21771 ruling A rewrite (about `:2254` on PR #22570's head): \"a row the principal cannot READ is a row that does not exist, so an update or delete of it answers what a nonexistent id answers\". It is guarded by `operation === 'update' || operation === 'delete'`.\n\nThe transfer door is an update. The by-id write gate's `callerCannotReadAddressedRow` (`security-plugin.ts` about `:3257`, step 2.7) asks the same question for it, so the door answers 404. `explain` never asks for a transfer.\n\nSeam: `runtime:explain-engine.ts` (the read-absent rewrite's verb guard) → `runtime:security-plugin.ts` step 2.7 (`callerCannotReadAddressedRow`).\n\n## Direction (for triage; not decided here)\n\nThe rewrite's verb guard matches the verbs the door asks the read-absent question for. A transfer reaches it as an update, as PR #22570's `rlsOperationForVerb` maps it. The guard should read that one mapping (or the door's verb list), ⛔ not a second inline list.\n\n**Serial:** behind PR #22570 (#22550), which edits the same `explain` path and adds the mapping this would read.\n\n## Tests\n\n- **Pin:** `explain` transfer on a row the caller cannot read → the missing-record shape (`visible: false`, no decider), beside the `PATCH owner_id` 404. Control: a readable row → unchanged.\n- **Ablation:** the update/delete-only guard back turns the pin red."
+}

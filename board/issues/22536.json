@@ -1,0 +1,34 @@
+{
+  "number": 22536,
+  "kind": "issue",
+  "title": "i18n(pages): a locale bundle's page label fills an untitled page:header on a record page, replacing the record-derived heading in that locale only",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T20:51:51Z",
+  "updated_at": "2026-10-10T02:20:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22536",
+  "body": "Blocked-by: #22508\n\nFiling gate: **① class (c): a trap that makes metadata an author wrote silently not take effect.** reach: a named real producer. objectui `buildDefaultHeader` seeds every record page's `page:header` with no `title`, the sanctioned spelling for \"derive the heading from the record\" (maintainer-ruled #7702; `packages/spec/src/ui/component.zod.ts:589`–`:602` at `faf6348508`). Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`. Found by the dev of PR #22534 (#22508), open question 2. ⛔ Not a claim. Triage sets the grade and the direction.\n\n**Who acts on it:** the triage seat rules the direction, because it overturns a control pin that triage ruled on #22508 (`6085431021`). Then the `domain:spec` seat dispatches it. The fix is the one function PR #22534 adds, `resolvePageHeaderTitle` in `packages/spec/src/system/i18n-resolver.ts`.\n\n## What happens\n\n- `PageHeaderProps.title` says: \"Omit to let the renderer derive the heading from the record (the default for record pages).\" `PageHeaderRenderer` finds no title and falls through to the record chip's own heading.\n- `translatePage` fills an absent header title with the bundle's `pages.<name>.label`. That was true before PR #22534, and it stays true after it, as the ruled control \"a page with no authored header title still shows the bundle `label`\".\n- So on a record page seeded by the platform, a locale pack that translates the page label replaces the record name with the page's static label in that locale. The default locale keeps showing the record name. This is the failure #22508 fixes for an authored `'{name}'`, reached through an absent title instead of a dynamic one. Nothing warns at build, lint or serve.\n\n## Not measured yet\n\n- No door has been measured. In-repo population is 0: the PR #22534 dev found no root-level untitled `page:header` on a page whose label a bundle translates. The reach is the named producer above, not a served response.\n- Measure first: a Studio-seeded record page plus a pack that carries `pages.<name>.label`, then `GET /api/v1/meta/page/:name` in that locale.\n\n## Directions for triage (the dev's options)\n\n- **A** keep the ruled control: the label fills any absent title.\n- **B** (dev's recommendation) leave an absent title absent on a record page (`type: 'record'`, or a page bound to an object); the label fills it elsewhere. This applies #22508's principle (\"a bundle translates an attribute; it does not swap one attribute for another\") to the one place where an absent title means \"derive from the record\". Resolver-only, no new gate.\n- **C** leave an absent title absent everywhere; the bundle label never fills a header.\n\n## Order\n\nAfter PR #22534 lands. It edits the same function.\n\nDedupe: issue search `translatePage header title label record` in objectstack: 4 hits. They are #22508 (open, the authored-title case this card follows), plus #4827, #4358 and #3589 (closed, unrelated). None of them is the absent-title record-page case. Dedupe words: untitled page:header record page bundle label · record-derived heading replaced by page label · buildDefaultHeader no title translation\n"
+}

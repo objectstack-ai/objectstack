@@ -1,0 +1,35 @@
+{
+  "number": 22537,
+  "kind": "issue",
+  "title": "spec(ui): objectui registers `record:approvals` and `record:attachments` inside the spec-reserved `record` namespace with no ComponentPropsMap row or PageComponentType member, so lint refuses a node the platform's own synthesizer emits",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2",
+    "target:v18"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T20:56:44Z",
+  "updated_at": "2026-10-10T01:46:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22537",
+  "body": "Blocked-by: #22472\n\nFiling gate: **① a contract violation** (AGENTS.md Prime Directive #10: contract text plus a repro). reach: a named real producer, objectui's own page synthesizer. Escalated by the at-tier contract review of PR #22532 (`6089080726`, finding A), on #22472. Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`. ⛔ Not a claim. Triage sets the grade, the lane and the remedy.\n\n**Who acts on it:** the triage seat grades it and picks the remedy. Then the spec seat dispatches it (a row) or the objectui `domain:ui` seat does (a rename).\n\n## What disagrees\n\n- **The spec reserves the `record` namespace.** In it, `component-type-unknown` refuses a type that has no `PageComponentType` member or `ComponentPropsMap` row. That refusal is why #22472 put `record:approval_decision` there: a misspelled name is refused.\n- **objectui uses two more names in that namespace.** At objectui `d03b022`, `record:approvals` and `record:attachments` are registered and emitted by the platform's own code: `plugin-detail/src/synth/buildDefaultPageSchema.ts`, `app-shell/src/utils/pageSchemaIntrospect.ts`, and the CLI's `known-schema-types.ts`. Neither has a member or a row.\n- **Contract text falsified:** `packages/spec/src/ui/component.zod.ts:9371` (#21142) calls `record:line_items` \"the last registered `record:*` renderer without a row\". These two make that untrue. So does the vocabulary's claim that the map covers the measured registrations.\n- **Repro:**\n  - the lint function against 17.7.0 refuses an authored node of either type with `component-type-unknown`; props are never judged (B1 report `6078632273` on objectstack-ai/objectui#12045);\n  - the same result from the #22472 branch (that dev's H4).\n- **Not measured:** an authored producer in this repo (zero hits on `main`), or the save or `os validate` door on a Studio-seeded page that carries either type.\n\n## Remedies for triage\n\n- A measured `ComponentPropsMap` row and enum member for each type, from objectui's renderers. This is a widening: `Clause-②: yes`, on the v18 line.\n- Or objectui renames them out of the reserved namespace.\n\n## Order\n\nAfter PR #22532 lands. It edits the same enum and map.\n\nDedupe: issue search `\"record:approvals\" OR \"record:attachments\"` in objectstack: 2 hits. They are #22472 (open; its body notes this \"for the spec seat's eye, not as work\") and #21142 (closed, the `record:line_items` row). Neither carries it. Dedupe words: record:approvals record:attachments reserved record namespace no row · component-type-unknown platform synthesizer · last registered record renderer without a row\n"
+}

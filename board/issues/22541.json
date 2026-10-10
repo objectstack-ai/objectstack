@@ -1,0 +1,35 @@
+{
+  "number": 22541,
+  "kind": "issue",
+  "title": "ci: the required Temporal Conformance job pulls `postgres:16` and `mysql:8.0` from Docker Hub unauthenticated, and Docker Hub's pull rate limit now fails it before any test runs, so the merge queue ejects every pull request",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "priority:p0",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T21:19:12Z",
+  "updated_at": "2026-10-09T22:35:59Z",
+  "closed_at": "2026-10-09T22:33:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22541",
+  "body": "Unblocks: #22472, #22508 (their PRs #22532 and #22534 are ejected from the merge queue by this failure)\n\nFiling gate: **① a reproducible defect with a named landing** (`tooling`: the fix is CI wiring). P0 suspected: a required context fails on every run, so nothing lands. Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`. ⛔ Not a claim. The seat starts the emergency direct triage for it now, as its rules require for a P0 suspicion.\n\n**Who acts on it:** the triage seat grades it. Then the `domain:spec` seat claims and dispatches the fix: `.github/workflows/` wiring is spec-lane under the anchor rule.\n\n## What fails\n\n- `.github/workflows/ci.yml`, job `Temporal Conformance (live PG + MySQL)` (`:1515`), starts two service containers from Docker Hub with no credentials: `image: postgres:16` (`:1526`) and `image: mysql:8.0` (`:1542`).\n- Since about 2026-10-09T21:01Z the service-container pull fails three times and the job ends `failure` in about 20 s, before checkout or any test body. The log reads: `Error response from daemon: toomanyrequests: You have reached your unauthenticated pull rate limit` (one later attempt: `received unexpected HTTP status: 500 Internal Server Error` from `registry-1.docker.io`).\n- The job is a required context, so the merge queue removes the entry about 70 s after it is added.\n\n## Measured (job logs read by the seat)\n\n- `merge_group` `pr-22532` at 21:01Z (job `114024413545`) and at 21:12Z (`114028399482`): both failed at `docker pull postgres:16`; PR #22532 was removed from the queue at 21:02:17Z and 21:13:05Z.\n- `merge_group` `pr-22534` at 21:15Z (job `114029405989`): same failure; PR #22534 was removed at 21:15:59Z.\n- `pull_request` runs on `claude/issue-22219-protocol-18-shapes-row` (21:13Z) and `claude/issue-22371-overlay-cleanup-step` (21:02Z): the same job failed.\n- **Control:** the same job passed on PR #22533's head at 20:53Z and on PR #22534's head at 20:55Z. The input is unchanged; only the registry's answer changed.\n\n## Direction for triage (the owner decides)\n\n- Pull the two service images from a registry that does not rate-limit anonymous CI pulls, keeping the same image and tag. For example `public.ecr.aws/docker/library/postgres:16` and `public.ecr.aws/docker/library/mysql:8.0` (the Docker official-image mirror on ECR Public), or `mirror.gcr.io/library/...`. One wiring change, no secret, no new gate. Measure that the mirror serves both tags and that the health checks pass.\n- Or authenticate to Docker Hub. That needs a maintainer-held secret, so it is a maintainer action, not a dispatch.\n- Re-measure first: if Docker Hub has recovered when this is picked up, the defect still stands. The job's pass/fail depends on a third party's anonymous quota.\n\nDedupe: issue search `docker pull rate limit toomanyrequests` and `\"Temporal Conformance\" docker image mirror` in objectstack: 0 hits each. Dedupe words: docker hub unauthenticated pull rate limit CI · temporal conformance service container pull fails · merge queue ejected toomanyrequests"
+}

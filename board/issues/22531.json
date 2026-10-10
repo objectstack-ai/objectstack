@@ -2,16 +2,15 @@
   "number": 22531,
   "kind": "pull_request",
   "title": "tooling(pm): dispatch-gates — the hand-written tables move out as data, the self-test out as a module with fast/slow tiers, derivation byte-identical",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
   "labels": [
-    "needs-user-decision",
     "size/xl",
     "skip-changeset"
   ],
@@ -21,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T19:57:33Z",
-  "updated_at": "2026-10-09T20:14:08Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-10T00:43:05Z",
+  "closed_at": "2026-10-10T00:40:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-10T00:40:01Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22531",

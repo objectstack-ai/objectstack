@@ -1,0 +1,37 @@
+{
+  "number": 22550,
+  "kind": "issue",
+  "title": "security(explain): `explain` transfer composes row-level security as a read (`mapOperationToRLS` → `select`), while the door composes it as an update — an update policy that refuses the `PATCH owner_id` is reported as not applying",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "priority:p2",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T23:03:48Z",
+  "updated_at": "2026-10-10T02:23:31Z",
+  "closed_at": "2026-10-10T02:22:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22550",
+  "body": "Filing gate: ① a product defect, class (a), `security`-adjacent (`explain` misreports; it grants nothing), reach measured once through a public door. Found and measured by the dev of #22530 (PR #22549, report on #22530, `out_of_scope_findings[0]`). Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. The fix is in `plugin-security` (`explain-engine.ts`'s record attribution, possibly `rls-compiler.ts`), which is `domain:services`.\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created): `explain transfer row-level security mapOperationToRLS select update policy owner_id` → 2 hits (#8059, #7665, both closed, by-id write scope on the door, not `explain`); `security explain transfer verdict differs from door` → 3 hits (#22046, #21207, #6735, all closed, unrelated). None carries this.\n\n## The defect\n\n`POST /api/v1/security/explain` with `operation: 'transfer'` and a `recordId` composes the record's row-level security for the raw verb `transfer`. `rls-compiler.ts`'s `mapOperationToRLS` (about `:1238`) sends every verb outside its list to `select`, and `computeLayeredRlsFilter` treats that as a read. So no update-class policy and no ownership floor ever reach a transfer verdict.\n\nThe door does otherwise. The by-id pre-image gate (step 2.7, `security-plugin.ts` about `:3170`) maps `transfer` and `restore` onto `update` (and `purge` onto `delete`) before it composes RLS: \"transfer/restore mutate like update\". The live transfer door is the `PATCH` that writes `owner_id`, an update.\n\n**Measured** (an untracked scratch dogfood probe on PR #22513's `cpg` fixture at PR #22549's `0b582c6d9`, deleted after): a `public_read_write` `cpg_board` row that an app-authored **update** RLS policy excludes (`name == 'open'`; the row is `'closed'`), for a member holding edit and transfer:\n- `explain` transfer → record `visible: true`, `decidedBy: object_crud`, with the RLS layer reading \"No business RLS policy applies to this record\".\n- `explain` update on the same row → `visible: false`, `decidedBy: rls`.\n- `PATCH /api/v1/data/cpg_board/ID` writing `owner_id` → **403 `PERMISSION_DENIED`**.\n\nThis is not `controlled_by_parent`, so it is outside #22530, whose PR covers the master-detail half of the transfer verdict.\n\n## Where\n\nSeam: `runtime:explain-engine.ts` `applyRecordAttribution` (passes `engineOp` `transfer` to `computeLayeredRlsFilter`) → `runtime:rls-compiler.ts` `mapOperationToRLS` (default `select`). The door's mapping lives at the step 2.7 gate in `security-plugin.ts`.\n\n## Direction (for triage; not decided here)\n\n`explain` composes RLS for a lifecycle verb with the same verb mapping the door uses (transfer/restore → update, purge → delete), from one shared definition rather than a second copy. Whether that mapping moves into a shared helper both sites read, or into `mapOperationToRLS` itself (which would also change the door's other callers), is triage's call.\n\n**Serial:** behind PR #22549 (#22530), which edits the same `explain` record path.\n\n## Tests\n\n- **Pin:** `explain` transfer on a row an update policy excludes → refused on `rls`, beside the `PATCH owner_id` 403; control: a row the policy admits → allowed, beside a 200.\n- **Ablation:** the raw-verb composition back turns the pin red."
+}

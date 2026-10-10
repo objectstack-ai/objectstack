@@ -2,8 +2,8 @@
   "number": 22530,
   "kind": "issue",
   "title": "security(explain): `explain` delete on a controlled_by_parent record reports the ownership floor, not the master check the data door runs — the master's editor is refused beside a DELETE 200",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:blocked",
     "priority:p2",
     "security",
     "target:v18"
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T19:54:30Z",
-  "updated_at": "2026-10-09T19:57:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T23:40:57Z",
+  "closed_at": "2026-10-09T23:38:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22530",
   "body": "Blocked-by: #22514\n\nFiling gate: ① a product defect, class (a), `security`, reach measured once through a public door. Found and measured by the dev of #22514 (PR #22529, report on #22514, `out_of_scope_findings[0]`). Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. The fix touches `plugin-security`'s `explain` delete branch (`domain:services`), and very likely a spec decision first: the served member `ISecurityService.checkControlledByParentWrite` is declared for UPDATE only, so `explain` cannot ask it for delete without a contract change (`domain:spec`).\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created): `explain delete controlled_by_parent master check canDeleteRecord owner_only_deletes floor checkControlledByParentWrite delete` → 10 hits. The nearest are #22514 (the UPDATE half, PR #22529), #22497 (a TSDoc on the denial-leg type), #21729 (closed, the attachment delete floor) and #5386 / #14747 (closed, other `controlled_by_parent` derivations). None carries this.\n\n## The defect\n\n`POST /api/v1/security/explain` with `operation: 'delete'` on a `controlled_by_parent` record reports the verdict of the `owner_only_deletes` floor (`decidedBy: rls`). The data door hands that floor to the master-detail check (step 2.7 → step 2.8), and `explain` never does.\n\n**Measured** with a scratch dogfood probe on PR #22513's `cpg` fixture, at `ee8751d41` and unchanged at PR #22529's `16a937c47`:\n- A principal who edits the master and holds delete on the child, but did not create it: `explain` delete → `record.visible: false`, `decidedBy: rls`, beside `DELETE /api/v1/data/cpg_contract/ID` → **200**.\n- A non-editor: `explain` reports the refusal on `rls` with no word about the master, beside a `DELETE` **403** that names the master's row-level security.\n\n## Where\n\n`plugin-security`'s `explain-engine.ts` delete branch (`applyRecordAttribution`) asks `canDeleteRecord` alone and keeps the `owner_only_deletes` floor. Seam: `spec:ISecurityService.checkControlledByParentWrite` (update only) → `runtime:explain-engine.ts` (the delete branch).\n\n## Direction (for triage; not decided here)\n\nPR #22529 closes the same divergence for UPDATE by asking the served member and mirroring step 2.7's `masterGateCoversThisWrite` vouch in the `explain` wiring. For DELETE, the write path runs the same master check, but the member's contract names update only. The open question is whether the member's contract widens to delete, or `explain` gets the verdict another way. ⛔ Not a second copy of the master-detail check.\n\nSame family, read-only and not measured: `explain`'s transfer verdict asks the sharing gate while the door runs step 2.8 for transfer too (noted in PR #22529's Acceptance notes).\n\n**Serial:** behind PR #22529 (#22514), which edits the same `explain` files.\n\n## Tests\n\n- **Pin:** `explain` delete on a `controlled_by_parent` child, parity with the caller's `DELETE`: the master's editor → allowed beside a 200; a non-editor → refused naming the master leg, beside a 403.\n- **Ablation:** the floor-only verdict back turns the pin red.\n"

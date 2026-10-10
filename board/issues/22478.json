@@ -2,8 +2,8 @@
   "number": 22478,
   "kind": "issue",
   "title": "tooling(pm): dispatch-gates.mjs — the gate roster moves out as data, the engine keeps load / match / derive, the self-test splits fast / slow, derivation byte-identical (W3 of the skills-lane diet program, ruled A; carries the `--tier` note remainder)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,22 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T12:17:28Z",
-  "updated_at": "2026-10-09T20:12:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T00:43:41Z",
+  "closed_at": "2026-10-10T00:40:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22478",
   "body": "Guards: ruling 208 — 「工具位只有一个,先花在删除上;`dispatch-gates.mjs` 冻结,只在它喂的 workflow 坏了时碰」 (`references/instrument-discipline.md:10`) — lifted for exactly this split by the maintainer's letter **A** on #22453 (「同意」, 2026-10-09T11:15Z, record 6079780639, batch #303 item 1) and restored as stated the moment this card's PR lands; the lift's three conditions are this card's acceptance, nothing else in the file changes under it.\n\nFiling gate: **③ a maintainer-directed task** — work item **W3** of the program anchor #22060, ruled A at #22453. Part of #22060 — this card closes on its own PR; the same PR carries `Fixes #22167` (ruling C's remainder: the `--tier` note in this file reworded to the same meaning, both occurrences). Reader: the `domain:skills` seat dispatches it to one os-dev; the surface is `scripts/pm/dispatch-gates.mjs` plus the new roster data file beside it (and `package.json`'s `check:pm-dispatch-gates` line if the two tiers need two scripts) — off the governed register, so CI green + the seat's at-tier read lands it through the queue. Filed by skills seat 1 (seat post #7623, `session_01JmWtcHfGbC4ncw4GFKWuRA`). Dedupe: the decision #22453 (ruled, closed on this filing), the anchor #22060 (W3 row), #22167 (`pm:blocked` on this card), #21719 (closed, the same lock hold measured); REST listing `labels=tooling` since 2026-09-20 titles grepped for `dispatch-gates|roster|split|freeze` → nothing else; the global search endpoint is not reachable from a seat container.\n\n## What is measured (`origin/main`, 2026-10-09)\n\n- `scripts/pm/dispatch-gates.mjs` is 30,049 lines (`wc -l`); the second-largest pm instrument, `check-half-states.mjs`, is 34,938.\n- Its battery `check:pm-dispatch-gates` (`package.json:79`, 2,011 cases) held the shared verify lock for 842.7 s and 1,023.8 s in the two 2026-10-07 dev reports and for 1,052.1 s, 1,126.6 s and 1,174 s in three 2026-10-09 reports on this lane (concurrent batteries on one box) — every dev delivery on a card touching the file pays it.\n- The `--tier` note's sentence \"changes contract accept/reject behaviour\" occurs twice (`grep -c`), contradicting `execution-duties.md`'s Clause-② (widening only) — ruling C on #22167; its first half landed as PR #22223, the remainder waits here.\n\n## Done when (the ruling's conditions, in its order)\n\n1. **Coverage first.** Before any split, the dev measures whether the existing self-tests reach every derivation path (every roster row and every gate family it can emit, `--tier`'s globs included) and adds a pin for each path they do not; the PR states the coverage before and after and names the pins added.\n2. **Roster as data.** The roster — which paths feed which gate families, and the tier globs — moves out as a data file with no logic beside `dispatch-gates.mjs`; the engine keeps roster loading, path matching and derivation (`--commands`, `--tier`, `--ran` and the readings they print); the file's line count before and after is in the PR. A new gate family is then one data row, ⛔ still only on the maintainer's words (ruling 208's 「⛔ 无原话不新增」 is untouched).\n3. **Two tiers.** The self-test splits into a fast tier (roster load, path match, derivation — what every dev delivery runs) and a slow tier (the full fixture replay — CI's `Lint & Repo Gates` and on demand); the battery's seconds before and after, per tier, are in the PR; ⛔ no case is dropped, the slow tier stays wired in CI.\n4. **Byte-identical derivation.** Over a fixed corpus of path sets (every fixture the battery already replays, plus this lane's three 2026-10-09 change sets), the printed output of `--commands`, `--tier` and `--ran` is identical before and after the split; the PR carries the replay and its empty diff.\n5. **The `--tier` note** is reworded to ruling C's meaning in both occurrences; `grep -c \"changes contract accept/reject\" scripts/pm/dispatch-gates.mjs` → 0; the PR body's first lines are `Fixes #<this card>` and `Fixes #22167`.\n6. **Nothing else** in the file changes; after landing the freeze is back as ruling 208 states it. `pnpm check:pm-dispatch-gates` green on both tiers; `pnpm check:pm-skill-ratchet` and `check:pm-skill-id-lint` untouched and green.\n\n## Serial constraints\n\n- Behind #22451 (in flight, PR pending): it moves the one pin at this file's line 26400 (`HUMAN_MERGE_LINE_THRESHOLD` 5,000 → 3,000); this card's branch merges `origin/main` after that lands and ⛔ never rewrites that pin's meaning.\n- `scripts/pm/check-skill-line-ratchet.mjs` is not on this card's surface; #22452 (W1) touches it for `platform-readings.md`'s ceiling only.\n\nDedupe words: `dispatch-gates roster as data` · `self-test fast slow tiers` · `derivation byte-identical split`"

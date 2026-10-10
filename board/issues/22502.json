@@ -14,19 +14,21 @@
     "area:workflow",
     "bug",
     "domain:spec",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p3",
     "target:v18"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T15:20:31Z",
-  "updated_at": "2026-10-09T15:57:19Z",
+  "updated_at": "2026-10-10T02:03:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22502",
   "body": "Blocked-by: #22477\n\nFiling gate: **② a contract gap with a named landing** (class b). Escalated by the at-tier contract review of PR #22499 (`6083797903`, ③), on #22477. Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`. ⛔ Not a claim. Triage sets the grade and the lane.\n\n## What disagrees\n\n- **After PR #22499 (#22477):** a flow text slot (`notify` `title`/`message`, `screen` `title`/`description`, a refusing `end` `message`) refuses a `{{ }}` hole whose root is a `$` name the engine does not bind. The engine's `$` names are a closed list: `$record`, `$runId`, `$flowName`, `$flowLabel`, `$error`, `$loopItems`, `$loopIndex`. The `$` namespace is reserved for the engine: a resume signal may not write one (`IAutomationService.resume`'s `INVALID_SIGNAL`).\n- **Still accepted at authoring:** `try_catch`'s `errorVariable` (`packages/spec/src/automation/control-flow.zod.ts:329`, `z.string().default('$error')`), and the nodes' `outputVariable` keys, take any string, including a `$`-named one such as `'$caught'`. The runtime binds it (`variables.set(errorVariable, …)`).\n- **Result:** a flow can bind `$caught` and then cannot read it in a text slot. `'Failed: {{ $caught.message }}'` is refused, and the remedy says to drop the `$`. One contract's two doors disagree about whether an author may own a `$` name.\n\n## Direction for triage (the owner decides)\n\n- Refuse a `$`-named `errorVariable` other than the default `$error`, and a `$`-named `outputVariable`, at authoring. The remedy: the same name without `$`, read as `{{ name }}`. This makes the reserved namespace one rule at every door. It is a narrowing (`Clause-②: no (narrowing)`), and it owes the contract-tier review and an ADR-0087 disposition.\n- Or record why an author-bound `$` name stays legal, and have the text-slot judge admit the flow's own bound names. That is a widening; the decision box if wanted.\n- **Measure first:** in-repo authors of a `$`-named `errorVariable`/`outputVariable`. The PR #22499 dev found only test fixtures.\n\n## Order\n\nAfter PR #22499 lands; that PR's judge is the reader this card aligns with.\n\nDedupe: REST listing of the newest 100 issues, titles grepped for errorVariable, outputVariable, try_catch, `$`-named, dollar: 0 hits. Dedupe words: try_catch errorVariable dollar name · outputVariable reserved dollar namespace · text slot unbound dollar root\n"

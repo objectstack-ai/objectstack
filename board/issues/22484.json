@@ -2,8 +2,8 @@
   "number": 22484,
   "kind": "issue",
   "title": "docs(adr): revise ADR-0087 D4 and its P2 true-up for B′, so the per-major projections are generated at publish rather than committed (#22449, Tier H)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:devpath",
     "domain:spec",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T12:38:30Z",
-  "updated_at": "2026-10-09T13:03:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T02:06:56Z",
+  "closed_at": "2026-10-10T02:04:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22484",
   "body": "Blocked-by: #22482\n\nFiling gate: **③ a maintainer-directed task.** Ruling `6078203801` on #22449 (B′). Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, as the ruling's card ④ and triage `6078734415` item 4. Parent: #22449. ⛔ Not a claim.\n\n## This card\n\n- Revise ADR-0087 D4 and its P2 true-up (`docs/adr/0087-*.md`, about `:348`–`:349`). They record #6957's ruling that the projections are committed. The revision records B′:\n  - generated at publish;\n  - generated in memory, and the diff rendered, at pull request;\n  - the guide at its public address, with the pointer stub kept;\n  - the committed copies removed.\n  It cites `6078203801` and keeps #6957's reason (reviewability), which condition (1) preserves.\n- Re-read `scripts/adr-anchors.mjs:44`–`:46`, which quote #6957, and update the anchor in the same PR if it quotes the superseded sentence.\n- A governed surface (`docs/adr/**`): Tier H, an authorized approval before it lands.\n\n## Order\n\nIt may land with card ① or after it. ⛔ It does not describe a state the code has not reached: land it no earlier than card ①.\n"

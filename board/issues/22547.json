@@ -1,0 +1,35 @@
+{
+  "number": 22547,
+  "kind": "issue",
+  "title": "storage(attachments): an attach refused before the storage gate runs (`PERMISSION_DENIED` create grant, `FILES_DISABLED`) still leaves the uploaded `sys_file` committed with no join row",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:services",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T22:10:29Z",
+  "updated_at": "2026-10-09T22:53:06Z",
+  "closed_at": "2026-10-09T22:53:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22547",
+  "body": "Blocked-by: #22466\n\nFiling gate: ① a product defect, class (a), reach through a named producer. Found and measured by the dev of #22466 (PR #22542, report `6089500426` on #22466, `out_of_scope_findings[0]`). Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. The candidate seams are all in `domain:services` (`service-storage`, `plugin-security`, `plugin-audit`), but the choice between them is a seam ruling (see Direction), so this card needs a grade and a direction before it can be dispatched.\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created): `attach refused orphan sys_file PERMISSION_DENIED sys_attachment` → 5 hits: #22466 (the gate's own refusal legs, PR #22542), #22455 (closed, the attach/delete gate), #21729 (closed, the attachment delete floor), #17406 and #4630 (closed, unrelated). None carries the refusals decided outside the storage gate.\n\n## The defect\n\nAttaching a file is two writes: the upload commits a `sys_file` (scope `attachments`, `owner_id` = the uploader), then a `sys_attachment` insert attaches it. PR #22542 makes an attach that the **storage attachment gate** refuses (`403 ATTACHMENT_PARENT_ACCESS`) tombstone the caller's own unheld upload, so the lifecycle sweep reclaims it. Two other refusals of the same insert are decided before or beside that gate, never reach it, and leave the file `committed` with zero join rows, kept forever:\n\n- **No `sys_attachment` create grant:** `plugin-security`'s object CRUD check refuses with `403 PERMISSION_DENIED` in the data middleware it registers in `start()`, before `next()`. The storage gate's `beforeInsert` hook never runs.\n- **`enable.files` off on the parent object:** `plugin-audit`'s `enforceFilesCapability` (`audit-writers.ts:2000`, a `beforeInsert` hook on `sys_attachment`) refuses with `403 FILES_DISABLED`.\n\nThe same holds for any refusal after the storage gate admits the insert (a later validation, a driver fault).\n\n**Reach:** this is the card's own measured producer. The dev of objectstack-ai/hotcrm#2029 measured on `@objectstack/*` 17.7.0 (report `6078558197`, recorded on #22455) a console upload under a read-only `sys_attachment` grant: the final attach answered 403 and left a committed `sys_file` with no attachment. The console now hides Upload without the create grant (objectstack-ai/objectui#12051), so the remaining reach is a grant that changes between render and click, or an attach to an object whose `enable.files` is off.\n\n**Model measurement** (PR #22542's sqlite rig, temporary, deleted): an outer middleware refusing before `next()` → `PERMISSION_DENIED 403`, storage gate asked 0 times, 0 tombstone run verdicts, file `committed`.\n\n## Direction (for triage; not decided here)\n\nThe dev's options, with costs, from the report:\n- **A:** a storage refusal observer registered in `StorageServicePlugin.init()`, so it sits outermost relative to every `start()`-time middleware, and hands the refused `file_id` of any 4xx refusal to PR #22542's tombstoner. Cost: the first `init()`-phase middleware registration in the repo, an ordering contract invisible from `plugin-security`'s side, a refusal-classification rule, and a dogfood pin with real security.\n- **B:** the refusing plugins hand the refused `file_id` over through a declared seam. Cost: touches `plugin-security` and `plugin-audit` and adds a cross-plugin contract.\n- **C:** leave it, with this card as the record. The dev recommends C now, because the residual reach is rare after the console fix and A's ordering contract is a ruling, not something a dev adds inside an S card.\n\n⛔ Not #22466's direction (b) (reaping committed rows with no join row after a grace period): #22466's triage (`6080400758`) sent that through the decision box.\n\n## Tests (if A or B is taken)\n\n- **Pin:** an attach refused for the create grant, and one refused for `FILES_DISABLED`, each leaves the caller's own unheld upload tombstoned; the sweep reclaims it.\n- **Controls:** PR #22542's (admitted attach, `ref_*` lineage, not the uploader) hold on the new path.\n- **Ablation:** removing the new hand-over turns the pins red."
+}

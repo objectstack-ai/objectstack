@@ -1,0 +1,33 @@
+{
+  "number": 22538,
+  "kind": "issue",
+  "title": "spec(ui): `record:approval_decision` on any page other than `sys_approval_request`'s parses and validates clean, then draws nothing (an authoring trap: placement is declared in prose, not enforced)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-09T20:57:25Z",
+  "updated_at": "2026-10-09T21:57:13Z",
+  "closed_at": "2026-10-09T21:57:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22538",
+  "body": "Filing gate: **① a metadata-authoring trap** (AGENTS.md Prime Directive #10: \"a contract violation, or a metadata-authoring trap\"). The evidence is the trap itself, read in the diff of PR #22532. Escalated by that PR's at-tier contract review (`6089080726`, finding B), on #22472. Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`. ⛔ Not a claim. Triage sets the grade, the lane and the direction.\n\n**Who acts on it:** the triage seat picks a direction, then the seat whose lane holds it dispatches it.\n\n## The trap\n\n- PR #22532 declares `record:approval_decision`: a `PageComponentType` member with an empty strict `ComponentPropsMap` row. The row comment and the changeset say it belongs on the `sys_approval_request` record page. That is a declared constraint, not an enforced one.\n- objectui's renderer returns null unless the record context's object is `sys_approval_request`. On any other object's record page the node parses, `os validate` passes it, and the page draws nothing. An authored block is silently dropped.\n- Ruling `6079807016` (objectui#12045) declared the type precisely so that a mistake is refused rather than silently dropped. Placement is the one mistake it still lets through.\n- **Not measured:** a wrong-placement page through `os validate` or a served door. There is no producer yet. #22473 (plugin-approvals' request page) is the first, and it places the type correctly.\n\n## Directions for triage\n\n- **A** an object-aware lint finding that binds the type to the page's `object` = `sys_approval_request`. The precedent for object-aware component checks is `validate-page-field-bindings.ts`.\n- **B** keep the claim as narrow as the enforcement: the constraint stays prose, and objectui's renderer draws a visible \"only on approval request pages\" notice instead of null. This makes the failure loud on the consumer side, in objectui.\n- **C** record the constraint and build nothing until a wrong-placement producer exists.\n\n## Order\n\nAfter PR #22532 lands. It declares the type.\n\nDedupe: issue search `approval_decision` in objectstack: 1 hit, #7278 (closed, the reject action's two dialogs), not this. The placement is noted only in PR #22532's row comment and changeset. Dedupe words: record:approval_decision placement unchecked · approval panel wrong page draws nothing · component type bound to page object"
+}

@@ -2,7 +2,7 @@
   "number": 22525,
   "kind": "pull_request",
   "title": "feat(i18n): a refused end node's message translates in the run's locale",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T18:59:58Z",
-  "updated_at": "2026-10-09T20:13:50Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-09T20:40:59Z",
+  "closed_at": "2026-10-09T20:40:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-09T20:40:57Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/22525",

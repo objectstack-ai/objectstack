@@ -14,18 +14,20 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T16:00:11Z",
-  "updated_at": "2026-10-09T20:00:06Z",
+  "updated_at": "2026-10-10T02:11:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22506",
   "body": "Filing class: ① product defect — reach: public door (`os migrate apply`, `os migrate account-issuer`, the boot log), measured once on 17.7.0.\n\n**Reader:** objectstack triage → the lane that owns `os migrate` (CLI / migration composition).\n\n## Symptom\n\nMeasured in `objectstack-ai/hotclm` while upgrading it from 17.4.0 to 17.7.0 (objectstack-ai/hotclm#82, PR objectstack-ai/hotclm#85, section *In-place upgrade — DB (b)*). App declares `requires: ['auth']`; SQLite database created by a 17.4.0 boot; `@objectstack/*` 17.7.0, `better-auth` family 1.7.3.\n\n1. The 17.7.0 boot logs `[schema-drift] sys_account.issuer … orphaned` and prescribes `os migrate apply --allow-destructive`; `os migrate account-issuer` prescribes the same.\n2. `os migrate plan` composes **0 plugins** and examines 20 tables; `sys_account` appears only as an undeclared platform table.\n3. `os migrate apply --allow-destructive --yes` → `0 destructive`. The `issuer` column (and its unique index) remain.\n4. `os migrate account-issuer` and the next boot prescribe the same command again — a loop with no exit.\n\n## Expected\n\nThe prescribed command drops the retired column (the retirement is `objectstack-ai/objectstack#17440`), or the prescription names a command that does. The 17.5 upgrade checklist says *\"Apply the `sys_account` drop: `os migrate apply --allow-destructive`, then `os migrate account-issuer` again, expecting zero\"* — on this database zero never arrives.\n\n## Impact\n\nLow on SQLite here: the column is nullable and NULL passes the unique index, so sign-in and account creation work on the upgraded database. The cost is an upgrade checklist step that cannot be completed and a boot warning that cannot be cleared by following its own advice.\n\n## Dedupe\n\nMCP `search_issues` on this repo, query `os migrate apply allow-destructive does not drop sys_account issuer column account-issuer` → 14 hits, none open and none describing this: nearest are #17440 (closed — the retirement), #21573 (closed — unmapped-column reads), #21552 (closed — read-only data commands exit 1 with no DB), #19217 (closed — QA carriers).\n\n---\n_Filed by the `repo:hotclm` PM seat from a measured dev finding._"

@@ -1,0 +1,34 @@
+{
+  "number": 22566,
+  "kind": "issue",
+  "title": "Comment reactions (ruling A amended on #22505): a reaction is the reactor's own `sys_comment_reaction` record, and `sys_comment.reactions` retires with no aggregate and no data migration",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:services",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T01:16:38Z",
+  "updated_at": "2026-10-10T02:26:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22566",
+  "body": "Filing gate ③: a task the maintainer directed. On objectstack-ai/objectstack#22505, the maintainer ruled A with two amendments (director record `6091550406`), verbatim: 「同意;sys_comment.reactions 可以退役;可以不用考虑历史数据迁移;」. The maintainer then delegated the aggregate question (`6091621568`), verbatim: 「sys_comment.reactions 是否需要只读汇总 你综合判断。」. The director judged it: **no aggregate**. Filed by `domain:services` seat 1 (seat post #6021, `session_013j5gkUCpqQiti4GgPqqmnt`); the record's State line hands this seat the platform card. objectstack-ai/objectstack#22500, the defect, closes on the PRs that execute it.\n\n**Reader:** triage first, for the lane. The record declares `Clause-②: yes` for the new object: it widens `plugin-audit`'s published surface. Under the clause-② dispatch rule, that makes it spec-lane work, even though the files sit in `domain:services` packages (`plugin-audit`, `plugin-security`). The claimant declares those files to the `domain:services` seat post (#6021).\n\n## The ruling, executed (premises read on `origin/main` `6a3f82efa7`)\n\n1. **A new object `sys_comment_reaction`** (the comment, the emoji, the user), owned by the reactor.\n   - A member adds or removes their own reaction on any comment they can read, under the platform's ordinary own-record rule.\n   - ⛔ The author-only update floor on `sys_comment` is not touched (`plugin-security`, `default-permission-sets.ts:1164`; `sys_comment_moderation` alternate at `:1217`).\n   - Two members reacting at once write two rows, so the whole-column overwrite and its lost updates are gone by construction.\n2. **Its permission-set rows:** create, read, and delete-own (the record's Execution line).\n3. **`sys_comment.reactions` retires** (`plugin-audit/src/objects/sys-comment.object.ts:125`, a JSON textarea on the comment's row).\n   - Nothing takes its place on the comment row: no stored aggregate, no computed-on-read block (`6091621568`).\n   - The retirement carries the retirement discipline's own records: a retired-keys or D3 semantic entry, whichever the field's declaration shape requires. That is governance, not data migration.\n4. **No migration of stored reactions.** Existing reactions are not converted and disappear with the column. The changeset says so plainly: after the upgrade, existing emoji reactions are gone.\n\n## Open for the claimant to measure (not ruled)\n\n- **Read:** which read rule lets a reaction be read exactly when its comment can be read. Measure whether the comment's own read gate (`plugin-audit`'s `comment-access-hooks.ts`) or the parent-record gate applies, and reuse it. ⛔ No copy of a readability rule.\n- **Uniqueness:** whether (comment, emoji, user) is one row, and how a second identical reaction is refused or treated as a no-op.\n- **Consumers of the retired column:** a census. The director found objectui's chatter as the only reader (`6091621568`); cloud has none. `packages/spec/src/ui/component.zod.ts`'s `enableReactions` (feed prop) is a different surface and stays out unless the census says otherwise.\n- **The pinned objectui** (`.objectui-sha`) still writes the column until its chatter card lands. Measure what the data door answers that write once the field is retired. Land in an order that leaves no window where a member's reaction click fails worse than today (AGENTS.md Post-Task Checklist step 4: a removal the pinned sibling depends on ships with the sibling fix and the pin bump).\n\n## The objectui half\n\nobjectui's chatter writes and reads reaction records and stops writing the column. It does one batched `find` on `sys_comment_reaction` for the feed's comment ids and groups client-side into the `Record<string, string[]>` shape `CommentThread` already renders (`6091621568`). That card lives in objectstack-ai/objectui; this session has no write channel there, so it is asked of triage on #22505.\n\nDedupe: MCP `search_issues`, this repo, `sys_comment_reaction reactor own record comment reactions retire sys_comment.reactions` → 5 hits (#22500, #22505, #20558, #4756, #4630; the last three closed, on other questions). objectui, `chatter reaction records objectui comment reaction write path` → 2 hits (objectui#11019 and objectui#11035, both closed, other defects). None is this card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

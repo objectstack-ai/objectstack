@@ -1,0 +1,33 @@
+{
+  "number": 22560,
+  "kind": "issue",
+  "title": "plugin-approvals: the ruled record-reader visibility tier (#8652) is reachable only through a constructor option no app can set — declare its opt-in where an app can",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T00:53:26Z",
+  "updated_at": "2026-10-10T01:53:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22560",
+  "body": "Unblocks: #22559\n\nFiling gate: **③ executing a maintainer ruling that is unreachable for its consumers.** Split out of #22559's second half by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). ⛔ Not a claim.\n\n## The ruling, and why no app can use it\n\n- Ruling on #8652 (`5299823744`, maintainer 「同意」): \"A user with read access to the target business record may view that record's approval requests and full action history, **read-only** … Enabled by a per-object or plugin-level switch, **default OFF** … **the downstream project opts in**.\"\n- On `main`, the switch is `ApprovalsPluginOptions.recordReaderVisibleObjects` (`approval-service.ts:1235`, read at `:1290`). It is a constructor option only.\n- The CLI's `serve` constructs `ApprovalsServicePlugin` with no options, as #22559 measured on 17.7.0 and on `main` `4638625`. So no app metadata reaches the switch, and the ruled opt-in cannot be exercised by a config-driven app. hotclm's contract page is the measured consumer.\n\n## What to build\n\n- **A declarative opt-in that an app's own metadata carries.** The ruling names it per-object or plugin-level. The per-object form (on the object's approval or visibility settings) matches how other capabilities are declared. The spec seat picks the exact key and declares it once.\n  - It feeds the same `recordReaderVisibleObjects` set the constructor option feeds.\n  - The constructor option stays for hosts that build the plugin themselves.\n- **Default OFF is preserved:** an app that declares nothing sees no change.\n- `Clause-②: yes (widening)`. A new declarable key, on the v18 line.\n\n## Order\n\n#22559, the data-door visibility parity, lands first or alongside. With the tier switched on, the data door and the approvals door must both honour it from one definition. Otherwise turning it on widens one door and not the other.\n\n## Acceptance\n\n- An app declaring the opt-in for an object: a caller who can read a record of that object sees its approval requests read-only on both doors, and is offered no approval actions.\n- An app declaring nothing: unchanged.\n- Pins for both, plus a control: a caller who cannot read the record sees nothing.\n\nDedupe: search over objectstack for a declarative `recordReaderVisibleObjects` switch found only #22559, which this card splits."
+}

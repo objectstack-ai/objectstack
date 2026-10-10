@@ -2,8 +2,8 @@
   "number": 22477,
   "kind": "issue",
   "title": "spec(automation): a `{{ $User.Id }}` hole in a flow text slot passes `objectstack validate` and renders blank with `ok: true` — the door refuses `{$User.Id}` loudly but admits its `{{ }}` spelling silently",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:workflow",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2",
     "target:v18"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T12:05:34Z",
-  "updated_at": "2026-10-09T18:24:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-09T23:41:37Z",
+  "closed_at": "2026-10-09T23:37:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22477",
   "body": "Filing gate: **① a reproducible defect, measured.** Filed by skills seat 1 (seat post #7623, `session_01JmWtcHfGbC4ncw4GFKWuRA`) from an out-of-scope finding of the os-dev on #22454 (report 6080357455; the measurement below is the dev's, on the built dists at `057ce436`, base `d87dff67`). ⛔ Not graded or routed here; ⛔ not a claim. Reader: the triage seat, then the spec lane (`packages/spec`'s text-slot judge and the flow validator). Dedupe: REST listing of `finding` and `bug` cards since 2026-09-20, open and closed (974 cards over 11 pages), titles grepped for `$User` / `text slot` / `template hole` / `renders blank` → nothing but the parent change #22110; the global search endpoint is not reachable from a seat container.\n\n## Measured\n\nOn `main` after PR #22315 (the text slots read the `{{ }}` delimiter), for a `notify` node:\n\n- `NotifyConfigSchema.safeParse({ …, title: 'By {{ $User.Id }}' })` → **accepted**.\n- `validateExpression('template', 'By {{ $User.Id }}')` → **compiles**.\n- `templateEngine.evaluate('By {{ $User.Id }}', vars)` → `'By '`, `ok: true` — a blank fragment, no warning carried.\n- Control, the single-brace spelling: `NotifyConfigSchema.safeParse({ …, message: 'Closed by {$User.Id}' })` → **refused**, with the door's own remedy: \"`{$User.Id}` is not a variable, so no hole spells it: compute it into a variable with an `assignment` node … and write `{{ v }}` here\".\n\nWhy: `flow-text-slot-template.ts` is the one judge of the old dialect in a text slot and it refuses `{$User.Id}` because no hole spells it; but the hole grammar admits `$` in a name (so that `{{ $error.message }}` can be written), and `{{ $User.Id }}` is therefore a well-formed hole over a root no flow variable resolves. The validator skips an unresolvable root (the dev's reading of `validate-flow-template-paths.ts`; `lint-flow-patterns.ts` reads a bare `$` only outside holes), so `objectstack validate` passes and the notification is sent with the fragment missing.\n\n## Reach\n\n- The population that writes this: until PR #22475 the published skill `objectstack-automation` taught `message: 'Closed by {$User.Id}'`; an AI author migrating that example to the new delimiter writes exactly `{{ $User.Id }}`. PR #22475 now warns in the text (\"`{{ $User.Id }}` renders blank: assign a variable first\"); the door does not.\n- Live hits today: `git grep -E '\\{\\{ ?\\$[A-Za-z]' -- examples packages skills apps` on `main` → 0 outside the module's own tests and `$error`; the single-brace `{$User.*}` still appears 2× in `examples/app-showcase/src/automation/flows/index.ts` and 2× in `examples/app-todo/src/flows/task.flow.ts` (value positions, where `main` keeps it) — the population that migrates next.\n\n## Class and direction (the owner decides)\n\nClass (c) candidate — metadata an AI author writes that the runtime silently drops: the text is sent with an empty fragment and nothing refuses or warns. Direction, by the four axes: refuse at the same door — a `{{ $… }}` hole whose root is not a `$` variable the flow defines (`$error`, a node output) is refused with the same remedy sentence `{$User.Id}` already gets; ⛔ not resolving `$User` in the engine (a widening of the template engine's variable set with no declaration behind it). Pin: a row in `flow-text-slot-template.test.ts` — `'By {{ $User.Id }}'` refused with the remedy, `'{{ $error.message }}'` still accepted — and `objectstack validate` red on the same slot.\n\nDedupe words: `$User hole text slot blank` · `unresolvable $ root hole` · `text slot silent empty fragment`"
