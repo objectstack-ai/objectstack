@@ -18,6 +18,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { resolveUserAuthzGrants } from '@objectstack/core';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -84,10 +85,14 @@ function makeEngine(opts: EngineOptions = {}) {
             (tables[object] ??= []).push(row);
             return row;
         },
-        async update(object: string, data: Row) {
+        async update(object: string, data: Row, options?: any) {
+            // The real engine's dispatch: the store updates by id, and nothing
+            // looser may pass here (`check:engine-double-contract`).
+            const dispatch = assertEngineUpdateDispatch(data, options);
+            if (dispatch.kind !== 'by-id') throw new Error('fake engine: only by-id updates are modelled');
             if (opts.writeError) throw opts.writeError;
             writes.push({ op: 'update', data });
-            const row = (tables[object] ?? []).find((r) => r.id === data.id);
+            const row = (tables[object] ?? []).find((r) => r.id === dispatch.id);
             if (row) Object.assign(row, data);
             return row;
         },

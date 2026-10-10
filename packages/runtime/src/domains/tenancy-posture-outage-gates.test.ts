@@ -40,14 +40,15 @@
 // check. So each pin enters at the door body (`handleKeys` / `handleActions`),
 // which is where the gate it is about actually runs.
 //
-// ## WHICH DOORS — three, because the gate body has three call sites
+// ## WHICH DOORS — four, because the gate body has four call sites
 //
-// `refuseUngrantedActivationWrite` is ONE gate with two callers, so the
-// install-wide activation write has two doors: `./actions.ts:156` (`POST
-// /actions/_activation/:object/:action`) and `./automation.ts:1050` (`POST
-// /automation/:name/toggle`, through `refuseUngrantedFlowActivationWrite`).
-// Both inherit the throw exit this change gives the gate, so both are pinned
-// here alongside the `/keys` mint. A pin on one door is not evidence about the
+// `refuseUngrantedActivationWrite` is ONE gate with three callers, so the
+// install-wide activation write has three doors: `./actions.ts` (`POST
+// /actions/_activation/:object/:action`), `./automation.ts` (`POST
+// /automation/:name/toggle`, through `refuseUngrantedFlowActivationWrite`) and
+// `./catalog-activation.ts` (`POST /security/_activation/:type/:name`, for
+// positions and permission sets). All inherit the throw exit this change gives
+// the gate, so all are pinned here alongside the `/keys` mint. A pin on one door is not evidence about the
 // other: they differ in what runs in FRONT of the gate — the automation domain
 // has an anonymous floor and its own authoring-write predicate — and what runs
 // in front of a gate is exactly what a pin entering at the door body measures.
@@ -73,8 +74,8 @@
 //
 // Covers: three wirings of `tenancy` (never registered · registered through a
 // factory that throws · registered SCOPED and healthy, reporting `isolated`)
-// across three doors (`POST /keys` mint · the actions activation write · the
-// automation toggle), for the callers each door's decision turns on (an org-less
+// across four doors (`POST /keys` mint · the actions activation write · the
+// automation toggle · the catalog activation write), for the callers each door's decision turns on (an org-less
 // minter; a tenant org admin who already holds `manage_metadata`; the
 // `PLATFORM_ADMIN` operator).
 //
@@ -101,10 +102,12 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { ObjectKernel, ServiceLifecycle, isAuthzStoreUnavailableError } from '@objectstack/core';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import { ACTIVATION_DENY_STATUS, ACTIVATION_DENY_CODE } from './activation-gate.js';
+import { bindTestSecurityCatalog } from '../security/security-catalog.testkit.js';
 
 /** ADR-0112 envelope for the outage answer — the brand's own two fields. */
 const OUTAGE_STATUS = 503;
@@ -574,5 +577,99 @@ describe('[#15900] the automation toggle — the same install-wide gate, reached
 
         expect(res.status).toBe(200);
         expect(toggleFlow).toHaveBeenCalled();
+    });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Gate 4 — the THIRD door onto the same install-wide write:
+// `POST /security/_activation/:type/:name` (`./catalog-activation.ts`), which
+// calls the gate directly, as the action door does. What runs in front of it
+// differs again — the `/security` domain's anonymous floor — so it is pinned
+// on its own rather than inferred from the other two.
+
+const CATALOG_POSITION = 'sales_rep';
+
+/**
+ * The engine the catalog door writes through: the ledger store's keyed find,
+ * insert and by-id update, with a security catalog bound that declares one
+ * position. `update` routes through the real engine's dispatch
+ * (`check:engine-double-contract`).
+ */
+function bootCatalogActivation(wiring: TenancyWiring) {
+    const ledger: Array<Record<string, unknown>> = [];
+    const ql = bindTestSecurityCatalog({
+        registry: { getObject: (name: string) => (name === 'sys_metadata_activation' ? { name } : undefined) },
+        find: async (_obj: string, opts: any) => {
+            const where = opts?.where ?? {};
+            const matched = ledger.filter((r) => Object.entries(where).every(([k, v]) => {
+                if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+                return r[k] === v;
+            }));
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
+        },
+        insert: async (_obj: string, data: any) => {
+            const row = { id: `act_${ledger.length + 1}`, ...data };
+            ledger.push(row);
+            return row;
+        },
+        update: async (_obj: string, data: any, options?: any) => {
+            const dispatch = assertEngineUpdateDispatch(data, options);
+            if (dispatch.kind !== 'by-id') throw new Error('fake engine: only by-id updates are modelled');
+            const row = ledger.find((r) => r.id === dispatch.id);
+            if (row) Object.assign(row, data);
+            return row;
+        },
+    }, { positions: [{ name: CATALOG_POSITION, permissionSets: [] }] });
+    const kernel = bareKernel();
+    kernel.registerService('objectql', ql);
+    kernel.registerService('data', ql);
+    wireTenancy(kernel, wiring);
+    return { dispatcher: new HttpDispatcher(kernel as never), ledger };
+}
+
+const flipPosition = (dispatcher: HttpDispatcher, ctx: HttpProtocolContext) =>
+    dispatcher.handleSecurity(`/_activation/position/${CATALOG_POSITION}`, 'POST', { enabled: false }, {}, ctx);
+
+describe('[#15900] the catalog activation write — the same install-wide gate, reached through the THIRD door', () => {
+    it('REFUSES loudly (503, outage brand) and writes no ledger row when the `tenancy` factory throws', async () => {
+        const { dispatcher, ledger } = bootCatalogActivation('throwing-factory');
+
+        const err = await flipPosition(dispatcher, tenantAdmin()).then(
+            () => { throw new Error('the catalog activation door answered instead of refusing'); },
+            (e: unknown) => e,
+        );
+
+        expect(isAuthzStoreUnavailableError(err)).toBe(true);
+        expect((err as { status?: unknown }).status).toBe(OUTAGE_STATUS);
+        expect((err as { code?: unknown }).code).toBe(OUTAGE_CODE);
+        expect(ledger).toEqual([]);
+    });
+
+    it('CONTROL — a deployment that never registered `tenancy` still permits the org admin', async () => {
+        const { dispatcher, ledger } = bootCatalogActivation('never-registered');
+
+        const res = responseOf(await flipPosition(dispatcher, tenantAdmin()));
+
+        expect(res.status).toBe(200);
+        expect(ledger).toEqual([expect.objectContaining({ metadata_type: 'position', name: CATALOG_POSITION, active: false })]);
+    });
+
+    it('reads a HEALTHY SCOPED `tenancy` through the request scope and REFUSES the tenant org admin (403), not 503', async () => {
+        const { dispatcher, ledger } = bootCatalogActivation('scoped-healthy');
+
+        const res = responseOf(await flipPosition(dispatcher, tenantAdmin()));
+
+        expect(res.status).toBe(ACTIVATION_DENY_STATUS);
+        expect(res.body?.error?.code).toBe(ACTIVATION_DENY_CODE);
+        expect(ledger).toEqual([]);
+    });
+
+    it('reads a HEALTHY SCOPED `tenancy` through the request scope and ADMITS the platform operator (200)', async () => {
+        const { dispatcher, ledger } = bootCatalogActivation('scoped-healthy');
+
+        const res = responseOf(await flipPosition(dispatcher, operator()));
+
+        expect(res.status).toBe(200);
+        expect(ledger).toHaveLength(1);
     });
 });
