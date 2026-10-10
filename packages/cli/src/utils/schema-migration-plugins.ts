@@ -2278,14 +2278,17 @@ export function refuseWhenHostConfigUnloadable(
  * (AGENTS.md → Route & surface ownership §2).
  *
  * @param kernel the booted kernel.
- * @param plannedDriver the driver whose managed set the plan will diff — the
- *   identity comparison that turns "bound somewhere" into "bound HERE".
+ * @param plannedDrivers the drivers whose managed sets the plan will diff — the
+ *   identity comparison that turns "bound somewhere" into "bound HERE". The
+ *   primary, and the `telemetry` sibling when the boot provisioned one
+ *   (#22579): an object routed to the sibling is examined there, not reported
+ *   as bound to a different datasource.
  * @param deferred whether this boot armed deferred DDL. `false` reports the
  *   coverage as UNMEASURED instead of syncing.
  */
 export async function measureComposedCoverage(
   kernel: unknown,
-  plannedDriver: unknown,
+  plannedDrivers: readonly unknown[],
   deferred: boolean,
 ): Promise<{ coverage: SchemaMigrationCoverage; notes: string[] }> {
   const notes: string[] = [];
@@ -2344,7 +2347,7 @@ export async function measureComposedCoverage(
     if (obj?.external != null) { federated++; continue; }
     const driver = engine.getDriverForObject(obj.name);
     if (!driver) { unbound++; continue; }
-    if (driver !== plannedDriver) { otherDriver++; continue; }
+    if (!plannedDrivers.includes(driver)) { otherDriver++; continue; }
     if (typeof (driver as { syncSchema?: unknown }).syncSchema !== 'function') { unsupported++; continue; }
     try {
       await engine.syncObjectSchema(obj.name);

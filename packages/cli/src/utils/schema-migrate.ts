@@ -25,6 +25,12 @@
  * resolves a database or a secret ({@link loadProjectEnvFiles}, #22581), and
  * the stack reports which database it opened and who named it
  * ({@link SchemaStack.dbSource}).
+ *
+ * Its datasources are the serving boot's too: when `os dev` / `os serve` would
+ * keep lifecycle-classed objects in a `telemetry` sibling database (ADR-0057
+ * §3.6), this boot provisions that sibling through the same helper
+ * (`provisionTelemetryDatasource`, #22579), and the plan diffs and applies each
+ * object against the database it lives in ({@link SchemaStack.detectManagedDrift}).
  */
 import path from 'node:path';
 import chalk from 'chalk';
@@ -37,6 +43,7 @@ import type {
 } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import { isDevelopmentBoot } from '@objectstack/core';
 import {
   doctorNodeEnv,
   provenanceOf,
@@ -50,6 +57,11 @@ import {
   measureComposedCoverage,
   type SchemaMigrationComposition,
 } from './schema-migration-plugins.js';
+import {
+  provisionTelemetryDatasource,
+  standaloneTelemetryPrimary,
+  TELEMETRY_DATASOURCE,
+} from './telemetry-datasource.js';
 
 export type { PendingSchemaWork };
 
@@ -77,8 +89,45 @@ export interface SqlDriverLike {
 }
 
 export interface SchemaStack {
+  /**
+   * The PRIMARY datasource's SQL driver — the database {@link dbLabel} names.
+   * A plan's drift is read through {@link detectManagedDrift}, which covers the
+   * `telemetry` sibling as well; this is the primary alone.
+   */
   driver: SqlDriverLike | null;
   dbLabel: string;
+  /**
+   * [#22579] The `telemetry` sibling database (ADR-0057 §3.6) this boot
+   * provisioned, as the serving boot would — the file lifecycle-classed
+   * objects (`audit` / `telemetry` / `event`) are planned against — or `null`
+   * when the serving boot keeps them in the primary: production without
+   * `OS_TELEMETRY_DB`, `OS_TELEMETRY_DB=0`, or a primary that is not a
+   * file-backed SQLite database. `os migrate plan` / `apply` print it beside
+   * the database in both faces.
+   */
+  telemetryDatabase: string | null;
+  /**
+   * [#22579] Every SQL driver this boot plans against, in order: the primary
+   * ({@link driver}), then the `telemetry` sibling when there is one. An object
+   * whose engine-resolved driver is not here is outside the plan.
+   */
+  drivers: readonly SqlDriverLike[];
+  /**
+   * [#22579] Managed drift over every datasource this boot plans against: the
+   * primary, then the `telemetry` sibling when there is one. Each entry stays
+   * tied to the driver that reported it, which is where
+   * {@link applyMigrationEntries} applies it. `[]` with no SQL driver.
+   */
+  detectManagedDrift: () => Promise<ManagedDriftEntry[]>;
+  /**
+   * [#22579] Apply drift {@link detectManagedDrift} returned, each entry on the
+   * driver that reported it. Refuses — before applying anything — an entry
+   * this stack did not report: it has no datasource to go to.
+   */
+  applyMigrationEntries: (
+    entries: ManagedDriftEntry[],
+    opts: { allowDestructive?: boolean },
+  ) => Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }>;
   /**
    * [#22581] Who named the database {@link dbLabel} describes: `--database-url`,
    * a variable from this process's environment, one from the project's `.env*`
@@ -154,6 +203,19 @@ function findSqlDriverVia(getService: (name: string) => any): SqlDriverLike | nu
 
 function findSqlDriver(kernel: any): SqlDriverLike | null {
   return findSqlDriverVia((name) => kernel?.getService?.(name));
+}
+
+/**
+ * [#22579] The `telemetry` sibling's SQL driver, under the service name its
+ * `DriverPlugin` published (`driver.telemetry`) — the same instance the engine
+ * routes lifecycle-classed objects to.
+ */
+function findTelemetryDriver(kernel: any): SqlDriverLike | null {
+  let d: any;
+  try { d = kernel?.getService?.(`driver.${TELEMETRY_DATASOURCE}`); } catch { /* not registered */ }
+  return d && typeof d.detectManagedDrift === 'function' && typeof d.applyMigrationEntries === 'function'
+    ? (d as SqlDriverLike)
+    : null;
 }
 
 /**
@@ -494,6 +556,16 @@ export function describeDatabaseSource(source: DatabaseSource): string {
   }
 }
 
+/**
+ * [#22579] The line `os migrate plan` / `apply` print under the database when
+ * the boot planned against a `telemetry` sibling ({@link SchemaStack.telemetryDatabase}).
+ */
+export function describeTelemetryDatabase(file: string): string {
+  return `Telemetry database: ${chalk.white(file)} ${chalk.dim(
+    '(audit, telemetry and event objects — where os serve keeps them; OS_TELEMETRY_DB=0 turns it off)',
+  )}`;
+}
+
 /** Boot the schema stack. Caller MUST call `shutdown()` when done. */
 export async function bootSchemaStack(
   opts: {
@@ -671,11 +743,15 @@ export async function bootSchemaStack(
   const { createStandaloneStack, Runtime, resolveStandaloneDatabase } = await import('@objectstack/runtime');
   const defer = opts.deferSchemaDdl === true;
 
+  // The inputs the database is resolved from — by `createStandaloneStack`
+  // below, the occupancy probe before it, and the telemetry sibling's key.
+  const databaseInput = { projectRoot, ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}) };
+
   // [#22581] Who named the database: the resolution `createStandaloneStack`
   // makes below (and the occupancy probe made before it), from the same inputs.
   const dbSource = resolveDatabaseSource(
     envLoad,
-    resolveStandaloneDatabase({ projectRoot, ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}) }),
+    resolveStandaloneDatabase(databaseInput),
     opts.databaseUrl || undefined,
   );
 
@@ -735,6 +811,31 @@ export async function bootSchemaStack(
   for (const plugin of stack.plugins) {
     await kernel.use(plugin);
   }
+  // [#22579] The `telemetry` sibling datasource (ADR-0057 §3.6), exactly when
+  // the serving boot provisions it and through the same helper. Without it,
+  // every lifecycle-classed object a development boot (or an `OS_TELEMETRY_DB`
+  // deployment) keeps in the sibling resolved to the primary here, so `plan`
+  // listed it as a table to create and `apply` created it there — an empty
+  // orphan beside the one the served boot uses.
+  //
+  //  - WHETHER and WHERE is the serving boot's answer: its `dev` reading
+  //    (`isDevelopmentBoot` — `--dev`, or `NODE_ENV=development`, the reading
+  //    the composition's auth gate takes too), `OS_TELEMETRY_DB` from the
+  //    environment loaded above, and the primary the standalone stack declares
+  //    (`standaloneTelemetryPrimary`, `serve`'s own key for it).
+  //  - HOW it opens is this boot's: never under the dev self-heal, and on a
+  //    read-only probe an absent file opens empty in memory — the posture the
+  //    primary has here (`oneShot`).
+  //
+  // Registered before the deferral below, which arms it with the primary.
+  const telemetryDatabase = (await provisionTelemetryDatasource({
+    primaryPath: await standaloneTelemetryPrimary(databaseInput),
+    env: process.env,
+    dev: isDevelopmentBoot(opts.serveFlags?.dev),
+    use: (plugin) => kernel.use(plugin as any),
+    warn: (message) => console.warn(message),
+    oneShot: { readOnlyProbe: opts.readOnlyProbe === true },
+  })) ?? null;
   const deferral = defer ? new DeferSchemaDdlPlugin() : null;
   if (deferral) {
     await kernel.use(deferral as any);
@@ -791,6 +892,12 @@ export async function bootSchemaStack(
   if (lifecycleNote) composition.notes.push(lifecycleNote);
 
   const driver = findSqlDriver(kernel);
+  // [#22579] Every SQL driver this boot plans against: the primary, then the
+  // sibling it provisioned. Nothing else — a datasource an artifact declares
+  // or a mapping names stays outside the plan, reported by its coverage.
+  const telemetryDriver = telemetryDatabase !== null ? findTelemetryDriver(kernel) : null;
+  const plannedDrivers: SqlDriverLike[] = [driver, telemetryDriver]
+    .filter((d): d is SqlDriverLike => d !== null);
 
   // #13028 — the composed host declared its objects in `init()`; the pass that
   // hands them to their driver lives in `ObjectQLPlugin.start()`, which the
@@ -801,13 +908,16 @@ export async function bootSchemaStack(
   // so instead of reading as coverage. Runs only when this boot actually
   // composed a host; every other caller is untouched.
   if (opts.composeHostStack === true && composition.notes.length > 0) {
-    const measured = await measureComposedCoverage(kernel, driver, defer);
+    const measured = await measureComposedCoverage(kernel, plannedDrivers, defer);
     composition.coverage = measured.coverage;
     composition.notes.push(...measured.notes);
   }
 
   // Read AFTER the pass above — that is the step which fills both of them.
-  const managedTableCount = driver ? (driver as any).managedObjectFields?.size ?? 0 : 0;
+  // [#22579] Every planned driver's managed set: the sibling's objects are
+  // examined too.
+  const managedTableCount = plannedDrivers
+    .reduce((n, d) => n + ((d as any).managedObjectFields?.size ?? 0), 0);
   // [#21391] Every datasource the deferral armed, not only the default's.
   const pendingSchemaWork: PendingSchemaWork[] = [];
   for (const d of deferral?.drivers ?? []) {
@@ -819,10 +929,46 @@ export async function bootSchemaStack(
     pendingSchemaWork.filter((w) => w.kind === 'create_table').map((w) => w.table),
   );
 
+  // [#22579] Which driver reported each drift entry — where it is applied.
+  const driftOwners = new Map<ManagedDriftEntry, SqlDriverLike>();
+
   return {
     driver,
     dbLabel: describeDb(driver),
     dbSource,
+    telemetryDatabase: telemetryDriver ? telemetryDatabase : null,
+    drivers: plannedDrivers,
+    detectManagedDrift: async (): Promise<ManagedDriftEntry[]> => {
+      const drift: ManagedDriftEntry[] = [];
+      for (const d of plannedDrivers) {
+        for (const entry of await d.detectManagedDrift()) {
+          driftOwners.set(entry, d);
+          drift.push(entry);
+        }
+      }
+      return drift;
+    },
+    applyMigrationEntries: async (entries, applyOpts) => {
+      const unowned = entries.filter((e) => !driftOwners.has(e));
+      if (unowned.length > 0) {
+        throw new Error(
+          `Refusing to apply ${unowned.length} drift entr${unowned.length === 1 ? 'y' : 'ies'} this migration did not `
+          + `detect (${unowned.map((e) => e.table).join(', ')}): there is no datasource to apply ${unowned.length === 1 ? 'it' : 'them'} to.`,
+        );
+      }
+      const applied: ManagedDriftEntry[] = [];
+      const skipped: ManagedDriftEntry[] = [];
+      for (const d of plannedDrivers) {
+        const own = entries.filter((e) => driftOwners.get(e) === d);
+        // The primary is asked every time, as it was before there was a
+        // sibling; the sibling only for entries of its own.
+        if (own.length === 0 && d !== driver) continue;
+        const result = await d.applyMigrationEntries(own, applyOpts);
+        applied.push(...result.applied);
+        skipped.push(...result.skipped);
+      }
+      return { applied, skipped };
+    },
     managedTableCount,
     kernel,
     pendingSchemaWork,
@@ -889,7 +1035,11 @@ export async function bootSchemaStack(
     shutdown: async () => {
       deferral?.release();
       try { await kernel.shutdown(); } catch { /* teardown is best-effort */ }
-      try { await driver?.disconnect?.(); } catch { /* ignore */ }
+      // [#22579] The sibling is a `DriverPlugin` driver, which owns no teardown
+      // of its own: the same backstop as the primary's.
+      for (const d of plannedDrivers) {
+        try { await d.disconnect?.(); } catch { /* ignore */ }
+      }
       // Only now — `kernel.shutdown()` is itself two INFO lines ("Graceful
       // shutdown started" / "complete"), and under `--json` those printed
       // BELOW the payload, which is half of what made stdout unparseable
