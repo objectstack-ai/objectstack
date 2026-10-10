@@ -38,10 +38,15 @@
 # it any more. It is a hand-written pointer stub naming the guide's public address,
 # and `gen:upgrade-guide` writes the gitignored docs pages under
 # content/docs/protocol-upgrade/ instead (NOT_DRIVER_MANAGED records that path). A
-# route there would now be harmful, not idle: the driver keeps one side WHOLE, so a
-# merge between the stub and a side still carrying a generated guide would keep
-# whichever side the driver chose, with nothing left to regenerate it from. Unrouted,
-# that merge text-merges and conflicts on the stub.
+# route there was harmful, not idle: the driver kept OURS whole, and the pre-commit
+# discharge then passed it, because `check:upgrade-guide` compares no committed
+# copy — so a branch carrying a generated guide merged the stub away in silence.
+# Unrouted, a merge made from a checkout that carries this file conflicts on the
+# stub. ⚠️ git reads the route from the checkout DOING the merge, so a branch
+# forked before #22483 still defers the guide on its first merge of main; the merged
+# tree has no row to discharge it against, so the next commit and the push are
+# refused instead of passed (measured on PR #22556 with the previous head as the
+# control, both merge directions).
 #
 # `merge=os-regen` hands those paths to `scripts/git-merge-regen.mjs`, which does
 # NOT text-merge them. See that file for why it also does not regenerate them

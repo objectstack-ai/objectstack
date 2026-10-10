@@ -932,9 +932,10 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'runs before `next build`. Git never merges them. Recorded because this generator used to own '
       + 'a ROUTED row, `docs/protocol-upgrade-guide.md`, and #22483 took that row out on purpose: the '
       + 'file is now a hand-written pointer stub that nothing generates, so "discard both sides and '
-      + 're-run the generator" would discard the stub with no generator to bring it back. A merge '
-      + 'that meets it on both sides is a human\'s, and its conflict is the signal. Same expiry clause '
-      + 'as the three untracked entries above: committing these pages turns this entry red.',
+      + 're-run the generator" would discard the stub with no generator to bring it back, and '
+      + '`check:upgrade-guide`, which compares no committed copy, would pass the loss. A merge that '
+      + 'meets the stub on both sides is a human\'s. Same expiry clause as the three untracked '
+      + 'entries above: committing these pages turns this entry red.',
   },
   {
     path: 'docs/audits/**',
