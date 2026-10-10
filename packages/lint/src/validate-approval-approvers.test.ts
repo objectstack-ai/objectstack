@@ -322,7 +322,7 @@ describe('unset-manager dead-end (#16748)', () => {
     expect(finding.hint).toContain('reads a manager_id column');
     expect(finding.hint).toContain('once every row in the file exists');
     expect(finding.hint).toContain("reported on that row's manager result");
-    expect(finding.hint).not.toMatch(/bulk import does not write/);
+    expect(finding.hint).not.toMatch(/does not write it/);
     // Placement is the grade: ahead of the clause that hands the remaining
     // routes to the deployment.
     const importAt = finding.hint.indexOf('/api/v1/auth/admin/import-users');
