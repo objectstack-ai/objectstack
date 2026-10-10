@@ -9,7 +9,7 @@ feat(spec,core)!: a position's permission sets are declared in `permissionSets` 
 
 Clause-②: yes
 
-<!-- adr-0087: not-required (no-migration-prescription) No authorable key is removed, renamed or re-shaped: `PositionSchema.permissionSets` is a key ADDED where a refusal stood, so no stored definition needs rewriting by `objectstack migrate meta` and no tombstone exists to write. What moves is runtime resolution: the `sys_position_permission_set` rows stop granting, and turning them into definitions is a DATA conversion (`convertPositionBindingRows`, `@objectstack/core`) that the ADR-0131 upgrade ceremony applies, not a metadata migration. Every package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered). -->
+<!-- adr-0087: registered position-permission-sets-declared -->
 
 **BREAKING** (the resolver stops reading the position → permission-set junction), shipped as `minor` under the launch-window convention for breaking changes.
 
