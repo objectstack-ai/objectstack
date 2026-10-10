@@ -26,7 +26,7 @@ Clause-②: no (narrowing)
 
 **The one-line fix: move the `record:details` component into the `tabs` items (the first item's `children`, by convention) and delete `slots.details`.** Its `sections` and `hideFields` move unchanged. The page then shows the details body it always declared, which is a visible change on every page that authored the pair.
 
-**Who is affected, measured.** In this repository, only the `sys_user` record page (`sys_user_detail` in `@objectstack/platform-objects`) authored both slots; no example app page does. hotcrm's one slotted page authors `header` and `discussion` only. Deployed metadata was not measured. A page row already stored with the pair is served as before (the authored tabs, without the details body); saving it again is refused until the details body moves.
+**Who is affected, measured.** In this repository, only the `sys_user` record page (`sys_user_detail` in `@objectstack/platform-objects`) authored both slots; no example app page does. hotcrm's one slotted page authors `header` and `discussion` only. Deployed metadata was not measured. A page row already stored with the pair is replayed unchanged at load, so it renders as before (the authored tabs, without the details body); its read diagnostics name the pair, and saving it again is refused until the details body moves.
 
 ### The kit
 

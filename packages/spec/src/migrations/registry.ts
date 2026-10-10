@@ -17395,16 +17395,17 @@ const step18: MigrationStep = {
         + 'sections never showed and the ban columns it hides were never hidden by it; it now carries its '
         + '`record:details` as the first `tabs` item. The parse now refuses the pair at `slots.details`, '
         + 'naming both slots and the fix: `definePage`, `defineStack` (`STACK_SCHEMA_INVALID`, 422), '
-        + '`objectstack validate`, an artifact\'s parse and the metadata save door (`422 INVALID_METADATA`). '
+        + '`objectstack validate` and the metadata save door (`422 INVALID_METADATA`). '
         + 'Measured reach before the narrowing: in this repository only `sys_user_detail` authored the '
         + 'pair (no example app page does), and hotcrm\'s one slotted page authors `header` and '
         + '`discussion` only. '
         + '⚠️ No D2 conversion: which tab item carries the details body, and under which label, is the '
         + 'author\'s decision, and moving it makes visible a body that never rendered — a change to the '
         + 'page, not a respelling. '
-        + '⚠️ A page row already stored with the pair is replayed unchanged and served as before (it '
-        + 'renders the authored tabs, without the details body), its read diagnostics name the pair, and '
-        + 'saving it again is refused until the details body moves. ADR-0087.',
+        + '⚠️ A page row already stored with the pair is replayed unchanged at load (no conversion '
+        + 'touches it), so it renders as before — the authored tabs, without the details body — while '
+        + 'its read diagnostics name the pair and saving it again is refused until the details body '
+        + 'moves. ADR-0087.',
       acceptanceCriteria:
         'Grep every page in `defineStack` pages sources, exported stacks and every page row in '
         + '`sys_metadata` for a `slots` map carrying both a `details` and a `tabs` key. For each, move the '
