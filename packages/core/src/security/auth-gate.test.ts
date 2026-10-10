@@ -293,6 +293,156 @@ describe('auth-gate (ADR-0069 session gate)', () => {
     });
   });
 
+  // ── The ADR-0043 approval action page (ruling A on #22438) ───────────────
+  //
+  // `GET` / `POST /api/v1/approvals/act` is session-less by design: the
+  // single-use token in the request is its whole authorization. The self-hosted
+  // raw-app mount (`plugin-approvals` `ACT_PATH`) never passes through this
+  // gate, so the allow-list gives the dispatcher's spelling of the same route
+  // the same token-only authentication. The card's scope is binding: the exact
+  // route only, no prefix or wildcard, no other approvals path.
+  //
+  // ⛔ These pin the DECISION per path, never the spelling of the entry.
+  describe('[#22577] the approval action page is exempt as the exact route, and nothing wider', () => {
+    it('PIN 1 — exempts the exact act route in every spelling the gate already normalises', () => {
+      for (const p of [
+        '/api/v1/approvals/act',                    // the self-hosted mount's ACT_PATH, as a REST-shaped seam sees it
+        '/approvals/act',                           // the dispatcher shape: the hono adapter strips the app prefix
+        '/api/approvals/act',                       // the third mount base the gate recognises
+        '/api/v1/approvals/act?token=abc',          // the e-mail link's spelling: query stripped
+        '/approvals/act?token=abc',
+        '/api/v1/approvals/act/',                   // trailing slash stripped
+        '/approvals/act//',
+        '//approvals//act',                         // empty segments dropped
+        '/environments/env_1/approvals/act',        // scoped: the dispatcher gates BEFORE its scoped-URL strip
+        '/api/v1/environments/env_1/approvals/act',
+        '/api/v1/projects/env_1/approvals/act',     // the legacy `projects` spelling of the same scope (ADR-0006)
+      ]) {
+        expect(isAuthGateAllowlisted(p), p).toBe(true);
+      }
+    });
+
+    it('PIN 2 — gates every sibling approvals path and every extension of the act route', () => {
+      for (const p of [
+        // prefix extensions of the act route
+        '/api/v1/approvals/act/x', '/approvals/act/x', '/api/v1/approvals/act/x/y',
+        '/api/v1/approvals/actx', '/approvals/actx', '/approvals/act-x', '/api/v1/approvals/acts',
+        // the approvals base and its other routes (the REST approvals surface)
+        '/api/v1/approvals', '/approvals', '/api/v1/approvals/',
+        '/api/v1/approvals/requests', '/api/v1/approvals/requests/req_1',
+        '/api/v1/approvals/requests/req_1/approve', '/approvals/requests/req_1/approve',
+        '/approvals/x', '/x/act',
+        // the act route below a non-mount segment, whose value a tenant controls
+        '/data/approvals/act', '/api/v1/data/approvals/act', '/meta/approvals/act',
+        '/data/environments/x/approvals/act', '/api/v2/approvals/act', '/rest/v1/approvals/act',
+        // a scope with no id: `approvals` is the id here, and the route is `act`
+        '/environments/approvals/act', '/api/v1/environments/approvals/act',
+        // spellings the gate does not normalise: case and percent-encoding
+        '/api/v1/Approvals/act', '/APPROVALS/ACT', '/approvals/Act',
+        '/api/v1/approvals%2Fact', '/approvals/%61ct',
+      ]) {
+        expect(isAuthGateAllowlisted(p), p).toBe(false);
+      }
+    });
+
+    it('carries through `evaluateAuthGate`: a gated session passes the act route and stays gated next door', () => {
+      const gated = { id: 'u1', authGate: { code: 'PASSWORD_EXPIRED', message: 'change it' } };
+      expect(evaluateAuthGate(gated, '/approvals/act')).toBeNull();
+      expect(evaluateAuthGate(gated, '/api/v1/approvals/act?token=abc')).toBeNull();
+      // ⭐ The control: the same fixture is still gated on the sibling route.
+      expect(evaluateAuthGate(gated, '/api/v1/approvals/requests/req_1/approve'))
+        .toEqual({ code: 'PASSWORD_EXPIRED', message: 'change it' });
+      expect(evaluateAuthGate(gated, '/approvals/act/x'))
+        .toEqual({ code: 'PASSWORD_EXPIRED', message: 'change it' });
+    });
+
+    // ⭐ CLAUSE ② — the widening, measured rather than asserted.
+    //
+    // `preEntryAllowlisted` is this file's subject as it stood before the
+    // entry, transcribed from `origin/main` 99801d831f. Over every path of up to
+    // five segments drawn from a vocabulary that mixes the new route's tokens
+    // with the existing ones (plus the six-segment scoped REST shape), the set
+    // of paths whose answer moved must be EXACTLY the act route at each mount
+    // base the gate recognises, unscoped or under one environment scope, and
+    // every move must be a newly exempt path, none newly gated.
+    it('BOUNDARY — newly exempt is exactly the act route at each mount base and scope, nothing else', () => {
+      const PRE_MOUNT_BASES: readonly (readonly string[])[] = [['api', 'v1'], ['api'], []];
+      const PRE_SCOPE_SEGMENTS: readonly string[] = ['environments', 'projects'];
+      const PRE_ALLOW_ROUTES: readonly (readonly string[])[] = [
+        ['health'], ['ready'], ['discovery'], ['me', 'apps'], ['me', 'localization'],
+      ];
+      const startsWith = (segments: readonly string[], prefix: readonly string[]): boolean => {
+        if (segments.length < prefix.length) return false;
+        for (let k = 0; k < prefix.length; k++) if (segments[k] !== prefix[k]) return false;
+        return true;
+      };
+      const preEntryAllowlisted = (rawPath: string | undefined | null): boolean => {
+        if (!rawPath) return false;
+        let path = rawPath.split('?')[0] || '/';
+        let end = path.length;
+        while (end > 1 && path.charCodeAt(end - 1) === 47) end--;
+        path = path.slice(0, end) || '/';
+        const segments = path.split('/').filter((s) => s !== '');
+        for (const base of PRE_MOUNT_BASES) {
+          if (!startsWith(segments, base)) continue;
+          let i = base.length;
+          let scoped = false;
+          if (i + 1 < segments.length && PRE_SCOPE_SEGMENTS.includes(segments[i] as string)) {
+            i += 2;
+            scoped = true;
+          }
+          if (segments[i] === 'auth') {
+            if (i + 1 < segments.length) return true;
+            if (!scoped) return true;
+          }
+          for (const route of PRE_ALLOW_ROUTES) {
+            if (segments.length - i === route.length && startsWith(segments.slice(i), route)) return true;
+          }
+        }
+        return false;
+      };
+
+      const SEG = ['api', 'v1', 'approvals', 'act', 'requests', 'environments', 'projects', 'env1', 'auth', 'health'];
+      const corpus: string[] = ['', '/'];
+      const walk = (prefix: string, depth: number) => {
+        if (depth === 0) return;
+        for (const s of SEG) {
+          const p = `${prefix}/${s}`;
+          corpus.push(p);
+          walk(p, depth - 1);
+        }
+      };
+      walk('', 5);
+      // The scoped REST shape is six segments deep: `/api/v1/<scope>/<id>/approvals/act`.
+      walk('/api/v1', 4);
+
+      // Built independently of the predicate: base × (no scope | scope × id) × route.
+      const expected = new Set<string>();
+      for (const base of PRE_MOUNT_BASES) {
+        const scopes: string[][] = [[]];
+        for (const s of PRE_SCOPE_SEGMENTS) for (const id of SEG) scopes.push([s, id]);
+        for (const scope of scopes) expected.add(`/${[...base, ...scope, 'approvals', 'act'].join('/')}`);
+      }
+
+      const newlyExempt = corpus.filter((p) => isAuthGateAllowlisted(p) && !preEntryAllowlisted(p));
+      const newlyGated = corpus.filter((p) => !isAuthGateAllowlisted(p) && preEntryAllowlisted(p));
+      expect(newlyGated).toEqual([]);
+      expect([...new Set(newlyExempt)].sort()).toEqual([...expected].sort());
+
+      // Anti-vacuity: the corpus reaches every expected path, exercises both
+      // answers on both predicates, and carries the siblings PIN 2 names.
+      const inCorpus = new Set(corpus);
+      for (const p of expected) expect(inCorpus.has(p), p).toBe(true);
+      expect(corpus.length).toBeGreaterThan(100_000);
+      expect(corpus.filter((p) => preEntryAllowlisted(p)).length).toBeGreaterThan(0);
+      expect(corpus.filter((p) => !isAuthGateAllowlisted(p)).length).toBeGreaterThan(0);
+      for (const p of ['/approvals/act/requests', '/api/v1/approvals/requests', '/approvals/act/act']) {
+        expect(inCorpus.has(p), p).toBe(true);
+        expect(isAuthGateAllowlisted(p), p).toBe(false);
+      }
+    });
+  });
+
   describe('evaluateAuthGate', () => {
     it('returns null when the user carries no authGate', () => {
       expect(evaluateAuthGate({ id: 'u1' }, '/api/v1/data/x')).toBeNull();

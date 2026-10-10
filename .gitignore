@@ -103,6 +103,9 @@ next-env.d.ts
 .source/
 apps/*/. source/
 apps/*/.next/docs/
+# The protocol upgrade guide's docs pages: generated at docs build by
+# `pnpm --filter @objectstack/spec gen:upgrade-guide`, never committed.
+content/docs/protocol-upgrade/
 .turbo
 
 # Local env overrides (may contain secrets)
