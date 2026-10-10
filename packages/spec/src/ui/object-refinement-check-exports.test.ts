@@ -56,7 +56,13 @@ import {
   checkListViewCalendarVisualization,
   checkListViewChartBinding,
 } from './view.zod';
-import { PageSchema, checkPageSourceCompleteness, checkPageRequiresKind, checkPagePrintComposition } from './page.zod';
+import {
+  PageSchema,
+  checkPageSourceCompleteness,
+  checkPageRequiresKind,
+  checkPagePrintComposition,
+  checkPageSlotPair,
+} from './page.zod';
 import {
   GlobalFilterSchema,
   checkGlobalFilterDateDefaultValue,
@@ -269,6 +275,28 @@ const pagePrintFixtures: Fixture[] = [
   { label: '`print.repeatFooter` with no `footer` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true, repeatFooter: true } }, refusesAt: ['print.repeatFooter'] },
   { label: '`print` on a `full` page with `regions` and its `header` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true } }, refusesAt: [] },
   { label: 'a `slotted` page with no `print`', value: { ...PAGE_BASE, kind: 'slotted' }, refusesAt: [] },
+];
+
+// [#22568] `slots.details` beside `slots.tabs` is refused at `slots.details`:
+// the `tabs` slot replaces the strip the Details tab lives in, so the
+// `details` body never rendered. Every fixture is a `record` page with no
+// `print`, `source` or `requires`, so the three siblings stay silent and each
+// row exercises THIS check alone; the kind-less row is the one whose direct
+// call sees no `kind` while the parse sees the applied `full` default.
+const SLOT_DETAILS = { type: 'record:details', properties: { hideFields: ['id'] } } as const;
+const SLOT_TABS = {
+  type: 'page:tabs',
+  properties: { items: [{ label: 'Related', children: [{ type: 'record:related_list' }] }] },
+} as const;
+const SLOT_PAGE = { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted' } as const;
+const pageSlotPairFixtures: Fixture[] = [
+  { label: '`details` beside `tabs`, one component each', value: { ...SLOT_PAGE, slots: { details: SLOT_DETAILS, tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
+  { label: '`details` beside `tabs`, each an array', value: { ...SLOT_PAGE, slots: { details: [SLOT_DETAILS], tabs: [SLOT_TABS] } }, refusesAt: ['slots.details'] },
+  { label: 'an EMPTY `details: []` beside `tabs` — a present slot is refused, not its contents', value: { ...SLOT_PAGE, slots: { details: [], tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
+  { label: '`details` beside `tabs` on a page with no `kind` (the `full` default)', value: { ...PAGE_BASE, type: 'record', object: 'account', slots: { details: SLOT_DETAILS, tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
+  { label: '`details` alone', value: { ...SLOT_PAGE, slots: { details: SLOT_DETAILS } }, refusesAt: [] },
+  { label: '`tabs` alone, carrying the `record:details` in its first item', value: { ...SLOT_PAGE, slots: { tabs: { type: 'page:tabs', properties: { items: [{ label: 'Details', children: [SLOT_DETAILS] }] } } } }, refusesAt: [] },
+  { label: 'a slot map with neither', value: { ...SLOT_PAGE, slots: { discussion: [] } }, refusesAt: [] },
 ];
 
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
@@ -485,6 +513,7 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPageSourceCompleteness', check: checkPageSourceCompleteness, fixtures: pageSourceFixtures },
       { name: 'checkPageRequiresKind', check: checkPageRequiresKind, fixtures: pageRequiresFixtures },
       { name: 'checkPagePrintComposition', check: checkPagePrintComposition, fixtures: pagePrintFixtures },
+      { name: 'checkPageSlotPair', check: checkPageSlotPair, fixtures: pageSlotPairFixtures },
     ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
@@ -640,9 +669,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all three exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all four exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
@@ -676,6 +705,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
     ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkPagePrintComposition', checkPagePrintComposition],
+    ['checkPageSlotPair', checkPageSlotPair],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);
