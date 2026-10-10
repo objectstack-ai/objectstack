@@ -1515,12 +1515,12 @@ export class AuthPlugin implements Plugin {
         // actually lock an org out are the system ones (better-auth's admin
         // ban, remove-user and updateMemberRole, driven by a SCIM
         // `active: false` / `DELETE /Users/{id}` / group remap). Since #6084 it
-        // also covers `sys_permission_set`: deleting or renaming the
-        // `admin_full_access` row un-makes every platform admin at once, and
-        // the zero-admin bootstrap exemption then switched the guard off for
-        // all of the above. All eight hooks register at priority 20 so the
-        // ADR-0092 checks above (10) still answer first for user-context
-        // callers. See last-admin-guard.ts.
+        // also covers switching `admin_full_access` off — in the activation
+        // ledger since ADR-0131 D3 — which un-makes every grant-anchored
+        // platform admin at once, and the zero-admin bootstrap exemption would
+        // then switch the guard off for all of the above. Every hook registers
+        // at priority 20 so the ADR-0092 checks above (10) still answer first
+        // for user-context callers. See last-admin-guard.ts.
         registerLastAdminGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.last-admin-guard',
           logger: ctx.logger,
