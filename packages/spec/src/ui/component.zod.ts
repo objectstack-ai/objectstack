@@ -8611,19 +8611,25 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  * uses above. The registration agrees: `plugin-tree/src/index.tsx` declares
  * `{ name: 'tree', type: 'object' }` and no flat input.
  *
- * `titleField` is in the set although no `tree` block key is spelled that way:
- * `ListView`'s flatten resolves `treeCfg.titleField` into `labelField` before
- * emitting (`ListView.tsx:3927`, `labelField: treeCfg.labelField ||
- * treeCfg.titleField || 'name'`), so the author's intent is always the block's
- * `labelField`, and the prescription below says so.
- *
- * ⚠️ The renderer's own half of that sentence is GONE, and it is a DELETED
- * read rather than a moved one: `getTreeConfig`'s `?? schema.titleField` rung
- * — the `:117` this record used to cite — was removed on objectui#8841
- * because it read the FLATTENED NODE and never the block, and the docblock at
+ * `titleField` is in the set although no `tree` block key is spelled that way,
+ * and at `20c6d351a` NOTHING reads it: both halves that once did are DELETED
+ * reads, not moved ones. The flatten half went on objectui#6152 round 14
+ * (objectui `3fd862510`): at `47b1f0bb7` the `case 'tree'` arm resolved
+ * `labelField: treeCfg.labelField || treeCfg.titleField || 'name'` (`:3927`);
+ * at `20c6d351a` it reads `labelField: treeCfg.labelField || 'name'`
+ * (`ListView.tsx:3985`) and emits no `titleField`. The renderer half went
+ * earlier: `getTreeConfig`'s `?? schema.titleField` rung — the `:117` this
+ * record used to cite — was removed on objectui#8841 because it read the
+ * FLATTENED NODE and never the block, and the docblock at
  * `ObjectTree.tsx:240-261` records the three measurements that retired it.
- * The flatten half above is what keeps the key in this set; ⛔ do not restore
- * the renderer half from this record's history.
+ * This paragraph is the correction the 2026-10-10 re-read above reported;
+ * ⛔ restore neither rung from this record's history.
+ *
+ * So `titleField` is in this set for its prescription, not for a read: an
+ * author who writes a flat `titleField` on an `object-tree` is naming the
+ * tree's label field, and the one key that does that is `tree.labelField`,
+ * which the prescription below says. Keeping or dropping `titleField` from
+ * the set is a schema decision this record does not make.
  */
 const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
   ...COMPONENT_LEVEL_GUIDANCE,
@@ -8634,8 +8640,8 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
     prescription:
       'Write this as a key of the `tree` config object instead — `tree: { parentField, labelField, fields, '
       + 'defaultExpandedDepth }`. The flat top-level spelling is the internal form `ObjectView`/`ListView` '
-      + 'produce when they flatten `options.tree`, not a second authoring spelling. A `titleField` is the '
-      + "block's `labelField`: it is only ever read as that key's last fallback.",
+      + 'produce when they flatten `options.tree`, not a second authoring spelling. A `titleField` names the '
+      + "tree's label field, which the `tree` block spells `labelField`: write `tree: { labelField }`.",
   },
 ];
 

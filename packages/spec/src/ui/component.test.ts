@@ -4314,7 +4314,11 @@ describe('object-map / object-gantt / object-tree — key sets derived from the 
     // still resolves `treeCfg.titleField` into `labelField` before emitting
     // (`ListView.tsx:3270` at this pin), so an authored `titleField` is still
     // only ever the block's `labelField`. What died is the renderer's own
-    // fallback, not the flatten's.
+    // fallback, not the flatten's. At `20c6d351a` the flatten's rung is gone
+    // too (objectui#6152 round 14, objectui `3fd862510`: `ListView.tsx:3985`
+    // reads `treeCfg.labelField || 'name'`), so no half reads `titleField`;
+    // it stays in the set for the prescription it carries, which names
+    // `tree.labelField` (see `OBJECT_TREE_FLAT_CONFIG_GUIDANCE`).
     expect(setFor('object-tree', 'OBJECT_TREE_FLAT_CONFIG_KEYS'))
       .toEqual([...Object.keys(TreeConfigSchema.shape), 'titleField'].sort());
   });
