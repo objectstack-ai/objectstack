@@ -288,6 +288,24 @@ describe('[ADR-0131 D3] position write-through under single — a Setup position
     expect((after.grants as any).permissions).not.toContain('pw_reports');
   });
 
+  // [ADR-0131 D3/D4] `permissionSets` has no row column: a Setup edit of the
+  // row saves the definition again, and must carry the binding the metadata
+  // door declared rather than clear it.
+  it('a row edit keeps the `permissionSets` the stored definition names, and a rename carries them to the new name', async () => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'night_lead', label: 'Night lead' });
+    await (b.protocol as any).saveMetaItem({
+      type: 'position', name: 'night_lead', item: { name: 'night_lead', label: 'Night lead', permissionSets: ['night_tools'] },
+    });
+    expect((await b.envRows('night_lead')).map((r) => r.body.permissionSets)).toEqual([['night_tools']]);
+    await patch(b, created.id, { label: 'Night supervisor' });
+    expect((await b.envRows('night_lead')).map((r) => r.body)).toEqual([
+      { name: 'night_lead', label: 'Night supervisor', delegatable: false, permissionSets: ['night_tools'] },
+    ]);
+    await patch(b, created.id, { name: 'night_supervisor' });
+    expect((await b.envRows('night_supervisor')).map((r) => r.body.permissionSets)).toEqual([['night_tools']]);
+  });
+
   it('an edit keeps the row and the definition agreeing; a deactivation and is_default stay on the row', async () => {
     const b = await boot();
     const created: any = await create(b, { name: 'shift_lead', label: 'Shift lead' });
