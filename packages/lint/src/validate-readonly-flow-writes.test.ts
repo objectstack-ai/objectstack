@@ -2,10 +2,29 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateReadonlyFlowWrites,
+  validateReadonlyFlowWrites as validateReadonlyFlowWritesUnrecorded,
   FLOW_UPDATE_READONLY_FIELD,
   FLOW_UPDATE_READONLY_WHEN_FIELD,
 } from './validate-readonly-flow-writes.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the rule ids this file's rule shortened is one
+// verdict sentence; the reasoning it used to carry is the id's `os explain`
+// entry. Every call below records what it fired, and the last case in this
+// file holds each recorded verdict of those ids to one line of at most 200
+// characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: that case reads what the cases above
+// fired.
+const SHORTENED_RULE_IDS: readonly string[] = [FLOW_UPDATE_READONLY_FIELD, FLOW_UPDATE_READONLY_WHEN_FIELD];
+const firedShortened: Array<{ rule: string; message: string }> = [];
+const validateReadonlyFlowWrites: typeof validateReadonlyFlowWritesUnrecorded = (...args) => {
+  const findings = validateReadonlyFlowWritesUnrecorded(...args);
+  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 // Target object: a static-readonly field, a conditional readonlyWhen field, and
 // a plain writable field. Map-shaped `fields` (the common authoring form).
@@ -56,7 +75,7 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings[0].path).toBe('flows[0].nodes[1].config.fields.approval_status');
     expect(findings[0].message).toContain('approval_status');
     expect(findings[0].message).toContain('crm_opportunity');
-    expect(findings[0].message).toContain('silently strips readonly fields from the UPDATE payload, so this write never lands');
+    expect(findings[0].message).toContain("which a runAs:'user' UPDATE silently strips");
     expect(findings[0].where).toBe('flow "stamp_approval" › node "Stamp approval"');
   });
 
@@ -143,7 +162,11 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].rule).toBe(FLOW_UPDATE_READONLY_WHEN_FIELD);
-    expect(findings[0].message).toContain('a bulk update strips it from every matched row once any one of them is locked');
+    expect(findings[0].message).toContain('where its predicate is TRUE');
+    // [#22161] The bulk-update reach is `os explain flow-update-readonly-when-field`.
+    expect(explanationOf(FLOW_UPDATE_READONLY_WHEN_FIELD)).toContain(
+      'a bulk update strips it from every matched row once any one of them is locked',
+    );
   });
 
   // The hint is the WHOLE product of an advisory rule - the finding blocks
@@ -233,7 +256,7 @@ describe('validateReadonlyFlowWrites', () => {
     // The message states the run identity it was judged under, so a reader of
     // the finding cannot mistake it for the user-run case.
     expect(findings[0].message).toContain("runAs:'system'");
-    expect(findings[0].message).toContain('a bulk update strips it from every matched row once any one of them is locked');
+    expect(findings[0].message).toContain('where its predicate is TRUE');
     expect(findings[0].hint).toContain('NOT waived by a system context');
   });
 
@@ -364,7 +387,7 @@ describe('validateReadonlyFlowWrites', () => {
       // No tracker id in the string an author reads (`check:doc-authoring`);
       // the ruling's id lives in the rule's comment.
       expect(findings[0].message).not.toMatch(/#\d{4,}/);
-      expect(findings[0].message).not.toContain('from the UPDATE payload, so this write never lands');
+      expect(findings[0].message).not.toContain('UPDATE');
       // The remedy names the create verb, the system channel and the own-object
       // beforeInsert stamp.
       expect(findings[0].hint).toContain("runAs:'system'");
@@ -646,5 +669,34 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning'); // readonlyWhen field
     expect(findings[0].path).toBe('flows[0].nodes[0].config.body.nodes[0].config.fields.amount');
+  });
+});
+
+describe('[#22161] one-line verdicts — the rule ids this file shortened', () => {
+  it('every verdict the cases above fired for those ids is one line of at most 200 characters', () => {
+    // The coverage control first: each shortened id fired at least once, so
+    // the shape assertion below cannot pass over an empty record.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const f of firedShortened) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [FLOW_UPDATE_READONLY_FIELD]: ['still reports success', 'defaultValue', 'run-time warning naming the dropped field', 'bypasses the static strip'],
+    [FLOW_UPDATE_READONLY_WHEN_FIELD]: ['bulk update', 'NOT waived by a system context', 'beforeUpdate', 'INSERT is never judged'],
+  };
+
+  it('covers exactly the shortened ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

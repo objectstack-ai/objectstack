@@ -124,7 +124,7 @@ describe('installPackage — durable persistence (#2532)', () => {
 describe('deletePackage — durable un-registration (#2532 counterpart)', () => {
   it('drops the sys_packages record so the package cannot resurrect at boot', async () => {
     const { impl, del } = makeImpl();
-    await (impl as any).deletePackage({ packageId: 'com.example.orders', allTenants: true });
+    await (impl as any).deletePackage({ packageId: 'com.example.orders' });
     expect(del).toHaveBeenCalledWith('com.example.orders');
   });
 });
@@ -135,7 +135,7 @@ describe('deletePackage — uninstall cleanups (#2747)', () => {
     const cleanup = vi.fn(async () => ({ success: true, removed: 3 }));
     (impl as any).registerUninstallCleanup('security.package-permissions', cleanup);
 
-    const res: any = await (impl as any).deletePackage({ packageId: 'com.example.orders', allTenants: true, actor: 'usr_1' });
+    const res: any = await (impl as any).deletePackage({ packageId: 'com.example.orders', actor: 'usr_1' });
 
     expect(cleanup).toHaveBeenCalledWith(expect.objectContaining({ packageId: 'com.example.orders', actor: 'usr_1' }));
     expect(res.cleanups).toEqual([
@@ -160,7 +160,7 @@ describe('deletePackage — uninstall cleanups (#2747)', () => {
       // `protocol.driver-text-disclosure.test.ts`, so "reported as failed" and
       // "reported in the driver's words" cannot collapse into one another.
       (impl as any).registerUninstallCleanup('boom', async () => { throw new Error('db down'); });
-      const res: any = await (impl as any).deletePackage({ packageId: 'com.example.orders', allTenants: true });
+      const res: any = await (impl as any).deletePackage({ packageId: 'com.example.orders' });
       expect(res.cleanups).toEqual([
         { name: 'boom', success: false, removed: 0, error: 'cleanup failed' },
       ]);
@@ -176,7 +176,7 @@ describe('deletePackage — uninstall cleanups (#2747)', () => {
     const second = vi.fn(async () => ({ success: true, removed: 2 }));
     (impl as any).registerUninstallCleanup('x', first);
     (impl as any).registerUninstallCleanup('x', second);
-    const res: any = await (impl as any).deletePackage({ packageId: 'p', allTenants: true });
+    const res: any = await (impl as any).deletePackage({ packageId: 'p' });
     expect(first).not.toHaveBeenCalled();
     expect(res.cleanups[0].removed).toBe(2);
   });

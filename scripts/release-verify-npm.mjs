@@ -207,7 +207,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '10. The probe: the whole group in one read, three answers': 9,
   '11. The 17.5.0 publish window, replayed on npm\'s own clock': 7,
   '12. The audit step backfills only a version whose whole group is on npm, and no publish or image build of it is in flight': 34,
-  '13. The backfill builds from the version commit\'s tree, as the publish does': 11,
+  '13. The backfill builds from the version commit\'s tree, as the publish does': 13,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1165,7 +1165,8 @@ function scriptClosure(entries) {
  * appended to STUB_LOG with the directory it ran in.
  *
  *   gh    `release view` answers from STUB_GH, as battery 12's does;
- *         `release upload TAG FILE` copies FILE into STUB_UPLOADS.
+ *         `release upload TAG FILE…` copies each FILE into STUB_UPLOADS
+ *         as `<tag>__<basename>`, so the manifest and the guide both survive.
  *   npm   `view NAME@V version`, `view NAME versions --json` and `pack NAME@V`,
  *         all answered from STUB_NPM_PRESENT; `pack` writes a real tarball.
  *   pnpm  `install` is recorded only. `--filter @objectstack/spec exec tsx
@@ -1173,6 +1174,8 @@ function scriptClosure(entries) {
  *         the workspace the way pnpm does, upward from where it runs, and
  *         writes a manifest that is a pure function of that workspace's
  *         `packages/spec/src`. So the bytes say which tree was read.
+ *         `… exec tsx scripts/build-upgrade-guide.ts --out FILE` writes a guide
+ *         that is a pure function of the same `src`, logged as `guide`.
  */
 function writeBackfillStubBin(dir) {
   writeStubBin(dir);
@@ -1181,7 +1184,12 @@ function writeBackfillStubBin(dir) {
       '#!/bin/sh',
       'if [ "$1 $2" = "release upload" ]; then',
       '  printf \'upload\\t%s\\t%s\\n\' "$PWD" "$3" >> "$STUB_LOG"',
-      '  cp "$4" "$STUB_UPLOADS/$(printf \'%s\' "$3" | tr \'/@\' \'__\')" || exit 1',
+      '  tag=$(printf \'%s\' "$3" | tr \'/@\' \'__\')',
+      '  shift 3',
+      '  for f in "$@"; do',
+      '    case "$f" in --*) continue ;; esac',
+      '    cp "$f" "$STUB_UPLOADS/${tag}__$(basename "$f")" || exit 1',
+      '  done',
       '  exit 0',
       'fi',
       '[ "$STUB_GH" = present ] || exit 1',
@@ -1256,6 +1264,22 @@ function writeBackfillStubBin(dir) {
       "  const to = JSON.parse(fs.readFileSync(path.join(spec, 'package.json'), 'utf8')).version;",
       "  fs.writeFileSync(path.join(spec, 'spec-changes.json'), `${JSON.stringify({ release: { from, to }, src }, null, 2)}\\n`);",
       '  log(`generate\\t${root}`);',
+      '  process.exit(0);',
+      '}',
+      "const guideGenerator = ['--filter', '@objectstack/spec', 'exec', 'tsx', 'scripts/build-upgrade-guide.ts', '--out'];",
+      'if (guideGenerator.every((a, i) => args[i] === a) && args.length === guideGenerator.length + 1) {',
+      '  let root = process.cwd();',
+      "  while (!fs.existsSync(path.join(root, 'pnpm-workspace.yaml'))) {",
+      '    const up = path.dirname(root);',
+      "    if (up === root) { process.stderr.write('stub pnpm: no workspace above the cwd\\n'); process.exit(1); }",
+      '    root = up;',
+      '  }',
+      "  const spec = path.join(root, 'packages', 'spec');",
+      '  const walk = (d) => fs.readdirSync(d, { withFileTypes: true })',
+      '    .flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));',
+      "  const src = walk(path.join(spec, 'src')).sort().map((f) => fs.readFileSync(f, 'utf8')).join('');",
+      "  fs.writeFileSync(args[guideGenerator.length], `# guide\\n\\n${src}`);",
+      '  log(`guide\\t${root}`);',
       '  process.exit(0);',
       '}',
       "process.stderr.write(`stub pnpm: unexpected call: ${args.join(' ')}\\n`);",
@@ -2037,7 +2061,9 @@ export async function selfTest() {
       const real = (p) => (existsSync(p) ? realpathSync(p) : p);
       const ranIn = (r, verb) => r.log.filter((line) => line.startsWith(`${verb}\t`)).map((line) => real(line.split('\t')[1]));
       const MANIFEST = 'packages/spec/spec-changes.json';
-      const SPEC_UPLOAD = '_objectstack_spec_1.1.0';
+      const GUIDE = 'packages/spec/protocol-upgrade-guide.md';
+      const SPEC_UPLOAD = '_objectstack_spec_1.1.0__spec-changes.json';
+      const GUIDE_UPLOAD = '_objectstack_spec_1.1.0__protocol-upgrade-guide.md';
 
       let envResolved = readable;
       let envProblem = '';
@@ -2060,7 +2086,7 @@ export async function selfTest() {
       const landingTree = join(root, 'landing');
       g('worktree', 'add', '--quiet', '--detach', landingTree, landing);
       const publishD4 = async (tree) => {
-        if (!readable) return { status: -1, manifest: '', stderr: '' };
+        if (!readable) return { status: -1, manifest: '', guide: '', stderr: '' };
         runs += 1;
         const temp = join(root, `step-${runs}`);
         mkdirSync(temp, { recursive: true });
@@ -2072,7 +2098,7 @@ export async function selfTest() {
         } catch (err) {
           envResolved = false;
           envProblem += `${PUBLISH_D4_STEP_NAME}: ${err instanceof Error ? err.message : String(err)}; `;
-          return { status: -1, manifest: '', stderr: envProblem };
+          return { status: -1, manifest: '', guide: '', stderr: envProblem };
         }
         const env = {
           PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH ?? ''}`,
@@ -2083,7 +2109,8 @@ export async function selfTest() {
         };
         const r = await runAsActions({ scriptFile, cwd: tree, env });
         const manifest = existsSync(join(tree, MANIFEST)) ? readFileSync(join(tree, MANIFEST), 'utf8') : '';
-        return { ...r, manifest };
+        const guide = existsSync(join(tree, GUIDE)) ? readFileSync(join(tree, GUIDE), 'utf8') : '';
+        return { ...r, manifest, guide };
       };
       const published = await publishD4(publishTree);
       const fromLanding = await publishD4(landingTree);
@@ -2092,6 +2119,11 @@ export async function selfTest() {
         published.status === 0 && fromLanding.status === 0 && published.manifest !== '' && fromLanding.manifest !== ''
           && published.manifest !== fromLanding.manifest && fromLanding.manifest.includes("'two'"),
         `publish exit ${published.status}, landing exit ${fromLanding.status}; ${published.stderr ?? ''}`,
+      );
+      t(
+        'FIXTURE: the publish job\'s D4 step writes the upgrade guide into the package, and the landing\'s differs',
+        published.guide !== '' && fromLanding.guide !== '' && published.guide !== fromLanding.guide,
+        `publish guide ${published.guide.length} bytes, landing guide ${fromLanding.guide.length} bytes`,
       );
 
       // The audit, on the landing: everything on npm, no Releases, image present.
@@ -2138,6 +2170,9 @@ export async function selfTest() {
       const attached = d4Run && existsSync(join(d4Run.temp, 'uploads', SPEC_UPLOAD))
         ? readFileSync(join(d4Run.temp, 'uploads', SPEC_UPLOAD), 'utf8')
         : '';
+      const attachedGuide = d4Run && existsSync(join(d4Run.temp, 'uploads', GUIDE_UPLOAD))
+        ? readFileSync(join(d4Run.temp, 'uploads', GUIDE_UPLOAD), 'utf8')
+        : '';
       t(
         'D4: the generator runs in the version commit\'s tree, and the asset is uploaded from there',
         d4Run !== null && d4Run.status === 0 && ranIn(d4Run, 'generate').join() === real(tree) && ranIn(d4Run, 'upload').join() === real(tree),
@@ -2148,6 +2183,12 @@ export async function selfTest() {
         'D4: the attached spec-changes.json is byte-identical to the publish job\'s manifest',
         attached !== '' && attached === published.manifest,
         `attached ${attached.length} bytes, publish ${published.manifest.length} bytes; landing-tree build equal: ${attached === fromLanding.manifest}`,
+      );
+      t(
+        'D4: the upgrade guide is generated in the version commit\'s tree and attached byte-identical to the publish job\'s',
+        d4Run !== null && ranIn(d4Run, 'guide').join() === real(tree)
+          && attachedGuide !== '' && attachedGuide === published.guide,
+        `attached guide ${attachedGuide.length} bytes, publish guide ${published.guide.length} bytes; ${d4Run ? said(d4Run) : 'not run'}`,
       );
 
       // Refusals: no tree named, and a tree that is not the version commit.

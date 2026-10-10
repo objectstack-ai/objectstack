@@ -591,6 +591,9 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
     conditionalRequired: keep,
+    // A boolean facet of this date field: it declares the field a deadline
+    // (#22227) and names no field.
+    dueLike: keep,
     // Names of ANOTHER object's fields — that object's projection governs them.
     // `displayField` / `descriptionField` / `lookupColumns` / `lookupFilters`
     // name fields of the `reference` target (the lookup picker reads them);
@@ -610,6 +613,17 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     visibleWhen: expression,
     readonlyWhen: expression,
     requiredWhen: expression,
+    // The deadline's settle predicate (#22227), a `visibleWhen`-family CEL over
+    // this object's record. Deleted when it mentions a denied field: the caller
+    // could not evaluate it, so their view keeps the overdue affordance.
+    settledWhen: expression,
+    // A field's cell formatting rules (#22228): each `{ condition, style }`
+    // condition is CEL over this object's record (plus the field's own
+    // `value`). A rule that mentions a denied field is dropped WHOLE — dropping
+    // only its condition would leave a bare `style` that reads as always-on —
+    // and an emptied list is deleted. The `style` map names CSS properties,
+    // never a field.
+    conditionalFormatting: ruleEntries,
     relatedListFilter: fieldKeyed,
     defaultValue: expression,
     autonumberFormat: expression,

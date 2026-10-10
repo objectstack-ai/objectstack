@@ -412,16 +412,20 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
  * `nav:breadcrumb`, `global:search`, `global:notifications`,
- * `element:divider`, and the three plugin console widgets
+ * `element:divider`, the three plugin console widgets
  * `cloud-connection:panel` and `marketplace:installed-list` (#11575) and
- * `mcp:connect-agent` (#12344). `user:profile` left this list at #14159 — it
+ * `mcp:connect-agent` (#12344), and `record:approval_decision` (#22472) and
+ * `record:attachments` (#22537), which read the record context alone.
+ * (`record:approvals` declares no props either, but its row is its own
+ * {@link RecordApprovalsProps}, which names the two host-channel keys its
+ * renderer reads.) `user:profile` left this list at #14159 — it
  * is not author-placeable at all, so its row refuses the whole bag
  * ({@link retiredComponentProps}).
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
  * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
- * this component" would leave the author guessing which of the nine it meant.
+ * this component" would leave the author guessing which of the ten it meant.
  * One `strictObject(` call site either way — the ledger counts sites from the
  * AST, and this is one.
  *
@@ -836,7 +840,13 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+     * (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+     * every objectui file this record cites is byte-identical across the hop
+     * from `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+     * `47b1f0bb7`, re-read there 2026-10-09:
+     * every objectui file this record cites is byte-identical across the hop
+     * from `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+     * `f0268ad78`, re-read there 2026-10-09:
      * `containers.tsx` changed across the hop from `a58626c88` (+92/-6,
      * objectui#11811: a record action disabled by its predicate says why, in the
      * `page:header` renderer), every hunk at `:1512` or below, so both anchors
@@ -1067,7 +1077,13 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `f0268ad78485`, re-read there 2026-10-09:
+ * (`.objectui-sha` = `20c6d351ad74`, re-read there 2026-10-10:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `47b1f0bb7174` (`git diff --quiet`), so every anchor held unmoved. At
+ * `47b1f0bb7174`, re-read there 2026-10-09:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `f0268ad78485` (`git diff --quiet`), so every anchor held unmoved. At
+ * `f0268ad78485`, re-read there 2026-10-09:
  * across the hop from `a58626c88dc8` `record-details.tsx`,
  * `record-highlights.tsx` and the three `permissions` files are byte-identical
  * (`git diff --quiet`), so NO anchor in those five moved;
@@ -2352,6 +2368,53 @@ export type RecordLineItemsProps = z.input<typeof RecordLineItemsProps>;
  */
 export type RecordLineItemsPropsParsed = z.infer<typeof RecordLineItemsProps>;
 
+/**
+ * `record:approvals` (#22537): the record page's approval timeline, which
+ * shows the step the record's approval sits at, who it waits on and what has
+ * been decided. Measured by the renderer read-point method at the
+ * `.objectui-sha` pin `47b1f0bb71`. objectui registers it in
+ * `app-shell/src/views/record-approvals-renderer.tsx:80` (namespace `record`)
+ * and draws it through `RecordApprovalsPanel`, and `SchemaRenderer` hoists
+ * `properties` onto the schema that renderer reads. It reads two
+ * `schema.<key>`s, and both are the HOST's runtime channel, the
+ * `record:history` `entries` / `loading` class:
+ *
+ *  - `approvals` (`:61`): the default record page threads its LIVE approvals
+ *    read through it (`RecordDetailView.tsx:2492-2501`, emitted by
+ *    `buildDefaultPageSchema({ approvals })`, `plugin-detail/src/synth/
+ *    buildDefaultPageSchema.ts:931`), the same read behind the record's
+ *    decision actions. With no host payload the renderer self-fetches the
+ *    record's requests from the record context (`:64-68`).
+ *  - `currentUserId` (`:71`): the host passes the signed-in user's id, which
+ *    the panel's Remind gate falls back to (`RecordApprovalsPanel.tsx:287`).
+ *    Without it the renderer reads the signed-in user itself.
+ *
+ * Neither is authorable surface, so the accepted key set is EMPTY and both
+ * keys are refused with their prescription. Studio's page create never writes
+ * either: it seeds from `buildDefaultPageSchema(objectDef)` with no options
+ * (`app-shell/src/views/metadata-admin/anchors.ts:208`), and so never emits
+ * this node at all. `className` and the designer attributes the renderer
+ * reads are node-level, never `properties`.
+ *
+ * Not exported, like the {@link emptyProps} rows it matches in contract: with
+ * no accepted key there is no author-state type to name, and the row is
+ * reached through `ComponentPropsMap['record:approvals']`.
+ */
+const RecordApprovalsProps = strictObject({
+  surface: 'this `record:approvals`',
+  history: `\`record:approvals\` declares no props at all. ${PROPS_HISTORY}`,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  guidance: {
+    approvals: '`approvals` is the HOST\'s data channel, not authorable surface: the default record '
+      + 'page passes the approval requests it fetched through it at runtime. Hand-authored requests '
+      + 'would show a static, fake approval history that never updates. Omit it: with no host '
+      + 'payload the block fetches the record\'s own approval requests.',
+    currentUserId: '`currentUserId` is the host\'s channel for the signed-in user, not authorable '
+      + 'surface: an authored id would decide for every viewer who counts as the submitter. Omit '
+      + 'it: the block reads the signed-in user itself.',
+  },
+}, {});
+
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
   history: PROPS_HISTORY,
@@ -2393,7 +2456,13 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+     * (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+     * every objectui file this record cites is byte-identical across the hop
+     * from `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+     * `47b1f0bb7`, re-read there 2026-10-09:
+     * every objectui file this record cites is byte-identical across the hop
+     * from `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+     * `f0268ad78`, re-read there 2026-10-09:
      * `containers.tsx` changed across the hop from `a58626c88` (+92/-6,
      * objectui#11811: a record action disabled by its predicate says why, in the
      * `page:header` renderer), every hunk at `:1512` or below, so both anchors
@@ -2815,7 +2884,13 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+   * `f0268ad78`, re-read there 2026-10-09:
    * every objectui file this record cites is byte-identical across the hop from
    * `a58626c88` (`git diff --quiet`), so every anchor held unmoved. At
    * `a58626c88`, re-read there 2026-10-06:
@@ -3278,7 +3353,22 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * against, `.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+ * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
+ * the four `action-*.tsx` renderers and `basic/data-list.tsx` are
+ * byte-identical across the hop from `47b1f0bb7` (`git diff --quiet`), so
+ * their anchors held unmoved; `data-objectstack/src/index.ts` changed in three
+ * docblocks above the `translateFilterArray` arm (+15/-9, objectui#5144,
+ * objectui `3c3115e38`: the inline-edit toggle no longer writes `inlineEdit`),
+ * which MOVED `5042-5053` -> `5048-5059` byte-identical and left
+ * `serializeOrderBy` (`868-894`) unmoved; and `previews/block-config.ts`
+ * changed below the `columns` control (+10/-4, objectui#12056, objectui
+ * `2a48bd408`: the repeater's inspector rows write the node-level
+ * `dataSource`), which did not move from `335`. At `47b1f0bb7`, re-read there
+ * 2026-10-09:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+ * `f0268ad78`, re-read there 2026-10-09:
  * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts` and `ui/button.tsx`
  * are byte-identical across the hop from `a58626c88` (`git diff --quiet`), so
  * their anchors held unmoved. All four `action-*.tsx` renderers changed for
@@ -3810,7 +3900,13 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  * inventory. A member's `params` is its `ActionParam[]` input list: both
  * containers forward an array as `actionParams` (group `:346-348`, menu
  * `:270-272`, re-read at the pin this repo builds against, `.objectui-sha` =
- * `f0268ad78`, 2026-10-09: both MOVED with their text byte-identical, by 21
+ * `20c6d351a`, 2026-10-10: `action-group.tsx`, `action-menu.tsx` and
+ * `static-params.ts` are byte-identical across the hop from `47b1f0bb7` (`git
+ * diff --quiet`), so both held unmoved; at `47b1f0bb7`, 2026-10-09:
+ * `action-group.tsx`, `action-menu.tsx` and
+ * `static-params.ts` are byte-identical across the hop from `f0268ad78` (`git
+ * diff --quiet`), so both held unmoved; at `f0268ad78`, 2026-10-09: both MOVED
+ * with their text byte-identical, by 21
  * and by 9, from `a58626c88`'s `:325-327` and `:261-263`, for objectui#11839's
  * disabled-reason wrapper above them; `static-params.ts` is byte-identical).
  * Any
@@ -4218,7 +4314,7 @@ export type ElementDefinitionListProps = z.input<typeof ElementDefinitionListPro
  *   `ViewFilterRule[]` and `SortItem[]` — and both are delivered:
  *   `ObjectStackAdapter.find` lowers a `{ field, operator, value }` array
  *   through `translateFilterArray` and serializes `{ field, order }` items
- *   through `serializeOrderBy` (`data-objectstack/src/index.ts:5042-5053`,
+ *   through `serializeOrderBy` (`data-objectstack/src/index.ts:5048-5059`,
  *   `:868-894`). Before the query the renderer resolves the rules' context
  *   tokens (`{current_user_id}`, the date macros) through `useResolvedFilter`
  *   (`data-list.tsx:209-210`), so a rule's string `value` may be one. The
@@ -4489,7 +4585,18 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * control `schema.editable` in `ObjectGrid.tsx`. It was declared ahead of its
  * reader on purpose (the BUILD objectui#11068 chose), and its describe carried
  * the `[EXPERIMENTAL — not enforced]` marker that said so. Re-measured at the
- * pin this repo builds against (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * pin this repo builds against (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved, and the same
+ * method still finds 15 hit lines against 3 for the control. At `47b1f0bb7`,
+ * re-read there 2026-10-09:
+ * `ObjectGrid.tsx` changed across the hop from `f0268ad78` (+19/-11:
+ * objectui#11865 slice m, objectui `2063f7a96`: one import line, and the
+ * grouped pager's rows-per-page picker drawn with the shared `Select`) and
+ * `data-table.tsx` is byte-identical (`git diff --quiet`); the read MOVED
+ * `5519` -> `5520` with its line byte-identical, and the same method still
+ * finds 15 hit lines against 3 for the control. At `f0268ad78`, re-read there
+ * 2026-10-09:
  * `ObjectGrid.tsx` (+85/-27: objectui#11880 item 5, objectui#6152 rounds 7 and
  * 10, objectui#11817, objectui#11809, objectui#11689) and `data-table.tsx`
  * (+434/-30: objectui#11816, objectui#11690, objectui#11682) changed across the
@@ -4513,7 +4620,7 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * `ab1879721`): the BUILD landed — objectui `154075ab1` (objectui#11068), inside
  * `89cad75d5570..ab1879721595` — and the grid reads the key. The same method
  * finds 0 hit lines at `89cad75d5570` and 15 at `ab1879721595`, at `2e818d0b51ec` and at this pin, against 3 for the
- * control `schema.editable` in `ObjectGrid.tsx` at each: `ObjectGrid.tsx:5519`
+ * control `schema.editable` in `ObjectGrid.tsx` at each: `ObjectGrid.tsx:5520`
  * hands `schema.keyboardNavigation ?? inlineEditable` to the `data-table` it
  * renders, and `components/src/renderers/complex/data-table.tsx` acts on it.
  * So the marker is gone, as the member's record prescribed; see the member.
@@ -4592,7 +4699,16 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * same members, and objectui's grid follows this declaration.
    *
    * ⚠️ That gap is closed at the pin this repo builds against (`.objectui-sha`
-   * = `f0268ad78`, re-read there 2026-10-09:
+   * = `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * `ObjectGrid.tsx` changed across the hop from `f0268ad78` (+19/-11:
+   * objectui#11865 slice m, objectui `2063f7a96`: one import line, and the
+   * grouped pager's rows-per-page picker drawn with the shared `Select`), every
+   * hunk above both reads (the last at `:6454-6465`), so both MOVED by 8 with
+   * their lines byte-identical: `6529-6530` -> `6537-6538`, `6546-6547` ->
+   * `6554-6555`. At `f0268ad78`, re-read there 2026-10-09:
    * `ObjectGrid.tsx` changed across the hop from `a58626c88` (+85/-27:
    * objectui#11880 item 5, objectui#6152 rounds 7 and 10, objectui#11817,
    * objectui#11809, objectui#11689), every hunk above both reads (the last at
@@ -4612,7 +4728,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `6158e4c93`) resolves both members against the display locale before they
    * reach `DataEmptyState` —
    * `resolveInlineI18nLabel(authoredEmptyState?.title, displayLocale)` and the
-   * same for `message` (`ObjectGrid.tsx:6529-6530`, drawn at `:6546-6547`) — so
+   * same for `message` (`ObjectGrid.tsx:6537-6538`, drawn at `:6554-6555`) — so
    * both `I18nLabel` forms draw, and a locale map with no usable entry keeps
    * that member's default. At `89cad75d5570` the two still reached
    * `DataEmptyState` raw.
@@ -4976,7 +5092,19 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `ComponentPropsMap` key. This record said to drop the marker in the change
    * that lands the BUILD at the pin, and it is dropped here.
    *
-   * Read at the pin this repo builds against (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * Read at the pin this repo builds against (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * `ObjectGrid.tsx` changed across the hop from `f0268ad78` (+19/-11:
+   * objectui#11865 slice m, objectui `2063f7a96`: one import line, and the
+   * grouped pager's rows-per-page picker drawn with the shared `Select`) and
+   * `data-table.tsx` is byte-identical (`git diff --quiet`), so the two grid
+   * anchors MOVED with their lines byte-identical — `5519` -> `5520`, `1824` ->
+   * `1825` — the five `data-table.tsx` anchors `1018`, `2607`, `3101`, `2257`
+   * and `2283` held unmoved, and no hunk lands in the arrow-key handling
+   * between `navigationTarget` and the end of `handleCellKeyDown`. At
+   * `f0268ad78`, re-read there 2026-10-09:
    * `ObjectGrid.tsx` (+85/-27: objectui#11880 item 5, objectui#6152 rounds 7 and
    * 10, objectui#11817, objectui#11809, objectui#11689) and `data-table.tsx`
    * (+434/-30: objectui#11816, objectui#11690, objectui#11682) changed across
@@ -5000,9 +5128,9 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * and `data-table.tsx` were
    * byte-identical across the hop from `ab1879721`, where they were measured
    * 2026-10-03; the BUILD is objectui `154075ab1`, objectui#11068):
-   * `plugin-grid/src/ObjectGrid.tsx:5519` hands the data table
+   * `plugin-grid/src/ObjectGrid.tsx:5520` hands the data table
    * `keyboardNavigation: schema.keyboardNavigation ?? inlineEditable`, where
-   * `inlineEditable` (`:1824`) is the authored `editable` AND the viewer's
+   * `inlineEditable` (`:1825`) is the authored `editable` AND the viewer's
    * write verdict — so an absent key follows whether the grid RENDERS
    * editable, `true` turns the navigation on for a read-only grid, and `false`
    * turns it off on an editable one. `components/src/renderers/complex/data-table.tsx`
@@ -5386,7 +5514,13 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+   * `f0268ad78`, re-read there 2026-10-09:
    * every objectui file this record cites is byte-identical across the hop from
    * `a58626c88` (`git diff --quiet`), so every anchor held unmoved. At
    * `a58626c88`, re-read there 2026-10-06:
@@ -5634,7 +5768,13 @@ const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+ * `47b1f0bb7`, re-read there 2026-10-09:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+ * `f0268ad78`, re-read there 2026-10-09:
  * `ObjectKanban.tsx` is byte-identical across the hop from `a58626c88`
  * (`git diff --quiet`), so the anchor did not move and was re-read in place. At
  * `a58626c88`, re-read there 2026-10-06:
@@ -5741,7 +5881,20 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * repo builds against (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`) except `objectql.ts` (+14/-13, comments
+   * only: objectui#12063, objectui `c7b30bd66`, and objectui#6152 round 15,
+   * objectui `025341692`, re-word the `object-chart` legacy-axis docblocks),
+   * whose every hunk is below the member, at `:5441` or later, so the member
+   * `4838` did not move and is byte-identical, still inside
+   * `ObjectKanbanSchema`; every other anchor held unmoved, and
+   * `plugin-kanban/src/types.ts` still declares no row-cap member. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved, and
+   * `plugin-kanban/src/types.ts` still declares no row-cap member. At
+   * `f0268ad78`, re-read there 2026-10-09:
    * `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no row-cap member),
    * `element-data-source.ts`, `ElementDataSourceGate.tsx` and
    * `plugin-kanban.mdx` are byte-identical to `a58626c88` (`git diff --quiet`),
@@ -6006,7 +6159,22 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * quick-add control and no block a document can name offers one either).
    *
    * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * `KanbanBoardCore.tsx`, `ObjectKanban.tsx` and `plugin-kanban/src/index.tsx`
+   * are byte-identical across the hop from `47b1f0bb7` (`git diff --quiet`), so
+   * `:78` and `345-346` did not move; `KanbanImpl.tsx` changed (+9/-6,
+   * objectui#6349 batch 7, objectui `c0c0a0d56`: its rule type spelled
+   * `KanbanConditionalFormattingRule` by that name, three comment lines added
+   * above the props), so the gate MOVED `:668` / `:681` -> `:671` / `:684`,
+   * both lines byte-identical; `ObjectKanban.tsx` still names `quickAdd` and
+   * `onQuickAdd` 2 times each against 11 for `onCardClick`, and objectui still
+   * registers no `kanban-ui` block. At `47b1f0bb7`, re-read there 2026-10-09:
+   * `KanbanBoardCore.tsx`, `ObjectKanban.tsx`, `KanbanImpl.tsx` and
+   * `plugin-kanban/src/index.tsx` are byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so `:78`, `:668`, `:681` and `345-346`
+   * did not move; `ObjectKanban.tsx` still names `quickAdd` and `onQuickAdd` 2
+   * times each against 11 for `onCardClick`, and objectui still registers no
+   * `kanban-ui` block. At `f0268ad78`, re-read there 2026-10-09:
    * `KanbanBoardCore.tsx`, `ObjectKanban.tsx` and `KanbanImpl.tsx` are
    * byte-identical across the hop from `a58626c88` (`git diff --quiet`), so
    * `:78`, `:668` and `:681` did not move; `plugin-kanban/src/index.tsx` changed
@@ -6105,7 +6273,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * which passes
    * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
    * (`plugin-kanban/src/index.tsx:357-358` there, `:345-346` at this pin) — but the affordance is gated on
-   * BOTH (`KanbanImpl.tsx:668` and `:681`), and `onQuickAdd` is a
+   * BOTH (`KanbanImpl.tsx:671` and `:684`), and `onQuickAdd` is a
    * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
    * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
    * in code (0 occurrences each, against 11 for the sibling `onCardClick` in the same
@@ -6198,6 +6366,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * element schemas).
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
    * `f0268ad78`, re-read there 2026-10-09:
    * every objectui file this record cites is byte-identical across the hop from
    * `a58626c88` (`git diff --quiet`), so every anchor held unmoved. At
@@ -6410,6 +6584,12 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `object-kanban`'s above.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
    * `f0268ad78`, re-read there 2026-10-09:
    * `ObjectCalendar.tsx` changed across the hop from `a58626c88` in one comment
    * line only, line for line (`:1250`, objectui `c0862c1cc` re-citing the
@@ -7619,7 +7799,13 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
  * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * `.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+ * `47b1f0bb7`, re-read there 2026-10-09:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+ * `f0268ad78`, re-read there 2026-10-09:
  * `ObjectMap.tsx` changed across the hop from `a58626c88` (+85/-4,
  * objectui#11819, objectui `fbaa79d19`: without WebGL2 the map lists its records
  * instead of crashing — a WebGL2 probe above every reader and a list fallback at
@@ -7808,7 +7994,13 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
    * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * pin this repo builds against (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+   * `f0268ad78`, re-read there 2026-10-09:
    * `ObjectMap.tsx` changed above all three anchors (+85/-4, objectui#11819,
    * objectui `fbaa79d19`: the WebGL2 probe and the list fallback), so each MOVED
    * down 38 with its text byte-identical, `:864` -> `:902`, `:958` -> `:996` and
@@ -7876,7 +8068,13 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
    * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+   * `f0268ad78`, re-read there 2026-10-09:
    * `ObjectMap.tsx` changed above both anchors (+85/-4, objectui#11819, objectui
    * `fbaa79d19`: the WebGL2 probe and the list fallback), so both MOVED down 38
    * with their text byte-identical, `:959` -> `:997` and `:1038` -> `:1076`; and
@@ -8066,7 +8264,15 @@ function objectGanttMarker() {
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * — `.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+ * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
+ * byte-identical across the hop from `47b1f0bb7` (`git diff --quiet`), so every
+ * anchor in them held unmoved; `ListView.tsx` changed (+281/-235), and its
+ * `case 'gantt'` still writes the toolbar Search term onto the node as `search`
+ * / `searchableFields`. At `47b1f0bb7`, re-read there 2026-10-09:
+ * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
+ * byte-identical across the hop from `f0268ad78` (`git diff --quiet`), so every
+ * anchor in them held unmoved. At `f0268ad78`, re-read there 2026-10-09:
  * `ObjectGantt.tsx` and `record-source.ts` are byte-identical across the hop from
  * `a58626c88` (`git diff --quiet`), so every anchor in them held unmoved;
  * `plugin-gantt/src/index.tsx` changed in one line only, the `markers` input's
@@ -8307,10 +8513,30 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
  * block (`ObjectTree.tsx:289-302`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:3853-3872`, `case 'tree'`: the
+ * they flatten `options.tree` (`ListView.tsx:3913-3932`, `case 'tree'`: the
  * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
  * NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * pin this repo builds against (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+ * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
+ * `47b1f0bb7` (`git diff --quiet`), so `289-302` and `240-261` did not move;
+ * `ListView.tsx` changed (+281/-235), its `case 'tree'` arm with it, which
+ * MOVED `3913-3932` -> `3965-3989`: objectui#6152 round 14 (objectui
+ * `3fd862510`) retired the arm's `treeCfg.titleField` label rung and its raw
+ * `...treeCfg` spread, so the arm now emits `parentField`, `labelField:
+ * treeCfg.labelField || 'name'` (`:3986`), `fields` and
+ * `defaultExpandedDepth` by name and NO `titleField`. The read `:3927` that the
+ * `titleField` paragraph below cites is therefore GONE at this pin, not moved;
+ * that paragraph is left as written and reported to the pin bump's review,
+ * because changing the key set it justifies is a schema change this re-read
+ * does not make. At `47b1f0bb7`, re-read there 2026-10-09:
+ * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
+ * `f0268ad78` (`git diff --quiet`), so `289-302` and `240-261` did not move;
+ * `ListView.tsx` changed above and below its `case 'tree'` arm (+85/-26:
+ * objectui#11865 slice p, objectui `8f8f760fa`: the "Color by field" and
+ * rows-per-page pickers drawn with the shared `Select`), which MOVED
+ * byte-identical `3853-3872` -> `3913-3932`, `:3867` -> `:3927` with it, so the
+ * flat key set each reads or emits did not move. At `f0268ad78`, re-read there
+ * 2026-10-09:
  * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
  * `a58626c88` (`git diff --quiet`), so `289-302` and `240-261` did not move;
  * `ListView.tsx` changed above and below its `case 'tree'` arm (+286/-46:
@@ -8387,7 +8613,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  *
  * `titleField` is in the set although no `tree` block key is spelled that way:
  * `ListView`'s flatten resolves `treeCfg.titleField` into `labelField` before
- * emitting (`ListView.tsx:3867`, `labelField: treeCfg.labelField ||
+ * emitting (`ListView.tsx:3927`, `labelField: treeCfg.labelField ||
  * treeCfg.titleField || 'name'`), so the author's intent is always the block's
  * `labelField`, and the prescription below says so.
  *
@@ -8416,7 +8642,13 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * — `.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+ * `47b1f0bb7`, re-read there 2026-10-09:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+ * `f0268ad78`, re-read there 2026-10-09:
  * every objectui file this record cites is byte-identical across the hop from
  * `a58626c88` (`git diff --quiet`), so every anchor held unmoved. At `a58626c88`,
  * re-read there 2026-10-06:
@@ -8603,7 +8835,19 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+   * builds against (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * re-COUNTED by the same method, 0 for the tree, 3 each for
+   * `plugin-calendar` and `plugin-gantt` and 4 for `plugin-map`, those four
+   * shells byte-identical across the hop from `47b1f0bb7` (`git diff --quiet`),
+   * and 3 for `plugin-grid`, whose shell changed in one type re-export only
+   * (+1/-1, objectui#6349 batch 7, objectui `c0c0a0d56`: `AggregationConfig`
+   * re-exported as `GroupAggregationConfig`), its wiring unchanged. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * re-COUNTED by the same method, all five `src/index.tsx` shells are
+   * byte-identical across the hop from `f0268ad78` (`git diff --quiet`) and
+   * read 0 for the tree, 3 each for `plugin-calendar`, `plugin-gantt` and
+   * `plugin-grid`, and 4 for `plugin-map`. At `f0268ad78`, re-read there
+   * 2026-10-09:
    * re-COUNTED by the same method, 0 for the tree and `plugin-map`'s 4, both
    * shells byte-identical across the hop from `a58626c88` (`git diff --quiet`),
    * and 3 each for `plugin-calendar`, `plugin-gantt` and `plugin-grid`, whose
@@ -8991,7 +9235,20 @@ function objectTimelineItemsFitVariant() {
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `f0268ad78`, re-read there 2026-10-09:
+ * repo builds against (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+ * `renderer.tsx` and `index.tsx` are byte-identical to `47b1f0bb7` (`git diff
+ * --quiet`), so their anchors held unmoved; `ObjectTimeline.tsx` changed
+ * (+15/-15, objectui#6152 round 14, objectui `3fd862510`: the nested
+ * `timeline.dateField` alias rung retired from the start-date chain and from
+ * the refusal's key list, with their comments) without touching a cited line,
+ * so every anchor in it held or MOVED with its cited text byte-identical — by
+ * 1 between the key list and the start-date chain (`:306` -> `:307` through
+ * `:565` -> `:566`), `:30` and everything from `:591` on not moving — and each
+ * is cited below at this pin. The `schema.*` read set of all three is
+ * unchanged. At `47b1f0bb7`, re-read there 2026-10-09:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+ * `f0268ad78`, re-read there 2026-10-09:
  * `renderer.tsx` is byte-identical to `a58626c88` (`git diff --quiet`), so its
  * three anchors held unmoved; `index.tsx` rewrote two description constants in
  * place, line for line (`:432` and `:438`, objectui `c0862c1cc`), so `:334` and
@@ -9108,29 +9365,29 @@ function objectTimelineItemsFitVariant() {
  * directions: nothing accepted a real key and nothing refused a typo.
  *
  * Read points per key, in `ObjectTimeline.tsx` unless named otherwise:
- * `objectName` (`:308` the fetch gate, `:388-391` the object-def load through
- * `useSettledSchema`, `:426` the `fetchesForItself` gate — the check that
+ * `objectName` (`:309` the fetch gate, `:389-392` the object-def load through
+ * `useSettledSchema`, `:427` the `fetchesForItself` gate — the check that
  * sat inside the fetch effect at `:420` is hoisted to render scope at this
- * pin, where `:427` also subscribes the invalidation bus on it
- * (objectui#10623) and the effect reads it at `:531` — `:433` / `:491`
+ * pin, where `:428` also subscribes the invalidation bus on it
+ * (objectui#10623) and the effect reads it at `:532` — `:434` / `:492`
  * inside the fetch effect,
  * `:832` the pull-to-refresh gate, `:617` the entry composition and `:845`
- * the navigation binding), `timeline` (`:325`,
+ * the navigation binding), `timeline` (`:326`,
  * the canonical nested config every field resolution prefers), `filter`
- * (`:414`, read once through `useResolvedFilter`, which resolves its context
- * tokens — objectui#10666 — and holds the result; `:415` keys the fetch on
- * it and `:492` sends it to `$filter`, where `f8a9d0fb0` sent `schema.filter`
- * verbatim at `:341` / `:405`), `sort` (`:416`, `:493` — through
+ * (`:415`, read once through `useResolvedFilter`, which resolves its context
+ * tokens — objectui#10666 — and holds the result; `:416` keys the fetch on
+ * it and `:493` sends it to `$filter`, where `f8a9d0fb0` sent `schema.filter`
+ * verbatim at `:341` / `:405`), `sort` (`:417`, `:494` — through
  * the shared `convertSortToQueryParams` sink, as `object-calendar`'s does),
- * `limit` (`:494`, the fetch's one top-level `$top`, through
+ * `limit` (`:495`, the fetch's one top-level `$top`, through
  * `resolveRowLimit(schema.limit, DEFAULT_TIMELINE_LIMIT)` with the default
- * `100` at `:30` and the refused-cap diagnostic at `:342`), `items` (`:306`, `:426`, `:602`,
+ * `100` at `:30` and the refused-cap diagnostic at `:343`), `items` (`:307`, `:427`, `:602`,
  * `:861` — the authored pass-through that short-circuits the object query),
- * `data` (`:307`, `:426`, `:553`, `:555` — the pre-fetched record source,
+ * `data` (`:308`, `:427`, `:554`, `:556` — the pre-fetched record source,
  * read off REACT PROPS rather than `schema`; the door's own docblock carries
  * how an authored key reaches that channel and why a `schema.*` sweep alone
  * publishes a false refusal),
- * `descriptionField` (`:593`), `mapping` (`:565`, `:591`, `:593`, `:594`),
+ * `descriptionField` (`:593`), `mapping` (`:566`, `:591`, `:593`, `:594`),
  * `variant` (`:899`) and `navigation` (`:843-846` → `:978` → `:1033-1034`).
  * Four more are read by the presentational renderer off the schema this
  * component spreads into it (`effectiveSchema`, `:962-981`): `dateFormat`
@@ -9148,7 +9405,7 @@ function objectTimelineItemsFitVariant() {
  *    ({@link OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE}) — the runtime handoff
  *    `ListView` emits, not a second authoring spelling;
  *  - `bind` — the objectui data-scope key the section header above rules out
- *    for every block in this family (`:346` here);
+ *    for every block in this family (`:347` here);
  *  - `className` (`:965`) — a node-level key on `PageComponentSchema`, not a
  *    per-block prop;
  *  - `onItemClick` / `onRowClick` — host callbacks JSON cannot carry.
@@ -9224,6 +9481,19 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
+   * `20c6d351a`, re-read there 2026-10-10:
+   * `record-source.ts` and `SchemaRenderer.tsx` are byte-identical across the hop
+   * from `47b1f0bb7` (`git diff --quiet`), so the prop channel above still
+   * carries the key; the file changed (+15/-15, objectui#6152 round 14, objectui
+   * `3fd862510`: the nested `timeline.dateField` alias rung and its entry in
+   * the refusal's key list retired, with their comments), away from these
+   * reads, so every anchor held or MOVED with its cited read byte-identical, by
+   * 1 between the key list and the start-date chain and by 0 below it: `:307`
+   * -> `:308`, `:426` -> `:427`, `:531` -> `:532`, `:553` -> `:554`, `:555` ->
+   * `:556`, while `:678-679` and `:709` held. At `47b1f0bb7`, re-read there
+   * 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
    * `f0268ad78`, re-read there 2026-10-09:
    * `record-source.ts` and `SchemaRenderer.tsx` are byte-identical across the hop
    * from `a58626c88` (`git diff --quiet`), so the prop channel above still
@@ -9304,9 +9574,9 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * `recordDisplayValueAt` (`:653`, objectui#10530), not `item[titleField]`.
    * At `f8a9d0fb0` the file was byte-identical to `62597c588` and
    * `87af769e9`, where they were re-READ 2026-09-22), all in
-   * `ObjectTimeline.tsx`: `:307` seeds the loading state off it, `:426`
+   * `ObjectTimeline.tsx`: `:308` seeds the loading state off it, `:427`
    * SKIPS the object query when it is present (the gate the effect reads at
-   * `:531`), `:553` tracks it, and `:555`
+   * `:532`), `:554` tracks it, and `:556`
    * is the row source itself — `(props as any).data || boundData ||
    * fetchedData`, so it wins over both the data-scope binding and the fetch.
    * Unlike `items` one line down, these rows are RECORDS: they go through the
@@ -9424,14 +9694,49 @@ export const ComponentPropsMap = {
   'record:alert': RecordAlertProps,
   'record:quick_actions': RecordQuickActionsProps,
   'record:history': RecordHistoryProps,
-  // #21142 — the last registered `record:*` renderer without a row: it sat on
-  // the string-arm registration ledger instead (`component-type-vocabulary.ts`),
-  // so the gate skipped its props and a column keyed `field` published green.
+  // #21142 — a registered `record:*` renderer without a row, though not the
+  // last one: `record:approvals` and `record:attachments` (#22537, below) were
+  // registered without rows too. This one sat on the string-arm registration
+  // ledger instead (`component-type-vocabulary.ts`), so the gate skipped its
+  // props and a column keyed `field` published green.
   // Not a `PageComponentType` member: it reaches the type union through the
   // open string arm, as `element:metadata_viewer` does, and the row is what
   // makes it known. Key set measured at the `.objectui-sha` pin; see the
   // schema's own header.
   'record:line_items': RecordLineItemsProps,
+  // #22472 — the approval decision panel (objectui#12045, ruling 6079807016,
+  // letter 乙: the props of the request page's decision node are checked by
+  // `os validate`). A `PageComponentType` member, declared spec first; see the
+  // enum's own note for why it is not a row-only string-arm type. The accepted
+  // key set is EMPTY, measured from the renderer's read points on objectui
+  // `main` at `d03b022` (`app-shell/src/views/approval-decision/
+  // ApprovalDecisionPanel.tsx`, landed in objectui `a368ccb`, still
+  // module-internal there): `ApprovalDecisionRenderer` discards the schema node
+  // (`schema: _schema`) and draws from the record context alone (the request
+  // row the page binds, with its `viewer` and `decision_progress`) and from
+  // `sys_approval_request`'s own declared actions. `className` and the designer
+  // attributes it reads are node-level, never `properties`. So the row is
+  // strict and refuses every key: a misspelled prop is a
+  // `component-props-unknown-key` finding instead of a silently dropped one.
+  // The panel draws nothing outside a `sys_approval_request` record page.
+  'record:approval_decision': emptyProps('record:approval_decision'),
+  // #22537 — the record page's Approvals and Attachments panels. objectui
+  // registered both inside this reserved namespace with no enum member and no
+  // row, so `component-type-unknown` refused a node its own default-page
+  // synthesizer emits, and Studio's page create seeds the Attachments tab onto
+  // every record page of an `enable.files` object. Both are `PageComponentType`
+  // members now. Each key set is measured from the renderer's read points at
+  // the `.objectui-sha` pin `47b1f0bb71`, and both are EMPTY:
+  //  - `record:approvals` reads `approvals` and `currentUserId`, and both are
+  //    the host's runtime channel, refused with a prescription (see the
+  //    schema's own header);
+  //  - `record:attachments` (`app-shell/src/views/
+  //    record-attachments-renderer.tsx`, registered at `:69`) discards the
+  //    schema node (`schema: _schema`) and draws the record context's
+  //    attachments; `className` and the designer attributes it reads are
+  //    node-level, never `properties`.
+  'record:approvals': RecordApprovalsProps,
+  'record:attachments': emptyProps('record:attachments'),
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),
@@ -9532,6 +9837,18 @@ export const ComponentPropsMap = {
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
   // measured at the pin this repo builds against (`.objectui-sha` =
+  // `20c6d351a`, re-read there 2026-10-10:
+  // `public-blocks.ts`, `data-list.tsx` and `block-types.ts` are byte-identical
+  // across the hop from `47b1f0bb7` (`git diff --quiet`), so `:117-118`,
+  // `:85`, `:311` and `137-138` did not move; `block-config.ts` changed (+10/-4,
+  // objectui#12056, objectui `2a48bd408`) between and inside the two
+  // inspectors: a six-line comment above the repeater's, and its object,
+  // title-field, fields and limit rows now writing and reading the node-level
+  // `dataSource` binding, so the two inspectors were re-READ and span
+  // `311-345` -> `311-351`, each still the block's own inspector. At
+  // `47b1f0bb7`, re-read there 2026-10-09:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
   // `f0268ad78`, re-read there 2026-10-09:
   // `public-blocks.ts` is byte-identical across the hop from `a58626c88`
   // (`git diff --quiet`), so `:117-118` did not move; `data-list.tsx` changed
@@ -9584,7 +9901,7 @@ export const ComponentPropsMap = {
   //    tracked `sdui.manifest.json` carries both;
   //  - authorship: the Studio page designer's palette offers both
   //    (`app-shell/src/views/metadata-admin/previews/block-types.ts:137-138`),
-  //    each with its own inspector (`previews/block-config.ts:311-345`), so
+  //    each with its own inspector (`previews/block-config.ts:311-351`), so
   //    stored pages hold them.
   'element:definition-list': ElementDefinitionListPropsSchema,
   'element:repeater': ElementRepeaterPropsSchema,
@@ -9618,6 +9935,12 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
+  // `20c6d351a`, re-read there 2026-10-10:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+  // `47b1f0bb7`, re-read there 2026-10-09:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
   // `f0268ad78`, re-read there 2026-10-09:
   // `ObjectGantt.tsx` and `ObjectTree.tsx` are byte-identical to `a58626c88`
   // (`git diff --quiet`); `ObjectMap.tsx` (+85/-4) changed for objectui#11819
@@ -9692,6 +10015,16 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
+  // `20c6d351a`, re-read there 2026-10-10:
+  // `renderer.tsx` and `index.tsx` are byte-identical to `47b1f0bb7` (`git diff
+  // --quiet`); `ObjectTimeline.tsx` changed (+15/-15, objectui#6152 round 14,
+  // objectui `3fd862510`: the nested `timeline.dateField` alias rung retired,
+  // with its entry in the refusal's key list and their comments) and was
+  // re-READ: every anchor held or moved with its text byte-identical, the
+  // `schema.*` read set is unchanged (the same 19 names at both pins), and no
+  // declared key set moved. At `47b1f0bb7`, re-read there 2026-10-09:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
   // `f0268ad78`, re-read there 2026-10-09:
   // `renderer.tsx` is byte-identical to `a58626c88` (`git diff --quiet`);
   // `index.tsx` rewrote two input descriptions in place and `ObjectTimeline.tsx`

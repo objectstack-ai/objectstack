@@ -233,7 +233,7 @@ describe('module docblock provenance', () => {
     }
     // The point of the watch: no gate notices, so the paragraph is the notice.
     expect(SOURCE).toContain('ADR-0049');
-    expect(SOURCE).toContain('cloud#2172');
-    expect(SOURCE).toContain('objectui#7388 block 2');
+    expect(SOURCE).toContain('the cloud build-progress card');
+    expect(SOURCE).toContain('block 2 of the objectui build-panel card');
   });
 });

@@ -64,6 +64,14 @@ const BUNDLE = {
   messages: { save: '保存' },
 };
 
+/**
+ * [#22432] `/i18n` stands on the anonymous-deny floor now. These cases are
+ * about the SUCCESS body a served caller receives, not about who may call, so
+ * they carry a session; anonymity is pinned in
+ * `domains/i18n-anonymous-deny.test.ts`.
+ */
+const SIGNED_IN = { request: {}, executionContext: { userId: 'u_test', isSystem: false } } as never;
+
 describe('/i18n success-envelope conformance (dispatcher domain)', () => {
   let dispatcher: HttpDispatcher;
   let i18nService: Record<string, unknown>;
@@ -93,7 +101,7 @@ describe('/i18n success-envelope conformance (dispatcher domain)', () => {
   }
 
   it('GET /locales — body satisfies GetLocalesResponseSchema', async () => {
-    const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} } as never);
+    const result = await dispatcher.handleI18n('/locales', 'GET', {}, SIGNED_IN);
     expect(result.response?.status).toBe(200);
     expectEnvelope(result.response?.body);
 
@@ -109,14 +117,14 @@ describe('/i18n success-envelope conformance (dispatcher domain)', () => {
   });
 
   it('GET /locales — a bare string[] is DEAD, so a revert cannot pass quietly', async () => {
-    const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} } as never);
+    const result = await dispatcher.handleI18n('/locales', 'GET', {}, SIGNED_IN);
     const locales = result.response?.body?.data?.locales as unknown[];
     expect(locales.every((l) => typeof l === 'object' && l !== null)).toBe(true);
     expect(locales).not.toContain('en');
   });
 
   it('GET /translations/:locale — body satisfies GetTranslationsResponseSchema', async () => {
-    const result = await dispatcher.handleI18n('/translations/zh-CN', 'GET', {}, { request: {} } as never);
+    const result = await dispatcher.handleI18n('/translations/zh-CN', 'GET', {}, SIGNED_IN);
     expect(result.response?.status).toBe(200);
     expectEnvelope(result.response?.body);
 
@@ -128,7 +136,7 @@ describe('/i18n success-envelope conformance (dispatcher domain)', () => {
   });
 
   it('GET /labels/:object/:locale — body satisfies GetFieldLabelsResponseSchema', async () => {
-    const result = await dispatcher.handleI18n('/labels/contact/zh-CN', 'GET', {}, { request: {} } as never);
+    const result = await dispatcher.handleI18n('/labels/contact/zh-CN', 'GET', {}, SIGNED_IN);
     expect(result.response?.status).toBe(200);
     expectEnvelope(result.response?.body);
 
@@ -144,7 +152,7 @@ describe('/i18n success-envelope conformance (dispatcher domain)', () => {
   });
 
   it('an empty label map is still a conforming body', async () => {
-    const result = await dispatcher.handleI18n('/labels/unknown_object/zh-CN', 'GET', {}, { request: {} } as never);
+    const result = await dispatcher.handleI18n('/labels/unknown_object/zh-CN', 'GET', {}, SIGNED_IN);
     expect(result.response?.status).toBe(200);
     expect(GetFieldLabelsResponseSchema.safeParse(result.response?.body?.data).success).toBe(true);
   });
@@ -156,7 +164,7 @@ describe('/i18n success-envelope conformance (dispatcher domain)', () => {
    */
   it('GET /locales conforms even when the provider omits getDefaultLocale', async () => {
     delete i18nService.getDefaultLocale;
-    const result = await dispatcher.handleI18n('/locales', 'GET', {}, { request: {} } as never);
+    const result = await dispatcher.handleI18n('/locales', 'GET', {}, SIGNED_IN);
     const parsed = GetLocalesResponseSchema.safeParse(result.response?.body?.data);
     expect(parsed.success).toBe(true);
     expect(parsed.data?.locales.every((l) => l.isDefault === false)).toBe(true);

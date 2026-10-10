@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
-import type { IDataEngine, II18nService, ISharingService } from '@objectstack/spec/contracts';
+import type { IDataEngine, II18nService, ISecurityService, ISharingService } from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
@@ -355,7 +355,7 @@ export class AuditPlugin implements Plugin {
           () => {
             try {
               // Typed with the slot's contract (#4251): the gate consults
-              // `canEdit` only, but it consults the REAL interface.
+              // `checkEdit` only, but it consults the REAL interface.
               return ctx.getService<ISharingService>('sharing');
             } catch {
               return null;
@@ -371,6 +371,17 @@ export class AuditPlugin implements Plugin {
             const t = i18n?.t;
             if (typeof t !== 'function') return undefined;
             return (key: string, loc: string, params?: Record<string, unknown>) => t.call(i18n, key, loc, params);
+          },
+          // [ADR-0055] The security service, for its master-detail write check:
+          // a `controlled_by_parent` parent is judged through its master, as its
+          // own update is. Resolved per check (the security plugin may start
+          // after this one); a kernel without it composes no master check.
+          () => {
+            try {
+              return ctx.getService<ISecurityService>('security');
+            } catch {
+              return null;
+            }
           },
         );
         if (typeof (engine as any).registerMiddleware === 'function') {

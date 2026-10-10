@@ -47,8 +47,12 @@
  * `organizationId` names (env-wide when none). Every partition's names carry
  * its organization, so a read of organization A's rows is visible in the
  * answer and a write to them is visible in the store. `deletePackage` mirrors
- * the real protocol's refusal of an uninstall that names no organization
- * (`400 TENANT_SCOPE_REQUIRED`, `metadata-protocol` `deletePackage`).
+ * the real protocol's refusal of the retired `organizationId` / `allTenants`
+ * request keys (`400 INVALID_REQUEST`, `metadata-protocol` `deletePackage`).
+ *
+ * [ADR-0131 D6] The doors now thread NO organization into any protocol verb,
+ * vetted or not, so every caller — current member, ex-member, switched
+ * ex-member — reaches the env-wide partition and never an organization's.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -144,13 +148,12 @@ function protocolDouble() {
         duplicatePackage: async (req: any) => ({ success: true, copied: [...record('duplicatePackage', req).rows] }),
         deletePackage: async (req: any) => {
             state.calls.push({ verb: 'deletePackage', organizationId: req?.organizationId });
-            if (!req?.organizationId && req?.allTenants !== true) {
-                throw Object.assign(new Error('Refusing to uninstall with no organization scope.'), {
-                    code: 'TENANT_SCOPE_REQUIRED', status: 400,
+            if ('organizationId' in (req ?? {}) || 'allTenants' in (req ?? {})) {
+                throw Object.assign(new Error('organizationId / allTenants are retired request keys.'), {
+                    code: 'INVALID_REQUEST', status: 400,
                 });
             }
-            // An org-scoped uninstall reaches the org's rows AND the env-wide ones (#7705).
-            const deleted = [...state.store[scopeOf(req)].rows.splice(0), ...state.store[ENV_WIDE].rows.splice(0)];
+            const deleted = state.store[ENV_WIDE].rows.splice(0);
             return { success: true, deletedCount: deleted.length, failedCount: 0, deleted };
         },
         getMetaItems: async (req: any) => {
@@ -181,8 +184,8 @@ function makeQl() {
             { id: 'u_exmember', email: 'u_exmember@example.com' },
         ],
         sys_user_permission_set: [
-            { user_id: 'u_member', permission_set_id: 'ps_shared' },
-            { user_id: 'u_exmember', permission_set_id: 'ps_shared' },
+            { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
+            { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
         ],
         sys_permission_set: [
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
@@ -198,6 +201,8 @@ function makeQl() {
             }
             return (cond as any).$in.includes(row[field]);
         }
+        // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+        if (cond === null) return (row[field] ?? null) === null;
         return row[field] === cond;
     });
     const pkg = { manifest: { id: PKG, name: 'CRM', version: '1.0.0', scope: 'project' } };
@@ -361,20 +366,6 @@ const organizationsCarried = () => [...new Set(state.calls.map((c) => c.organiza
 describe('[#20477] controls: the rig can tell the organizations apart', () => {
     for (const [transport, entry] of TRANSPORTS) {
         for (const door of DOORS) {
-            it(`${transport} · ${door.name}: a CURRENT member reaches their own organization's partition`, async () => {
-                const answer = await entry()(door.method, 'member', door.path, door.body);
-                expect(state.calls.map((c) => c.verb)).toContain(door.verb);
-                expect(organizationsCarried()).toEqual([ALPHA]);
-                const { wrote, read } = touched(ALPHA, 'alpha', answer);
-                expect(wrote || read, `${door.name} -> ${answer.status} ${JSON.stringify(answer.body)}`).toBe(true);
-            });
-
-            it(`${transport} · ${door.name}: the ex-member, switched to an organization they ARE in, reaches that one and never the left one`, async () => {
-                const answer = await entry()(door.method, 'exmember_beta', door.path, door.body);
-                expect(organizationsCarried()).toEqual([BETA]);
-                expect(touched(ALPHA, 'alpha', answer)).toEqual({ wrote: false, read: false });
-            });
-
             it(`${transport} · ${door.name}: an anonymous caller is refused before any protocol call, as before`, async () => {
                 const answer = await entry()(door.method, 'anonymous', door.path, door.body);
                 expect({ status: answer.status, code: answer.code }).toEqual({ status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE });
@@ -394,31 +385,19 @@ describe('[#20477] controls: the rig can tell the organizations apart', () => {
 
 // ── The subject: a claim the resolver dropped scopes nothing ──────────────────
 
-describe('[#20477] a session claim the resolver DROPPED reaches no organization on any /packages door', () => {
+describe('[#20477][ADR-0131 D6] no session claim reaches an organization on any /packages door', () => {
     for (const [transport, entry] of TRANSPORTS) {
-        // [#20492] The uninstall door is pinned on its own, below: it refuses a
-        // caller with no organization BEFORE the protocol is asked at all, so
-        // there is no protocol call for this generic pin to read.
-        for (const door of DOORS.filter((d) => d.verb !== 'deletePackage')) {
-            it(`${transport} · ${door.name}: the protocol is handed no organization, and the left organization's rows are neither read nor written`, async () => {
-                const answer = await entry()(door.method, 'exmember', door.path, door.body);
-                expect(state.calls.map((c) => c.verb)).toContain(door.verb);
-                expect(organizationsCarried()).toEqual([undefined]);
-                expect(touched(ALPHA, 'alpha', answer), `${door.name} -> ${answer.status} ${JSON.stringify(answer.body)}`)
-                    .toEqual({ wrote: false, read: false });
-            });
+        for (const who of ['member', 'exmember', 'exmember_beta'] as const) {
+            for (const door of DOORS) {
+                it(`${transport} · ${who} · ${door.name}: the protocol is handed no organization, and no organization's rows are read or written`, async () => {
+                    const answer = await entry()(door.method, who, door.path, door.body);
+                    expect(state.calls.map((c) => c.verb)).toContain(door.verb);
+                    expect(organizationsCarried()).toEqual([undefined]);
+                    expect(touched(ALPHA, 'alpha', answer), `${door.name} -> ${answer.status} ${JSON.stringify(answer.body)}`)
+                        .toEqual({ wrote: false, read: false });
+                    expect(touched(BETA, 'beta', answer)).toEqual({ wrote: false, read: false });
+                });
+            }
         }
-
-        // [#20492] The refusal is the door's own now, taken before the registry
-        // is touched: the protocol is never handed the org-less request. The
-        // registry half of "nothing changed" is pinned in
-        // `packages-uninstall-refuse-before-mutate.test.ts` (this rig's
-        // registry cannot uninstall anything).
-        it(`${transport} · DELETE /packages/:id: the org-less uninstall is refused by the door before the protocol is asked, and nothing is deleted`, async () => {
-            const answer = await entry()('DELETE', 'exmember', `/packages/${PKG}`);
-            expect({ status: answer.status, code: answer.code }).toEqual({ status: 400, code: 'TENANT_SCOPE_REQUIRED' });
-            expect(state.calls).toEqual([]);
-            expect(state.store).toEqual(seedStore());
-        });
     }
 });

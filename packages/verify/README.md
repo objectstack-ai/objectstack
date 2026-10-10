@@ -77,7 +77,8 @@ await stack.stop();
 Every `VerifyStack` carries it; nothing extra to boot. Each method is a thin
 facade over a door the kernel wired at boot — the ObjectQL engine's own write,
 dry-run and read calls, the runtime's `/automation` and `/actions` routes
-driven in-process, the `SchemaRegistry`, the `tenancy` service — with **zero
+driven in-process, the automation engine's condition evaluator, the
+`SchemaRegistry`, the `tenancy` service — with **zero
 re-implemented semantics**: the handle assembles no execution context, orders
 no hooks, evaluates no permission. What the engine does is what you assert on.
 
@@ -99,6 +100,14 @@ expect(deal.expected_revenue).toBe(6_000);             // the hook derived it
 await expect(stack.hooks.run('crm_vault', 'insert', { name: 'x' }, { as: rep }))
   .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
 
+// An update as the system principal (no user): no permission gate, but the
+// hooks, the validations and the record-change flows all run.
+await stack.hooks.run('crm_opportunity', 'update', { id: deal.id, stage: 'closed_won' }, { system: true });
+
+// A predicate update: one payload for every matched row, hooks and record
+// flows once per row with that row's own `previous`. Resolves the count.
+const n = await stack.hooks.updateWhere('crm_opportunity', { name: 'Globex' }, { description: 'Bulk note' }, { as: rep });
+
 // A validation rule, without writing.
 const verdict = await stack.validate('crm_opportunity', { amount: -1 }, { as: rep });
 expect(verdict.valid).toBe(false);
@@ -111,6 +120,13 @@ await stack.flows.resume(run, { quoteName: 'Q-1', discount: 10 }, { as: rep });
 // An action body, through the route that carries its param contract.
 const out = await stack.actions.run('crm_opportunity', 'apply_discount',
   { as: rep, recordId: deal.id, params: { discount: 10 } });
+
+// A flow condition's truth table, on the engine's own evaluator, over
+// variable shapes no write produces. A start gate's, an edge's and a
+// decision branch's condition reach it as a CEL envelope, so pass one.
+expect(await stack.automation.evaluateCondition(
+  { dialect: 'cel', source: 'record.stage != previous.stage' },
+  { record: { stage: 'closed_won' }, previous: { stage: 'proposal' } })).toBe(true);
 
 // Fixtures and reads through the real engine.
 const [acc] = await stack.seed('crm_account', [{ name: 'Globex' }]);
@@ -127,12 +143,20 @@ await stack.stop();
 - `as` is always a bearer token minted by `signIn()` / `signUp()` on the same
   stack — the handle resolves it through the dispatcher's own identity resolver
   (`contextFor(token)` exposes that context for services the handle does not
-  cover). There is no way to run as "nobody"; `seed` and the default `rows` run
-  as the system principal, deliberately and by name.
+  cover). There is no way to run as "nobody"; `seed`, the default `rows` and
+  an update passed `{ system: true }` (`hooks.run(…, 'update', …)`,
+  `hooks.updateWhere`) run as the system principal, deliberately and by name.
 - A refusal from `flows.*` / `actions.run` is the route's ADR-0112 envelope
   (`VerifyRefusal`: `code`, `status`, `details`; `isVerifyRefusal(e)`); a
-  refusal from `hooks.run` / `validate` / `rows` is the engine's own error.
-  Assert on `code` (and `status` / `statusCode`), never on a message alone.
+  refusal from `hooks.run` / `hooks.updateWhere` / `validate` / `rows` /
+  `automation.evaluateCondition` is the engine's own error (a condition the
+  engine cannot evaluate rejects, never answers `false`; on a stack with no
+  automation service, `automation.evaluateCondition` rejects with the kernel's
+  own `SERVICE_NOT_REGISTERED` error naming `automation`). The two update doors refuse a malformed call themselves,
+  before the engine is touched, with `INVALID_REQUEST` / `400` (`{ system: true }`
+  on an insert or delete, a caller named twice, or a `hooks.updateWhere` the
+  engine would write by id). Assert on `code` (and `status` / `statusCode`),
+  never on a message alone.
 - Many files, one boot: `bootStackOnce(config, opts?)` memoises `bootStack` per
   `(config, opts)` object identity for the life of the process. Share it from
   one module, under vitest `isolate: false`, and never `stop()` a stack other
@@ -189,7 +213,8 @@ run" must never read like "nothing to find".
 ## API
 
 - `bootStack(config, opts?)` → `VerifyStack` (`api` / `raw` / `signIn` / `signUp` / `apiAs` / `stop`, plus the handle:
-  `hooks.run` / `validate` / `flows.run` / `flows.resume` / `actions.run` / `seed` / `rows` / `metadata` / `tenancy` / `contextFor`).
+  `hooks.run` / `hooks.updateWhere` / `validate` / `flows.run` / `flows.resume` / `actions.run` /
+  `automation.evaluateCondition` / `seed` / `rows` / `metadata` / `tenancy` / `contextFor`).
 - `bootStackOnce(config, opts?)` → the same, memoised per `(config, opts)` identity for the process.
 - `deriveCrudCases(config)` → the auto-derived round-trip cases (write one, read one, assert) for every object.
 - `runCrudVerification(stack, token, config)` → `VerifyReport`; `formatReport(report)` for a log summary.
@@ -198,7 +223,9 @@ run" must never read like "nothing to find".
 `bootStack` options: `admin`, `authSecret`, `security` (a custom `SecurityPlugin`
 for owner-scoped fixtures), `multiTenant` (also what decides the posture
 `tenancy()` reports), `automation` (register the automation service so
-`flows.*` has something to drive), `orgContext`, `databaseFile`, `extraPlugins`.
+`flows.*` and `automation.evaluateCondition` have something to drive; an app
+that declares `requires: ['automation']` gets it without this), `orgContext`,
+`databaseFile`, `extraPlugins`.
 
 ## Known limitations
 

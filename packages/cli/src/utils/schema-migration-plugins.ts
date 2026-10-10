@@ -2,8 +2,22 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
+import {
+  isDevelopmentBoot,
+  resolveAuthSecret,
+  resolvePlatformAuthComposition,
+  resolveStackTiers,
+  type PlatformAuthSkipReason,
+} from '@objectstack/core';
+import { stampSearchPinyinEnabled } from '@objectstack/types';
 import { isAppPluginLike } from './graft-runtime-hooks.js';
-import { stackDeclaredCapabilities, stackDeclaresMetadata } from './stack-collections.js';
+import { isHostConfig } from './plugin-detection.js';
+import {
+  resolveStackCollection,
+  stackBootPlugins,
+  stackDeclaredCapabilities,
+  stackDeclaresMetadata,
+} from './stack-collections.js';
 
 /**
  * The object set a SCHEMA migration is planned against (#12938).
@@ -40,27 +54,46 @@ import { stackDeclaredCapabilities, stackDeclaresMetadata } from './stack-collec
  * The set is derived from `serve`'s own assembly rather than hand-picked:
  *
  *  - **The host config's plugins**, when an `objectstack.config.{ts,js,mjs}` is
- *    present — this is `serve`'s `plugins = config.plugins` step. On a
- *    deployment whose whole object set comes from its config (ObjectStack
- *    Cloud's control plane is the measured one: `createCloudStack()` returns the
- *    plugins, and the app has no compiled artifact at all) this is the ONLY half
- *    that matters.
+ *    present — this is `serve`'s `plugins = config.plugins` step, each entry by
+ *    `serve`'s rule for one (`materializeStackPlugin`, `@objectstack/core`;
+ *    #22506, {@link materializeHostPlugins}). On a deployment whose whole object
+ *    set comes from its config (ObjectStack Cloud's control plane is the
+ *    measured one: `createCloudStack()` returns the plugins, and the app has no
+ *    compiled artifact at all) this is the ONLY half that matters.
  *  - **`AppPlugin(config)`**, when the config carries top-level metadata and
  *    brings no `AppPlugin` of its own — `serve` step 3, same presence test
  *    ({@link isAppPluginLike}), so top-level `objects`/`flows` reach the
- *    registry here exactly as they do there.
- *  - **`PlatformObjectsPlugin`**, when absent — `serve` step 5c. It is the one
- *    plugin `serve` composes UNCONDITIONALLY; everything else it injects
- *    (the auth family, i18n, observability, the HTTP server) sits behind a tier,
- *    an env var or a capability, and the auth family additionally behind "the
- *    config brought no `AuthPlugin`". Composing a tier-gated plugin here would
- *    be inventing an object set no boot of this deployment has.
- *  - **A `requires`-supplied provider a composed plugin hard-depends on**
- *    (#21732) — `serve` step 5's token lookup, narrowed to the providers the
+ *    registry here exactly as they do there. The config's pinyin-search
+ *    decision is stamped as `serve` stamps it (#22506), so the `__search`
+ *    companion columns its boot provisions are in the schema view too.
+ *  - **`PlatformObjectsPlugin`**, when absent — `serve` step 5c, composed on
+ *    every served boot.
+ *  - **What `os serve` mounts AROUND the stack — `os migrate plan`, `apply` and
+ *    `unmapped-columns` only** (`servedPlatform`, #22506, {@link composeServedPlatform}): the auth
+ *    family behind `serve`'s auth gate, the provider of every capability its
+ *    resolver mounts (the stack's `requires` and the always-on slate), and the
+ *    REST API plugin — each through the rule `serve` reads, each for its
+ *    declarations only ({@link composeProviderForDeclarations}). Without it an
+ *    app declaring `requires: ['auth']` planned 9 of the 68 tables its boot
+ *    created, `sys_account` among the missing, so the retired
+ *    `sys_account.issuer` column was never a drop and the upgrade step that
+ *    prescribes one looped.
+ *  - **Otherwise, a `requires`-supplied provider a composed plugin hard-depends
+ *    on** (#21732) — `serve` step 5's token lookup, narrowed to the providers the
  *    kernel cannot order the composition without, each in a measured inert
  *    posture ({@link resolveRequiredProviders}). Without it every config that
  *    lists a connector in `plugins` and `automation` in `requires` — the blank
- *    template and the showcase among them — could not boot this command.
+ *    template and the showcase among them — could not boot this command. This
+ *    is the path of the one caller that does not ask for `servedPlatform`.
+ *  - **The security plugin behind `serve`'s auth gate — only when the caller
+ *    asks** (`authGatedSecurity`, #22371). `os migrate
+ *    security-catalog-overlays` needs the permission-set names the deployment's
+ *    boot holds, and the security plugin declares its shipped sets only where
+ *    `serve`'s auth gate composes it. The gate is the one rule `serve` asks
+ *    (`resolvePlatformAuthComposition`, `@objectstack/core`), so this is not an
+ *    invented object set: it is the one this deployment's boot has. That
+ *    command also boots NON-deferred under `--apply`, which is why it does not
+ *    ask for the whole served platform: schema sync would create its tables.
  *
  * ## Phase 1 only for host plugins — and why that is the contract, not a dodge
  *
@@ -376,10 +409,15 @@ function declarationContext(
   ctx: unknown,
   owner: string,
   lifecycle: DeclarationBootLifecycle | undefined,
+  withheld: 'post-declaration' | 'every-hook' = 'post-declaration',
 ): unknown {
   if (!ctx || typeof ctx !== 'object') return ctx;
   const target = ctx as Record<string | symbol, unknown>;
   const hook = (name: unknown, ...rest: unknown[]): unknown => {
+    // [#22506] A platform provider registers no hook at all — see
+    // {@link composeProviderForDeclarations}. Nothing is recorded: the record
+    // is about HOST code, and this is the platform's own.
+    if (withheld === 'every-hook') return undefined;
     if ((POST_DECLARATION_PHASES as readonly unknown[]).includes(name)) {
       lifecycle?.recordWithheldHook(owner, String(name));
       return undefined;
@@ -437,6 +475,43 @@ export function composeForDeclarations<T extends object>(
   plugin: T,
   lifecycle?: DeclarationBootLifecycle,
 ): T {
+  return declarationProxy(plugin, lifecycle, 'post-declaration');
+}
+
+/**
+ * [#22506] A PLATFORM PROVIDER composed for its declarations: `init()` runs,
+ * `start()` does not, and `init()` registers NO lifecycle hook at all —
+ * `kernel:ready` included, unlike {@link composeForDeclarations}.
+ *
+ * ## Why stricter than a host plugin
+ *
+ * {@link composeForDeclarations} keeps `kernel:ready` for host code on
+ * purpose: a host that provisions its tables from a `kernel:ready` hook is a
+ * measured shape the plan must see (#13028). A platform provider is not host
+ * code, and its `kernel:ready` hooks are where its RUNTIME arms — measured on
+ * #22506, `MessagingServicePlugin.init()` registers the `kernel:ready` hooks
+ * that start its notification and outbound-HTTP dispatchers. Composed with the
+ * host posture, both dispatchers ticked inside `os migrate plan`; the write
+ * guard comes off when the bootstrap ends, so on a database holding pending
+ * deliveries a dry run could have SENT them. What a schema command needs from a
+ * provider is the objects its `init()` declares; its loops, schedulers,
+ * dispatchers and seeding belong to a served boot.
+ *
+ * Whether every provider declares its objects in `init()` is not assumed: the
+ * parity pin (`commands/migrate/plan.boot-parity.integration.test.ts`) compares the
+ * object set a plan examines with the one a real `os serve` boot registers, per
+ * example app shape, so a provider that declares from a hook fails one test.
+ */
+export function composeProviderForDeclarations<T extends object>(plugin: T): T {
+  return declarationProxy(plugin, undefined, 'every-hook');
+}
+
+/** The Proxy both declaration postures share — see {@link composeForDeclarations}. */
+function declarationProxy<T extends object>(
+  plugin: T,
+  lifecycle: DeclarationBootLifecycle | undefined,
+  withheld: 'post-declaration' | 'every-hook',
+): T {
   return new Proxy(plugin, {
     get(target, prop) {
       if (prop === 'start') return suppressedStart;
@@ -448,7 +523,7 @@ export function composeForDeclarations<T extends object>(
         return (ctx: unknown, ...rest: unknown[]): unknown => Reflect.apply(
           value as (...args: unknown[]) => unknown,
           target,
-          [declarationContext(ctx, label, lifecycle), ...rest],
+          [declarationContext(ctx, label, lifecycle, withheld), ...rest],
         );
       }
       if (typeof value === 'function' && prop !== 'constructor') {
@@ -1241,6 +1316,16 @@ export interface SchemaMigrationComposition {
    * kernel bootstrap returns.
    */
   lifecycle?: DeclarationBootLifecycle;
+  /**
+   * [#22371] What the auth gate answered when the caller asked for the
+   * security plugin `os serve` composes behind it (`authGatedSecurity`) —
+   * `undefined` when it did not ask. `composed: false` names the gate's reason,
+   * or `config-unloadable` when the host config exists and could not be read,
+   * so the gate had nothing to read.
+   */
+  securityPlugin?:
+    | { readonly composed: true }
+    | { readonly composed: false; readonly reason: PlatformAuthSkipReason | 'config-unloadable' };
 }
 
 const NOTHING_COMPOSED: SchemaMigrationComposition = Object.freeze({
@@ -1415,6 +1500,44 @@ export async function buildSchemaMigrationPlugins(opts: {
   basePlugins: readonly unknown[];
   cwd?: string;
   skipSeedData?: boolean;
+  /**
+   * [#22371] Also compose the security plugin `os serve` composes behind its
+   * auth gate, for its declarations only — see {@link composeAuthGatedSecurity}.
+   * `artifactRequires` is the compiled artifact's `requires` as the standalone
+   * stack surfaced it. Unset (every caller but `os migrate
+   * security-catalog-overlays`): nothing tier-gated is composed, as before.
+   */
+  authGatedSecurity?: { artifactRequires?: readonly string[] };
+  /**
+   * [#22371] The `os serve` flags this composition answers for, with `serve`'s
+   * meaning — `os migrate security-catalog-overlays`' `--dev` and `--preset`:
+   *
+   *  - `dev`: the host config's `devPlugins` are composed after its `plugins`
+   *    (`stackBootPlugins`, the merge `serve` registers), and the boot is a
+   *    development one for the auth gate's secret fallback
+   *    (`isDevelopmentBoot`, `@objectstack/core`);
+   *  - `preset`: the tier preset the auth gate's tiers fall back to when the
+   *    stack declares none (`resolveStackTiers`).
+   *
+   * Unset: `serve` with neither flag. Every other caller passes none.
+   */
+  serveFlags?: { readonly dev?: boolean; readonly preset?: string };
+  /**
+   * [#22506] Also compose what `os serve` mounts AROUND the stack — the auth
+   * family behind its auth gate, the provider of every capability its resolver
+   * mounts (the stack's `requires` and the always-on slate), and the REST API
+   * plugin — each for its declarations only. See {@link composeServedPlatform}.
+   * `artifactRequires` is the compiled artifact's `requires` as the standalone
+   * stack surfaced it.
+   *
+   * Set by `os migrate plan` and `os migrate apply`, whose subject is the
+   * deployment's whole object set, and by `os migrate unmapped-columns`, which
+   * reads the plan's own `unmapped_column` findings over that set. Unset (`os migrate
+   * security-catalog-overlays`, which also boots NON-deferred under `--apply`):
+   * a provider is composed only when a composed plugin hard-depends on it
+   * (#21732), as before.
+   */
+  servedPlatform?: { artifactRequires?: readonly string[] };
 }): Promise<SchemaMigrationComposition> {
   const cwd = opts.cwd ?? process.cwd();
   const hostConfigPath = findHostConfig(cwd);
@@ -1424,7 +1547,10 @@ export async function buildSchemaMigrationPlugins(opts: {
   // to mirror, and the five-table data stack is the honest answer. Returning
   // early — rather than composing the platform floor anyway — is what keeps an
   // artifact-less, config-less run byte-identical to the one before this card.
-  if (!hostConfigPath && !hasArtifactApp) return NOTHING_COMPOSED;
+  // [#22371] Unless the caller asked for the auth-gated security plugin: a
+  // bare `os serve` composes it on such a project too, and its shipped sets
+  // are package-held names there as anywhere.
+  if (!hostConfigPath && !hasArtifactApp && !opts.authGatedSecurity) return NOTHING_COMPOSED;
 
   // #13332 — armed FIRST, so its `init()` is ordered ahead of every host
   // plugin's: `resolvePluginOrder` is a DFS in registration order, and a host
@@ -1441,6 +1567,9 @@ export async function buildSchemaMigrationPlugins(opts: {
   // #21732 — the config's capability declarations, read off the same loaded
   // config the plugins came from. See {@link resolveRequiredProviders}.
   let loadedRequires: unknown;
+  // [#22371] The loaded config and its own plugins, for the auth gate below.
+  let loadedConfig: unknown;
+  let loadedHostPlugins: readonly unknown[] = [];
 
   if (hostConfigPath) {
     try {
@@ -1449,6 +1578,14 @@ export async function buildSchemaMigrationPlugins(opts: {
       // every CLI invocation (see `schema-migrate.ts`'s lazy-import note).
       const { loadConfig } = await import('./config.js');
       const { config } = await loadConfig(hostConfigPath);
+      // [#22506] The pinyin-search decision `serve` stamps from THIS config's
+      // locales (`stampSearchPinyinEnabled`, `@objectstack/types` — the one
+      // helper both boots call, #3955). `createStandaloneStack` stamps from a
+      // compiled artifact only, so a config-only project planned a schema view
+      // without the `__search` companion columns its boot provisions, and listed
+      // every one of them as a destructive drop. Stamped before the kernel
+      // starts, where every registry reads it.
+      stampSearchPinyinEnabled((config as { i18n?: unknown } | null)?.i18n);
 
       // [#22288] `serve`'s rule for the tokens, as well as its lookup: the
       // top-level `requires`, otherwise each package body's. A multi-package
@@ -1456,9 +1593,25 @@ export async function buildSchemaMigrationPlugins(opts: {
       // top-level read left a plugin's hard dependency on that provider
       // unordered and the plan exited 1.
       loadedRequires = stackDeclaredCapabilities(config);
-      const hostPlugins: unknown[] = Array.isArray(config?.plugins) ? config.plugins : [];
-      for (const plugin of hostPlugins) {
-        if (plugin && typeof plugin === 'object') plugins.push(composeForDeclarations(plugin, lifecycle));
+      // [#22371] `serve`'s list — the config's `plugins`, and its `devPlugins`
+      // under `--dev` — by `serve`'s own merge.
+      const hostPlugins: unknown[] = stackBootPlugins(config, opts.serveFlags?.dev);
+      loadedConfig = config;
+      // [#22506] Each entry by `serve`'s rule for one (`materializeStackPlugin`,
+      // `@objectstack/core`) — a string is a package specifier, a plain bundle
+      // is wrapped into `AppPlugin`, an instance is itself. This loop used to
+      // keep the objects and drop the rest: a string entry vanished from the
+      // plan without a word, and a bundle reached the kernel with no `init`.
+      const materialized = await materializeHostPlugins(hostPlugins, {
+        hostRoot: path.dirname(hostConfigPath),
+        lifecycle,
+        skipSeedData: opts.skipSeedData ?? false,
+      });
+      loadedHostPlugins = materialized.map((m) => m.plugin);
+      for (const { plugin, wrappedBundle } of materialized) {
+        // A bundle this composition wrapped is an `AppPlugin` it constructed
+        // itself, composed like the config's own below; an instance is host code.
+        plugins.push(wrappedBundle ? plugin : composeForDeclarations(plugin as object, lifecycle));
       }
 
       // `serve` step 3, same predicate: a host config that ALSO carries
@@ -1490,9 +1643,12 @@ export async function buildSchemaMigrationPlugins(opts: {
       // is only known once the boot is over, so that sentence belongs to the
       // guard's disarm() note — which drops it if a raw execute() went
       // through (#14053 review, R1) — and must not be pre-claimed here.
+      const devPluginCount = hostPlugins.length - stackBootPlugins(config, false).length;
       notes.push(
         `Composed the host stack from ${path.relative(cwd, hostConfigPath) || hostConfigPath}: `
-        + `${hostPlugins.length} plugin(s), registered for their declarations only `
+        + `${hostPlugins.length} plugin(s)`
+        + `${devPluginCount > 0 ? ` (${devPluginCount} of them its devPlugins, as under --dev)` : ''}, `
+        + 'registered for their declarations only '
         + '(init runs, start does not), with the contract\'s row writes refused at the '
         + 'driver for the whole boot.',
       );
@@ -1536,11 +1692,33 @@ export async function buildSchemaMigrationPlugins(opts: {
     notes.push('Composed PlatformObjectsPlugin (the platform floor `os serve` composes unconditionally).');
   }
 
+  // [#22506] `os migrate plan` / `apply`: the platform `os serve` composes
+  // around this stack — the auth family behind its auth gate, and the provider
+  // of every capability its resolver mounts — through the shared rules. See
+  // {@link composeServedPlatform}. Not on an unloadable config: there is no
+  // stack to read, and that path is refused on its own terms (#12953).
+  if (opts.servedPlatform) {
+    if (!(hostConfigPath && !hostConfigLoaded)) {
+      const served = await composeServedPlatform({
+        config: loadedConfig ?? {},
+        hostPlugins: loadedHostPlugins,
+        basePlugins: opts.basePlugins,
+        composed: [...opts.basePlugins, ...plugins],
+        artifactRequires: opts.servedPlatform.artifactRequires,
+        packageRoot: hostConfigPath ? path.dirname(hostConfigPath) : cwd,
+      });
+      // The auth family where `serve` registers it — ahead of the host plugins,
+      // so a config's own instance of the same name supersedes it here as
+      // there (the slot #22371's security plugin takes, below).
+      plugins.splice(1, 0, ...served.authFamily);
+      plugins.push(...served.plugins);
+      notes.push(...served.notes);
+    }
   // #21732 — `serve` step 5, narrowed to what this boot cannot start without:
   // a provider the config's `requires` supplies, that a composed plugin
   // hard-depends on. Only when the config LOADED — an unloadable config has
   // no `requires` to read, and that path is refused on its own terms.
-  if (hostConfigLoaded && hostConfigPath) {
+  } else if (hostConfigLoaded && hostConfigPath) {
     const resolved = await resolveRequiredProviders({
       requires: loadedRequires,
       composed: [...opts.basePlugins, ...plugins],
@@ -1550,9 +1728,383 @@ export async function buildSchemaMigrationPlugins(opts: {
     notes.push(...resolved.notes);
   }
 
+  // [#22371] The security plugin `serve` pairs with AuthPlugin, behind the
+  // same gate — composed ahead of the host plugins, where `serve` registers it,
+  // so a config's own instance of the same name supersedes it here as there.
+  let securityPlugin: SchemaMigrationComposition['securityPlugin'];
+  if (opts.authGatedSecurity) {
+    if (hostConfigPath && !hostConfigLoaded) {
+      securityPlugin = { composed: false, reason: 'config-unloadable' };
+    } else {
+      const gated = await composeAuthGatedSecurity({
+        config: loadedConfig,
+        hostPlugins: loadedHostPlugins,
+        basePlugins: opts.basePlugins,
+        artifactRequires: opts.authGatedSecurity.artifactRequires,
+        ...(opts.serveFlags ? { serveFlags: opts.serveFlags } : {}),
+        lifecycle,
+      });
+      securityPlugin = gated.status;
+      if (gated.plugin) plugins.splice(1, 0, gated.plugin);
+      notes.push(gated.note);
+    }
+  }
+
   return {
     plugins, hostConfigPath, hostConfigLoaded, hostConfigError, notes, coverage: null, writeGuard, lifecycle,
+    ...(securityPlugin ? { securityPlugin } : {}),
   };
+}
+
+/** One `plugins` entry as {@link materializeHostPlugins} resolved it. */
+interface MaterializedHostPlugin {
+  /** The plugin the entry stands for. */
+  plugin: unknown;
+  /** The entry was a plain bundle, and this composition wrapped it into an `AppPlugin`. */
+  wrappedBundle: boolean;
+}
+
+/**
+ * [#22506] The host config's `plugins` entries, each resolved by `os serve`'s
+ * rule for an entry: `materializeStackPlugin` (`@objectstack/core`), the one
+ * rule `serve` and `@objectstack/verify`'s `bootStack` mount the same array by.
+ *
+ * Only the LOADING is this boot's own, as it is each boot's:
+ *
+ *  - a string is a package specifier, loaded host-anchored through
+ *    `Serve.importConfigPlugin`, the loader `serve`'s own boot loop calls (its
+ *    relative-path refusal and its failure wrapper come with it). The command
+ *    module is imported only when an entry IS a string, so a config of
+ *    instances never loads it;
+ *  - a plain bundle is wrapped into `AppPlugin` with the declaration boot's two
+ *    answers for the config's own `AppPlugin`: the boot's seed setting, and no
+ *    `onEnable` (#21054, recorded on `lifecycle`).
+ *
+ * An absent entry (`undefined`, `null`, `false` — a conditional spread's hole)
+ * is skipped, as before. Anything else that cannot be loaded, or that does not
+ * resolve to a plugin object, THROWS. `serve` logs such an entry and boots on; a
+ * plan that did the same would be missing that plugin's objects and still read
+ * as coverage. The throw lands in the caller's unloadable-config path, so the
+ * plan prints what it could and then exits non-zero (#12953), and `apply`
+ * refuses before any DDL (#13118).
+ */
+async function materializeHostPlugins(
+  entries: readonly unknown[],
+  opts: { hostRoot: string; lifecycle: DeclarationBootLifecycle; skipSeedData: boolean },
+): Promise<MaterializedHostPlugin[]> {
+  const { materializeStackPlugin } = await import('@objectstack/core');
+  const out: MaterializedHostPlugin[] = [];
+  for (const [index, entry] of entries.entries()) {
+    if (entry === undefined || entry === null || entry === false) continue;
+    const at = typeof entry === 'string' ? `plugins[${index}] ('${entry}')` : `plugins[${index}]`;
+    let wrapped: unknown;
+    let plugin: unknown;
+    try {
+      plugin = await materializeStackPlugin(entry, {
+        importSpecifier: async (specifier) => {
+          const { default: Serve } = await import('../commands/serve.js');
+          return Serve.importConfigPlugin(specifier, opts.hostRoot);
+        },
+        wrapBundle: async (bundle) => {
+          const { AppPlugin } = await import('@objectstack/runtime');
+          const app = new AppPlugin(bundle as any, undefined, {
+            skipSeedData: opts.skipSeedData,
+            skipOnEnable: true,
+          });
+          opts.lifecycle.trackApp(app);
+          wrapped = app;
+          return app;
+        },
+      });
+    } catch (error: any) {
+      throw new Error(`its ${at} could not be loaded (${error?.message ?? String(error)})`);
+    }
+    if (!plugin || typeof plugin !== 'object') {
+      throw new Error(
+        `its ${at} resolves to ${plugin === null ? 'null' : typeof plugin}, not a plugin instance — `
+        + '`os serve` cannot register it either',
+      );
+    }
+    out.push({ plugin, wrappedBundle: plugin === wrapped });
+  }
+  return out;
+}
+
+/**
+ * [#22506] What `os serve` composes AROUND a stack, for `os migrate plan` and
+ * `os migrate apply` — read through the rules `serve` itself reads, and each
+ * piece composed for its declarations only.
+ *
+ * ## The defect
+ *
+ * A migration only examines the objects its boot REGISTERS, and this
+ * composition stopped at the stack: the host config's plugins, its metadata,
+ * the platform floor and — since #21732 — a provider only when a composed
+ * plugin hard-depended on it. Everything `serve` adds around a stack was
+ * missing. Measured on #22506 with an app declaring `requires: ['auth']` over a
+ * database a real `os serve` boot had created: the boot created 68 tables, the
+ * plan examined 9, and `sys_account` read as an undeclared platform table — so
+ * the retired `sys_account.issuer` column was never a destructive drop, while
+ * the boot's own drift line and `os migrate account-issuer` kept prescribing
+ * `os migrate apply --allow-destructive`. A loop with no exit, and the third
+ * time this family surfaced (#12938, #21732), each fix having grown one list.
+ *
+ * ## What is composed, and whose rule each piece is
+ *
+ *  - **The auth family behind `serve`'s auth gate** (`serve` 5d):
+ *    `resolvePlatformAuthComposition` (`@objectstack/core`), fed the tiers
+ *    `resolveStackTiers` derives and the secret `resolveAuthSecret` resolves,
+ *    exactly as `serve` and `os migrate security-catalog-overlays` feed it.
+ *    Behind the gate `serve` mounts `AuthPlugin` with the security and audit
+ *    plugins beside it. `AuthPlugin`'s objects are composed through its
+ *    declaration twin, `createIdentityObjectsPlugin()` (`@objectstack/plugin-auth`):
+ *    the same manifest under the same package id, and no authentication — this
+ *    boot never signs anyone in, so it needs no secret value and constructs no
+ *    auth manager. Registered where `serve` registers the family, ahead of the
+ *    host plugins, so a config's own instance of the same name supersedes it.
+ *  - **The capability providers** (`serve` 5): the stack's `requires`, read by
+ *    `serve`'s rule (a host config's own; otherwise the compiled artifact's when
+ *    it declares any; otherwise the config's), plus the always-on slate every
+ *    served boot mounts (`PLATFORM_ALWAYS_ON_CAPABILITIES`, `@objectstack/spec`)
+ *    — looked up in `CAPABILITY_PROVIDERS` and skipped when already held, by
+ *    `providesCapability`'s exact identity match (`@objectstack/core`). The
+ *    slate is `serve`'s with no `--preset`: these commands take no preset, as
+ *    they take no `--dev`.
+ *  - **The REST API plugin**, which `serve` composes on every boot and whose
+ *    `init()` declares `sys_import_job` (#22202).
+ *
+ * ## How each provider runs: its `init()`, nothing else
+ *
+ * {@link composeProviderForDeclarations}: `start()` suppressed and NO lifecycle
+ * hook registered — the measured reason is on that function. A token with a
+ * {@link DECLARATION_PROVIDER_POSTURES} row keeps the posture measured for it
+ * (`automation`: the engine up, nothing armed, #21732).
+ *
+ * ## What this does NOT compose, stated
+ *
+ * `serve`'s flags (`--preset minimal` mounts no slate; `--dev` adds the
+ * config's `devPlugins`); its tier-gated AI and i18n services and the rest of
+ * its boot that is no shared rule; and the `telemetry` sibling datasource a
+ * development boot provisions (ADR-0057 §3.6), so lifecycle-classed objects are
+ * examined against the primary database here. The parity pin
+ * (`commands/migrate/plan.boot-parity.integration.test.ts`) holds the object
+ * set a plan examines equal to the one a real `os serve` boot registers, per
+ * example app shape — so whatever this list misses fails one test instead of
+ * being found on an upgrade.
+ */
+async function composeServedPlatform(input: {
+  config: unknown;
+  /** The host config's plugins, materialized — what the auth gate reads beside the base stack's. */
+  hostPlugins: readonly unknown[];
+  basePlugins: readonly unknown[];
+  /** Everything composed so far — what a provider counts as already held against. */
+  composed: readonly unknown[];
+  artifactRequires?: readonly string[];
+  packageRoot: string;
+}): Promise<{ authFamily: unknown[]; plugins: unknown[]; notes: string[] }> {
+  const { CAPABILITY_PROVIDERS, providesCapability } = await import('@objectstack/core');
+  const { PLATFORM_ALWAYS_ON_CAPABILITIES } = await import('@objectstack/spec/kernel');
+  const config = input.config ?? {};
+  // `serve`'s `requires` — the rule {@link composeAuthGatedSecurity} states.
+  const requires = !isHostConfig(config) && Array.isArray(input.artifactRequires)
+    ? input.artifactRequires.filter((t): t is string => typeof t === 'string')
+    : stackDeclaredCapabilities(config);
+  const notes: string[] = [];
+
+  // ── `serve` 5d — the auth family, behind its auth gate ──────────────────
+  const authFamily: unknown[] = [];
+  const declaredTiers = resolveStackCollection(config, 'tiers').filter((t): t is string => typeof t === 'string');
+  const decision = resolvePlatformAuthComposition({
+    plugins: [...input.basePlugins, ...input.hostPlugins],
+    tiers: resolveStackTiers({ declaredTiers, requires }),
+    secret: resolveAuthSecret({ isDev: isDevelopmentBoot(undefined) }),
+  });
+  if (decision.composes) {
+    const { createIdentityObjectsPlugin } = await import('@objectstack/plugin-auth');
+    const { SecurityPlugin, appSecurityPluginOptions } = await import('@objectstack/plugin-security');
+    const { AuditPlugin } = await import('@objectstack/plugin-audit');
+    authFamily.push(
+      composeProviderForDeclarations(createIdentityObjectsPlugin()),
+      composeProviderForDeclarations(new SecurityPlugin(appSecurityPluginOptions(config as any))),
+      composeProviderForDeclarations(new AuditPlugin()),
+    );
+  }
+  notes.push(describeAuthFamilyComposition(decision.composes ? { composed: true } : { composed: false, reason: decision.reason }));
+
+  // ── every boot — the REST API plugin (`sys_import_job`) ─────────────────
+  const plugins: unknown[] = [];
+  const all = (): unknown[] => [...input.composed, ...authFamily, ...plugins];
+  const composedNames: string[] = [];
+  if (!all().some((p) => pluginName(p) === 'com.objectstack.rest.api')) {
+    const { createRestApiPlugin } = await import('@objectstack/rest');
+    plugins.push(composeProviderForDeclarations(createRestApiPlugin({}) as object));
+    composedNames.push('the REST API plugin');
+  }
+
+  // ── `serve` 5 — the capability providers: `requires` + the always-on slate ──
+  const construct = async (token: string, pkg: string, exportName: string): Promise<unknown> => {
+    const mod = (await import(/* webpackIgnore: true */ pkg)) as Record<string, unknown>;
+    const Ctor = mod[exportName] as (new (arg?: unknown) => unknown) | undefined;
+    if (typeof Ctor !== 'function') {
+      throw new Error(`Capability "${token}": ${pkg} did not export ${exportName}`);
+    }
+    const posture = DECLARATION_PROVIDER_POSTURES[token];
+    if (posture && exportName === CAPABILITY_PROVIDERS[token]?.export) {
+      return new Ctor(posture({ packageRoot: input.packageRoot }));
+    }
+    return composeProviderForDeclarations(new Ctor() as object);
+  };
+  for (const token of [...new Set([...requires, ...PLATFORM_ALWAYS_ON_CAPABILITIES])]) {
+    const spec = CAPABILITY_PROVIDERS[token];
+    // A tier token (`auth`, `ui`, `i18n`, `ai`) or one no open package
+    // provides mounts nothing in `serve`'s resolver either.
+    if (!spec) continue;
+    if (providesCapability(all(), spec.identities)) continue;
+    plugins.push(await construct(token, spec.pkg, spec.export));
+    composedNames.push(spec.export);
+    for (const extra of spec.extras ?? []) {
+      if (providesCapability(all(), extra.identities)) continue;
+      plugins.push(await construct(token, extra.pkg, extra.export));
+      composedNames.push(extra.export);
+    }
+  }
+  if (composedNames.length > 0) {
+    notes.push(
+      `Composed what \`os serve\` mounts around this stack (with no --preset) — ${composedNames.join(', ')} — `
+      + 'for their declarations only: init runs; start and every lifecycle hook do not.',
+    );
+  }
+  return { authFamily, plugins, notes };
+}
+
+/**
+ * [#22506] What the auth gate answered for `os migrate plan` / `apply`, as an
+ * operator reads it — and, when the family was not composed for want of a
+ * secret, the command that does compose it.
+ */
+export function describeAuthFamilyComposition(
+  status: { readonly composed: true } | { readonly composed: false; readonly reason: PlatformAuthSkipReason },
+): string {
+  if (status.composed) {
+    return 'Composed the auth family `os serve` composes behind its auth gate (an auth secret resolves) — '
+      + 'plugin-auth\'s identity objects (sys_user, sys_account, …), the security plugin and the audit plugin — '
+      + 'for their declarations only.';
+  }
+  if (status.reason === 'stack-supplies-auth') {
+    return 'Did not compose the platform auth family: the stack mounts its own AuthPlugin, composed with its plugins above.';
+  }
+  if (status.reason === 'no-secret') {
+    return 'Did not compose the auth family: `os serve` composes none without an auth secret, and none is set here '
+      + '(no OS_AUTH_SECRET, and not a development boot) — so plugin-auth\'s tables (sys_user, sys_account, …) '
+      + 'are NOT in this plan. If the deployment serves with OS_AUTH_SECRET (from its environment or a .env file, '
+      + 'which `os migrate` does not read), re-run with that OS_AUTH_SECRET exported.';
+  }
+  const why: Record<Exclude<PlatformAuthSkipReason, 'stack-supplies-auth' | 'no-secret'>, string> = {
+    'auth-tier-off': 'the `auth` tier is off: the declared `tiers`, else the default preset\'s, carry none, and no '
+      + '`requires` token opens it',
+    'host-kernel': 'a host kernel, whose auth is per project',
+  };
+  return `Did not compose the auth family: \`os serve\` composes none here (${why[status.reason]}).`;
+}
+
+/**
+ * [#22371] The security plugin `os serve` composes for this deployment, for its
+ * declarations only — or why it composes none.
+ *
+ * `serve` composes it in its auth step, paired with `AuthPlugin`, behind the
+ * gate `resolvePlatformAuthComposition` (`@objectstack/core`) states: the stack
+ * mounts no `AuthPlugin` of its own, the `auth` tier is on, the composition is
+ * not a host kernel, and an auth secret resolves. Its `init()` declares the
+ * platform's shipped permission sets on its own manifest, so behind the gate
+ * they are package-held names, and the cold boot's catalog check refuses an
+ * environment row over one of them; outside it they are not. Measured on
+ * #22371: one database and config were refused on 3 names with
+ * `OS_AUTH_SECRET` set and on 2 without it. So the gate is read from what
+ * `serve` reads, in `serve`'s own spelling:
+ *
+ *  - the plugins: the host config's and the standalone stack's (`serve`'s
+ *    `plugins` is one or the other — a host config's own, or the stack merged
+ *    over an app config — and the gate asks only for two names among them);
+ *  - the plugins under `--dev`: the config's `devPlugins` too, merged by
+ *    `serve`'s own rule (`stackBootPlugins`) before they reach this gate;
+ *  - the tiers: the config's declared `tiers` (no boot carries an artifact's),
+ *    and the `requires` `serve` reads — a host config's own; otherwise the
+ *    compiled artifact's when it declares any, which `serve`'s merge lays over
+ *    the config's, else the config's — over the `--preset` the caller passed
+ *    (`resolveStackTiers`, `serve`'s own precedence; the default preset when
+ *    none). Of `serve`'s `requires` additions (`email`, `mcp`, the always-on
+ *    slate, `queue` / `job`) none maps to the `auth` tier, so the gate's
+ *    answer does not move with them;
+ *  - the secret and the development fallback: `isDevelopmentBoot`, `serve`'s
+ *    `isDev` — `--dev`, or `NODE_ENV=development`.
+ *
+ * `AuthPlugin` itself is not composed: it holds no catalog name, and its
+ * `init()` is not this boot's to run. The security plugin is wrapped by
+ * {@link composeForDeclarations}, like a host plugin: its `start()` seeds the
+ * shipped sets into `sys_permission_set`, which this boot must not do.
+ */
+async function composeAuthGatedSecurity(input: {
+  config: unknown;
+  hostPlugins: readonly unknown[];
+  basePlugins: readonly unknown[];
+  artifactRequires?: readonly string[];
+  serveFlags?: { readonly dev?: boolean; readonly preset?: string };
+  lifecycle: DeclarationBootLifecycle;
+}): Promise<{
+  plugin?: unknown;
+  status: NonNullable<SchemaMigrationComposition['securityPlugin']>;
+  note: string;
+}> {
+  const config = input.config ?? {};
+  const requires = !isHostConfig(config) && Array.isArray(input.artifactRequires)
+    ? input.artifactRequires.filter((t): t is string => typeof t === 'string')
+    : stackDeclaredCapabilities(config);
+  const declaredTiers = resolveStackCollection(config, 'tiers').filter((t): t is string => typeof t === 'string');
+  const decision = resolvePlatformAuthComposition({
+    plugins: [...input.basePlugins, ...input.hostPlugins],
+    tiers: resolveStackTiers({
+      declaredTiers,
+      requires,
+      ...(input.serveFlags?.preset !== undefined ? { preset: input.serveFlags.preset } : {}),
+    }),
+    secret: resolveAuthSecret({ isDev: isDevelopmentBoot(input.serveFlags?.dev) }),
+  });
+  if (!decision.composes) {
+    const status = { composed: false, reason: decision.reason } as const;
+    return { status, note: describeSecurityPluginComposition(status) };
+  }
+  const { SecurityPlugin, appSecurityPluginOptions } = await import('@objectstack/plugin-security');
+  const status = { composed: true } as const;
+  return {
+    plugin: composeForDeclarations(new SecurityPlugin(appSecurityPluginOptions(config)), input.lifecycle),
+    status,
+    note: describeSecurityPluginComposition(status),
+  };
+}
+
+/**
+ * [#22371] What {@link SchemaMigrationComposition.securityPlugin} says, as an
+ * operator reads it — the line the composition notes carry, exported so the
+ * command that asked for it can print the same sentence.
+ */
+export function describeSecurityPluginComposition(
+  status: NonNullable<SchemaMigrationComposition['securityPlugin']>,
+): string {
+  if (status.composed) {
+    return 'Composed the security plugin as `os serve` composes it behind its auth gate (an auth secret '
+      + 'resolves), for its declarations only: its shipped permission sets are package-held names on this '
+      + 'deployment\'s boot.';
+  }
+  const why: Record<PlatformAuthSkipReason | 'config-unloadable', string> = {
+    'stack-supplies-auth': 'the stack mounts its own AuthPlugin',
+    'auth-tier-off': 'the `auth` tier is off: the declared `tiers`, else the preset\'s, carry none, and no '
+      + '`requires` token opens it',
+    'host-kernel': 'a host kernel, whose auth is per project',
+    'no-secret': 'no OS_AUTH_SECRET, and not a development boot: no --dev, and NODE_ENV is not development',
+    'config-unloadable': 'the host config could not be loaded, so the gate had nothing to read',
+  };
+  return `Did not compose the security plugin: \`os serve\` composes none here (${why[status.reason]}), so its `
+    + 'shipped permission sets are not package-held names on this deployment\'s boot.';
 }
 
 /**

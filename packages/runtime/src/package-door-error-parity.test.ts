@@ -98,7 +98,7 @@ function thrown(message: string, carried: Record<string, unknown>): Error {
  * code outside the declared vocabulary, and a genuinely unexpected fault.
  */
 const SHAPES: Array<{ name: string; error: unknown }> = [
-    { name: 'a coded 4xx (`status`)', error: thrown('scope required', { status: 400, code: 'TENANT_SCOPE_REQUIRED' }) },
+    { name: 'a coded 4xx (`status`)', error: thrown('invalid request', { status: 400, code: 'INVALID_REQUEST' }) },
     { name: 'the established 409', error: thrown('would drop data', { status: 409, code: 'DESTRUCTIVE_CHANGE' }) },
     { name: 'a coded 4xx spelled `statusCode`', error: thrown('locked', { statusCode: 409, code: 'RECORD_LOCKED' }) },
     {

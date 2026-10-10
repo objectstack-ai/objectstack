@@ -56,15 +56,45 @@
  *
  * ## No spelling is kept
  *
- * Unlike the value slots, which keep the date macros and `{$User.*}` because
- * CEL cannot write them yet, a text slot keeps nothing: each of those has a
- * remedy that renders the same text — compute it into a variable with an
- * `assignment` node, whose value slot still reads that spelling, and write the
- * variable as a hole. So the single brace is deleted from the text slots
- * whole, and the two dialects never share one string.
+ * Unlike the value slots, which keep the date macros because CEL cannot write
+ * them yet, a text slot keeps nothing: each has a remedy that renders the same
+ * text — compute it into a variable with an `assignment` node, whose value
+ * slot still reads the date macro, and write the variable as a hole. The run
+ * user's id is computed the same way, with the CEL value envelope
+ * `current_user.id` (the value slots refuse `{$User.*}` since #19939's second
+ * pass); every other `{$User.<path>}` never resolved, and its remedy says so.
+ * So the single brace is deleted from the text slots whole, and the two
+ * dialects never share one string.
+ *
+ * ## A `$` root is the engine's (#22477)
+ *
+ * The hole grammar admits `$` in a name so that the engine's own variables
+ * have a spelling (`{{ $error.message }}`), which also makes `{{ $User.Id }}`
+ * a well-formed hole — over a root no flow variable answers to, so it rendered
+ * a blank fragment with the run reporting success, while `{$User.Id}` was
+ * refused here with its remedy. The `$` names are reserved for the engine (a
+ * resume signal may not write one — `IAutomationService.resume`'s
+ * `INVALID_SIGNAL`), so this judge also refuses a hole whose root is a `$`
+ * name the engine does not bind ({@link FLOW_ENGINE_VARIABLES}), and a
+ * single-brace path token over one gets the same remedy instead of a
+ * `{{ }}` rewrite that would be refused in turn. `{{ $User.<path> }}` gets
+ * the very sentence `{$User.<path>}` gets: for `$User.Id`, compute
+ * `current_user.id` with an `assignment` node's CEL envelope, then write
+ * `{{ v }}`. ⛔ The template engine does not learn `$User`
+ * (or any new `$` root) instead — that would widen the flow's variable set
+ * with no declaration behind it.
  */
 
-import { celExpression, templateTokensOf, type TemplateToken } from './flow-template-token';
+import {
+  CEL_RUN_USER_ID,
+  CEL_RUN_USER_ID_GUARDED,
+  celExpression,
+  isRunUserIdToken,
+  runUserPathNeverResolved,
+  templateTokenKind,
+  templateTokensOf,
+  type TemplateToken,
+} from './flow-template-token';
 
 /**
  * The one sentence every refusal of a `{…}` token in a text slot leads with —
@@ -75,6 +105,48 @@ import { celExpression, templateTokensOf, type TemplateToken } from './flow-temp
 export const TEXT_SLOT_TEMPLATE_REFUSAL =
   'A flow text slot reads `{{ }}` template holes (ADR-0032 §3), not the single-brace `{…}` dialect: a `{…}` token '
   + 'here is no placeholder any more and would be sent as literal text, so it is refused.';
+
+/**
+ * The `$`-named variables the flow engine binds — the only `$` roots a text
+ * slot's hole may name. One enumerated list, measured from where
+ * `service-automation` binds them, because the spec cannot import a runtime:
+ *
+ *  - `$record`, `$runId`, `$flowName`, `$flowLabel` — seeded at the start of
+ *    every run attempt (`AutomationEngine.seedRunVariables`; `$record` when
+ *    the run has a trigger record);
+ *  - `$error` — published by the engine when a node fails, the value a
+ *    `fault` edge's handler and a `try_catch` region read;
+ *  - `$loopItems`, `$loopIndex` — bound by a flat-graph `loop` with no `body`
+ *    (`loop-node.ts`'s legacy branch).
+ *
+ * `text-slot-template.test.ts` in that package scans its sources for every
+ * `$`-named variable they bind by name and asserts this judge admits a hole
+ * over each, so a root the engine starts binding without a line here reddens
+ * there. A node output is not a `$` root: it is addressed by its node id
+ * (`{{ lookup.result }}`). ⛔ Package-internal on purpose — the refusal names
+ * the list, and a published copy would be a second public answer to a
+ * question the engine owns.
+ */
+const FLOW_ENGINE_VARIABLES: readonly string[] = [
+  '$record',
+  '$runId',
+  '$flowName',
+  '$flowLabel',
+  '$error',
+  '$loopItems',
+  '$loopIndex',
+];
+
+const ENGINE_VARIABLE_SET: ReadonlySet<string> = new Set(FLOW_ENGINE_VARIABLES);
+
+/**
+ * The sentence every refusal of a `{{ }}` hole over an unbound `$` root leads
+ * with — the same words at every door, as {@link TEXT_SLOT_TEMPLATE_REFUSAL}
+ * is for the single brace.
+ */
+const ENGINE_VARIABLE_HOLE_REFUSAL =
+  'A `{{ }}` hole in a flow text slot may name a `$` variable only when the flow engine binds it — the `$` names '
+  + 'are reserved for the engine — so a hole over any other `$` name is refused rather than sent as a blank fragment.';
 
 /** One text slot of a builtin flow node — a config key whose value renders to text. */
 export interface FlowNodeTextSlot {
@@ -138,12 +210,87 @@ function singleBraceTokens(text: string): TemplateToken[] {
     text[token.index - 1] !== '{' && text[token.index + token.text.length] !== '}');
 }
 
-/** `text` with each single-brace PATH token written as a hole — the spelling a refusal prescribes for it. */
+/**
+ * A `{{ … }}` hole — the template engine's `HOLE_RE` (`@objectstack/formula`
+ * `template-engine.ts`), verbatim: the inner content, no `}` inside.
+ */
+const HOLE = /\{\{([^}]*)\}\}/g;
+
+/**
+ * A hole's path — the engine's `PATH_ONLY_RE`, verbatim. A hole whose path
+ * fails it does not compile, and the compile step every door runs next names
+ * it; this judge reads only the holes that do.
+ */
+const HOLE_PATH = /^[\w$.[\]]+$/;
+
+/**
+ * The `$` root of a variable path when the engine does not bind it, else
+ * `undefined`. The root is the path's first segment as the engine resolves it
+ * (`[i]` read as `.i`), so `$User.Id`, `$User[0]` and `$User` all root at
+ * `$User`.
+ */
+function unboundEngineRoot(path: string): string | undefined {
+  const root = path.replace(/\[(\w+)\]/g, '.$1').split('.').find((segment) => segment !== '');
+  if (root === undefined || !root.startsWith('$') || ENGINE_VARIABLE_SET.has(root)) return undefined;
+  return root;
+}
+
+/** One `{{ }}` hole of a text slot whose root is a `$` name the engine does not bind. */
+interface UnboundRootHole {
+  /** The hole as written (`{{ $User.Id }}`). */
+  readonly text: string;
+  /** Its variable path, trimmed (`$User.Id`). */
+  readonly path: string;
+  /** The path's `$` root (`$User`). */
+  readonly root: string;
+}
+
+/** Every hole of `text` that compiles as a path and roots at a `$` name the engine does not bind, in order. */
+function unboundRootHoles(text: string): UnboundRootHole[] {
+  const out: UnboundRootHole[] = [];
+  for (const match of text.matchAll(HOLE)) {
+    const inner = match[1]!;
+    const pipe = inner.indexOf('|');
+    const path = (pipe === -1 ? inner : inner.slice(0, pipe)).trim();
+    if (!HOLE_PATH.test(path)) continue;
+    const root = unboundEngineRoot(path);
+    if (root !== undefined) out.push({ text: match[0], path, root });
+  }
+  return out;
+}
+
+/**
+ * The remedy for a `$` root the engine does not bind, written as `written` —
+ * a hole or a single-brace token. Names the engine's variables, since that is
+ * the list the author's `$` name was read against.
+ */
+function unboundRootRemedy(written: string, root: string): string {
+  return (
+    `\`${written}\` names \`${root}\`, which is not one of the flow engine's own variables `
+    + `(${FLOW_ENGINE_VARIABLES.map((name) => `\`${name}\``).join(', ')}), so no hole spells it: write the variable `
+    + 'that holds the value — one the flow binds itself (a declared variable, an `assignment` target, an '
+    + '`outputVariable`, a `try_catch` `errorVariable`) is named without the `$` — or compute the value into a '
+    + 'variable with an `assignment` node and write `{{ v }}` here.'
+  );
+}
+
+/** A single-brace PATH token over a `$` root the engine does not bind — no hole spells it either. */
+function unboundRootOf(token: TemplateToken): string | undefined {
+  return token.kind === 'path' ? unboundEngineRoot(token.inner) : undefined;
+}
+
+/**
+ * `text` with each single-brace PATH token written as a hole — the spelling a
+ * refusal prescribes for it. A path over a `$` root the engine does not bind
+ * stays as written: its hole would be refused too, so its remedy is
+ * {@link unboundRootRemedy}, never a rewrite.
+ */
 function doubled(text: string, tokens: readonly TemplateToken[]): string {
   let out = '';
   let at = 0;
   for (const token of tokens) {
-    out += text.slice(at, token.index) + (token.kind === 'path' ? `{{ ${token.inner} }}` : token.text);
+    const spellable = token.kind === 'path' && unboundRootOf(token) === undefined;
+    out += text.slice(at, token.index) + (spellable ? `{{ ${token.inner} }}` : token.text);
     at = token.index + token.text.length;
   }
   return out + text.slice(at);
@@ -153,10 +300,17 @@ function doubled(text: string, tokens: readonly TemplateToken[]): string {
 function unspellableRemedy(token: TemplateToken): string {
   switch (token.kind) {
     case 'date-macro':
-    case 'user':
       return (
         `\`${token.text}\` is not a variable, so no hole spells it: compute it into a variable with an \`assignment\` `
         + `node, whose value slot still reads it (\`assignments: { v: '${token.text}' }\`), and write \`{{ v }}\` here.`
+      );
+    case 'user':
+      if (!isRunUserIdToken(token.inner)) return runUserPathNeverResolved(token.text, (path) => `\`{{ ${path} }}\``);
+      return (
+        `\`${token.text}\` is not a variable, so no hole spells it: compute the run user's id into a variable with an `
+        + `\`assignment\` node's CEL value envelope (\`assignments: { v: { dialect: 'cel', source: '${CEL_RUN_USER_ID}' } }\`) `
+        + 'and write `{{ v }}` here. In a flow that can run without a user `current_user` is `null` and that read '
+        + `fails the run, so compute \`${CEL_RUN_USER_ID_GUARDED}\` there, which renders nothing where the template did.`
       );
     case 'expression':
       return (
@@ -173,27 +327,71 @@ function unspellableRemedy(token: TemplateToken): string {
   }
 }
 
-/**
- * Why `text` — a text slot's template — is refused, or `undefined` when it
- * carries no single-brace token. The message leads with
- * {@link TEXT_SLOT_TEMPLATE_REFUSAL}, then names the `{{ }}` spelling of every
- * path token (the whole text rewritten) and the remedy for every token no hole
- * can spell.
- */
-export function textSlotTemplateRefusal(text: string): string | undefined {
+/** The refusal of `text`'s single-brace tokens, or `undefined` when it carries none. */
+function singleBraceRefusal(text: string): string | undefined {
   const tokens = singleBraceTokens(text);
   if (tokens.length === 0) return undefined;
   const parts: string[] = [];
-  if (tokens.some((token) => token.kind === 'path')) {
+  if (tokens.some((token) => token.kind === 'path' && unboundRootOf(token) === undefined)) {
     parts.push(`Write \`${text}\` as \`${doubled(text, tokens)}\`.`);
   }
   const seen = new Set<string>();
   for (const token of tokens) {
-    if (token.kind === 'path' || seen.has(token.text)) continue;
+    if (seen.has(token.text)) continue;
+    if (token.kind === 'path') {
+      const root = unboundRootOf(token);
+      if (root === undefined) continue;
+      seen.add(token.text);
+      parts.push(unboundRootRemedy(token.text, root));
+      continue;
+    }
     seen.add(token.text);
     parts.push(unspellableRemedy(token));
   }
   return `${TEXT_SLOT_TEMPLATE_REFUSAL} ${parts.join(' ')}`;
+}
+
+/**
+ * The refusal of `text`'s holes over a `$` root the engine does not bind, or
+ * `undefined` when it has none. A `$User.<path>` hole gets the remedy its
+ * single-brace spelling gets, word for word, so the two spellings answer
+ * alike; any other root gets {@link unboundRootRemedy}.
+ */
+function unboundRootHoleRefusal(text: string): string | undefined {
+  const holes = unboundRootHoles(text);
+  if (holes.length === 0) return undefined;
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  for (const hole of holes) {
+    if (seen.has(hole.text)) continue;
+    seen.add(hole.text);
+    const single = `{${hole.path}}`;
+    parts.push(
+      templateTokenKind(hole.path) === 'user'
+        ? unspellableRemedy({ text: single, inner: hole.path, kind: 'user', index: 0 })
+        : unboundRootRemedy(hole.text, hole.root),
+    );
+  }
+  return `${ENGINE_VARIABLE_HOLE_REFUSAL} ${parts.join(' ')}`;
+}
+
+/**
+ * Why `text` — a text slot's template — is refused, or `undefined` when it
+ * carries neither a single-brace token nor a hole over a `$` root the engine
+ * does not bind.
+ *
+ * A single-brace token leads with {@link TEXT_SLOT_TEMPLATE_REFUSAL}, then the
+ * `{{ }}` spelling of every path token (the whole text rewritten) and the
+ * remedy for every token no hole can spell. A hole such as `{{ $User.Id }}`
+ * leads with its own sentence (the `$` names are the engine's), then the
+ * remedy for each such hole — `{{ $User.Id }}` gets the one `{$User.Id}`
+ * gets. A text carrying both gets both, single brace first.
+ */
+export function textSlotTemplateRefusal(text: string): string | undefined {
+  const refusals = [singleBraceRefusal(text), unboundRootHoleRefusal(text)].filter(
+    (refusal): refusal is string => refusal !== undefined,
+  );
+  return refusals.length === 0 ? undefined : refusals.join(' ');
 }
 
 /** One text slot present in a node's config, with the text it carries. */

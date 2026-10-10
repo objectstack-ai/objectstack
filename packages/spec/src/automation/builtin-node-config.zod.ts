@@ -102,6 +102,12 @@ import { valueSlotTemplateRefusals } from './flow-value-slot-template';
 // the single-brace tokens they still carry, composed into the screen and end
 // contracts below rather than re-spelled here.
 import { textSlotTemplateRefusal } from './flow-text-slot-template';
+// [#22502] The `$` names are the flow engine's at the binding keys too — the
+// one rule, composed into every `outputVariable` below rather than re-spelled.
+import { flowBoundVariableNameSchema } from './flow-bound-variable-name';
+// The one key a screen field's option is addressed by as text — the option
+// collision refusal below reads it, as `translateFlow` and the extractor do.
+import { flowScreenFieldOptionKey } from './flow-screen-option-key';
 
 /** What a rejected key on these contracts silently did before #4001 批 9. */
 const BUILTIN_NODE_CONFIG_HISTORY =
@@ -394,9 +400,10 @@ function celValueSlotSchema(description: string) {
  * C half of #11182 ruling D): a string anywhere in a literal that carries a
  * `{…}` token the interpolator would resolve is refused, with the token's CEL
  * spelling ({@link valueSlotTemplateRefusals} — every token measured lossy
- * under conversion, so none is rewritten, ADR-0087 D2). Two spellings CEL
- * cannot write yet keep their 17.x meaning until it can: the date macros
- * (`{NOW()}`, `{TODAY() + 7}`) and the run user (`{$User.Id}`).
+ * under conversion, so none is rewritten, ADR-0087 D2). The run user is the
+ * CEL scope's `current_user` (`{$User.Id}` is refused, naming
+ * `current_user.id`). One spelling CEL cannot write yet keeps its 17.x
+ * meaning until it can: the date macros (`{NOW()}`, `{TODAY() + 7}`).
  *
  * The slot-neutral contract. The CRUD `fields` map's values take it
  * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, #19938), and it is
@@ -408,7 +415,7 @@ function celValueSlotSchema(description: string) {
 export const FlowValueSlotSchema = celValueSlotSchema(
   'A value: a CEL value envelope `{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib '
   + 'such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is '
-  + 'refused (the template dialect is retired from value slots; the date macros and `$User` paths are kept for now)',
+  + 'refused (the template dialect is retired from value slots; the date macros are kept for now)',
 );
 
 export type FlowValueSlot = z.input<typeof FlowValueSlotSchema>;
@@ -441,8 +448,9 @@ export const GetRecordConfigSchema = lazySchema(() => strictObject({
   /** Max records; >1 returns a `records` list, otherwise a single `record`. */
   limit: z.number().optional()
     .describe('Max records to return; >1 switches to a multi-record query'),
-  /** Flow variable the result is bound to. */
-  outputVariable: z.string().optional().describe('Flow variable the result is bound to'),
+  /** Flow variable the result is bound to — never a `$` name: those are the engine's (#22502). */
+  outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
+    .describe('Flow variable the result is bound to — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),
 }));
 
 export type GetRecordConfig = z.input<typeof GetRecordConfigSchema>;
@@ -467,9 +475,12 @@ export const CreateRecordConfigSchema = lazySchema(() => strictObject({
    */
   fields: z.record(z.string(), FlowValueSlotSchema).optional()
     .describe('Field values to write on the new record: each key is a field name, each value a CEL value envelope or a literal'),
-  /** Flow variable bound to the created record (`{var.id}` works even when the driver returns a bare id). */
-  outputVariable: z.string().optional()
-    .describe('Flow variable bound to the created record'),
+  /**
+   * Flow variable bound to the created record (`{var.id}` works even when the
+   * driver returns a bare id) — never a `$` name: those are the engine's (#22502).
+   */
+  outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
+    .describe('Flow variable bound to the created record — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),
 }));
 
 export type CreateRecordConfig = z.input<typeof CreateRecordConfigSchema>;
@@ -597,6 +608,43 @@ export const SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED =
   + "offers (e.g. `reference: 'crm_knowledge_article'`). Without it the field renders a picker with nothing to "
   + 'resolve.';
 
+/**
+ * The sentence every refusal of two colliding screen-field options leads with.
+ *
+ * An option is addressed as text by {@link flowScreenFieldOptionKey}
+ * (`String(value)`): its label translation sits under
+ * `flows.<flow>.screens.<node_id>.fields.<field>.options.<value>`, and the
+ * console's select keys its items the same way. `value` is `z.unknown()`, so
+ * `1` and `"1"` (or `true` and `"true"`) both parse — and then read as ONE
+ * option to both readers: one translation key, one select item. Refused at the
+ * second of the pair rather than tolerated, because no reader can recover
+ * which one the author meant.
+ */
+export const SCREEN_FIELD_OPTION_VALUE_COLLISION =
+  'Two options of this screen field have values that read the same as text, so nothing can tell them apart: an '
+  + "option's label translation is addressed by its value as text "
+  + '(`flows.<flow>.screens.<node_id>.fields.<field>.options.<value>`), and so is the item the select offers.';
+
+/** An option value as an author wrote it — `1`, `"1"`, `true` — for a refusal to quote. */
+function quoteOptionValue(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean'
+    || typeof value === 'bigint') {
+    return String(value);
+  }
+  return Array.isArray(value) ? 'an array' : `a value of type ${typeof value}`;
+}
+
+/** The full refusal for option `second` colliding with the earlier option `first` of the same field. */
+function screenFieldOptionCollision(first: number, firstValue: unknown, second: number, secondValue: unknown): string {
+  const key = flowScreenFieldOptionKey(secondValue);
+  return (
+    `${SCREEN_FIELD_OPTION_VALUE_COLLISION} Option [${second}] (value ${quoteOptionValue(secondValue)}) reads as `
+    + `${JSON.stringify(key)}, exactly as option [${first}] (value ${quoteOptionValue(firstValue)}) does. Give each `
+    + 'option a value that stays distinct as text, or drop the duplicate.'
+  );
+}
+
 export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   surface: 'this screen field',
   history: BUILTIN_NODE_CONFIG_HISTORY,
@@ -651,14 +699,19 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   type: z.string().optional().describe('Input type'),
   /** Whether the runner requires a value before resume. */
   required: z.boolean().optional().describe('Whether a value is required to submit'),
-  /** Choices for a select-style field. */
+  /**
+   * Choices for a select-style field. Each option is addressed as text by its
+   * value (`String(value)`, {@link flowScreenFieldOptionKey}) — the key its
+   * label translation sits under — so two options of one field whose values
+   * read the same as text are refused by the refinement below.
+   */
   options: z.array(strictObject({
     surface: 'this screen field option',
     history: BUILTIN_NODE_CONFIG_HISTORY,
   }, {
-    value: z.unknown().describe('Stored value'),
+    value: z.unknown().describe('Stored value; it also addresses the option as text (its label translation key), so it must stay distinct from its siblings as text'),
     label: z.string().describe('Display label'),
-  })).optional().describe('Choices for a select-style field'),
+  })).optional().describe('Choices for a select-style field; option values must stay distinct when read as text'),
   /** Prefilled value; interpolates `{token}` templates at suspend time. */
   defaultValue: z.unknown().optional().describe('Prefilled value (interpolates {token} templates)'),
   /** Input placeholder text. */
@@ -722,6 +775,26 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    */
   reference: z.string().optional().describe("Target object name (snake_case) whose records a `type: 'lookup'` field picks from; REQUIRED when `type` is `lookup`"),
 }).superRefine((field, ctx) => {
+  // Two options whose values read the same as text are ONE option to every
+  // reader that addresses them as text — the label translation key and the
+  // console's select alike — so the second of each pair is refused, at its own
+  // `value`. Judged before the lookup rule below, which returns early.
+  if (Array.isArray(field.options)) {
+    const firstByKey = new Map<string, number>();
+    field.options.forEach((option, index) => {
+      const key = flowScreenFieldOptionKey(option.value);
+      const first = firstByKey.get(key);
+      if (first === undefined) {
+        firstByKey.set(key, index);
+        return;
+      }
+      ctx.addIssue({
+        code: 'custom',
+        path: ['options', index, 'value'],
+        message: screenFieldOptionCollision(first, field.options![first]!.value, index, option.value),
+      });
+    });
+  }
   // Conditional requirement, not a shape change: the key set is unchanged and
   // `.shape` still enumerates twelve keys. `type` is an open widget hint, so
   // this reads ONE member of it — the member whose whole meaning is "resolve
@@ -987,9 +1060,9 @@ export const MapConfigSchema = lazySchema(() => strictObject({
   /** Params passed to each item's subflow; interpolated with the item variable bound. */
   input: z.record(z.string(), z.unknown()).optional()
     .describe("Params passed to each item's subflow (interpolated per item)"),
-  /** Variable the ordered list of per-item outputs is bound to. */
-  outputVariable: z.string().optional()
-    .describe("Each item's subflow output, collected in order"),
+  /** Variable the ordered list of per-item outputs is bound to — never a `$` name: those are the engine's (#22502). */
+  outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
+    .describe("Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
 }));
 
 export type MapConfig = z.input<typeof MapConfigSchema>;
@@ -1016,8 +1089,7 @@ export type MapConfigParsed = z.infer<typeof MapConfigSchema>;
 export const AssignmentValueSchema = celValueSlotSchema(
   'Value the variable takes: a CEL value envelope `{ dialect: \'cel\', source }` evaluated by the expression engine '
   + '(the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in '
-  + 'a string is refused (the template dialect is retired from value slots; the date macros and `$User` paths are '
-  + 'kept for now)',
+  + 'a string is refused (the template dialect is retired from value slots; the date macros are kept for now)',
 );
 
 export type AssignmentValue = z.input<typeof AssignmentValueSchema>;

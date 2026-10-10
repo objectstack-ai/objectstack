@@ -207,29 +207,6 @@ describe('#5265 — a save receipt names what was actually written', () => {
         });
     }
 
-    it('an org-scoped runtime-only save names the org, not an overlay', async () => {
-        // [#6190, 2026-08-09] Re-spelled from `hook` to `view`. The claim is
-        // about the RECEIPT — "(org=…)" rather than the overlay phrasing — and
-        // the receipt does not vary by type. What changed is which types can
-        // reach this receipt at all: since the #6190 ruling an org-scoped write
-        // requires a type that declares `allowOrgOverride`, and the
-        // overlay-less-yet-overridable population is empty by ruling (see the
-        // population pin above). `view` is runtime-only here for the reason the
-        // case below states — no artifact was shipped at this name — so this
-        // still measures a RUNTIME-ONLY org-scoped save, not an overlay.
-        const { protocol } = makeProtocol();
-
-        const result = await protocol.saveMetaItem({
-            type: 'view', name: 'rc5_probe_view', item: VIEW,
-            organizationId: 'org_alpha',
-        });
-
-        expect(result.message).not.toContain('customization overlay');
-        expect(result.message).toBe(
-            `Saved view 'rc5_probe_view' (org=org_alpha, state=active) [seq=${result.seq}]`,
-        );
-    });
-
     it('a runtime-only draft still reports its lifecycle state', async () => {
         const { protocol } = makeProtocol();
 
@@ -274,18 +251,6 @@ describe('#5265 — a save receipt names what was actually written', () => {
 
         expect(result.message).toBe(
             `Saved customization overlay (env-wide, state=active) — type=view, name=rc5_probe_view [seq=${result.seq}]`,
-        );
-    });
-
-    it('an org-scoped overlay OF a packaged artifact keeps the original sentence', async () => {
-        const { protocol } = makeProtocol([{ type: 'view', name: 'rc5_probe_view' }]);
-
-        const result = await protocol.saveMetaItem({
-            type: 'view', name: 'rc5_probe_view', item: VIEW, organizationId: 'org_alpha',
-        });
-
-        expect(result.message).toBe(
-            `Saved customization overlay (org=org_alpha, state=active) — type=view, name=rc5_probe_view [seq=${result.seq}]`,
         );
     });
 
@@ -344,9 +309,7 @@ describe('#5265 — a save receipt names what was actually written', () => {
         const { protocol: overlaid } = makeProtocol([{ type: 'view', name: 'rc5_probe_view' }]);
 
         const runtimeOnly = await plain.saveMetaItem({ type: 'view', name: 'rc5_probe_view', item: VIEW });
-        const override = await overlaid.saveMetaItem({
-            type: 'view', name: 'rc5_probe_view', item: VIEW, organizationId: 'org_alpha',
-        });
+        const override = await overlaid.saveMetaItem({ type: 'view', name: 'rc5_probe_view', item: VIEW });
 
         expect(runtimeOnly.message.length).toBeLessThan(200);
         expect(override.message.length).toBeLessThan(200);

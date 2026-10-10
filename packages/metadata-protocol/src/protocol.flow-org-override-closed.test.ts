@@ -288,7 +288,7 @@ describe('#6283 — flow: allowOrgOverride rolled back to false', () => {
 
     // ── the control that makes the red half mean something ────────────────
 
-    it('view — still allowOrgOverride:true — is still accepted over a packaged artifact', async () => {
+    it('view is still accepted over a packaged artifact — env-wide (ADR-0131 D6 retired the org axis)', async () => {
         // Without this, the two refusals above would also pass on a harness
         // that could not save ANYTHING. `view` is the type ADR-0005 whitelists
         // and #6283 does not touch.
@@ -298,7 +298,6 @@ describe('#6283 — flow: allowOrgOverride rolled back to false', () => {
             type: 'view',
             name: 'overdue_grid',
             item: VIEW,
-            organizationId: 'org_alpha',
         });
 
         expect(result.success).toBe(true);

@@ -103,6 +103,23 @@
  * resolved, so they need no check of their own — the schema closes the leaf
  * vocabulary (`.strict()`), which is a shape concern, not a reference.
  *
+ * `flows.<name>.refusals.<node_id>.message` (#22450) is judged the same way one
+ * level down: the node id must name an `end` node declaring
+ * `outcome: 'refused'`, at any depth (the same `walkFlowNodes` universe). A
+ * completed `end`, a node of another type and an id the flow does not declare
+ * are each an orphan, with its own diagnosis. The message's `{{ }}` holes are
+ * the schema's to judge (`TranslationDataSchema`, the one text-slot judge).
+ *
+ * `flows.<name>.successMessage` / `.errorMessage` (#22507), the terminal
+ * toasts, are judged against the flow itself: `translateFlow` overlays a toast
+ * only where the flow AUTHORS one, so a translated toast over a flow that
+ * declares none is an orphan, `translation-target-unknown` like the rest.
+ * `…fields.<field_name>.options.<value>` (#22507) is judged against that
+ * screen field's own `options[]`, each read as text by spec's
+ * `flowScreenFieldOptionKey` — the key `translateFlow` looks up — at the
+ * `translation-option-key-unknown` warning severity and with the
+ * label-versus-value diagnosis every option map here gets.
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -165,7 +182,12 @@
  */
 
 import { expandViewContainer } from '@objectstack/spec';
-import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
+import { flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import {
+  FLOW_TERMINAL_MESSAGE_KEYS,
+  hasPlatformObjectPrefix,
+  isPlatformProvidedObjectName,
+} from '@objectstack/spec/system';
 import { walkFlowNodes } from './flow-walk.js';
 import { packagesOf, recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
@@ -182,6 +204,15 @@ import { viewObjectName } from './view-walk.js';
  * by name to import.
  */
 const SCREEN_NODE_TYPE = 'screen';
+
+/**
+ * [#22450] The node a `flows.<name>.refusals.*` key addresses: an `end` node
+ * declaring `outcome: 'refused'` (`EndConfigSchema`). Local consts for
+ * {@link SCREEN_NODE_TYPE}'s reason — `end` is a structural node type and
+ * `'refused'` a member of the schema's `outcome` enum, neither exported by name.
+ */
+const END_NODE_TYPE = 'end';
+const REFUSED_OUTCOME = 'refused';
 
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
 export const TRANSLATION_OPTION_KEY_UNKNOWN = 'translation-option-key-unknown';
@@ -315,6 +346,13 @@ interface ScreenFacts {
   /** `config.fields[].name` — the flat screen's declared inputs. */
   fields: Set<string>;
   /**
+   * [#22507] Field name → that field's declared options, each value read as
+   * text (`flowScreenFieldOptionKey`) — the keys a `…fields.<f>.options` map
+   * may name — plus each label (lower-cased) → its value, for the
+   * keyed-by-label diagnosis. Absent for a field that declares no `options`.
+   */
+  fieldOptions: Map<string, DeclaredOptions>;
+  /**
    * `config.objectName` when this is an OBJECT-FORM screen. Its inputs are the
    * object's own create/edit form, not `config.fields`, so a field key here is
    * an orphan that belongs under `objects.<objectName>.fields.*` — the same
@@ -327,6 +365,18 @@ interface ScreenFacts {
 interface FlowFacts {
   /** Screen node id → that screen's facts. Keyed by `FlowNode.id`. */
   screens: Map<string, ScreenFacts>;
+  /**
+   * The ids of the `end` nodes declaring `outcome: 'refused'` (#22450) — the
+   * nodes a `flows.<name>.refusals.<node_id>` key addresses. A completed `end`
+   * renders no message, so a key over one is an orphan.
+   */
+  refusals: Set<string>;
+  /**
+   * [#22507] The terminal toasts the flow AUTHORS (`successMessage` /
+   * `errorMessage` declared as a string) — the only ones a
+   * `flows.<name>.<key>` translation overlays.
+   */
+  messages: Set<string>;
   /**
    * Every NON-screen node id → its `type`. The `screens` group addresses screen
    * nodes only, so a key naming a real `decision` node is still an orphan — but
@@ -636,7 +686,34 @@ function namedViewKeys(container: AnyRec): {
  * legacy shapes the extractor also tolerates (bare `string[]`, and a
  * `value → label` record).
  */
-function readOptions(field: AnyRec): { values: Set<string>; byLabel: Map<string, string> } | undefined {
+/** A declared option set: the values an option map may be keyed by, and label (lower-cased) → value. */
+interface DeclaredOptions {
+  values: Set<string>;
+  byLabel: Map<string, string>;
+}
+
+/**
+ * [#22507] A SCREEN field's declared options, each value read as text by
+ * spec's `flowScreenFieldOptionKey` — the key `translateFlow` looks a label up
+ * by. Unlike an object field's ({@link readOptions}), a screen field's
+ * `value` is `z.unknown()`, so `1` and `true` are real values here, addressed
+ * as `"1"` and `"true"`. `undefined` when the field declares no options array.
+ */
+function readScreenFieldOptions(field: AnyRec): DeclaredOptions | undefined {
+  if (!Array.isArray(field.options)) return undefined;
+  const values = new Set<string>();
+  const byLabel = new Map<string, string>();
+  for (const opt of field.options) {
+    if (!isRec(opt)) continue;
+    const value = flowScreenFieldOptionKey(opt.value);
+    values.add(value);
+    const label = strName(opt.label);
+    if (label) byLabel.set(label.toLowerCase(), value);
+  }
+  return values.size > 0 ? { values, byLabel } : undefined;
+}
+
+function readOptions(field: AnyRec): DeclaredOptions | undefined {
   const raw = field.options;
   const values = new Set<string>();
   const byLabel = new Map<string, string>();
@@ -1309,24 +1386,35 @@ function buildUniverse(stack: AnyRec): Universe {
     if (!flowName) return;
     if (!ownDeclaration && flows.has(flowName)) return;
     const screens = new Map<string, ScreenFacts>();
+    const refusals = new Set<string>();
     const otherNodes = new Map<string, string>();
+    const messages = new Set<string>(FLOW_TERMINAL_MESSAGE_KEYS.filter((key) => typeof flow[key] === 'string'));
     for (const { node } of walkFlowNodes(flow, '')) {
       const nodeId = strName(node.id);
       if (!nodeId) continue;
       const nodeType = strName(node.type);
       if (nodeType !== SCREEN_NODE_TYPE) {
         if (nodeType && !otherNodes.has(nodeId)) otherNodes.set(nodeId, nodeType);
+        // [#22450] A refusing `end`, at any depth: the engine reads the
+        // translated message of whichever `end` the run reaches.
+        if (nodeType === END_NODE_TYPE && isRec(node.config) && node.config.outcome === REFUSED_OUTCOME) {
+          refusals.add(nodeId);
+        }
         continue;
       }
       const config = isRec(node.config) ? node.config : undefined;
       const fields = new Set<string>();
+      const fieldOptions = new Map<string, DeclaredOptions>();
       for (const field of recordsOf(config?.fields)) {
         const name = strName(field.name);
-        if (name) fields.add(name);
+        if (!name) continue;
+        fields.add(name);
+        const options = readScreenFieldOptions(field);
+        if (options) fieldOptions.set(name, options);
       }
-      screens.set(nodeId, { fields, objectName: strName(config?.objectName) });
+      screens.set(nodeId, { fields, fieldOptions, objectName: strName(config?.objectName) });
     }
-    flows.set(flowName, { screens, otherNodes });
+    flows.set(flowName, { screens, refusals, messages, otherNodes });
   };
   for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
   for (const flow of artifactProvidedRecords(stack, 'flows')) {
@@ -1711,6 +1799,20 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           continue;
         }
         if (!isRec(rawFlow)) continue;
+        // ── flows.<name>.successMessage | .errorMessage (#22507) ──────────
+        // `translateFlow` overlays a toast only where the flow authors one, so
+        // a translated toast over a flow that declares none resolves nothing.
+        for (const key of FLOW_TERMINAL_MESSAGE_KEYS) {
+          if (rawFlow[key] === undefined || flow.messages.has(key)) continue;
+          orphan(
+            `${inLocale} · flow "${flowName}" · ${key}`,
+            `${flowPath}.${key}`,
+            `Translations carry \`${key}\` for flow "${flowName}", which declares no \`${key}\`. A ` +
+              `toast is translated only where the flow authors one, so nothing resolves this key and the ` +
+              `runner keeps its own sentence.`,
+            `Declare \`${key}\` on the flow, or drop the key.`,
+          );
+        }
         for (const [nodeId, rawScreen] of Object.entries(asRecord(rawFlow.screens))) {
           const screenPath = `${flowPath}.screens.${nodeId}`;
           const screen = flow.screens.get(nodeId);
@@ -1735,8 +1837,19 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             continue;
           }
           if (!isRec(rawScreen)) continue;
-          for (const fieldName of Object.keys(asRecord(rawScreen.fields))) {
-            if (screen.fields.has(fieldName)) continue;
+          for (const [fieldName, rawField] of Object.entries(asRecord(rawScreen.fields))) {
+            if (screen.fields.has(fieldName)) {
+              // [#22507] …fields.<field_name>.options.<value>, judged against the
+              // field's own declared options.
+              checkScreenFieldOptionKeys(findings, {
+                optionMap: isRec(rawField) ? rawField.options : undefined,
+                declared: screen.fieldOptions.get(fieldName),
+                subject: `screen field "${fieldName}" of screen "${nodeId}" in flow "${flowName}"`,
+                path: `${screenPath}.fields.${fieldName}.options`,
+                where: `${inLocale} · flow "${flowName}" · screen "${nodeId}" · field "${fieldName}"`,
+              });
+              continue;
+            }
             const objectForm = screen.fields.size === 0 ? screen.objectName : undefined;
             orphan(
               `${inLocale} · flow "${flowName}" · screen "${nodeId}" · field "${fieldName}"`,
@@ -1758,6 +1871,31 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                     : ` Screen "${nodeId}" declares no \`config.fields\` at all.`),
             );
           }
+        }
+        // ── flows.<name>.refusals.<node_id> (#22450) ──────────────────────
+        for (const nodeId of Object.keys(asRecord(rawFlow.refusals))) {
+          if (flow.refusals.has(nodeId)) continue;
+          const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+          orphan(
+            `${inLocale} · flow "${flowName}" · refusal "${nodeId}"`,
+            `${flowPath}.refusals.${nodeId}`,
+            nodeType === END_NODE_TYPE
+              ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as an ` +
+                `\`end\` node that completes. Only an \`end\` declaring \`outcome: 'refused'\` shows a ` +
+                `message, so nothing resolves this key.`
+              : nodeType
+                ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as a ` +
+                  `\`${nodeType}\` node, not a refusing \`end\`. Only an \`end\` declaring ` +
+                  `\`outcome: 'refused'\` shows a message, so nothing resolves this key.`
+                : `Translations are keyed to refusal "${nodeId}", a node id flow "${flowName}" does not ` +
+                  `declare. The refusal keeps its source-locale message.` +
+                  suggest(nodeId, flow.refusals),
+            `Refusal translations are keyed by the \`id\` of an \`end\` node declaring ` +
+              `\`outcome: 'refused'\`.` +
+              (flow.refusals.size > 0
+                ? ` Declared refusing end node ids: ${listNames(flow.refusals)}.`
+                : ` Flow "${flowName}" declares no refusing \`end\` node at all.`),
+          );
         }
       }
     }
@@ -2005,6 +2143,66 @@ function checkActionParamOptionKeys(
         ? `Rename the key to "${labelHit}".`
         : `Option keys are the stored \`value\`, not the label and not a variant spelling. ` +
           `Declared values: ${listNames(values)}.`,
+    });
+  }
+}
+
+/**
+ * [#22507] Option translations under a DECLARED screen field —
+ * `flows.<name>.screens.<node_id>.fields.<field_name>.options.<value>`, keyed
+ * by the option's value read as text: the field `options` leg
+ * ({@link checkOptionKeys}) and the action param's
+ * ({@link checkActionParamOptionKeys}) one surface over, at their severity and
+ * with their label-versus-value diagnosis.
+ *
+ * Judged against the screen field's own `options[]`, the one set
+ * `translateFlow` walks — a screen field declares no binding to an object
+ * field, so an object field's options are never borrowed here.
+ */
+function checkScreenFieldOptionKeys(
+  findings: TranslationRefFinding[],
+  ctx: {
+    optionMap: unknown;
+    declared: DeclaredOptions | undefined;
+    subject: string;
+    path: string;
+    where: string;
+  },
+): void {
+  const optionKeys = Object.keys(asRecord(ctx.optionMap));
+  if (optionKeys.length === 0) return;
+
+  if (!ctx.declared) {
+    findings.push({
+      severity: 'warning',
+      rule: TRANSLATION_OPTION_KEY_UNKNOWN,
+      where: ctx.where,
+      path: ctx.path,
+      message: `Option translations are keyed under ${ctx.subject}, which declares no \`options\`. Nothing reads this map.`,
+      hint: `Declare the options on the screen field, move the translations to the field that owns them, or drop them.`,
+    });
+    return;
+  }
+
+  for (const key of optionKeys) {
+    if (ctx.declared.values.has(key)) continue;
+    const labelHit = ctx.declared.byLabel.get(key.toLowerCase());
+    findings.push({
+      severity: 'warning',
+      rule: TRANSLATION_OPTION_KEY_UNKNOWN,
+      where: ctx.where,
+      path: `${ctx.path}.${key}`,
+      message: labelHit
+        ? `Option translation is keyed by the DISPLAY LABEL "${key}" instead of the stored ` +
+          `value "${labelHit}". The resolver looks the option up by value, so this entry is ` +
+          `never found and the option renders with its source-locale label.`
+        : `Option translation is keyed by "${key}", which is not one of the values declared ` +
+          `by ${ctx.subject}. The option renders untranslated.` +
+          suggest(key, ctx.declared.values),
+      hint: labelHit
+        ? `Rename the key to "${labelHit}".`
+        : `Option keys are the stored \`value\` read as text (\`1\` for a number value, \`true\` for a ` +
+          `boolean), not the label and not a variant spelling. Declared values: ${listNames(ctx.declared.values)}.`,
     });
   }
 }

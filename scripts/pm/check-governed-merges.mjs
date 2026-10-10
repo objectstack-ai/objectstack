@@ -180,20 +180,25 @@
  * proves itself against the PR's own `changed_files` count. A walk that cannot
  * prove it collected the whole list refuses instead of answering on part of it.
  *
- * ## The SIZE predicate (maintainer ruling, 2026-09-18)
+ * ## The SIZE predicate (maintainer ruling, 2026-09-18; the line, 2026-10-09)
  *
  * The maintainer, verbatim, in the same exchange as ruling C on PR #18971:
  *
  *   「还有应该完善skills，修改代码量超过某个行数（比如5000）就应该人工审核。」
  *
- * Read as: a pull request whose changed line count exceeds 5,000 lands by the
+ * and on 2026-10-09, lowering the line, verbatim and untranslated:
+ *
+ *   「这种大额改动就应该人工审核,我还是建议5000行的人工审核门槛降到 3000,立卡。」
+ *
+ * Read as: a pull request whose changed line count exceeds 3,000 lands by the
  * same terminal as a Tier H governed diff (ACCEPT on the card,
  * `needs-user-decision` on the PR, a final 维护者速读, review requested from
  * `GOVERNED_APPROVERS`), whatever paths it touches — on 2026-09-18 that meant
  * the maintainer's own merge alone; since 2026-09-27 it means the two landings
- * a Tier H path has (the "SIZE limb's LIFT" section below). 「比如」 makes
- * 5,000 the ruled DEFAULT, declared once as `HUMAN_MERGE_LINE_THRESHOLD` so it
- * moves by one word from the maintainer and by one edit here.
+ * a Tier H path has (the "SIZE limb's LIFT" section below). 「比如」 made the
+ * 2026-09-18 figure the ruled DEFAULT; the 2026-10-09 word lowered it to 3,000.
+ * It is declared once as `HUMAN_MERGE_LINE_THRESHOLD` so it moves by one word
+ * from the maintainer and by one edit here — which is how it moved.
  *
  * The count is GitHub's `additions + deletions` on the PR — the number the API
  * and the size labeller report — and generated files are INCLUDED. The case
@@ -1095,14 +1100,19 @@ export const GOVERNED_TIERS = Object.freeze({
 
 /**
  * The human-merge line threshold — the maintainer's 2026-09-18 ruling, its
- * 「比如5000」 taken as the ruled default (header: "The SIZE predicate"). ONE
- * declaration: the predicate, the words it prints, `dispatch-gates.mjs`'s
+ * 「比如5000」 taken as the ruled default, lowered on 2026-10-09 by the
+ * maintainer's word (header: "The SIZE predicate"), verbatim and untranslated:
+ *
+ *   「这种大额改动就应该人工审核,我还是建议5000行的人工审核门槛降到 3000,立卡。」
+ *
+ * ONE declaration: the predicate, the words it prints, `dispatch-gates.mjs`'s
  * dispatch-time reading and the self-test's pins on both sides all read it
- * from here, so moving it is one word from the maintainer and one edit.
- * `additions + deletions` STRICTLY greater: 5,000 changed lines is under the
- * threshold, 5,001 is over; the self-test pins the pair.
+ * from here, so moving it is one word from the maintainer and one edit — the
+ * 2026-10-09 move was exactly that. `additions + deletions` STRICTLY greater:
+ * 3,000 changed lines is under the threshold, 3,001 is over; the self-test
+ * pins the pair.
  */
-export const HUMAN_MERGE_LINE_THRESHOLD = 5000;
+export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
 
 /**
  * The governed surfaces, in report order — the 2026-08-18 unified definition
@@ -5976,13 +5986,13 @@ async function selfTest() {
   // generated-artifact lift moves a PATH off the register and moves the size
   // not at all.
   battery('⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths');
-  assert('the-threshold-is-the-ruled-default-5000-declared-once', HUMAN_MERGE_LINE_THRESHOLD === 5000, String(HUMAN_MERGE_LINE_THRESHOLD));
+  assert('the-threshold-is-the-ruled-3000-of-2026-10-09-declared-once', HUMAN_MERGE_LINE_THRESHOLD === 3000, String(HUMAN_MERGE_LINE_THRESHOLD));
   const atThreshold = sizeVerdict({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 0 });
   const overByOne = sizeVerdict({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 1 });
-  assert('⭐ exactly-5000-changed-lines-is-UNDER-the-threshold',
-    atThreshold.measured === true && atThreshold.changedLines === 5000 && atThreshold.exceeds === false, JSON.stringify(atThreshold));
-  assert('⭐ 5001-changed-lines-is-OVER-it-the-count-is-additions-PLUS-deletions',
-    overByOne.measured === true && overByOne.changedLines === 5001 && overByOne.exceeds === true, JSON.stringify(overByOne));
+  assert('⭐ exactly-3000-changed-lines-is-UNDER-the-threshold',
+    atThreshold.measured === true && atThreshold.changedLines === 3000 && atThreshold.exceeds === false, JSON.stringify(atThreshold));
+  assert('⭐ 3001-changed-lines-is-OVER-it-the-count-is-additions-PLUS-deletions',
+    overByOne.measured === true && overByOne.changedLines === 3001 && overByOne.exceeds === true, JSON.stringify(overByOne));
   const prompting = sizeVerdict({ additions: 238310, deletions: 119 });
   assert('the-PR-that-prompted-the-ruling-reads-238429-changed-lines-and-is-over',
     prompting.changedLines === 238429 && prompting.exceeds === true, JSON.stringify(prompting));
@@ -6049,8 +6059,8 @@ async function selfTest() {
       liftedByApproval.humanMerge === false && landsByHumanMerge(liftedByApproval) === false && sizeLimbFires(liftedByApproval.size) === false,
     JSON.stringify(liftedByApproval.size));
   assert('and-the-threshold-the-strict-comparison-and-the-generated-files-inclusion-are-UNCHANGED-by-the-lift',
-    liftedByApproval.size.threshold === 5000 && sizeVerdict({ additions: 5000, deletions: 0 }, authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }])).exceeds === false &&
-      sizeVerdict({ additions: 5000, deletions: 1 }, null).exceeds === true);
+    liftedByApproval.size.threshold === 3000 && sizeVerdict({ additions: 3000, deletions: 0 }, authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }])).exceeds === false &&
+      sizeVerdict({ additions: 3000, deletions: 1 }, null).exceeds === true);
   const liftedWords = renderTestVerdict(liftedByApproval);
   assert('and-the-words-print-the-lift-the-approver-the-commit-and-this-card-and-name-the-seat-landing',
     liftedWords.includes('SIZE LIFTED') && liftedWords.includes('os-zhuang (on e4ead7480000)') && liftedWords.includes('objectstack#20153') &&
@@ -6163,20 +6173,20 @@ async function selfTest() {
     assert('⭐ the-verdict-is-BYTE-IDENTICAL-through---branch-and-through---test-once-the-same-numbers-are-handed-in',
       branchRun.out.endsWith(sameNumbers.out) && sameNumbers.out !== '', JSON.stringify({ b: branchRun.out.slice(-160), t: sameNumbers.out.slice(-160) }));
     const overRun = run('--test', 'src/a.ts', '--additions', String(HUMAN_MERGE_LINE_THRESHOLD), '--deletions', '1');
-    assert('⭐ --test-with-5001-changed-lines-on-an-ordinary-path-exits-3-and-says-HUMAN-MERGE',
+    assert('⭐ --test-with-3001-changed-lines-on-an-ordinary-path-exits-3-and-says-HUMAN-MERGE',
       overRun.status === EXIT_TEST_GOVERNED && overRun.out.includes('HUMAN MERGE') && !overRun.out.includes('ordinary queue landing'),
       `status=${overRun.status} out=${overRun.out.slice(0, 400)}`);
     assert('and-the-flag-values-never-leak-into-the-path-list',
       overRun.out.includes('0 of 1 path(s) hit the register'), overRun.out.slice(0, 200));
     const atRun = run('--test', 'src/a.ts', '--additions', String(HUMAN_MERGE_LINE_THRESHOLD), '--deletions', '0');
-    assert('and-exactly-5000-exits-0-the-threshold-is-strictly-greater',
+    assert('and-exactly-3000-exits-0-the-threshold-is-strictly-greater',
       atRun.status === EXIT_TEST_NOT_GOVERNED && atRun.out.includes('under the human-merge threshold'), `status=${atRun.status} out=${atRun.out.slice(0, 300)}`);
-    const jsonRun = run('--test', 'src/a.ts', '--additions', '5001', '--deletions', '0', '--json');
+    const jsonRun = run('--test', 'src/a.ts', '--additions', '3001', '--deletions', '0', '--json');
     let jsonBody = null;
     try { jsonBody = JSON.parse(jsonRun.out); } catch { /* asserted below */ }
     assert('--json-carries-governed-false-humanMerge-true-and-the-size-block',
       jsonRun.status === EXIT_TEST_GOVERNED && jsonBody?.governed === false && jsonBody?.humanMerge === true && jsonBody?.size?.exceeds === true &&
-        jsonBody?.size?.changedLines === 5001, jsonRun.out.slice(0, 300));
+        jsonBody?.size?.changedLines === 3001, jsonRun.out.slice(0, 300));
     const noneRun = run('--test', 'src/a.ts');
     assert('--test-with-no-size-flags-still-answers-the-path-question-and-prints-NOT-MEASURED-on-stdout',
       noneRun.status === EXIT_TEST_NOT_GOVERNED && noneRun.out.includes('NOT MEASURED'), `status=${noneRun.status} out=${noneRun.out.slice(0, 300)}`);
@@ -6327,11 +6337,11 @@ async function selfTest() {
     og(seed, 'commit', '-qm', 'chore: seed (#1)');
     writeFileSync(join(seed, 'packages', 'at.txt'), lines(LINE)); // exactly the line: NOT listed
     og(seed, 'add', '-A');
-    og(seed, 'commit', '-qm', 'feat: exactly at the line (#5000)');
+    og(seed, 'commit', '-qm', 'feat: exactly at the line (#3000)');
     writeFileSync(join(seed, 'packages', 'over.txt'), lines(LINE + 1)); // one over, plus a binary at 0: LISTED
     writeFileSync(join(seed, 'packages', 'blob.bin'), Buffer.from([0, 1, 2, 3, 0]));
     og(seed, 'add', '-A');
-    og(seed, 'commit', '-qm', 'feat: one over the line (#5001)');
+    og(seed, 'commit', '-qm', 'feat: one over the line (#3001)');
     og(seed, 'checkout', '-q', '-b', 'topic'); // a MERGE commit: first-parent diff = the branch's whole change
     writeFileSync(join(seed, 'README.md'), 'a\nc\n'); // -1
     writeFileSync(join(seed, 'packages', 'topic.txt'), 'x\ny\n'); // +2
@@ -6355,8 +6365,8 @@ async function selfTest() {
       mergeRead.paths.join() === 'README.md,packages/topic.txt' && mergeRead.size.additions === 2 && mergeRead.size.deletions === 1, JSON.stringify(mergeRead));
     const atRead = commitChanges(seed, atSha);
     assert('the-at-threshold-commit-classifies-to-nothing-and-the-over-by-one-to-an-entry-on-the-LANDED-diff',
-      classifyCommit({ sha: atSha, date: 'd', subject: 'feat: exactly at the line (#5000)' }, atRead.paths, GOVERNED_REPOS[2], atRead.size) === null &&
-        classifyCommit({ sha: overSha, date: 'd', subject: 'feat: one over the line (#5001)' }, overRead.paths, GOVERNED_REPOS[2], overRead.size)?.size.exceeds === true,
+      classifyCommit({ sha: atSha, date: 'd', subject: 'feat: exactly at the line (#3000)' }, atRead.paths, GOVERNED_REPOS[2], atRead.size) === null &&
+        classifyCommit({ sha: overSha, date: 'd', subject: 'feat: one over the line (#3001)' }, overRead.paths, GOVERNED_REPOS[2], overRead.size)?.size.exceeds === true,
       JSON.stringify(atRead.size));
     const bare = join(overFx, 'live.git');
     og(overFx, 'clone', '-q', '--bare', seed, bare);
@@ -6368,8 +6378,8 @@ async function selfTest() {
     const sweepRun = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${co}`], { encoding: 'utf8', env: overEnv });
     const sweepOut = sweepRun.stdout ?? '';
     assert('⭐ a-REAL-sweep-LISTS-the-over-by-one-landing-on-the-size-limb-and-NOT-the-at-threshold-one',
-      sweepOut.includes('PR #5001') && sweepOut.includes('⛔ SIZE') && sweepOut.includes(`${LINE + 1} changed line(s) (+${LINE + 1} / -0)`) &&
-        !sweepOut.includes('PR #5000') && !sweepOut.includes('PR #7') && sweepOut.includes('1 oversized landing(s) with no governed path'),
+      sweepOut.includes('PR #3001') && sweepOut.includes('⛔ SIZE') && sweepOut.includes(`${LINE + 1} changed line(s) (+${LINE + 1} / -0)`) &&
+        !sweepOut.includes('PR #3000') && !sweepOut.includes('PR #7') && sweepOut.includes('1 oversized landing(s) with no governed path'),
       `status=${sweepRun.status} out=${sweepOut.slice(0, 900)} err=${(sweepRun.stderr ?? '').slice(0, 300)}`);
     assert('and-attributes-it-like-any-row-so-an-offline-attribution-still-marks-the-sweep-INCOMPLETE',
       sweepRun.status === EXIT_INCOMPLETE && sweepOut.includes('attribution unavailable'), `status=${sweepRun.status}`);
@@ -6377,7 +6387,7 @@ async function selfTest() {
     let jsonBody = null;
     try { jsonBody = JSON.parse(jsonRun.stdout); } catch { /* asserted below */ }
     assert('and---json-carries-the-entry-with-its-size-block-and-an-empty-surface-list',
-      jsonBody?.entries?.length === 1 && jsonBody.entries[0].pr === 5001 && jsonBody.entries[0].surfaces.length === 0 &&
+      jsonBody?.entries?.length === 1 && jsonBody.entries[0].pr === 3001 && jsonBody.entries[0].surfaces.length === 0 &&
         jsonBody.entries[0].size.exceeds === true && jsonBody.entries[0].size.changedLines === LINE + 1,
       (jsonRun.stdout ?? '').slice(0, 400));
   } catch (error) {
@@ -6704,7 +6714,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled 5,000 declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }

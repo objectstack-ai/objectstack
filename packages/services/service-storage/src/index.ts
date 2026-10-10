@@ -92,8 +92,25 @@ export type {
   BackfillOptions,
   BackfillReport,
 } from './backfill-file-references.js';
+// The one-time operator sweep that rewrites stored `sys_file` rows whose scope
+// is the retired `public` to `user`. Exported, unlike the organization backfill
+// beside it, because a deployment that stored such rows must run it after
+// upgrading (until it does, a copy of one of those rows is refused) and a
+// deployment consumes this package, not a source checkout.
+export {
+  planSysFilePublicScopeBackfill,
+  applySysFilePublicScopeBackfill,
+  runSysFilePublicScopeBackfill,
+  formatSysFilePublicScopeBackfillReport,
+} from './backfill-sys-file-public-scope.js';
+export type {
+  PlannedSysFileScopeRow,
+  SysFilePublicScopeBackfillEngine,
+  SysFilePublicScopeBackfillOptions,
+  SysFilePublicScopeBackfillReport,
+} from './backfill-sys-file-public-scope.js';
 export { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
-export type { AttachmentSharingLike } from './attachment-access-hooks.js';
+export type { AttachmentSharingLike, AttachmentSecurityLike } from './attachment-access-hooks.js';
 export { runFilesToReferencesMigration } from './files-to-references-migration.js';
 export type {
   FilesToReferencesEngine,

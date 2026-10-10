@@ -40,7 +40,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           user: "用户",
           tenant: "租户",
-          public: "公开",
           private: "私有",
           temp: "临时",
           attachments: "附件"

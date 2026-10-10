@@ -405,7 +405,7 @@ const READS: Readonly<Record<string, ReadRow>> = {
   },
   'commands/serve.ts :: config.docs': {
     reads: 'top-level',
-    why: 'the dev mirror of `os build`: the root `src/docs` collection joins the TOP-LEVEL `docs`, as `collectAndLintDocs` returns it for the artifact\'s top level, and each package\'s own docs are attached to that package\'s body (`attachPackageDocs`, beside it).',
+    why: 'the dev mirror of `os build`: the read is the top level\'s own inline `docs`, which never move. The root `src/docs` collection is placed by `placeCollectedDocs`, as `os build` places it: on the body of the package whose id is the stack\'s `manifest.id` on a multi-package stack, on the top level when no single package owns it, and each package\'s own docs on that package\'s body.',
   },
   // ── shared readers ─────────────────────────────────────────────────────
   'utils/authoring-filter-judge.ts :: stack': {
@@ -439,6 +439,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     reads: 'resolved',
     evidence: [{ in: 'commands/i18n/extract.ts', code: 'extractTranslations(authoringRuleUnionStack(normalized' }],
     why: 'its caller hands it the union (#22238).',
+  },
+  'utils/schema-migrate.ts :: stack.requires': {
+    reads: 'top-level',
+    why: 'the `createStandaloneStack` RESULT, not an authored stack: its top-level `requires` is the one the runtime already read off the resolved artifact (`resolveArtifactCollections`, ADR-0130 D4 option B), so on a two-package artifact it is every body\'s tokens. Handed to the auth gate of `os migrate security-catalog-overlays` as the field `serve`\'s merge lays over the config (#22371).',
   },
   'utils/scaffold-wiring.ts :: config.requires': {
     reads: 'top-level',

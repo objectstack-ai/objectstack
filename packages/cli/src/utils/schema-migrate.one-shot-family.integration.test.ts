@@ -65,6 +65,7 @@ import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js
 import MigratePlan from '../commands/migrate/plan.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
+import MigrateSecurityCatalogOverlays from '../commands/migrate/security-catalog-overlays.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
@@ -206,6 +207,16 @@ const CALLERS: Record<string, Caller> = {
     // No run to resume: the boot happens and the command then reports the id
     // unknown. The boot is what this case is about.
     write: [{ label: 'migrate resume --run', argv: ['--run', 'run_absent_21391', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/security-catalog-overlays.ts': {
+    run: invoke(MigrateSecurityCatalogOverlays),
+    // The fixture's app declares no catalog name, so the run lists nothing and
+    // `--apply` deletes nothing — the boot is what these cases are about.
+    noWrite: [{ label: 'migrate security-catalog-overlays', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate security-catalog-overlays --apply',
+      argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'],
+    }],
   },
   'commands/migrate/summary-nulls.ts': {
     run: invoke(MigrateSummaryNulls),

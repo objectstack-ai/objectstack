@@ -281,23 +281,12 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
         // The walk is what this case is named for, and the walk is unchanged:
         // both buckets are scanned. What changed is the org row's OUTCOME.
         //
-        // [#6190, 2026-08-09] `action` is `allowOrgOverride: false`, so since
-        // that ruling an org-scoped row of it cannot be written — and this pass
-        // rewrites through `saveMetaItem`, so it is refused like any other
-        // write. That is the correct outcome, not a gap to route around:
-        //
-        //   • Ruling 2 = A made existing org-scoped rows of such types
-        //     NON-DESTRUCTIVE residue — audible, disposed of operationally,
-        //     never rewritten by a migration. A canonicalization pass that
-        //     quietly rewrote them would be doing exactly the migration the
-        //     ruling declined to authorise, one row at a time.
-        //   • And the refusal is not silent: the row surfaces in the report
-        //     with the reason, which makes this pass a SECOND residue detector
-        //     alongside the cold-boot warn (PR #6600).
-        //
-        // Deliberately NOT re-spelled to an org-overridable type: that would
-        // have kept the assertion green while deleting the only coverage of
-        // what the pass does with residue.
+        // [ADR-0131 D6] Environment metadata has no per-organization layer, so
+        // the pass never re-saves an org-scoped row (that would move it — the
+        // promotion ceremony's job, ADR-0131 C7). The row is NON-DESTRUCTIVE
+        // residue: reported `skipped` with the reason, its bytes untouched —
+        // which keeps this pass a SECOND residue detector alongside the
+        // cold-boot warn (PR #6600).
         const { engine, tables } = makeStubEngine([
             legacyObjectRow,
             { ...legacyActionRow, organization_id: 'org_a' },
@@ -308,11 +297,12 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
 
         expect(report.scanned).toBe(2);
         expect(report.rewritten).toBe(1);
-        expect(report.failed).toBe(1);
+        expect(report.skipped).toBe(1);
+        expect(report.failed).toBe(0);
 
         const orgReport = report.rows.find((r: any) => r.type === 'action')!;
-        expect(orgReport.outcome).toBe('failed');
-        expect(orgReport.reason).toContain('cannot be written org-scoped');
+        expect(orgReport.outcome).toBe('skipped');
+        expect(orgReport.reason).toContain('promotion ceremony (ADR-0131 C7)');
 
         // Non-destructive: the stored bytes are exactly as they were.
         const orgRow = metaRows(tables).find((r) => r.organization_id === 'org_a')!;
@@ -913,7 +903,7 @@ describe('migrateStoredMetadata — the decision review list: stored rows take f
     };
 
     it('a stored two-branch decision with no `mode` is LISTED — row, flow, node, label and path — and the row is canonical', async () => {
-        const { engine, tables } = makeStubEngine([flowRow('lead_verdict', gatewayBody('lead_verdict'), { organization_id: 'org_1' })]);
+        const { engine, tables } = makeStubEngine([flowRow('lead_verdict', gatewayBody('lead_verdict'))]);
         const before = JSON.stringify(metaRows(tables));
         const protocol = new ObjectStackProtocolImplementation(engine);
 
@@ -922,7 +912,7 @@ describe('migrateStoredMetadata — the decision review list: stored rows take f
         expect(report.decisionModeReview).toEqual([{
             id: metaRows(tables)[0]!.id,
             name: 'lead_verdict',
-            organizationId: 'org_1',
+            organizationId: null,
             packageId: null,
             state: 'active',
             nodeId: 'check',

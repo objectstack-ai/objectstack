@@ -108,6 +108,9 @@
  *   flows.<flow>.screens.<node_id>.fields.<field>.label
  *   flows.<flow>.screens.<node_id>.fields.<field>.placeholder
  *   flows.<flow>.screens.<node_id>.fields.<field>.inlineHelpText
+ *   flows.<flow>.screens.<node_id>.fields.<field>.options.<value>   (#22507)
+ *   flows.<flow>.successMessage / .errorMessage                (#22507)
+ *   flows.<flow>.refusals.<node_id>.message                    (#22450)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
@@ -132,10 +135,11 @@ import {
   PAGE_COMPONENT_COPY_KEYS,
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
+  FLOW_TERMINAL_MESSAGE_KEYS,
   globalFilterKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
@@ -1675,6 +1679,13 @@ function walkPicklists(config: any, out: ExpectedEntry[]): void {
 const SCREEN_NODE_TYPE = 'screen';
 
 /**
+ * [#22450] The node whose message `flows.<flow>.refusals.<node_id>.message`
+ * addresses: an `end` node declaring `outcome: 'refused'` (`EndConfigSchema`).
+ */
+const END_NODE_TYPE = 'end';
+const REFUSED_OUTCOME = 'refused';
+
+/**
  * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
  * walks use (`conversions/walk.ts`, `automation/control-flow.zod.ts`) and for
  * the same reason: a stack handed to `defineStack` is hand-built objects rather
@@ -1841,8 +1852,26 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     // is stored and never read. When a reader of a non-screen flow's label
     // lands (a run-result toast, say), this predicate widens in the same change
     // as that reader.
-    if (nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE)) {
+    const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
+    if (hasScreen) {
       pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
+    }
+
+    // `flows.<flow>.successMessage` / `.errorMessage` (#22507) — the terminal
+    // toasts, seeded from the flow's own text and emitted ONLY where the flow
+    // authors one: `translateFlow` overlays a toast only there, so a key for a
+    // flow with none would ask for a string nothing shows. Each predicate
+    // mirrors the reader of its toast. The completion toast is drawn by the
+    // console's screen-flow runner alone (a launch that completes without
+    // pausing toasts the invoking ACTION's message), so it is demanded for a
+    // flow with a screen, like the label. The failure toast is drawn wherever
+    // the console reports a failed run — the runner's resume and both launch
+    // hosts, for a flow of any type started by a click — so it is demanded for
+    // every flow, like a refusal.
+    for (const key of FLOW_TERMINAL_MESSAGE_KEYS) {
+      if (key === 'successMessage' && !hasScreen) continue;
+      const authored = inlineText(flow[key]);
+      if (authored !== undefined) pushEntry(out, ['flows', flowName, key], authored, 'flow', scope);
     }
     for (const node of nodes) {
       if (!node || typeof node !== 'object' || node.type !== SCREEN_NODE_TYPE) continue;
@@ -1875,7 +1904,36 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
             pushOptional(out, [...fieldRoot, key], authored, 'flow', scope);
           }
         }
+        // `…fields.<field>.options.<value>` (#22507) — each option's label,
+        // keyed by its value read as text through the one key function
+        // `translateFlow` looks it up by (`flowScreenFieldOptionKey`), so the
+        // skeleton offers exactly the keys the resolver reads.
+        const options: any[] = Array.isArray(field.options) ? field.options : [];
+        for (const option of options) {
+          if (!option || typeof option !== 'object') continue;
+          pushEntry(out, [...fieldRoot, 'options', flowScreenFieldOptionKey(option.value)], option.label, 'flow', scope);
+        }
       }
+    }
+
+    // `flows.<flow>.refusals.<node_id>.message` (#22450) — the message of every
+    // `end` node declaring `outcome: 'refused'`, at any depth of the same node
+    // universe. The engine reads that key (`flowRefusalMessageKey`) in the
+    // run's locale before it renders the holes, so the seed is the authored
+    // TEMPLATE, holes and all: a translator keeps the `{{ }}` holes, and the
+    // schema judges the translation as the same text slot. Unlike the flow
+    // `label`, this is demanded for a flow with no screen too: the trigger and
+    // action doors start any flow by name for a person, and the refusal is the
+    // answer that person reads (hotcrm's `quote_generation` refuses before its
+    // first screen). A run no person started carries no locale and stores the
+    // authored message.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || node.type !== END_NODE_TYPE) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      if (cfg.outcome !== REFUSED_OUTCOME) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'refusals', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
     }
   }
 }

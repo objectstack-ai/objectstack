@@ -57,7 +57,7 @@
  * `code`/`status`/`cause` survive) and absorb per-item and cleanup throws into
  * `failed[]`/`cleanups[]`, which carry no such channel. Same for
  * `declaredCode`: every in-tree throw that escapes these seams spells a
- * REGISTERED code (`TENANT_SCOPE_REQUIRED`, `SERVICE_UNAVAILABLE`) or none.
+ * REGISTERED code (`INVALID_REQUEST`, `SERVICE_UNAVAILABLE`) or none.
  *
  * That is not a reason to withhold either channel, and the ruling that says so
  * is the honest cost of this door being **composed rather than closed**:

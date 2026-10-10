@@ -21,7 +21,7 @@
  *   `@objectstack/metadata-core` re-exports to the server's doors). Both
  *   example apps author it (`app-showcase` `inquiry.view.ts`, `app-crm`
  *   `lead.view.ts`). It is `strictObject` as of #4001 批 14.
- * - `EmbedConfigSchema` was **REMOVED** at #5015 (ADR-0049 enforce-or-remove) —
+ * - `EmbedConfigSchema` was **REMOVED** at the no-door retirement (ADR-0049 enforce-or-remove) —
  *   see the block below where it stood.
  *
  * The ledger's classification question is *"who writes this schema's input?"*,
@@ -111,7 +111,7 @@ export const SharingConfigSchema = lazySchema(() => strictObject({
     .describe('Allow access without authentication'),
 }));
 
-// [#5015] `EmbedConfigSchema` / `EmbedConfig` were REMOVED per ADR-0049
+// [no-door retirement] `EmbedConfigSchema` / `EmbedConfig` were REMOVED per ADR-0049
 // enforce-or-remove, ruled REMOVE on 2026-08-04.
 //
 // The shape described iframe embedding of an app, page or form — `enabled`,

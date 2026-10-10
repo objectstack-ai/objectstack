@@ -12,6 +12,7 @@ import type {
 } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
+import { createEvalUser, type EvalUserParsed } from '@objectstack/spec/identity';
 import {
     validateScreenInputs,
     screenDeclaresInputContract,
@@ -144,6 +145,34 @@ function unquoteLiteral(operand: string): string {
 }
 
 /**
+ * The value the flow CEL scope binds as `current_user` for a run (#19939 —
+ * the maintainer's ruling on its second pass, Q1 A and Q2 A): the run's
+ * `EvalUser` when the run has a user, else `null`.
+ *
+ * Built through `createEvalUser`, the one factory every surface builds the
+ * canonical user with (ADR-0068), from what the run context holds and
+ * nothing else: `id` from `userId`, `positions`, and `organizationId` from
+ * `tenantId`; `isPlatformAdmin` is derived from the positions there. No run
+ * context carries an email or a name, so neither is bound — a read of either
+ * is the user record's (`current_user.id`), not the run's.
+ *
+ * A run with no user — a schedule, a record change made by a system write, a
+ * caller that passed no context — answers `null`, never a pseudo-user
+ * (ADR-0118 D1, D4): `current_user.id` then fails the run loudly, and the
+ * author's guard `current_user != null ? current_user.id : null` can be
+ * written.
+ */
+function runUserOf(context: AutomationContext | undefined): EvalUserParsed | null {
+    const userId = context?.userId;
+    if (typeof userId !== 'string' || userId === '') return null;
+    return createEvalUser({
+        id: userId,
+        positions: Array.isArray(context?.positions) ? context.positions : [],
+        ...(typeof context?.tenantId === 'string' ? { organizationId: context.tenantId } : {}),
+    });
+}
+
+/**
  * The branch a `decision` node reports when it DECLARED `config.conditions` and
  * none of them matched — "fall through to the declared fallback".
  *
@@ -251,7 +280,11 @@ import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 // `./builtin/` is safe in this direction: `template.ts` imports only
 // `../guard-refusal.js` and package-external contracts, so nothing it pulls in
 // reaches back here.
-import { renderTextSlot } from './builtin/template.js';
+import { renderTextSlot, FlowTextTemplateError } from './builtin/template.js';
+// [#22450] The one bundle-locale negotiation rule (exact → case-insensitive →
+// base language → variant expansion), asked about the locales the i18n service
+// holds — the same question objectql's `negotiatedMessageLocale` asks it.
+import { flowRefusalMessageKey, resolveBundleLocale } from '@objectstack/spec/system';
 
 /**
  * Does this `decision` take EVERY out-edge whose condition holds (#15429)?
@@ -1287,6 +1320,44 @@ class FlowRefusalSignal {
 
 function isRefusalSignal(err: unknown): err is FlowRefusalSignal {
     return typeof err === 'object' && err !== null && (err as FlowRefusalSignal).__flowRefused === true;
+}
+
+/**
+ * [#22450] The slice of `II18nService` (`@objectstack/spec/contracts`) a
+ * refusing `end` node reads: `t()` for the translated template, and
+ * `getLocales()`, when the service offers it, to negotiate the run's locale.
+ */
+export interface RefusalI18nService {
+    t(key: string, locale: string, params?: Record<string, unknown>): string;
+    getLocales?(): string[];
+}
+
+/**
+ * [#22450] The locale `service` can actually ANSWER in, for the locale the run
+ * asked for. `AutomationContext.locale` is the door's `ExecutionContext.locale`,
+ * whose header leg is the request's tag verbatim, so a bare `zh` has to reach a
+ * `zh-CN` bundle the way the document translators reach it.
+ *
+ * ⛔ No rule of its own: `resolveBundleLocale` is the one negotiation rule, asked
+ * about what `getLocales()` reports, exactly as objectql's
+ * `negotiatedMessageLocale` asks it. The requested tag passes through untouched
+ * whenever there is nothing to negotiate against (no `getLocales`, a throwing or
+ * empty answer, no match).
+ */
+function negotiatedServiceLocale(service: RefusalI18nService, requested: string): string {
+    if (typeof service.getLocales !== 'function') return requested;
+    let available: unknown;
+    try {
+        available = service.getLocales();
+    } catch {
+        return requested;
+    }
+    if (!Array.isArray(available) || available.length === 0) return requested;
+    const offered: Record<string, true> = {};
+    for (const code of available) {
+        if (typeof code === 'string' && code.length > 0) offered[code] = true;
+    }
+    return resolveBundleLocale(offered, requested) ?? requested;
 }
 
 /**
@@ -2445,6 +2516,8 @@ export class AutomationEngine implements IAutomationService {
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
     private connectorPullSource?: (request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>;
+    /** [#22450] The lazy `i18n` service reader — see {@link setI18nServiceSource}. */
+    private i18nServiceSource?: () => RefusalI18nService | undefined;
     /**
      * Re-entrancy guard for record-triggered flows (complements the intra-run
      * {@link MAX_NODE_REENTRIES} back-edge guard, which cannot see a self-trigger
@@ -4794,6 +4867,21 @@ export class AutomationEngine implements IAutomationService {
      * materialized, which the engine does not hold, so the plugin hands the
      * engine the call rather than the map.
      */
+    /**
+     * [#22450] Attach a reader of the `i18n` service, through which a refusing
+     * `end` node picks its translated message
+     * (`flows.<flow>.refusals.<node_id>.message`) in the run's locale. The
+     * automation plugin calls this at `init()` with a reader that asks the
+     * kernel at QUESTION time, the bridge objectql takes for its validation
+     * messages made lazy: the `i18n` provider may register after this plugin
+     * starts, and a reading taken at boot would record its absence for good.
+     * With none attached (a bare engine), or one that answers nothing, every
+     * refusal renders its authored message.
+     */
+    setI18nServiceSource(source: (() => RefusalI18nService | undefined) | undefined): void {
+        this.i18nServiceSource = source;
+    }
+
     setConnectorPullSource(
         source: ((request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>) | undefined,
     ): void {
@@ -6325,7 +6413,7 @@ export class AutomationEngine implements IAutomationService {
             if (startCondition !== undefined && startCondition !== null && startCondition !== '') {
                 const condExpr =
                     typeof startCondition === 'string' ? { dialect: 'cel', source: startCondition } : startCondition;
-                if (!this.evaluateCondition(condExpr, variables)) {
+                if (!this.evaluateCondition(condExpr, variables, runContext)) {
                     this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
                     // `flowLabel` rides even here, unlike `successMessage` /
                     // `summary`: it names the flow, it claims no work done, and
@@ -8309,7 +8397,7 @@ export class AutomationEngine implements IAutomationService {
 
         const visibility = (field: ScreenFieldSpec): ScreenFieldVisibility => {
             try {
-                return this.evaluateCondition(String(field.visibleWhen), scope);
+                return this.evaluateCondition(String(field.visibleWhen), scope, run.context);
             } catch (err) {
                 // #6499 — BOTH spliced pieces were uncontrolled: the author's
                 // own `visibleWhen` source (metadata text of any shape) and
@@ -10967,6 +11055,93 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#22450] A refusing `end` node's message, rendered in the run's language.
+     *
+     * The run stores the refusal already rendered
+     * (`sys_automation_run.refusal_message`, `AutomationResult.refusalMessage`),
+     * so the translation has to be picked HERE, as a template, before its
+     * `{{ }}` holes are filled. This is the validation-message precedent
+     * (objectql's `authoredRuleMessage`) on the automation side:
+     *
+     *  - the address is `flowRefusalMessageKey` (`@objectstack/spec/system`);
+     *  - the channel is the existing `i18n` service, reached through
+     *    {@link setI18nServiceSource} — no second i18n path;
+     *  - the locale is `AutomationContext.locale`, the door's already-resolved
+     *    `ExecutionContext.locale`, negotiated against the locales the service
+     *    holds by `resolveBundleLocale`, the one bundle-locale rule.
+     *
+     * The authored template renders whenever no translation is picked: no
+     * locale on the run (a record-change or schedule trigger, code calling
+     * `execute` directly), no service, no entry (`t()` echoes the key on a
+     * miss), or a service that throws. A resumed leg renders in the locale the
+     * run was STARTED in — the context is persisted with the suspended run and a
+     * resume carries none of its own.
+     *
+     * A translation is a text slot like the message it translates: the
+     * single-brace `{token}` is refused at every door that reads the bundle
+     * (`TranslationDataSchema`, the one text-slot judge). If one still fails to
+     * compile here, it is a translator's defect, not the run's: the refusal
+     * must not become a failure, so the authored message renders and the line
+     * below names the key and the reason.
+     */
+    private renderRefusalMessage(
+        flowName: string,
+        nodeId: string,
+        authored: string | undefined,
+        variables: Map<string, unknown>,
+        context: AutomationContext,
+    ): string | undefined {
+        const translated = this.translatedRefusalTemplate(flowName, nodeId, context.locale);
+        if (translated !== undefined) {
+            try {
+                return renderTextSlot(translated.template, variables);
+            } catch (err: unknown) {
+                if (!(err instanceof FlowTextTemplateError)) throw err;
+                this.logger.warn(
+                    `[automation] flow '${flowName}' refused at node '${nodeId}': the '${translated.locale}' translation ` +
+                    `at '${translated.key}' does not compile (${err.message}), so the refusal shows the authored ` +
+                    `message instead. Fix the translation's holes to match the authored message.`,
+                );
+            }
+        }
+        return renderTextSlot(authored, variables);
+    }
+
+    /**
+     * [#22450] The translated refusal TEMPLATE for `locale`, or `undefined` when
+     * none is picked — see {@link renderRefusalMessage} for every reason.
+     */
+    private translatedRefusalTemplate(
+        flowName: string,
+        nodeId: string,
+        requested: string | undefined,
+    ): { template: string; key: string; locale: string } | undefined {
+        if (typeof requested !== 'string' || requested.length === 0) return undefined;
+        let service: RefusalI18nService | undefined;
+        try {
+            service = this.i18nServiceSource?.();
+        } catch {
+            return undefined;
+        }
+        if (!service || typeof service.t !== 'function') return undefined;
+        const locale = negotiatedServiceLocale(service, requested);
+        const key = flowRefusalMessageKey(flowName, nodeId);
+        try {
+            const template = service.t(key, locale);
+            // II18nService echoes the key back on a miss.
+            if (typeof template === 'string' && template.length > 0 && template !== key) {
+                return { template, key, locale };
+            }
+        } catch (err: unknown) {
+            this.logger.warn(
+                `[automation] flow '${flowName}' refused at node '${nodeId}': the i18n service threw reading ` +
+                `'${key}' (${err instanceof Error ? err.message : String(err)}), so the refusal shows the authored message.`,
+            );
+        }
+        return undefined;
+    }
+
+    /**
      * Execute a node with timeout support, fault edge handling, and step logging.
      */
     private async executeNode(
@@ -11002,7 +11177,10 @@ export class AutomationEngine implements IAutomationService {
                     // Rendered HERE, against the live variable map, because
                     // that is what makes the text per-record; a template on the
                     // wire would put the rendering in every runner.
-                    renderTextSlot(endConfig.message, variables),
+                    // [#22450] …in the run's language: the TEMPLATE is picked
+                    // before it is rendered, because the run stores the
+                    // rendered text and nothing downstream can translate it.
+                    this.renderRefusalMessage(flow.name, node.id, endConfig.message, variables, context),
                 );
             }
             return;
@@ -11543,7 +11721,7 @@ export class AutomationEngine implements IAutomationService {
                 if (nextNode) recordSkipped(nextNode, edge);
                 continue;
             }
-            if (this.evaluateCondition(edge.condition!, variables)) {
+            if (this.evaluateCondition(edge.condition!, variables, context)) {
                 anyConditionMet = true;
                 if (nextNode) {
                     await this.executeNode(nextNode, flow, variables, context, steps);
@@ -11848,8 +12026,27 @@ export class AutomationEngine implements IAutomationService {
      *
      * Shared deliberately: a predicate and a value expression that disagreed
      * about what `rows` means would be two dialects wearing one name.
+     *
+     * ## `current_user` — the run's user, or `null` (#19939)
+     *
+     * The scope also binds `current_user`, ADR-0068's canonical user root, from
+     * the run context the caller passes ({@link runUserOf}): the run's
+     * `EvalUser` when the run has a user, and `null` when it has none — never
+     * a pseudo-user (ADR-0118 D1, D4). It carries only what the run holds:
+     * `id`, `positions`, `organizationId` and the `isPlatformAdmin` flag
+     * derived from them; no run carries an email or a name. This is what the
+     * retired `{$User.Id}` value-slot token is refused in favour of, so it
+     * reads the same context the interpolator's `$User.Id` branch reads.
+     *
+     * `vars` and `current_user` are bound AFTER the variables are spread, so
+     * each wins over a flow variable of the same name — which is then read as
+     * `vars["vars"]` / `vars["current_user"]` (the spec's
+     * `FLOW_SCOPE_CLAIMED_IDENTIFIERS`, measured from here).
      */
-    private celScope(variables: Map<string, unknown>): { extra: Record<string, unknown>; record: Record<string, unknown> } {
+    private celScope(
+        variables: Map<string, unknown>,
+        context?: AutomationContext,
+    ): { extra: Record<string, unknown>; record: Record<string, unknown> } {
         const vars: Record<string, unknown> = {};
         for (const [key, value] of variables) {
             // Convert "step.result" keys into nested object paths.
@@ -11863,7 +12060,7 @@ export class AutomationEngine implements IAutomationService {
             }
             cursor[segs[segs.length - 1]] = value;
         }
-        return { extra: { ...vars, vars }, record: vars };
+        return { extra: { ...vars, vars, current_user: runUserOf(context) }, record: vars };
     }
 
     /**
@@ -11984,8 +12181,17 @@ export class AutomationEngine implements IAutomationService {
      * `assignments: [{ variable, value }]` array and the bare
      * `{ <variable>: <value> }` config) are deliberately NOT declared, so an
      * envelope-shaped object there stays the literal object it always was.
+     *
+     * `context` is the run's: it decides what `current_user` is in the scope
+     * ({@link celScope}) — the run's user, or `null` when the run has none or
+     * no context is passed. Every executor passes the one it was handed.
      */
-    evaluateValueEnvelope(envelope: { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>, where: string): unknown {
+    evaluateValueEnvelope(
+        envelope: { dialect?: string; source?: string; ast?: unknown },
+        variables: Map<string, unknown>,
+        where: string,
+        context?: AutomationContext,
+    ): unknown {
         const refusals = this.valueEnvelopeRefusals(envelope);
         if (refusals.length > 0) {
             throw new Error(
@@ -11993,7 +12199,7 @@ export class AutomationEngine implements IAutomationService {
             );
         }
         const source = envelope.source ?? '';
-        const result = ExpressionEngine.evaluate({ dialect: 'cel', source }, this.celScope(variables));
+        const result = ExpressionEngine.evaluate({ dialect: 'cel', source }, this.celScope(variables, context));
         if (!result.ok) {
             // Reached by the shapes the two validators above cannot judge — an
             // `ast`-only envelope (`ExpressionSchema` accepts `source`-or-`ast`;
@@ -12072,8 +12278,17 @@ export class AutomationEngine implements IAutomationService {
      * refuses it at authoring, and `structuralConditionRefusal` refuses it on
      * both structural slots, so it is refused here as well, through the same
      * shared constructor rather than a second rule.
+     *
+     * `context` is the run's: it decides what `current_user` is in a CEL
+     * predicate's scope ({@link celScope}) — the run's user, or `null` when
+     * the run has none or no context is passed. Every engine site and the
+     * `decision` executor pass the run's.
      */
-    evaluateCondition(expression: string | { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>): boolean {
+    evaluateCondition(
+        expression: string | { dialect?: string; source?: string; ast?: unknown },
+        variables: Map<string, unknown>,
+        context?: AutomationContext,
+    ): boolean {
         const shapeRefusal = structuralConditionRefusal(expression);
         if (shapeRefusal) {
             // ADR-0032 §1d — the error carries its source. `structuralConditionRefusal`
@@ -12113,7 +12328,7 @@ export class AutomationEngine implements IAutomationService {
             try {
                 const result = ExpressionEngine.evaluate(
                     { dialect: 'cel', source: exprStr },
-                    this.celScope(variables),
+                    this.celScope(variables, context),
                 );
                 // ADR-0032 §Decision 1c — NO silent fallback. A non-`ok` result is a
                 // real fault (malformed predicate, or — pre build-validation — a

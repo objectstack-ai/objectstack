@@ -88,12 +88,11 @@ describe('ADR-0010 L3 lock enforcement — artifact-backed item', () => {
 
         const save = await protocol.saveMetaItem({
             type: 'view', name: 'case_grid', item: validView,
-            organizationId: 'org_alpha',
         });
         expect(save.success).toBe(true);
 
         const del = await protocol.deleteMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
         });
         expect(del.success).toBe(true);
     });
@@ -104,12 +103,11 @@ describe('ADR-0010 L3 lock enforcement — artifact-backed item', () => {
 
         const save = await protocol.saveMetaItem({
             type: 'view', name: 'case_grid', item: validView,
-            organizationId: 'org_alpha',
         });
         expect(save.success).toBe(true);
 
         await expect(protocol.deleteMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
         })).rejects.toMatchObject({
             code: 'ITEM_LOCKED',
             status: 403,
@@ -122,14 +120,13 @@ describe('ADR-0010 L3 lock enforcement — artifact-backed item', () => {
 
         await expect(protocol.saveMetaItem({
             type: 'view', name: 'case_grid', item: validView,
-            organizationId: 'org_alpha',
         })).rejects.toMatchObject({
             code: 'ITEM_LOCKED',
             status: 403,
         });
 
         const del = await protocol.deleteMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
         });
         expect(del.success).toBe(true);
     });
@@ -140,19 +137,18 @@ describe('ADR-0010 L3 lock enforcement — artifact-backed item', () => {
 
         await expect(protocol.saveMetaItem({
             type: 'view', name: 'case_grid', item: validView,
-            organizationId: 'org_alpha',
         })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
 
         await expect(protocol.deleteMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
         })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
 
         await expect(protocol.publishMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
         })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
 
         await expect(protocol.rollbackMetaItem({
-            type: 'view', name: 'case_grid', toVersion: 1, organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid', toVersion: 1,
         })).rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
     });
 });
@@ -204,7 +200,6 @@ describe('ADR-0010 L3 lock enforcement — audit trail', () => {
 
         await expect(protocol.saveMetaItem({
             type: 'view', name: 'case_grid', item: validView,
-            organizationId: 'org_alpha',
             actor: 'user_42',
         })).rejects.toMatchObject({ code: 'ITEM_LOCKED' });
 
@@ -234,7 +229,6 @@ describe('ADR-0010 L3 lock enforcement — audit trail', () => {
 
         const result = await protocol.saveMetaItem({
             type: 'view', name: 'case_grid', item: validView,
-            organizationId: 'org_alpha',
             actor: 'user_42',
         });
         expect(result.success).toBe(true);

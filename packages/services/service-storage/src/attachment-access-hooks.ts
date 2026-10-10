@@ -2,13 +2,15 @@
 
 import { withoutOperationPrivateKeys } from '@objectstack/core';
 import type { StandardErrorCode } from '@objectstack/spec/api';
+import type { ISecurityService, ISharingService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 
-import type {
-  AttachmentLifecycleEngine,
-  AttachmentLifecycleLogger,
-  AttachmentReadMiddlewareCtx,
+import {
+  createRefusedAttachTombstoner,
+  type AttachmentLifecycleEngine,
+  type AttachmentLifecycleLogger,
+  type AttachmentReadMiddlewareCtx,
 } from './attachment-lifecycle.js';
 
 /**
@@ -21,12 +23,13 @@ import type {
  * semantics (ContentDocumentLink): an attachment's access is derived from
  * its PARENT record.
  *
- *  - beforeInsert: the caller must be able to READ the parent record —
- *    verified with a caller-scoped findOne so RLS/OWD/sharing apply.
- *    Fail-closed 403 `ATTACHMENT_PARENT_ACCESS`. (Salesforce requires edit
- *    on the parent; v1 enforces read visibility — strictly better than
- *    nothing, edit-parity is a tracked follow-up.) `uploaded_by` is
- *    server-stamped from the session — a client-supplied value never wins.
+ *  - beforeInsert: the caller must be able to EDIT the parent record (see
+ *    "Parent EDIT" below; Salesforce parity, #2970 item 3 — v1 asked read
+ *    visibility, which is now only the degraded mode). Fail-closed 403
+ *    `ATTACHMENT_PARENT_ACCESS`. `uploaded_by` is server-stamped from the
+ *    session — a client-supplied value never wins. A refusal also hands the
+ *    refused `file_id` to the lifecycle, which tombstones the caller's own
+ *    never-attached upload (#22466, `createRefusedAttachTombstoner`).
  *  - beforeUpdate (commit da891e0ef): the caller must be the uploader OR hold edit on
  *    the parent record — the delete rule, applied to the verb that could
  *    otherwise rewrite the other two gates away: an ungated update let any
@@ -46,8 +49,8 @@ import type {
  *    {@link refuseNotVisible}. The named refusals below are what a caller who
  *    can read the parent, but may not edit it, receives.
  *  - beforeDelete: the caller must be the uploader OR hold edit on the
- *    parent record (sharing service's `canEdit`; public-model parents are
- *    editable by design). Fail-closed 403 `ATTACHMENT_DELETE_DENIED`; a
+ *    parent record (see "Parent EDIT" below). Fail-closed 403
+ *    `ATTACHMENT_DELETE_DENIED`; a
  *    multi-delete requires EVERY matched row to pass, and one carrying
  *    NEITHER an id NOR a `where` is refused outright (#4757) — the engine
  *    would hand `deleteMany` an AST over the whole table, and a gate that
@@ -55,6 +58,38 @@ import type {
  *    reaches this handler through the `dispatchUnscopedMultiWrite`
  *    whole-operation dispatch its registration declares (#9719) — the
  *    per-row dispatch alone can never deliver the shape it refuses.
+ *
+ * ## Parent EDIT — one question, four limbs
+ *
+ * The attach rule, the row rule's parent-editor limb (update and delete) and
+ * the attach rule on a re-point all ask ONE question — may the caller edit the
+ * parent record? — answered by ONE composition ({@link installAttachmentAccessHooks}'s
+ * `mayEditParent`), so the four cannot drift:
+ *
+ *  - plugin-sharing's `checkEdit` (`ISharingService`) answers first: `allow`
+ *    admits and `deny` refuses (with each limb's own envelope).
+ *  - `abstain` means record sharing does not enforce on the parent at all. For
+ *    most parents that IS permission (a `public_read_write` object: nobody
+ *    owns its rows). For a `controlled_by_parent` parent it is not: its access
+ *    derives from its MASTER (ADR-0055), and `effectiveSharingModel` maps it to
+ *    `public` precisely because the security plugin's master-detail check
+ *    judges it instead. So an abstention asks that check —
+ *    `ISecurityService.checkControlledByParentWrite`, the answer a by-id update
+ *    of the parent gets — and only its `allow` and `not_applicable` admit.
+ *    `deny` and `unresolvable` (a broken declaration, a missing record, a null
+ *    master reference) refuse. A rejection — a datasource fault, a context the
+ *    write path refuses — propagates unchanged, so an outage keeps its `503`.
+ *  - A kernel whose security service does not serve that member composes no
+ *    master check, and there the parent's own update meets none either: the
+ *    abstention admits, as it always did.
+ *  - No sharing service at all: caller-scoped parent READ visibility (degraded
+ *    mode) — still strictly tighter than no gate.
+ *
+ * ⛔ This is why the gate reads `checkEdit`, never `canEdit`: `canEdit` is its
+ * two-state projection, folding `abstain` into `true`, and an attach gate that
+ * took that fold as permission let any member holding the `sys_attachment`
+ * create or delete bit write files onto every master-detail child record of
+ * the org — including records whose own update refuses them.
  *
  * System-context operations (engine self-writes, seeds, lifecycle sweeps)
  * bypass all three gates, as do context-less programmatic calls on bare
@@ -65,10 +100,20 @@ import type {
  * order is not load-bearing.
  */
 
-/** Minimal surface of plugin-sharing's service this gate consults. */
-export interface AttachmentSharingLike {
-  canEdit(object: string, recordId: string, context: Record<string, unknown>): Promise<boolean>;
-}
+/**
+ * The one member of plugin-sharing's contract this gate consults — the
+ * TRI-STATE edit verdict, because the gate must tell "sharing permits this"
+ * from "sharing does not enforce here" (see "Parent EDIT" above). A `Pick` of
+ * the real `ISharingService`, not a hand-written shape.
+ */
+export type AttachmentSharingLike = Pick<ISharingService, 'checkEdit'>;
+
+/**
+ * The one member of the security service's contract this gate consults: the
+ * ADR-0055 master-detail write check, for a `controlled_by_parent` parent.
+ * OPTIONAL on the contract, so the gate handles its absence by construction.
+ */
+export type AttachmentSecurityLike = Pick<ISecurityService, 'checkControlledByParentWrite'>;
 
 const PACKAGE_ID = 'com.objectstack.service.storage';
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -316,13 +361,86 @@ function callerContext(ctx: any): ExecutionContext {
  * refusal, because the i18n service is contributed by another plugin that may
  * start after this one. Absent, the built-in catalog still renders the
  * caller's locale.
+ *
+ * `getSecurity` resolves the security service, lazily for the same reason, for
+ * its ADR-0055 master-detail write check (see "Parent EDIT" in the module
+ * header). Absent — or serving no such member — a `controlled_by_parent`
+ * parent meets no master check here, exactly as its own update meets none.
  */
 export function installAttachmentAccessHooks(
   engine: AttachmentLifecycleEngine,
   getSharing: () => AttachmentSharingLike | null | undefined,
   logger: AttachmentLifecycleLogger,
   messageTranslator?: () => ValidationMessageTranslator | undefined,
+  getSecurity?: () => AttachmentSecurityLike | null | undefined,
 ): void {
+  /**
+   * [#22466] What a refused attach does about its file. Created HERE, at
+   * installation — outside every engine operation — because the tombstone it
+   * schedules runs in a snapshot of this context: outside the refused write's
+   * unit of work, so a caller's transaction rolling back cannot take the
+   * tombstone with it. See {@link createRefusedAttachTombstoner}.
+   */
+  const tombstoneRefusedAttach = createRefusedAttachTombstoner(engine, logger);
+
+  /**
+   * May the caller EDIT the parent record `(object, recordId)`? The one
+   * question the attach rule, the row rule's parent-editor limb and the
+   * re-point's attach rule all ask — see "Parent EDIT" in the module header for
+   * the composition and why each outcome lands where it does.
+   *
+   * `recordId` is the value the limb holds (the degraded read probe keeps the
+   * shape each limb always queried with); the sharing and security services
+   * are handed its string form, as `canEdit` always was.
+   */
+  const mayEditParent = async (
+    ctx: any,
+    object: string,
+    recordId: unknown,
+    callerCtx: ExecutionContext,
+    limb: string,
+  ): Promise<boolean> => {
+    const sharing = getSharing();
+    if (!sharing || typeof sharing.checkEdit !== 'function') {
+      // Degraded mode (no sharing service): caller-scoped parent READ
+      // visibility — still strictly tighter than no gate.
+      logger.debug?.(`[storage] attachment access: sharing service absent — ${limb} gated on parent read visibility`);
+      try {
+        return !!(await ctx.api.object(object).findOne({ where: { id: recordId } }));
+      } catch {
+        return false;
+      }
+    }
+    const verdict = await sharing.checkEdit(object, String(recordId), callerCtx);
+    if (verdict === 'allow') return true;
+    // `deny`, and anything that is not one of the three verdicts, refuses.
+    if (verdict !== 'abstain') return false;
+
+    // Record sharing does not enforce on this parent. Whether that is
+    // permission is the master-detail check's question (ADR-0055): it answers
+    // `not_applicable` for a parent that derives nothing from a master.
+    let security: AttachmentSecurityLike | null | undefined;
+    try {
+      security = getSecurity?.();
+    } catch {
+      security = undefined;
+    }
+    if (!security || typeof security.checkControlledByParentWrite !== 'function') {
+      // No master-detail check is composed in this kernel, and the parent's own
+      // update meets none either. ⛔ Not "the master was judged editable" —
+      // nothing measured it.
+      logger.debug?.(
+        `[storage] attachment access: record sharing abstains on ${object} and the security service composes no ` +
+          `master-detail write check — ${limb} admitted on the abstention, as the parent's own update would be`,
+      );
+      return true;
+    }
+    // A rejection (a datasource fault, a context the write path refuses) is a
+    // refusal of the request, and propagates as it is.
+    const answer = await security.checkControlledByParentWrite(object, String(recordId), callerCtx);
+    return answer.outcome === 'allow' || answer.outcome === 'not_applicable';
+  };
+
   /** Resolve every sys_attachment row a write matches, under SYSTEM context
    * — the caller may legitimately be unable to READ rows they are allowed to
    * touch (and the read-visibility middleware below must not narrow the
@@ -387,9 +505,8 @@ export function installAttachmentAccessHooks(
   };
 
   /** Uploader-or-parent-editor over every matched row. Parent-edit verdicts
-   * are memoized per (object, id) — a multi-row write usually targets one
-   * record. Degrades to caller-scoped parent READ visibility when no sharing
-   * service is present — still strictly tighter than no gate. */
+   * ({@link mayEditParent}) are memoized per (object, id) — a multi-row write
+   * usually targets one record. */
   const authorizeRows = async (
     ctx: any,
     rows: Array<Record<string, unknown>>,
@@ -397,7 +514,6 @@ export function installAttachmentAccessHooks(
     denyCode: string,
   ): Promise<void> => {
     const userId = ctx.session.userId as string | undefined;
-    const sharing = getSharing();
     const callerCtx = callerContext(ctx);
     const canEditCache = new Map<string, boolean>();
     /** Parent READ verdicts, asked only for a row about to be refused. */
@@ -410,20 +526,7 @@ export function installAttachmentAccessHooks(
       const cacheKey = `${parentObject}\u0000${parentId}`;
       let allowed = canEditCache.get(cacheKey);
       if (allowed === undefined) {
-        if (sharing && typeof sharing.canEdit === 'function') {
-          allowed = await sharing.canEdit(parentObject, parentId, callerCtx);
-        } else {
-          // Degraded mode (no sharing service): fall back to caller-scoped
-          // parent READ visibility — still strictly tighter than no gate.
-          try {
-            allowed = !!(await ctx.api.object(parentObject).findOne({ where: { id: parentId } }));
-          } catch {
-            allowed = false;
-          }
-          logger.debug?.(
-            `[storage] attachment access: sharing service absent — ${verb} gated on parent read visibility`,
-          );
-        }
+        allowed = await mayEditParent(ctx, parentObject, parentId, callerCtx, verb);
         canEditCache.set(cacheKey, allowed);
       }
       if (!allowed) {
@@ -477,25 +580,19 @@ export function installAttachmentAccessHooks(
       if (parentId === undefined || parentId === null || parentId === '') return;
 
       // Salesforce parity (#2970 item 3): attaching to a record requires EDIT
-      // access to it, not merely read. Public-model parents return canEdit
-      // true for any member (so the common case is unchanged); private,
-      // owner-scoped parents require the caller to own/edit them. Degrades to
-      // caller-scoped READ visibility when no sharing service is present.
-      const sharing = getSharing();
-      let allowed = false;
-      if (sharing && typeof sharing.canEdit === 'function') {
-        allowed = await sharing.canEdit(parentObject, String(parentId), callerContext(ctx));
-      } else {
-        try {
-          allowed = !!(await ctx.api.object(parentObject).findOne({ where: { id: parentId } }));
-        } catch {
-          allowed = false;
-        }
-        logger.debug?.(
-          '[storage] attachment access: sharing service absent — attach gated on parent read visibility',
-        );
-      }
+      // access to it, not merely read — answered as "Parent EDIT" in the module
+      // header sets out, so a `controlled_by_parent` parent is judged through
+      // its master, as its own update is.
+      const allowed = await mayEditParent(ctx, parentObject, parentId, callerContext(ctx), 'attach');
       if (!allowed) {
+        // [#22466] Every refusal leg of the attach rule arrives HERE — sharing
+        // `deny` or a non-verdict, the master-detail check's `deny` or
+        // `unresolvable`, the degraded read probe's miss — so this one call
+        // covers them all and no leg can drift. A REJECTION from either check
+        // (an outage) never reaches this line: it is no verdict, and keeps
+        // its own status. The tombstone is scheduled, never awaited, and is
+        // conditional on the file being the caller's own unheld upload.
+        tombstoneRefusedAttach(data.file_id, ctx.session.userId);
         forbid(
           'ATTACHMENT_PARENT_ACCESS',
           `Cannot attach to ${parentObject}/${parentId}: the parent record does not exist or you cannot edit it`,
@@ -535,8 +632,7 @@ export function installAttachmentAccessHooks(
       // is closed by the row rule itself, not by stamping.)
 
       // Re-pointing an attachment is an INSERT into the new parent's files
-      // panel: the NEW parent must satisfy the attach rule (EDIT via the
-      // sharing service, degrading to caller-scoped read visibility — the
+      // panel: the NEW parent must satisfy the attach rule (parent EDIT, the
       // beforeInsert gate above), or an authorized edit of your own
       // attachment would be a way to plant files on records you cannot see.
       // Mirrors the comment kit's thread re-point rule (#4630).
@@ -544,7 +640,6 @@ export function installAttachmentAccessHooks(
       if (!data || typeof data !== 'object') return;
       if (data.parent_object === undefined && data.parent_id === undefined) return;
 
-      const sharing = getSharing();
       /** Attach-rule verdicts memoized per effective (object, id) target. */
       const canAttachCache = new Map<string, boolean>();
       for (const row of rows) {
@@ -570,18 +665,7 @@ export function installAttachmentAccessHooks(
         const cacheKey = `${nextObject}\u0000${String(nextId)}`;
         let allowed = canAttachCache.get(cacheKey);
         if (allowed === undefined) {
-          if (sharing && typeof sharing.canEdit === 'function') {
-            allowed = await sharing.canEdit(nextObject, String(nextId), callerContext(ctx));
-          } else {
-            try {
-              allowed = !!(await ctx.api.object(nextObject).findOne({ where: { id: nextId } }));
-            } catch {
-              allowed = false;
-            }
-            logger.debug?.(
-              '[storage] attachment access: sharing service absent — re-point gated on parent read visibility',
-            );
-          }
+          allowed = await mayEditParent(ctx, nextObject, nextId, callerContext(ctx), 're-point');
           canAttachCache.set(cacheKey, allowed);
         }
         if (!allowed) {

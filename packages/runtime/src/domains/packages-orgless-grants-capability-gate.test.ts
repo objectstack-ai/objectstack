@@ -14,8 +14,8 @@
  * `org_alpha` — operator-authored, and not revoked by the removal — went on
  * conferring `manage_metadata` with no organization boundary left on it. The
  * gate passed: `PATCH /packages/:id/disable` switched the package off for the
- * whole environment (200), and `DELETE /packages/:id` reached the door's own
- * organization check (400 `TENANT_SCOPE_REQUIRED`) instead of the gate's 403.
+ * whole environment (200), and `DELETE /packages/:id` got past the gate
+ * instead of being refused its 403.
  *
  * The same held for a set the left organization bound to one of its own
  * POSITIONS: with no tenant the position read is installation-wide, so the left
@@ -32,8 +32,9 @@
  * runs the REAL identity resolution (`resolveRequestScope` →
  * `resolveExecutionContext` → `resolveAuthzContext`) under an `isolated`
  * posture, over a real `SchemaRegistry` holding the package, and a `protocol`
- * double that refuses an organization-less `deletePackage` the way
- * `@objectstack/metadata-protocol` does. `@objectstack/core` resolves to its
+ * double that refuses a `deletePackage` carrying the retired `organizationId` /
+ * `allTenants` keys the way `@objectstack/metadata-protocol` does (ADR-0131 D6).
+ * `@objectstack/core` resolves to its
  * source here (this package's vitest alias), so the resolver under test is the
  * one in this checkout.
  */
@@ -61,6 +62,8 @@ function matchesWhere(row: any, where: any): boolean {
             }
             return (cond as any).$in.includes(row[field]);
         }
+        // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+        if (cond === null) return (row[field] ?? null) === null;
         return row[field] === cond;
     });
 }
@@ -87,11 +90,11 @@ const TABLES: Record<string, any[]> = {
     sys_user: ['u_member', 'u_exmember', 'u_gone', 'u_global', 'u_admin', 'u_posex', 'u_posmember', 'u_orgless']
         .map((id) => ({ id, email: `${id}@example.com` })),
     sys_user_permission_set: [
-        { user_id: 'u_member', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_exmember', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_gone', permission_set_id: 'ps_meta', organization_id: ALPHA },
-        { user_id: 'u_global', permission_set_id: 'ps_meta', organization_id: null },
-        { user_id: 'u_admin', permission_set_id: 'ps_admin', organization_id: null },
+        { user_id: 'u_member', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_exmember', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_gone', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
+        { user_id: 'u_global', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: null },
+        { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
     ],
     sys_permission_set: [
         { id: 'ps_meta', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata', 'studio.access'] },
@@ -136,9 +139,9 @@ function rig() {
     const protocol = {
         deletePackage: async (req: any) => {
             deleteRequests.push({ ...req });
-            if (!req?.organizationId && req?.allTenants !== true) {
-                throw Object.assign(new Error('Refusing to uninstall with no organization scope.'), {
-                    code: 'TENANT_SCOPE_REQUIRED', status: 400,
+            if ('organizationId' in (req ?? {}) || 'allTenants' in (req ?? {})) {
+                throw Object.assign(new Error('organizationId / allTenants are retired request keys.'), {
+                    code: 'INVALID_REQUEST', status: 400,
                 });
             }
             return { success: true, deletedCount: 0, failedCount: 0, deleted: [], failed: [], cleanups: [] };
@@ -248,7 +251,7 @@ describe('[#20515] what the rule leaves unchanged', () => {
         const r = rig();
         const answer = await r.call('DELETE', 'member', `/packages/${PKG}`);
         expect(answer.status).toBe(200);
-        expect(r.deleteRequests).toEqual([{ packageId: PKG, organizationId: ALPHA }]);
+        expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
     });
 
     it('CONTROL · the same current member passes PATCH /packages/:id/disable: 200, and the package is switched off', async () => {
@@ -261,13 +264,14 @@ describe('[#20515] what the rule leaves unchanged', () => {
         const r = rig();
         const answer = await r.call('DELETE', 'posmember', `/packages/${PKG}`);
         expect(answer.status).toBe(200);
-        expect(r.deleteRequests).toEqual([{ packageId: PKG, organizationId: ALPHA }]);
+        expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
     });
 
-    it('a GLOBAL grant still passes the gate for the removed member — the door\'s own organization check answers, not the gate', async () => {
+    it('a GLOBAL grant still passes the gate for the removed member — the uninstall proceeds, naming no organization', async () => {
         const r = rig();
         const answer = await r.call('DELETE', 'global', `/packages/${PKG}`);
-        expect({ status: answer.status, code: answer.code }).toEqual({ status: 400, code: 'TENANT_SCOPE_REQUIRED' });
+        expect(answer.status).toBe(200);
+        expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
         // …and the disable door, which asks no organization, lands — the
         // positive control that makes `switchedOff` false above mean something.
         const d = rig();
@@ -278,8 +282,7 @@ describe('[#20515] what the rule leaves unchanged', () => {
     it('platform-admin standing (unscoped admin_full_access) passes with org_alpha active, and with no organization at all', async () => {
         expect((await rig().call('DELETE', 'admin', `/packages/${PKG}`)).status).toBe(200);
         expect((await rig().call('PATCH', 'admin', `/packages/${PKG}/disable`)).status).toBe(200);
-        const orgless = await rig().call('DELETE', 'admin_orgless', `/packages/${PKG}`);
-        expect({ status: orgless.status, code: orgless.code }).toEqual({ status: 400, code: 'TENANT_SCOPE_REQUIRED' });
+        expect((await rig().call('DELETE', 'admin_orgless', `/packages/${PKG}`)).status).toBe(200);
         expect((await rig().call('PATCH', 'admin_orgless', `/packages/${PKG}/disable`)).status).toBe(200);
     });
 

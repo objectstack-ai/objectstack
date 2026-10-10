@@ -628,7 +628,6 @@ export const ERROR_CODE_LEDGER = {
     'REGISTRY_TYPE_NOT_CANONICAL',  // [#9111] a SchemaRegistry overlay entry was offered a non-canonical metadata `type` — the mint door asserts, the caller folds
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic; [#9174] also refused on `revertCommit`'s restore limb, per-item on `failed[]`, NOT batch-atomic
-    'TENANT_SCOPE_REQUIRED',      // [#7780] destructive call named neither an organization nor an explicit cross-tenant intent; needs an explicit opt-in
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
     'VERSION_NOT_FOUND',
@@ -1104,6 +1103,13 @@ export const ERROR_CODE_LEDGER = {
     'MAPPING_NOT_FOUND',
     'NODE_FAILURE',
     'NO_EXECUTOR',
+    // [ADR-0131 D6] The stored-flow credential move (`flow-credential-migration.ts`)
+    // records a legacy organization-scoped flow row it cannot re-save on its
+    // report's `failed[]` with the code the metadata protocol refuses such a
+    // write with. Report data in the `sys_migration` receipt and an `error` log
+    // line — no HTTP door; registered under `@objectstack/metadata-protocol`
+    // too, so this row is provenance, not identity.
+    'NOT_OVERRIDABLE',
     'RESUME_IN_PROGRESS',         // duplicate resume refused while the first is running
     'RUN_NOT_FOUND',              // no suspension for this run id — unresumable for good
     'STORE_UNAVAILABLE',          // durable suspended-run store unreadable — existence unknown
@@ -1472,6 +1478,10 @@ export const ERROR_CODE_LEDGER = {
     // way, the same posture `@objectstack/spec`'s own `STACK_*` rows above
     // record.
     'INVALID_ARTIFACT_PACKAGES',
+  ],
+  '@objectstack/verify': [
+    // [#22301] An in-process test door, no HTTP path: a malformed call to the handle's update doors throws an Error carrying code / status / statusCode.
+    'INVALID_REQUEST',
   ],
 } as const satisfies Record<string, readonly string[]>;
 
@@ -1868,19 +1878,5 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       'ONE waiver rather than a row per driver: with one constructor there is one stamp ' +
       'site, and rows for packages that stamp nothing would be the dead weight this file\'s ' +
       'gate refuses.',
-  },
-  {
-    package: '@objectstack/runtime',
-    code: 'TENANT_SCOPE_REQUIRED',
-    registeredUnder: '@objectstack/metadata-protocol',
-    reason: 'The door mirrors the producer\'s refusal; it is not a second emitter. ' +
-      '`DELETE /packages/:id` (domains/packages.ts, `requireUninstallOrganizationScope`) ' +
-      'asks `deletePackage`\'s organization-scope question BEFORE ' +
-      '`registry.uninstallPackage`, and answers with the code `deletePackage` refuses a ' +
-      'scope-less uninstall with (an uninstall across every organization must be declared, ' +
-      'never inferred from a missing one), so a refused uninstall changes nothing. The door ' +
-      'never sends `allTenants`, so its condition is exactly the producer\'s "no ' +
-      'organization"; the protocol keeps its own refusal as the second line and stays the ' +
-      'registered emitter.',
   },
 ];

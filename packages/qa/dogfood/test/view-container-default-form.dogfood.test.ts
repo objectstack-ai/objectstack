@@ -94,7 +94,7 @@ const fixture = defineStack({
     version: '0.0.1',
     type: 'app',
     name: 'Default form fixture',
-    engines: { protocol: '^17' },
+    engines: { protocol: '^18' },
   },
   objects: [object('crm_lead'), object('crm_contact'), object('crm_account')],
   views: [

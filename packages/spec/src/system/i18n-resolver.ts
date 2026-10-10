@@ -68,6 +68,7 @@
  */
 
 import { mapFlowNodeList } from '../conversions/walk.js';
+import { flowScreenFieldOptionKey } from '../automation/flow-screen-option-key.js';
 import { pageComponentSlotPositions } from '../ui/component.zod.js';
 
 import type {
@@ -1843,6 +1844,67 @@ function lookupPageAttr(
 }
 
 /**
+ * Authored text in either `I18nLabel` form: a non-empty string, or the
+ * non-empty entries of an inline locale map. `undefined` when the value
+ * authors no text, which is how a `page:header` with no `title` (or an empty
+ * one) reads: the renderer draws no heading of its own for it either.
+ */
+function authoredLabelText(value: unknown): string | Record<string, string> | undefined {
+  if (typeof value === 'string') return value.length > 0 ? value : undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+/**
+ * Do two authored values say the same text? Strings compare as strings; two
+ * inline locale maps compare as sets of entries (key order is not text).
+ * Mirrors the CLI extractor's `sameAuthored`, which decides whether
+ * `os i18n extract` offers `pages.<name>.title` at all.
+ */
+function sameAuthoredText(a: string | Record<string, string>, b: unknown): boolean {
+  const other = authoredLabelText(b);
+  if (other === undefined) return false;
+  if (typeof a === 'string' || typeof other === 'string') return a === other;
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(other).sort();
+  return aKeys.length === bKeys.length && aKeys.every((k, i) => bKeys[i] === k && a[k] === other[k]);
+}
+
+/**
+ * The ONE header-title resolution for a root-level `page:header`. A region's
+ * entry and a `slots.<slot>` entry both reach it through the same visitor in
+ * {@link translatePage}, so the two roots cannot disagree.
+ *
+ * A bundle translates an attribute. It does not put one attribute in place of
+ * another over text the author wrote. The order:
+ *
+ *  1. the bundle's `pages.<name>.title`, across the locale chain;
+ *  2. the header's AUTHORED title, left as written: a template such as
+ *     `'{name}'`, a plain string, or an inline locale map;
+ *  3. the bundle's `pages.<name>.label`, in two cases only: the header authors
+ *     no title, or its title restates the page's own authored `label`. In the
+ *     second case the label's translation IS a translation of that text, and
+ *     `os i18n extract` offers no `title` key for such a header (it offers the
+ *     label alone), so reading the label here is what translates it.
+ *
+ * `undefined` means "leave the authored title alone".
+ */
+function resolvePageHeaderTitle(
+  bundleTitle: string | undefined,
+  bundleLabel: string | undefined,
+  authoredTitle: unknown,
+  authoredPageLabel: unknown,
+): string | undefined {
+  if (bundleTitle !== undefined) return bundleTitle;
+  if (bundleLabel === undefined) return undefined;
+  const own = authoredLabelText(authoredTitle);
+  if (own === undefined || sameAuthoredText(own, authoredPageLabel)) return bundleLabel;
+  return undefined;
+}
+
+/**
  * The copy keys `pages.<name>.components.<id>` carries (#6080). Measured
  * against `ComponentPropsMap` — see the schema's own note for which component
  * declares which.
@@ -2197,9 +2259,13 @@ export function walkAddressedPageComponents(
  * mutated.
  *
  * Header copy is addressed by **page name** rather than by component id because
- * `page:header` instances carry no stable id in practice. `title` falls back to
- * `pages.<name>.label` so translators need not repeat a string that is normally
- * identical to the page's nav label.
+ * `page:header` instances carry no stable id in practice. The header title is
+ * `pages.<name>.title`; when the bundle omits it, the header keeps its
+ * AUTHORED title, and `pages.<name>.label` stands in only where the header
+ * authors no title or its title restates the page's own `label`, so a
+ * translator need not repeat a string identical to the page's nav label
+ * ({@link resolvePageHeaderTitle}). A label never replaces a header title
+ * that says something else, a dynamic `'{name}'` above all.
  *
  * **One component, one address.** A ROOT-LEVEL `page:header` — an entry of a
  * region's `components[]`, or of a `slots.<slot>` on a `kind: 'slotted'` page
@@ -2283,10 +2349,12 @@ export function translatePage<T extends PageLike>(
   const name = doc.name;
   if (!name || !bundle) return doc;
 
-  const label = lookupPageAttr(bundle, name, 'label', opts) ?? doc.label;
+  const bundleLabel = lookupPageAttr(bundle, name, 'label', opts);
+  const label = bundleLabel ?? doc.label;
   const description = lookupPageAttr(bundle, name, 'description', opts) ?? doc.description;
-  const headerTitle = lookupPageAttr(bundle, name, 'title', opts)
-    ?? lookupPageAttr(bundle, name, 'label', opts);
+  // The header title is decided per header, against what that header authors
+  // (`resolvePageHeaderTitle`); only the bundle half is page-wide.
+  const bundleHeaderTitle = lookupPageAttr(bundle, name, 'title', opts);
   const headerSubtitle = lookupPageAttr(bundle, name, 'subtitle', opts);
 
   // The traversal — roots, descent, depth cap, cycle guard, collision
@@ -2349,6 +2417,11 @@ export function translatePage<T extends PageLike>(
     // root level — nested components are reached by the id route only.
     if (nested) return next;
     if (next.type !== PAGE_HEADER_COMPONENT) return next;
+    // One call for a region root and a slot root alike: both arrive here with
+    // `nested: false`, so the fallback order cannot differ between them.
+    const headerTitle = resolvePageHeaderTitle(
+      bundleHeaderTitle, bundleLabel, next.properties?.title, doc.label,
+    );
     if (headerTitle === undefined && headerSubtitle === undefined) return next;
     return {
       ...next,
@@ -2692,6 +2765,24 @@ export function objectLabelKey(objectName: string): string {
  */
 export function objectValidationMessageKey(objectName: string, ruleName: string): string {
   return `objects.${objectName}._validations.${ruleName}.message`;
+}
+
+/**
+ * Dot-notation i18n key for a refused `end` node's message —
+ * `flows.<flow>.refusals.<node_id>.message` (#22450).
+ *
+ * A sibling of {@link objectValidationMessageKey}, spelled here for the same
+ * reason: its consumer holds an `II18nService` (which takes a key), not a
+ * `TranslationBundle`. Used by the automation engine, which picks the
+ * translated TEMPLATE in the run's locale (`AutomationContext.locale`) before
+ * it renders the `{{ }}` holes. The run stores the refusal already rendered,
+ * so nothing downstream could translate it afterwards.
+ *
+ * `flowName` is `Flow.name` and `nodeId` is the refusing `end` node's
+ * `FlowNode.id`, the same addressing the `screens` group uses.
+ */
+export function flowRefusalMessageKey(flowName: string, nodeId: string): string {
+  return `flows.${flowName}.refusals.${nodeId}.message`;
 }
 
 export function resolveObjectFieldLabels(
@@ -3818,6 +3909,21 @@ export interface FlowScreenFieldLike {
   placeholder?: string;
   /** Help text drawn under the input (`ScreenFieldConfig.inlineHelpText`). */
   inlineHelpText?: string;
+  /**
+   * Select choices (`ScreenFieldConfig.options`, forwarded verbatim as
+   * `ScreenFieldSpec.options`). Each option's `label` is overlaid from
+   * `options.<value>`, the value read as text ({@link flowScreenFieldOptionKey}).
+   */
+  options?: ReadonlyArray<FlowScreenFieldOptionLike>;
+  [key: string]: unknown;
+}
+
+/** Minimal screen-field option shape consumed by {@link resolveFlowScreenFieldOptions}. */
+export interface FlowScreenFieldOptionLike {
+  /** The stored value — also the option's address as text (`String(value)`). */
+  value?: unknown;
+  /** The label the select shows, and the string a translation replaces. */
+  label?: string;
   [key: string]: unknown;
 }
 
@@ -3839,6 +3945,10 @@ export interface FlowLike {
   /** `Flow.name` — the machine name the `flows` group is keyed by. */
   name: string;
   label?: string;
+  /** The completion toast (`Flow.successMessage`, served verbatim as `AutomationResult.successMessage`). */
+  successMessage?: string;
+  /** The failure toast (`Flow.errorMessage`, served verbatim as `AutomationResult.errorMessage`). */
+  errorMessage?: string;
   nodes?: FlowNodeLike[];
   [key: string]: any;
 }
@@ -3875,12 +3985,17 @@ const SCREEN_NODE_TYPE = 'screen';
  * mirrored from the issue (#7646's report):
  *
  * - `description` — a screen's body text (`config.description`) is
- *   guidance-refused by the schema, outside the recorded #7646 ruling's
- *   enumeration (per-flow label, per-screen title, per-field copy). Growing
- *   the face is a schema-side ruled step, never a resolver-side accretion.
- * - runner chrome (Cancel / Submit / the terminal toast) — the console's own
- *   words in every app, ruled into the console's message catalog, not the
- *   per-app bundle.
+ *   guidance-refused by the schema, and the family pin
+ *   (`flows-translation-face.test.ts`) records it as owed (#22507): the
+ *   server renders it per run as a `{{ }}` template, so a translation has to
+ *   be picked before that render, which an overlay on the served screen
+ *   cannot do. Growing the face is a schema-side ruled step, never a
+ *   resolver-side accretion.
+ * - runner chrome (Cancel / Submit / the toast's own sentence, `Flow "…"
+ *   completed`) — the console's own words in every app, ruled into the
+ *   console's message catalog, not the per-app bundle. The flow's AUTHORED
+ *   toast text is not chrome: it is keyed at the flow level,
+ *   {@link FLOW_TERMINAL_MESSAGE_KEYS}.
  */
 export const FLOW_SCREEN_COPY_KEYS = ['title'] as const;
 
@@ -3904,13 +4019,115 @@ export type FlowScreenCopyKey = typeof FLOW_SCREEN_COPY_KEYS[number];
  * report's `help` is not a key here: the schema answers `help` / `helpText` /
  * `hint` / `tooltip` by name with the rename to `inlineHelpText`.
  *
- * `options` is absent because `ScreenFieldConfig.options[].value` is
- * unconstrained, so a value-keyed map cannot address the labels. It is refused
- * by name with guidance at the schema.
+ * `options` is a key of the same field face (#22507) but deliberately NOT in
+ * this list: it is a map over the field's `options[]` array, not one string
+ * spread onto the key it names, so a consumer walking this list would write
+ * the map over the array. It is resolved by
+ * {@link resolveFlowScreenFieldOptions}, keyed by each option's value read as
+ * text ({@link flowScreenFieldOptionKey}).
  */
 export const FLOW_SCREEN_FIELD_COPY_KEYS = ['label', 'placeholder', 'inlineHelpText'] as const;
 
 export type FlowScreenFieldCopyKey = typeof FLOW_SCREEN_FIELD_COPY_KEYS[number];
+
+/**
+ * The flow-level copy keys besides `label` (#22507): the terminal toasts,
+ * `flows.<flow>.successMessage` and `flows.<flow>.errorMessage`, each spelled
+ * as `FlowSchema` spells the string it overlays.
+ *
+ * The engine carries both VERBATIM on the terminal `AutomationResult` (plain
+ * strings, never interpolated), so a runner translates the served string by
+ * handing it to {@link translateFlow} under its own key, the way it already
+ * resolves the served `flowLabel`. Exported for the same one-list-both-sides
+ * reason as {@link FLOW_SCREEN_COPY_KEYS}: the CLI's skeleton writer offers
+ * exactly these keys, and `translation.test.ts` pins the schema to them.
+ */
+export const FLOW_TERMINAL_MESSAGE_KEYS = ['successMessage', 'errorMessage'] as const;
+
+export type FlowTerminalMessageKey = typeof FLOW_TERMINAL_MESSAGE_KEYS[number];
+
+/** One flow-level toast string, resolved across the locale chain like {@link lookupFlowLabel}. */
+function lookupFlowTerminalMessage(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  key: FlowTerminalMessageKey,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.flows?.[flowName]?.[key];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * One option's translated label, resolved across the locale chain — option
+ * by option, so a partial `zh` map still falls back to the next DECLARED
+ * locale for the options it omits.
+ */
+function lookupFlowScreenFieldOptionLabel(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  nodeId: string,
+  fieldName: string,
+  optionKey: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const map = pickData(bundle, code)?.flows?.[flowName]?.screens?.[nodeId]?.fields?.[fieldName]?.options;
+    if (!map || typeof map !== 'object') continue;
+    // Own keys only: an option whose value reads as `toString` must not
+    // resolve to the map's prototype member.
+    if (!Object.prototype.hasOwnProperty.call(map, optionKey)) continue;
+    const candidate = (map as Record<string, unknown>)[optionKey];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve a screen field's option labels against
+ * `flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>`
+ * (#22507), each option keyed by its value read as text
+ * ({@link flowScreenFieldOptionKey}, `String(value)`), falling back to the
+ * authored `label` option by option.
+ *
+ * Takes the field rather than a bare name for the reason
+ * {@link resolveFlowScreenTitle} takes the screen: a runner holding the
+ * served `ScreenFieldSpec` (`options` forwarded verbatim by the executor)
+ * passes it as-is, beside the `ScreenSpec.nodeId` it already holds.
+ *
+ * Returns the field's own `options` array — the SAME reference — when it
+ * declares none, carries no name, or nothing resolved, so a caller can tell
+ * "translated" from "untouched" by identity. Only the declared options are
+ * walked: a bundle key naming no option of the field adds nothing (the lint
+ * reports it, `translation-option-key-unknown`).
+ */
+export function resolveFlowScreenFieldOptions(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  nodeId: string,
+  field: FlowScreenFieldLike,
+  opts?: ResolveOptions,
+): FlowScreenFieldLike['options'] {
+  const options = field?.options;
+  if (!Array.isArray(options) || !bundle || !flowName || !nodeId) return options;
+  const fieldName = typeof field.name === 'string' && field.name.length > 0 ? field.name : undefined;
+  if (!fieldName) return options;
+  let changed = false;
+  const next = options.map((option: FlowScreenFieldOptionLike) => {
+    if (!option || typeof option !== 'object') return option;
+    const label = lookupFlowScreenFieldOptionLabel(
+      bundle, flowName, nodeId, fieldName, flowScreenFieldOptionKey(option.value), opts,
+    );
+    if (label === undefined) return option;
+    changed = true;
+    return { ...option, label };
+  });
+  return changed ? next : options;
+}
 
 function lookupFlowLabel(
   bundle: TranslationBundle | undefined,
@@ -4004,10 +4221,20 @@ export function resolveFlowScreenTitle(
 /**
  * Apply the active locale to a flow metadata document (#7646's recommendation
  * B, the resolver half #11287): translates the flow's own `label` against
- * `flows.<name>.label`, and — for every `type: 'screen'` node with an id —
- * the screen heading and per-field copy against
- * `flows.<name>.screens.<node_id>.{title,fields.<field_name>.{label,placeholder,inlineHelpText}}`.
+ * `flows.<name>.label`, its terminal toasts against
+ * `flows.<name>.{successMessage,errorMessage}` (#22507), and — for every
+ * `type: 'screen'` node with an id — the screen heading and per-field copy
+ * against
+ * `flows.<name>.screens.<node_id>.{title,fields.<field_name>.{label,placeholder,inlineHelpText,options.<value>}}`.
  * The input document is not mutated.
+ *
+ * **The toasts overlay only what the flow authors.** A flow with no
+ * `successMessage` gets none from the bundle: the runner then draws its own
+ * chrome sentence, and a translation must not turn that into a message the
+ * author never wrote. Same rule for `errorMessage`. Each option of a screen
+ * field is overlaid by its value read as text
+ * ({@link resolveFlowScreenFieldOptions}); a bundle key naming no declared
+ * option adds nothing.
  *
  * **Where the translated title lands.** The bundle's `title` is written to
  * `config.title` even when the author declared none: the executor builds the
@@ -4059,7 +4286,12 @@ export function resolveFlowScreenTitle(
  * label the engine serves on every run result as `AutomationResult.flowLabel`,
  * and draws the answer (the API name when no label was served) in its header
  * and its completion toast, read at the `.objectui-sha` pin `0abd4f9f8`. Both
- * `flows` rows in the ledger are `live`.
+ * `flows` rows in the ledger are `live`. The terminal toasts and the option
+ * labels (#22507) take the same client side — the runner hands the served
+ * `successMessage` / `errorMessage` to this function as it does the label,
+ * and overlays each served field's options through
+ * {@link resolveFlowScreenFieldOptions} — in a downstream objectui change;
+ * their ledger rows are `planned` until it lands.
  */
 export function translateFlow<T extends FlowLike>(
   flow: T,
@@ -4071,6 +4303,15 @@ export function translateFlow<T extends FlowLike>(
   if (!name || !bundle) return flow;
 
   const label = lookupFlowLabel(bundle, name, opts);
+  // [#22507] The terminal toasts — only where the flow authors one (see the
+  // docblock: a bundle never adds a toast).
+  const messages: Partial<Record<FlowTerminalMessageKey, string>> = {};
+  for (const key of FLOW_TERMINAL_MESSAGE_KEYS) {
+    if (typeof flow[key] !== 'string') continue;
+    const translated = lookupFlowTerminalMessage(bundle, name, key, opts);
+    if (translated !== undefined) messages[key] = translated;
+  }
+  const messagesChanged = Object.keys(messages).length > 0;
 
   const nodes = Array.isArray(flow.nodes)
     ? mapFlowNodeList(
@@ -4081,10 +4322,11 @@ export function translateFlow<T extends FlowLike>(
     : undefined;
   const nodesChanged = nodes !== undefined && nodes !== flow.nodes;
 
-  if (label === undefined && !nodesChanged) return flow;
+  if (label === undefined && !messagesChanged && !nodesChanged) return flow;
   return {
     ...flow,
     ...(label !== undefined ? { label } : {}),
+    ...messages,
     ...(nodesChanged ? { nodes } : {}),
   };
 }
@@ -4140,6 +4382,9 @@ function translateScreenField(
   const fieldName = typeof field.name === 'string' && field.name.length > 0 ? field.name : undefined;
   if (!fieldName) return field;
   const copy = lookupFlowScreenFieldCopy(bundle, flowName, nodeId, fieldName, opts);
-  if (!copy) return field;
-  return { ...field, ...copy };
+  // [#22507] Option labels, keyed by each option's value read as text.
+  const options = resolveFlowScreenFieldOptions(bundle, flowName, nodeId, field, opts);
+  const optionsChanged = options !== field.options;
+  if (!copy && !optionsChanged) return field;
+  return { ...field, ...copy, ...(optionsChanged ? { options } : {}) };
 }

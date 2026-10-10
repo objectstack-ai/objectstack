@@ -108,6 +108,11 @@ function matchesWhere(row: any, where: any): boolean {
             if (!(cond as any).$in.includes(row[field])) return false;
             continue;
         }
+        // An absent column reads as NULL, as it does in SQL (`organization_id: null`).
+        if (cond === null) {
+            if ((row[field] ?? null) !== null) return false;
+            continue;
+        }
         if (row[field] !== cond) return false;
     }
     return true;
@@ -143,10 +148,10 @@ function permissionStore(opts: { syncSchemas: () => Promise<void> }) {
         sys_position: [],
         sys_position_permission_set: [],
         sys_user_permission_set: [
-            { id: 'ups_member', user_id: 'u_member', permission_set_id: 'ps_install', organization_id: null },
-            { id: 'ups_exmember', user_id: 'u_exmember', permission_set_id: 'ps_install', organization_id: null },
-            { id: 'ups_orgless', user_id: 'u_orgless', permission_set_id: 'ps_install', organization_id: null },
-            { id: 'ups_session', user_id: 'u_session', permission_set_id: 'ps_install', organization_id: null },
+            { id: 'ups_member', user_id: 'u_member', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: null },
+            { id: 'ups_exmember', user_id: 'u_exmember', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: null },
+            { id: 'ups_orgless', user_id: 'u_orgless', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: null },
+            { id: 'ups_session', user_id: 'u_session', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: null },
         ],
         sys_permission_set: [
             { id: 'ps_install', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access'] },

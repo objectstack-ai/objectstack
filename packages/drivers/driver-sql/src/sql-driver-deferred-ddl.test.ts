@@ -284,3 +284,75 @@ describe('deferred initObjects does not ensure the database exists (#13028)', ()
     expect(await (driver as any).knex.schema.hasTable('widgets')).toBe(true);
   });
 });
+
+/**
+ * [#22506] A rotation-declared object (ADR-0057 P2) is previewed from the
+ * rotator's own facts.
+ *
+ * The rotator keeps such an object as its CURRENT shard (`<table>__r<key>`)
+ * plus a read VIEW under the base name. The preview used to ask `hasTable` of
+ * the base name — false for a view — so it listed `create_table` on every
+ * plan, and the flush, which takes the sync's rotation branch, created
+ * nothing: `os migrate plan` could never read "in sync" on a database holding
+ * `sys_activity`, the audit plugin's rotated object. These cases pin both
+ * halves: an object that is already sharded previews no work, and one that
+ * has no shard yet still previews the `create_table` the flush performs.
+ */
+describe('a rotation-declared object previews from the rotator\'s facts (#22506)', () => {
+  let driver: SqlDriver;
+
+  afterEach(async () => {
+    await driver.disconnect();
+  });
+
+  const ROTATED = {
+    name: 'rot_audit',
+    fields: { summary: { type: 'text' } },
+    lifecycle: { class: 'telemetry', storage: { strategy: 'rotation', shards: 3, unit: 'day' } },
+  };
+
+  async function physical(d: SqlDriver): Promise<Record<string, string>> {
+    const raw: any = await (d as any).knex.raw(
+      "SELECT name, type FROM sqlite_master WHERE name LIKE 'rot_audit%' AND name NOT LIKE '%autoindex%'",
+    );
+    const rows: Array<{ name: string; type: string }> = Array.isArray(raw) ? raw : raw?.rows ?? [];
+    return Object.fromEntries(rows.map((r) => [r.name, r.type]));
+  }
+
+  it('already sharded — the current shard and the read view exist — previews no work', async () => {
+    driver = makeDriver();
+    // The boot path: the rotator creates the current shard and the view.
+    await driver.initObjects([ROTATED]);
+    const shapes = await physical(driver);
+    // The shape the old probe misread: the base name is a VIEW, the data a shard.
+    expect(shapes.rot_audit).toBe('view');
+    expect(Object.entries(shapes).filter(([n, t]) => /^rot_audit__r\d{8}$/.test(n) && t === 'table')).toHaveLength(1);
+
+    driver.setDeferredDdl(true);
+    await driver.initObjects([ROTATED]);
+    expect(await driver.previewDeferredSchemaWork()).toEqual([]);
+  });
+
+  it('control: never sharded — previews create_table, and creates nothing', async () => {
+    driver = makeDriver();
+    driver.setDeferredDdl(true);
+    await driver.initObjects([ROTATED]);
+
+    expect(await driver.previewDeferredSchemaWork()).toEqual([
+      { table: 'rot_audit', kind: 'create_table', columns: ['summary'] },
+    ]);
+    expect(await physical(driver)).toEqual({});
+  });
+
+  it('converges: once the flush has sharded it, the next preview is empty', async () => {
+    driver = makeDriver();
+    driver.setDeferredDdl(true);
+    await driver.initObjects([ROTATED]);
+    await driver.flushDeferredSchemaDdl();
+    expect((await physical(driver)).rot_audit).toBe('view');
+
+    driver.setDeferredDdl(true);
+    await driver.initObjects([ROTATED]);
+    expect(await driver.previewDeferredSchemaWork()).toEqual([]);
+  });
+});

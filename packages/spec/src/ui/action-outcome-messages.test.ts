@@ -12,6 +12,14 @@
  * runner default) and the `${result.*}` INTERPOLATION are the console's — the
  * reader is objectstack-ai/objectui#11344, a later link of the same ruling,
  * carried from the pin this repo builds against (`.objectui-sha` =
+ * `20c6d351a`, re-read there 2026-10-10:
+ * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
+ * byte-identical in body to `47b1f0bb7` and MOVED up by 6, `1504` -> `1498`
+ * (objectui#6349 batch 4, objectui `d32869883`: `ActionContext` and
+ * `ActionResult` declared once, in the import block and declarations above it).
+ * At `47b1f0bb7`, re-read there 2026-10-09:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
  * `f0268ad78`, re-read there 2026-10-09:
  * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
  * byte-identical in body to `a58626c88` and MOVED by 7 (objectui#11695 added the

@@ -64,7 +64,7 @@ describe('EndConfigSchema — the `end` node contract: it may refuse the run wit
     expect(issue.message).toContain('{{ record.name }}');
   });
 
-  it('REFUSES a single-brace token in the `message` — a text slot reads `{{ }}` holes (#22110)', () => {
+  it('REFUSES a single-brace token in the `message` — a text slot reads `{{ }}` holes', () => {
     const result = EndConfigSchema.safeParse({ outcome: 'refused', message: 'Refused: {record.name}' });
     expect(result.success).toBe(false);
     if (result.success) return;

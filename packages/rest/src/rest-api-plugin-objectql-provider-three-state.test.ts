@@ -259,7 +259,7 @@ const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_
  */
 const engineGranting = () => ({
     find: async (object: string) => {
-        if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg' }];
+        if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' }];
         if (object === 'sys_permission_set') {
             return [{ id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] }];
         }

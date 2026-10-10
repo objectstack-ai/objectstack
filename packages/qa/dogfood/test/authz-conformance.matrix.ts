@@ -10,7 +10,7 @@
 // file exists and that the row ↔ proof pairing is MUTUAL (#7976 below), AND
 // ratchets completeness at ROUTE-FAMILY AND DISPATCHER-DOMAIN granularity over
 // the two route ledgers, plus a curated table of named gates and transport
-// tripwires (`discover()`: 19 probes over 14 named source files) — a new REST
+// tripwires (`discover()`: 20 probes over 15 named source files) — a new REST
 // route FAMILY or dispatcher DOMAIN is UNCLASSIFIED, a deleted named guard is
 // STALE, and either breaks CI.
 //
@@ -67,8 +67,8 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 39 ledger keys, 7 are classified by rows below that already pinned
-// the same surface through a probe; the other 32 are enumerated one by one,
+// Of the 39 ledger keys, 9 are classified by rows below (re-derived when the
+// `/i18n` domain left the baseline, #22432); the other 30 are enumerated one by one,
 // dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
 // whose MAX note dates every step down from the 34 of 40 it held on the
 // 2026-08-31 adoption day. That list can only get shorter: growth, staleness,
@@ -76,7 +76,7 @@
 // 2026-08-31 those surfaces minted no key at all, so nothing about them was
 // visible in either direction.
 //
-// Each of the 19 probes DECLARES its instrument kind
+// Each of the 20 probes DECLARES its instrument kind
 // (ROUTE_ENUMERATION / GATE_PIN / TRIPWIRE — see the companion test), and a
 // non-tripwire probe that mints ZERO keys fails as a DEAD PROBE. That closes a
 // blind-spot mechanism neither UNCLASSIFIED nor STALE can reach: both are
@@ -98,14 +98,14 @@
 // [commit 2ce1eb41b] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
-// 44 of 52 carry no `covers` key at all (8 rows, 17 keys, every one an
-// HTTP/transport pin), and 38 of the file's 45 `enforced` rows are exactly
+// 44 of 54 carry no `covers` key at all (10 rows, 20 keys, every one an
+// HTTP/transport pin), and 38 of the file's 47 `enforced` rows are exactly
 // that in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
 // grant-validity-window row among them (see their own blocks further down)
 // are the normal case, not an exception. Of the
-// 17 `covers` keys that DO exist, 6 are GATE pins tied to the enforcement call
+// 20 `covers` keys that DO exist, 7 are GATE pins tied to the enforcement call
 // itself, not merely a function name — delete `shouldDenyAnonymous` from
-// `/actions`, `/automation`, `/packages` or `/analytics`, or drop the MCP
+// `/actions`, `/automation`, `/packages`, `/analytics` or `/i18n`, or drop the MCP
 // context-threading / stdio principal binding, and the pinned key vanishes from source, its row
 // goes STALE, and CI catches the regression. That anti-regression property is
 // real and is what this file mechanically delivers. Outside the curated
@@ -294,6 +294,18 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     // family key needs.
     covers: ['rest-family:rest-route-ledger.ts:openapi'],
     note: 'Measured on a booted showcase before the change: an unauthenticated caller was served the document and the viewer page with 200, just as a signed-in caller was, while the record doors on the same boot answered it 401 — ADR-0056 D2 is default-deny and no ADR-0138 D2 door class names these endpoints. The cited proof drives both endpoints anonymously (401, the REST flat envelope, nothing of either served) and with a signed-in member (200, the document / the viewer page) on one boot. The environment-scoped twin mounts only under project scoping, which the showcase does not enable; it is the same handler closure, pinned per base in rest/src/rest-api-description-anonymous-deny.test.ts beside the gated-session 403 and the permission-store-outage 503. The viewer page fetches the document from the browser, and that request carries the browser\'s session (measured with the real viewer in a browser), so a signed-in browser is served on both endpoints; a deployment that publishes its API description to readers without an account publishes a static copy of the document instead.' },
+  // #22432 — the `/i18n` dispatcher domain, under the ruling recorded on #22146
+  // (the domain gains the domain-level anonymous refusal every other dispatcher
+  // domain has, with an objectui companion for the Console's sign-in page).
+  // Every face converges on ONE handler body, `handleI18nRequest`, so one
+  // domain-wide floor there covers them all — the `/analytics` shape above.
+  { id: 'anonymous-deny-i18n', summary: 'anonymous-deny on the translation dispatcher surface', state: 'enforced',
+    enforcement: 'runtime/domains/i18n.ts handleI18nRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the provider probe (so a 401-vs-501 difference cannot fingerprint whether the deployment carries an i18n provider) and ahead of every face (so an anonymous request that leaves out its locale is a 401, never the 400 describing what a face reads); every face answers the dispatcher-wrapper 401 UNAUTHENTICATED and serves nothing of the bundle, and a signed-in caller is served as before',
+    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
+    // The DISPATCHER domain at ledger granularity, beside the gate pin — the
+    // pairing the `/packages` and `/analytics` rows make.
+    covers: ['i18n:domains/i18n.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/i18n'],
+    note: 'Ungated, an unauthenticated caller was served the application\'s translation bundle (the labels of its objects, fields, apps and pages) while the metadata read of the same objects answered it 401 on the same boot; ADR-0056 D2 is default-deny and no ADR-0138 D2 door class names this domain. Gating the DOMAIN rather than each face keeps a newly added face from arriving ungated. The Console renders its sign-in page from its built-in packs and reads this domain once signed in, so the console pin moved past that change in the same landing. The cited proof drives every mounted face anonymously (401, the dispatcher-wrapper envelope, nothing of the bundle served) and with a signed-in member (200, served) on one boot. The per-face unit pins (anonymous 401 with the provider never consulted, a missing locale and an empty slot still 401, signed-in control unchanged) live in runtime/domains/i18n-anonymous-deny.test.ts.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
   // admission). Neither surface is reachable by a client today; these rows

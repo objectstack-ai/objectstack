@@ -206,6 +206,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "你修改了什么？"
           }
         }
+      },
+      approval_comment: {
+        label: "回复",
+        successMessage: "已发送回复。",
+        params: {
+          comment: {
+            label: "回复内容"
+          },
+          attachments: {
+            label: "附件"
+          }
+        }
       }
     }
   },

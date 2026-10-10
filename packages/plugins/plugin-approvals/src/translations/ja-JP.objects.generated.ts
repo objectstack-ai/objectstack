@@ -206,6 +206,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             label: "何を変更しましたか？"
           }
         }
+      },
+      approval_comment: {
+        label: "返信",
+        successMessage: "返信を投稿しました。",
+        params: {
+          comment: {
+            label: "コメント"
+          },
+          attachments: {
+            label: "添付ファイル"
+          }
+        }
       }
     }
   },
