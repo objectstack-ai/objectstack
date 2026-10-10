@@ -149,36 +149,20 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
     ]);
   });
 
-  it('BOTH DIRECTIONS: an org-scoped read sees its own rows AND env-wide rows, and NOT a third org', async () => {
+  it('[ADR-0131 D6] a read naming an organization sees the env-wide rows only — not its own legacy rows, not another organization\'s', async () => {
     const { engine, protocol } = await boot();
     await seedThreeOrgs(protocol, engine);
 
-    const result = await (protocol as any).auditMetaItem({
-      type: 'view', name: NAME, organizationId: ORG_A,
-    });
-    const actors = actorsOf(result);
-
-    // (1) own-org rows visible — without this the filter is "hides everything".
-    expect(actors).toContain(ACTOR_A);
-    // (2) env-wide rows visible — THE discriminating control. Package-level
-    //     and REST-authored writes are env-wide and must stay in the tab.
-    expect(actors).toContain(ACTOR_ENV);
-    // (3) the third org is gone — the disclosure this card exists to close.
-    expect(actors).not.toContain(ACTOR_B);
-
-    expect(actors).toEqual([ACTOR_A, ACTOR_ENV].sort());
-  });
-
-  it('is symmetric — org_beta sees its own rows plus env-wide, never org_alpha', async () => {
-    const { engine, protocol } = await boot();
-    await seedThreeOrgs(protocol, engine);
-
-    const actors = actorsOf(await (protocol as any).auditMetaItem({
-      type: 'view', name: NAME, organizationId: ORG_B,
-    }));
-
-    expect(actors).toEqual([ACTOR_B, ACTOR_ENV].sort());
-    expect(actors).not.toContain(ACTOR_A);
+    for (const organizationId of [ORG_A, ORG_B]) {
+      const actors = actorsOf(await (protocol as any).auditMetaItem({
+        type: 'view', name: NAME, organizationId,
+      }));
+      // The env-wide rows stay — THE discriminating control: every write is
+      // env-wide and must stay in the tab. No organization's legacy row is
+      // read: the trail is the environment's (#8747's disclosure stays closed
+      // in both directions).
+      expect(actors, organizationId).toEqual([ACTOR_ENV]);
+    }
   });
 
   it('an organization with no rows of its own still sees the env-wide rows, and only those', async () => {
@@ -228,10 +212,10 @@ describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)'
     await plantLegacyOrgSave(engine, ORG_A, 'other_grid', 'carol@alpha.example');
 
     const actors = actorsOf(await (protocol as any).auditMetaItem({
-      type: 'view', name: NAME, organizationId: ORG_A,
+      type: 'view', name: NAME,
     }));
 
     expect(actors).not.toContain('carol@alpha.example');
-    expect(actors).toEqual([ACTOR_A, ACTOR_ENV].sort());
+    expect(actors).toEqual([ACTOR_ENV]);
   });
 });

@@ -198,7 +198,7 @@ async function seedLegacyOrgDraft(
     args: { type: string; name: string; body: unknown; organizationId: string; packageId?: string | null },
 ): Promise<void> {
     await protocol.ensureOverlayIndex();
-    const repo = protocol.getOverlayRepo(args.organizationId);
+    const repo = protocol.legacyOrganizationRepo(args.organizationId);
     await repo.put(
         { type: args.type, name: args.name, org: args.organizationId },
         args.body,
@@ -437,7 +437,7 @@ describe('a package-less organization overlay, two packages shipping its view na
 
     /** The organization read's copies of the view, where the doors find the form. */
     async function servedCopies(protocol: any): Promise<Array<Record<string, any>>> {
-        const org: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_a' });
+        const org: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_a' });
         return (org.items as any[]).filter((v) => v?.name === NAME);
     }
 
@@ -459,7 +459,7 @@ describe('a package-less organization overlay, two packages shipping its view na
      */
     async function storeOpenOverlay(protocol: any, rows: Map<string, Row>) {
         await protocol.ensureOverlayIndex();
-        await protocol.getOverlayRepo('org_a').put(
+        await protocol.legacyOrganizationRepo('org_a').put(
             { type: 'view', name: NAME, org: 'org_a' },
             formView(true, 'Intake (org)'),
             { parentVersion: null, actor: null, source: 'test.legacy-residue', intent: 'runtime-only', state: 'active', packageId: null },
@@ -734,7 +734,7 @@ describe('each package\'s copy of a view container expands into its own package\
     /** An organization overlay of the form, open, as a rollback restores it: the save check never judged it. */
     async function restoreOpenOverlay(protocol: any) {
         await protocol.ensureOverlayIndex();
-        await protocol.getOverlayRepo('org_a').put(
+        await protocol.legacyOrganizationRepo('org_a').put(
             { type: 'view', name: NAME, org: 'org_a' },
             formView(true, 'Intake (org)'),
             { parentVersion: null, actor: null, source: 'test.restored', intent: 'runtime-only', state: 'active', packageId: null },
@@ -762,7 +762,7 @@ describe('each package\'s copy of a view container expands into its own package\
      * judged over the env-wide view list beneath it.
      */
     async function doorsServe(protocol: any): Promise<unknown[]> {
-        const org: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_a' });
+        const org: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_a' });
         const envWide: any = await protocol.getMetaItems({ type: 'view' });
         return (org.items as any[]).filter((view) => anonymousFormIntakeCandidates(view)
             .some((c) => c.slug === SLUG && !anonymousFormIntakeWithdrawnIn(envWide.items, view, c)));
@@ -1012,7 +1012,7 @@ describe('each package\'s copy of a view container expands into its own package\
         /** An organization overlay of the form under `name`, open, as a rollback restores it. */
         async function restoreOpenOverlayAt(protocol: any, name: string) {
             await protocol.ensureOverlayIndex();
-            await protocol.getOverlayRepo('org_a').put(
+            await protocol.legacyOrganizationRepo('org_a').put(
                 { type: 'view', name, org: 'org_a' },
                 { name, label: 'Intake (org)', object: 'task', viewKind: 'form', config: form(true, 'Intake (org)', SLUG) },
                 { parentVersion: null, actor: null, source: 'test.restored', intent: 'runtime-only', state: 'active', packageId: null },

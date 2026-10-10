@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 223,
-    "droppedRefinementSites": 693,
+    "droppedRefinementSites": 701,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -104,6 +104,7 @@
         "manifest.skills.element.triggerConditions.element",
         "manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
+        "manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "manifest.views.element.form",
         "manifest.views.element.form.sections.element.in",
         "manifest.views.element.form.submitBehavior.options[1].url",
@@ -238,7 +239,8 @@
     "api/GetTranslationsResponse": {
       "sites": [
         "translations.flows.valueType.refusals.valueType.message",
-        "translations.flows.valueType.screens.valueType.description"
+        "translations.flows.valueType.screens.valueType.description",
+        "translations.flows.valueType.screens.valueType.title"
       ]
     },
     "api/GetUiViewResponse": {
@@ -316,6 +318,7 @@
         "options[1].manifest.skills.element.triggerConditions.element",
         "options[1].manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
+        "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "options[1].manifest.views.element.form",
         "options[1].manifest.views.element.form.sections.element.in",
         "options[1].manifest.views.element.form.submitBehavior.options[1].url",
@@ -1166,13 +1169,15 @@
     "system/PlatformTranslationBundle": {
       "sites": [
         "valueType.flows.valueType.refusals.valueType.message",
-        "valueType.flows.valueType.screens.valueType.description"
+        "valueType.flows.valueType.screens.valueType.description",
+        "valueType.flows.valueType.screens.valueType.title"
       ]
     },
     "system/PlatformTranslationData": {
       "sites": [
         "flows.valueType.refusals.valueType.message",
-        "flows.valueType.screens.valueType.description"
+        "flows.valueType.screens.valueType.description",
+        "flows.valueType.screens.valueType.title"
       ]
     },
     "system/Schedule": {
@@ -1218,19 +1223,22 @@
     "system/TranslationBundle": {
       "sites": [
         "valueType.flows.valueType.refusals.valueType.message",
-        "valueType.flows.valueType.screens.valueType.description"
+        "valueType.flows.valueType.screens.valueType.description",
+        "valueType.flows.valueType.screens.valueType.title"
       ]
     },
     "system/TranslationData": {
       "sites": [
         "flows.valueType.refusals.valueType.message",
-        "flows.valueType.screens.valueType.description"
+        "flows.valueType.screens.valueType.description",
+        "flows.valueType.screens.valueType.title"
       ]
     },
     "system/TranslationItem": {
       "sites": [
         "flows.valueType.refusals.valueType.message",
-        "flows.valueType.screens.valueType.description"
+        "flows.valueType.screens.valueType.description",
+        "flows.valueType.screens.valueType.title"
       ]
     },
     "ui/Action": {

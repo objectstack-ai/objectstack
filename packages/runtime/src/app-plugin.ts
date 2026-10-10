@@ -783,6 +783,65 @@ export class AppPlugin implements Plugin {
         return owned;
     }
 
+    /**
+     * The config door's half of the residual rule (ADR-0130 D4): what this
+     * bundle's TOP LEVEL carries that none of its `packages[]` bodies declares
+     * is registered under the stack's own `manifest.id`, with the boot's
+     * warning — exactly as the artifact door does it for a compiled artifact.
+     *
+     * The `manifest` service this plugin hands the bundle to in `init()`
+     * registers the package bodies and never the top level of a stack that
+     * carries `packages[]` (`resolveArtifactPackageOrder` answers the bodies
+     * alone). So on a config boot (`os serve objectstack.config.ts`, with or
+     * without `--dev`) such an item was served by no door and the boot said
+     * nothing, while `os build` of the same project booted as an artifact
+     * served it under `manifest.id` and warned.
+     *
+     * ⛔ The rule is not written here. Which items are residual, the key and
+     * owner each is registered under, and the line the boot prints are all
+     * `MetadataPlugin.registerUnclaimedTopLevel`'s, the one copy the artifact
+     * door calls too. This method only says WHERE this door stores: the
+     * metadata service's in-memory registry, the route this plugin already
+     * uses for the code-owned items it surfaces (never persisted to a
+     * writable loader, so a config edit is never shadowed by a stored row).
+     *
+     * One registrar per boot, declared by the composition: on a boot whose
+     * composition runs the artifact door over the same stack
+     * (`securityMetadataRegistrar: 'artifact-door'`), the door registers the
+     * residual and this does nothing. A composition with no metadata service
+     * that can register in memory has no registry to serve the residual from;
+     * it is skipped with a `debug` line, as the security block below is.
+     *
+     * A refusal the rule raises (a residual view container whose own `name`
+     * disagrees with its key) is NOT caught: the artifact boot of the same
+     * stack refuses it too, and the config boot answers the same. `os validate`
+     * reports it before either boot, from the same residual answer
+     * (`unclaimedTopLevel`).
+     */
+    private async registerUnclaimedTopLevel(ctx: PluginContext, appId: string): Promise<void> {
+        if (this.securityMetadataRegistrar === 'artifact-door') return;
+        let metadata: { registerInMemory?: (type: string, name: string, item: unknown) => void } | undefined;
+        try {
+            metadata = ctx.getService('metadata');
+        } catch {
+            // Not registered on this kernel — handled below.
+        }
+        const registerInMemory = metadata?.registerInMemory;
+        if (typeof registerInMemory !== 'function') {
+            ctx.logger.debug('[AppPlugin] no in-memory metadata registry — the top-level residual of a multi-package stack is not registered', { appId });
+            return;
+        }
+        const { MetadataPlugin } = await import('@objectstack/metadata');
+        await MetadataPlugin.registerUnclaimedTopLevel(
+            {
+                register: (type, name, item) => registerInMemory.call(metadata, type, name, item),
+                warn: (message) => ctx.logger.warn(message),
+            },
+            this.bundle,
+            { door: 'config', label: String(appId) },
+        );
+    }
+
     start = async (ctx: PluginContext) => {
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
@@ -965,6 +1024,14 @@ export class AppPlugin implements Plugin {
             );
             throw err;
         }
+
+        // [ADR-0130 D4] The residual of a multi-package stack — top-level
+        // items no package body declares — through the metadata door's one
+        // rule. BEFORE the security block below on purpose: that block is the
+        // registrar of every stack-declared security item, so on a slot both
+        // write, its copy (forward-converted from the same, now-stamped item)
+        // is the one that stays.
+        await this.registerUnclaimedTopLevel(ctx, appId);
 
         // [ADR-0057 / #2077] Surface stack-declared SECURITY metadata
         // (positions, permission sets, capabilities, sharing rules) in the

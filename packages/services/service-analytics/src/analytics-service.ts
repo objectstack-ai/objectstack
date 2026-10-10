@@ -64,9 +64,11 @@ import { storedMetadataBodyAnalyticsRefusal } from './stored-metadata-body-refus
 // The generic-exit declarations — `enable` (ADR-0049) and a field's `internal`
 // flag — asked at this door as every other door asks them.
 import {
+  assertDefinitionExposed,
   assertNoInternalFieldNamed,
   assertObjectsExposed,
   type ObjectDeclarationProvider,
+  type RegisteredDefinitionKind,
 } from './api-exposure-door.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
@@ -1067,6 +1069,12 @@ export interface AnalyticsServiceConfig {
    * no gate, reported once at the first query: that is a host constructing
    * this service by hand. The production bridge in `plugin.ts` always wires it,
    * from the same schema registry `/data` reads.
+   *
+   * [#22663] Also asked when a definition enters the shared registry: a
+   * configured cube, or a dataset `registerDataset` compiled, whose base
+   * object or declared join is denied is refused there, and `getMeta` never
+   * lists it. A throw at registration is no answer, and registers the
+   * definition as before; the query face still refuses fail-closed.
    */
   getObjectDeclaration?: ObjectDeclarationProvider;
   /**
@@ -1436,17 +1444,16 @@ export class AnalyticsService implements IAnalyticsService {
 
   constructor(config: AnalyticsServiceConfig = {}) {
     this.logger = config.logger || createLogger({ level: 'info', format: 'pretty' });
-    this.cubeRegistry = new CubeRegistry();
+    // [#22663] Every write to the shared registry is admitted by the
+    // generic-exit gate's registration face: a cube that reads an object the
+    // API does not serve for the aggregate operation can never answer a query,
+    // so it is refused rather than published by `getMeta`.
+    this.cubeRegistry = new CubeRegistry((cube) => this.assertRegistrable('cube', cube));
     this.sharedScope = {
       getCube: (name) => this.cubeRegistry.get(name),
       getCompiledDataset: (name) => this.datasetRegistry.get(name),
       register: (cube) => this.cubeRegistry.register(cube),
     };
-
-    // Register pre-defined cubes
-    if (config.cubes) {
-      this.cubeRegistry.registerAll(config.cubes);
-    }
 
     this.readScopeProvider = config.getReadScope;
     this.readAdmissionProvider = config.admitObjectRead;
@@ -1473,6 +1480,22 @@ export class AnalyticsService implements IAnalyticsService {
     // or from `NODE_ENV`. An unset `NODE_ENV` is not development — see the
     // field's doc for the ruling this inherits.
     this.debugSql = config.debugSql ?? (getEnv('NODE_ENV') === 'development');
+
+    // Register pre-defined cubes. After the probes above are assigned, so the
+    // registry's admission can ask `getObjectDeclaration`. [#22663] A refused
+    // cube takes the same per-definition channel the pre-registered datasets
+    // below take: warned with the refusal's own words (the cube, the object,
+    // the declaration) and skipped, so one bad definition does not take the
+    // boot down and every other cube still registers.
+    if (config.cubes) {
+      for (const cube of config.cubes) {
+        try {
+          this.cubeRegistry.register(cube);
+        } catch (e) {
+          this.logger?.warn?.(`[Analytics] Failed to register cube "${cube?.name}": ${String((e as Error)?.message ?? e)}`);
+        }
+      }
+    }
 
     // Compile + register pre-defined datasets (ADR-0021).
     if (config.datasets) {
@@ -1987,6 +2010,30 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
+   * [#22663] The REGISTRATION face of the object half: a definition entering
+   * the shared registry — a configured cube, a dataset {@link registerDataset}
+   * compiled, a cube written to {@link cubeRegistry} directly — is refused when
+   * its base object or a declared join ({@link cubeObjects}, the set the query
+   * face's first ask reads) is one the spec's decision denies the aggregate
+   * operation. Such a cube could never answer: every query of it is refused
+   * `404 OBJECT_API_DISABLED` / `405 OBJECT_API_METHOD_NOT_ALLOWED`, so
+   * publishing it through `getMeta` advertised a cube that does not work.
+   *
+   * Thrown, located, in the query face's codes; the constructor turns it into
+   * its per-definition warning. Cannot answer, do not block — the
+   * compile-time probes' tiering (#5115): an object with no declaration yet
+   * (registration runs inside the plugin's `init()`, before a later plugin's
+   * objects are registered) or a lookup that throws is not refused here, and
+   * the query face still judges it at every query. No provider wired: no gate,
+   * as on the query face, which reports that once at the first query.
+   */
+  private assertRegistrable(kind: RegisteredDefinitionKind, cube: Cube): void {
+    const provider = this.objectDeclarationProvider;
+    if (!provider) return;
+    assertDefinitionExposed(kind, cube.name, this.cubeObjects(cube), provider);
+  }
+
+  /**
    * The FIELD half of the generic-exit gate: a member that reads a field its
    * object declares `internal: true` — a dimension, a measure's input, a
    * filter or sort key, a dataset filter, a relationship hop's column — is
@@ -2458,9 +2505,17 @@ export class AnalyticsService implements IAnalyticsService {
    * under the name, which is why no request path calls it: `queryDataset`
    * compiles into a request scope instead (#20356). Idempotent. Returns the
    * compiled dataset.
+   *
+   * [#22663] Throws, registering nothing, when the dataset's base object or a
+   * joined object is one the API does not serve for the aggregate operation
+   * ({@link assertRegistrable}).
    */
   registerDataset(dataset: Dataset): CompiledDataset {
     const compiled = this.compile(dataset);
+    // Judged as the DATASET first, so the refusal names what the caller
+    // registered. The registry's own admission asks the same question of the
+    // same compiled cube on the next line, and answers the same.
+    this.assertRegistrable('dataset', compiled.cube);
     this.cubeRegistry.register(compiled.cube);
     this.datasetRegistry.set(dataset.name, compiled);
     return compiled;

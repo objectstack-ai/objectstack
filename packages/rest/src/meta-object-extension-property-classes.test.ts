@@ -327,9 +327,10 @@ async function measure(opts: {
         layerCode: layeredBody?.code,
         layerOverlay: layeredBody?.overlay,
         layerEffective: layeredBody?.effective,
-        registryResolved: registry.foldObjectExtendersOnto(
-            objectName, clone(storedBody ?? declaration),
-        ),
+        // [ADR-0131 D6, triage ruling Q1 → C] The host object is one a package
+        // ships, so a stored row of it is an overlay of sealed managed content
+        // that no read serves: the base is the owner's declaration.
+        registryResolved: registry.foldObjectExtendersOnto(objectName, clone(declaration)),
         storedRow: storedBody,
     };
 }

@@ -78,6 +78,17 @@ function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
 }
 
 /**
+ * [ADR-0131 D6] A `sys_metadata` row stored in a legacy organization's layer:
+ * no metadata read serves one, so the authored hook and action binders skip it
+ * too. Judged off the row in hand — `sys_metadata` is a platform table, never a
+ * federated object.
+ */
+function isLegacyOrganizationRow(row: { organization_id?: unknown } | null | undefined): boolean {
+  const organizationId = row?.organization_id;
+  return organizationId !== null && organizationId !== undefined && organizationId !== '';
+}
+
+/**
  * Options for ObjectQLPlugin.
  *
  * `environmentId` declares that this kernel serves ONE environment. It is a
@@ -2379,11 +2390,14 @@ export class ObjectQLPlugin implements Plugin {
    * Read the ACTIVE runtime-authored hook rows from `sys_metadata`.
    *
    * Reads the table directly (like `protocol.getMetaItems` does) instead of
-   * going through the metadata service, because (a) env-scoped kernels have
-   * no DatabaseLoader so the service never surfaces these rows, and (b) rows
-   * published from a Studio session are org-scoped — engine hooks fire
-   * process-wide, so we take active rows across ALL organizations rather
-   * than one org's overlay view.
+   * going through the metadata service, because env-scoped kernels have no
+   * DatabaseLoader so the service never surfaces these rows.
+   *
+   * [ADR-0131 D6] The environment's rows only (`organization_id IS NULL`),
+   * the rule every metadata read follows: a legacy organization-scoped hook
+   * row is not bound — the protocol's boot report
+   * (`reportUnhydratableOrgScopedRows`) names it, and the v18 migration
+   * ceremony carries it.
    *
    * Returns `null` when the read failed (e.g. no sys_metadata table on this
    * kernel) — callers must treat that as "couldn't read", NOT "zero hooks",
@@ -2395,8 +2409,8 @@ export class ObjectQLPlugin implements Plugin {
       // No environment filter: per ADR-0005 (revised 2026-05) each
       // environment has its own physical DB, so this kernel's sys_metadata
       // only ever holds its own rows (saveMetaItem no longer stamps
-      // environment_id). Rows across ALL organizations are taken — engine
-      // hooks fire process-wide, matching flow-trigger semantics.
+      // environment_id). [ADR-0131 D6] The environment's rows only — see
+      // the TSDoc.
       //
       // [#21911, ADR-0096] The explicit system opt-in: a boot / resync read
       // of the platform store with no caller behind it, never a principal-less
@@ -2414,6 +2428,8 @@ export class ObjectQLPlugin implements Plugin {
       }
       const hooks: any[] = [];
       for (const row of rows) {
+        // [ADR-0131 D6] The environment's rows only — see the TSDoc.
+        if (isLegacyOrganizationRow(row)) continue;
         try {
           const data = this.convertStoredRow(
             ctx,
@@ -2564,9 +2580,9 @@ export class ObjectQLPlugin implements Plugin {
    *      handler still needs registering.
    *
    * Same read discipline as {@link readAuthoredHookRows}: direct table read
-   * (env-scoped kernels surface authored rows nowhere else), all
-   * organizations (engine actions are process-wide), `null` on a failed
-   * read so callers never tear down live registrations on an error.
+   * (env-scoped kernels surface authored rows nowhere else), the
+   * environment's rows only (ADR-0131 D6), `null` on a failed read so callers
+   * never tear down live registrations on an error.
    */
   private async readAuthoredActionRows(ctx: PluginContext): Promise<any[] | null> {
     if (!this.ql) return null;
@@ -2600,6 +2616,7 @@ export class ObjectQLPlugin implements Plugin {
       }
       const actions: any[] = [];
       for (const row of rows) {
+        if (isLegacyOrganizationRow(row)) continue; // [ADR-0131 D6]
         const data = parseRow(row, 'action');
         if (data && typeof data.name === 'string') actions.push(data);
       }
@@ -2612,6 +2629,7 @@ export class ObjectQLPlugin implements Plugin {
         context: { isSystem: true },
       })) ?? [];
       for (const row of objectRows) {
+        if (isLegacyOrganizationRow(row)) continue; // [ADR-0131 D6]
         const obj = parseRow(row, 'object');
         if (!obj || typeof obj.name !== 'string' || !Array.isArray(obj.actions)) continue;
         for (const action of obj.actions) {

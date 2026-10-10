@@ -230,9 +230,323 @@ import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spe
 import { deriveViewContainerObject } from './view-container-expansion.js';
 // [#21412] The divergent container `name` refusal — the one judge the boot
 // loop, `os validate` and the runtime save door call too. See the container
-// branch of `_registerArtifactBodyCollections`.
+// branch of `registerArtifactBodyCollections`.
 import { viewContainerNameRefusal } from './view-container-name.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+
+// ───────────────────────────────────────────────────────────────────────────
+// The residual rule — ONE rule, for both boot doors (ADR-0130 D4)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// A stack that carries `packages[]` registers each package BODY under that
+// package's id. What its TOP LEVEL carries that no body declares is the
+// residual: it is registered under the stack's own `manifest.id`, and the boot
+// says so. Two doors reach a stack:
+//
+//   - the ARTIFACT door — `MetadataPlugin`'s load of a compiled
+//     `objectstack.json` (`_parseAndRegisterArtifact` below);
+//   - the CONFIG door — `os serve objectstack.config.ts`, whose `AppPlugin`
+//     hands the stack to the `manifest` service, which registers the package
+//     bodies and never the top level (`resolveArtifactPackageOrder` answers
+//     `packages[]` alone when the key is present). Before this rule had a
+//     second caller, a config boot served such an item through no door and
+//     said nothing, while an artifact boot of the same project served it
+//     under `manifest.id` and warned.
+//
+// Both call {@link MetadataPlugin.registerUnclaimedTopLevel}, so which items
+// are residual, which id they take, how each is registered and what the boot
+// says are decided here and nowhere else. ⛔ Never a second copy at a door.
+
+/**
+ * Where one door's registrations land. The artifact door writes its in-memory
+ * loader and the `MetadataManager`; the config door writes the metadata
+ * service's in-memory registry (`AppPlugin`), the route it already uses for
+ * the code-owned items it surfaces. ⛔ The sink only STORES: what is
+ * registered, under which key and with which owner stamp is
+ * {@link registerArtifactBodyCollections}'s decision, made once for both.
+ */
+export interface ArtifactRegistrationSink {
+    /** Store one item under `(type, name)`. It arrives already stamped with its owner. */
+    register(type: string, name: string, item: unknown): Promise<void> | void;
+    /** Say one line at `warn`. */
+    warn(message: string): void;
+}
+
+/** Which door a stack arrived through — chooses the words, never the rule. */
+export interface UnclaimedTopLevelSource {
+    door: 'artifact' | 'config';
+    /** The artifact's path or URL; the config's manifest id. */
+    label: string;
+}
+
+/**
+ * The `(type, name)` slot one item occupies in the registry, derived the one
+ * way both the registration and the claim walk derive it.
+ *
+ * A `defineView` container has no own `name`: it is filed under the object it
+ * binds to (`deriveViewContainerObject`, #13912) and expands into one view
+ * item per named view. Most other items carry a top-level `name`; a view
+ * written without one falls back to the same object derivation. An item with
+ * no derivable slot is not registered, and so claims nothing.
+ */
+function artifactItemSlot(
+    metaType: string,
+    item: unknown,
+): { container: true; object: string } | { container: false; name: string } | undefined {
+    if (metaType === 'view' && isAggregatedViewContainer(item)) {
+        const object = deriveViewContainerObject(item);
+        return object ? { container: true, object } : undefined;
+    }
+    let name = (item as any)?.name;
+    if (!name && metaType === 'view') name = deriveViewContainerObject(item);
+    return name ? { container: false, name } : undefined;
+}
+
+/**
+ * Every `(type, name)` slot the package bodies register: a container's own
+ * slot and each view it expands into, every named item's slot. Read only to
+ * tell "the top level repeats what a package already owns" (the normal case —
+ * `composeStacks(…, { manifest: 'preserve' })` is ADDITIVE, so the flattened
+ * top level repeats every body) from "the top level carries something no
+ * package declares".
+ */
+function claimedArtifactSlots(bodies: readonly unknown[]): (type: string, name: string) => boolean {
+    const owned = new Map<string, Set<string>>();
+    const claim = (type: string, name: string): void => {
+        let names = owned.get(type);
+        if (!names) owned.set(type, names = new Set<string>());
+        names.add(name);
+    };
+    for (const body of bodies) {
+        for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
+            const items = (body as any)?.[field];
+            if (!Array.isArray(items)) continue;
+            for (const item of items) {
+                const slot = artifactItemSlot(metaType, item);
+                if (!slot) continue;
+                if (!slot.container) {
+                    claim(metaType, slot.name);
+                    continue;
+                }
+                claim('view', slot.object);
+                for (const vi of expandViewContainer(slot.object, item)) claim('view', vi.name);
+            }
+        }
+    }
+    return (type, name) => owned.get(type)?.has(name) === true;
+}
+
+/** One top-level item of a multi-package stack that none of its package bodies declares. */
+export interface UnclaimedTopLevelItem {
+    /** The stack collection the item sits in, e.g. `views`. */
+    field: string;
+    /** Its position in that collection, e.g. `0` for `views[0]`. */
+    index: number;
+    /** The metadata type it registers as, e.g. `view`. */
+    type: string;
+    /** The item itself, as the stack carries it. */
+    item: unknown;
+}
+
+/** A multi-package stack's residual, and the identity it is registered under. */
+export interface UnclaimedTopLevel {
+    /** The stack's own manifest id — the owner of every unclaimed item. */
+    ownerId: string | undefined;
+    /** The stack's own manifest version, stamped beside that id. */
+    ownerVersion: string | undefined;
+    /** How many package bodies the stack carries. */
+    bodyCount: number;
+    /** The unclaimed items, in the order a door registers them. */
+    items: UnclaimedTopLevelItem[];
+}
+
+/**
+ * WHICH top-level items of a stack that carries `packages[]` no package body
+ * declares, and under which id they are registered — the decision half of the
+ * residual rule, with nothing registered and nothing thrown.
+ *
+ * {@link MetadataPlugin.registerUnclaimedTopLevel} registers exactly these, in
+ * this order, through either boot door. `os validate` / `os build`
+ * (`@objectstack/cli`'s view-container walk) read the same answer to judge what
+ * that registration will judge, so an author-time door and a boot door cannot
+ * disagree about which items are residual. ⛔ Never re-derived by a caller.
+ *
+ * An item is unclaimed when it occupies a registry slot (`artifactItemSlot`)
+ * that no package body occupies (`claimedArtifactSlots`): a container is
+ * compared on its own slot, every other item on its name. An item with no
+ * derivable slot is registered by no door, so it is not listed.
+ *
+ * @returns `undefined` for a stack without `packages[]`: its top level IS its
+ *   one package's body, so it has no residual.
+ */
+export function unclaimedTopLevel(stack: unknown): UnclaimedTopLevel | undefined {
+    if (!Array.isArray((stack as any)?.packages)) return undefined;
+    const bodies = resolveArtifactPackageOrder(stack);
+    const claimed = claimedArtifactSlots(bodies);
+    const items: UnclaimedTopLevelItem[] = [];
+    for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
+        const collection = (stack as any)[field];
+        if (!Array.isArray(collection)) continue;
+        collection.forEach((item: unknown, index: number) => {
+            const slot = artifactItemSlot(metaType, item);
+            if (!slot) return;
+            if (claimed(metaType, slot.container ? slot.object : slot.name)) return;
+            items.push({ field, index, type: metaType, item });
+        });
+    }
+    return {
+        ownerId: (stack as any)?.manifest?.id ?? (stack as any)?.id ?? undefined,
+        ownerVersion: (stack as any)?.manifest?.version ?? (stack as any)?.version ?? undefined,
+        bodyCount: bodies.length,
+        items,
+    };
+}
+
+/**
+ * Register ONE body's collections through `sink`.
+ *
+ * A "body" is the whole artifact (the single-package branch, where the
+ * artifact and its one package are the same object), one entry of
+ * `packages[]` (ADR-0130 D4) — an assembled `{ ...manifest, ...collections }`
+ * payload carrying the same collection keys the top level does — or a
+ * multi-package stack's residual ({@link unclaimedTopLevel}). The loop is
+ * identical for all three: there is one ingestion of a collection, not one per
+ * shape or per door.
+ *
+ * @param provenance - The `(packageId, packageVersion)` every item found in
+ *   this body is stamped with (ADR-0010 §3.7, via `applyProtection`). It is
+ *   the body's OWN identity, never the enclosing artifact's, which is what
+ *   makes a multi-package artifact's items agree with the registry and with
+ *   `GET /api/v1/packages` about who owns them.
+ * @param sourceLabel - The words naming the source in a divergent container
+ *   `name` refusal: `artifact` for a compiled artifact; `manifest` for a
+ *   config's residual, the word the config boot's own registrar uses for the
+ *   same stack. Two items of one name inside one body still register as they
+ *   always have (last wins): suppressing that would be a behaviour change on
+ *   the single-package branch D7 pins.
+ * @returns How many items this body registered.
+ */
+async function registerArtifactBodyCollections(
+    sink: ArtifactRegistrationSink,
+    body: Record<string, unknown>,
+    provenance: { packageId?: string; packageVersion?: string },
+    sourceLabel: string,
+): Promise<number> {
+    const { packageId, packageVersion } = provenance;
+    let totalRegistered = 0;
+    for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
+        const items = (body as any)[field];
+        if (!Array.isArray(items) || items.length === 0) continue;
+        for (const item of items) {
+            const slot = artifactItemSlot(metaType, item);
+            if (!slot) continue;
+            // Expand aggregated view containers into independent ViewItems
+            // ("Object has-many View"), while still registering the
+            // container under the bare <object> key for backward-compatible
+            // reads. Already-independent ViewItems carry a top-level `name`
+            // and take the normal path below.
+            if (slot.container) {
+                // [#13912] `object` FIRST — a package-shipped
+                // `defineView({ object: 'crm_lead', list: { columns } })`
+                // sets the binding there and nowhere else, and the old
+                // two-deep chain skipped that container entirely, so it never
+                // reached the registry at all and `getViewsByObject()` had
+                // nothing to expand.
+                const viewObject = slot.object;
+                // [#21412] A container whose own `name` disagrees with the
+                // key derived above is refused through the one judge every
+                // door that files a container calls, in its words — and
+                // BEFORE the sink stores anything, so a refusal files nothing.
+                // `manager.register` would refuse the same document too
+                // (#7378 row 1, `assertMetadataRegisterContract`), but in the
+                // generic register contract's words and only after the loader
+                // write; row 1 is unchanged for every type.
+                const nameRefusal = viewContainerNameRefusal(item, sourceLabel, packageId);
+                if (nameRefusal) throw nameRefusal;
+                applyProtection(item as any, {
+                    packageId: packageId,
+                    packageVersion: packageVersion,
+                });
+                await sink.register('view', viewObject, item);
+                totalRegistered++;
+                for (const vi of expandViewContainer(viewObject, item)) {
+                    for (const w of vi._diagnostics?.warnings ?? []) {
+                        sink.warn(`[MetadataPlugin] View expansion warning for '${vi.name}': ${w.message}`);
+                    }
+                    applyProtection(vi as any, {
+                        packageId: packageId,
+                        packageVersion: packageVersion,
+                    });
+                    await sink.register('view', vi.name, vi);
+                    totalRegistered++;
+                }
+                continue;
+            }
+            // Most metadata items carry a top-level `name`. The `View`
+            // container (UI namespace) is an exception: it has no own
+            // `name` — its identity is the target object, declared in the
+            // container's own top-level `object` field and, for containers
+            // written before that field was read here, under
+            // `list.data.object` (or `form.data.object`). Mirror the
+            // resolution used by `ObjectQL.SchemaRegistry` so that
+            // artifact-loaded views land in `MetadataManager` under the
+            // SAME key reads expect (`metadataService.get('view', <object>)`).
+            // Without this, HMR pushes views into the registry only via
+            // AppPlugin's `manifest.register`, which targets the
+            // boot-only SchemaRegistry cache and is never refreshed on
+            // file edits — leaving MetadataService empty for view/* and
+            // forcing all reads to return the stale boot copy.
+            //
+            // [#13912] `deriveViewContainerObject` is that resolution, in
+            // the package's one spelling (`artifactItemSlot` reads it). Its
+            // last fallback — the row's own `name` — cannot fire on that
+            // branch (it is reached only when `item.name` is falsy), so what
+            // it adds there is exactly the leading `object` term this path
+            // was missing.
+            const name = slot.name;
+            // ADR-0010 §3.7 — translate the author-facing
+            // `protection` block into the private `_lock` envelope
+            // and stamp package provenance in one call. Strips the
+            // public block so it never lands in sys_metadata.
+            applyProtection(item as any, {
+                packageId: packageId,
+                packageVersion: packageVersion,
+            });
+            await sink.register(metaType, name, item);
+            totalRegistered++;
+        }
+    }
+    return totalRegistered;
+}
+
+/**
+ * The one line a boot prints when it registered a residual — the same
+ * sentence through either door, with the door's own noun and remedy: an
+ * artifact is rebuilt, a config is re-declared. The `top-level metadata
+ * item(s)` sentence is what operators grep for, and the artifact door's text
+ * is unchanged byte for byte.
+ */
+function unclaimedTopLevelWarning(
+    source: UnclaimedTopLevelSource,
+    residual: number,
+    bodyCount: number,
+    manifestPackageId: string | undefined,
+): string {
+    const owner = manifestPackageId ?? '<none>';
+    if (source.door === 'artifact') {
+        return `[MetadataPlugin] artifact '${source.label}' carries ${residual} top-level metadata item(s) that `
+            + `none of its ${bodyCount} package bodies declare. They were registered under the `
+            + `artifact's own manifest id ('${owner}') because no package in the `
+            + 'artifact claims them, so every door will report that id as their owner. Rebuild the '
+            + 'artifact so each collection it ships is carried by the package that owns it.';
+    }
+    return `[AppPlugin] config stack '${source.label}' carries ${residual} top-level metadata item(s) that `
+        + `none of its ${bodyCount} package bodies declare. They were registered under the `
+        + `stack's own manifest id ('${owner}') because no package in the stack claims them, `
+        + 'so every door will report that id as their owner. Declare each one inside the '
+        + '`packages[]` entry of the package that owns it; a flat `src/docs/` page moves under '
+        + '`src/<package>/docs/`, where `<package>` is the package id or its last dot-separated segment.';
+}
 
 
 export interface MetadataPluginOptions {
@@ -1041,24 +1355,20 @@ export class MetadataPlugin implements Plugin {
         const carriesPackages = Array.isArray((metadata as any)?.packages);
         const bodies = resolveArtifactPackageOrder(metadata) as Record<string, unknown>[];
 
-        // Which `(type, name)` slots a package body claimed. Read only by the
-        // residual sweep below, to tell "the flattened top level repeats what a
-        // package already owns" (the normal case, and the duplicate this fixes)
-        // from "the top level carries something no package declares".
-        const ownedByPackage = new Map<string, Set<string>>();
-        const claim = (type: string, name: string): void => {
-            let names = ownedByPackage.get(type);
-            if (!names) ownedByPackage.set(type, names = new Set<string>());
-            names.add(name);
+        // What the door stores into: the in-memory loader first, then the
+        // manager, for every item either pass below registers.
+        const sink: ArtifactRegistrationSink = {
+            register: async (type, name, item) => {
+                await memLoader.save(type, name, item);
+                await this.manager.register(type, name, item, { notify: false });
+            },
+            warn: (message) => ctx.logger.warn(message),
         };
-        const claimed = (type: string, name: string): boolean =>
-            ownedByPackage.get(type)?.has(name) === true;
 
         let totalRegistered = 0;
         for (const body of bodies) {
-            totalRegistered += await this._registerArtifactBodyCollections(
-                ctx,
-                memLoader,
+            totalRegistered += await registerArtifactBodyCollections(
+                sink,
                 body,
                 carriesPackages
                     // `registerApp` keys an installed package on `id || name`
@@ -1073,44 +1383,18 @@ export class MetadataPlugin implements Plugin {
                     // Unchanged single-package branch — the same two values
                     // this method has always stamped (D7).
                     : { packageId: manifestPackageId, packageVersion: manifestVersion },
-                { claim: carriesPackages ? claim : undefined },
+                'artifact',
             );
         }
 
-        if (carriesPackages) {
-            // The residual sweep, and why it registers nothing for a normally
-            // composed artifact: `composeStacks(…, { manifest: 'preserve' })`
-            // is ADDITIVE — it emits the flattened top level AND `packages[]`
-            // from the same inputs — so every top-level item is already owned
-            // above and this pass is a no-op. (Whether the producer should keep
-            // emitting that half at all is #14512's decision, not this door's.)
-            //
-            // It exists because `packages` is a `concat` key: an artifact
-            // composed from one stack that already carried `packages` and one
-            // that did not has top-level collections no package body repeats.
-            // Dropping those would take metadata a booted instance can see
-            // today off every door — a silent regression in the name of fixing
-            // a duplicate. Such an item falls back to the artifact's own
-            // identity because nothing better exists, and it is logged, because
-            // it means the artifact's two halves disagree.
-            const residual = await this._registerArtifactBodyCollections(
-                ctx,
-                memLoader,
-                metadata,
-                { packageId: manifestPackageId, packageVersion: manifestVersion },
-                { skip: claimed },
-            );
-            totalRegistered += residual;
-            if (residual > 0) {
-                ctx.logger.warn(
-                    `[MetadataPlugin] artifact '${label}' carries ${residual} top-level metadata item(s) that `
-                    + `none of its ${bodies.length} package bodies declare. They were registered under the `
-                    + `artifact's own manifest id ('${manifestPackageId ?? '<none>'}') because no package in the `
-                    + 'artifact claims them, so every door will report that id as their owner. Rebuild the '
-                    + 'artifact so each collection it ships is carried by the package that owns it.',
-                );
-            }
-        }
+        // The residual, through the one rule both boot doors call (see
+        // `registerUnclaimedTopLevel`). It registers nothing for a normally
+        // composed artifact, and nothing at all without `packages[]`.
+        totalRegistered += await MetadataPlugin.registerUnclaimedTopLevel(
+            sink,
+            metadata,
+            { door: 'artifact', label },
+        );
 
         this.manager.registerLoader(memLoader);
         ctx.logger.info('[MetadataPlugin] Artifact metadata loaded', { source: label, totalRegistered });
@@ -1119,145 +1403,68 @@ export class MetadataPlugin implements Plugin {
 
 
     /**
-     * Register ONE artifact body's collections into the MetadataManager.
+     * The residual rule (ADR-0130 D4), the ONE copy both boot doors call: what
+     * a multi-package stack's top level carries that none of its package
+     * bodies declares is registered under the stack's own `manifest.id`, and
+     * the boot warns once, with the count.
      *
-     * A "body" is either the whole artifact (the single-package branch, where
-     * the artifact and its one package are the same object) or one entry of
-     * `packages[]` (ADR-0130 D4), which is an assembled
-     * `{ ...manifest, ...collections }` payload carrying the same collection
-     * keys the top level does. The loop is identical for both — that is the
-     * point: there is one ingestion of a collection here, not one per shape.
+     * Called by this plugin's artifact door on a compiled `objectstack.json`,
+     * and by `AppPlugin` (`@objectstack/runtime`) on a config boot, whose
+     * `manifest` service registers the package bodies and never the top level
+     * of a stack that carries `packages[]`. The two doors differ only in where
+     * their `sink` stores and in the words of the line; the decision — which
+     * items, keyed how, owned by whom — is this method's.
      *
-     * @param provenance - The `(packageId, packageVersion)` every item found in
-     *   this body is stamped with (ADR-0010 §3.7, via `applyProtection`). It is
-     *   the body's OWN identity, never the enclosing artifact's, which is what
-     *   makes a multi-package artifact's items agree with the registry and with
-     *   `GET /api/v1/packages` about who owns them.
-     * @param slots.claim - Called with every `(type, name)` this pass
-     *   registered. Passed when reading package bodies; the residual sweep uses
-     *   what it recorded.
-     * @param slots.skip - Consulted before registering each `(type, name)`.
-     *   Passed ONLY by the residual sweep, so a package body's copy is never
-     *   overwritten by the flattened top-level copy of the same definition —
-     *   the overwrite that re-attributed the item to the artifact's manifest.
-     *   ⛔ It is never passed while reading the bodies themselves: two items of
-     *   one name inside one body still register as they always have (last
-     *   wins), because suppressing that would be a behaviour change on the
-     *   single-package branch D7 pins.
-     * @returns How many items this body registered.
+     * Why the residual is registered rather than dropped: `packages` is a
+     * `concat` key, so a stack composed from one input that already carried
+     * `packages` and one that did not has top-level collections no package
+     * body repeats. Dropping those takes metadata off every door in silence.
+     * Such an item falls back to the stack's own identity because nothing
+     * better exists, and it is logged, because it means the stack's two halves
+     * disagree. A normally composed stack registers nothing here:
+     * `composeStacks(…, { manifest: 'preserve' })` is ADDITIVE, so every
+     * top-level item is a copy a body already owns.
+     *
+     * WHICH items are residual, and the id they take, is
+     * {@link unclaimedTopLevel}'s answer, the pure half `os validate` reads
+     * too: the bodies' slots are read by the same derivation the registration
+     * uses (`artifactItemSlot`), so "claimed" means exactly "a body registers
+     * this key" on either door. Bodies and their order come from
+     * `resolveArtifactPackageOrder` (`@objectstack/core`), the one reader of
+     * `packages[]` — never re-derived here.
+     *
+     * A residual view container whose own `name` disagrees with its object is
+     * refused, as a body's is: the artifact door names its source `artifact`,
+     * the config door `manifest`, the word the config boot's own registrar and
+     * `os validate` already use for the same stack.
+     *
+     * @returns How many items the residual registered — `0` for a stack
+     *   without `packages[]`, which has no residual: its top level IS its one
+     *   package's body.
      */
-    private async _registerArtifactBodyCollections(
-        ctx: PluginContext,
-        memLoader: MemoryLoader,
-        body: Record<string, unknown>,
-        provenance: { packageId?: string; packageVersion?: string },
-        slots: {
-            claim?: (type: string, name: string) => void;
-            skip?: (type: string, name: string) => boolean;
-        } = {},
+    static async registerUnclaimedTopLevel(
+        sink: ArtifactRegistrationSink,
+        stack: unknown,
+        source: UnclaimedTopLevelSource,
     ): Promise<number> {
-        const { packageId, packageVersion } = provenance;
-        let totalRegistered = 0;
-        for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
-            const items = (body as any)[field];
-            if (!Array.isArray(items) || items.length === 0) continue;
-            for (const item of items) {
-                // Expand aggregated view containers into independent ViewItems
-                // ("Object has-many View"), while still registering the
-                // container under the bare <object> key for backward-compatible
-                // reads. Already-independent ViewItems carry a top-level `name`
-                // and fall through to the normal path below.
-                if (metaType === 'view' && isAggregatedViewContainer(item)) {
-                    // [#13912] `object` FIRST — a package-shipped
-                    // `defineView({ object: 'crm_lead', list: { columns } })`
-                    // sets the binding here and nowhere else, and the old
-                    // two-deep chain skipped that container entirely (`continue`
-                    // below), so it never reached the registry at all and
-                    // `getViewsByObject()` had nothing to expand.
-                    const viewObject = deriveViewContainerObject(item);
-                    if (!viewObject) continue;
-                    // Residual sweep only: a package body already registered this
-                    // container, so the flattened copy is the duplicate, not a
-                    // second definition.
-                    if (slots.skip?.('view', viewObject)) continue;
-                    // [#21412] A container whose own `name` disagrees with the
-                    // key derived above is refused through the one judge every
-                    // door that files a container calls, in its words — and
-                    // BEFORE `memLoader.save`, so a refusal files nothing.
-                    // `manager.register` below would refuse the same document
-                    // too (#7378 row 1, `assertMetadataRegisterContract`), but
-                    // in the generic register contract's words and only after
-                    // the loader write; row 1 is unchanged for every type.
-                    const nameRefusal = viewContainerNameRefusal(item, 'artifact', packageId);
-                    if (nameRefusal) throw nameRefusal;
-                    applyProtection(item as any, {
-                        packageId: packageId,
-                        packageVersion: packageVersion,
-                    });
-                    await memLoader.save('view', viewObject, item);
-                    await this.manager.register('view', viewObject, item, { notify: false });
-                    totalRegistered++;
-                    slots.claim?.('view', viewObject);
-                    for (const vi of expandViewContainer(viewObject, item)) {
-                        for (const w of vi._diagnostics?.warnings ?? []) {
-                            ctx.logger.warn(`[MetadataPlugin] View expansion warning for '${vi.name}': ${w.message}`);
-                        }
-                        applyProtection(vi as any, {
-                            packageId: packageId,
-                            packageVersion: packageVersion,
-                        });
-                        await memLoader.save('view', vi.name, vi);
-                        await this.manager.register('view', vi.name, vi, { notify: false });
-                        totalRegistered++;
-                        slots.claim?.('view', vi.name);
-                    }
-                    continue;
-                }
-                // Most metadata items carry a top-level `name`. The `View`
-                // container (UI namespace) is an exception: it has no own
-                // `name` — its identity is the target object, declared in the
-                // container's own top-level `object` field and, for containers
-                // written before that field was read here, under
-                // `list.data.object` (or `form.data.object`). Mirror the
-                // resolution used by `ObjectQL.SchemaRegistry` so that
-                // artifact-loaded views land in `MetadataManager` under the
-                // SAME key reads expect (`metadataService.get('view', <object>)`).
-                // Without this, HMR pushes views into the registry only via
-                // AppPlugin's `manifest.register`, which targets the
-                // boot-only SchemaRegistry cache and is never refreshed on
-                // file edits — leaving MetadataService empty for view/* and
-                // forcing all reads to return the stale boot copy.
-                //
-                // [#13912] `deriveViewContainerObject` is that resolution, in
-                // the package's one spelling. Its last fallback — the row's own
-                // `name` — cannot fire on this branch (we are here only because
-                // `item.name` is falsy), so what it adds here is exactly the
-                // leading `object` term this path was missing.
-                let name = (item as any)?.name;
-                if (!name) {
-                    if (metaType === 'view') {
-                        name = deriveViewContainerObject(item);
-                    }
-                }
-                if (!name) continue;
-                // Residual sweep only — see the call site: this slot is already
-                // owned by one of the artifact's package bodies.
-                if (slots.skip?.(metaType, name)) continue;
-                // ADR-0010 §3.7 — translate the author-facing
-                // `protection` block into the private `_lock` envelope
-                // and stamp package provenance in one call. Strips the
-                // public block so it never lands in sys_metadata.
-                applyProtection(item as any, {
-                    packageId: packageId,
-                    packageVersion: packageVersion,
-                });
-                await memLoader.save(metaType, name, item);
-                await this.manager.register(metaType, name, item, { notify: false });
-                totalRegistered++;
-                slots.claim?.(metaType, name);
-            }
+        const unclaimed = unclaimedTopLevel(stack);
+        if (!unclaimed) return 0;
+        // The unclaimed items, regrouped per collection in the order the
+        // stack carries them; the registration walks the collections in its
+        // own order, so it meets them exactly as a walk of the whole top level
+        // that skipped every claimed slot would.
+        const body: Record<string, unknown[]> = {};
+        for (const { field, item } of unclaimed.items) (body[field] ??= []).push(item);
+        const residual = await registerArtifactBodyCollections(
+            sink,
+            body,
+            { packageId: unclaimed.ownerId, packageVersion: unclaimed.ownerVersion },
+            source.door === 'artifact' ? 'artifact' : 'manifest',
+        );
+        if (residual > 0) {
+            sink.warn(unclaimedTopLevelWarning(source, residual, unclaimed.bodyCount, unclaimed.ownerId));
         }
-        return totalRegistered;
+        return residual;
     }
 
     /**

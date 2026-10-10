@@ -156,12 +156,6 @@
     "packages/metadata-protocol/src/protocol.object-registry-write-through-spelling.test.ts": {
       "blind": 1
     },
-    "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit-live-registry.test.ts": {
-      "blind": 1
-    },
-    "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts": {
-      "unjudged": 1
-    },
     "packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts": {
       "blind": 1
     },

@@ -103,28 +103,19 @@ const BUILDER = { systemPermissions: ['manage_metadata'] };
 const requestFrom = (fn: any) => fn.mock.calls[0][0];
 
 describe('#8747 GET /meta/:type/:name/audit scopes the read to the environment-wide rows', () => {
-    it('[ADR-0131 D6] reads the environment-wide rows (`organizationId: null`) even for a caller with an active organization', async () => {
-        // Every `/meta` write now audits environment-wide, so that is the
-        // partition this door reads — never every tenant's rows (an absent key).
-        const { auditMetaItem, drive } = boot({ ...BUILDER, userId: 'u1', tenantId: 'org_alpha' });
-        await drive();
-
-        expect(auditMetaItem).toHaveBeenCalledTimes(1);
-        const request = requestFrom(auditMetaItem);
-        expect(request.organizationId).toBe(null);
-        expect(request).toHaveProperty('organizationId');
-    });
-
-    it('is fail-closed when the caller resolves no organization', async () => {
-        // A principal with no active organization must read env-wide rows, not
-        // become a skeleton key. `null` is the env-wide read downstream; an
-        // ABSENT key would be the pre-fix unscoped call.
-        const { auditMetaItem, drive } = boot({ ...BUILDER, userId: 'u1' });
-        await drive();
-
-        const request = requestFrom(auditMetaItem);
-        expect(request.organizationId).toBe(null);
-        expect(request).toHaveProperty('organizationId');
+    it('[ADR-0131 D6] hands the read no organization, whatever the caller\'s: the protocol scopes it to the environment', async () => {
+        // The organization key retired from the read (the protocol builds the
+        // environment scope itself, unconditionally — #8747's fail-closed
+        // scoping now lives there, pinned by `protocol.audit-org-scope.test.ts`).
+        for (const ctx of [
+            { ...BUILDER, userId: 'u1', tenantId: 'org_alpha' },
+            { ...BUILDER, userId: 'u1' },
+        ]) {
+            const { auditMetaItem, drive } = boot(ctx);
+            await drive();
+            expect(auditMetaItem).toHaveBeenCalledTimes(1);
+            expect(requestFrom(auditMetaItem)).not.toHaveProperty('organizationId');
+        }
     });
 
     it('an unresolvable execution context never reaches the read — the anonymous floor refuses first', async () => {
@@ -145,22 +136,6 @@ describe('#8747 GET /meta/:type/:name/audit scopes the read to the environment-w
 
         expect(answer.status).toBe(401);
         expect(auditMetaItem).not.toHaveBeenCalled();
-    });
-
-    it('never omits the organization — the call shape that leaked is unreachable', async () => {
-        for (const ctx of [
-            { ...BUILDER, userId: 'u1', tenantId: 'org_alpha' },
-            { ...BUILDER, userId: 'u1', tenantId: undefined },
-            { ...BUILDER, userId: 'u1' },
-        ]) {
-            const { auditMetaItem, drive } = boot(ctx);
-            await drive();
-            const request = requestFrom(auditMetaItem);
-            expect(
-                'organizationId' in request,
-                `route omitted organizationId for ctx ${JSON.stringify(ctx)}`,
-            ).toBe(true);
-        }
     });
 
     it('does not pass the dead `environmentId` the request type never declared', async () => {

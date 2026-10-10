@@ -95,13 +95,6 @@ export * from './object-schema-fls.js';
 // `ITEM_KEY_DISCRIMINATORS` from `registry.ts`, so its surface is unchanged.
 export * from './item-key-discriminators.js';
 
-// [#9454 · ADR-0131 D6] The registry-derived per-organization overlay
-// predicate (`declaresOrgOverride`) and the organization a protocol READ
-// carries (`organizationIdForMetaRead`). The write-side twin retired with the
-// per-organization overlay axis: the `/meta` doors carry no organization into
-// a metadata write. See the module header for what still reads through it.
-export * from './meta-write-org-scope.js';
-
 // [#12702 · ADR-0131 D6] Which CALLERS a `/meta` item write door admits:
 // `manage_metadata` (or `isSystem`), on both transports. The org-scoped
 // `manage_org_presentation` arm retired with the per-organization overlay

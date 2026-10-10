@@ -436,44 +436,30 @@ export function resetEnvWritableMetadataTypes(): void {
 }
 
 /**
- * [#22090] The `sys_metadata` predicate for "the rows of one state that a
- * caller in `organizationId` sees, optionally narrowed to a `type` and a
- * package" — the ONE statement of that rule, which
+ * [#22090] The `sys_metadata` predicate for "the environment's rows of one
+ * state, optionally narrowed to a `type` and a package" — the ONE statement
+ * of that rule, which
  * {@link SysMetadataRepository.listDrafts} asks for `'draft'` and the
  * protocol's package revert asks for `'active'`.
  *
  * A package's membership in storage is its rows' `package_id` column, the
  * same column the read path decorates as `_packageId`. The revert has to know
  * which of a package's rows are published as well as which are drafts, and a
- * second spelling of the org half below is exactly the drift #3115 / #7705 /
+ * second spelling of the scope half below is exactly the drift #3115 / #7705 /
  * #7779 each had to repair on one copy at a time — so the revert asks this
  * function, never a `where` of its own.
+ *
+ * [ADR-0131 D6] The environment's rows only (`organization_id IS NULL`): a
+ * legacy organization-scoped row is reported at boot, never read.
  *
  * Deliberately NOT exported from the package entry: it is a shared predicate
  * between this module and `protocol.ts`, not a public read.
  */
 export function packageScopedRowWhere(
-  organizationId: string | null,
   state: 'draft' | 'active',
   filter?: { type?: string; packageId?: string },
 ): Record<string, unknown> {
-  const where: Record<string, unknown> = { state };
-  // Surface BOTH org-scoped drafts and env-wide (`organization_id IS NULL`)
-  // drafts. Env-wide drafts are real pending changes — `getMetaItems`/preview
-  // overlays them and `publish-drafts` promotes them — but a strict
-  // `organization_id = this.organizationId` equality silently dropped them
-  // whenever the active org was non-null. AI-authored metadata is written
-  // env-wide, so its drafts vanished from the pending-changes list and the
-  // Publish CTA never appeared: the change showed in preview yet could not be
-  // published from the UI (the "orphaned draft" bug).
-  if (organizationId != null) {
-    where.$or = [
-      { organization_id: organizationId },
-      { organization_id: null },
-    ];
-  } else {
-    where.organization_id = null;
-  }
+  const where: Record<string, unknown> = { state, organization_id: null };
   if (filter?.type) where.type = filter.type;
   if (filter?.packageId) where.package_id = filter.packageId;
   return where;
@@ -1373,28 +1359,20 @@ export class SysMetadataRepository implements MetadataRepository {
        * item this header is the only place a client can find a label at all.
        */
       label: I18nLabel | null;
-      /**
-       * The scope the draft actually lives in — `null` for an env-wide draft,
-       * a string for a per-org overlay draft. The `$or` below surfaces BOTH to
-       * a non-null-org caller, so consumers that then act on a draft (promote /
-       * discard) MUST route the write to THIS scope, not the caller's active
-       * org, or they 404 on the env-wide row they can never match (#3115).
-       */
-      organizationId: string | null;
       packageId: string | null;
       updatedAt: string | null;
       updatedBy: string | null;
     }>
   > {
     this.assertOpen();
-    const where = packageScopedRowWhere(this.organizationId, 'draft', filter);
+    // [ADR-0131 D6] The environment's drafts, whichever repository asks.
+    const where = packageScopedRowWhere('draft', filter);
     const rows = await this.engine.find('sys_metadata', { where, context: { isSystem: true } });
     return (rows as any[]).map((row) => ({
       type: row.type,
       name: row.name,
       // [#22200] Off the row this read already holds — no second query.
       label: draftBodyLabel(row),
-      organizationId: row.organization_id ?? null,
       packageId: row.package_id ?? null,
       // [commit c383352cb] `updated_at` / `created_at` are the BUILTIN audit columns,
       // and on Postgres and MySQL they used to arrive here as a JS `Date`:

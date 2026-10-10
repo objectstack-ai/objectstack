@@ -293,7 +293,7 @@ describe('#7736 a runtime-authored view container is served', () => {
  *     isolation because it operates only on rows already scoped to THIS
  *     request's own org/environment (the pre-existing `queryByOrg` merge).
  */
-describe('#13407 org-scoped and environment-scoped runtime containers are served', () => {
+describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6] a legacy organization container only by the anonymous form doors\' legacy read', () => {
     it('derives the object binding from the containers own top-level `object` field, not just `list.data.object`', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
@@ -312,15 +312,28 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
         expect(switcherMatches(list.items, 'crm_lead').map((v: any) => v.name)).toEqual(['crm_lead.default']);
     });
 
-    it('the cards own repro: a runtime container authored by a signed-in user with an ACTIVE ORG is now served', async () => {
+    it('the cards own repro, at the one read left that reaches a legacy organization row: the anonymous form doors\' legacy layer expands it', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
 
-        const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+        const list: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_acme' });
         const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
         expect(served).toEqual(['crm_lead.default', 'crm_lead.pipeline']);
+    });
+
+    it('[ADR-0131 D6] every other read serves no legacy organization container, whatever organization it names', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
+
+        for (const request of [{ type: 'view' }, { type: 'view', organizationId: 'org_acme' }]) {
+            const list: any = await protocol.getMetaItems(request as any);
+            expect(switcherMatches(list.items, 'crm_lead')).toEqual([]);
+        }
+        expect((await protocol.getMetaItem({ type: 'view', name: 'crm_lead.default', organizationId: 'org_acme' } as any)).item)
+            .toBeUndefined();
     });
 
     it('POSITIVE CONTROL: a pre-existing independent ViewItem for the same object is still served alongside the newly-expanded container', async () => {
@@ -332,7 +345,7 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
             config: { type: 'grid', data: { provider: 'object', object: 'crm_lead' }, columns: [{ field: 'name' }] },
         });
 
-        const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+        const list: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_acme' });
         const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
         // A fix that merely "returned everything" could not distinguish these:
         // the pre-existing independent item and the two newly-expanded
@@ -345,10 +358,10 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
         const protocol = new ObjectStackProtocolImplementation(engine);
         await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
 
-        const globex: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_globex' } as any);
+        const globex: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_globex' });
         expect(switcherMatches(globex.items, 'crm_lead')).toEqual([]);
 
-        const acme: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+        const acme: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_acme' });
         expect(switcherMatches(acme.items, 'crm_lead')).toHaveLength(2);
     });
 
@@ -356,7 +369,7 @@ describe('#13407 org-scoped and environment-scoped runtime containers are served
         const { engine, registered } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
-        await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+        await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_acme' });
 
         // The RESPONSE carries the expansion (re-confirmed above); the SHARED
         // registry — read by every org/environment this kernel serves — must
@@ -632,8 +645,9 @@ describe('#21334 a container on another package\'s object never takes that packa
     const CONTAINERS = [
         { arm: 'package-scoped (saved into another writable package)', packageId: REPAIR, organizationId: undefined, ownPackage: REPAIR },
         { arm: 'package-less, environment-wide', packageId: undefined, organizationId: undefined, ownPackage: undefined },
-        { arm: 'package-less, organization-scoped', packageId: undefined, organizationId: ORG, ownPackage: undefined },
-    ] as const;
+        // [ADR-0131 D6] No organization-scoped arm: a legacy organization
+        // container is served by no read (pinned in the ISOLATION case below).
+    ] as { arm: string; packageId: string | undefined; organizationId: string | undefined; ownPackage: string | undefined }[];
     const save = (protocol: Protocol, name: string, item: unknown, c: (typeof CONTAINERS)[number]) => c.organizationId
         ? plantOrgRow((protocol as any).engine, c.organizationId, name, item)
         : protocol.saveMetaItem({
@@ -881,19 +895,19 @@ describe('#21334 a container on another package\'s object never takes that packa
                     });
                 }
 
-                it('ISOLATION — an organization-scoped container\'s names answer nothing by name for another organization', async () => {
+                it('[ADR-0131 D6] ISOLATION — a legacy organization-scoped container\'s names answer nothing, for any caller', async () => {
                     const { protocol } = showcaseHarness(environmentId);
-                    const org = CONTAINERS.find((c) => c.organizationId !== undefined)!;
-                    await save(protocol, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member }, org);
+                    await plantOrgRow((protocol as any).engine, ORG, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member });
                     const expanded = MEMBER_CASES['listViews.*'].servedAs;
 
-                    expect(await byNameDoor(protocol, expanded, ORG)).toBeTruthy();
+                    expect(await byNameDoor(protocol, expanded, ORG)).toBeUndefined();
+                    expect(ownNames(await objectDoor(protocol, ORG))).toEqual([]);
                     expect(ownNames(await objectDoor(protocol, 'org_globex'))).toEqual([]);
                     expect(await byNameDoor(protocol, expanded, 'org_globex')).toBeUndefined();
                     expect(await byNameDoor(protocol, expanded)).toBeUndefined();
                 });
 
-                for (const organizationId of [undefined, ORG]) {
+                for (const organizationId of [undefined] as Array<string | undefined>) {
                     it(`a tenant overlay of the package's own container (${organizationId ? 'organization-scoped' : 'environment-wide'}): each name it expands answers the overlay's view by name, not the packaged one`, async () => {
                         const { protocol } = showcaseHarness(environmentId);
                         const overlay = {
@@ -1006,7 +1020,7 @@ describe('#21334 a container on another package\'s object never takes that packa
 
         for (const [kernel, environmentId] of KERNELS) {
             describe(`on ${kernel}`, () => {
-                for (const organizationId of [undefined, ORG]) {
+                for (const organizationId of [undefined] as Array<string | undefined>) {
                     const scope = organizationId ? 'organization-scoped' : 'environment-wide';
                     for (const order of ['the container first', 'the row first'] as const) {
                         it(`${scope}, ${order}: the stored row answers its name on both doors; the row-less expanded name answers the expansion`, async () => {
@@ -1043,19 +1057,16 @@ describe('#21334 a container on another package\'s object never takes that packa
                     }
                 }
 
-                it('the predicate is read over the caller\'s own rows: an organization\'s row wins for that organization only', async () => {
+                it('[ADR-0131 D6] a legacy organization row of the name is no caller\'s row: every caller is served the container\'s expansion', async () => {
                     const { protocol } = showcaseHarness(environmentId);
                     await saveView(protocol, TASK, container);
                     await saveView(protocol, DEFAULT, row, ORG);
 
-                    // The organization that holds the row: the row, on both doors.
-                    await expectBothDoors(protocol, DEFAULT, ORG, expectTheRow);
-                    // A caller for whom the name has no row of its own: the
-                    // container's expansion, on both doors.
                     const expectTheDefaultExpansion = (v: any) => {
                         expect(v?.label).toBe('FromContainer');
                         expect(v?.config?.columns).toEqual([{ field: 'title' }]);
                     };
+                    await expectBothDoors(protocol, DEFAULT, ORG, expectTheDefaultExpansion);
                     await expectBothDoors(protocol, DEFAULT, undefined, expectTheDefaultExpansion);
                     await expectBothDoors(protocol, DEFAULT, 'org_globex', expectTheDefaultExpansion);
                 });
@@ -1937,7 +1948,7 @@ describe('#21334 a container on another package\'s object never takes that packa
 
         for (const [kernel, environmentId] of KERNELS) {
             describe(`on ${kernel}`, () => {
-                for (const organizationId of [undefined, ORG]) {
+                for (const organizationId of [undefined] as Array<string | undefined>) {
                     const scope = organizationId ? 'organization-scoped' : 'environment-wide';
                     for (const c of AT_REST) {
                         it(`${scope}, ${c.member} stored at ${c.rowName}: ${c.spared} still answers the packaged view on both doors, and the container's view is served under its own name, with no package and no default`, async () => {

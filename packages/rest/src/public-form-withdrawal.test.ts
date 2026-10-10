@@ -104,11 +104,15 @@ interface Setup {
 
 function build(setup: Setup) {
   const createData = vi.fn().mockResolvedValue({ object: 'inquiry', id: 'rec_1', record: {} });
-  const getMetaItems = vi.fn(async (req: { type: string; organizationId?: string }) => {
+  // [ADR-0131 D6, triage ruling Q3 A] The doors' `view` read reaches the
+  // Default Organization's legacy layer through `legacyFormOrganizationId`, the
+  // one read key left that names an organization.
+  const getMetaItems = vi.fn(async (req: { type: string; organizationId?: string; legacyFormOrganizationId?: string }) => {
     if (req.type === 'view') {
-      if (req.organizationId !== ORG && setup.envWideViews) return setup.envWideViews;
-      if (req.organizationId === ORG && setup.orgViews) return setup.orgViews;
-      const effective = req.organizationId === ORG && setup.inOrg !== undefined ? setup.inOrg : setup.envWide;
+      const org = req.legacyFormOrganizationId;
+      if (org !== ORG && setup.envWideViews) return setup.envWideViews;
+      if (org === ORG && setup.orgViews) return setup.orgViews;
+      const effective = org === ORG && setup.inOrg !== undefined ? setup.inOrg : setup.envWide;
       return [formView(effective, setup.sharing), ...(setup.extraViews ?? [])];
     }
     if (req.type === 'object') return [inquiryObject];
@@ -179,14 +183,16 @@ describe('[#21331] public form withdrawal reaches every intake door', () => {
     const post = await s.post();
     expect(post.statusCode).toBe(201);
     expect(s.createData).toHaveBeenCalledTimes(1);
-    // Every read names the organization, except the env-wide view read the
-    // kill switch adds beneath the organization's view read.
-    const reads = s.getMetaItems.mock.calls.map(([r]) => [r.type, r.organizationId]);
+    // [ADR-0131 D6] No read names an organization by the retired key; the
+    // `view` read alone reaches the legacy layer, and the object read is the
+    // environment's.
+    const reads = s.getMetaItems.mock.calls.map(([r]) => [r.type, r.legacyFormOrganizationId]);
     expect(reads.length).toBeGreaterThan(0);
-    for (const [type, organizationId] of reads) {
-      if (type !== 'view') expect(organizationId).toBe(ORG);
+    for (const [r] of s.getMetaItems.mock.calls) expect(r.organizationId).toBeUndefined();
+    for (const [type, legacy] of reads) {
+      if (type !== 'view') expect(legacy).toBeUndefined();
     }
-    // One resolution per door: the organization's view read, then the env-wide one.
+    // One resolution per door: the legacy organization's view read, then the env-wide one.
     expect(reads.filter(([type]) => type === 'view').map(([, o]) => o)).toEqual([ORG, undefined, ORG, undefined]);
   });
 
@@ -195,14 +201,14 @@ describe('[#21331] public form withdrawal reaches every intake door', () => {
     expect((await s.get()).body.code).toBe('FORM_NOT_FOUND');
     expect((await s.post()).body.code).toBe('FORM_NOT_FOUND');
     expect(s.createData).not.toHaveBeenCalled();
-    for (const [r] of s.getMetaItems.mock.calls) expect(r.organizationId).toBeUndefined();
+    for (const [r] of s.getMetaItems.mock.calls) expect(r.legacyFormOrganizationId).toBeUndefined();
   });
 
   it('tenancy never registered: the env-wide read, unchanged', async () => {
     const s = build({ envWide: true, inOrg: false, tenancy: 'not-registered' });
     expect((await s.get()).statusCode).toBe(200);
     expect((await s.post()).statusCode).toBe(201);
-    for (const [r] of s.getMetaItems.mock.calls) expect(r.organizationId).toBeUndefined();
+    for (const [r] of s.getMetaItems.mock.calls) expect(r.legacyFormOrganizationId).toBeUndefined();
   });
 
   it('tenancy registered but unreachable: both doors refuse instead of reading env-wide (fail closed)', async () => {
