@@ -7,14 +7,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { CapabilityDeclarationSchema, PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
-import {
-  isPlatformCapabilityDeclaration,
-  registerBuiltinCapabilities,
-  securityBuiltinCapabilities,
-  withoutPlatformCapabilityDeclarations,
-  withoutPlatformCapabilityItems,
-} from './builtin-capabilities.js';
+import { CapabilityDeclarationSchema, PLATFORM_CAPABILITIES, describeHighPrivilegeBits } from '@objectstack/spec/security';
+import { registerBuiltinCapabilities, securityBuiltinCapabilities } from './builtin-capabilities.js';
 import { SECURITY_PLUGIN_ID } from './manifest.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
 
@@ -59,85 +53,24 @@ describe('registerBuiltinCapabilities', () => {
 
 const curated = PLATFORM_CAPABILITIES[0]!.name;
 const OWN = { name: curated, _packageId: SECURITY_PLUGIN_ID };
-const FOREIGN_CURATED = { name: curated, _packageId: 'com.example.other' };
-const PACKAGE_DECLARED = { name: 'field.export', _packageId: 'com.example.other' };
-const OWN_NON_CURATED = { name: 'field.export', _packageId: SECURITY_PLUGIN_ID };
-
-describe('isPlatformCapabilityDeclaration', () => {
-  it('is this plugin’s declaration of a curated name, and nothing else', () => {
-    expect(isPlatformCapabilityDeclaration(OWN)).toBe(true);
-    for (const item of [FOREIGN_CURATED, PACKAGE_DECLARED, OWN_NON_CURATED, { name: curated }, null, undefined, curated]) {
-      expect(isPlatformCapabilityDeclaration(item)).toBe(false);
-    }
-  });
-
-  it('drops only those from a list', () => {
-    expect(withoutPlatformCapabilityItems([OWN, FOREIGN_CURATED, PACKAGE_DECLARED, OWN_NON_CURATED])).toEqual(
-      [FOREIGN_CURATED, PACKAGE_DECLARED, OWN_NON_CURATED],
-    );
-  });
-});
-
-describe('withoutPlatformCapabilityDeclarations', () => {
-  class FakeRegistry {
-    readonly items: Record<string, unknown[]> = {
-      capability: [OWN, FOREIGN_CURATED, PACKAGE_DECLARED],
-      permission: [OWN],
-    };
-    listItems(type: string): unknown[] {
-      return this.items[type] ?? [];
-    }
-    getItem(type: string, name: string): unknown {
-      return (this.items[type] ?? []).find((i) => (i as { name?: unknown }).name === name);
-    }
-  }
-  class FakeEngine {
-    registry = new FakeRegistry();
-    #inserted: unknown[] = [];
-    async insert(object: string, row: unknown): Promise<unknown> {
-      this.#inserted.push([object, row]);
-      return row;
-    }
-    inserted(): unknown[] {
-      return this.#inserted;
-    }
-  }
-
-  it('lists every capability but this plugin’s curated declarations, and every other type as it is', () => {
-    const engine = new FakeEngine();
-    const view = withoutPlatformCapabilityDeclarations(engine);
-    expect(view.registry.listItems('capability')).toEqual([FOREIGN_CURATED, PACKAGE_DECLARED]);
-    expect(view.registry.listItems('permission')).toEqual([OWN]);
-    expect(view.registry.getItem('capability', curated)).toBe(OWN);
-    // The engine itself is untouched.
-    expect(engine.registry.listItems('capability')).toEqual([OWN, FOREIGN_CURATED, PACKAGE_DECLARED]);
-  });
-
-  it('forwards every other member to the engine itself, private state included', async () => {
-    const engine = new FakeEngine();
-    const view = withoutPlatformCapabilityDeclarations(engine);
-    await view.insert('sys_capability', { name: 'x' });
-    expect(engine.inserted()).toEqual([['sys_capability', { name: 'x' }]]);
-  });
-
-  it('returns an engine with no listing registry as it is', () => {
-    const bare = { insert: async () => undefined };
-    expect(withoutPlatformCapabilityDeclarations(bare)).toBe(bare);
-    expect(withoutPlatformCapabilityDeclarations(undefined)).toBeUndefined();
-  });
-});
 
 describe('readDeclaredCapabilityContext, beside the curated declarations', () => {
   const APP = { name: 'field.export', _packageId: 'com.example.field' };
   const engineWith = (capabilities: unknown[]) => ({ registry: { listItems: (type: string) => (type === 'capability' ? capabilities : []) } });
+  const setGranting = (...systemPermissions: string[]) => ({ name: 'baseline', systemPermissions });
 
-  it('still falls back to the metadata service when the registry holds only the platform’s curated declarations', async () => {
-    const metadata = { list: async (type: string) => (type === 'capability' ? [APP] : []) };
-    expect(await readDeclaredCapabilityContext(engineWith([OWN]), metadata)).toEqual({ declaredCapabilities: [APP] });
-    expect(await readDeclaredCapabilityContext(engineWith([OWN]), { list: async () => [] })).toBeUndefined();
+  it('hands over the registry’s capabilities as they are, the curated ones included', async () => {
+    expect(await readDeclaredCapabilityContext(engineWith([OWN, APP]), undefined)).toEqual({ declaredCapabilities: [OWN, APP] });
   });
 
-  it('reads the registry’s package declarations without the curated ones', async () => {
-    expect(await readDeclaredCapabilityContext(engineWith([OWN, APP]), undefined)).toEqual({ declaredCapabilities: [APP] });
+  it('excuses a package-declared token and never a curated one: the platform floor discards the curated declarations', async () => {
+    const context = await readDeclaredCapabilityContext(engineWith([OWN, APP]), undefined);
+    expect(describeHighPrivilegeBits(setGranting(APP.name), context)).toBeNull();
+    expect(describeHighPrivilegeBits(setGranting(curated), context)).not.toBeNull();
+    // A registry holding only the curated declarations excuses nothing, as no declaration did.
+    const curatedOnly = await readDeclaredCapabilityContext(engineWith([OWN]), undefined);
+    expect(describeHighPrivilegeBits(setGranting(APP.name), curatedOnly))
+      .toEqual(describeHighPrivilegeBits(setGranting(APP.name), undefined));
+    expect(describeHighPrivilegeBits(setGranting(APP.name), undefined)).not.toBeNull();
   });
 });

@@ -29,9 +29,10 @@ import { defineCapability } from '@objectstack/spec';
  * ['showcase.export_data']`.
  *
  * `packageId` is the ADR-0086 D3 AUTHOR-DECLARED provenance — the documented
- * fallback the seeder reads when the registry has not stamped `_packageId`
- * (`cap._packageId ?? cap.packageId` in `bootstrapDeclaredCapabilities`).
- * Without an owning package the declaration is NOT materialized into
+ * fallback the declared-capability seeder read when the registry had not
+ * stamped `_packageId` (`cap._packageId ?? cap.packageId`; that seeder is
+ * retired by ADR-0131 D3, and no row is written for a declared capability).
+ * Without an owning package the declaration was NOT materialized into
  * `sys_capability` (a `managed_by:'package'` row with no `package_id` would
  * make uninstall undefined), which left `OpsPermissionSet` granting a
  * capability that never existed — one boot `warn` and an inert security

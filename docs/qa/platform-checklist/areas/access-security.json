@@ -2149,15 +2149,15 @@
         ]
       },
       "variants": [
-        "DEFINE — capability metadata authored via defineCapability, bootstrapped to a sys_capability row",
+        "DEFINE — capability metadata authored via defineCapability, served by the registry (no sys_capability row is written for it — ADR-0131 D3)",
         "GRANT — a permission set's systemPermissions carries the capability name",
         "REQUIRE — an action's requiredPermissions lists it; invocation on the platform action path is denied unless a granted set carries it (ADR-0066 D4 actionPermissionError)",
         "REGRANT — the grant is withdrawn from the permission set and restored; the gate must follow both edits, not cache the first answer",
-        "shadow-refusal — a declaration whose name collides with PLATFORM_CAPABILITY_NAMES is refused loudly"
+        "shadow-refusal — a declaration whose name collides with PLATFORM_CAPABILITY_NAMES, or with a name another package declares, is refused loudly by the registry's one-holder rule"
       ],
       "steps": [
-        "boot showcase isolated; confirm the declared capability bootstrapped: GET the sys_capability row for showcase.export_data (bootstrap-declared-capabilities.ts upsertPackageCapability writes name/label/description/scope)",
-        "read its fields — label falls back to humanize(name), description to 'Capability <name>.' when absent (capabilityRowFields)",
+        "boot showcase isolated; confirm the declared capability is served: GET /api/v1/meta/capability/showcase.export_data answers its declared name/label/description/scope, and no sys_capability row names it",
+        "read its fields — they are the declaration's own; nothing is transcribed into a row",
         "identify which platform action-invoke surface this build exposes (dispatcher /actions domain · MCP run_action · in-process ql.executeAction/invokeBusinessAction) and record it; do NOT probe /api/v1/actions/... or /api/v1/data/:object/actions/... — @objectstack/rest mounts no action-invoke route by design (#7680), so a 404 there scores nothing",
         "on that surface, INVOKE showcase_zoo_perm_held (requires showcase.export_data) as the GRANTED member holding OpsPermissionSet, then as a NON-granted member: granted executes, non-granted is refused with the actionPermissionError text naming the action and the missing capability",
         "REGRANT leg: withdraw showcase.export_data from OpsPermissionSet's systemPermissions, re-invoke as the (formerly) granted member → now refused; restore the grant, re-invoke → executes again",
@@ -2167,10 +2167,10 @@
       ],
       "acceptance": [
         {
-          "clause": "the package-declared capability materializes as a sys_capability row at boot with its authored identity (name is the upsert key; label/description apply their documented fallbacks)",
+          "clause": "the package-declared capability is served by the registry with its authored identity, and no sys_capability row is written for it (ADR-0131 D3)",
           "oracle": "api",
-          "verify": "the sys_capability read for showcase.export_data matches the declaration; label/description fallbacks hold when omitted",
-          "evidence": "the row read + the declaration source"
+          "verify": "GET /api/v1/meta/capability/showcase.export_data matches the declaration; the sys_capability read finds no row for it",
+          "evidence": "the metadata read + the empty row read + the declaration source"
         },
         {
           "clause": "the three-way resolves by NAME on the surface that actually enforces it — the PLATFORM action path (ADR-0066 D4 actionPermissionError, reached via the dispatcher /actions domain, the MCP run_action bridge, or ql.executeAction): invoking an action that REQUIREs the capability is refused for a member whose granted sets do not carry it and executes for one that does, the refusal follows a grant WITHDRAWN from the permission set, and execution returns when it is re-granted — grant / deny / regrant, all three legs",
@@ -2181,7 +2181,7 @@
         {
           "clause": "a declaration whose name shadows a curated PLATFORM_CAPABILITY_NAME is refused LOUDLY — a package cannot hijack a platform-owned capability name",
           "oracle": "build",
-          "verify": "the shadow declaration is rejected at authoring/boot with a located error naming the collision (bootstrap-declared-capabilities.ts guard)",
+          "verify": "the shadow declaration is rejected at authoring/boot with a located error naming the collision (the registry's one-holder refusal, SecurityCatalogNameConflictError)",
           "evidence": "the refusal text"
         },
         {
@@ -2205,7 +2205,7 @@
       ],
       "source": [
         "packages/spec/liveness/capability.json (ADR-0066 D1, #5961 — the kind's own liveness ledger)",
-        "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts#upsertPackageCapability (upsertPackageCapability, capabilityRowFields, PLATFORM_CAPABILITY_NAMES guard)",
+        "packages/objectql/src/registry.ts#SecurityCatalogNameConflictError (the one-holder refusal: a second holder of a capability name, a curated platform name included)",
         "packages/lint/src/validate-capability-references.ts#known (authoring lint known-name set)",
         "examples/app-showcase/src/security/{capabilities.ts,permission-sets.ts} (DEFINE + GRANT fixtures)",
         "packages/runtime/src/action-execution.ts#actionPermissionError (actionPermissionError — ADR-0066 D4, the single-sourced REQUIRE-side gate every invoke surface calls)",

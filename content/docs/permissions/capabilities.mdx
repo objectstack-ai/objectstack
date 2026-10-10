@@ -49,8 +49,8 @@ capability name travels through five stations:
   ② REGISTER         AppPlugin → metadata.registerInMemory('capability', name)
         │                                     (also: **/*.capability.ts files)
         ▼
-  ③ SEED             bootstrapDeclaredCapabilities → sys_capability row
-        │                        managed_by: 'package' + package_id provenance
+  ③ SERVE            registry item (capability kind) → catalog read, /meta door
+        │                 owning-package provenance, one holder per name
         ▼
   ④ GRANT            permission set: systemPermissions: ['export_data']
         │                                       assigned to positions / users
@@ -62,12 +62,13 @@ capability name travels through five stations:
 1. **Declare** — `defineCapability(...)` on the stack's `capabilities` array,
    or a `*.capability.ts` / `*.capability.yml` file the filesystem loader globs.
 2. **Register** — at boot, `AppPlugin` puts each stack-declared capability into
-   the metadata registry under the `capability` kind, so boot seeders and
-   runtime resolvers can list it.
-3. **Seed** — `bootstrapDeclaredCapabilities` (in `@objectstack/plugin-security`)
-   reads them back and upserts each one into `sys_capability` with
-   `managed_by: 'package'` and `package_id` provenance. This is what makes the
-   capability *attributable* and package uninstall well-defined.
+   the metadata registry under the `capability` kind, so the security catalog
+   and runtime resolvers can list it.
+3. **Serve** — the registry is the capability's one home. It records the
+   owning package as provenance, which is what makes the capability
+   *attributable*. The security catalog read and
+   `GET /api/v1/meta/capability/:name` answer its definition. No
+   `sys_capability` row is written for it.
 4. **Grant** — an administrator (or a permission set your package ships) lists
    the name in [`systemPermissions`](/docs/permissions/permission-metadata#system-permissions).
 5. **Check** — a resource lists the name in `requiredPermissions`, and the
@@ -157,7 +158,8 @@ plain names. Three consequences worth internalising before you pick one:
 
 You cannot take a platform name. A declaration whose `name` collides with a
 curated platform capability (`manage_users`, `manage_metadata`,
-`setup.access`, …) is refused loudly at boot — those are platform-owned.
+`setup.access`, …) is refused at boot by the registry's one-holder rule
+(`422`) — those are platform-owned, and the platform declares them itself.
 
 ## "Or" is one capability, granted twice
 
@@ -191,36 +193,28 @@ it. Do not rely on it to keep a view or a dashboard from an audience until the
 platform enforces it.
 </Callout>
 
-## What the seeder does, and what it refuses
+## One holder per name
 
-`bootstrapDeclaredCapabilities` runs on `kernel:ready` and is idempotent: it
-re-seeds on every boot, so the row always reflects the shipped declaration. Four
-outcomes are refusals rather than writes, and each one leaves the capability
-behaving differently:
+Each capability name has exactly one holder in the registry. When a package
+registers a declaration, the registry records that package as its owner.
+Package uninstall then removes it with the rest of the package. Two cases are
+refused at boot, with a `422` that names the name and both holders:
 
 | Situation | Outcome |
 |:--|:--|
-| No resolvable owning package (`_packageId` and `packageId` both absent) | **Refused — no row is written.** The declaration is inert |
-| Name collides with a curated platform capability | Refused; the platform keeps its own definition |
-| A row already exists owned by a **different** package | Skipped loudly; a package never writes into a foreign record |
-| A row was authored by an administrator (`managed_by: 'admin'`) | Never clobbered |
+| The name is a curated platform capability | Refused; the platform holds its own definition |
+| Another installed package already declares the name | Refused; a package never takes over another package's capability |
 
-A pre-existing `managed_by: 'platform'` row for a *non-curated* name is a
-different case: that is the untitled placeholder the old implicit back-door
-derived from whatever a permission set happened to reference, and an explicit
-declaration **claims** it — upgrading the row to package provenance with your
-authored label, description and scope. The provenance and composition rules
-behind that behaviour are set out in
-[Package capability declaration](/docs/permissions/authorization#package-capability-declaration-adr-0066-d1).
+Declaring a capability writes no `sys_capability` row. Its label, description,
+scope and provenance live on the registry item, and that is what the catalog
+read and the metadata door serve.
 
 <Callout type="info">
-**The `sys_capability` row is a catalogue, not a gate.** It carries the label,
-the scope and the provenance that make a capability reviewable, attributable and
-uninstallable — but no authorization check reads it. Permission-set grants and
-resource `requiredPermissions` match capability names **as strings**; the only
-production readers of the table are the two boot seeders. The row's `active`
-flag is a catalogue/visibility flag with no authorization effect: clearing it
-revokes nothing. Withdraw a capability by withdrawing the **grant**.
+**No authorization check reads a `sys_capability` row.** Permission-set grants
+and resource `requiredPermissions` match capability names **as strings**. A
+declared capability has no row at all, and the rows the platform still seeds
+for its curated capabilities are a catalogue only: clearing a row's `active`
+flag revokes nothing. Withdraw a capability by withdrawing the **grant**.
 </Callout>
 
 ## `capability` is code-only
@@ -265,7 +259,7 @@ to store arbitrary JSON on the authorization surface.
 - [ ] `label` and `description` are written for the administrator who will grant it in Setup
 - [ ] `scope` is `org` unless the privilege really is platform-wide
 - [ ] The declaration is reachable from the stack (`capabilities: [...]`) or a `*.capability.ts` file
-- [ ] The package resolves an owning package id — otherwise the seeder writes no row
+- [ ] No other installed package declares the same name — the registry refuses a second holder at boot
 - [ ] Something actually **requires** the name (`requiredPermissions`), and something **grants** it (`systemPermissions`)
 
 ## See also

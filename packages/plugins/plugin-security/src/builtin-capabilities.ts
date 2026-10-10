@@ -34,19 +34,13 @@
  * reason. Existing `sys_capability` rows are rows, not registry holders, so a
  * database the seeder already populated registers the same as a fresh one.
  *
- * ## The one adapter, and why it lives at the call site
+ * ## Beside the package declarations
  *
- * `bootstrapDeclaredCapabilities` and `readDeclaredCapabilityContext`
- * (`declared-capability-context.ts`) read the registry's capabilities as PACKAGE declarations. Handed the curated
- * declarations too, the seeder would refuse each one as a package hijacking a
- * curated name (one false `capability_platform_name_refused` line per name,
- * every boot), and both would stop falling back to the metadata service on a
- * registry that holds no package declaration. The seeders are retired, not
- * edited (ADR-0131 cutover), so the plugin hands that seeder an engine view
- * without this plugin's own curated declarations
- * ({@link withoutPlatformCapabilityDeclarations}), and the context read drops
- * the same items ({@link withoutPlatformCapabilityItems}); both readers then
- * see exactly what they saw before. The view goes with the seeder.
+ * The registry lists these beside every package-declared capability, and
+ * `readDeclaredCapabilityContext` (`declared-capability-context.ts`) hands
+ * them to the anchor predicates with the rest: the predicates' platform floor
+ * (`@objectstack/spec/security`, `high-privilege.ts`) keeps a curated name
+ * high-privilege whoever declares it, so they excuse nothing there.
  *
  * ## What a declaration here carries
  *
@@ -55,8 +49,7 @@
  * catalog row.
  */
 
-import { PLATFORM_CAPABILITIES, PLATFORM_CAPABILITY_NAMES, type PlatformCapability } from '@objectstack/spec/security';
-import { SECURITY_PLUGIN_ID } from './manifest.js';
+import { PLATFORM_CAPABILITIES, type PlatformCapability } from '@objectstack/spec/security';
 
 /**
  * The engine registry's registration seam, as this module uses it — ObjectQL's
@@ -88,58 +81,4 @@ export function registerBuiltinCapabilities(registry: unknown, packageId: string
     target.registerItem('capability', { name, label, description, scope }, 'name', packageId);
   }
   return securityBuiltinCapabilities.length;
-}
-
-/**
- * Is `item` this plugin's own declaration of a curated capability — a curated
- * name stamped with this plugin's package id? Exact match on both. Another
- * package's item under a curated name is not, so it still reaches the readers
- * (and their refusal) as before.
- */
-export function isPlatformCapabilityDeclaration(item: unknown): boolean {
-  if (!item || typeof item !== 'object') return false;
-  const { name, _packageId } = item as { name?: unknown; _packageId?: unknown };
-  return _packageId === SECURITY_PLUGIN_ID && typeof name === 'string' && PLATFORM_CAPABILITY_NAMES.has(name);
-}
-
-/** Read `prop` off `target`, binding a method to `target` itself. */
-function forward(target: object, prop: PropertyKey): unknown {
-  const value = Reflect.get(target, prop, target);
-  return typeof value === 'function' ? value.bind(target) : value;
-}
-
-/**
- * The engine as the declared-capability seeder must see it: every member is
- * the engine's own, except that its registry lists no capability this plugin
- * declared from the curated list ({@link isPlatformCapabilityDeclaration}).
- * Every other type, and every other capability, is listed as the registry
- * lists it. An engine without a listing registry is returned as it is.
- */
-export function withoutPlatformCapabilityDeclarations<T>(engine: T): T {
-  const registry = (engine as { registry?: unknown } | null | undefined)?.registry;
-  if (!engine || typeof engine !== 'object' || !registry || typeof registry !== 'object'
-    || typeof (registry as { listItems?: unknown }).listItems !== 'function') {
-    return engine;
-  }
-  const registryView = new Proxy(registry, {
-    get(target, prop) {
-      if (prop !== 'listItems') return forward(target, prop);
-      return (type: string, ...rest: unknown[]) => {
-        const items = (target as { listItems(type: string, ...rest: unknown[]): unknown }).listItems(type, ...rest);
-        return type === 'capability' && Array.isArray(items)
-          ? items.filter((item) => !isPlatformCapabilityDeclaration(item))
-          : items;
-      };
-    },
-  });
-  return new Proxy(engine as object, {
-    get(target, prop) {
-      return prop === 'registry' ? registryView : forward(target, prop);
-    },
-  }) as T;
-}
-
-/** Drop this plugin's own curated declarations from a list of capability declarations. */
-export function withoutPlatformCapabilityItems<T>(items: readonly T[]): T[] {
-  return items.filter((item) => !isPlatformCapabilityDeclaration(item));
 }

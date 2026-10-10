@@ -19,16 +19,16 @@
  *
  *  - `in the registry` — a package manifest's `capabilities`, the way a stack
  *    reaches the engine registry;
- *  - `in the metadata service only` — what the declared-capability seeder
- *    reads when the registry holds no package declaration.
+ *  - `in the metadata service only` — what the catalog read falls back to
+ *    when the registry holds no package declaration.
  *
  * ## The expected values
  *
  * Read off the producers, never off a registry: the curated entries from
  * `PLATFORM_CAPABILITIES`, the stack's from its declaration. The census is the
- * one the boot wrote before the curated capabilities were declared — the
- * curated pass's rows plus the stack's package row — which is why an
- * unchanged census is the pin that the declarations changed no row.
+ * curated pass's rows and nothing else: the stack's declared capability is
+ * served by the registry, its one home (ADR-0131 D3), and no row is written
+ * for it.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -193,10 +193,9 @@ async function census(engine: ObjectQL): Promise<string[]> {
 }
 
 /** The census the boot writes, read off the producers (module doc). */
-const EXPECTED_CENSUS = [
-  ...PLATFORM_CAPABILITIES.map((c) => [c.name, 'platform', '-', c.label, c.description, c.scope, true].join(' | ')),
-  [STACK_CAPABILITY.name, 'package', STACK_PACKAGE, STACK_CAPABILITY.label, STACK_CAPABILITY.description, STACK_CAPABILITY.scope, true].join(' | '),
-].sort();
+const EXPECTED_CENSUS = PLATFORM_CAPABILITIES
+  .map((c) => [c.name, 'platform', '-', c.label, c.description, c.scope, true].join(' | '))
+  .sort();
 
 const SCENARIOS: ReadonlyArray<{ posture: Posture; declared: Declared }> = [
   { posture: 'single', declared: 'in the registry' },
@@ -248,9 +247,10 @@ describe.each(SCENARIOS)('a $posture boot, the stack capability $declared', ({ p
     }
   });
 
-  it('the boot writes the census it wrote before the declarations, on a fresh and on a seeded database', async () => {
+  it('the boot writes the curated rows and no row for the stack’s declared capability, on a fresh and on a seeded database', async () => {
     expect(await census(fresh.engine)).toEqual(EXPECTED_CENSUS);
     expect(await census(reseeded.engine)).toEqual(EXPECTED_CENSUS);
+    expect(fresh.writes.filter((w) => w.endsWith(` ${STACK_CAPABILITY.name}`))).toEqual([]);
     // The seeded database needs no write at all: every row already reads as declared.
     expect(reseeded.writes).toEqual([]);
   });

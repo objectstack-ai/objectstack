@@ -195,20 +195,18 @@ export default defineStack({
 });
 ```
 
-At boot `bootstrapDeclaredCapabilities`
-(`packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts`) seeds
-each declaration into `sys_capability` with **`managed_by: 'package'` + `package_id`**
-provenance — idempotent, re-seeded on upgrade, and it **never clobbers**
-admin-authored rows, refuses to hijack a curated platform capability, and refuses
-to write into another package's capability.
+At boot each declaration becomes a registry item owned by its package — the
+capability's one home (ADR-0131 D3). No `sys_capability` row is written for it.
+The registry's one-holder rule refuses a second holder of a name at boot with a
+`422`, so a package can neither take a curated platform capability nor take
+over another package's.
 
 This **replaces the implicit back-door** where a capability existed only as an
 untitled placeholder derived from whatever a permission set happened to reference
 in `systemPermissions[]`. That derivation still runs for back-compat (a
 reference with no declaration keeps resolving as a `managed_by:'platform'`
-placeholder), but an explicit `defineCapability` takes precedence and — for a
-pre-existing derived placeholder — **claims** it, upgrading the row to package
-provenance with the authored label/description/scope. This is the ADR-0066 D1
+placeholder), but an explicit `defineCapability` is the attributable form: its
+label, description, scope and owning package live on the registry item. This is the ADR-0066 D1
 direction: retire the implicit `managed_by`-guessing back-doors in favour of
 explicit, attributable declarations.
 
@@ -543,8 +541,8 @@ The complete, prioritized gap map lives in issue **#2561** (the production
   seeded by `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts`.
   A **package** now DEFINES its own capabilities explicitly via
   [`defineCapability` / `stack.capabilities`](#package-capability-declaration-adr-0066-d1),
-  seeded with `managed_by:'package'` + `package_id` provenance by
-  `bootstrap-declared-capabilities.ts` — replacing the implicit
+  served by the registry with owning-package provenance (no row is written for
+  it) — replacing the implicit
   derive-from-`systemPermissions` back-door (which stays for back-compat).
   The authoring lint (ADR-0066 ⑨) is also **landed**: `validateCapabilityReferences`
   (`@objectstack/lint`) warns at author time (`os validate` / `os lint`) when a
