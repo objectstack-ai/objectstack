@@ -27,7 +27,7 @@ export const entry: SemanticMigration = {
     + 'The conversion of stored rows is data, not a metadata rewrite: organizations that bound different '
     + 'sets to one position name are reported conflicting and never merged (D10 fate 4), so no chain step '
     + 'can apply it on its own. Under a wall a position or set an organization authored in Setup has no '
-    + 'definition at all and stops granting (ruling #15196 Q3 = A); a platform administrator re-creates it as '
+    + 'definition at all and stops granting (ruled: such a row is not promoted); a platform administrator re-creates it as '
     + 'environment metadata under the same name to keep it. ADR-0087.',
   acceptanceCriteria:
     'Every position whose holders should hold a permission set names that set in `permissionSets` on its '
