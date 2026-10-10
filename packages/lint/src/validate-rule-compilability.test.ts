@@ -23,13 +23,31 @@ import { ObjectStackSchema } from '@objectstack/spec';
 import { ObjectSchema } from '@objectstack/spec/data';
 
 import {
-  validateRuleCompilability,
+  validateRuleCompilability as validateRuleCompilabilityUnrecorded,
   MAX_RULE_NESTING_DEPTH,
   RUNTIME_AJV_OPTIONS,
   VALIDATION_RULE_REGEX_UNCOMPILABLE,
   VALIDATION_RULE_SCHEMA_UNCOMPILABLE,
 } from './validate-rule-compilability.js';
 import { AUTHORING_COMMANDS, AUTHORING_RULES, authoringRulesFor, runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the two ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — so the pin covers every firing variant
+// this suite exercises, not a chosen few. Run the whole file: those cases read
+// what the cases above fired.
+const COMPILE_IDS: readonly string[] = [VALIDATION_RULE_REGEX_UNCOMPILABLE, VALIDATION_RULE_SCHEMA_UNCOMPILABLE];
+const fired: Array<{ rule: string; message: string }> = [];
+const validateRuleCompilability: typeof validateRuleCompilabilityUnrecorded = (...args) => {
+  const findings = validateRuleCompilabilityUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const RUNTIME_VALIDATOR = 'packages/objectql/src/validation/rule-validator.ts';
@@ -80,19 +98,23 @@ describe('validateRuleCompilability — the fail-open artifacts go RED', () => {
     // Named: which rule, on which object, and where in the config.
     expect(f.where).toBe("object 'account' · validation 'tax_id_format'");
     expect(f.path).toBe('objects.account.validations.tax_id_format.regex');
-    expect(f.message).toContain("'tax_id_format'");
-    expect(f.message).toContain("object 'account'");
     // The compiler's own text, not a paraphrase — this is what an author acts on.
+    // [#22161] Its reason, that is: V8 echoes the source (`/([/: `), which the
+    // `path` and the `fix:` line already carry.
     let native = '';
     try {
       new RegExp('([');
     } catch (err) {
       native = (err as Error).message;
     }
-    expect(native).not.toBe('');
-    expect(f.message).toContain(native);
+    expect(native).toBe('Invalid regular expression: /([/: Unterminated character class');
+    expect(f.message).toBe(
+      '`regex` does not compile (Unterminated character class), so the write path skips the rule and it ' +
+        'enforces nothing on any record',
+    );
     // And the consequence is stated, not implied.
     expect(f.message).toContain('enforces nothing');
+    expect(f.hint).toContain("new RegExp('([')");
     expect(f.hint).toMatch(/escaped|format/);
   });
 
@@ -113,10 +135,10 @@ describe('validateRuleCompilability — the fail-open artifacts go RED', () => {
     expect(f.rule).toBe(VALIDATION_RULE_SCHEMA_UNCOMPILABLE);
     expect(f.where).toBe("object 'account' · validation 'support_config_shape'");
     expect(f.path).toBe('objects.account.validations.support_config_shape.schema');
-    expect(f.message).toContain("'support_config_shape'");
-    expect(f.message).toContain("object 'account'");
-    // ajv's own wording, whatever this ajv version words it as.
+    // ajv's own wording, whatever this ajv version words it as — [#22161] to its
+    // first violation, with the rest counted.
     expect(f.message).toMatch(/schema is invalid/i);
+    expect(f.message).toMatch(/^ajv cannot compile `schema` \(schema is invalid: data\/type [^,]+ \(and \d+ more\)\), /);
     expect(f.message).toContain('enforces nothing');
   });
 
@@ -836,8 +858,11 @@ describe('validateRuleCompilability — reads only keys the spec declares (meta-
     // metadata. `walked` and `names` are the two accumulators #5178 added when
     // the rule walk and the registered-format vocabulary became shared handles
     // (`walkObjectValidationRules`, `registeredFormatNames`) — array `.push` /
-    // `.length` / `.sort`, never a key off authored metadata.
-    const PLUMBING = new Set(['findings', 'out', 'walked', 'names']);
+    // `.length` / `.sort`, never a key off authored metadata. [#22161] `text`,
+    // `echo`, `lead` and `violations` are the verdict helpers' strings — a
+    // compiler's refusal and the prefixes cut off it (`regexRefusal`,
+    // `schemaRefusal`): `.startsWith` / `.slice` / `.split` / `.length`.
+    const PLUMBING = new Set(['findings', 'out', 'walked', 'names', 'text', 'echo', 'lead', 'violations']);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
 
     // …and no excuse outlives the read it excuses. A stale name in either list
@@ -942,5 +967,43 @@ describe('validateRuleCompilability — every branch is reachable from a PARSING
       ),
     );
     expect([...emitted].sort()).toEqual([...new Set(pushedRuleIds())].sort());
+  });
+});
+
+describe('[#22161] one-line verdicts — the two compile ids', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each id fired at least once, so the shape
+    // assertion below cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...COMPILE_IDS].sort());
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('a regex refusal V8 does not spell the usual way is quoted whole', () => {
+    // The source is cut only when the engine's text starts with the exact echo
+    // of it; nothing else is parsed out of the refusal.
+    const [f] = validateRuleCompilability(
+      objectWith({ type: 'format', name: 'fmt', field: 'tax_id', regex: '(?<a>x)(?<a>y)', message: 'm' }),
+    );
+    expect(f.message).toContain('(Duplicate capture group name)');
+    expect(f.message).not.toContain('(?<a>x)');
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [VALIDATION_RULE_REGEX_UNCOMPILABLE]: ['`checkFormat`', 'new RegExp(rule.regex)', 'skipped', 'enforces nothing on any record, forever', 'no flags'],
+    [VALIDATION_RULE_SCHEMA_UNCOMPILABLE]: ['`checkJsonSchema`', 'new Ajv({ allErrors: true, strict: false })', '`ajv-formats`', 'duplicate `$id`', 'counts the rest'],
+  };
+
+  it('covers exactly the two ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...COMPILE_IDS].sort());
+  });
+
+  it.each([...COMPILE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanationOf(rule);
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });
