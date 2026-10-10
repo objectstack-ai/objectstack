@@ -318,23 +318,22 @@ type ResolvedBinding = Omit<ChartBinding, 'dataset'>;
  */
 type MeasurePosition = 'query' | 'report-series' | 'page-series' | 'page-axis';
 
-/** Presentation position → what actually happens when the name resolves to nothing. */
+/**
+ * Presentation position → what actually happens when the name resolves to
+ * nothing, as the verdict's one clause. [#22161] Why each position is
+ * presentation on its surface is the `chart-measure-unknown` explanation
+ * (`os explain`), not this text.
+ */
 const UNKNOWN_CONSEQUENCE: Record<Exclude<MeasurePosition, 'query'>, string> = {
   'report-series':
-    'On this surface `chart.series[]` is a per-measure DISPLAY-NAME override, not a '
-    + 'binding: the renderer derives the series from the chart\'s own `xAxis`/`yAxis` '
-    + 'query and pairs an authored entry with the derived series whose key it EQUALS, so '
-    + 'an entry naming no declared measure is ignored. The override lands on nothing — '
-    + 'the series is still drawn from the dataset selection.',
+    'this `chart.series[]` entry is a DISPLAY-NAME override, so it lands on nothing and the '
+    + 'series is still drawn',
   'page-series':
-    'On this surface `series[]` is presentation, not a binding: the renderer derives one '
-    + 'series per selected measure and REPLACES the authored array with the derived one, '
-    + 'so this entry never reaches the chart at all. It lands on nothing — the chart is '
-    + 'still drawn from `dimensions`/`values`.',
+    'the renderer REPLACES the authored array with the derived series, so this entry never '
+    + 'reaches the chart',
   'page-axis':
-    'On this surface `yAxis[].field` is axis PRESENTATION, not a binding: the entry keeps '
-    + 'its slot (the count is what turns on a secondary axis) and its scale/chrome, while '
-    + 'the plotted columns come from `values`. The key re-points nothing.',
+    'this `yAxis[].field` is axis PRESENTATION and the plotted columns come from `values`, so '
+    + 'it re-points nothing',
 };
 
 /** Presentation position → the shape sentence in the hint. */
@@ -350,20 +349,28 @@ const SHAPE_HINT: Record<Exclude<MeasurePosition, 'query'>, string> = {
     + 'plotted columns come from `values`.',
 };
 
-/** Position → the consequence of naming a DECLARED measure outside the selection. */
+/**
+ * Position → the consequence of naming a DECLARED measure outside the
+ * selection, as the verdict's closing clause. [#22161] Which selection each
+ * surface measures against is the `chart-axis-not-selected` explanation.
+ */
 const UNSELECTED_CONSEQUENCE: Record<MeasurePosition, string> = {
-  query: 'the query does not return it, so the series plots nothing.',
+  query: 'the query does not return it, so the series plots nothing',
   'report-series':
-    'this entry is a display-name override matched against the ONE series the chart '
-    + 'derives (from its own `chart.yAxis` query), so unless it names that measure the '
-    + 'override lands on nothing. The series drawn is unaffected.',
-  'page-series':
-    'the series are derived from `values`, so none is derived for it and this entry '
-    + 'lands on nothing. The chart drawn is unaffected.',
-  'page-axis':
-    'the plotted columns come from `values`, so the axis entry re-points nothing. The '
-    + 'chart drawn is unaffected.',
+    'this display-name override pairs only with the series the chart derives, so it lands on nothing',
+  'page-series': 'the series are derived from `values`, so this entry lands on nothing',
+  'page-axis': 'the plotted columns come from `values`, so the axis entry re-points nothing',
 };
+
+/**
+ * [#22161] A chart's selection for a one-line verdict: sorted, at most three,
+ * then `(and N more)`.
+ */
+function selectionRoster(names: Iterable<string>): string {
+  const all = [...names].sort();
+  const shown = all.slice(0, 3).join(', ');
+  return all.length > 3 ? `${shown} (and ${all.length - 3} more)` : shown;
+}
 
 export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
   const findings: ChartBindingFinding[] = [];
@@ -438,12 +445,14 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
           rule: CHART_MEASURE_UNKNOWN,
           where: binding.where,
           path,
+          // [#22161] One verdict per position; the per-surface reading of
+          // which positions bind is `os explain` text.
           message:
-            `"${name}" is not a measure declared by dataset "${dsName}". ` +
+            `"${name}" is not a measure declared by dataset "${dsName}"` +
             (position === 'query'
-              ? `Post-ADR-0021 result rows are keyed by MEASURE NAME (e.g. "sum_amount"), ` +
-                `not the base field (e.g. "amount"), so this series comes back empty.`
-              : UNKNOWN_CONSEQUENCE[position]),
+              ? `, so this series comes back empty (result rows are keyed by measure name, ` +
+                `not the base field)`
+              : `: ${UNKNOWN_CONSEQUENCE[position]}`),
           hint:
             `Dataset measures: ${list(ds.measures)}.${suggestName(name, ds.measures)} ` +
             (position === 'query'
@@ -465,8 +474,8 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
           where: binding.where,
           path,
           message:
-            `"${name}" is a declared measure of "${dsName}" but is not in this chart's ` +
-            `selected values (${list(selected)}) — ${UNSELECTED_CONSEQUENCE[position]}`,
+            `"${name}" is a declared measure of "${dsName}" outside this chart's ` +
+            `selected values (${selectionRoster(selected)}): ${UNSELECTED_CONSEQUENCE[position]}`,
           hint:
             position === 'report-series'
               ? `Point the entry at the measure this chart plots (\`chart.yAxis\`), or drop it.`

@@ -80,7 +80,7 @@
  */
 
 import { expandViewContainerWithDiagnostics, isAggregatedViewContainer } from '@objectstack/spec';
-import { listNames, recordsOf, suggestName } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 
 export interface ViewRefFinding {
   where: string;
@@ -121,6 +121,17 @@ function resolvesViewId(requested: string, ids: ReadonlySet<string>, object: str
 /** The short, author-facing spelling of an expanded view id (`task.mine` → `mine`). */
 const shortViewName = (id: string, object: string): string =>
   id.startsWith(`${object}.`) ? id.slice(object.length + 1) : id;
+
+/**
+ * [#22161] An object's list views for a one-line verdict: sorted, at most
+ * three, then `(and N more)` — the `fix:` line's `Did you mean` names the
+ * nearest one wherever it sorts.
+ */
+function viewRoster(names: readonly string[]): string {
+  const sorted = [...names].sort();
+  const shown = sorted.slice(0, 3).join(', ');
+  return sorted.length > 3 ? `${shown} (and ${sorted.length - 3} more)` : shown;
+}
 
 /** Pull the view-container slots out of an object definition (ADR-0017 nested
  *  "Object has-many View"). Absent slots stay undefined — the expander ignores
@@ -215,10 +226,11 @@ export function lintViewRefs(stack: AnyRec): ViewRefFinding[] {
     for (const col of collisions) {
       findings.push({
         where: `object '${object}' · view key '${col.key}'`,
+        // [#22161] One verdict; the shared namespace and which references
+        // resolve through it are `os explain` text.
         message:
-          `View key collision: the ${col.viewKind} view '${col.requested}' clashes with another view ` +
-          `in the same container and was renamed to '${col.renamedTo}'. Anything referencing ` +
-          `'${col.requested}' (a form action target, a navigation viewName) resolves to the OTHER view, not this one.`,
+          `View key collision: the ${col.viewKind} view '${col.requested}' was renamed to ` +
+          `'${col.renamedTo}', so every reference to '${col.requested}' resolves to the OTHER view`,
         hint:
           `Give the ${col.viewKind} view a unique key — the default list implicitly claims '<object>.default'. ` +
           `Renaming key '${col.key}' fixes both this collision and any reference that targets it.`,
@@ -325,15 +337,13 @@ export function lintViewRefs(stack: AnyRec): ViewRefFinding[] {
 
     findings.push({
       where: `app '${appName}' · nav '${navId}'`,
+      // [#22161] One verdict; how the name is matched and why the fallback is
+      // silent are `os explain` text. The list views stay: they are the fix.
       message:
         `Navigation entry opens view '${viewName}' on object '${objectName}', which declares no such ` +
-        `list view. ` +
-        (isFormView
-          ? `The name resolves to a FORM view of that object, which the object's view switcher never offers. `
-          : '') +
-        `At runtime the name does not resolve and the entry falls back to the object's default view, ` +
-        `keeping its authored label and icon — so the sidebar still reads correctly while opening the ` +
-        `wrong view. List views on '${objectName}': ${listNames(available)}.`,
+        `list view` +
+        (isFormView ? ` (the name resolves to a FORM view)` : '') +
+        `, so it opens the default view under its own label. List views: ${viewRoster(available)}`,
       hint:
         `Correct the name, declare '${viewName}' in the object's \`listViews\`, or drop \`viewName\` ` +
         `to open the default view.` +
