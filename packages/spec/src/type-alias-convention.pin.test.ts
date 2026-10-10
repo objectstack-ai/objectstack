@@ -274,7 +274,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 773 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 774 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -845,6 +845,7 @@ export type Iso_data_fieldValue__CalendarDateValueSchema = Assert<Eq< z.input< t
 export type Iso_data_fieldValue__ClockTimeValueSchema = Assert<Eq< z.input< typeof M178.ClockTimeValueSchema >, z.infer< typeof M178.ClockTimeValueSchema > >>;
 export type Iso_data_fieldValue__FileLikeValueSchema = Assert<Eq< z.input< typeof M178.FileLikeValueSchema >, z.infer< typeof M178.FileLikeValueSchema > >>;
 export type Iso_data_fieldValue__FileReferenceIdValueSchema = Assert<Eq< z.input< typeof M178.FileReferenceIdValueSchema >, z.infer< typeof M178.FileReferenceIdValueSchema > >>;
+export type Iso_data_fieldValue__FileRefusedValueSchema = Assert<Eq< z.input< typeof M178.FileRefusedValueSchema >, z.infer< typeof M178.FileRefusedValueSchema > >>;
 export type Iso_data_fieldValue__FileValueSchema = Assert<Eq< z.input< typeof M178.FileValueSchema >, z.infer< typeof M178.FileValueSchema > >>;
 export type Iso_data_fieldValue__InstantValueSchema = Assert<Eq< z.input< typeof M178.InstantValueSchema >, z.infer< typeof M178.InstantValueSchema > >>;
 export type Iso_data_fieldValue__LocationValueSchema = Assert<Eq< z.input< typeof M178.LocationValueSchema >, z.infer< typeof M178.LocationValueSchema > >>;
@@ -1671,7 +1672,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 773 isomorphic pins', () => {
+  it('still declares all 774 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2433,7 +2434,14 @@ describe('ADR-0122 type-alias convention', () => {
     // in the untouched `Iso_ui_page__PageTypeSchema = Assert<` line, which this
     // case's `= Assert<` pattern then no longer matched — one pin added, one
     // pin silently uncounted. Restoring the space is what made the count honest.
-    expect(pins).toHaveLength(773);
+    //
+    // 773 -> 774 is #22593: the new exported `FileRefusedValueSchema` (the
+    // expanded read form a reader refused `sys_file` metadata is served) is a
+    // closed `{ id, metadataRefused: true }` with no default and no transform
+    // in its tree, so it is pinned here
+    // (Iso_data_fieldValue__FileRefusedValueSchema) rather than given a
+    // `FileRefusedValueParsed` synonym. +1 added.
+    expect(pins).toHaveLength(774);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

@@ -866,6 +866,27 @@ os migrate plan --json                       # Machine-readable output
 os migrate unmapped-columns --object contact --json   # A retired field's stored values, keyed by record id (read-only)
 ```
 
+#### Which database, and who named it
+
+Every `os migrate` command reads the project's `.env*` files the way `os serve` and
+`os start` read them, before it resolves the database or an auth secret: dotenv-flow's
+cascade of `.env`, `.env.local`, `.env.<NODE_ENV>` and `.env.<NODE_ENV>.local`, with
+`NODE_ENV` defaulting to `production`. `os migrate security-catalog-overlays --dev`
+reads the `development` set, as `os serve --dev` does. A variable exported in the
+shell wins over the same variable in a `.env` file, and `--database-url` wins over
+both. So the database a migration targets is the one the deployment serves.
+
+`os migrate plan` and `os migrate apply` say which database they opened and who named
+it:
+
+```text
+ℹ Database: data/app.db (OS_DATABASE_URL from .env)
+```
+
+Under `--json` the same answer is `database` plus `databaseSource`, whose `kind` is
+`flag`, `process-env`, `env-file` (with its `variable` and `file`),
+`config-datasource` (with its `datasource`) or `default`.
+
 #### Nothing is applied before you confirm
 
 Both commands boot your app to read its metadata. That boot writes no row and no
