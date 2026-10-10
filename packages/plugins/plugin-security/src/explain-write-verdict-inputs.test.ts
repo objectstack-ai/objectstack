@@ -37,6 +37,8 @@ import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-shar
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
+import { PermissionEvaluator } from './permission-evaluator.js';
+import { LIFECYCLE_VERB_RLS_OPERATION, rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 // ── metadata ───────────────────────────────────────────────────────────────
@@ -87,7 +89,26 @@ const DEPT_REPORTER: PermissionSet = PermissionSetSchema.parse({
   },
 });
 
-const PERMISSION_SETS: PermissionSet[] = [MEMBER_DEFAULT, ADMIN_FULL_ACCESS, HR_REVIEWER, DEPT_REPORTER];
+/**
+ * [#22550] Every write verb on the object, and two app-authored write-class
+ * policies with DISJOINT predicates: the update class admits only the row named
+ * `Shared`, the delete class only the row named `Owned`, and nothing narrows a
+ * read. So which rows a composition admits names the operation it was composed
+ * for: as `update` it admits `shared` alone, as `delete` it admits `owned`
+ * alone, and as a read (`select`) it admits both.
+ */
+const LIFECYCLE_STEWARD: PermissionSet = PermissionSetSchema.parse({
+  name: 'lifecycle_steward',
+  objects: {
+    [OBJECT]: { allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true },
+  },
+  rowLevelSecurity: [
+    { name: 'steward_updates_shared_only', object: OBJECT, operation: 'update', using: "name == 'Shared'" },
+    { name: 'steward_deletes_owned_only', object: OBJECT, operation: 'delete', using: "name == 'Owned'" },
+  ],
+});
+
+const PERMISSION_SETS: PermissionSet[] = [MEMBER_DEFAULT, ADMIN_FULL_ACCESS, HR_REVIEWER, DEPT_REPORTER, LIFECYCLE_STEWARD];
 
 // ── principals and rows ────────────────────────────────────────────────────
 
@@ -109,6 +130,11 @@ const REPORTER_CTX = ctxFor(U_REPORTER, 'dept_reporter');
 /** The floor taken out of play by its own domain — isolates M2. */
 const HR_NO_FLOOR_CTX = ctxFor(U_HR, 'hr_reviewer', []);
 const REPORTER_NO_FLOOR_CTX = ctxFor(U_REPORTER, 'dept_reporter', []);
+/**
+ * [#22550] The steward with the platform floor out of its domain, so the two
+ * authored policies are the only write-class row-level security in play.
+ */
+const STEWARD_CTX = ctxFor('u_steward', 'lifecycle_steward', []);
 
 type RowKey = 'shared' | 'owned' | 'unshared';
 
@@ -215,9 +241,18 @@ interface WriteOutcome {
   message: string;
 }
 
+/**
+ * The by-id write verbs. [#22550] `transfer` / `restore` / `purge` are driven
+ * through the middleware as the lifecycle operations step 2.7 is pre-wired for;
+ * the engine dispatches none of them, so the terminal below records that the
+ * write got through and writes nothing.
+ */
+type WriteVerb = 'update' | 'delete' | 'transfer' | 'restore' | 'purge';
+
 interface Stack {
-  explain: (operation: 'update' | 'delete', rowKey: RowKey, context: any) => Promise<any>;
-  write: (operation: 'update' | 'delete', rowKey: RowKey, context: any) => Promise<WriteOutcome>;
+  explain: (operation: WriteVerb, rowKey: RowKey, context: any) => Promise<any>;
+  /** `data` replaces the update's change set (the transfer door is an update that writes `owner_id`). */
+  write: (operation: WriteVerb, rowKey: RowKey, context: any, data?: Record<string, unknown>) => Promise<WriteOutcome>;
   row: (rowKey: RowKey) => Record<string, unknown> | undefined;
 }
 
@@ -262,14 +297,14 @@ async function makeStack(
     explain: (operation, rowKey, context) =>
       security.explain({ object: OBJECT, operation, recordId: idOf(rowKey) }, { ...context }),
     row: (rowKey) => engine._tables[OBJECT].find((r) => r.id === idOf(rowKey)),
-    async write(operation, rowKey, context) {
+    async write(operation, rowKey, context, data) {
       const recordId = idOf(rowKey);
       const opCtx: any = {
         object: OBJECT,
         operation,
         context: { ...context },
         ...(operation === 'update'
-          ? { data: { id: recordId, value: 2 } }
+          ? { data: { id: recordId, ...(data ?? { value: 2 }) } }
           : { options: { where: { id: recordId } } }),
       };
       let reached = false;
@@ -277,7 +312,7 @@ async function makeStack(
         await securityMw(opCtx, async () => {
           await sharingMw(opCtx, async () => {
             if (operation === 'delete') await engine.delete(opCtx.object, opCtx.options);
-            else await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
+            else if (operation === 'update') await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
             reached = true;
           });
         });
@@ -404,4 +439,155 @@ describe("OWD control: `public_read_write` — the object's own model opens writ
   it.each(cells)('%s × %s row: both admit', async (_label, rowKey, context) => {
     await expectCell(await makeStack({ schema: PUBLIC_RW_SCHEMA }), 'update', rowKey, context, true);
   });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#22550] The lifecycle verbs: explain composes a verb's row-level security
+// for the operation the door composes it for.
+//
+// The door's by-id pre-image gate (step 2.7) composes a lifecycle verb's
+// row-level security for its nearest write class (`rlsOperationForVerb`:
+// transfer and restore as update, purge as delete). explain composed it for
+// the RAW verb, which the RLS compiler sends to `select`, so no update-class
+// policy and no ownership floor reached a transfer's verdict: a row an update
+// policy excludes was explained writable beside the door's 403.
+//
+// `LIFECYCLE_STEWARD`'s two policies are disjoint, so the rows a composition
+// admits name the operation it was composed for. Each cell asserts the door's
+// outcome for the expected class, then explain's verdict and both of its `rls`
+// readings (the object-level layer and the record's row story) against it, on
+// the row the class's policy excludes and on the one it admits.
+//
+// `restore` and `purge` are refused at the object gate for every principal
+// (their grants are retired until the lifecycle batch returns them), so their
+// door never reaches step 2.7. Their cells lift ONLY that gate, the way the
+// batch's rows will (restore asks the update grant, purge the delete grant),
+// and leave every row-level input as it is. A separate cell shows the gate
+// standing: explain answers `object_crud`, with the same composition under it.
+// ───────────────────────────────────────────────────────────────────────────
+
+type LifecycleVerb = 'transfer' | 'restore' | 'purge';
+
+/** Each lifecycle verb's class, written out here and held equal to the helper's declaration below. */
+const LIFECYCLE_VERB_CLASS: Record<LifecycleVerb, 'update' | 'delete'> = {
+  transfer: 'update',
+  restore: 'update',
+  purge: 'delete',
+};
+
+/** The row each class's policy admits, and the one it excludes (`LIFECYCLE_STEWARD`). */
+const ROWS_OF_CLASS: Record<'update' | 'delete', { admits: RowKey; excludes: RowKey }> = {
+  update: { admits: 'shared', excludes: 'owned' },
+  delete: { admits: 'owned', excludes: 'shared' },
+};
+
+/**
+ * The object gate as the lifecycle batch will answer it: restore asks the
+ * update grant and purge the delete grant. Every other operation, and every
+ * row-level input, is the evaluator's own.
+ */
+function liftRetiredLifecycleGrants() {
+  const original = PermissionEvaluator.prototype.checkObjectPermission;
+  return vi
+    .spyOn(PermissionEvaluator.prototype, 'checkObjectPermission')
+    .mockImplementation(function (
+      this: PermissionEvaluator,
+      operation: string,
+      objectName: string,
+      permissionSets: PermissionSet[],
+      opts?: { isPrivate?: boolean },
+    ) {
+      const asked = operation === 'restore' ? 'update' : operation === 'purge' ? 'delete' : operation;
+      return original.call(this, asked, objectName, permissionSets, opts);
+    });
+}
+
+const rlsLayerOf = (decision: any) => (decision.layers ?? []).find((l: any) => l.layer === 'rls');
+
+describe("[#22550] explain composes a lifecycle verb's row-level security as the door does", () => {
+  it('the verbs under test are exactly the ones the mapping declares, each with its class', () => {
+    expect({ ...LIFECYCLE_VERB_RLS_OPERATION }).toEqual(LIFECYCLE_VERB_CLASS);
+    for (const [verb, cls] of Object.entries(LIFECYCLE_VERB_CLASS)) expect(rlsOperationForVerb(verb)).toBe(cls);
+  });
+
+  const cells = (Object.keys(LIFECYCLE_VERB_CLASS) as LifecycleVerb[]).flatMap((verb) => {
+    const cls = LIFECYCLE_VERB_CLASS[verb];
+    return [
+      [verb, cls, ROWS_OF_CLASS[cls].excludes, false],
+      [verb, cls, ROWS_OF_CLASS[cls].admits, true],
+    ] as Array<[LifecycleVerb, 'update' | 'delete', RowKey, boolean]>;
+  });
+
+  it.each(cells)('%s (as %s) × %s row: door admits = %s, and explain answers the same', async (verb, _cls, rowKey, admitted) => {
+    const lift = liftRetiredLifecycleGrants();
+    try {
+      const stack = await makeStack({ schema: PUBLIC_RW_SCHEMA });
+      const decision = await stack.explain(verb, rowKey, STEWARD_CTX);
+      const door = await stack.write(verb, rowKey, STEWARD_CTX);
+      const cell = `${verb} × ${rowKey}`;
+      expect(door.ok, `${cell}: the by-id ${verb} through the middleware (${door.message})`).toBe(admitted);
+      if (!admitted) {
+        expect(door.code, `${cell}: ADR-0112 code`).toBe('PERMISSION_DENIED');
+        expect(door.status, `${cell}: ADR-0112 status`).toBe(403);
+      }
+      expect(decision.record, `${cell}: explain's record verdict`).toEqual({
+        recordId: String(ROWS[rowKey].id),
+        visible: admitted,
+        decidedBy: 'rls',
+      });
+      const rls = rlsLayerOf(decision);
+      expect(rls?.record?.outcome, `${cell}: the record's business RLS`).toBe(admitted ? 'admitted' : 'excluded');
+      expect(rls?.verdict, `${cell}: the object-level rls layer composes the class's policy`).toBe('narrows');
+    } finally {
+      lift.mockRestore();
+    }
+  });
+
+  it.each([
+    ['owned', false],
+    ['shared', true],
+  ] as Array<[RowKey, boolean]>)(
+    'transfer × %s row: the live transfer door, the update that writes owner_id, admits = %s, as explain transfer says',
+    async (rowKey, admitted) => {
+      const stack = await makeStack({ schema: PUBLIC_RW_SCHEMA });
+      const decision = await stack.explain('transfer', rowKey, STEWARD_CTX);
+      const door = await stack.write('update', rowKey, STEWARD_CTX, { owner_id: U_HR });
+      const cell = `transfer × ${rowKey}`;
+      expect(door.ok, `${cell}: the update writing owner_id (${door.message})`).toBe(admitted);
+      expect(decision.record?.visible, `${cell}: explain transfer (decidedBy ${decision.record?.decidedBy})`).toBe(door.ok);
+      if (admitted) {
+        expect(stack.row(rowKey)?.owner_id, `${cell}: ownership really moved`).toBe(U_HR);
+      } else {
+        expect(door.code, `${cell}: ADR-0112 code`).toBe('PERMISSION_DENIED');
+        expect(door.status, `${cell}: ADR-0112 status`).toBe(403);
+        expect(decision.record?.decidedBy, `${cell}: explain names the layer the door refuses on`).toBe('rls');
+        expect(stack.row(rowKey)?.owner_id, `${cell}: ownership untouched`).toBe(ROWS[rowKey].owner_id);
+      }
+    },
+  );
+
+  it.each(['restore', 'purge'] as LifecycleVerb[])(
+    '%s with its grant retired: the object gate decides first, and the same composition stands under it',
+    async (verb) => {
+      const stack = await makeStack({ schema: PUBLIC_RW_SCHEMA });
+      const cls = LIFECYCLE_VERB_CLASS[verb];
+      for (const [rowKey, admitted] of [
+        [ROWS_OF_CLASS[cls].excludes, false],
+        [ROWS_OF_CLASS[cls].admits, true],
+      ] as Array<[RowKey, boolean]>) {
+        const decision = await stack.explain(verb, rowKey, STEWARD_CTX);
+        expect(decision.record, `${verb} × ${rowKey}`).toEqual({
+          recordId: String(ROWS[rowKey].id),
+          visible: false,
+          decidedBy: 'object_crud',
+        });
+        expect(rlsLayerOf(decision)?.record?.outcome, `${verb} × ${rowKey}: the ${cls} class`).toBe(
+          admitted ? 'admitted' : 'excluded',
+        );
+        const door = await stack.write(verb, rowKey, STEWARD_CTX);
+        expect(door.ok, `${verb} × ${rowKey}: the object gate refuses`).toBe(false);
+        expect(door.status, `${verb} × ${rowKey}: ADR-0112 status`).toBe(403);
+      }
+    },
+  );
 });
