@@ -107,13 +107,41 @@ const INVOICE_OBJECT = {
 };
 const LEADS_VIEW = { name: 'all_leads', label: 'All leads', object: 'lead', columns: ['name'] };
 
+// [#22639] The list view and dashboard audience gate (ruling 6095014058,
+// letter A): `requiredPermissions`, all required. The holder holds `LEGAL_CAP`.
+const LEGAL_CAP = 'clm_legal_workbench.view';
+const LEGAL_QUEUE_VIEW = {
+    name: 'clm_contract.legal_queue', object: 'clm_contract', viewKind: 'list',
+    config: { type: 'grid', columns: ['matter_ref'], requiredPermissions: [LEGAL_CAP] },
+};
+const CONTRACT_VIEWS = {
+    name: 'clm_contract', object: 'clm_contract',
+    list: { type: 'grid', columns: ['name'] },
+    listViews: {
+        mine: { type: 'grid', columns: ['name'] },
+        legal_review: { type: 'grid', columns: ['matter_ref'], requiredPermissions: [LEGAL_CAP] },
+    },
+};
+const LEGAL_BOARD = { name: 'legal_board', label: 'Legal board', requiredPermissions: [LEGAL_CAP], widgets: [{ id: 'w_open_matters', type: 'metric' }] };
+const CONTRACT_OBJECT = {
+    name: 'clm_contract', label: 'Contract',
+    fields: { amount: { type: 'number', label: 'Amount' } },
+    listViews: {
+        mine: { type: 'grid', columns: ['amount'] },
+        legal_desk: { type: 'grid', columns: ['amount'], requiredPermissions: [LEGAL_CAP] },
+    },
+};
+/** A type no per-caller gate judges. */
+const LEAD_FLOW = { name: 'lead_intake', label: 'Lead intake' };
+
 const STORE: Record<string, any[]> = {
     book: [ADMIN_GUIDE, HELP_CENTER],
     doc: DOCS,
     app: [CRM_APP, PAYROLL_APP, LAUNCHPAD_APP],
-    dashboard: [OPS_DASHBOARD],
-    object: [INVOICE_OBJECT],
-    view: [LEADS_VIEW],
+    dashboard: [OPS_DASHBOARD, LEGAL_BOARD],
+    object: [INVOICE_OBJECT, CONTRACT_OBJECT],
+    view: [LEADS_VIEW, LEGAL_QUEUE_VIEW, CONTRACT_VIEWS],
+    flow: [LEAD_FLOW],
 };
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -130,7 +158,7 @@ interface Caller {
 }
 const CALLERS: Record<'holder' | 'non-holder' | 'anonymous', Caller> = {
     holder: {
-        ctx: { userId: 'u_holder', isSystem: false, systemPermissions: ['finance.access', 'payroll.access', 'studio.access'] },
+        ctx: { userId: 'u_holder', isSystem: false, systemPermissions: ['finance.access', 'payroll.access', 'studio.access', LEGAL_CAP] },
         holdings: ['crm_admin'],
         readableFields: ['amount', 'secret_margin'],
     },
@@ -247,6 +275,8 @@ const text = (a: Answer): string => JSON.stringify(a.body ?? null);
 const navIds = (doc: any): string[] => (doc?.navigation ?? []).map((e: any) => e.id);
 const widgetIds = (doc: any): string[] => (doc?.widgets ?? []).map((w: any) => w.id);
 const fieldNames = (doc: any): string[] => Object.keys(doc?.fields ?? {}).sort();
+/** [#22639] A view container's or an object's list views, by key (`list` for a container's default). */
+const listViewIds = (doc: any): string[] => [...(doc?.list ? ['list'] : []), ...Object.keys(doc?.listViews ?? {})];
 
 // ── The rows ──────────────────────────────────────────────────────────────────
 
@@ -271,9 +301,18 @@ const ROWS: Row[] = [
     // The ADR-0106 object mask — the dispatcher's plain read already ran it;
     // its `/published` did not.
     { type: 'object', name: 'invoice', secrets: ['secret_margin'], nonHolder: { status: 200, shape: 'masked' } },
-    // Controls: an ungated doc and an ungated type.
+    // [#22639] The list view and dashboard audience gate: ONE view and a
+    // dashboard refused whole (the app's whole refusal), a view container and
+    // an object's own list views pruned.
+    { type: 'view', name: 'clm_contract.legal_queue', secrets: ['matter_ref'], nonHolder: { status: 403, code: 'PERMISSION_DENIED' } },
+    { type: 'view', name: 'clm_contract', secrets: ['legal_review', 'matter_ref'], nonHolder: { status: 200, shape: 'pruned' } },
+    { type: 'dashboard', name: 'legal_board', secrets: ['w_open_matters'], nonHolder: { status: 403, code: 'PERMISSION_DENIED' } },
+    { type: 'object', name: 'clm_contract', secrets: ['legal_desk'], nonHolder: { status: 200, shape: 'pruned' } },
+    // Controls: an ungated doc, a view that names no capability (no key,
+    // served to all), and [#22639] a type no gate judges (`view` now is one).
     { type: 'doc', name: 'crm_intro', secrets: [], nonHolder: { status: 200, shape: 'whole' } },
     { type: 'view', name: 'all_leads', secrets: [], nonHolder: { status: 200, shape: 'whole' } },
+    { type: 'flow', name: 'lead_intake', secrets: [], nonHolder: { status: 200, shape: 'whole' } },
 ];
 
 const DOORS = ['', '/published'] as const;
@@ -310,6 +349,7 @@ describe('[#20193] the dispatcher answers every caller what RestServer answers �
                     expect(navIds(dispatcher.served)).toEqual(navIds(rest.served));
                     expect(widgetIds(dispatcher.served)).toEqual(widgetIds(rest.served));
                     expect(fieldNames(dispatcher.served)).toEqual(fieldNames(rest.served));
+                    expect(listViewIds(dispatcher.served)).toEqual(listViewIds(rest.served));
                     for (const s of row.secrets) {
                         if (text(rest).includes(s)) expect(text(dispatcher)).toContain(s);
                         else expect(text(dispatcher)).not.toContain(s);

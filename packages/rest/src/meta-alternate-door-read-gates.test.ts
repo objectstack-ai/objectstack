@@ -170,7 +170,7 @@ const LEGAL_QUEUE_VIEW = {
     object: 'clm_contract',
     viewKind: 'list',
     label: 'Legal intake queue',
-    config: { type: 'grid', columns: ['name'], requiredPermissions: [LEGAL_CAP] },
+    config: { type: 'grid', columns: ['matter_ref'], requiredPermissions: [LEGAL_CAP] },
 };
 /** A view CONTAINER: one named list view gated, the default `list` and `mine` not. */
 const CONTRACT_VIEWS = {
@@ -565,7 +565,7 @@ const SUBJECTS: Subject[] = [
     // ONE view: the holder is served it, everyone else refused it whole — the
     // app's whole refusal, to an author as to anyone.
     {
-        type: 'view', name: 'clm_contract.legal_queue', secrets: ['Legal intake queue'],
+        type: 'view', name: 'clm_contract.legal_queue', secrets: ['matter_ref'],
         plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, author: { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
     },
     // A view container: the gated named list view pruned, the rest served.
