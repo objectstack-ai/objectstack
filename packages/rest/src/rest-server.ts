@@ -3587,7 +3587,17 @@ export class RestServer {
      */
     private static gatesPerCaller(metaType: string): boolean {
         return metaType === 'book' || metaType === 'doc' || metaType === 'app'
-            || metaType === 'view' || metaType === 'dashboard';
+            || RestServer.gatesOnItsOwnKey(metaType);
+    }
+
+    /**
+     * [#22639] The types whose per-caller gate reads nothing but the item's own
+     * `requiredPermissions` — a list view and a dashboard (ruling 6095014058,
+     * letter A). `/diff` judges them when a current document exists, and with
+     * none serves the diff as before, the event doors' rule.
+     */
+    private static gatesOnItsOwnKey(metaType: string): boolean {
+        return metaType === 'view' || metaType === 'dashboard';
     }
 
     /**
@@ -7860,7 +7870,16 @@ export class RestServer {
                     const diffCurrent = diffGated
                         ? await this.fetchCurrentMetaDocument(req, p)
                         : undefined;
-                    if (diffGated && diffCurrent == null) {
+                    // [#22639] A list view's and a dashboard's per-caller gate
+                    // is the item's OWN `requiredPermissions`. With no
+                    // published row there is no current document to judge, so
+                    // — as the event doors answer for every gated type — the
+                    // diff is served as before, and a never-published view or
+                    // dashboard keeps its builder's diff whether or not it
+                    // names a capability: no key, no change. Its draft is
+                    // judged where it is served whole (`?state=draft`,
+                    // `/layers`).
+                    if (diffGated && diffCurrent == null && !RestServer.gatesOnItsOwnKey(diffMetaType)) {
                         sendMetaItemAbsent(res);
                         return;
                     }
@@ -7889,7 +7908,7 @@ export class RestServer {
                     // reads each side pruned, exactly as the plain read prunes
                     // it ({@link diffEmittedFrom}).
                     let served: any = result;
-                    if (diffGated) {
+                    if (diffGated && diffCurrent != null) {
                         const { from, to } = RestServer.diffSides(diffCurrent, result);
                         const judge = this.metaItemReadGate(
                             environmentId, req, p, diffMetaType, req.params.name, [diffCurrent, from, to],
