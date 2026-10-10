@@ -105,6 +105,7 @@
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
  *   flows.<flow>.label
  *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
+ *   flows.<flow>.screens.<node_id>.description                 (#22507)
  *   flows.<flow>.screens.<node_id>.fields.<field>.label
  *   flows.<flow>.screens.<node_id>.fields.<field>.placeholder
  *   flows.<flow>.screens.<node_id>.fields.<field>.inlineHelpText
@@ -1791,10 +1792,15 @@ function collectFlowNodesDeep(nodes: unknown): any[] {
  *
  * - **A screen's `title` falls back to the node `label`.** The executor builds
  *   the wire title as `config.title ?? node.label` (`ScreenSpec.title`), and
- *   `translateFlow` overlays the bundle onto `config.title` for that reason —
- *   one key covers whichever of the two the runner draws. So the seed, and the
- *   `inline` the coverage gate judges, is that same pair: a screen with only a
- *   canvas label still shows English text a translator owes a translation for.
+ *   the engine picks the translated `title` template for whichever of the two
+ *   it renders (#22507) — one key covers both. So the seed, and the `inline`
+ *   the coverage gate judges, is that same pair: a screen with only a canvas
+ *   label still shows English text a translator owes a translation for.
+ * - **A screen's `description` is asked for only where it is authored.** The
+ *   engine translates body text only where the screen authors one (#22507), so
+ *   the seed is the authored TEMPLATE, holes and all — a translator keeps the
+ *   `{{ }}` holes, and the schema judges the translation as the same text
+ *   slot, like a refusal message.
  * - **A field's `label` falls back to its `name`.** `ScreenFieldConfig.label`
  *   is optional and forwarded as-is (`ScreenFieldSpec.label`), so the runner
  *   renders the field name when the author wrote no label. That is a derived

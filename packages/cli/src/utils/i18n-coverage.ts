@@ -355,8 +355,9 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // it, so it keeps its own bucket and reports as `i18n/missing-picklist`.
   picklist: 'picklist',
   page: 'page',
-  // Screen-flow copy (`flows.<f>.label`, `flows.<f>.screens.<n>.title`, and
-  // the per-field `label` / `placeholder` / option labels), the terminal
+  // Screen-flow copy (`flows.<f>.label`, `flows.<f>.screens.<n>.title` /
+  // `.description` (#22507), and the per-field `label` / `placeholder` /
+  // option labels), the terminal
   // toasts (`flows.<f>.successMessage` / `.errorMessage`, #22507) and a refused
   // `end` node's message (`flows.<f>.refusals.<n>.message`, #22450) — the
   // author's own text, so

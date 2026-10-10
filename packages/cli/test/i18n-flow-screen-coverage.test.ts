@@ -84,7 +84,8 @@ const leadConversion = {
       label: 'Conversion Details Step',
       config: {
         title: 'Conversion Details',
-        // Body text is guidance-REFUSED by the schema: it must not become a key.
+        // Body text is a key since #22507 (the engine picks its translated
+        // template in the run's locale), demanded only where it is authored.
         description: 'Choose what this lead becomes.',
         fields: [
           { name: 'create_opportunity', label: 'Create Opportunity?', type: 'boolean' },
@@ -139,6 +140,7 @@ describe('the screen-flow gap a green i18n gate could not see (#11485)', () => {
     // The exact strings the console renders in English.
     expect(keys).toContain('flows.lead_conversion.label');
     expect(keys).toContain('flows.lead_conversion.screens.conversion_details.title');
+    expect(keys).toContain('flows.lead_conversion.screens.conversion_details.description');
     expect(keys).toContain('flows.lead_conversion.screens.conversion_details.fields.create_opportunity.label');
     expect(keys).toContain('flows.lead_conversion.screens.conversion_details.fields.opportunity_name.label');
     expect(keys).toContain('flows.lead_conversion.screens.conversion_details.fields.opportunity_name.placeholder');
@@ -170,6 +172,7 @@ describe('the screen-flow gap a green i18n gate could not see (#11485)', () => {
           screens: {
             conversion_details: {
               title: '转化详情',
+              description: '选择这条线索转化成什么。',
               fields: {
                 create_opportunity: { label: '创建商机？' },
                 opportunity_name: { label: '商机名称', placeholder: 'Acme - 第三季度续约', inlineHelpText: '显示在报价单上' },
@@ -198,6 +201,7 @@ describe('what the walker harvests from a screen flow', () => {
   it('keys screens by `FlowNode.id` and fields by `ScreenFieldConfig.name`', () => {
     expect(flowKeys({ flows: [leadConversion] }).sort()).toEqual([
       'flows.lead_conversion.label',
+      'flows.lead_conversion.screens.conversion_details.description',
       'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.inlineHelpText',
       'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.label',
       'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.placeholder',
@@ -205,6 +209,7 @@ describe('what the walker harvests from a screen flow', () => {
       'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.label',
       'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.placeholder',
       'flows.lead_conversion.screens.conversion_details.title',
+      'flows.lead_conversion.screens.summary.description',
       'flows.lead_conversion.screens.summary.title',
     ]);
   });
@@ -266,9 +271,7 @@ describe('what the walker harvests from a screen flow', () => {
   it('never emits the keys the schema refuses by name', () => {
     const keys = flowKeys({ flows: [leadConversion] });
 
-    // `description` is a screen's body text — guidance-refused spec-side.
-    expect(keys.filter((k) => k.endsWith('.description'))).toEqual([]);
-    // Runner chrome and per-field `help` / `options` are refused too.
+    // Runner chrome and per-field `help` / `options` are refused.
     expect(keys.filter((k) => /\.(help|helpText|options|successMessage|errorMessage)$/.test(k))).toEqual([]);
   });
 });
@@ -649,6 +652,46 @@ const guardedCapture = {
   ],
   edges: [],
 };
+
+describe('a screen\'s body text is a key where the screen authors one (#22507)', () => {
+  // Ruling A on #22507: the engine picks the translated `description` template
+  // in the run's locale before it fills the holes, so the walker seeds the
+  // authored TEMPLATE, holes and all, and demands it only where it is authored
+  // — the engine never adds body text the author did not write.
+  const templated = {
+    name: 'quick_add_task',
+    label: 'Quick Add Task',
+    type: 'screen',
+    nodes: [
+      { id: 'success_screen', type: 'screen', label: 'Success', config: { title: 'Task Created', description: 'Task "{{ subject }}" created successfully!', waitForInput: true } },
+      { id: 'bare', type: 'screen', label: 'Bare', config: { waitForInput: true } },
+    ],
+  };
+  const config = (zh?: Record<string, unknown>) => ({
+    i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+    flows: [templated],
+    translations: [{ 'zh-CN': { flows: { quick_add_task: { label: '快速添加任务', screens: { success_screen: { title: '任务已创建', ...zh }, bare: { title: '空白' } } } } } }],
+  });
+
+  it('demands the authored body text and nothing for a screen that authors none', () => {
+    const keys = userIssues(computeI18nCoverage(config())).filter((i) => i.locale === 'zh-CN').map((i) => i.key);
+    expect(keys).toEqual(['flows.quick_add_task.screens.success_screen.description']);
+  });
+
+  it('goes quiet once the body text template is translated', () => {
+    expect(userIssues(computeI18nCoverage(config({ description: '任务“{{ subject }}”已创建。' })))).toEqual([]);
+  });
+
+  it('scaffolds the authored template, holes and all, and no row for the screen without one', () => {
+    const { bundles } = extractTranslations({ flows: [templated] }, { locales: ['en', 'zh-CN'] });
+    const en = bundles.en as any;
+    expect(en.flows.quick_add_task.screens.success_screen.description).toBe('Task "{{ subject }}" created successfully!');
+    expect((bundles['zh-CN'] as any).flows.quick_add_task.screens.success_screen.description).toBe('');
+    expect(en.flows.quick_add_task.screens.bare).not.toHaveProperty('description');
+    const parsed = TranslationDataSchema.safeParse(en);
+    expect(parsed.success ? [] : parsed.error.issues).toEqual([]);
+  });
+});
 
 describe('the flow label is demanded only for a flow the runner can open', () => {
   it('emits no `flows.<flow>.label` entry for a flow with no screen node', () => {
