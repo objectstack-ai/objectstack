@@ -83,7 +83,8 @@ import {
     anonymousFormIntakeUnavailableMessage,
     anonymousFormObjectName,
     anonymousFormSharingPath,
-    // [#21476] The ADR-0106 fingerprint the admin read folds the reason into.
+    // [#21476] The ADR-0106 fingerprint the admin read folds the reason into
+    // — and [#22639] the list views the read gate withheld.
     objectFieldVisibilityFingerprint,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
@@ -3365,6 +3366,8 @@ export class RestServer {
      *  - `app-permission` — the ADR-0112 standard envelope through the shared
      *    `sendError` (`@objectstack/types`), `{ success: false, error: { code,
      *    message } }`, the `body.error.code` objectui#4252 branches on (#8013);
+     *  - `audience-permission` — [#22639] a list view's or a dashboard's own
+     *    `requiredPermissions`: the app's whole refusal, so the same emitter;
      *  - `docs-audience` — {@link sendDeclaredFault}, `401 UNAUTHENTICATED` /
      *    `403 PERMISSION_DENIED` (ADR-0046 §6.7).
      */
@@ -3374,6 +3377,7 @@ export class RestServer {
                 sendMetaItemAbsent(res);
                 return;
             case 'app-permission':
+            case 'audience-permission':
                 sendEnvelopeError(res, refusal.status, refusal.code, refusal.message);
                 return;
             case 'docs-audience':
@@ -3569,13 +3573,21 @@ export class RestServer {
      * [#20156] Does {@link metaItemReadGate} judge this type per caller? The
      * question a door serving no document of its own asks before it fetches the
      * current one — a type the answer is no for costs that door no extra read
-     * and no new failure mode. `dashboard` is never judged per caller (its gate
-     * answers per deployment). `app` always is: an app the plain read refuses
+     * and no new failure mode. `app` always is: an app the plain read refuses
      * WHOLE is refused on every door, to an author as to anyone (ruling
      * 5856774816), and a non-author is served it pruned.
+     *
+     * [#22639] So are `view` and `dashboard`, for the same reason: a list view
+     * or a dashboard whose own `requiredPermissions` the caller does not all
+     * hold is refused whole on every door, author or not, and a view
+     * container is served pruned. (A dashboard's widget gate still answers per
+     * deployment and stays off these doors.) `object` is not here: its
+     * per-caller arm never refuses, and every door this question serves is an
+     * authoring door, open only to callers ADR-0106 D4 serves the schema whole.
      */
     private static gatesPerCaller(metaType: string): boolean {
-        return metaType === 'book' || metaType === 'doc' || metaType === 'app';
+        return metaType === 'book' || metaType === 'doc' || metaType === 'app'
+            || metaType === 'view' || metaType === 'dashboard';
     }
 
     /**
@@ -6481,8 +6493,17 @@ export class RestServer {
                             // the folded ETag is byte-identical, so a view's
                             // `304` answers exactly as before.
                             const intakeFolds = metaType === 'view';
+                            // [#22639] And for the two types this arm serves that
+                            // the per-caller read gate judges — a list view (one
+                            // refused whole, a container pruned) and an object
+                            // (its own `listViews` pruned): the body varies per
+                            // caller by what the gate withheld, which the
+                            // protocol's validator does not hash. Nothing
+                            // withheld folds nothing, so the `304` answers as
+                            // before.
+                            const audienceFolds = metaType === 'view' || metaType === 'object';
                             const cacheRequest = {
-                                ifNoneMatch: (maskApplies || intakeFolds) ? undefined : (req.headers['if-none-match'] as string),
+                                ifNoneMatch: (maskApplies || intakeFolds || audienceFolds) ? undefined : (req.headers['if-none-match'] as string),
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
                             };
 
@@ -6526,6 +6547,30 @@ export class RestServer {
                             // in the key — and what varies per caller is this
                             // projection plus the validator below.
                             let cachedDocument: any = result.data;
+                            // [#22639] THE per-caller read gate, before the mask —
+                            // the item chain's order (`createMetaItemAnswer`: gate,
+                            // then mask). This arm serves `view` and `object`, the
+                            // two types it judges here: a list view the caller
+                            // does not hold is refused whole, a container and an
+                            // object are served minus the list views withheld.
+                            // The same judge every other door asks — ⛔ no
+                            // decision of its own here. What it withheld is
+                            // folded into the validator below.
+                            let audienceFingerprint = '';
+                            if (audienceFolds) {
+                                const verdict = await this.metaItemReadGate(
+                                    environmentId, req, p, metaType, req.params.name, [cachedDocument],
+                                    { arms: 'all', app: 'gate' },
+                                )(cachedDocument);
+                                if (verdict.kind === 'refuse') {
+                                    verdict.send(res);
+                                    return;
+                                }
+                                audienceFingerprint = objectFieldVisibilityFingerprint(
+                                    metaReadGate.withheldListViewNames(cachedDocument, verdict.document),
+                                );
+                                cachedDocument = verdict.document;
+                            }
                             let visibilityFingerprint = '';
                             if (maskPosture.kind === 'project') {
                                 // [#21884] Related to the fetched document: its `objectOverride` params name other objects.
@@ -6578,18 +6623,25 @@ export class RestServer {
                                 // the runtime view's: a D4-exempt caller whose
                                 // permission withholds a field is served a
                                 // different `sortability`, never a 304 for another's.
+                                // [#22639] …and so does what the read gate
+                                // withheld: a caller who no longer holds a list
+                                // view's capability is never answered a `304`
+                                // for the body that carried it.
                                 const value = foldVisibilityFingerprintIntoEtag(
                                     foldVisibilityFingerprintIntoEtag(
-                                        foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
-                                        runtimeView.fingerprint,
+                                        foldVisibilityFingerprintIntoEtag(
+                                            foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                            runtimeView.fingerprint,
+                                        ),
+                                        intakeFingerprint,
                                     ),
-                                    intakeFingerprint,
+                                    audienceFingerprint,
                                 );
                                 const etagValue = result.etag.weak
                                     ? `W/"${value}"`
                                     : `"${value}"`;
                                 res.header('ETag', etagValue);
-                                if ((maskApplies || intakeFolds) && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
+                                if ((maskApplies || intakeFolds || audienceFolds) && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
                                     res.status(304).send();
                                     return;
                                 }
