@@ -341,7 +341,7 @@ describe('try_catch: its retry is closed, so the spec judges its keys like every
     const config = {
       try: TRY_REGION,
       catch: { nodes: [{ id: 'handler', type: 'assignment', label: 'H', config: { assignments: { b: 1 } } }], edges: [] },
-      errorVariable: '$err',
+      errorVariable: 'err',
       retry: { maxRetries: 3, backoffMs: 500, backoffMultiplier: 2, maxRetryDelayMs: 10000, jitter: true },
     };
     expect(getBuiltinNodeConfigContracts().get('try_catch')!.schema.safeParse(config).success).toBe(true);
