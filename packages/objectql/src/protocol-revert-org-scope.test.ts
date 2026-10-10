@@ -277,7 +277,7 @@ describe('#7559 — the revert reads the history row under the key the writer st
         ]);
 
         // READER: the commit's revert plan asks for exactly that version.
-        const commits = await protocol.listCommits({ packageId: PKG, organizationId: ORG });
+        const commits = await protocol.listCommits({ packageId: PKG });
         const target = commits.find((c) => c.id === p2.commitId)!;
         expect(target.items).toEqual([
             { type: 'view', name: 'cases', existedBefore: true, prevVersion: 2 },

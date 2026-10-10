@@ -26457,7 +26457,8 @@ export class ObjectStackProtocolImplementation implements
             `[Protocol] [metadata_sealed_overlay_unserved] ${rows.length} active environment sys_metadata row(s) ` +
             `overlay an item a managed package ships, on a type that is sealed against overlays (ADR-0131 D6): ` +
             `${detail}. No read serves them — the package's own definition is served. ` +
-            `Each row is kept at rest, untouched. To keep the change, re-express it as a new item under a new ` +
+            `Each row is kept at rest, untouched (an object's table and its columns stay as they are). To keep ` +
+            `the change, re-express it as a new item under a new ` +
             `name (a linkage-free clone of the managed item), then delete the stored row; otherwise delete the ` +
             `stored row.`,
         );

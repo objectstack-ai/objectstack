@@ -78,6 +78,17 @@ function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
 }
 
 /**
+ * [ADR-0131 D6] A `sys_metadata` row stored in a legacy organization's layer:
+ * no metadata read serves one, so the authored hook and action binders skip it
+ * too. Judged off the row in hand — `sys_metadata` is a platform table, never a
+ * federated object.
+ */
+function isLegacyOrganizationRow(row: { organization_id?: unknown } | null | undefined): boolean {
+  const organizationId = row?.organization_id;
+  return organizationId !== null && organizationId !== undefined && organizationId !== '';
+}
+
+/**
  * Options for ObjectQLPlugin.
  *
  * `environmentId` declares that this kernel serves ONE environment. It is a
@@ -2405,18 +2416,20 @@ export class ObjectQLPlugin implements Plugin {
       // of the platform store with no caller behind it, never a principal-less
       // engine context.
       let rows: any[] = (await this.ql.find('sys_metadata', {
-        where: { type: 'hook', state: 'active', organization_id: null },
+        where: { type: 'hook', state: 'active' },
         context: { isSystem: true },
       })) ?? [];
       if (rows.length === 0) {
         // Legacy plural rows — mirrors getMetaItems' singular/plural fallback.
         rows = (await this.ql.find('sys_metadata', {
-          where: { type: 'hooks', state: 'active', organization_id: null },
+          where: { type: 'hooks', state: 'active' },
           context: { isSystem: true },
         })) ?? [];
       }
       const hooks: any[] = [];
       for (const row of rows) {
+        // [ADR-0131 D6] The environment's rows only — see the TSDoc.
+        if (isLegacyOrganizationRow(row)) continue;
         try {
           const data = this.convertStoredRow(
             ctx,
@@ -2592,17 +2605,18 @@ export class ObjectQLPlugin implements Plugin {
       // [#21911, ADR-0096] The explicit system opt-in on all three reads — see
       // readAuthoredHookRows.
       let rows: any[] = (await this.ql.find('sys_metadata', {
-        where: { type: 'action', state: 'active', organization_id: null },
+        where: { type: 'action', state: 'active' },
         context: { isSystem: true },
       })) ?? [];
       if (rows.length === 0) {
         rows = (await this.ql.find('sys_metadata', {
-          where: { type: 'actions', state: 'active', organization_id: null },
+          where: { type: 'actions', state: 'active' },
           context: { isSystem: true },
         })) ?? [];
       }
       const actions: any[] = [];
       for (const row of rows) {
+        if (isLegacyOrganizationRow(row)) continue; // [ADR-0131 D6]
         const data = parseRow(row, 'action');
         if (data && typeof data.name === 'string') actions.push(data);
       }
@@ -2611,10 +2625,11 @@ export class ObjectQLPlugin implements Plugin {
       // Converting the OBJECT row canonicalizes the embedded actions too —
       // the chain's action walker covers `objects[].actions[]`.
       const objectRows: any[] = (await this.ql.find('sys_metadata', {
-        where: { type: 'object', state: 'active', organization_id: null },
+        where: { type: 'object', state: 'active' },
         context: { isSystem: true },
       })) ?? [];
       for (const row of objectRows) {
+        if (isLegacyOrganizationRow(row)) continue; // [ADR-0131 D6]
         const obj = parseRow(row, 'object');
         if (!obj || typeof obj.name !== 'string' || !Array.isArray(obj.actions)) continue;
         for (const action of obj.actions) {
