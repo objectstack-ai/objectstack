@@ -126,8 +126,13 @@ describe('view form — `pagination` is offered to every view type', () => {
     expect(offeredTo('pagination', undefined)).toHaveLength(1);
   });
 
+  // A `chart` view binds a dataset (#22491), so it carries that binding here;
+  // every other type parses with no block of its own.
+  const bindingFor = (type: string) =>
+    (type === 'chart' ? { chart: { dataset: 'lead_metrics', values: ['amount_sum'] } } : {});
+
   it.each(VIEW_TYPES.map((t) => [t]))("is backed by the door: type '%s' parses a pagination block and keeps it", (type) => {
-    const r = ListViewSchema.safeParse({ type, columns: ['name'], pagination: { pageSize: 50 } });
+    const r = ListViewSchema.safeParse({ type, columns: ['name'], ...bindingFor(type), pagination: { pageSize: 50 } });
     expect(r.success, JSON.stringify(r.error?.issues ?? '')).toBe(true);
     expect((r.data as { pagination?: unknown }).pagination).toEqual({ pageSize: 50 });
   });
