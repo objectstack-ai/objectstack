@@ -61,9 +61,9 @@
  * [ADR-0090 D5, ADR-0131 D3/D4] The `everyone` anchor distributes the
  * deployment's baseline sets — the app's `isDefault` set composed with the
  * platform's `member_default` — in its definition's `permissionSets`, which
- * the authorization resolver reads. The plugin passes that list
- * ({@link registerBuiltinPositions}'s `permissionSets`); no other built-in
- * names a set.
+ * the authorization resolver reads. The plugin declares it at `kernel:ready`
+ * ({@link declareEveryoneBaseline}), once the stack's declared capabilities
+ * the high-privilege check reads are in; no other built-in names a set.
  */
 
 import {
@@ -79,8 +79,6 @@ export interface BuiltinPositionDeclaration {
   readonly name: string;
   readonly label: string;
   readonly description: string;
-  /** The sets this built-in distributes (`PositionSchema.permissionSets`) — `everyone`'s baseline only. */
-  readonly permissionSets?: readonly string[];
 }
 
 /**
@@ -134,23 +132,30 @@ export interface BuiltinPositionRegistry {
  * registration gets a fresh copy: the registry stamps provenance onto the
  * object it is handed, and the list above is shared.
  *
- * `everyoneSets` is the baseline the `everyone` anchor distributes (module
- * doc); an empty list declares no `permissionSets` at all.
- *
  * @returns how many were registered — 0 when `registry` cannot register
  *   anything, which the caller reports (absence is loud).
  */
-export function registerBuiltinPositions(
-  registry: unknown,
-  packageId: string,
-  everyoneSets: readonly string[] = [],
-): number {
+export function registerBuiltinPositions(registry: unknown, packageId: string): number {
   const target = registry as Partial<BuiltinPositionRegistry> | null | undefined;
   if (!target || typeof target.registerItem !== 'function') return 0;
   for (const declaration of securityBuiltinPositions) {
-    const item: Record<string, unknown> = { ...declaration };
-    if (declaration.name === EVERYONE_POSITION && everyoneSets.length > 0) item.permissionSets = [...everyoneSets];
-    target.registerItem('position', item, 'name', packageId);
+    target.registerItem('position', { ...declaration }, 'name', packageId);
   }
   return securityBuiltinPositions.length;
+}
+
+/**
+ * [ADR-0090 D5, ADR-0131 D3/D4] Declare the `everyone` anchor again, owned by
+ * `packageId`, now naming `sets` — the deployment's baseline — in its
+ * `permissionSets` (module doc). The same package re-registering its own item
+ * replaces it.
+ *
+ * @returns whether it was declared — `false` when `registry` cannot register.
+ */
+export function declareEveryoneBaseline(registry: unknown, packageId: string, sets: readonly string[]): boolean {
+  const target = registry as Partial<BuiltinPositionRegistry> | null | undefined;
+  if (!target || typeof target.registerItem !== 'function') return false;
+  const everyone = securityBuiltinPositions.find((p) => p.name === EVERYONE_POSITION)!;
+  target.registerItem('position', { ...everyone, permissionSets: [...sets] }, 'name', packageId);
+  return true;
 }

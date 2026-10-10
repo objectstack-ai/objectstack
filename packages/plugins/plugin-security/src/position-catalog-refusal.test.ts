@@ -139,7 +139,10 @@ async function boot(opts: { walled?: boolean } = {}) {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ([MEMBER_DEFAULT, QA_ADMIN, QA_ORG_ADMIN_LIKE] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [MEMBER_DEFAULT, QA_ADMIN, QA_ORG_ADMIN_LIKE],
     },
     ...(opts.walled
@@ -191,6 +194,15 @@ async function boot(opts: { walled?: boolean } = {}) {
     { id: 'inq_2', subject: 'two' },
     { id: 'inq_3', subject: 'three' },
   ], { context: seed } as any);
+  // [ADR-0131 D3/D4] What the resolver reads: the set's definition, and each
+  // position's definition naming it — the junction rows above bind nothing.
+  const pkg = 'com.objectstack.qa.position-catalog-refusal';
+  engine.registry.registerItem('permission', {
+    name: 'qa_auditor_set', label: 'QA Auditor', objects: { qa_inquiry: { allowRead: true, viewAllRecords: true } },
+  } as any, 'name' as any, pkg);
+  for (const [name, label] of [['qa_auditor', 'Auditor'], ['qa_retired', 'Retired']]) {
+    engine.registry.registerItem('position', { name, label, permissionSets: ['qa_auditor_set'] } as any, 'name' as any, pkg);
+  }
 
   return { engine, warn };
 }

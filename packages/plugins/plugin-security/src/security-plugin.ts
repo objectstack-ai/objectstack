@@ -178,7 +178,7 @@ import {
   securityPluginManifestHeader,
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
-import { registerBuiltinPositions } from './builtin-positions.js';
+import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-positions.js';
 
 /**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
@@ -1785,27 +1785,38 @@ export class SecurityPlugin implements Plugin {
     // engine handle `start()` already holds, before `kernel:ready` runs the
     // seeders and before any request reaches the metadata door. Rows keep
     // seeding from the same list (`bootstrapBuiltinRoles`).
-    //
-    // [ADR-0090 D5, ADR-0131 D3/D4] `everyone` declares the deployment's
-    // baseline in its `permissionSets` — the binding the authorization resolver
-    // reads. A platform set carrying high-privilege bits is never declared
-    // there, with the same check and the same report the boot-time binding
-    // made before.
-    const everyoneSets = this.baselinePermissionSets.filter((name) => {
-      const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
-      const offending = boot ? describeHighPrivilegeBits(boot) : null;
-      if (offending) {
-        ctx.logger.warn('[security] refusing to bind fallback set to everyone — high-privilege bits', { set: name, offending });
-      }
-      return !offending;
-    });
-    if (registerBuiltinPositions((ql as { registry?: unknown }).registry, SECURITY_PLUGIN_ID, everyoneSets) === 0) {
+    const builtinRegistry = (ql as { registry?: unknown }).registry;
+    if (registerBuiltinPositions(builtinRegistry, SECURITY_PLUGIN_ID) === 0) {
       ctx.logger.warn(
         '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
           + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
           + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
           + '`everyone` baseline sets are granted through no position.',
       );
+    }
+    // [ADR-0090 D5, ADR-0131 D3/D4] `everyone` declares the deployment's
+    // baseline in its `permissionSets` — the binding the authorization resolver
+    // reads, in place of the junction rows the boot used to write. At
+    // `kernel:ready`, where that binding ran, because the high-privilege check
+    // reads the stack's declared capabilities (#18535) and they are all in by
+    // then; the check and its report are the binding's own.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:ready', async () => {
+        try {
+          const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
+          const everyoneSets = this.baselinePermissionSets.filter((name) => {
+            const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
+            const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
+            if (offending) {
+              ctx.logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set: name, offending });
+            }
+            return !offending;
+          });
+          if (everyoneSets.length > 0) declareEveryoneBaseline(builtinRegistry, SECURITY_PLUGIN_ID, everyoneSets);
+        } catch (e) {
+          ctx.logger.warn('[security] everyone-anchor baseline declaration failed (non-fatal)', { error: (e as Error).message });
+        }
+      });
     }
 
     // [ADR-0131 D3/D4] Bind the security catalog read to this engine: every

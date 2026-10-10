@@ -160,6 +160,11 @@ async function boot(): Promise<ObjectQL> {
     id: 'ups_global_platform_ops', user_id: USER_GLOBAL, permission_set_id: 'ps_1_global_platform_ops',
     permission_set: 'platform_ops', organization_id: null,
   }, SYS);
+  // [ADR-0131 D3/D4] The two GLOBAL sets are declared in the catalog, which is
+  // what makes a grant of them confer anything; the sets ORG_OTHER authored are
+  // rows only, with no definition (#15196 Q3 A).
+  engine.registry.registerItem('permission', { name: 'ops_lead', systemPermissions: ['probe.global_ops_lead'] }, 'name', 'com.test.ops');
+  engine.registry.registerItem('permission', { name: 'platform_ops', systemPermissions: ['probe.global_platform_ops'] }, 'name', 'com.test.ops');
   return engine;
 }
 
@@ -208,7 +213,7 @@ async function rig(): Promise<Rig> {
     hook: () => { /* collected, never fired — see the file header */ },
     getService: (n: string) => {
       if (n === 'objectql') return ql;
-      if (n === 'metadata') return { list: async () => [] };
+      if (n === 'metadata') return { get: async () => undefined, list: async () => [] };
       if (n === 'manifest') return { register: () => {} };
       return services[n];
     },

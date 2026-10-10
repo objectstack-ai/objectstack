@@ -176,7 +176,10 @@ async function boot(makeDriver: () => Driver, posture: TenancyPosture) {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? [MEMBER_DEFAULT, userAdminSet, probeSet].find((s) => s.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [MEMBER_DEFAULT, userAdminSet, probeSet],
     },
     tenancy: { posture },
