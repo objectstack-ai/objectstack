@@ -379,7 +379,6 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
       // The NULL-safe key part is what makes this hold: a bare
       // `(organization_id, name)` composite would be NULL-distinct under SQL,
       // so every platform-seeded capability could be duplicated at will.
-      // `bootstrapSystemCapabilities` upserts by name and depends on it.
       const d = makeDriver();
       await d.initObjects(FIXED_APP as any);
 

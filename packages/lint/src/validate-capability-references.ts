@@ -18,8 +18,7 @@
  *      (`stack.capabilities`) — the explicit, package-provenanced declaration
  *      (ADR-0066 D1), materialized at boot by `bootstrapDeclaredCapabilities`,
  *   3. every capability a permission set in this stack GRANTS via
- *      `systemPermissions` (granting a capability also declares it — mirrors
- *      the runtime `bootstrapSystemCapabilities` derived-defaults rule), and
+ *      `systemPermissions` (granting a capability also declares it), and
  *   4. any `sys_capability` row shipped as seed data.
  *
  * WARNING, not error: a single package's lint cannot see capabilities declared

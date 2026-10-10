@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect, vi } from 'vitest';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
-import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { CAPABILITY_NAME_COLLISION } from './capability-name-collision.js';
 import {
   CAPABILITY_DECLARATION_UNOWNED,
@@ -40,10 +39,9 @@ function makeQl(declared: any[] = []) {
       // matches null-or-missing through mingo (its reference matcher, retired by
       // commit `8fec76a2b`, used `value == condition`), and MongoDB matches
       // null-or-missing — none of them
-      // is strict equality against an ABSENT key. `bootstrapSystemCapabilities`
-      // (called by several cases below) scopes its curated lookup with
-      // `organization_id: null`, which strict `===` would make unsatisfiable
-      // here while it works in production.
+      // is strict equality against an ABSENT key; strict `===` would make an
+      // `organization_id: null` lookup unsatisfiable here while it works in
+      // production.
       // [#11096] `$in` is supported because the real engine supports it — the
       // seeder now issues ONE batched `{ name: { $in: [...] } }` existence read
       // for the whole declaration. ⛔ A double that did not match it would
@@ -64,8 +62,7 @@ function makeQl(declared: any[] = []) {
       );
       // [commit e1d773eb7] `limit` is HONOURED, and a paged read is ordered by `id`
       // ascending (#4363's pagination tie-breaker). Both are properties of the
-      // shipped drivers, measured for the sibling double in
-      // `bootstrap-system-capabilities.test.ts`; this one ignored `limit`
+      // shipped drivers; this double once ignored `limit`
       // entirely, which made the whole class of page-cap defect INEXPRESSIBLE
       // here — including the cap commit e1d773eb7 fixed, whose consequence lands on THIS seeder.
       if (q?.limit === undefined) return matched;
@@ -161,10 +158,10 @@ describe('bootstrapDeclaredCapabilities (ADR-0066 D1 package declaration)', () =
   });
 
   it('CLAIMS a derived-from-systemPermissions platform placeholder', async () => {
-    // Simulate the back-compat path: bootstrapSystemCapabilities derived a
-    // placeholder from a permission set's systemPermissions.
+    // A platform placeholder row, as the retired derive-from-systemPermissions
+    // seeder left one on an existing database.
     const ql = makeQl([{ name: 'export_data', label: 'Export Data', description: 'Nice.', scope: 'org', _packageId: 'com.acme.reports' }]);
-    await bootstrapSystemCapabilities(ql, [{ systemPermissions: ['export_data'] }]);
+    ql.rows.push({ id: 'cap_derived', name: 'export_data', label: 'Export Data', description: 'Capability export_data.', managed_by: 'platform' });
     const derived = ql.rows.find((r) => r.name === 'export_data');
     expect(derived.managed_by).toBe('platform');
     // Now the explicit declaration claims it.
@@ -172,19 +169,6 @@ describe('bootstrapDeclaredCapabilities (ADR-0066 D1 package declaration)', () =
     expect(out.claimed).toBe(1);
     const claimed = ql.rows.find((r) => r.name === 'export_data');
     expect(claimed).toMatchObject({ managed_by: 'package', package_id: 'com.acme.reports', label: 'Export Data', scope: 'org' });
-    expect(ql.rows.filter((r) => r.name === 'export_data')).toHaveLength(1);
-  });
-
-  it('declared name suppresses the implicit derived placeholder (no clobber)', async () => {
-    // Full boot order: declared first, then system with materializedNames.
-    const ql = makeQl([{ name: 'export_data', label: 'Export Data', scope: 'org', _packageId: 'com.acme.reports' }]);
-    const cap = await bootstrapDeclaredCapabilities(ql, null);
-    await bootstrapSystemCapabilities(ql, [{ systemPermissions: ['export_data'] }], {
-      materializedCapabilityNames: cap.materializedNames,
-    });
-    const row = ql.rows.find((r) => r.name === 'export_data');
-    // The package row is untouched — no humanized placeholder overwrote it.
-    expect(row).toMatchObject({ managed_by: 'package', label: 'Export Data', scope: 'org' });
     expect(ql.rows.filter((r) => r.name === 'export_data')).toHaveLength(1);
   });
 
@@ -196,138 +180,11 @@ describe('bootstrapDeclaredCapabilities (ADR-0066 D1 package declaration)', () =
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// [#4967 Part 1] A REFUSED declaration must not suppress the back-compat
-// derivation. `materializedNames` reports the names this pass CONFIRMED have a
-// row — the three refusal paths land on different sides of that line, for
-// different reasons, so each gets its own pin (and, where the direction is not
-// obvious, the reverse case that shows what the other answer would cost).
+// [#4967 Part 1] `materializedNames` reports the names this pass CONFIRMED have
+// a row — the refusal paths land on different sides of that line. The cases
+// that paired it with the back-compat derivation went with that seeder.
 // ───────────────────────────────────────────────────────────────────────────
 describe('refused declarations vs. the derived placeholder (#4967 Part 1)', () => {
-  const OPS_SETS = [{ name: 'showcase_ops', systemPermissions: ['setup.access', 'showcase.export_data'] }];
-
-  it('NO OWNING PACKAGE + no row: falls through, so the derivation materializes it', async () => {
-    // The showcase repro: `showcase.export_data` declared without a resolvable
-    // owner, granted by `showcase_ops`.
-    const ql = makeQl([{ name: 'showcase.export_data', label: 'Export Data' }]);
-    const out = await bootstrapDeclaredCapabilities(ql, null, { permissionSets: OPS_SETS });
-
-    // The declaration is refused — no package row, and (the fix) the name is
-    // NOT reported as materialized.
-    expect(out.seeded).toBe(0);
-    expect(out.skippedUnowned).toBe(1);
-    expect(out.materializedNames).toEqual([]);
-
-    // Second pass — the capability now exists, as the back-compat placeholder
-    // it would have had if the declaration had never been written.
-    await bootstrapSystemCapabilities(ql, OPS_SETS, { materializedCapabilityNames: out.materializedNames });
-    expect(ql.rows.find((r) => r.name === 'showcase.export_data')).toMatchObject({
-      name: 'showcase.export_data', managed_by: 'platform', active: true,
-    });
-    // …and it RESOLVES by name, which is what the granting permission set needs
-    // from the registry (Setup listing, provenance, ADR-0066 ⑨ lint sources).
-    expect(await ql.find('sys_capability', { where: { name: 'showcase.export_data' } })).toHaveLength(1);
-  });
-
-  it('REVERSE: the pre-#4967 list (every declared name) leaves the capability in no row at all', async () => {
-    // Same fixture, same second pass — only the skip list is the old one, which
-    // reported a name the first pass refused to write. Nothing derives it and
-    // nothing declared it: the hole.
-    const ql = makeQl([{ name: 'showcase.export_data', label: 'Export Data' }]);
-    await bootstrapDeclaredCapabilities(ql, null, { permissionSets: OPS_SETS });
-    await bootstrapSystemCapabilities(ql, OPS_SETS, {
-      materializedCapabilityNames: ['showcase.export_data'], // ← the old `declaredNames`
-    });
-    expect(ql.rows.find((r) => r.name === 'showcase.export_data')).toBeUndefined();
-  });
-
-  it('is stable across boots: the refusal re-derives nothing and duplicates nothing', async () => {
-    const ql = makeQl([{ name: 'showcase.export_data', label: 'Export Data' }]);
-    for (let boot = 0; boot < 2; boot += 1) {
-      const out = await bootstrapDeclaredCapabilities(ql, null, { permissionSets: OPS_SETS });
-      await bootstrapSystemCapabilities(ql, OPS_SETS, { materializedCapabilityNames: out.materializedNames });
-    }
-    expect(ql.rows.filter((r) => r.name === 'showcase.export_data')).toHaveLength(1);
-    // Boot 2 finds the placeholder, so the refusal now reports the name — the
-    // row exists and must not be re-derived over.
-    const out2 = await bootstrapDeclaredCapabilities(ql, null, { permissionSets: OPS_SETS });
-    expect(out2.skippedUnowned).toBe(1);
-    expect(out2.materializedNames).toEqual(['showcase.export_data']);
-  });
-
-  it('NO OWNING PACKAGE + an admin row: still suppresses, so the placeholder cannot clobber it', async () => {
-    const ql = makeQl([{ name: 'showcase.export_data', label: 'Declared Label' }]);
-    ql.rows.push({ id: 'cap_admin', name: 'showcase.export_data', label: 'Admin Made', description: 'Admin wrote this.', managed_by: 'admin' });
-    const out = await bootstrapDeclaredCapabilities(ql, null, { permissionSets: OPS_SETS });
-    expect(out.skippedUnowned).toBe(1);
-    expect(out.materializedNames).toEqual(['showcase.export_data']);
-    await bootstrapSystemCapabilities(ql, OPS_SETS, { materializedCapabilityNames: out.materializedNames });
-    expect(ql.rows.find((r) => r.name === 'showcase.export_data')).toMatchObject({
-      label: 'Admin Made', description: 'Admin wrote this.', managed_by: 'admin',
-    });
-  });
-
-  it('SECOND LAYER (#5876): dropping that name from the list no longer overwrites the admin row', async () => {
-    // This pin was written by #5875 (as `REVERSE: dropping that name from the
-    // list lets the derivation overwrite the admin row`) to justify why the
-    // unowned path checks for an EXISTING row instead of always falling
-    // through: back then the derived defaults refreshed label/description on
-    // ANY row they found, so the skip list was the ONLY thing standing between
-    // an admin-authored row and a humanized placeholder. That fact is fixed —
-    // #5876 guards the derived reconcile by `managed_by`, so the write site
-    // now refuses the clobber even when the call site forgets to suppress it.
-    //
-    // The suppression list keeps its job (it is what states the boot-order
-    // contract, and it stops the derivation doing work on names another pass
-    // owns), but it is no longer load-bearing for THIS shape — which is the
-    // point of a second layer.
-    const ql = makeQl([]);
-    ql.rows.push({ id: 'cap_admin', name: 'showcase.export_data', label: 'Admin Made', description: 'Admin wrote this.', managed_by: 'admin' });
-    await bootstrapSystemCapabilities(ql, OPS_SETS, { materializedCapabilityNames: [] });
-    expect(ql.rows.find((r) => r.name === 'showcase.export_data')).toMatchObject({
-      label: 'Admin Made', description: 'Admin wrote this.', managed_by: 'admin',
-    });
-  });
-
-  it('DISCRIMINATION (#5876): with the name dropped, a PLATFORM placeholder is still refreshed', async () => {
-    // The guard above must not read as "the derivation stopped writing". Same
-    // fixture, same empty skip list, provenance flipped to the one the derived
-    // pass owns → the reconcile happens exactly as it always did.
-    const ql = makeQl([]);
-    ql.rows.push({ id: 'cap_derived', name: 'showcase.export_data', label: 'Stale Placeholder', description: 'Stale.', managed_by: 'platform' });
-    await bootstrapSystemCapabilities(ql, OPS_SETS, { materializedCapabilityNames: [] });
-    expect(ql.rows.find((r) => r.name === 'showcase.export_data')).toMatchObject({
-      label: 'Showcase Export Data', description: 'Capability showcase.export_data.', managed_by: 'platform',
-    });
-  });
-
-  it('FOREIGN owner: suppresses, because the other package authored that row', async () => {
-    const sets = [{ name: 'ops', systemPermissions: ['shared_cap'] }];
-    const ql = makeQl([{ name: 'shared_cap', label: 'Mine', _packageId: 'com.b' }]);
-    ql.rows.push({ id: 'cap_x', name: 'shared_cap', label: 'Owner Label', description: 'Owner wrote this.', managed_by: 'package', package_id: 'com.a' });
-    const out = await bootstrapDeclaredCapabilities(ql, null, { permissionSets: sets });
-    expect(out.skippedForeign).toBe(1);
-    expect(out.materializedNames).toEqual(['shared_cap']);
-    await bootstrapSystemCapabilities(ql, sets, { materializedCapabilityNames: out.materializedNames });
-    expect(ql.rows.find((r) => r.name === 'shared_cap')).toMatchObject({
-      label: 'Owner Label', description: 'Owner wrote this.', package_id: 'com.a',
-    });
-  });
-
-  it('CURATED platform name: suppresses, and the curated pass seeds the row regardless', async () => {
-    // A no-op for the skip list (the derived path never reaches a curated name
-    // — it is already in the curated map), but a truthful answer: the row
-    // exists after the second pass either way.
-    const sets = [{ name: 'ops', systemPermissions: ['manage_users'] }];
-    const ql = makeQl([{ name: 'manage_users', label: 'Evil', _packageId: 'com.acme.evil' }]);
-    const out = await bootstrapDeclaredCapabilities(ql, null, { permissionSets: sets });
-    expect(out.skippedPlatform).toBe(1);
-    expect(out.materializedNames).toEqual(['manage_users']);
-    await bootstrapSystemCapabilities(ql, sets, { materializedCapabilityNames: out.materializedNames });
-    expect(ql.rows.find((r) => r.name === 'manage_users')).toMatchObject({
-      label: 'Manage Users', managed_by: 'platform', // curated definition, not the package's
-    });
-  });
-
   it('materializedNames reconciles with the outcome counters', async () => {
     const ql = makeQl([
       { name: 'a.new', _packageId: 'com.a' },                    // → seeded
