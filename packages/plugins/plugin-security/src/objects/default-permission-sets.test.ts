@@ -351,6 +351,30 @@ describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)'
 });
 
 /**
+ * [#22566] A comment reaction (`sys_comment_reaction`, plugin-audit) is its
+ * reactor's own record, so the wildcard own-record floor is the WHOLE of its
+ * delete rule — the opposite shape from `sys_comment` above, whose delete is
+ * moderation. A TRIPWIRE again: the behaviour is driven through the real
+ * middleware in `comment-reaction-own-record-floor.test.ts`.
+ *
+ * What it guards is the policy that would quietly undo the ruling ("a member
+ * cannot delete another member's reaction"): a `sys_comment_moderation`-style
+ * alternate match on reactions in ANY shipped set would OR a second match into
+ * the delete class and let every org member remove every reaction. A reaction
+ * policy appearing here is a decision, not a refactor.
+ */
+describe('sys_comment_reaction delete is ownership-shaped (#22566)', () => {
+  it('no shipped set carries a row-level policy on sys_comment_reaction', () => {
+    expect(defaultPermissionSets.length).toBeGreaterThanOrEqual(6);
+    for (const set of defaultPermissionSets) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const scoped = (set.rowLevelSecurity ?? []).filter((p: any) => p.object === 'sys_comment_reaction');
+      expect(scoped, `${set.name} sys_comment_reaction policies`).toEqual([]);
+    }
+  });
+});
+
+/**
  * [#11965 / #11663 Choice 6A] platform-admin re-anchor, L1 behaviour-neutrality
  * pin.
  *
