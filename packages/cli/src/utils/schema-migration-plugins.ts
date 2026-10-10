@@ -1994,10 +1994,12 @@ export function describeAuthFamilyComposition(
     return 'Did not compose the platform auth family: the stack mounts its own AuthPlugin, composed with its plugins above.';
   }
   if (status.reason === 'no-secret') {
+    // [#22581] `os migrate` reads the project's `.env*` files as `os serve`
+    // does, so "none is set here" covers both homes of the secret.
     return 'Did not compose the auth family: `os serve` composes none without an auth secret, and none is set here '
-      + '(no OS_AUTH_SECRET, and not a development boot) — so plugin-auth\'s tables (sys_user, sys_account, …) '
-      + 'are NOT in this plan. If the deployment serves with OS_AUTH_SECRET (from its environment or a .env file, '
-      + 'which `os migrate` does not read), re-run with that OS_AUTH_SECRET exported.';
+      + '(no OS_AUTH_SECRET in this process\'s environment or the project\'s .env files, and not a development '
+      + 'boot) — so plugin-auth\'s tables (sys_user, sys_account, …) are NOT in this plan. If the deployment '
+      + 'serves with an OS_AUTH_SECRET, re-run with it exported or in the project\'s .env file.';
   }
   const why: Record<Exclude<PlatformAuthSkipReason, 'stack-supplies-auth' | 'no-secret'>, string> = {
     'auth-tier-off': 'the `auth` tier is off: the declared `tiers`, else the default preset\'s, carry none, and no '

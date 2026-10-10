@@ -332,6 +332,8 @@
     "FilePersistenceConfigSchema (const)",
     "FileReferenceIdValue (type)",
     "FileReferenceIdValueSchema (const)",
+    "FileRefusedValue (type)",
+    "FileRefusedValueSchema (const)",
     "FileValue (type)",
     "FileValueSchema (const)",
     "Filter (type)",

@@ -84,6 +84,7 @@
     "data/FileLikeValue",
     "data/FilePersistenceConfig",
     "data/FileReferenceIdValue",
+    "data/FileRefusedValue",
     "data/FileValue",
     "data/FilterArray",
     "data/FilterCondition",

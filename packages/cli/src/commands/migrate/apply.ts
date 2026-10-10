@@ -17,6 +17,7 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  describeDatabaseSource,
   renderPlan,
   renderPendingSchemaWork,
   summarize,
@@ -198,14 +199,21 @@ export default class MigrateApply extends Command {
         return;
       }
 
+      // [#22581] The database this run reconciles and who named it, on every
+      // payload below — the in-sync and refusal paths included, since "nothing
+      // to apply" is only as good as the database it was read from.
+      const target = { database: stack.dbLabel, databaseSource: stack.dbSource };
+
       // What the object set was composed from (#12938) — printed BEFORE the
       // in-sync early return below, not with the plan. "Already in sync" over a
       // set that is a fraction of the target's tables is precisely the reading
       // this card exists to stop, so the account of what was composed has to
-      // reach the operator on that path too.
+      // reach the operator on that path too. [#22581] The database line rides
+      // above it for the same reason.
       if (!flags.json) {
+        printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
         for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
-        if (stack.composition.notes.length > 0) console.log('');
+        console.log('');
       }
 
       const drift = await stack.driver.detectManagedDrift();
@@ -234,7 +242,7 @@ export default class MigrateApply extends Command {
       if (drift.length === 0 && pending.length === 0) {
         if (flags.json) {
           await emitJson(
-            { applied: [], skipped: [], created: [], message: unexamined > 0 ? 'in_sync_partial' : 'in_sync', ...compositionPayload },
+            { ...target, applied: [], skipped: [], created: [], message: unexamined > 0 ? 'in_sync_partial' : 'in_sync', ...compositionPayload },
             0,
             { compact: true },
           );
@@ -258,8 +266,6 @@ export default class MigrateApply extends Command {
       const deferred = drift.filter((d) => d.category === 'destructive' && !allowDestructive);
 
       if (!flags.json) {
-        printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
-        console.log('');
         await renderPendingSchemaWork(pending);
         renderPlan(drift);
         if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
@@ -312,7 +318,7 @@ export default class MigrateApply extends Command {
           // consumer must be able to read "no DDL" off the document too, not
           // only off stderr.
           await emitJson({
-            database: stack.dbLabel,
+            ...target,
             created: [],
             applied: [],
             skipped: drift,
@@ -365,7 +371,7 @@ export default class MigrateApply extends Command {
           const detail = e?.message ?? String(e);
           if (flags.json) {
             await emitJson({
-              database: stack.dbLabel, created: [], applied: [], skipped: drift, pending,
+              ...target, created: [], applied: [], skipped: drift, pending,
               message: 'refused_account_issuer_preflight_unreadable', detail,
             }, 0, { compact: true });
             return;
@@ -379,7 +385,7 @@ export default class MigrateApply extends Command {
         if (!preflight.ok) {
           if (flags.json) {
             await emitJson({
-              database: stack.dbLabel, created: [], applied: [], skipped: drift, pending,
+              ...target, created: [], applied: [], skipped: drift, pending,
               message: 'refused_account_issuer_collisions', preflight,
             }, 0, { compact: true });
             return;
@@ -404,7 +410,7 @@ export default class MigrateApply extends Command {
 
       const totalIntended = intended.length + pending.length;
       if (totalIntended === 0) {
-        if (flags.json) { await emitJson({ applied: [], skipped: deferred, created: [], message: 'nothing_safe_to_apply' }, 0, { compact: true }); return; }
+        if (flags.json) { await emitJson({ ...target, applied: [], skipped: deferred, created: [], message: 'nothing_safe_to_apply' }, 0, { compact: true }); return; }
         printWarning('No changes to apply without --allow-destructive.');
         return;
       }
@@ -412,7 +418,7 @@ export default class MigrateApply extends Command {
       // Confirmation gate. Nothing above this line has touched the database.
       if (!flags.yes) {
         if (flags.json || !process.stdin.isTTY) {
-          if (flags.json) { await emitJson({ applied: [], skipped: drift, pending, message: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true }); return; }
+          if (flags.json) { await emitJson({ ...target, applied: [], skipped: drift, pending, message: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true }); return; }
           printWarning('Confirmation required. Re-run with --yes to apply, or use "os migrate plan" to preview.');
           return;
         }
@@ -429,7 +435,7 @@ export default class MigrateApply extends Command {
 
       if (flags.json) {
         await emitJson({
-          database: stack.dbLabel,
+          ...target,
           created,
           applied,
           skipped,
