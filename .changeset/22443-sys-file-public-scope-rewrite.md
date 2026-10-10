@@ -5,7 +5,7 @@
 
 feat(service-storage)!: the `sys_file` scope option `public` is retired, and rows already stored with it are rewritten to `user` by a one-time operator sweep (#22443)
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (already-registered storage-scope-public-retired) the retirement of the storage scope public is that step-18 entry; this changeset retires the same value from the stored sys_file vocabulary and rewrites its stored rows through an operator sweep -->
 
