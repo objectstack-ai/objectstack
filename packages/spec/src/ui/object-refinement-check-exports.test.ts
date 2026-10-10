@@ -54,6 +54,7 @@ import {
   ListViewSchema,
   ObjectListViewSchema,
   checkListViewCalendarVisualization,
+  checkListViewChartBinding,
 } from './view.zod';
 import { PageSchema, checkPageSourceCompleteness, checkPageRequiresKind, checkPagePrintComposition } from './page.zod';
 import {
@@ -208,6 +209,20 @@ const calendarFixtures: Fixture[] = [
   },
   { label: 'an `appearance` block with no switcher', value: { type: 'grid', columns: ['name'], appearance: {} }, refusesAt: [] },
   { label: 'no `appearance` at all', value: { type: 'grid', columns: ['name'] }, refusesAt: [] },
+];
+
+// [#22491] Shape-valid on BOTH authoring doors, so no `options` bag here (the
+// two refuse it by name); the bag's paths are pinned on the overlay door in
+// `view-chart-binding.test.ts`. A block missing a key is a SHAPE failure, so
+// it is not a fixture of this check either.
+const chartBindingFixtures: Fixture[] = [
+  { label: "`type: 'chart'` with no `chart` block", value: { type: 'chart', columns: ['stage'] }, refusesAt: ['chart'] },
+  {
+    label: "`type: 'chart'` with a block naming a dataset and a measure",
+    value: { type: 'chart', columns: ['stage'], chart: { dataset: 'lead_metrics', values: ['amount_sum'] } },
+    refusesAt: [],
+  },
+  { label: 'a block-less view of another type', value: { type: 'kanban', columns: ['stage'] }, refusesAt: [] },
 ];
 
 const PAGE_BASE = { name: 'home_page', label: 'Home', type: 'home' } as const;
@@ -454,6 +469,7 @@ const chartMeasureArityFixtures: Fixture[] = [
 
 const listViewExports: ExportUnderTest[] = [
   { name: 'checkListViewCalendarVisualization', check: checkListViewCalendarVisualization, fixtures: calendarFixtures },
+  { name: 'checkListViewChartBinding', check: checkListViewChartBinding, fixtures: chartBindingFixtures },
 ];
 
 const MIRRORED: MirroredSchema[] = [
@@ -593,7 +609,7 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
   const declarations = (src: string, name: string): number =>
     src.match(new RegExp(`^\\s*(export )?function ${name}\\b`, 'gm'))?.length ?? 0;
 
-  it('view.zod.ts declares the export and chains it onto ListViewShapeSchema for ListViewSchema', () => {
+  it('view.zod.ts declares the exports and chains them onto ListViewShapeSchema for ListViewSchema', () => {
     const src = read('view.zod.ts');
     expect(src).toContain('export function checkListViewCalendarVisualization(');
     // Exactly one declaration — the count below keys on this name.
@@ -607,6 +623,14 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     // view.test.ts pins the behaviour; this pins that every attachment is the
     // export, by name, and none is an inline copy.
     expect(attachments(src, 'checkListViewCalendarVisualization')).toBe(3);
+    // [#22491] The chart-binding check: declared once, chained after the
+    // calendar check at the same three doors.
+    expect(src).toContain('export function checkListViewChartBinding(');
+    expect(declarations(src, 'checkListViewChartBinding')).toBe(1);
+    expect(src).toMatch(
+      /ListViewShapeSchema\s*\.superRefine\(checkListViewCalendarVisualization\)\s*\.superRefine\(checkListViewChartBinding\)/,
+    );
+    expect(attachments(src, 'checkListViewChartBinding')).toBe(3);
     // [#17063] `checkListViewPageMount` was retired with the `type: 'page'`
     // mount it policed, so neither a declaration nor an attachment of it may
     // return: a re-attachment would be a check with no rule left to enforce.
@@ -648,6 +672,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   // an enumeration of every exported refinement.
   it.each([
     ['checkListViewCalendarVisualization', checkListViewCalendarVisualization],
+    ['checkListViewChartBinding', checkListViewChartBinding],
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
     ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkPagePrintComposition', checkPagePrintComposition],
@@ -661,7 +686,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   // [#17063] The retired member, from the same surface, in the same leg. A
   // downstream mirror re-attaching a check it imports from here is the whole
   // point of this file, so the barrel is where a relapse would first become
-  // reachable — the runtime namespace answers it, with the four survivors
+  // reachable — the runtime namespace answers it, with the survivors
   // above as the lit control that the namespace is really populated.
   it('no longer exports `checkListViewPageMount` — retired with the mount it policed', () => {
     expect('checkListViewPageMount' in (ui as Record<string, unknown>)).toBe(false);
