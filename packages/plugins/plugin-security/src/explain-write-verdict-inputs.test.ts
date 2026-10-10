@@ -61,6 +61,17 @@ const PRIVATE_SCHEMA = {
 /** The OWD control: the object's own write model opens row writes. */
 const PUBLIC_RW_SCHEMA = { ...PRIVATE_SCHEMA, sharingModel: 'public_read_write' };
 
+/**
+ * [#22550] The same object with no tenant column, so Layer 0 adds nothing and
+ * the object-level `rls` layer's verdict reads business row-level security
+ * alone. On the walled object that verdict is `narrows` for every operation
+ * (the tenant predicate), whichever class was composed under it.
+ */
+const PUBLIC_RW_UNWALLED_SCHEMA = {
+  ...PUBLIC_RW_SCHEMA,
+  fields: fieldsOf('id', 'name', 'value', 'owner_id', 'created_by'),
+};
+
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
 const ADMIN_FULL_ACCESS = defaultPermissionSets.find((p) => p.name === 'admin_full_access')!;
 
@@ -250,7 +261,7 @@ interface WriteOutcome {
 type WriteVerb = 'update' | 'delete' | 'transfer' | 'restore' | 'purge';
 
 interface Stack {
-  explain: (operation: WriteVerb, rowKey: RowKey, context: any) => Promise<any>;
+  explain: (operation: WriteVerb | 'read', rowKey: RowKey, context: any) => Promise<any>;
   /** `data` replaces the update's change set (the transfer door is an update that writes `owner_id`). */
   write: (operation: WriteVerb, rowKey: RowKey, context: any, data?: Record<string, unknown>) => Promise<WriteOutcome>;
   row: (rowKey: RowKey) => Record<string, unknown> | undefined;
@@ -535,13 +546,24 @@ describe("[#22550] explain composes a lifecycle verb's row-level security as the
         visible: admitted,
         decidedBy: 'rls',
       });
-      const rls = rlsLayerOf(decision);
-      expect(rls?.record?.outcome, `${cell}: the record's business RLS`).toBe(admitted ? 'admitted' : 'excluded');
-      expect(rls?.verdict, `${cell}: the object-level rls layer composes the class's policy`).toBe('narrows');
+      expect(rlsLayerOf(decision)?.record?.outcome, `${cell}: the record's business RLS`).toBe(
+        admitted ? 'admitted' : 'excluded',
+      );
     } finally {
       lift.mockRestore();
     }
   });
+
+  it.each(Object.keys(LIFECYCLE_VERB_CLASS) as LifecycleVerb[])(
+    "%s: the object-level rls layer composes the verb's class too, where a read composes nothing",
+    async (verb) => {
+      const stack = await makeStack({ schema: PUBLIC_RW_UNWALLED_SCHEMA });
+      const read = await stack.explain('read', 'shared', STEWARD_CTX);
+      expect(rlsLayerOf(read)?.verdict, 'read: no select policy, no tenant wall').toBe('not_applicable');
+      const decision = await stack.explain(verb, 'shared', STEWARD_CTX);
+      expect(rlsLayerOf(decision)?.verdict, `${verb}: the ${LIFECYCLE_VERB_CLASS[verb]} class's policy`).toBe('narrows');
+    },
+  );
 
   it.each([
     ['owned', false],
