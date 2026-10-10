@@ -51,6 +51,7 @@ import {
   celExpression,
   celPath,
 } from './flow-template-token';
+import { FLOW_NODE_EXPRESSION_PATHS } from './flow-node-expression-paths';
 import {
   VALUE_SLOT_TEMPLATE_REFUSAL,
   flowNodeValueTemplateRefusals,
@@ -525,6 +526,110 @@ describe('`flowNodeValueTemplateRefusals` — every value position of a node, lo
 
   it('a node type with no value slot is not judged', () => {
     expect(flowNodeValueTemplateRefusals('notify', { title: 'Hi {name}', message: '{body}' })).toEqual([]);
+  });
+
+  it('the maps a node hands to a callee (#19939): `subflow.input`, `map.input`, `script.inputs`', () => {
+    expect(flowNodeValueTemplateRefusals('subflow', {
+      flowName: 'child', input: { ownerId: '{record.project.owner}', note: 'Task "{record.title}" is done.', n: 1 },
+    }).map((r) => [r.path, r.label, r.source])).toEqual([
+      ['input.ownerId', 'subflow input value', '{record.project.owner}'],
+      ['input.note', 'subflow input value', 'Task "{record.title}" is done.'],
+    ]);
+    // `map.collection` keeps the dialect until its own stage; `map.input` does not.
+    expect(flowNodeValueTemplateRefusals('map', {
+      flowName: 'child', collection: '{rows}', input: { row: '{item}', tags: ['{item.tag}'] },
+    }).map((r) => [r.path, r.label])).toEqual([
+      ['input.row', 'map item input value'],
+      ['input.tags[0]', 'map item input value'],
+    ]);
+    expect(flowNodeValueTemplateRefusals('script', { function: 'f', inputs: { title: '{record.title}' } })
+      .map((r) => [r.path, r.label])).toEqual([['inputs.title', 'script input value']]);
+    // Each names the envelope the executor now evaluates, at the key itself.
+    const [refusal] = flowNodeValueTemplateRefusals('subflow', { flowName: 'child', input: { list: '{rows}' } });
+    expect(refusal!.message).toContain("{ dialect: 'cel', source: 'rows' }");
+  });
+});
+
+/**
+ * [#19939] A callee's input — the guarded form SUPPLIES `null`. Where the
+ * template resolved a whole token to nothing it handed the callee nothing, so
+ * a child flow seeded the variable from its `defaultValue`; the guarded form
+ * hands `null`, a supplied value that wins over the default. The refusal at a
+ * top-level value of a callee's map says so (measured through the engine in
+ * `service-automation`'s `callee-input-value-slots.test.ts`).
+ */
+describe('a callee\'s input map: the refusal says what the guarded form hands the callee', () => {
+  const at = (nodeType: string, map: string, key: string, value: unknown, base: Record<string, unknown> = {}): string => {
+    const refusals = flowNodeValueTemplateRefusals(nodeType, { ...base, [map]: { [key]: value } });
+    expect(refusals, JSON.stringify(value)).toHaveLength(1);
+    return refusals[0]!.message;
+  };
+
+  it('subflow: a path names the child variable, its `defaultValue`, and the `null` that wins over it', () => {
+    const message = at('subflow', 'input', 'ownerId', '{record.owner}', { flowName: 'child' });
+    expect(message).toContain('`input.ownerId` is the child flow\'s input variable `ownerId`.');
+    expect(message).toContain('the child seeded `ownerId` from its `defaultValue`');
+    expect(message).toContain('the guarded form hands `null`, a supplied value, which wins over that default');
+    expect(message).toContain('To keep the default, write it in the guard\'s `null` branch');
+    // The sentence follows the remedy: rule, spelling, guard, then the callee.
+    expect(message.indexOf('(the guarded form writes `null`)')).toBeLessThan(message.indexOf('is the child flow\'s'));
+  });
+
+  it('map: the same sentence, for each item\'s child flow', () => {
+    const message = at('map', 'input', 'row', '{item}', { flowName: 'child', collection: '{rows}' });
+    expect(message).toContain('`input.row` is each item\'s child flow\'s input variable `row`.');
+    expect(message).toContain('wins over that default');
+  });
+
+  it('script: the function is handed `null` where the template handed `undefined`', () => {
+    const message = at('script', 'inputs', 'title', '{record.title}', { function: 'f' });
+    expect(message).toContain('`inputs.title` is the function\'s `input.title`: where the template handed `undefined`, the guarded form hands `null`.');
+    expect(message).not.toContain('defaultValue');
+  });
+
+  it('the run user\'s id and an expression carry it too — each has an absent case', () => {
+    expect(at('subflow', 'input', 'who', '{$User.Id}', { flowName: 'child' })).toContain('wins over that default');
+    expect(at('subflow', 'input', 'n', '{count + 1}', { flowName: 'child' })).toContain('wins over that default');
+  });
+
+  it('a `$User` path that never resolved handed nothing in EVERY run: leaving the key out keeps exactly that', () => {
+    const message = at('subflow', 'input', 'email', '{$User.Email}', { flowName: 'child' });
+    expect(message).toContain('which the template handed nothing in every run, so the child seeded `email` from its `defaultValue`: leaving the key out of `input` keeps exactly that.');
+    expect(at('script', 'inputs', 'email', '{$User.Email}', { function: 'f' }))
+      .toContain('which the template handed `undefined` in every run: leaving the key out of `inputs` hands it nothing, as the template did.');
+  });
+
+  it('no callee sentence where the remedy hands nothing new: text with holes, a date macro, braces that are neither', () => {
+    for (const value of ['Hi {name}', '{TODAY()}', '{#}']) {
+      expect(at('subflow', 'input', 'k', value, { flowName: 'child' }), value).not.toMatch(/child flow's input variable|defaultValue/);
+    }
+  });
+
+  it('no callee sentence inside a literal: the variable takes the whole value, which the remedy builds', () => {
+    const refusals = flowNodeValueTemplateRefusals('subflow', { flowName: 'child', input: { meta: { owner: '{record.owner}' } } });
+    expect(refusals.map((r) => r.path)).toEqual(['input.meta.owner']);
+    expect(refusals[0]!.message).not.toContain('defaultValue');
+  });
+
+  it('only the callee maps carry it — every other value slot the ledger declares does not (one list: the ledger)', () => {
+    const CALLEE = new Set(['subflow input.*', 'map input.*', 'script inputs.*']);
+    const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
+    expect(valueEntries.filter((e) => CALLEE.has(`${e.nodeType} ${e.path}`))).toHaveLength(3);
+    for (const entry of valueEntries) {
+      const map = entry.path.slice(0, -2);
+      const message = at(entry.nodeType, map, 'k', '{x}');
+      const carries = /is (the child flow|each item's child flow|the function)'s/.test(message);
+      expect(carries, `${entry.nodeType} ${entry.path}`).toBe(CALLEE.has(`${entry.nodeType} ${entry.path}`));
+    }
+  });
+
+  it('the contract parse judges a value with no position, so the executor\'s door names the remedy without it', () => {
+    const viaSchema = FlowValueSlotSchema.safeParse('{record.owner}');
+    expect(viaSchema.success).toBe(false);
+    const base = viaSchema.error!.issues[0]!.message;
+    const viaDoor = at('subflow', 'input', 'ownerId', '{record.owner}', { flowName: 'child' });
+    expect(viaDoor.startsWith(base)).toBe(true);
+    expect(base).not.toContain('defaultValue');
   });
 });
 
