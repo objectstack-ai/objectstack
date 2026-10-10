@@ -55,7 +55,7 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
              * and refuses a value outside the closed pair, or a `mode` beside a
              * non-empty `conditions` list, with the schema's own sentence.
              */
-            async execute(node, variables, _context) {
+            async execute(node, variables, context) {
                 const config = node.config as Record<string, unknown> | undefined;
                 const conditions = (config?.conditions ?? []) as Array<{ label: string; expression: string }>;
                 if (conditions.length === 0) return { success: true };
@@ -82,7 +82,7 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
                     // envelope of its own to carry the dialect — the decision
                     // descriptor is deliberately schemaless — so the executor
                     // supplies it.
-                    if (engine.evaluateCondition({ dialect: 'cel', source: cond.expression }, variables)) {
+                    if (engine.evaluateCondition({ dialect: 'cel', source: cond.expression }, variables, context)) {
                         return { success: true, branchLabel: cond.label };
                     }
                 }
@@ -107,8 +107,10 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
         // validate` call (`flowNodeValueTemplateRefusals`) — so the legacy
         // shapes are no way around it, and a flow that registered cannot be
         // refused here. What reaches `interpolate()` below carries no token, or
-        // only the two the retirement keeps until CEL can spell them (the date
-        // macros, `{$User.*}`); on everything else it is the identity.
+        // only the one the retirement keeps until CEL can spell it (the date
+        // macros); on everything else it is the identity. The run user is
+        // `current_user` in a CEL envelope, bound from the `context` this
+        // executor passes to the evaluator.
         //
         // [#15137] …with ONE exception, and only in the canonical map: a value
         // that is envelope-shaped (`isExpressionEnvelopeShaped` — a plain object
@@ -197,7 +199,7 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
                         // to a literal — but it cannot normally get this far:
                         // `registerFlow` refuses the same set, derived from the
                         // same call (`AutomationEngine.valueEnvelopeRefusals`).
-                        variables.set(key, engine.evaluateValueEnvelope(value, variables, `assignments.${key}`));
+                        variables.set(key, engine.evaluateValueEnvelope(value, variables, `assignments.${key}`, context));
                         continue;
                     }
                     variables.set(key, interpolate(value, variables, context));
