@@ -46,6 +46,47 @@ Derived from the changesets objectui declared over the range — 33 releasing of
 
 - _(no changeset)_ docs(agents): an authored `events` bag is refused by `objectui validate` once PR objectui#11069 lands (objectui#5250) (#12050) (objectui `972e56659`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+     changeset, the re-recorded `scripts/sdui-manifest.record.json` (the regenerated
+     `sdui.manifest.json` is byte-identical across the range, 107 components), the
+     re-recorded `packages/sdui-parser/objectui-lockstep.json` (its grammar region,
+     diagnostic codes and containment predicate are unchanged across the range) and the
+     re-measured pin citations in `packages/spec/src`, which carry their own
+     `@objectstack/spec` patch changeset. It adds, removes or renames no
+     ObjectStack-authorable key: no Zod schema, no spec declaration and no stored
+     `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing here to
+     rewrite, and this body carries no FROM/TO prescription of its own.
+     The range carries six declared-breaking objectui changes, each by its author's
+     breaking annotation and none by a declared `major`. Each is answered here:
+     (1) objectui#12055 (`7282c6a51`): `@object-ui/providers`' upload adapter no longer
+     sends an upload's `path` as the storage scope. The scope vocabulary is the server's
+     `sys_file` `scope` select, which this repo already enforces; nothing moves here.
+     (2) objectui#6349 batch 6 (`1f1c4b526`): `useConfirmDialog`'s result type is
+     declared as `DesignerConfirmDialogState`. An objectui TypeScript type; no ObjectStack
+     key.
+     (3) objectui#5250 (`e4c0b5432`): `objectui validate` and `objectui check` judge a
+     document through objectui's strict authoring face. objectui's own CLI; this repo's
+     `os validate` and publish doors are unchanged.
+     (4) objectui#5144 (`3c3115e38`): list views read `userActions.editInline` with the
+     default `@objectstack/spec` already declares (`false`), folding a boolean
+     `inlineEdit` into it. The renderer now follows this repo's existing declaration, so
+     nothing here moves. Measured on this tree: the showcase task view `grid`
+     declares `inlineEdit: true` and keeps its toggle; a grid that declares neither key no
+     longer offers one.
+     (5) and (6) objectui#6349 batch 4 (`d32869883`): `WidgetLabelling` and
+     `FIELD_WIDGET_LABELLING` are typed against `RegistryComponentMeta['labelling']`.
+     objectui TypeScript types; no ObjectStack key.
+     Three more commits carry `!` in their subject and are listed above at their declared
+     level: objectui#6152 rounds 14 and 15 (`3fd862510`, `025341692`), where the list
+     renderers stop reading the per-kind block keys and the legacy chart axes that
+     `@objectstack/spec`'s view write door already refuses, and objectui#12063
+     (`c7b30bd66`), `UnifiedViewConfig.chart` retired in objectui's types. They follow this
+     repo's existing declarations. Measured on this tree: no example, package or docs
+     list view authors a retired key, and both chart list views (the showcase task
+     view `chart` and project view `budget_chart`) bind an ADR-0021 dataset.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
+     per-entry re-measurement of the upstream declared-breaking entries.
+-->
 
 objectui range: `47b1f0bb7174...20c6d351ad74`
