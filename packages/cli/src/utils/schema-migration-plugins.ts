@@ -68,8 +68,8 @@ import {
  *    companion columns its boot provisions are in the schema view too.
  *  - **`PlatformObjectsPlugin`**, when absent — `serve` step 5c, composed on
  *    every served boot.
- *  - **What `os serve` mounts AROUND the stack — `os migrate plan` and `apply`
- *    only** (`servedPlatform`, #22506, {@link composeServedPlatform}): the auth
+ *  - **What `os serve` mounts AROUND the stack — `os migrate plan`, `apply` and
+ *    `unmapped-columns` only** (`servedPlatform`, #22506, {@link composeServedPlatform}): the auth
  *    family behind `serve`'s auth gate, the provider of every capability its
  *    resolver mounts (the stack's `requires` and the always-on slate), and the
  *    REST API plugin — each through the rule `serve` reads, each for its
@@ -1531,7 +1531,8 @@ export async function buildSchemaMigrationPlugins(opts: {
    * stack surfaced it.
    *
    * Set by `os migrate plan` and `os migrate apply`, whose subject is the
-   * deployment's whole object set. Unset (`os migrate
+   * deployment's whole object set, and by `os migrate unmapped-columns`, which
+   * reads the plan's own `unmapped_column` findings over that set. Unset (`os migrate
    * security-catalog-overlays`, which also boots NON-deferred under `--apply`):
    * a provider is composed only when a composed plugin hard-depends on it
    * (#21732), as before.

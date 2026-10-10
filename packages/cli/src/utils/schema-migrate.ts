@@ -472,8 +472,10 @@ export async function bootSchemaStack(
      * mounts AROUND the stack, each piece for its declarations only: the auth
      * family behind its auth gate, the provider of every capability its
      * resolver mounts (the stack's `requires` and the always-on slate), and
-     * the REST API plugin. Set by `os migrate plan` and `os migrate apply`, and
-     * by nothing else — their subject is the deployment's whole object set.
+     * the REST API plugin. Set by `os migrate plan` and `os migrate apply`,
+     * whose subject is the deployment's whole object set, and by `os migrate
+     * unmapped-columns`, which reads the plan's own findings over that set —
+     * and by nothing else.
      * See `buildSchemaMigrationPlugins`'s `servedPlatform`.
      */
     composeServedPlatform?: boolean;
