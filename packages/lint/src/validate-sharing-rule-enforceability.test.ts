@@ -8,13 +8,36 @@ import { compileCelToFilter } from '@objectstack/formula';
 import { OWDModel, ShareRecipientType, ObjectAccessScopeSchema } from '@objectstack/spec/security';
 
 import {
-  validateSharingRuleEnforceability,
+  validateSharingRuleEnforceability as validateSharingRuleEnforceabilityUnrecorded,
   SHARING_RULE_UNLOWERABLE_CONDITION,
   SHARING_RULE_RUNTIME_VARIABLE_CONDITION,
   SHARING_RULE_OBJECT_NOT_SHAREABLE,
   SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT,
 } from './validate-sharing-rule-enforceability.js';
 import { AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the four ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — so the pin covers every firing variant
+// this suite exercises, not a chosen few. Run the whole file: those cases read
+// what the cases above fired.
+const SHARING_RULE_IDS: readonly string[] = [
+  SHARING_RULE_UNLOWERABLE_CONDITION,
+  SHARING_RULE_RUNTIME_VARIABLE_CONDITION,
+  SHARING_RULE_OBJECT_NOT_SHAREABLE,
+  SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT,
+];
+const fired: Array<{ rule: string; message: string }> = [];
+const validateSharingRuleEnforceability: typeof validateSharingRuleEnforceabilityUnrecorded = (...args) => {
+  const findings = validateSharingRuleEnforceabilityUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 const ids = (stack: unknown) => validateSharingRuleEnforceability(stack).map((f) => f.rule);
 
@@ -50,9 +73,11 @@ describe('validateSharingRuleEnforceability — the declared-but-never-read case
       path: 'sharingRules[0].condition',
       where: 'sharing rule "high_value_opps" on object "opportunity"',
     });
-    // It must say what actually happens at boot, not merely "unsupported".
-    expect(findings[0].message).toMatch(/SKIPS the rule at boot/);
-    expect(findings[0].message).toMatch(/never written to `sys_sharing_rule`/);
+    // It must say what actually happens at boot, not merely "unsupported"…
+    expect(findings[0].message).toMatch(/^condition is not lowerable \(.+\), so the rule is never seeded and grants nothing$/);
+    // …and `os explain` says how.
+    expect(explanationOf(SHARING_RULE_UNLOWERABLE_CONDITION)).toMatch(/the rule is SKIPPED/);
+    expect(explanationOf(SHARING_RULE_UNLOWERABLE_CONDITION)).toMatch(/never written to `sys_sharing_rule`/);
     // …and prescribe the fix that works on THIS surface.
     expect(findings[0].hint).toMatch(/record\.x != null/);
     expect(findings[0].hint).toMatch(/INTERPRETED/);
@@ -303,11 +328,12 @@ describe('validateSharingRuleEnforceability — an anchor no gate would consult 
       where: 'sharing rule "high_value_opps" on object "crm_opportunity"',
     });
     // An author must be able to act on this: it has to name the object, the
-    // rule, and WHY the rule cannot take effect.
-    expect(findings[0].message).toMatch(/high_value_opps/);
-    expect(findings[0].message).toMatch(/crm_opportunity/);
-    expect(findings[0].message).toMatch(/sharingModel 'public_read_write'/);
-    expect(findings[0].message).toMatch(/SHARING_NOT_ENABLED/);
+    // rule (the `where` above), and WHY the rule cannot take effect.
+    expect(findings[0].message).toBe(
+      'anchor object "crm_opportunity" declares sharingModel \'public_read_write\', so the grant is refused ' +
+        '(SHARING_NOT_ENABLED) and the rule restricts nothing',
+    );
+    expect(explanationOf(SHARING_RULE_OBJECT_NOT_SHAREABLE)).toMatch(/`buildReadFilter` returns `null`/);
     // …and both honest fixes, because which one is right is the author's call.
     expect(findings[0].hint).toMatch(/delete it/);
     expect(findings[0].hint).toMatch(/sharingModel: 'private'/);
@@ -333,7 +359,8 @@ describe('validateSharingRuleEnforceability — an anchor no gate would consult 
     // `controlled_by_parent` first and answers "share the master record
     // instead"; this arm mirrors that order, and names the master it resolved.
     expect(findings[0].message).toMatch(/derived from its master/i);
-    expect(findings[0].message).toMatch(/share the master record instead/);
+    expect(findings[0].message).toMatch(/SHARING_NOT_ENABLED/);
+    expect(explanationOf(SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT)).toMatch(/share the master record instead/);
     expect(findings[0].hint).toMatch(/crm_account/);
   });
 
@@ -588,5 +615,36 @@ describe('validateSharingRuleEnforceability — an unreadable master carrier is 
     ["'' (names no object)", { reference: '' }],
   ])('absence keeps the ordinary finding and does NOT throw: %s', (_label, carrier) => {
     expect(ids(detailAnchoredOn(carrier))).toContain(SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT);
+  });
+});
+
+describe('[#22161] one-line verdicts — the four ids', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each id fired at least once, so the shape
+    // assertion below cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...SHARING_RULE_IDS].sort());
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [SHARING_RULE_UNLOWERABLE_CONDITION]: ['`bootstrapDeclaredSharingRules`', 'one WARN line in the boot log', 'ADR-0049', 'SharingRuleService', 'INVALID_FILTER'],
+    [SHARING_RULE_RUNTIME_VARIABLE_CONDITION]: ['MATERIALISED', 'no "current user"', 'the rule is SKIPPED'],
+    [SHARING_RULE_OBJECT_NOT_SHAREABLE]: ['WIDENS', 'ADR-0090 D1', '`assertNotInertGrant`', 'not under record-sharing enforcement', 'restriction that does not exist'],
+    [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT]: ['ADR-0055', 'no shares to widen', '`assertNotInertGrant`', 'whatever the MASTER grants them'],
+  };
+
+  it('covers exactly the four ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SHARING_RULE_IDS].sort());
+  });
+
+  it.each([...SHARING_RULE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });
