@@ -54,6 +54,7 @@ import { ObjectKernel, hashApiKey } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes, DATASOURCE_ADMIN_CAPABILITY } from '../admin-routes.js';
+import { bindCatalogFromTables } from './security-catalog.testkit.js';
 
 const RAW_MEMBER_KEY = 'osk_15350_member';
 const RAW_EXMEMBER_KEY = 'osk_15350_exmember';
@@ -143,12 +144,12 @@ function makeQl() {
       },
     ],
   };
-  return {
+  return bindCatalogFromTables({
     find: async (object: string, q: any = {}) => {
       const rows = (tables[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
-  };
+  }, tables);
 }
 
 // ---------------------------------------------------------------------------
