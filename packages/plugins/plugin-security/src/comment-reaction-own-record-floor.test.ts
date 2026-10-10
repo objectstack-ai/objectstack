@@ -45,6 +45,7 @@ import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
@@ -63,7 +64,7 @@ const REACTION_OBJECT = {
     user_id: { type: 'text', label: 'User', required: true },
   },
   indexes: [{ fields: ['comment_id', 'emoji', 'user_id'], unique: 'organization' }],
-  enable: { apiMethods: ['get', 'list', 'create', 'delete'] },
+  enable: { apiMethods: ['get', 'list', 'create', 'delete', 'bulk'] },
 };
 
 /** The app's grant: read, create and delete on reactions — every row. */
@@ -207,5 +208,55 @@ describe('[#22566] a reaction is its reactor’s own record — the own-record f
     expect(await attempt(() => ql.delete(REACTION, { where: { id: b.id }, context: BOB }))).toEqual({ ok: true });
     const left = await ql.find(REACTION, { where: { comment_id: BOBS_COMMENT }, context: SYSTEM });
     expect(left.map((r: any) => r.id)).toEqual([a.id]);
+  }, 60_000);
+});
+
+/**
+ * The object grants `bulk`, and the batch doors are the protocol's own
+ * `createManyData` / `deleteManyData` — driven here over the same real engine,
+ * so what is pinned is the door's real loop, not a re-statement of it.
+ * `deleteManyData` deletes one id at a time by id, so each row meets the floor;
+ * a row it may not delete fails ON ITS OWN, with the floor's code, and the row
+ * survives.
+ */
+describe('[#22566] the batch doors keep the own-record floor', () => {
+  interface BatchResult { id: string; success: boolean; errors?: Array<{ code?: string }> }
+  interface BatchDoor {
+    createManyData(req: { object: string; records: unknown[]; context?: unknown }): Promise<{ records: Array<{ id: string }> }>;
+    deleteManyData(req: {
+      object: string;
+      ids: string[];
+      options?: { continueOnError?: boolean };
+      context?: unknown;
+    }): Promise<{ succeeded: number; failed: number; results: BatchResult[] }>;
+  }
+  const doorOver = (ql: ObjectQL): BatchDoor =>
+    new ObjectStackProtocolImplementation(ql as never, () => new Map(), undefined) as unknown as BatchDoor;
+
+  it('createMany then deleteMany: a member removes its own reactions in one batch; another member’s is refused alone and survives', async () => {
+    const ql = await boot();
+    const door = doorOver(ql);
+    const { records: mine } = await door.createManyData({
+      object: REACTION,
+      records: [
+        { comment_id: BOBS_COMMENT, emoji: '👍', user_id: ALICE.userId },
+        { comment_id: BOBS_COMMENT, emoji: '🎉', user_id: ALICE.userId },
+      ],
+      context: ALICE,
+    });
+    expect(mine).toHaveLength(2);
+    const bobs = await react(ql, BOB, '👍');
+
+    const ids = [mine[0]!.id, bobs.id, mine[1]!.id].map(String);
+    const res = await door.deleteManyData({ object: REACTION, ids, options: { continueOnError: true }, context: ALICE });
+
+    expect(res.succeeded).toBe(2);
+    expect(res.failed).toBe(1);
+    const refused = res.results.find((r) => r.id === String(bobs.id));
+    expect(refused?.success).toBe(false);
+    expect(refused?.errors?.[0]?.code).toBe('PERMISSION_DENIED');
+    // Ground truth past every scope: Bob's row is still there, Alice's are gone.
+    const left = await ql.find(REACTION, { where: { comment_id: BOBS_COMMENT }, context: SYSTEM });
+    expect(left.map((r: any) => String(r.id))).toEqual([String(bobs.id)]);
   }, 60_000);
 });

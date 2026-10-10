@@ -18,6 +18,8 @@
  *  - UNIQUENESS: two members reacting at once keep two rows; the same
  *    (comment, emoji, user) twice is refused by the declared index and reaches
  *    the data door as `409 UNIQUE_VIOLATION`;
+ *  - BULK CREATE: the engine calls the batch doors make (`insert` of an array,
+ *    `insertMany`) run the create gate on every row — stamped, or refused;
  *  - a deleted comment does not take its author's delete down with it, and its
  *    reactions are read by nobody.
  *
@@ -321,6 +323,68 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
       const created = await react(MEMBER, comments.onBoard, '❤️');
       expect(created.id).toBeTruthy();
       await engine.delete(REACTION, { where: { id: created.id }, context: SYS });
+    });
+  });
+
+  // The object grants `bulk`. The batch create door (`createManyData`) is ONE
+  // `engine.insert` of the rows, and the partial-success batch
+  // (`insertManyData`) is `engine.insertMany`; the engine runs `beforeInsert`
+  // once per row in both, so each row meets the create gate. Driven here at
+  // those exact engine calls.
+  describe('bulk create: every row meets the create gate', () => {
+    const idsOf = (rows: Row[]) => rows.map((r) => String(r.id));
+    const dropAll = async (ids: string[]) => {
+      for (const id of ids) await engine.delete(REACTION, { where: { id }, context: SYS });
+    };
+
+    it('createMany: every row is stamped with the session user, whatever each row sent', async () => {
+      const created: Row[] = await engine.insert(
+        REACTION,
+        [
+          { comment_id: comments.onBoard, emoji: '🚀', user_id: OTHER.userId },
+          { comment_id: comments.onMine, emoji: '🚀' },
+        ],
+        { context: MEMBER },
+      );
+      const rows = await engine.find(REACTION, { where: { id: { $in: idsOf(created) } }, context: SYS });
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.user_id).toBe(MEMBER.userId);
+        expect(row.created_by).toBe(MEMBER.userId);
+      }
+      await dropAll(idsOf(created));
+    });
+
+    it('createMany: one row on a comment the member cannot read refuses the batch, on the envelope, and nothing is written', async () => {
+      const before = (await allReactions()).length;
+      const outcome = await attempt(() =>
+        engine.insert(
+          REACTION,
+          [
+            { comment_id: comments.onBoard, emoji: '🛸' },
+            { comment_id: comments.onTheirs, emoji: '🛸' },
+          ],
+          { context: MEMBER },
+        ),
+      );
+      expect(outcome).toMatchObject({ ok: false, code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+      expect((await allReactions()).length).toBe(before);
+    });
+
+    it('insertMany: a row on a comment the member cannot read is refused, on the envelope, and nothing is written', async () => {
+      const before = (await allReactions()).length;
+      const outcome = await attempt(() =>
+        engine.insertMany(
+          REACTION,
+          [
+            { comment_id: comments.onBoard, emoji: '🌱' },
+            { comment_id: comments.onTheirs, emoji: '🌱' },
+          ],
+          { context: MEMBER },
+        ),
+      );
+      expect(outcome).toMatchObject({ ok: false, code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+      expect((await allReactions()).length).toBe(before);
     });
   });
 
