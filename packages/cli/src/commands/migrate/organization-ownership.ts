@@ -88,7 +88,7 @@ export default class MigrateOrganizationOwnership extends Command {
     const json = Boolean(flags.json);
     const refuse = async (payload: Record<string, unknown>, message: string): Promise<void> => {
       if (json) {
-        await emitJson({ refused: true, ...payload }, 1, { compact: true });
+        await emitJson({ error: payload.reason === 'boot-failed' ? 'boot_failed' : 'plan_refused', ...payload }, 1, { compact: true });
         return;
       }
       printError(message);
