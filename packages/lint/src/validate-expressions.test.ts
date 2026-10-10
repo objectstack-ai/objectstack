@@ -312,8 +312,32 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues).toHaveLength(0);
     });
 
-    // #1928 tier 3 — a likely field typo in a flow condition is a non-blocking warning.
+    // #1928 tier 3 — a likely field typo in a flow condition is a non-blocking
+    // warning WHERE THE DOOR CANNOT TELL whether a flow variable answers to the
+    // name: here a `script` node's registered function gets the live variable
+    // map and may bind any name (#22565 stands down on such a flow).
     it('warns (severity=warning) on a likely field typo in a flow condition', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'crm_opportunity', fields: { stage: { type: 'select' }, amount: { type: 'currency' } } }],
+        flows: [{
+          name: 'opp_won',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_opportunity', condition: 'stagee == "closed_won"' } },
+            { id: 'enrich', type: 'script', config: { function: 'enrich_opportunity' } },
+          ],
+          edges: [],
+        }],
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].message).toMatch(/did you mean `stage`/);
+    });
+
+    // [#22565] RE-JUDGED: on a flow whose every binding the door can read, the
+    // same typo binds nothing at all, so the run fails `Unknown variable:
+    // stagee`. One finding, at `error`, still naming the field it is near — the
+    // near-miss warning is withdrawn, not doubled.
+    it('refuses (severity=error) the same typo on a flow whose bindings are all in hand, with the did-you-mean', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'crm_opportunity', fields: { stage: { type: 'select' }, amount: { type: 'currency' } } }],
         flows: [{
@@ -325,15 +349,19 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         }],
       });
       expect(issues).toHaveLength(1);
-      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].severity).toBe('error');
+      expect(issues[0].message).toMatch(/^`stagee` is not bound in this flow's expression scope/);
       expect(issues[0].message).toMatch(/did you mean `stage`/);
     });
 
-    it('does not warn when the bare ref is far from any field (likely a flow variable)', () => {
+    it('does not warn when the bare ref is far from any field (a flow variable)', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'crm_opportunity', fields: { stage: { type: 'select' } } }],
         flows: [{
           name: 'renewal',
+          // [#22565] Declared: the run binds a flow variable only when the flow
+          // says so, and an undeclared `expiring_deals` faults it.
+          variables: [{ name: 'expiring_deals', type: 'list' }],
           nodes: [{ id: 'start', type: 'start', config: { objectName: 'crm_opportunity' } }],
           edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'expiring_deals.length > 0' }],
         }],
@@ -825,6 +853,8 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         objects: [{ name: 'crm_opportunity', fields: { amount: { type: 'currency' } } }],
         flows: [{
           name: 'opp_flow',
+          // [#22565] Declared — see the `expiring_deals` fixture above.
+          variables: [{ name: 'expiring_count', type: 'number' }],
           nodes: [{ id: 'start', type: 'start', config: { objectName: 'crm_opportunity' } }],
           edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'amount / 100 > 5 && expiring_count * 2 > 3' }],
         }],
@@ -2598,6 +2628,10 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       objects,
       flows: [{
         name: 'convert_lead',
+        // [#22565] The variable the branch reads, declared — app-crm binds it
+        // with a node; a flow that binds nothing named `lead_record` faults
+        // `Unknown variable: lead_record` on the branch, and is refused for it.
+        variables: [{ name: 'lead_record', type: 'object' }],
         nodes: [
           { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
           { id: 'check', type: 'decision', config: { conditions: [{ label: 'Yes', expression }] } },
@@ -3498,6 +3532,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // Its one "key" is `Map.prototype.get`; the metadata key it is built
       // from is read off the tabled `obj` receiver (`obj.attachedOnRead`).
       'attachedOnReadIndex',
+      // [#22565] The flow CEL root judge's findings for one site, one unbound
+      // root at a time. Their keys are that module's own `{ root, members }` and
+      // the array's own methods — never metadata keys.
+      'unbound', 'unboundRoot',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -4811,6 +4849,9 @@ describe('a blank string in a ledger predicate slot (#17493)', () => {
   const flowStack = (...middle: Record<string, unknown>[]) => ({
     flows: [{
       name: 'blank_flow',
+      // [#22565] The variable the non-blank controls read, declared: an
+      // `amount` the flow does not bind is refused as an unbound root.
+      variables: [{ name: 'amount', type: 'number' }],
       nodes: [{ id: 'start', type: 'start' }, ...middle],
       edges: [],
     }],
@@ -4903,6 +4944,9 @@ describe('a decision branch with no `expression` (#19961)', () => {
   const flowStack = (...branches: Record<string, unknown>[]) => ({
     flows: [{
       name: 'absent_flow',
+      // [#22565] The variable the valid branch reads, declared — see the
+      // #17493 fixture above.
+      variables: [{ name: 'amount', type: 'number' }],
       nodes: [{ id: 'start', type: 'start' }, { id: 'check', type: 'decision', config: { conditions: branches } }],
       edges: [],
     }],

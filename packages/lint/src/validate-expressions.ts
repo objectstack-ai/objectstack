@@ -2241,13 +2241,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       if (!source) return;
       const unbound = unboundFlowCelRoots(source, rootScope);
       if (unbound.length === 0) return;
-      const refused = unbound.map((u) => u.root);
+      const refused = unbound.map((unboundRoot) => unboundRoot.root);
       for (let i = issues.length - 1; i >= from; i--) {
         const issue = issues[i]!;
         if (issue.severity === 'warning' && isFlattenedNearMissFor(issue.message, refused)) issues.splice(i, 1);
       }
-      for (const u of unbound) {
-        issues.push({ where, message: unboundFlowCelRootMessage(u, rootScope), source, severity: 'error' });
+      for (const unboundRoot of unbound) {
+        issues.push({ where, message: unboundFlowCelRootMessage(unboundRoot, rootScope), source, severity: 'error' });
       }
     };
 
