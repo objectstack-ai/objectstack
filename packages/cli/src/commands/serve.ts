@@ -2151,7 +2151,7 @@ export default class Serve extends Command {
     // `development` under `--dev`, else `NODE_ENV` (`production` when unset).
     // [#22579] Through `loadProjectEnvFiles`, the load `os migrate`'s one-shot
     // boot runs, so the two boots cannot read different files for one project;
-    // `boot-preparation-parity.test.ts` holds every preparation step to that.
+    // `utils/boot-preparation-parity.test.ts` holds every preparation step to that.
     loadProjectEnvFiles(process.cwd(), { dev: flags.dev });
 
     // ── Tenancy-posture boot gate (#5359) ────────────────────────────
