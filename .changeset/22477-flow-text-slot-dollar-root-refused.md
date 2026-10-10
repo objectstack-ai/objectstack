@@ -19,7 +19,7 @@ Clause-②: no (narrowing)
   - `NotifyConfigSchema`, `ScreenConfigSchema` and `EndConfigSchema` raise a `custom` issue at the slot's key.
   - `registerFlow` refuses the flow, and a stored flow carrying such a hole is skipped at boot with a warn naming it.
   - `objectstack validate` reports `expression-invalid` at `error`.
-- The remedy for `{{ $User.<path> }}` is the sentence `{$User.<path>}` gets: for `$User.Id`, compute the run user's id into a variable with an `assignment` node's CEL value envelope, `current_user.id`, then write the variable as a hole; every other `$User` path never resolved, and its remedy says so. Any other root is named in the refusal, beside the variables the engine does bind.
+- The remedy for `{{ $User.<path> }}` is the sentence `{$User.<path>}` gets: compute the value into a variable with an `assignment` node, whose value slot still reads that spelling, then write the variable as a hole. Any other root is named in the refusal, beside the variables the engine does bind.
 - A single-brace path token over such a root (`'Failed: {$caught.message}'`) is no longer prescribed the `{{ }}` spelling, which would be refused in turn; it gets the same remedy.
 
 **Unchanged.** `{{ $error.message }}`, `{{ record.name }}`, a node output `{{ lookup.result }}` and every hole over an engine-bound `$` variable. The template engine binds no new variable.
@@ -30,7 +30,7 @@ Clause-②: no (narrowing)
 
 | you wrote | write instead |
 |:--|:--|
-| `message: 'By {{ $User.Id }}'` | an `assignment` node first, `assignments: { by: { dialect: 'cel', source: 'current_user.id' } }`, then `message: 'By {{ by }}'` |
+| `message: 'By {{ $User.Id }}'` | an `assignment` node first, `assignments: { by: '{$User.Id}' }`, then `message: 'By {{ by }}'` |
 | `errorVariable: '$caught'` with `message: 'Failed: {{ $caught.message }}'` | `errorVariable: 'caught'` with `'Failed: {{ caught.message }}'`, or keep the default `$error` and write `{{ $error.message }}` |
 
 **The one-line fix: compute a run-user value into a variable first, and name a variable the flow binds itself without the `$`.**

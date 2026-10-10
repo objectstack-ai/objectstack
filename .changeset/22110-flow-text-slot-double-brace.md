@@ -32,8 +32,7 @@ Clause-②: yes (narrowing)
 | `title: 'Deal won: {record.name}'` | `title: 'Deal won: {{ record.name }}'` |
 | `message: 'Failed: {$error.message}'` | `message: 'Failed: {{ $error.message }}'` |
 | `message: 'Total {amount * 2}'`, `'{round(x)}'` | compute it first — `assignments: { v: { dialect: 'cel', source: 'amount * 2' } }` — then `'Total {{ v }}'` (a number format is a formatter: `{{ v \| number:2 }}`) |
-| `message: 'Due {TODAY() + 7}'` | compute it first with an `assignment` node, whose value slot still reads that spelling — `assignments: { due: '{TODAY() + 7}' }` — then `'Due {{ due }}'` |
-| `message: 'By {$User.Id}'` | compute it first with an `assignment` node's CEL value envelope — `assignments: { by: { dialect: 'cel', source: 'current_user.id' } }` — then `'By {{ by }}'` |
+| `message: 'Due {TODAY() + 7}'`, `'By {$User.Id}'` | compute it first with an `assignment` node, whose value slot still reads that spelling — `assignments: { due: '{TODAY() + 7}' }` — then `'Due {{ due }}'` |
 
 **The one-line fix: double the braces of every path token in a text slot (`{x}` → `{{ x }}`), and compute anything else into a variable first.**
 

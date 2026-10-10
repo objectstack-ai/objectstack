@@ -18,7 +18,7 @@ Clause-②: no (narrowing)
 
 **The expression remedy.** A refused `{…}` arithmetic token's CEL spelling now reads every variable path in it the way a lone path token's does — `{int * 2}` is `vars["int"] * 2`, `{items.0 * 2}` is `items[0] * 2` — instead of rewriting only its divisors, which printed envelopes that did not evaluate.
 
-**Still accepted, unchanged.** A CEL value envelope, every literal, and the date macros `{NOW()}` / `{TODAY() ± N}` (CEL has no string form for a Timestamp yet). A string that mixes a date macro with any other token, a `$User` path included, is still kept whole. `{$User.*}` keeps resolving where the single-brace dialect still lives — a `filter` value, a `notify` `recipients` entry.
+**Still accepted, unchanged.** A CEL value envelope, every literal, and the date macros `{NOW()}` / `{TODAY() ± N}` (CEL has no string form for a Timestamp yet). A string that mixes a date macro with any other token, a `$User` path included, is still kept whole. `{$User.*}` keeps resolving where the single-brace dialect still lives — a `filter` value, a `notify` `recipients` entry. The value-slot retirement's entry earlier on this line lists `{$User.<path>}` among the spellings still accepted, and the text-slot entries compute the run user through it; this entry supersedes those lines.
 
 ## FROM → TO
 

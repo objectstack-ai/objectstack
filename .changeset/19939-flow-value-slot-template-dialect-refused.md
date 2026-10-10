@@ -21,7 +21,7 @@ Clause-②: yes (narrowing)
 **What is still accepted, unchanged.** A CEL value envelope, every literal (a token-free string, numbers, booleans, `null`, arrays, objects), and two spellings CEL cannot write yet, which keep their meaning until it can:
 
 - the date macros — `{NOW()}`, `{TODAY()}`, with an optional `± N` day offset. CEL's `now()` / `today()` / `daysFromNow()` / `addDays()` yield a Timestamp, which reaches the data engine as a `Date` object rather than the ISO text the macro wrote, and CEL has no string form for one;
-- the run user — `{$User.<path>}`. The flow CEL scope bound no user when this entry was written; it now binds `current_user`, and `{$User.<path>}` is refused too — see this release's run-user entry, which names `current_user.id`.
+- the run user — `{$User.<path>}`. The flow CEL scope binds no user.
 
 A string whose tokens include one of these is not refused. Text slots (`notify` `title` / `message`, a screen `description`, …) and `filter` values keep the template dialect.
 
