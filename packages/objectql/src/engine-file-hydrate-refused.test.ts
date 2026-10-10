@@ -193,7 +193,7 @@ describe('a refused sys_file read marks the file field refused — not absent', 
   it('a reader refused sys_file reads each held file as { id, metadataRefused: true }', async () => {
     const { engine } = await boot({ refuseReader: true });
 
-    const rows = byId(await engine.find('doc', { context: READER_CTX } as any));
+    const rows = byId(await engine.find('doc', { context: READER_CTX }));
 
     expect(rows.d1.attachment).toEqual({ id: FILE_ID, metadataRefused: true });
     // Multi-value: every id is marked; a legacy URL string is not an id and
@@ -210,7 +210,7 @@ describe('a refused sys_file read marks the file field refused — not absent', 
   it('findOne serves the same refused marker', async () => {
     const { engine } = await boot({ refuseReader: true });
 
-    const row = await engine.findOne('doc', { where: { id: 'd1' }, context: READER_CTX } as any);
+    const row = await engine.findOne('doc', { where: { id: 'd1' }, context: READER_CTX });
 
     expect(row?.attachment).toEqual({ id: FILE_ID, metadataRefused: true });
   });
@@ -218,7 +218,7 @@ describe('a refused sys_file read marks the file field refused — not absent', 
   it('the served value is the declared refused form of the expanded file contract', async () => {
     const { engine } = await boot({ refuseReader: true });
 
-    const rows = byId(await engine.find('doc', { context: READER_CTX } as any));
+    const rows = byId(await engine.find('doc', { context: READER_CTX }));
 
     expect(FileRefusedValueSchema.safeParse(rows.d1.attachment).success).toBe(true);
     expect(valueSchemaFor({ type: 'file' }, 'expanded').safeParse(rows.d1.attachment).success).toBe(true);
@@ -233,7 +233,7 @@ describe('a refused sys_file read marks the file field refused — not absent', 
   it('the refusal is handed to the caller, so it costs no warn — one debug line names it', async () => {
     const { engine, logger } = await boot({ refuseReader: true });
 
-    await engine.find('doc', { context: READER_CTX } as any);
+    await engine.find('doc', { context: READER_CTX });
 
     expect(logger.lines.warn).toEqual([]);
     expect(logger.lines.error).toEqual([]);
@@ -245,7 +245,7 @@ describe('a refused sys_file read marks the file field refused — not absent', 
   it('CONTROL a record with no file still reads empty for the refused reader', async () => {
     const { engine } = await boot({ refuseReader: true });
 
-    const rows = byId(await engine.find('doc', { context: READER_CTX } as any));
+    const rows = byId(await engine.find('doc', { context: READER_CTX }));
 
     expect(rows.d3.attachment).toBeNull();
     expect(rows.d3.gallery).toBeNull();
@@ -255,7 +255,7 @@ describe('a refused sys_file read marks the file field refused — not absent', 
   it('CONTROL a reader allowed to read sys_file gets the hydrated file', async () => {
     const { engine, logger } = await boot({ refuseReader: true });
 
-    const rows = byId(await engine.find('doc', { context: SYSTEM_CTX } as any));
+    const rows = byId(await engine.find('doc', { context: SYSTEM_CTX }));
 
     expect(rows.d1.attachment).toEqual({
       id: FILE_ID,
@@ -274,7 +274,7 @@ describe('a refused sys_file read marks the file field refused — not absent', 
       },
     });
 
-    const rows = byId(await engine.find('doc', { context: READER_CTX } as any));
+    const rows = byId(await engine.find('doc', { context: READER_CTX }));
 
     expect(rows.d1.attachment).toBe(FILE_ID);
     expect(logger.lines.warn).toEqual([]);
@@ -288,7 +288,7 @@ describe('a refused sys_file read marks the file field refused — not absent', 
       },
     });
 
-    const rows = byId(await engine.find('doc', { context: READER_CTX } as any));
+    const rows = byId(await engine.find('doc', { context: READER_CTX }));
 
     expect(rows.d1.attachment).toBe(FILE_ID);
     const seam = logger.lines.warn.filter((l: any) => l.msg.startsWith('sys_file lookup failed'));
