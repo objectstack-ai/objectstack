@@ -27,7 +27,11 @@
  *    floor hand-over (`masterGateCoversOperation`) key on the mapped verb;
  *  - `security/explain` (`explain-engine.ts`), the object-level `rls` layer and
  *    the record-level row story alike, so a `transfer` is explained against the
- *    update-class policies the door judges it by.
+ *    update-class policies the door judges it by;
+ *  - [#22571] `security/explain`'s read-absent rewrite (#21771 ruling A), whose
+ *    guard asks this mapping which operation the explained verb's door is, so a
+ *    `transfer` of a row the caller cannot read gets the missing-record shape
+ *    the transfer door's 404 is.
  *
  * The middleware's AST step (step 3) passes its verb RAW, by design: the
  * engine's middleware vocabulary carries no lifecycle verb, an invariant

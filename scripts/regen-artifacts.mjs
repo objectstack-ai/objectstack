@@ -89,7 +89,6 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // Deliberately NOT sharded (#5837): keyed by version, so two PRs append under
   // different majors — a low-conflict shape the split would not improve.
   { path: 'packages/spec/spec-changes.json', gen: 'gen:spec-changes', check: 'check:spec-changes' },
-  { path: 'docs/protocol-upgrade-guide.md', gen: 'gen:upgrade-guide', check: 'check:upgrade-guide' },
   // Sharded by category (#5837): one file per namespace, so two PRs touching
   // different categories never share a file. The reason it had to be sharded and
   // not merely driver-managed is that the driver is LOCAL — the GitHub merge
@@ -922,6 +921,21 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'full of, and which a reader may well assume happened here. Same expiry clause as the two '
       + 'entries above: the day any of these pages is committed to this tree, this entry turns red '
       + 'and a real disposition is owed.',
+  },
+  {
+    path: 'content/docs/protocol-upgrade/**',
+    gen: 'gen:upgrade-guide',
+    untracked: true,
+    why:
+      'GITIGNORED build output (`.gitignore:108`): the protocol upgrade guide\'s docs pages, one '
+      + 'per major plus an index, which `gen:upgrade-guide` writes and the `@objectstack/docs` build '
+      + 'runs before `next build`. Git never merges them. Recorded because this generator used to own '
+      + 'a ROUTED row, `docs/protocol-upgrade-guide.md`, and #22483 took that row out on purpose: the '
+      + 'file is now a hand-written pointer stub that nothing generates, so "discard both sides and '
+      + 're-run the generator" would discard the stub with no generator to bring it back, and '
+      + '`check:upgrade-guide`, which compares no committed copy, would pass the loss. A merge that '
+      + 'meets the stub on both sides is a human\'s. Same expiry clause as the three untracked '
+      + 'entries above: committing these pages turns this entry red.',
   },
   {
     path: 'docs/audits/**',
