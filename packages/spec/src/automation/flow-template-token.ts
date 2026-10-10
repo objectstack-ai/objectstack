@@ -219,6 +219,119 @@ export function runUserPathNeverResolved(text: string, write: (path: string) => 
   );
 }
 
+/** The CEL spelling of a date macro ({@link celDateMacro}). */
+export interface CelDateMacro {
+  /**
+   * The CEL source whose value is the text the macro wrote: `isoDate(…)` for
+   * `TODAY()` (`YYYY-MM-DD`), `isoDatetime(…)` for `NOW()`, both on the UTC
+   * calendar the interpolator renders on.
+   */
+  readonly source: string;
+  /**
+   * What the remedy must say beside {@link source} — set when the two do not
+   * write the same text for every input: an offset that is not a whole number,
+   * a variable offset, or an offset that is neither.
+   */
+  readonly edge?: string;
+}
+
+/**
+ * **The CEL spelling of a date macro** — `{TODAY()}`, `{NOW()}`, with an
+ * optional `± N` day offset — read the way `resolveToken` reads it: the offset
+ * is a number literal, else a variable looked up by its whole text, else 0.
+ *
+ *  - `{TODAY()}` → `isoDate(today())`; `{TODAY() + N}` / `{TODAY() - N}` →
+ *    `isoDate(daysFromNow(N))` / `isoDate(daysAgo(N))`;
+ *  - `{NOW()}` → `isoDatetime(now())`; `{NOW() ± N}` →
+ *    `isoDatetime(addDays(now(), ±N))`, which keeps the time of day where
+ *    `daysFromNow` would land on midnight.
+ *
+ * Byte for byte with the interpolator for a whole number of days — the cell
+ * grid `stdlib-timestamp-text.test.ts` measures in `@objectstack/formula`, and
+ * the live parity pin beside `crud-fields-value-envelope.test.ts` in
+ * `service-automation` drives both engines over the same instants. The three
+ * edges where they part are named in {@link CelDateMacro.edge}:
+ *
+ *  - **a fraction** (`{TODAY() - 1.5}`): the template added the offset to the
+ *    day of the month and truncated the SUM, `addDays` truncates the OFFSET —
+ *    the same day forward, one day apart backward once the day of the month
+ *    passes the offset — and `daysFromNow` / `daysAgo` take a whole number, so
+ *    `daysAgo(1.5)` is refused at build;
+ *  - **a variable** (`{TODAY() + days}`): the template looked the offset up as
+ *    one variable name and added 0 days, silently, when it found none or the
+ *    value was not a number; CEL reads the path, an absent variable fails the
+ *    run, and a value that is not a number is an invalid date `isoDate` refuses;
+ *  - **neither** (`{TODAY() + 3d}`): the template added 0 days, silently.
+ *
+ * `undefined` for an `inner` that is not a date macro.
+ */
+export function celDateMacro(inner: string): CelDateMacro | undefined {
+  const match = DATE_MACRO.exec(inner.trim());
+  if (!match) return undefined;
+  const [, fn, signText, offsetText] = match;
+  const today = fn === 'TODAY';
+  const token = `{${inner.trim()}}`;
+  const base = today ? 'today()' : 'now()';
+  const render = (instant: string): string => (today ? `isoDate(${instant})` : `isoDatetime(${instant})`);
+  const unsigned = today ? 'daysFromNow(7)' : 'addDays(now(), 7)';
+  if (offsetText === undefined) return { source: render(base) };
+  const sign = signText === '-' ? -1 : 1;
+  const asNumber = Number(offsetText);
+  if (!Number.isNaN(asNumber)) {
+    const days = sign * asNumber;
+    // `resolveToken` skips a zero offset (`if (offset)`), so the macro wrote today.
+    if (days === 0) return { source: render(base) };
+    if (Number.isSafeInteger(days)) {
+      if (!today) return { source: render(`addDays(now(), ${days})`) };
+      return { source: render(days < 0 ? `daysAgo(${-days})` : `daysFromNow(${days})`) };
+    }
+    if (Number.isFinite(days)) {
+      const truncated = Math.trunc(days);
+      const whole = today ? (days < 0 ? 'daysAgo' : 'daysFromNow') : undefined;
+      // The day of the month is at least 1, so a fraction under one day moves
+      // back one day on every date, and a larger one only past that day.
+      const back = Math.ceil(-days);
+      const moved = days < 0
+        ? `moved ${back} day${back === 1 ? '' : 's'} back`
+          + (-days > 1 ? ` once the day of the month passed ${-days} (fewer near its start)` : '')
+          + `, where \`addDays\` moves ${-truncated} back`
+        : `moved ${truncated} day${truncated === 1 ? '' : 's'} forward, as \`addDays\` does`;
+      return {
+        source: render(`addDays(${base}, ${days})`),
+        edge:
+          `\`${token}\` is not a whole number of days, the only offset the template documents: it added the offset `
+          + `to the day of the month and truncated the sum, so it ${moved} by truncating the offset.`
+          + (whole ? ` \`${whole}(${Math.abs(days)})\` is refused at build: \`daysFromNow\` and \`daysAgo\` take a whole number.` : '')
+          + ' Write the whole number of days you mean.',
+      };
+    }
+    return {
+      source: render(base),
+      edge:
+        `\`${token}\` has an offset that is not a finite number: the template's date came out invalid and the run `
+        + `failed. Write the whole number of days you mean — \`${render(unsigned)}\` is seven days on.`,
+    };
+  }
+  if (VARIABLE_PATH.test(offsetText)) {
+    return {
+      source: render(`addDays(${base}, ${sign < 0 ? '-' : ''}${celPath(offsetText)})`),
+      edge:
+        `The template looked \`${offsetText}\` up as one variable name${offsetText.includes('.') ? ', never walking a dotted path,' : ''} `
+        + 'and added 0 days without a word when it found none or the value was not a number. CEL reads the path, an absent '
+        + 'variable fails the run, and a value that is not a number makes `addDays` an invalid date, which '
+        + `\`${today ? 'isoDate' : 'isoDatetime'}\` refuses. \`addDays\` truncates a fractional offset, where the `
+        + 'template truncated the day of the month plus the offset.',
+    };
+  }
+  return {
+    source: render(base),
+    edge:
+      `\`${offsetText}\` is neither a number nor a variable name, so the template added 0 days without a word — `
+      + `\`${render(base)}\` writes what it wrote. For the offset you meant, write a whole number of days: `
+      + `\`${render(unsigned)}\` is seven days on.`,
+  };
+}
+
 /**
  * One lexeme of a template expression, in the order the alternatives are
  * tried: a quoted string (its content is never rewritten), a number, a

@@ -34,11 +34,12 @@
  * can be applied wholesale to a node's `config.filter` block and its other
  * value-like positions. The value slots (`fields.*`, `assignments.*`) no
  * longer read this dialect (#19939): a `{…}` token there is refused before it
- * gets here, except the date macros, which CEL cannot spell yet
- * (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`); the run
- * user there is the CEL scope's `current_user`. The `{$User.*}` branch below
- * still answers the positions that keep this dialect (a `filter`, a `notify`
- * `recipients` entry). Nor do
+ * gets here (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`),
+ * each with its CEL spelling — the run user is the CEL scope's
+ * `current_user`, and a date macro is its CEL string form, `isoDate(today())`
+ * / `isoDatetime(now())` (the stdlib writes the bytes the date branch below
+ * writes). The `{$User.*}` and date branches below still answer the positions
+ * that keep this dialect (a `filter`, a `notify` `recipients` entry). Nor do
  * the TEXT slots — a notify `title` / `message`, a screen `title` /
  * `description`, a refusing `end` node's `message` (#22110, ADR-0032 D3):
  * they render ADR-0032 §3's `{{ }}` holes through the formula template engine,
@@ -109,7 +110,10 @@ export class FlowExpressionFunctionError extends Error {
  * to string there; a string riding into `/ 100` would corrupt silently).
  *
  * `NOW()` / `TODAY()` are deliberately NOT in this table: they are whole-token
- * date macros with their own `± N days` grammar, handled before this path.
+ * date macros with their own `± N days` grammar, handled before this path —
+ * and in a value slot, where this dialect is retired, CEL's `isoDate(today())`
+ * / `isoDatetime(now())` write the same text (the parity pin beside
+ * `crud-fields-value-envelope.test.ts`).
  */
 const EXPRESSION_FUNCTION_ARITY: Record<string, number> = {
     round: 1,
