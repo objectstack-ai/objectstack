@@ -312,6 +312,48 @@ export function assertDefinitionExposed(
 }
 
 /**
+ * [#22661] The LABEL face: may the dimension-label passes read `target` — the
+ * object a reference-class dimension (`lookup` / `master_detail` / `user` /
+ * `tree`) points at — to turn a grouped id into the target record's display
+ * name?
+ *
+ * Both label passes (the display pass, `resolveDimensionLabels`, and the
+ * sort-key pass, `createOrderLabelResolver`) read a SECOND object the query
+ * faces above never ask about: the dataset's base object and its hops are
+ * judged, the label target was not, so a dataset over an exposed object
+ * rendered the display names of an object every data route refuses. Asked the
+ * same decision, for the same `aggregate` operation: a label is the read a
+ * relationship-hop dimension over the target's display field performs
+ * (`<lookup>.<name>`), which this door already judges as `aggregate` over
+ * `queryObjects`; judging the label as anything else would serve through one
+ * spelling what the other is refused. It takes no caller.
+ *
+ * Withheld, not refused, and that is the precedent measured on this door: a
+ * label the target's row scope hides, or whose scope cannot be resolved, is
+ * not fetched and the stored id renders. An unexposed target answers the same
+ * way, and a provider that THROWS answers it too — no label is read on a
+ * declaration nobody could read (fail-closed, reported at `warn`: a display
+ * degradation, not a refused query).
+ */
+export function servesLabelTarget(
+  target: string,
+  provider: ObjectDeclarationProvider,
+  logger?: ExposureLogger,
+): boolean {
+  let enable: EnableLike | null | undefined;
+  try {
+    enable = (provider(target) ?? undefined)?.enable as EnableLike | null | undefined;
+  } catch (e) {
+    logger?.warn(
+      `[Analytics] the API exposure declaration of "${target}" could not be resolved — its display ` +
+        `labels are not read and the stored ids render (fail-closed): ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return false;
+  }
+  return apiExposureDenialReason(enable, ANALYTICS_OPERATION) === null;
+}
+
+/**
  * Refuse the query when any member it names reads a field its object declares
  * `internal: true` — in every position, every role. `named` is what the door's
  * member resolver attributes to each object (relationship hops included); a

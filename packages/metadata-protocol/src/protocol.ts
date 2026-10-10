@@ -4447,6 +4447,19 @@ function headSegment(name: string): string {
 const INTERNAL_FIELD_WALK_DEPTH = 8;
 
 /**
+ * [#22661] The operation an `$expand` entry's TARGET object is judged as, by
+ * the spec's one exposure decision (`canServeApiOperation`, ADR-0049): `get`.
+ *
+ * An expansion replaces an id the caller already holds with the record it
+ * names, which is the read `GET /data/{target}/{id}` performs, and that route
+ * is judged `get`. It never enumerates the target: the engine's sub-read is
+ * bounded to `id $in` the source rows' own values, so a nested `where` can only
+ * narrow records the caller could fetch by id. `list` would refuse an object
+ * that serves exactly those records by id; it is not the read this is.
+ */
+const EXPANSION_TARGET_OPERATION = 'get';
+
+/**
  * [#22646] The NESTED-RELATION conditions a filter holds — a key naming a
  * reference field of the object (`REFERENCE_VALUE_TYPES`) whose value is a
  * plain record carrying at least one non-`$` key, i.e. a condition on the
@@ -12513,7 +12526,8 @@ export class ObjectStackProtocolImplementation implements
      *    is a presence oracle on the related record (the expanded object appears
      *    only when the guess matches), and a deeper level's sub-read is one more
      *    `engine.find` that answers the same way. Target OBJECT exposure is a
-     *    different axis, filed separately (#22661).
+     *    different axis, judged before this walk ({@link servedExpand}, #22661):
+     *    an entry whose target the API does not serve never reaches it.
      *
      * Not judged here because the ingress already refuses them, measured: a
      * DOTTED sort or group-by path crossing a relation (the sort gate's
@@ -12592,6 +12606,69 @@ export class ObjectStackProtocolImplementation implements
             }
             this.refuseInternalInExpand(target, entry.expand, `${path}.expand`, depth + 1);
         }
+    }
+
+    /**
+     * [#22661] The `$expand` tree this door hands the engine, without the
+     * entries whose TARGET object's declared exposure does not serve the read.
+     *
+     * An expansion reads a SECOND object: the record a lookup points at, served
+     * under the source row. The data routes judge the ADDRESSED object's
+     * `enable` block (`apiEnabled: false` answers 404, an `apiMethods` whitelist
+     * that does not grant the verb answers 405); the expansion's target was
+     * never asked, so `GET /data/{source}?$expand={lookup}` served the row
+     * fields of an object `GET /data/{target}` refuses. Every level is asked the
+     * spec's one decision, `canServeApiOperation(enable, 'get')`
+     * ({@link EXPANSION_TARGET_OPERATION} says why `get`), against that level's
+     * own target, and the decision takes no caller, so an administrator and a
+     * member get the same tree.
+     *
+     * Withheld, not refused, and that is the precedent measured on this door: a
+     * related record the caller may not READ is answered by the engine's
+     * expansion as the bare foreign key (its sub-read is refused and the id is
+     * retained, `ObjectQL.expandRelatedRecords`), so the field answers exactly
+     * as an unexpanded lookup does. An unexposed target answers the same way:
+     * its entry is dropped here, nothing below it is read, and the field keeps
+     * its stored id. Nothing about the target is named in the response.
+     *
+     * Here, at the door, and not in the engine: exposure is a property of the
+     * API, and the engine's privileged callers (a flow's `config.expand`, a
+     * hook's own read) never pass this door, the same split #7823 drew for the
+     * write results and #22646 for the evaluate positions.
+     *
+     * Copy-on-write: the caller's map is never mutated, and an unchanged tree
+     * comes back by reference. A key that names no reference field of its level
+     * is left alone — the top level is the expand gate's to refuse, and a
+     * deeper one is a key the engine reads nothing for. Below the walk's depth
+     * backstop an entry is dropped rather than passed unjudged.
+     */
+    private servedExpand(source: string, expand: Record<string, any>, depth: number): Record<string, any> {
+        const gate = this.resolveQueryFields(source);
+        let served: Record<string, any> | undefined;
+        for (const [rel, entry] of Object.entries(expand)) {
+            const def = gate?.fields?.[rel];
+            const target = def != null && REFERENCE_VALUE_TYPES.has(def.type) ? referenceTargetOf(def) : undefined;
+            if (!target) continue;
+            if (depth >= INTERNAL_FIELD_WALK_DEPTH || !this.servesExpansionTarget(target)) {
+                served ??= { ...expand };
+                delete served[rel];
+                continue;
+            }
+            if (isPlainRecord(entry) && isPlainRecord(entry.expand)) {
+                const nested = this.servedExpand(target, entry.expand, depth + 1);
+                if (nested !== entry.expand) {
+                    served ??= { ...expand };
+                    served[rel] = { ...entry, expand: nested };
+                }
+            }
+        }
+        return served ?? expand;
+    }
+
+    /** [#22661] Does the target's declared exposure serve an expansion read of it? */
+    private servesExpansionTarget(target: string): boolean {
+        const schema: any = this.engine?.registry?.getObject?.(target);
+        return canServeApiOperation(schema?.enable, EXPANSION_TARGET_OPERATION);
     }
 
     /** Field heads an `orderBy` names (string or `{ field }`), dotted head only. */
@@ -12891,6 +12968,13 @@ export class ObjectStackProtocolImplementation implements
         // rather than `expandNames` is what covers the second one.
         if (options.expand && typeof options.expand === 'object') {
             this.assertExpandTargetsExist(request.object, Object.keys(options.expand));
+            // [#22661] …then every level's TARGET is asked its declared exposure,
+            // and an entry the decision does not serve is withheld (the field
+            // answers as an unexpanded lookup) — see {@link servedExpand}. Ahead
+            // of the `internal: true` walk below, so nothing about a withheld
+            // target is judged, named or read.
+            options.expand = this.servedExpand(request.object, options.expand, 0);
+            if (Object.keys(options.expand).length === 0) delete options.expand;
         }
 
         // [#4254] The `searchFields` override is validated on the value the
@@ -13310,10 +13394,14 @@ export class ObjectStackProtocolImplementation implements
                 ? request.expand.split(',').map((s: string) => s.trim()).filter(Boolean)
                 : request.expand;
             this.assertExpandTargetsExist(request.object, expandNames);
-            queryOptions.expand = {} as Record<string, any>;
+            const expand = {} as Record<string, any>;
             for (const rel of expandNames) {
-                queryOptions.expand[rel] = { object: rel };
+                expand[rel] = { object: rel };
             }
+            // [#22661] The same exposure judgement as the list path: an entry
+            // whose target does not serve `get` is withheld ({@link servedExpand}).
+            const served = this.servedExpand(request.object, expand, 0);
+            if (Object.keys(served).length > 0) queryOptions.expand = served;
         }
 
         const result = await this.engine.findOne(request.object, queryOptions);
