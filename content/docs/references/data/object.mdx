@@ -430,6 +430,7 @@ const result = ApiMethod.parse(data);
 | **feeds** | `boolean` | optional (default: `true`) | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike |
 | **activities** | `boolean` | optional (default: `true`) | Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline |
 | **clone** | `boolean` | optional (default: `true`) | Allow record deep cloning |
+| **approvalsVisibleToReaders** | `boolean` | optional (default: `false`) | Opt-in: true lets a caller who can read a record of this object see that record's approval requests and full action history (comments and attachments included), read-only, on the approvals API and the generic data API alike, on a read that names the record. No approval action is offered. Default false: only the request's participants (submitter, approvers, past actors) and administrators see it |
 
 ### Nested Shape: `Object.publicSharing`
 
@@ -533,6 +534,7 @@ const result = ApiMethod.parse(data);
 | **feeds** | `boolean` | optional (default: `true`) | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike |
 | **activities** | `boolean` | optional (default: `true`) | Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline |
 | **clone** | `boolean` | optional (default: `true`) | Allow record deep cloning |
+| **approvalsVisibleToReaders** | `boolean` | optional (default: `false`) | Opt-in: true lets a caller who can read a record of this object see that record's approval requests and full action history (comments and attachments included), read-only, on the approvals API and the generic data API alike, on a read that names the record. No approval action is offered. Default false: only the request's participants (submitter, approvers, past actors) and administrators see it |
 
 
 ---

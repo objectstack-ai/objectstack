@@ -293,6 +293,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "enable.clone": {
         label: "克隆"
       },
+      "enable.approvalsVisibleToReaders": {
+        label: "审批对读者可见",
+        helpText: "能读取记录的用户可只读查看该记录的审批请求与历史，不提供任何审批动作"
+      },
       validations: {
         label: "校验规则",
         helpText: "对象级校验规则——由规则对象组成的数组，例如 [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。状态机转移表也在此声明（ADR-0020）"

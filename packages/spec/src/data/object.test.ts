@@ -27,6 +27,9 @@ describe('ObjectCapabilities', () => {
     expect(result.feeds).toBe(true);
     expect(result.activities).toBe(true);
     expect(result.clone).toBe(true);
+    // The record-reader approval tier is opt-IN (#8652: default OFF, the
+    // downstream project opts in): an absent flag grants nothing.
+    expect(result.approvalsVisibleToReaders).toBe(false);
   });
 
   it('should accept custom capability values', () => {
@@ -38,10 +41,28 @@ describe('ObjectCapabilities', () => {
       feeds: true,
       activities: false,
       clone: true,
+      approvalsVisibleToReaders: true,
     };
 
     const result = ObjectCapabilities.parse(capabilities);
     expect(result).toEqual(capabilities);
+  });
+
+  it('approvalsVisibleToReaders is a boolean an object declares in its enable block', () => {
+    // The authorable surface: the key is recognised on the object itself, not
+    // only on the bare block…
+    const declared = ObjectSchema.safeParse({
+      name: 'exam_sheet',
+      label: 'Exam Sheet',
+      fields: { title: { type: 'text', label: 'Title' } },
+      enable: { approvalsVisibleToReaders: true },
+    });
+    expect(declared.success).toBe(true);
+    expect(declared.success ? declared.data.enable?.approvalsVisibleToReaders : undefined).toBe(true);
+    // …and it takes a boolean only: a truthy string is refused, never read as on.
+    const wrongType = ObjectCapabilities.safeParse({ approvalsVisibleToReaders: 'yes' });
+    expect(wrongType.success).toBe(false);
+    expect(wrongType.success ? undefined : wrongType.error.issues[0]?.code).toBe('invalid_type');
   });
 
   // #2377/#3207 (ADR-0049): `trash`/`mru` parsed-but-did-nothing for years —

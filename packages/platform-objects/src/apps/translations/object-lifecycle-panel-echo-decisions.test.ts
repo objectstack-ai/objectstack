@@ -1177,7 +1177,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 667 since the field form offers the deadline pair on date and datetime
       // fields, `dueLike` and `settledWhen` — two new row labels, authored in
       // all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(667);
+      // 668 since the object form offers `enable.approvalsVisibleToReaders`,
+      // the per-object opt-in for the read-only record-reader approval tier —
+      // one new row label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(668);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
