@@ -34,6 +34,7 @@ import {
   type SecurityCatalogReader,
 } from '@objectstack/core';
 import type { PermissionSet } from '@objectstack/spec/security';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
 import { SysMigration } from '@objectstack/platform-objects/system';
 
@@ -513,7 +514,7 @@ describe('[ADR-0131 D4] a read that did not happen is never "resolves nowhere"',
       getObject: (name) => (b.engine as any).getObject(name),
       find: async (object, options) => {
         if (object === 'sys_user_permission_set') throw new Error('table locked');
-        return b.engine.find(object, options as any);
+        return b.engine.find(object, options as EngineQueryOptions);
       },
     };
     const report = await collectCatalogReferences(engine, { posture: 'single', catalog: b.catalog });
