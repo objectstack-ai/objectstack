@@ -244,7 +244,7 @@ const result = FlowRegionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **try** | `{ nodes: object[]; edges?: object[] }` | ✅ | Protected region |
 | **catch** | `{ nodes: object[]; edges?: object[] }` | optional | Handler region run when the try region fails |
-| **errorVariable** | `string` | optional (default: `"$error"`) | Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, `code` when the failing node carried a platform-classified error code (ADR-0112 — branch on `$error.code` to tell "the row is already there" from "the store is down"), and `iteration` / `item` when the failure happened inside a loop body |
+| **errorVariable** | `string` | optional (default: `"$error"`) | Variable holding the caught error in the catch region — `$error` (the default), or a name without a leading `$` read as `{{ name.message }}`; any other `$` name is the flow engine's own and refused. The value is a `TryCatchErrorValue`: `nodeId`, `message`, `code` when the failing node carried a platform-classified error code (ADR-0112 — branch on `$error.code` to tell "the row is already there" from "the store is down"), and `iteration` / `item` when the failure happened inside a loop body |
 | **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
 
 ### Nested Shape: `TryCatchConfig.try`

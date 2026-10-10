@@ -194,6 +194,13 @@ export const PageComponentType = z.enum([
   // unregistered until this declaration exists, and plugin-approvals authors
   // the page after it. Its `ComponentPropsMap` row is an empty strict object.
   'record:approval_decision',
+  // #22537: the record page's Approvals and Attachments panels, which objectui
+  // registered inside this reserved namespace with no member and no row, so
+  // `component-type-unknown` refused a node the platform's own default-page
+  // synthesizer emits. Studio's page create seeds the Attachments tab onto
+  // every record page of an `enable.files` object. Each has a
+  // `ComponentPropsMap` row measured from its renderer's read points.
+  'record:approvals', 'record:attachments',
   // Navigation
   'app:launcher', 'nav:menu', 'nav:breadcrumb',
   // Utility — `user:profile` REMOVED (#14159): shell chrome, refused by name
@@ -909,6 +916,8 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['record:alert', 'is a banner each viewer can dismiss, so what prints would depend on who prints it'],
   ['record:quick_actions', 'is a row of action controls, with nothing to print'],
   ['record:approval_decision', 'is the decision panel of an approval request: action controls that differ by viewer, beside a progress tally each decision changes, with nothing to print'],
+  ['record:approvals', 'is the record\'s live approval timeline, with a remind control only the submitter sees, so what prints would depend on who prints it'],
+  ['record:attachments', 'is a list of attached files with upload, download and delete controls, and the files themselves never reach paper'],
   ['element:button', 'is an action control, with nothing to print'],
   ['element:record_picker', 'is an input control, with nothing to print'],
   ['element:text_input', 'is an input control, with nothing to print'],

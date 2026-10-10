@@ -138,18 +138,19 @@ export function namedSnapshotColumn(ast: Record<string, unknown>): NamedSnapshot
 }
 
 /**
- * The ONE subject object `where` pins — an equality on `object_name`, plain or
+ * The ONE string value `where` pins `column` to — an equality, plain or
  * `{ $eq }`, at the root or inside a root `$and` — or `null` when it pins none
- * (or two different ones).
+ * (or two different ones). A pin is a conjunct every matching row satisfies;
+ * nothing under `$or` / `$not` is one.
  */
-export function pinnedSubjectObject(where: unknown): string | null {
+export function pinnedEquality(where: unknown, column: string): string | null {
   const pins = new Set<string>();
   const walk = (condition: unknown) => {
     if (!isRecord(condition)) return;
     for (const [key, value] of Object.entries(condition)) {
       if (key === '$and' && Array.isArray(value)) {
         for (const sub of value) walk(sub);
-      } else if (key === 'object_name') {
+      } else if (key === column) {
         if (typeof value === 'string') pins.add(value.trim());
         else if (isRecord(value) && Object.keys(value).length === 1 && typeof value.$eq === 'string') pins.add(value.$eq.trim());
       }
@@ -157,8 +158,17 @@ export function pinnedSubjectObject(where: unknown): string | null {
   };
   walk(where);
   if (pins.size !== 1) return null;
-  const object = [...pins][0];
-  return object ? object : null;
+  const pinned = [...pins][0];
+  return pinned ? pinned : null;
+}
+
+/**
+ * The ONE subject object `where` pins — an equality on `object_name`, plain or
+ * `{ $eq }`, at the root or inside a root `$and` — or `null` when it pins none
+ * (or two different ones).
+ */
+export function pinnedSubjectObject(where: unknown): string | null {
+  return pinnedEquality(where, 'object_name');
 }
 
 /**
