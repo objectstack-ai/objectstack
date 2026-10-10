@@ -104,13 +104,15 @@ function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
  */
 function unclaimedTopLevelObjects(
   stack: unknown,
-): { ownerId: string | undefined; objects: ServiceObject[] } | undefined {
+): { ownerId: string | undefined; ownerVersion: string | undefined; objects: ServiceObject[] } | undefined {
   const residual = unclaimedTopLevel(stack);
   if (!residual) return undefined;
   const objects = residual.items
     .filter((entry) => entry.type === 'object')
     .map((entry) => entry.item as ServiceObject);
-  return objects.length > 0 ? { ownerId: residual.ownerId, objects } : undefined;
+  return objects.length > 0
+    ? { ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, objects }
+    : undefined;
 }
 
 /**
@@ -2307,7 +2309,7 @@ export class ObjectQLPlugin implements Plugin {
    */
   private registerUnclaimedTopLevelObjects(
     ctx: PluginContext,
-    residual: { ownerId: string | undefined; objects: ServiceObject[] },
+    residual: { ownerId: string | undefined; ownerVersion: string | undefined; objects: ServiceObject[] },
     bodies: unknown[],
   ): void {
     const ql = this.ql;
@@ -2325,7 +2327,8 @@ export class ObjectQLPlugin implements Plugin {
         continue;
       }
       try {
-        ql.registry.registerObject(object, residual.ownerId, undefined, 'own');
+        // The `(ownerId, ownerVersion)` pair the metadata door stamps the residual with.
+        ql.registry.registerObject(object, residual.ownerId, undefined, 'own', undefined, residual.ownerVersion);
       } catch (e) {
         if (!(e instanceof ObjectOwnershipConflictError)) throw e;
         unserved.push(`'${object.name}' (package '${e.existingPackageId}' already owns that name)`);
