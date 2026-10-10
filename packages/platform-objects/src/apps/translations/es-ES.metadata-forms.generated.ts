@@ -423,7 +423,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fileAccessDelegate: {
         label: "Delegado de acceso a archivos",
-        helpText: "Servicio del kernel que autoriza la descarga de archivos pertenecientes a los campos multimedia de este objeto, en lugar de comprobar si quien llama puede leer la fila propietaria. Para objetos cuyo acceso media un servicio. Falla cerrado."
+        helpText: "Servicio del kernel que autoriza la descarga de archivos pertenecientes a los campos multimedia de este objeto y decide si un lector que no puede leer sys_file ve su nombre, tamaño y tipo al leer un registro de este objeto (se consulta una vez por registro propietario en cada lectura de ese tipo), en lugar de comprobar si quien llama puede leer la fila propietaria. Para objetos cuyo acceso media un servicio. Falla cerrado."
       },
       lifecycle: {
         label: "Ciclo de vida de los datos",

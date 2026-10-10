@@ -1884,9 +1884,9 @@ async function materializeHostPlugins(
  *
  * `serve`'s flags (`--preset minimal` mounts no slate; `--dev` adds the
  * config's `devPlugins`); its tier-gated AI and i18n services and the rest of
- * its boot that is no shared rule; and the `telemetry` sibling datasource a
- * development boot provisions (ADR-0057 §3.6), so lifecycle-classed objects are
- * examined against the primary database here. The parity pin
+ * its boot that is no shared rule. (The `telemetry` sibling datasource a
+ * development boot provisions, ADR-0057 §3.6, is not a composition: the boot
+ * itself provisions it, `bootSchemaStack`, #22579.) The parity pin
  * (`commands/migrate/plan.boot-parity.integration.test.ts`) holds the object
  * set a plan examines equal to the one a real `os serve` boot registers, per
  * example app shape — so whatever this list misses fails one test instead of
@@ -2278,14 +2278,17 @@ export function refuseWhenHostConfigUnloadable(
  * (AGENTS.md → Route & surface ownership §2).
  *
  * @param kernel the booted kernel.
- * @param plannedDriver the driver whose managed set the plan will diff — the
- *   identity comparison that turns "bound somewhere" into "bound HERE".
+ * @param plannedDrivers the drivers whose managed sets the plan will diff — the
+ *   identity comparison that turns "bound somewhere" into "bound HERE". The
+ *   primary, and the `telemetry` sibling when the boot provisioned one
+ *   (#22579): an object routed to the sibling is examined there, not reported
+ *   as bound to a different datasource.
  * @param deferred whether this boot armed deferred DDL. `false` reports the
  *   coverage as UNMEASURED instead of syncing.
  */
 export async function measureComposedCoverage(
   kernel: unknown,
-  plannedDriver: unknown,
+  plannedDrivers: readonly unknown[],
   deferred: boolean,
 ): Promise<{ coverage: SchemaMigrationCoverage; notes: string[] }> {
   const notes: string[] = [];
@@ -2344,7 +2347,7 @@ export async function measureComposedCoverage(
     if (obj?.external != null) { federated++; continue; }
     const driver = engine.getDriverForObject(obj.name);
     if (!driver) { unbound++; continue; }
-    if (driver !== plannedDriver) { otherDriver++; continue; }
+    if (!plannedDrivers.includes(driver)) { otherDriver++; continue; }
     if (typeof (driver as { syncSchema?: unknown }).syncSchema !== 'function') { unsupported++; continue; }
     try {
       await engine.syncObjectSchema(obj.name);
