@@ -46,9 +46,10 @@ import Database from 'better-sqlite3';
  * and no object declares it. A new raw-DDL table fails this pin and has to be
  * named here with the same reason.
  *
- * Both sides run with `OS_TELEMETRY_DB=0`: a development boot's `telemetry`
- * sibling (ADR-0057 §3.6) is a second database the one-shot boot does not
- * provision — a known, separate gap — and the pin compares object sets on one.
+ * Both sides run with `OS_TELEMETRY_DB=0`, so the pin compares object sets on
+ * one database. A development boot's `telemetry` sibling (ADR-0057 §3.6) — a
+ * second database both boots provision — is
+ * `plan.telemetry-sibling.integration.test.ts`'s (#22579).
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
