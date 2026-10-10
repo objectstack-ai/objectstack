@@ -340,22 +340,29 @@ export default class MigrateUnmappedColumns extends Command {
         'objectql',
       ) as { getDriverForObject?: (name: string) => unknown } | undefined;
       const bound = engine?.getDriverForObject?.(object);
+      // [#22579] Any driver the plan diffs: the primary, or the `telemetry`
+      // sibling a lifecycle-classed object lives in when the serving boot
+      // keeps one. The read goes to that driver, and the document names it.
+      const objectDriver = stack.drivers.find((d) => d === bound) ?? null;
       const outside =
         declared.external != null
           ? 'it is federated (no managed table)'
           : !bound
             ? 'it is bound to no driver'
-            : bound !== stack.driver
+            : !objectDriver
               ? 'it is bound to a different datasource'
               : null;
-      if (outside) {
+      if (outside || !objectDriver) {
         throw new Error(
           `${object} is not in the set "os migrate plan" diffs: ${outside}. The plan reports no unmapped column ` +
             'for it, and that is unmeasured, not clean. Refusing rather than answering empty work.',
         );
       }
+      // The sibling is the one other planned driver, and it is planned only
+      // with its file: a driver that is not the primary has a database named.
+      const database = objectDriver === stack.driver ? stack.dbLabel : stack.telemetryDatabase!;
 
-      const reader = stack.driver as unknown as Partial<UnmappedColumnReader>;
+      const reader = objectDriver as unknown as Partial<UnmappedColumnReader>;
       if (typeof reader.find !== 'function') {
         throw new Error(`The SQL driver on this stack has no find(); ${object} cannot be read from here.`);
       }
@@ -367,7 +374,7 @@ export default class MigrateUnmappedColumns extends Command {
         if (flags.json) {
           console.error(line);
           await emitJson({
-            database: stack.dbLabel,
+            database,
             object,
             table,
             columns: [],
@@ -377,20 +384,20 @@ export default class MigrateUnmappedColumns extends Command {
           });
           return;
         }
-        printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+        printInfo(`Database: ${chalk.white(database)}`);
         printInfo(line);
         printSuccess(`No unmapped column on ${object} — nothing to read.`);
         return;
       }
 
-      const drift = await stack.driver.detectManagedDrift();
+      const drift = await stack.detectManagedDrift();
       const columns = unmappedColumnsOf(drift, table);
 
       const records =
         columns.length === 0
           ? []
           : await readUnmappedColumnValues(
-              { find: (o, q) => (reader.find as UnmappedColumnReader['find']).call(stack.driver, o, q) },
+              { find: (o, q) => (reader.find as UnmappedColumnReader['find']).call(objectDriver, o, q) },
               object,
               columns.map((c) => c.column),
               flags['max-records'] != null ? { max: flags['max-records'] } : {},
@@ -398,7 +405,7 @@ export default class MigrateUnmappedColumns extends Command {
 
       if (flags.json) {
         await emitJson({
-          database: stack.dbLabel,
+          database,
           object,
           table,
           columns,
@@ -409,7 +416,7 @@ export default class MigrateUnmappedColumns extends Command {
         return;
       }
 
-      printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      printInfo(`Database: ${chalk.white(database)}`);
       printInfo(`Object: ${chalk.white(object)} (table ${table})`);
       console.log('');
       if (columns.length === 0) {

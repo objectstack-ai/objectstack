@@ -887,6 +887,24 @@ Under `--json` the same answer is `database` plus `databaseSource`, whose `kind`
 `flag`, `process-env`, `env-file` (with its `variable` and `file`),
 `config-datasource` (with its `datasource`) or `default`.
 
+The deployment's datasources are the serving boot's too. Where `os serve` keeps
+lifecycle-classed system data (audit, telemetry and event objects) in the `telemetry`
+sibling database — a development boot (`--dev`, or `NODE_ENV=development`) on a
+file-backed SQLite database, or any boot with `OS_TELEMETRY_DB=<path>` — `plan` and
+`apply` open that sibling too, and plan and apply those objects in it, never in the
+primary:
+
+```text
+ℹ Database: data/app.db (OS_DATABASE_URL from .env)
+ℹ Telemetry database: data/app.telemetry.db (audit, telemetry and event objects — where os serve keeps them; OS_TELEMETRY_DB=0 turns it off)
+```
+
+Under `--json` that is `telemetryDatabase`, present only when a sibling is planned.
+Run the migration with the `NODE_ENV` the deployment is served with: a plan run
+without `NODE_ENV=development` describes a production `os serve`, which keeps those
+objects in the primary unless `OS_TELEMETRY_DB` names a file. A `plan` against a
+sibling that does not exist yet lists its tables to create and leaves no file behind.
+
 #### Nothing is applied before you confirm
 
 Both commands boot your app to read its metadata. That boot writes no row and no
