@@ -87,7 +87,6 @@ import {
 } from './per-organization-catalog.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
-import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
 import { RLSCompiler, RLS_DENY_FILTER, compiledPolicyNameOf, policyDeclaresClause } from './rls-compiler.js';
 import {
@@ -179,7 +178,7 @@ import {
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
 import { registerBuiltinPositions } from './builtin-positions.js';
-import { registerBuiltinCapabilities, withoutPlatformCapabilityDeclarations } from './builtin-capabilities.js';
+import { registerBuiltinCapabilities } from './builtin-capabilities.js';
 
 /**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
@@ -4660,10 +4659,9 @@ export class SecurityPlugin implements Plugin {
         // [#18535, ADR-0090 D5] The stack's declared `capabilities:` — the half
         // of the anchor question the predicate cannot discover for itself. Read
         // ONCE per pass, from the DECLARATIONS rather than from `sys_capability`:
-        // this binding runs before `bootstrapDeclaredCapabilities` seeds those
-        // rows (see `declared-capability-context.ts` for why that order is
-        // fixed), so the rows are empty here on a first boot. Unreadable or
-        // absent ⇒ `undefined` ⇒ the pre-#17811 verdict, which refuses.
+        // the registry is a package capability's one home (ADR-0131 D3), and no
+        // row is seeded for it. Unreadable or absent ⇒ `undefined` ⇒ the
+        // pre-#17811 verdict, which refuses.
         const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
         for (const baselineName of this.baselinePermissionSets) {
           const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
@@ -4983,34 +4981,12 @@ export class SecurityPlugin implements Plugin {
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
         }
-        // [ADR-0066 D1] Seed the capability registry (sys_capability) in two
-        // passes. FIRST the EXPLICIT package declarations (`defineCapability` /
-        // `stack.capabilities`) land with `managed_by:'package'` + package_id
-        // provenance — the formal replacement for the implicit derive-from-
-        // systemPermissions back-door. THEN the platform curated set + the
-        // back-compat derived defaults, SKIPPING any name that already HAS a row
-        // (so the placeholder never clobbers the authored capability).
-        // [#4967 Part 1] The skip list is the names the first pass confirmed are
-        // materialized — not every name it read. A declaration the first pass
-        // REFUSES (no owning package) writes no row, so skipping its derivation
-        // too left the capability existing nowhere and every grant naming it
-        // inert; it now falls through to the placeholder. The permission sets are
-        // passed to the first pass as well, so a refusal can name the grantor(s)
-        // it affects (#4967 Part 3).
-        let materializedCapabilityNames: string[] = [];
-        try {
-          // [ADR-0131 D3] Handed the engine WITHOUT this plugin's own curated
-          // declarations (`builtin-capabilities.ts`): they are not a package's,
-          // the curated pass below seeds their rows, and read here each would be
-          // refused as a package claiming a curated name.
-          const capOutcome = await bootstrapDeclaredCapabilities(withoutPlatformCapabilityDeclarations(ql), this.metadata, {
-            logger: ctx.logger,
-            permissionSets: this.bootstrapPermissionSets,
-          });
-          materializedCapabilityNames = capOutcome.materializedNames;
-        } catch (e) {
-          ctx.logger.warn('[security] declared-capability seeding failed', { error: (e as Error).message });
-        }
+        // [ADR-0131 D3] A package's declared capabilities (`defineCapability` /
+        // `stack.capabilities`) are served by the registry, their one home; no
+        // `sys_capability` row is seeded for them, so no declared name is
+        // materialized here, and a second holder of a name is refused by the
+        // registry's one-holder rule (`security-catalog-namespace.ts`).
+        const materializedCapabilityNames: string[] = [];
         try {
           await bootstrapSystemCapabilities(ql, this.bootstrapPermissionSets, {
             logger: ctx.logger,
