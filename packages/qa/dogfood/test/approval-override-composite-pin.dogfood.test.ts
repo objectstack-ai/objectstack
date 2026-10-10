@@ -24,10 +24,17 @@
 // Both halves are asserted, not just the affirmative one (#16679 ⭐): the four
 // override levers (approve/reject/reassign/recall) must evaluate `visible ===
 // true`, AND the four secondary/submitter levers (send_back/request_info/
-// remind/resubmit) must evaluate `visible === false` for this exact viewer.
-// A pin asserting only the first half would stay green if the predicate
-// degenerated to a constant `true` — precisely the failure a
-// security-adjacent lever must not have.
+// remind/resubmit) and the thread reply (`approval_comment`) must evaluate
+// `visible === false` for this exact viewer. A pin asserting only the first
+// half would stay green if the predicate degenerated to a constant `true` —
+// precisely the failure a security-adjacent lever must not have. The set of
+// served actions that evaluate `true` is also asserted EXACTLY, so a lever
+// added later cannot join the override set without this pin moving.
+//
+// The thread reply has a second half on the wire: its predicate carries no
+// override arm because the comment route admits none, so the same admin's
+// POST to that route is refused with `FORBIDDEN` — the hidden button and the
+// refused route are asserted together.
 //
 // See `test/fixtures/override-composite-fixture.ts` for why this boots a
 // purpose-built object + flow rather than the showcase's own
@@ -59,6 +66,14 @@ const NON_OVERRIDE_LEVERS = [
   'approval_remind',
   'approval_resubmit',
 ] as const;
+
+/**
+ * The thread reply. It gates on `can_act`, or on `is_submitter` while the
+ * request is pending — the comment route's own admission
+ * (`ApprovalService.comment`), which has no override arm — so for THIS viewer
+ * it must evaluate `visible === false`, and the route must refuse the post.
+ */
+const THREAD_REPLY = 'approval_comment';
 
 interface ServedViewer {
   can_act: boolean;
@@ -130,10 +145,10 @@ describe('approval override composite (#16679)', () => {
         expect(metaRes.status).toBe(200);
         const metaBody = (await metaRes.json()) as { item?: { actions?: ServedAction[] } };
         const actions = metaBody.item?.actions ?? [];
-        expect(actions.length).toBe(8);
+        expect(actions.length).toBe(9);
 
         const byName = new Map(actions.map((a) => [a.name, a] as const));
-        for (const name of [...OVERRIDE_LEVERS, ...NON_OVERRIDE_LEVERS]) {
+        for (const name of [...OVERRIDE_LEVERS, ...NON_OVERRIDE_LEVERS, THREAD_REPLY]) {
           const action = byName.get(name);
           expect(action, `served actions must include '${name}'`).toBeTruthy();
           expect(action?.visible?.dialect).toBe('cel');
@@ -167,6 +182,30 @@ describe('approval override composite (#16679)', () => {
             `${name} must stay visible=false — it must not admit an actor who is neither the approver nor the submitter`,
           ).toBe(false);
         }
+        expect(
+          evaluateVisible(byName.get(THREAD_REPLY)),
+          `${THREAD_REPLY} must stay visible=false — the comment route admits the submitter and the slot holders only`,
+        ).toBe(false);
+
+        // "Exactly the four": every served action, not only the ones named
+        // above, is evaluated, and the ones that admit this viewer are the
+        // override levers and nothing else.
+        expect(actions.filter((a) => evaluateVisible(a)).map((a) => a.name).sort()).toEqual(
+          [...OVERRIDE_LEVERS].sort(),
+        );
+
+        // The route half of the hidden reply: the same admin's post is
+        // refused, and nothing is written to the request's timeline.
+        const replyRes = await stack.apiAs(adminToken, 'POST', `/approvals/requests/${requestId}/comment`, {
+          comment: 'an override admin on no slot',
+        });
+        expect(replyRes.status).toBe(403);
+        expect(((await replyRes.json()) as { code?: string }).code).toBe('FORBIDDEN');
+        const timelineRes = await stack.apiAs(adminToken, 'GET', `/approvals/requests/${requestId}/actions`);
+        expect(timelineRes.status).toBe(200);
+        const timeline = ((await timelineRes.json()) as { data: Array<{ action?: string }> }).data;
+        expect(timeline.length).toBeGreaterThan(0);
+        expect(timeline.map((a) => a.action)).not.toContain('comment');
       } finally {
         await stack.stop();
       }

@@ -613,7 +613,9 @@ You rarely call these routes by hand. The decision verbs above ship as
 **server-declared actions** on `sys_approval_request` (`actions[]` in its object
 metadata) — `approval_approve`, `approval_reject`, `approval_reassign`,
 `approval_send_back`, `approval_request_info`, `approval_remind`,
-`approval_recall`, `approval_resubmit`. The console's generic action runtime
+`approval_recall`, `approval_resubmit`, `approval_comment`. `approval_comment`
+is the thread reply: a pending approver sees it, and so does the submitter while
+the request is `pending`; it has no admin-override arm. The console's generic action runtime
 renders and executes them wherever the object is surfaced — the **Approvals
 inbox** included — so a decision (comment, a file-upload for `attachments`, the
 reassign user-picker) is collected by the generic action dialog with **no

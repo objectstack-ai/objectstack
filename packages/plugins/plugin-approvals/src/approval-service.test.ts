@@ -13,6 +13,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { ApprovalService, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
+import { celEngine } from '@objectstack/formula';
+import { SysApprovalRequest } from './sys-approval-request.object.js';
 
 interface FakeRow { [k: string]: any }
 
@@ -2045,6 +2047,122 @@ describe('ApprovalService — admin override (#3424)', () => {
   it('a non-participant member cannot read the request at all', async () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX);
     expect(await svc.getRequest(req.id, MEMBER)).toBeNull();
+  });
+});
+
+// ── approval_comment: the declared reply against the route it posts to ──────
+//
+// `sys_approval_request` declares the thread reply as the action
+// `approval_comment` (POST `/approvals/requests/{id}/comment`, body `comment` +
+// `attachments`, no actor). Its `visible` gate is evaluated on the row the
+// caller is served — `getRequest`, which attaches the `viewer` block — so the
+// gate is only honest if, for every caller shape, "the button shows" is exactly
+// "the route admits the post". This matrix measures both halves against the
+// REAL service for each shape, and the agreement is the pin: a predicate looser
+// than the route is a lever that fails on use, a narrower one a reply nobody
+// can send. The REST route resolves the actor as `body.actorId ?? body.actor_id
+// ?? context.userId`, and the declared action sends no actor, so the service is
+// driven with the caller's own id exactly as the route would drive it.
+describe('approval_comment — its visible gate is the comment route\'s admission', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-01-15T10:00:00Z').getTime();
+
+  const PLATFORM_ADMIN = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+  const SALES_MANAGER = { userId: 'u_sm', tenantId: 't1', positions: ['sales_manager'], permissions: [] } as any;
+
+  type Action = { name: string; visible?: { dialect: string; source: string } | string };
+  const reply = ((SysApprovalRequest as { actions?: Action[] }).actions ?? []).find((a) => a.name === 'approval_comment');
+
+  /** The predicate's verdict on the row this caller is served; no row, no button. */
+  const shown = (row: Record<string, unknown> | null, ctx: any): boolean => {
+    if (!row || !reply?.visible) return false;
+    const source = typeof reply.visible === 'string' ? reply.visible : reply.visible.source;
+    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, user: { id: String(ctx.userId ?? '') } });
+    if (!r.ok) throw new Error(`approval_comment.visible faulted: ${r.error.message}`);
+    return r.value === true;
+  };
+
+  /** The route's verdict: the post as the declared action sends it, or the refusal's code. */
+  const admitted = async (id: string, ctx: any): Promise<true | string> => {
+    try {
+      await svc.comment(id, { actorId: ctx.userId, comment: 'a reply', attachments: ['file_1'] }, ctx);
+      return true;
+    } catch (err: any) {
+      return String(err?.message ?? err).split(':')[0];
+    }
+  };
+
+  async function open(input: ReturnType<typeof openInput>): Promise<string> {
+    const opened = await svc.openNodeRequest(input, CTX); // submitter u1
+    if ('autoApproved' in opened) throw new Error('fixture: the approver slate must not be empty');
+    return opened.id;
+  }
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+  });
+
+  it('the action is declared, and posts to the comment route', () => {
+    expect(reply, 'sys_approval_request declares approval_comment').toBeDefined();
+  });
+
+  it('every caller shape: the button shows exactly when the route admits the post', async () => {
+    const pending = await open(openInput(['u9']));
+    const stuck = await open(openInput([], {
+      recordId: 'opp2', runId: 'run_2',
+      config: { approvers: [{ type: 'position' as const, value: 'sales_manager' }], behavior: 'first_response' as const, lockRecord: true },
+    }));
+    const approved = await open(openInput(['u9'], { recordId: 'opp3', runId: 'run_3' }));
+    await svc.decideNode(approved, { decision: 'approve', actorId: 'u9' }, SYS);
+    const recalled = await open(openInput(['u9'], { recordId: 'opp4', runId: 'run_4' }));
+    await svc.recall(recalled, { actorId: 'u1' }, CTX);
+
+    const cases: Array<[string, string, any, boolean, true | string]> = [
+      ['pending · the submitter', pending, CTX, true, true],
+      ['pending · a pending approver', pending, asUser('u9'), true, true],
+      ['pending · a holder of a position slot', stuck, SALES_MANAGER, true, true],
+      ['pending · an override admin on no slot', pending, PLATFORM_ADMIN, false, 'FORBIDDEN'],
+      ['pending · a stranger', pending, asUser('u_stranger'), false, 'FORBIDDEN'],
+      ['approved · the submitter', approved, CTX, false, 'INVALID_STATE'],
+      ['approved · the approver who decided', approved, asUser('u9'), false, 'INVALID_STATE'],
+      ['recalled · the submitter', recalled, CTX, false, 'INVALID_STATE'],
+    ];
+    const measured: Array<[string, boolean, true | string]> = [];
+    for (const [label, id, ctx] of cases) {
+      const row = (await svc.getRequest(id, ctx)) as Record<string, unknown> | null;
+      measured.push([label, shown(row, ctx), await admitted(id, ctx)]);
+    }
+    expect(measured).toEqual(cases.map(([label, , , show, admit]) => [label, show, admit]));
+    // The agreement itself, stated without the expected table: shown ⇔ admitted.
+    for (const [label, show, admit] of measured) expect([label, show], label).toEqual([label, admit === true]);
+  });
+
+  it('the override admin is a real non-arm, not a reader who cannot see the request', async () => {
+    // Without this the admin row above could pass because the admin is simply
+    // not served the request. The admin IS served it, with the override flag
+    // the decision levers OR in — and the reply deliberately does not.
+    const id = await open(openInput(['u9']));
+    const row = await svc.getRequest(id, PLATFORM_ADMIN);
+    expect(row?.viewer).toMatchObject({ can_act: false, is_submitter: false, can_override: true });
+  });
+
+  it('a reply the route admits is a comment row on the request timeline, attachments included', async () => {
+    const id = await open(openInput(['u9']));
+    await svc.comment(id, { actorId: 'u1', comment: 'Receipts attached.', attachments: ['file_a', 'file_b'] }, CTX);
+    await svc.comment(id, { actorId: 'u9', comment: 'Thanks, reviewing.' }, asUser('u9'));
+    const timeline = await svc.listActions(id, asUser('u9'));
+    const replies = timeline.filter((a) => a.action === 'comment');
+    expect(replies.map((a) => [a.comment, (a.attachments ?? []).map((f) => f.id)])).toEqual([
+      ['Receipts attached.', ['file_a', 'file_b']],
+      ['Thanks, reviewing.', []],
+    ]);
+    // A reply moves nothing: the request is still pending on the same slate.
+    const row = await svc.getRequest(id, SYS);
+    expect([row?.status, row?.pending_approvers]).toEqual(['pending', ['u9']]);
   });
 });
 
