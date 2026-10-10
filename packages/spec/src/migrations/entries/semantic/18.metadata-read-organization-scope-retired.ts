@@ -19,8 +19,9 @@ export const entry: SemanticMigration = {
     + 'metadata read of @objectstack/metadata-protocol that served a row stored organization-scoped: '
     + 'the item, list, layered, cached, history, diff, audit, drafts, commit timeline, lock, search '
     + 'and references reads, and the boot hydration — plus an environment overlay row of an item a '
-    + 'managed package ships on a type sealed against overlays (a managed flow, action, hook or '
-    + 'object), which the reads served over the package definition',
+    + 'managed package ships on a type sealed against overlays (any type whose registry entry admits '
+    + 'no overlay: a managed flow, action, hook, object or datasource, for example), which the reads '
+    + 'served over the package definition',
   replacement:
     'drop `organizationId` from the read request: every read serves the environment row, else the '
     + 'code definition, to every caller, and `overlayScope` is `env` or null. A legacy row stored '
@@ -36,7 +37,7 @@ export const entry: SemanticMigration = {
     + '(meta-doors-organization-scope-retired) and the protocol refuses every organization-scoped '
     + 'write (metadata-write-organization-scope-refused); a read that still served a legacy '
     + 'organization row would keep a retired layer live, one caller at a time. D6 also seals managed '
-    + 'content: an overlay of a managed flow, action, hook or object sits in no regime D6 recognises, '
+    + 'content: an overlay of a managed item of a sealed type sits in no regime D6 recognises, '
     + 'so the package definition wins at read as the write doors already make it win at write. '
     + 'Permission sets keep their own ruling on stored forks.',
   acceptanceCriteria:

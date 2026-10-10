@@ -142,7 +142,7 @@ See [ADR-0005](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/
 
 The switches are operator-only where one install serves several organizations. The refusal names the same path whichever layer answers it: `403 NOT_OVERRIDABLE` for a write that names no base, and `403 ITEM_LOCKED` for one that names the read-only package. Which writes are refused, and with which code, is unchanged.
 
-An environment row stored over a managed flow, action, hook or object before the seal — written through the `OS_METADATA_WRITABLE` hatch — is **not served** (ADR-0131 D6): every read, and boot, takes the package's definition, and the row stays at rest, untouched. Boot names each such row, per type (`[metadata_sealed_overlay_unserved]`), with the two remedies: re-express the change as a new item under a new name, or delete the stored row. A stored fork of a code-declared permission set is the one exception: it keeps the detection reading and the operator's Discard Overlay action it already had.
+An environment row stored over a managed item of a type sealed against overlays (a flow, action, hook, object or datasource, for example — any type whose registry entry admits no overlay) before the seal — written through the `OS_METADATA_WRITABLE` hatch — is **not served** (ADR-0131 D6): every read, and boot, takes the package's definition, and the row stays at rest, untouched. Boot names each such row, per type (`[metadata_sealed_overlay_unserved]`), with the two remedies: re-express the change as a new item under a new name, or delete the stored row. A stored fork of a code-declared permission set is the one exception: it keeps the detection reading and the operator's Discard Overlay action it already had.
 
 ---
 
