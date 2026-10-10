@@ -472,16 +472,17 @@ export const QuickAddTaskFlow: Flow = {
         // CEL value envelopes — the `{…}` template dialect is retired from
         // value slots. `subject` is a required screen field; the others may be
         // left empty, and CEL refuses an absent variable where the template
-        // wrote nothing, so they are guarded with `has()`. `{$User.Id}` is one
-        // of the two spellings the retirement keeps until CEL can write it (the
-        // flow CEL scope binds no user yet), so it stays as authored.
+        // wrote nothing, so they are guarded with `has()`. The owner is the
+        // run's user, `current_user` — a screen flow always has one, so the
+        // id is read bare (a flow that can run without a user guards it:
+        // `current_user != null ? current_user.id : null`).
         fields: {
           subject: { dialect: 'cel', source: 'subject' },
           priority: { dialect: 'cel', source: 'has(vars.priority) ? vars.priority : null' },
           due_date: { dialect: 'cel', source: 'has(vars.dueDate) ? vars.dueDate : null' },
           category: { dialect: 'cel', source: 'has(vars.category) ? vars.category : null' },
           status: 'not_started',
-          owner: '{$User.Id}',
+          owner: { dialect: 'cel', source: 'current_user.id' },
         },
         outputVariable: 'newTaskId',
       },

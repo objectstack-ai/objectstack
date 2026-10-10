@@ -923,11 +923,38 @@ const MEMBER_SCREEN_READ_LIMIT = 50000;
  *
  * `user` / `field` are deliberately absent: they resolve to the id they were
  * given without a lookup, so there is no "expanded to nobody" state to report.
+ * `manager` is absent too: it names a PERSON, so an empty lookup adds no slot at
+ * all ({@link PERSON_APPROVER_TYPES}) and has its own warning.
  * `business_unit` / `bu` are the accepted dialects of `department`.
  */
 const GRAPH_APPROVER_TYPES: ReadonlySet<string> = new Set([
-  'team', 'department', 'business_unit', 'bu', 'position', 'org_membership_level', 'manager',
+  'team', 'department', 'business_unit', 'bu', 'position', 'org_membership_level',
 ]);
+
+/**
+ * Approver types that name ONE PERSON (or the persons a record field holds),
+ * resolved from the record — `manager` (the subject user's
+ * `sys_user.manager_id`) and `field` (the user ids in `record[value]`). When
+ * one resolves to nobody it contributes NO slot to the slate (#22558).
+ *
+ * The `type:value` literal the group types fall back to would be a slot nobody
+ * can ever take for these two: the acting path admits a caller only under
+ * their user id, their own account's email, or the `position:<p>` address of a
+ * position they hold (`approver-address.ts`), so `manager:<value>` — printed
+ * `manager:undefined` when the author omits `value`, as `manager` always does —
+ * and `field:<name>` are held by no one, today or later. A slot that reads as
+ * real and matches nobody is worse than no slot: the documented contract is
+ * that an entry which resolves to nobody contributes nothing, and the node's
+ * `onEmptyApprovers` policy decides a slate left with no approver
+ * (`content/docs/automation/approvals.mdx`). In a multi-approver slate the
+ * other entries carry the request — the "second entry that cannot resolve
+ * empty" escape that page names for an unset manager.
+ *
+ * `user` needs no entry: its `value` IS the slot and it never falls back.
+ * `position` keeps its literal because the literal is an acting address — a
+ * holder staffed into the position later decides it.
+ */
+const PERSON_APPROVER_TYPES: ReadonlySet<string> = new Set(['manager', 'field']);
 
 /** One OOO delegation hop applied while resolving an approver (#1322 M1/M4). */
 interface OooSubstitution {
@@ -1713,9 +1740,12 @@ export class ApprovalService implements IApprovalService {
   /**
    * Expand the approvers on an Approval node into user IDs by querying the
    * graph tables for `team:` / `department:` / `position:` /
-   * `org_membership_level:` / `manager:` approver types. Falls back to a
-   * prefixed literal (`type:value`) when graph lookups produce nothing — so
-   * existing fixtures and flows that rely on substring matching keep working.
+   * `org_membership_level:` / `manager:` approver types. A GROUP type whose
+   * lookup produces nothing falls back to a prefixed literal (`type:value`) —
+   * for `position` that literal is the address a holder staffed later decides
+   * under. A PERSON type (`manager`, `field`) that resolves to nobody adds no
+   * slot at all ({@link PERSON_APPROVER_TYPES}, #22558): its literal could be
+   * taken by no one.
    *
    * **Graph semantics:**
    *   - `team`       → flat members of `sys_team` (better-auth; no BFS)
@@ -1811,8 +1841,9 @@ export class ApprovalService implements IApprovalService {
    * substitution (#1322) to individually-routed types. Extracted from
    * {@link ApprovalService.expandApprovers} so the caller can tag each spec's
    * resolved ids with a group (#3266) without duplicating the resolution logic.
-   * Returns the `type:value` literal as a single-element fallback when a graph
-   * lookup yields nothing — same behaviour as before the extraction.
+   * Returns the `type:value` literal as a single-element fallback when a GROUP
+   * lookup yields nothing, and an empty list when a PERSON type
+   * ({@link PERSON_APPROVER_TYPES}) does (#22558).
    */
   private async resolveApproverSpec(
     a: any,
@@ -1881,6 +1912,9 @@ export class ApprovalService implements IApprovalService {
         : users
     );
 
+    // The user a `manager` approver resolved FROM, kept for the warning below
+    // when no manager comes back.
+    let managerSubject: unknown;
     try {
       if (type === 'team') {
         // #10230: the request's OWN organization, not `directoryOrg`. They are
@@ -1901,6 +1935,7 @@ export class ApprovalService implements IApprovalService {
         if (users.length) return users;
       } else if (type === 'manager' && record) {
         const subject = (record as any)[a.value] ?? (record as any).owner_id;
+        managerSubject = subject;
         if (subject) {
           // #10153: the request's OWN organization, not `directoryOrg`. They are
           // provably equal on this branch (`manager` is not org-scoped, so a
@@ -1911,7 +1946,35 @@ export class ApprovalService implements IApprovalService {
           if (mgr) return this.applyOooDelegation(mgr, now, organizationId, substitutions);
         }
       }
-    } catch { /* a directory lookup failed → fall through to the literal slot */ }
+    } catch { /* a directory lookup failed → handled below as resolving to nobody */ }
+    // #22558: a PERSON type that resolved to nobody contributes NO slot — see
+    // PERSON_APPROVER_TYPES for why its `type:value` literal could never be
+    // taken. With nothing else on the slate, the request reaches the node's
+    // `onEmptyApprovers` policy on an EMPTY `pending_approvers`; beside other
+    // entries, those entries carry it.
+    //
+    // `field` is silent, exactly as it already is when the record is present
+    // and the field is empty (that path returns `[]` above): it reaches here
+    // only without a record. `manager` keeps the warning it had as a graph
+    // type, because an unset `sys_user.manager_id` is the common cause and
+    // nothing else on the request names it.
+    if (PERSON_APPROVER_TYPES.has(type)) {
+      if (type === 'manager') {
+        this.logger?.warn?.(
+          `[approvals] approver 'manager' resolved to nobody, so it adds no slot to this request — no manager `
+          + `could be resolved for the record's subject user (sys_user.manager_id is unset, the manager is outside `
+          + `this organization, or the directory could not be read). The node's onEmptyApprovers policy decides `
+          + `a slate this leaves empty; declare onEmptyApprovers: 'fallback' with fallbackApprovers to route it `
+          + `to named people instead.`,
+          {
+            type, value: a.value ?? null,
+            subject: managerSubject != null ? String(managerSubject) : null,
+            organizationId: organizationId ?? null,
+          },
+        );
+      }
+      return [];
+    }
     // #3508: `queue` is declared-but-unenforced — there is no queue branch
     // above, so a queue approver always lands here and the `queue:<id>` slot
     // routes to nobody. The spec marks it non-authorable
@@ -2937,10 +3000,9 @@ export class ApprovalService implements IApprovalService {
       // the primary slate. The request then opens on THOSE ids.
       //
       // ⛔ What must never happen here is opening on the abandoned slate: an
-      // empty `{ type: 'manager' }` rung leaves the literal `manager:undefined`
-      // (the type is in GRAPH_APPROVER_TYPES and `value` is omitted for
-      // `manager`, so the literal interpolates the missing value), and that
-      // slot is decidable by nobody. Replacing the slate is the whole point.
+      // unstaffed group rung leaves its `type:value` literal (an empty
+      // `{ type: 'manager' }` rung leaves nothing at all, #22558), and that
+      // slate is decidable by nobody. Replacing the slate is the whole point.
       if (emptyPolicy === 'fallback') {
         const declared = (input.config as any).fallbackApprovers;
         // The spec refuses `fallback` without a non-empty list, so an empty one

@@ -13,8 +13,12 @@
  * interpolator itself is driven over the same tokens the judge classifies:
  *
  *  - every KEPT spelling resolves through `interpolateString` to a value — the
- *    date macros to ISO text, `$User` to the run user — and the judge
- *    refuses none of them;
+ *    date macros to ISO text — and the judge refuses none of them;
+ *  - the run user (`$User`, refused since #19939 pass 2) resolves through the
+ *    interpolator to the run's `userId` for `$User.Id` and to nothing for every
+ *    other path in a shipped run context, and the remedies the judge prints
+ *    evaluate through the CEL scope's `current_user` to the same answer — with
+ *    a user, and, guarded, without one;
  *  - every REFUSED spelling resolves through the variables (a path), computes
  *    (an expression), or resolves to nothing — and the judge refuses each,
  *    including the dispatch-order edges (`{$User}` with no path, `{NOW}` with
@@ -24,11 +28,13 @@
  *    author-time envelope check, then the built `@objectstack/formula` engine
  *    over the flow's real CEL scope) as the interpolator read from the
  *    template — including a head variable named like an identifier CEL claims
- *    for itself (`{list.0}` → `vars["list"][0]`, #22290).
+ *    for itself (`{list.0}` → `vars["list"][0]`, #22290), or one the flow
+ *    scope binds over it (`{vars.0}` → `vars["vars"][0]`), and inside an
+ *    EXPRESSION token (`{int * 2}` → `vars["int"] * 2`).
  */
 
 import { describe, expect, it } from 'vitest';
-import { valueSlotTemplateRefusals } from '@objectstack/spec/automation';
+import { VALUE_SLOT_TEMPLATE_REFUSAL, valueSlotTemplateRefusals } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { interpolateString } from './template.js';
 
@@ -53,12 +59,43 @@ describe('a spelling the retirement KEEPS resolves through the interpolator, and
     expect(valueSlotTemplateRefusals(token)).toEqual([]);
   });
 
-  it.each([
-    ['{$User.Id}', 'usr_1'],
-    ['{$User.Email}', 'ada@example.com'],
-  ])('%s — the run user', (token, value) => {
-    expect(interpolateString(token, VARIABLES, CONTEXT)).toBe(value);
-    expect(valueSlotTemplateRefusals(token)).toEqual([]);
+});
+
+describe('the run user — `{$User.*}` — is REFUSED, and its remedy reads what the interpolator read', () => {
+  const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => quiet } as never;
+  const engine = new AutomationEngine(quiet);
+  /** A run context the way the trigger doors build one: no `user` object, ever. */
+  const SHIPPED = { userId: 'usr_1', positions: ['org_member'], tenantId: 'org_1' } as never;
+  const USERLESS = {} as never;
+  /** The CEL sources the refusal of `token` prints, in order — read after the rule sentence, whose own `'…'` is not a remedy. */
+  const sources = (token: string): string[] => {
+    const message = (valueSlotTemplateRefusals(token)[0]?.message ?? '').slice(VALUE_SLOT_TEMPLATE_REFUSAL.length);
+    return [...message.matchAll(/\{ dialect: 'cel', source: '([^']*)' \}/g)].map((m) => m[1]!);
+  };
+
+  it('`{$User.Id}`: the bare remedy reads the run user, the guard reads `null` where the template read nothing', () => {
+    expect(valueSlotTemplateRefusals('{$User.Id}')).toHaveLength(1);
+    const [bare, guarded] = sources('{$User.Id}');
+    expect([bare, guarded]).toEqual(['current_user.id', 'current_user != null ? current_user.id : null']);
+    // With a user: all three agree.
+    expect(interpolateString('{$User.Id}', VARIABLES, SHIPPED)).toBe('usr_1');
+    expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: bare! }, VARIABLES, 'w', SHIPPED)).toBe('usr_1');
+    expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: guarded! }, VARIABLES, 'w', SHIPPED)).toBe('usr_1');
+    // Without one: the template read nothing, the bare read fails loudly, the guard reads `null`.
+    expect(interpolateString('{$User.Id}', VARIABLES, USERLESS)).toBeUndefined();
+    expect(() => engine.evaluateValueEnvelope({ dialect: 'cel', source: bare! }, VARIABLES, 'w', USERLESS)).toThrow(/current_user\.id/);
+    expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: guarded! }, VARIABLES, 'w', USERLESS)).toBeNull();
+  });
+
+  it.each(['{$User.Email}', '{$User.Name}', '{$User.id}'])('%s never resolved in a shipped run context — and is refused saying so', (token) => {
+    expect(interpolateString(token, VARIABLES, SHIPPED)).toBeUndefined();
+    expect(valueSlotTemplateRefusals(token)[0]!.message).toContain(`\`${token}\` never resolved in any shipped run`);
+  });
+
+  it('the user-record read it names starts from `current_user.id`, which evaluates', () => {
+    const [uid] = sources('{$User.Email}');
+    expect(uid).toBe('current_user.id');
+    expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: uid! }, VARIABLES, 'w', SHIPPED)).toBe('usr_1');
   });
 });
 
@@ -175,5 +212,51 @@ describe('the remedy a refused path prints reads, through CEL, the value the int
   it('control: a `$`-named head is still read through `vars`', () => {
     expect(printedSpellings('{$error.message}')).toEqual(['vars["$error"].message']);
     expectReadingsAgree('{$error.message}', VARIABLES, 'boom');
+  });
+
+  // The flow scope's own claims (`FLOW_SCOPE_CLAIMED_IDENTIFIERS` in the spec,
+  // measured from `celScope`): `vars` and `current_user` are bound AFTER the
+  // variables are spread, so the bare spelling reads the binding and only
+  // `vars["…"]` reads the variable.
+  it.each(['vars', 'current_user'])('a head variable named `%s` — the scope binds it over the variable', (name) => {
+    const value = ['first', { key: 'second' }];
+    const variables = new Map<string, unknown>([[name, value]]);
+    expectReadingsAgree(`{${name}.0}`, variables, 'first');
+    expectReadingsAgree(`{${name}.1.key}`, variables, 'second');
+    expectReadingsAgree(`{${name}.tags}`, new Map<string, unknown>([[name, { tags: 'T' }]]), 'T');
+    // The bare spelling does not read the variable — the binding answers it.
+    expect(() => engine.evaluateValueEnvelope({ dialect: 'cel', source: `${name}[0]` }, variables, name)).toThrow();
+  });
+});
+
+describe('an EXPRESSION token\'s remedy evaluates — every variable path in it is read by the path rule', () => {
+  const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => quiet } as never;
+  const engine = new AutomationEngine(quiet);
+  const remedyOf = (token: string): string => {
+    const message = valueSlotTemplateRefusals(token)[0]!.message;
+    const m = /Write `[^`]+` as \{ dialect: 'cel', source: (?:'([^']*)'|("(?:[^"\\]|\\.)*")) \}/.exec(message);
+    expect(m, message).not.toBeNull();
+    return m![1] ?? (JSON.parse(m![2]!) as string);
+  };
+
+  it('`{int * 2}` — a head CEL claims: `vars["int"] * 2`, the value the interpolator computed', () => {
+    const variables = new Map<string, unknown>([['int', 5]]);
+    expect(interpolateString('{int * 2}', variables, CONTEXT)).toBe(10);
+    expect(remedyOf('{int * 2}')).toBe('vars["int"] * 2');
+    expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: remedyOf('{int * 2}') }, variables, 'w')).toBe(10);
+  });
+
+  it('`{items.0 * 2}` — an index: `items[0] * 2`, which evaluates (the interpolator computed nothing for it)', () => {
+    const variables = new Map<string, unknown>([['items', [3, 4]]]);
+    expect(interpolateString('{items.0 * 2}', variables, CONTEXT)).toBeUndefined();
+    expect(remedyOf('{items.0 * 2}')).toBe('items[0] * 2');
+    expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: remedyOf('{items.0 * 2}') }, variables, 'w')).toBe(6);
+  });
+
+  it('a `$`-named head and a divisor in one expression', () => {
+    const variables = new Map<string, unknown>([['$error', { code: 7 }]]);
+    expect(interpolateString('{$error.code / 2}', variables, CONTEXT)).toBe(3.5);
+    expect(remedyOf('{$error.code / 2}')).toBe('vars["$error"].code / 2.0');
+    expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: remedyOf('{$error.code / 2}') }, variables, 'w')).toBe(3.5);
   });
 });

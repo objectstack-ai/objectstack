@@ -74,13 +74,36 @@ describe('textSlotTemplateRefusal — the one judge of the single brace in a tex
     expect(message).not.toContain('Write `');
   });
 
-  it('names an assignment whose value slot still reads it for a date macro or a run-user path', () => {
-    for (const token of ['{TODAY() + 7}', '{NOW()}', '{$User.Id}']) {
+  it('names an assignment whose value slot still reads it for a date macro', () => {
+    for (const token of ['{TODAY() + 7}', '{NOW()}']) {
       const message = textSlotTemplateRefusal(`Due ${token}`)!;
       expect(message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL), token).toBe(true);
       expect(message, token).toContain(`assignments: { v: '${token}' }`);
       // …and that value-slot spelling is one the value slot does keep (#19939).
       expect(valueSlotTemplateRefusals(token), token).toEqual([]);
+    }
+  });
+
+  // #19939 pass 2: the value slots refuse `{$User.*}`, so the run user's id is
+  // computed with the CEL envelope the value-slot refusal names, never with a
+  // value-slot spelling that is refused in turn.
+  it('names an assignment with the CEL envelope `current_user.id` for the run user\'s id, and its guard', () => {
+    const message = textSlotTemplateRefusal('By {$User.Id}')!;
+    expect(message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(message).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
+    expect(message).toContain('`current_user != null ? current_user.id : null`');
+    expect(message).toContain('`{{ v }}`');
+    expect(message).not.toContain("assignments: { v: '{$User.Id}' }");
+    expect(valueSlotTemplateRefusals('{$User.Id}')).toHaveLength(1);
+  });
+
+  it('says every other run-user path never resolved, and names the read of the user record', () => {
+    for (const token of ['{$User.Email}', '{$User.Name}']) {
+      const message = textSlotTemplateRefusal(`Contact ${token}`)!;
+      expect(message, token).toContain(`\`${token}\` never resolved in any shipped run`);
+      expect(message, token).toContain("objectName: 'sys_user'");
+      expect(message, token).toContain('`{{ me.email }}`');
+      expect(message, token).not.toContain(`assignments: { v: '${token}' }`);
     }
   });
 
@@ -127,11 +150,9 @@ describe('textSlotTemplateRefusal — a `{{ }}` hole over a `$` root the engine 
     // Not the single-brace rule: the author wrote a hole.
     expect(message!.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(false);
     const remedy = singleBraceRemedy('By {$User.Id}');
-    expect(remedy).toContain("assignments: { v: '{$User.Id}' }");
+    expect(remedy).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
     expect(remedy).toContain('`{{ v }}`');
     expect(message!.endsWith(remedy)).toBe(true);
-    // …and the value-slot spelling that remedy names is one the value slot keeps.
-    expect(valueSlotTemplateRefusals('{$User.Id}')).toEqual([]);
   });
 
   it('gives every `$User.<path>` hole its single-brace remedy, formatter or not', () => {
@@ -139,7 +160,7 @@ describe('textSlotTemplateRefusal — a `{{ }}` hole over a `$` root the engine 
       ['{{$User.Email}}', '{$User.Email}'],
       ['Owner: {{ $User.Name | upper }}', '{$User.Name}'],
     ] as const) {
-      expect(textSlotTemplateRefusal(text), text).toContain(`assignments: { v: '${single}' }`);
+      expect(textSlotTemplateRefusal(text), text).toContain(`\`${single}\` never resolved in any shipped run`);
     }
   });
 
@@ -180,7 +201,7 @@ describe('textSlotTemplateRefusal — a `{{ }}` hole over a `$` root the engine 
     const message = textSlotTemplateRefusal('{{ $User.Id }} and {{ $User.Id }} for {owner}')!;
     expect(message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
     expect(message).toContain('`{{ $User.Id }} and {{ $User.Id }} for {{ owner }}`');
-    expect(message.split("assignments: { v: '{$User.Id}' }")).toHaveLength(2);
+    expect(message.split("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }")).toHaveLength(2);
   });
 
   it('leaves a hole that does not compile as a path to the compile step', () => {
@@ -241,7 +262,7 @@ describe('ScreenConfigSchema — its two text slots compose the judge', () => {
       const refused = ScreenConfigSchema.safeParse({ [key]: 'By {{ $User.Id }}' });
       expect(refused.success, key).toBe(false);
       expect(refused.error?.issues.map((i) => [i.code, i.path.join('.')]), key).toEqual([['custom', key]]);
-      expect(refused.error?.issues[0]!.message, key).toContain("assignments: { v: '{$User.Id}' }");
+      expect(refused.error?.issues[0]!.message, key).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
     }
   });
 
@@ -261,7 +282,7 @@ describe('the node contracts — `By {{ $User.Id }}` is refused at the schema (#
       const refused = NotifyConfigSchema.safeParse(config);
       expect(refused.success, key).toBe(false);
       expect(refused.error?.issues.map((i) => [i.code, i.path.join('.')]), key).toEqual([['custom', key]]);
-      expect(refused.error?.issues[0]!.message, key).toContain("assignments: { v: '{$User.Id}' }");
+      expect(refused.error?.issues[0]!.message, key).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
     }
   });
 
@@ -269,7 +290,7 @@ describe('the node contracts — `By {{ $User.Id }}` is refused at the schema (#
     const refused = EndConfigSchema.safeParse({ outcome: 'refused', message: 'Refused by {{ $User.Id }}' });
     expect(refused.success).toBe(false);
     expect(refused.error?.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['custom', 'message']]);
-    expect(refused.error?.issues[0]!.message).toContain("assignments: { v: '{$User.Id}' }");
+    expect(refused.error?.issues[0]!.message).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
   });
 
   it('control: `{{ $error.message }}` and `{{ record.name }}` still parse in every text slot', () => {

@@ -12,6 +12,7 @@ import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalToken } from './sys-approval-token.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
+import { SysApprovalRequestDetailPage } from './sys-approval-request.page.js';
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
   ApprovalService,
@@ -124,6 +125,12 @@ export class ApprovalsServicePlugin implements Plugin {
       defaultDatasource: 'cloud',
       namespace: 'sys',
       objects: [SysApprovalRequest, SysApprovalAction, SysApprovalApprover, SysApprovalToken, SysApprovalDelegation],
+      // The request's record-detail page (a slotted page, default for every
+      // sys_approval_request record): the decision panel, the request's
+      // fields, and its timeline. This plugin owns the object, so it ships its
+      // page too — the shape plugin-auth ships sys_user's. The page and its
+      // slot map are documented on `SysApprovalRequestDetailPage`.
+      pages: [SysApprovalRequestDetailPage],
       // ADR-0029 D7 — contribute the Approvals entries into the Setup app's
       // `group_approvals` slot. This plugin owns these objects (K2.b), so it
       // ships their menu too; when the plugin isn't installed the slot is empty.

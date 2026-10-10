@@ -271,11 +271,13 @@ for some input, so the rewrite is yours to judge.
 | `'{round(x * 100) / 100}'` | `source: 'round(x * 100) / 100.0'` | CEL divides two integers as integers: keep a decimal operand on every division |
 | `'Follow up on {record.name}'` | `source: "'Follow up on ' + record.name"` | wrap a non-string hole in `string(…)`, one that may be null in `coalesce(…, '')` |
 | braces meant literally, `'{"a": 1}'` | `source: "'{\"a\": 1}'"` | a CEL string literal |
+| `'{$User.Id}'` | `source: 'current_user.id'` | `current_user` is the run's user, and `null` in a run with none (a schedule, a record change made by a system write), where this read fails the run. In a flow that can run without a user, write `current_user != null ? current_user.id : null`: it writes `null` where the template wrote nothing, which on `update_record` clears a stored value the template left alone — or skip the node on `current_user != null` |
+| `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | read the user record by `current_user.id`: an `assignment` (`uid: { dialect: 'cel', source: 'current_user.id' }`), a `get_record` on `sys_user` with `filter: { id: '{uid}' }` and `outputVariable: 'me'`, then `source: 'me.email'` | these never resolved in any shipped run — they wrote nothing. `current_user` carries only what the run holds: `id`, `positions`, `organizationId`, `isPlatformAdmin` |
 
-Two spellings **keep** their meaning for now, because CEL cannot write them yet:
+One spelling **keeps** its meaning for now, because CEL cannot write it yet:
 the date macros (`'{NOW()}'`, `'{TODAY() + 7}'` — CEL's `now()` / `today()` are
 timestamps, not the ISO text the macros write, and there is no string form for
-one) and the run user (`'{$User.Id}'` — the flow's CEL scope binds no user).
+one).
 
 [#19939]: https://github.com/objectstack-ai/objectstack/issues/19939
 
@@ -325,7 +327,8 @@ check.
 | `'Deal won: {record.name}'` | `'Deal won: {{ record.name }}'` |
 | `'Failed: {$error.message}'` | `'Failed: {{ $error.message }}'` |
 | `'Total {amount * 2}'`, `'{round(x)}'` | compute it into a variable (`assignments: { v: { dialect: 'cel', source: 'amount * 2' } }`), then `'Total {{ v }}'` |
-| `'Due {TODAY() + 7}'`, `'By {$User.Id}'` | compute it into a variable with an `assignment` node, whose value slot still reads that spelling (`assignments: { due: '{TODAY() + 7}' }`), then `'Due {{ due }}'` |
+| `'Due {TODAY() + 7}'` | compute it into a variable with an `assignment` node, whose value slot still reads that spelling (`assignments: { due: '{TODAY() + 7}' }`), then `'Due {{ due }}'` |
+| `'By {$User.Id}'` | compute the run user's id into a variable with an `assignment` node's CEL value envelope (`assignments: { by: { dialect: 'cel', source: 'current_user.id' } }`), then `'By {{ by }}'` — guarded as `current_user != null ? current_user.id : null` in a flow that can run without a user |
 
 [#22110]: https://github.com/objectstack-ai/objectstack/issues/22110
 
@@ -1990,21 +1993,30 @@ slot still reads.
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
-| Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*` |
+| Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*`, `current_user` |
 | Edge `condition` | **CEL** (bare, no braces) | `record.status == 'open'` | same as above |
-| Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, and `vars.*` |
-| Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), except the date macros `{NOW()}` / `{TODAY() ± N}` and `{$User.*}`, which still resolve until CEL can write them) |
-| Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, and `vars.*` — the whole CEL stdlib (`joinNonEmpty`, …) |
+| Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, `vars.*` and `current_user` |
+| Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), `{$User.*}` included, except the date macros `{NOW()}` / `{TODAY() ± N}`, which still resolve until CEL can write them) |
+| Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, `vars.*` and `current_user` — the whole CEL stdlib (`joinNonEmpty`, …) |
 | Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | **template** (`{{ }}` holes) | `'Deal won: {{ record.name }} ({{ record.amount \| currency }})'` | flow variables by name (`$`-named ones too: `{{ $error.message }}`) — a path and an optional formatter, never logic |
 
 A value slot takes either form, chosen by shape: an object naming a `dialect`
 is a CEL envelope, everything else is a literal. The `{token}` template dialect
 it used to read is retired: `objectstack validate`, `registerFlow` and the
 executor refuse a `{…}` token in a value slot with its CEL spelling (see *The
-`{…}` template dialect is retired from value slots* above). The date macros and
-`{$User.*}` are kept until CEL can write them: CEL's `now()` / `today()` are
-timestamps, not the strings the macros write, and the flow's CEL scope binds no
-user.
+`{…}` template dialect is retired from value slots* above). The date macros are
+kept until CEL can write them: CEL's `now()` / `today()` are timestamps, not the
+strings the macros write.
+
+Every CEL expression in a flow — a condition or a value envelope — sees
+**`current_user`**, the run's user: `current_user.id`, `current_user.positions`,
+`current_user.organizationId`, `current_user.isPlatformAdmin`. It carries only
+what the run holds, so there is no email or name on it (read the user record by
+`current_user.id`). In a run with **no user** — a schedule, a record change made
+by a system write — `current_user` is `null`, never a stand-in user: guard a read
+with `current_user != null`, or skip the work with that start condition. A flow
+variable named `current_user` or `vars` is shadowed by the scope's own binding
+and is read as `vars["current_user"]` / `vars["vars"]`.
 
 <Callout type="warn">
 **The failure modes to memorize:**

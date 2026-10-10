@@ -155,15 +155,19 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
   nodes: [
     // A record-change flow binds its object on the START node's config,
     // not at the flow top level.
+    // current_user is the acting user, or null when no user made the write
+    // (a system write): the start condition skips those runs, so the stored
+    // value is left alone there.
     { id: 'start', type: 'start', label: 'On Task Create',
-      config: { objectName: 'project_task', triggerType: 'record-after-create' } },
-    // Values interpolate with SINGLE braces. {$User.Id} is the acting user;
-    // {record.<field>} reads the triggering record.
+      config: { objectName: 'project_task', triggerType: 'record-after-create',
+        condition: 'current_user != null' } },
+    // A filter value interpolates SINGLE braces: {record.<field>} reads the
+    // triggering record. A field value is a CEL value envelope.
     { id: 'assign', type: 'update_record', label: 'Assign to Actor',
       config: {
         objectName: 'project_task',
         filter: { id: '{record.id}' },
-        fields: { assigned_to: '{$User.Id}' },
+        fields: { assigned_to: { dialect: 'cel', source: 'current_user.id' } },
       } },
     { id: 'done', type: 'end', label: 'Done' },
   ],
