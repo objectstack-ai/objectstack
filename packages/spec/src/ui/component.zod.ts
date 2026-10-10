@@ -2383,8 +2383,12 @@ export type RecordLineItemsPropsParsed = z.infer<typeof RecordLineItemsProps>;
  * (`app-shell/src/views/metadata-admin/anchors.ts:208`), and so never emits
  * this node at all. `className` and the designer attributes the renderer
  * reads are node-level, never `properties`.
+ *
+ * Not exported, like the {@link emptyProps} rows it matches in contract: with
+ * no accepted key there is no author-state type to name, and the row is
+ * reached through `ComponentPropsMap['record:approvals']`.
  */
-export const RecordApprovalsProps = strictObject({
+const RecordApprovalsProps = strictObject({
   surface: 'this `record:approvals`',
   history: `\`record:approvals\` declares no props at all. ${PROPS_HISTORY}`,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
@@ -2398,7 +2402,6 @@ export const RecordApprovalsProps = strictObject({
       + 'it: the block reads the signed-in user itself.',
   },
 }, {});
-export type RecordApprovalsProps = z.input<typeof RecordApprovalsProps>;
 
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
