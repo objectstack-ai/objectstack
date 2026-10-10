@@ -21,7 +21,7 @@
  * `engine-file-hydrate-refused.test.ts` and `engine-file-hydrate-outage.test.ts`.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi, type MockInstance } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -49,7 +49,7 @@ const envelopeOf = (e: any) => ({ code: e?.code, status: e?.statusCode ?? e?.sta
 
 describe('a file field the security layer refused reads as refused, not as "no file" — the real security layer', () => {
   let engine: ObjectQL;
-  let warn: ReturnType<typeof vi.fn>;
+  let warn: MockInstance<(...args: unknown[]) => void>;
 
   beforeAll(async () => {
     engine = new ObjectQL();
@@ -110,8 +110,9 @@ describe('a file field the security layer refused reads as refused, not as "no f
     const plugin = new SecurityPlugin({ fallbackPermissionSet: RECORD_READER_SET.name });
     await plugin.init(ctx as never);
     await plugin.start(ctx as never);
-    warn = vi.fn();
-    vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(warn);
+    warn = vi
+      .spyOn((engine as unknown as { logger: { warn: (...args: unknown[]) => void } }).logger, 'warn')
+      .mockImplementation(() => undefined);
 
     await engine.insert('sys_file', [
       { id: FILE_ID, key: 'k/1', name: 'contract.pdf', mime_type: 'application/pdf', size: 1024, status: 'committed' },
