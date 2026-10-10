@@ -190,8 +190,11 @@ const SQL_DRIVER_SERVICES = [
 ];
 
 /** Locate the SQL driver behind any `getService`-shaped lookup (kernel or plugin ctx). */
-function findSqlDriverVia(getService: (name: string) => any): SqlDriverLike | null {
-  for (const name of SQL_DRIVER_SERVICES) {
+function findSqlDriverVia(
+  getService: (name: string) => any,
+  names: readonly string[] = SQL_DRIVER_SERVICES,
+): SqlDriverLike | null {
+  for (const name of names) {
     let d: any;
     try { d = getService(name); } catch { /* not registered */ }
     if (d && typeof d.detectManagedDrift === 'function' && typeof d.applyMigrationEntries === 'function') {
@@ -211,11 +214,7 @@ function findSqlDriver(kernel: any): SqlDriverLike | null {
  * routes lifecycle-classed objects to.
  */
 function findTelemetryDriver(kernel: any): SqlDriverLike | null {
-  let d: any;
-  try { d = kernel?.getService?.(`driver.${TELEMETRY_DATASOURCE}`); } catch { /* not registered */ }
-  return d && typeof d.detectManagedDrift === 'function' && typeof d.applyMigrationEntries === 'function'
-    ? (d as SqlDriverLike)
-    : null;
+  return findSqlDriverVia((name) => kernel?.getService?.(name), [`driver.${TELEMETRY_DATASOURCE}`]);
 }
 
 /**
