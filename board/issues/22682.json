@@ -12,21 +12,19 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
+    "pm:on-hold",
     "priority:p1",
     "target:v18"
   ],
-  "assignees": [
-    "marchtian"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T13:03:29Z",
-  "updated_at": "2026-10-10T13:45:55Z",
+  "updated_at": "2026-10-10T19:42:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22682",
   "body": "This card carries the `packages/spec` half of three items found by objectui#7611's C9 build (report objectui 6097735087; seat answers objectui 6097763840). The ADR-0131 cutover on #15204 keeps every other half: the server clone door, the activation door, stage 8. The objectui consumers follow this card in a C9 follow-up PR.\n\nFiling gate: **④**, a per-layer sub-issue of the cross-layer cutover (epic #15194, card #15204). Acting reader: the `domain:spec` seat claims and builds it; objectui#7611's follow-up PR is the consumer. Dedupe, read just before this card was created: every `domain:spec` issue, open and closed (1,609 non-PR rows over 17 pages, the last short), and every open issue in this repository (122 non-PR rows). Their titles were grepped for `approver.*position`, `decision ?output`, `DecisionOutput`, `APPROVER_VALUE`, `position\\.form` and `permissionSets`: **0 hits** on the subject. Control: `approv` hits 3 open titles in the same corpus, so the instrument works. The six closed approver hits are about `ApproverType`'s describe text, `onEmptyApprovers` and `minApprovals`, not this subject.\n\n## What changes, and why it cannot wait\n\nADR-0131 D4, verbatim: \"References to declared items are **by machine name**, resolved registry-first.\" Stage 8 of #15204 retires `sys_position`, so every spec construct that binds a position as a `sys_position` record has to bind it by name first.\n\n1. **`APPROVER_VALUE_BINDINGS.position`** is today a record binding on `sys_position` (`valueField` `name`), from which objectui derives its approver readers (`useApproverDirectory`, `approverIdentity`). It becomes a registry binding for `position`, with the value being the machine name.\n2. **`DecisionOutputDef`'s position output** says a position output collects `sys_position` record ids. It collects position names.\n3. **The position form** (`position.form.ts`) gains `permissionSets`, with a registry multi-picker widget key, once #15204 stage 1 lands `PositionSchema.permissionSets`. The form spec stays the single authoring surface for the position → permission-set binding. objectui implements the widget in metadata-admin's widget registry.\n\n## Rulings and premises\n- Seat answers (objectui 6097763840), open to the maintainer's veto: Q2 → A (the spec binds positions by name; the alternative, a local objectui override, is the mirror the spec's own comment records as a cost, #3508), and Q3 → A.\n- **Premises to re-verify on `origin/main` before building**, each from the C9 report and not re-read by the filing seat:\n  - the location and shape of `APPROVER_VALUE_BINDINGS` and `DecisionOutputDef`;\n  - that no registry binding kind for `position` exists yet;\n  - that `position.form.ts` has no `permissionSets` line.\n- **Ordering:** items 1 and 2 are buildable now. Item 3 waits for #15204 stage 1 (branch `claude/issue-15204-s1-position-permission-sets`) to merge. #15204's stage 8 waits for items 1 and 2.\n- `Clause-②`: the claimant judges it at claim. Replacing a record binding with a name binding is a published-contract change, so expect `yes` and a contract-tier review.\n\nPart of #15194 (ADR-0131 execution tree). Parent card: #15204."

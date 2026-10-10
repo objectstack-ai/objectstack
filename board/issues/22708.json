@@ -1,0 +1,29 @@
+{
+  "number": 22708,
+  "kind": "issue",
+  "title": "[Decision] fleet relay: should the auto-merge row spend `workflows: write` so seats can enqueue pulls that change `.github/workflows/**`, or stay a human-queue item?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T18:05:02Z",
+  "updated_at": "2026-10-10T18:05:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22708",
+  "body": "立卡门类别 ②(只有维护者能做的决定:中继令牌的权限边界)。Filed by skills seat 1 (`session_01RdnZdPZH9ByduzPRWuH9tN`) from the landing of PR #22691 on #22658.\n\n## 一句话问题\n\n席位通过车队中继给一张改了 `.github/workflows/ci.yml` 的 PR 挂 auto-merge,被 GitHub 拒绝:App 令牌没有 `workflows` 权限;这张 PR(以及今后每张改 CI 工作流文件的 PR)落地要么由人点一下,要么给中继令牌加这项权限。\n\n## Governing text\n\n- `scripts/pm/fleet-write/ops.mjs` header 「The permissions the relay's token is narrowed to」: `PERMISSIONS = { issues: write, 'pull-requests': write, contents: write, metadata: read, actions: write(stroke-scoped) }` — \"that set and nothing wider\"; `grep -n \"PERMISSIONS = \" scripts/pm/fleet-write/ops.mjs`.\n- `.github/workflows/fleet-write.yml` mint step: `permission-issues/pull-requests/contents/metadata` literal, `permission-actions` stroke-scoped; `grep -n 'permission-' .github/workflows/fleet-write.yml`.\n- `.claude/skills/pm-dispatch/SKILL.md` 〈升级与决策〉: 「安全/权限边界与破坏性难逆动作恒在人工地板」; `grep -n '人工地板' .claude/skills/pm-dispatch/SKILL.md`.\n- 协议声明:本卡不改协议;它决定一个令牌授权(选项 A/C)或把现状写成协议文本(选项 B)。\n\n## 前提(各带 re-check)\n\n- GitHub refuses a GitHub App without `workflows` permission to merge or enqueue a pull that changes a workflow file. Measured: relay runs 38073172033, 38073412183, 38073910401 on PR #22691 (`.github/workflows/ci.yml` modified), the row `GraphQL: Pull request refusing to allow a GitHub App to create or update workflow `.github/workflows/ci.yml` without `workflows` permission`. re-check: `gh api repos/objectstack-ai/objectstack/actions/runs/38073910401/jobs --jq '.jobs[].conclusion'` → failure; the row via the MCP `get_job_logs` read of job 114276785480.\n- Two pulls changing `ci.yml` landed through the relay today (#22685 13:52Z, #22666 10:17Z) because their arms came 3 s after their ready flips, while mergeability was recomputing: GitHub accepted a deferred arm and enqueued them itself. re-check: `gh api repos/objectstack-ai/objectstack/issues/22685/timeline --jq '[.[]|select(.event|test(\"ready_for_review|auto_merge_enabled|added_to_merge_queue\"))|.created_at]'`.\n- Today's rate: 3 of the ~27 relay-landed pulls on `main` changed a workflow file (`.github/workflows/**`). re-check: `gh api 'repos/objectstack-ai/objectstack/pulls?state=closed&per_page=40'` then each pull's `/files` for `.github/workflows/`.\n\n## 具体问题\n\nWho may land a pull that changes CI workflow files: the seat's relay (with a wider token), or a human only?\n\n## 选项 × 真实代价 × 工作量\n\n| 选项 | 做什么 | 客户可感知后果 | 工作量 |\n|---|---|---|---|\n| **A** 常驻授权 | `automerge_enable` row `alsoSpends: ['workflows']`; mint input `permission-workflows: write` literal on every stroke; validate/execute self-tests pin it | 无客户可见变化;车队令牌每笔都能改写工作流文件(通过 enqueue 一张改 CI 的 PR) | skills 车道 · 1 PR · 先例 PR #22460 (`workflow_dispatch` row + `permission-actions` stroke-scoped, +~180/−20) |\n| **B** 维持人工地板(推荐) | 不改令牌;`references/landing-operations.md` 写一行:改 `.github/workflows/**` 的 PR 是人工入队项,席位 ACCEPT + 证明 + 请一次点击 | 无客户可见变化;这类 PR 每张多等一次人点;今天 3/27 | skills 车道 · 1 PR(Tier S 文本,一行换一行)· 先例:本班 `execution-duties.md:59`(1 行) |\n| **C** 按笔授权 | 像 `actions` 一样 stroke-scoped:validator 读 PR 的 files,仅当该 PR 改工作流文件时该笔 mint `workflows: write` | 同 A 的能力,但只在需要的笔上;validator 多一次 REST 读(PR files) | skills 车道 · 1 PR · 先例 PR #22460 的 stroke-scoped 形状 + 一次 files 读;约 A 的 1.5× |\n\n## 业务含义直译\n\n- A = 把「谁能改 CI 流水线」的钥匙交给自动席位;今后 AI 落地的 CI 改动不再经人手。\n- B = CI 流水线改动保持「最后一步由人按」;AI 做到门口,人推门。\n- C = 钥匙只在需要时、只为那一张 PR 临时发;比 A 窄,比 B 多一道机制。\n\n## 四轴(业务立场)\n\n- **实际业务需求**:实测今天 3/27 张 PR 改了工作流文件;其中 2 张因时序侥幸落地,1 张(#22691)卡住。拉动存在但小,且每张的代价只是一次点击。\n- **项目长远合理性**:工作流文件决定什么代码带着仓库 secrets 跑;GitHub 把它单独设权正是为此。B 保持这道边界与 GitHub 自己的模型一致;A 把它抹平;C 是带机制的折中。\n- **防 AI 犯错**:AI 批量改 CI 的错误(放宽门禁、改 required checks、泄 secrets)在 B 下有人眼最后一关、响亮拒绝;A 下是静默放行。这条轴压向 B。\n- **创业阶段不扩散**:B 零新增权限、一行文本;A/C 各扩一项令牌能力并永久维护。默认从紧 ⇒ B。\n\n<!-- os-decision-facets -->\nos-decision-facets\n① 项目长远合理性:B 不增特例、与平台权限模型同向;A 抹平一道平台设的边界;C 增一个按笔判定的分支。\n② 实际业务拉动:今天 3/27,代价每张一次人点;零客户可见后果。\n③ 防 AI 犯错:B = 人眼最后一关、GitHub 响亮拒绝;A = 静默放行 AI 落地的 CI 改动。\n④ 创业阶段不扩散:B 零权限增量;A/C 各加一项永久令牌义务。\nPrior rulings read: workflows permission · fleet token · auto-merge → 3 hits (#21294 closed, #19404 closed, #19774 closed — none rules this); ADR none; thread: none\n\n## 推荐 + 回退 + 置信缺口\n\n**推荐 B**(先只按①:两年后的平台样子是「自动席位把 PR 送到门口,改 CI 流水线的最后一步由人按」,与 GitHub Apps 的权限模型一致,主流 CI 平台(GitHub、GitLab 的 protected CI config)同此建模)。②③④ 是否翻转:否 —— ②拉动小,③④同向 B。回退:C(若维护者要席位能落这类 PR)。置信缺口:GitHub 对「arm 时序侥幸」的内部规则未读到文档,只凭今天的时间线;若维护者选 A/C,首张实测由席位记录。\n\n自检行:只看①选 B;②③④ 是否翻转:否。\n\n## 裁后执行\n\n- 裁 B:skills 席立一张 `pm:queue` 工具卡,`landing-operations.md` 一行换一行(Tier S),并把「改 `.github/workflows/**` 的 PR = 人工入队项」写进席位贴 Notes;本卡关闭。\n- 裁 A 或 C:skills 席立执行卡(ops.mjs `alsoSpends` / stroke-scoped 读 + `fleet-write.yml` 一行 + validate/execute 自测),先例 PR #22460;首张改工作流的 PR 由席位实测并记 NOT MEASURED → MEASURED。\n- 无论哪项,PR #22691 今天由维护者一键入队,不等本卡。\n\n## 相关\n\n- #22658 / PR #22691(触发实测,note 6100546812 与其更正);PR #22685、#22666(时序落地的两张);#21294、#19404(日志读法读数);PR #22460(stroke-scoped 权限先例)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

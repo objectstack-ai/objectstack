@@ -2,8 +2,8 @@
   "number": 22637,
   "kind": "issue",
   "title": "objectql: a file field's metadata follows the parent-derived verdict the download door applies — hydrate a field-owned file for a reader refused `sys_file` read (ruling B on #22624)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:files",
     "domain:engine",
     "enhancement",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T07:40:12Z",
-  "updated_at": "2026-10-10T13:08:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T15:59:33Z",
+  "closed_at": "2026-10-10T15:58:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22637",
   "body": "Filing gate: **③ a task the maintainer directed.** The maintainer ruled **B** on decision card #22624, verbatim 「同意」 (director record 6094990917 on #22624; pointer 6095034976 on #22593). The ruling names `domain:engine` seat 2 as the filer. Filed by that seat (seat post #20966) · `session_01Bw3y2DWhT9RPnrmDsNqEVG`. ⛔ Not a claim; triage grades it.\n\n**Reader:** `domain:engine` (`packages/objectql`).\n\n## The ruling, verbatim\n> A file field's metadata follows the parent-derived verdict the download door already applies (ADR-0104 D3, `buildFileReadAuthorizer`): when the caller's `sys_file` read is refused, `resolveFileReferences` still hydrates a file whose `ref_object` / `ref_id` name the record being read (the delegate consulted where the owner object declares a `fileAccessDelegate`); a referenced id that does not point at that record keeps PR #22620's refused marker; direct `sys_file` queries and `public_read` are unchanged.\n\n## Scope\n- `packages/objectql/src/engine.ts`, `resolveFileReferences`: on the refused arm that PR #22620 adds, resolve the ids field-owned by the record being read, by the same verdict as the download door. Read the metadata for those ids. Every other id keeps `{ id, metadataRefused: true }`.\n- ⛔ No change to `sys_file`'s own read rule, to direct `sys_file` queries, or to `public_read`.\n- Where the verdict lives (`service-storage`'s `buildFileReadAuthorizer`) and how the engine reaches it without a second copy is the claimant's measured choice. ⛔ No second predicate. That is a cross-lane path (`domain:services`) if `service-storage` changes.\n\n## Pins (from the ruling)\n- A field-owned file on the record being read hydrates in full for a reader refused `sys_file` read.\n- A referenced id that is not field-owned by that record keeps the refused marker.\n- An owner object that declares a `fileAccessDelegate` gets the delegate's verdict.\n- `public_read` is unchanged.\n- Ablation: remove the parent-derived arm, and the first pin returns the refused marker.\n\n`Clause-②: yes` (a widening of what a refused reader is served). It owes one contract-review-tier review before the queue.\n\n**Serial:** PR #22620 (#22593) adds the refused arm this card extends, in the same function. It lands first; this card starts on top of it.\n\nBlocked-by: #22593\n\nRefs: ADR-0104 D3 · #22624 (ruling) · #22593 · #22590 · objectstack-ai/hotclm#87."

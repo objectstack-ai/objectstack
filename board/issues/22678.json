@@ -14,18 +14,20 @@
     "area:access",
     "documentation",
     "domain:engine",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T11:52:25Z",
-  "updated_at": "2026-10-10T11:52:25Z",
+  "updated_at": "2026-10-10T19:06:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22678",
   "body": "Filing gate ③: a task the maintainer directed. The maintainer ruled batch #312 item 2, verbatim 「同意」 (director record `6097072172` on #22590, 2026-10-10T11:34Z): **A is the end state, and its first deliverable is an ADR, not code.** The record names the `domain:engine` lane (with `domain:spec`) as this card's carrier. Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) so that the chain has its card. ⛔ Not a claim.\n\n**Reader:** the `domain:engine` seat, with `domain:spec`. `docs/adr/**` is governed (Tier H), so the ADR lands with the maintainer's APPROVED review.\n\n## What the ADR decides (scope from `6097072172`; ⛔ nothing wider)\n\n- **One** non-authorable filter leaf, which the engine never accepts from a request: \"the ids of object X this caller may read\".\n- ObjectQL pushes it down as a subquery against the parent table. Its read scope is composed from `canReadObject`, `getReadFilter` and the driver's own tenant wall.\n- `driver-sql` implements it. The other four drivers implement it or refuse loudly.\n- The activity gate asks it once per parent object.\n- The withheld-update rule moves to a writer-stamped changed-fields column, with a backfill.\n- The delegated (on-behalf-of) context, parents with their own plugin read gate, and federated parents stay on the bounded fail-closed probe.\n\n## What it revisits, for this one leaf only\n\n- **ADR-0055's alternatives table, row (a):** \"the RLS compiler deliberately has no subquery support\".\n- **ADR-0056's non-goal** that restated it.\n- **`querySubqueries`,** which left the driver contract in 17.0.0 as a zero-consumer bit (`driver.zod.ts:350`).\n\nPrime Directive #13 makes reversing a recorded decision a decision of its own, so the ADR states the reversal narrowly: one internal leaf. ⛔ Not a general subquery capability, and ⛔ not authorable.\n\n## Its six in-tree consumers, named in the ADR\n\nThe activity gate, the audit ledger, the withheld-update rule, comments, reactions and attachments. One leaf retires six bounded probes (`PARENT_GATE_SCAN_LIMIT = 2_000`, `parent-record-read-gate.ts:68`).\n\n## After approval (⛔ the execution cards never precede it)\n\nThe carriers file the execution cards: the spec leaf, the engine push-down, `driver-sql`, the four other drivers, the activity gate's switch, and the changed-fields column.\n\nWorkload, from the record: the ADR is one document; the program is roughly 3–5k lines over 6–10 PRs across three lanes, with no precedent.\n\n## Gate on #22590\n\n#22590 is `Blocked-by:` this card (the end state) and objectui#12081 (C's precondition). C, the interim, is a located 400 at the cap; the `domain:services` lane dispatches it there once objectui#12081 item 8 is pinned.\n\nRefs: ADR-0055 · ADR-0056 · #22590 (`6097072172`, `6095537369`) · triage direction `6093122404`."

@@ -1,0 +1,37 @@
+{
+  "number": 22696,
+  "kind": "pull_request",
+  "title": "refactor(plugin-security): move the organization-scope helpers and the seed write-refusal accumulator out of per-organization-catalog.ts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T14:44:00Z",
+  "updated_at": "2026-10-10T18:21:00Z",
+  "closed_at": "2026-10-10T18:20:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-10T18:20:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22696",
+  "body": "Part of #15204\n\nClause-②: no\n\nStage **6c-prep** of the cutover stage plan (claim amendment 6098235618 on the card, adding this stage to the epic lane's claim 6095611212). The surviving per-organization helpers leave `per-organization-catalog.ts`, so stage 6c (deleting that module) no longer waits on stage 7. This is a move with no behavior change. #15204 remains open: this PR is one stage of its cutover.\n\n## What moved, and where\n\n`sec/` = `packages/plugins/plugin-security/src/`.\n\n| Export | New home | Kept consumers past 6c's landing slot |\n|:--|:--|:--|\n| `seedCtx`, `catalogIsPerOrganization`, `listSeedOrganizationIds`, `rowOrganizationId`, `resolveOwnOrganizationRow`, `SEED_ORGANIZATION_SCAN_LIMIT`, `warnOrganizationLessRows`, `OrganizationLessRowOrigin` | `sec/organization-scope.ts` | delegated-admin-gate, grant-permission-set-name-backfill, auto-org-admin-grant, security-plugin, bootstrap-declared-permissions (6b-2), seed-name-lookup and permission-set-projection (7a) |\n| `SeedLogger`, `logSeedDurabilityFailure`, `createSeedWriteRefusals`, `reportSeedWriteRefusals`, `SeedWriteRefusals`, `SeedWriteRefusalReport`, `SeedWriteRefusalClass` | `sec/write-refusals.ts` | bootstrap-platform-admin, cleanup-package-permissions, suggested-audience-bindings, bootstrap-declared-permissions and permission-set-drift (6b-2), permission-set-overlay-discard (7-pre), permission-set-projection (7a) |\n\n- **What stays in `per-organization-catalog.ts`:** `rowMatchesDeclaration` and nothing else. Its one importer is `bootstrap-builtin-positions.ts`, which retires in 6a. The module changes by deletion only: `git diff` shows 0 added lines and 666 deleted.\n- **Bodies are byte-identical.** Each new module is built from line ranges of the old file. Each gets a new header of at most seven lines, plus one new `import type { SeedLogger } from './write-refusals.js'` in `organization-scope.ts`. No export is renamed, and no signature or body changes.\n- **The doctrine docblock moved with the helpers it explains.** Its three sections (why the catalog is per organization, the doctrine, and what replaces a reap) now head `organization-scope.ts`, beside `resolveOwnOrganizationRow` and `warnOrganizationLessRows`.\n- **The `SeedLogger` choice.** Both modules use `SeedLogger`. It lives in `write-refusals.ts` because its own doc is the durability-channel contract, and `organization-scope.ts` imports the type from there. Its pin in `seed-write-refusal.test.ts` reads the declaration from source, so that test's path literal follows it.\n- **No re-export shim, and no public surface.** None of these names is in `plugin-security`'s `src/index.ts`, and none is imported from any other package (`git grep` over the tree). The package's public exports are unchanged.\n\n## Importers repointed\n\nThere are 17 importers in `sec/` plus `seed-write-refusal.test.ts`. The only edits are their import specifiers: names, aliases (`seedCtx as organizationScopedCtx`, `seedCtx as lookupCtx`) and `type` modifiers are all kept. `walled-platform-bucket-diagnostic.test.ts` names the module only in comments, which point at `per-organization-catalog.test.ts`, so it is unchanged.\n\nFor retired modules, batch #310 item 4 applies as the seat reads it in 6098235618: an import specifier repoint is the mechanical consequence of the move, and no other line changes. That covers the 6a, 6b-1, 6b-2, 7-pre and 7a modules. `permission-set-projection.ts`'s import is the only line changed there.\n\n## Comment pointers\n\n- **Repointed in surviving modules:**\n  - `security-plugin.ts`, the seeding comment: now `organization-scope.ts`, plus `rowMatchesDeclaration` for the O(changed declarations) half.\n  - `delegated-admin-gate.ts`: now `organization-scope.ts`.\n  - `bootstrap-platform-admin.ts`, the `tryInsert` comment: now `write-refusals.ts`.\n  - `plugin-auth/src/ensure-default-organization.ts`, the `logSeedDurabilityFailure` provenance: now `write-refusals.ts`. Comment only.\n- **Left as they are in retired modules (item 4):** `bootstrap-builtin-positions.ts`, `bootstrap-declared-positions.ts`, `bootstrap-declared-permissions.ts`, `permission-set-projection.ts`, and `plugin-sharing/src/bootstrap-declared-sharing-rules.ts`. ADR-0131 D2 lists `bootstrapDeclaredSharingRules` among the retirements.\n\n## Behavior-free pin\n\nThe full `@objectstack/plugin-security` suite was run before (base `0fea05fe3`) and after (`539010f0`). Both runs: 196 files, 4,150 tests, 4,105 passed, 45 skipped, 0 failed. Compared by (file, full test name), the two runs have the same set of keys and no status differs.\n\n## Size\n\n1,422 changed lines (+725 / −697) over 22 files, measured by `dispatch-gates`. That is under the 3,000 line of batch #310 item 7.\n\n## Local gates (on `539010f0`)\n\n- **Build:** `pnpm --filter '@objectstack/plugin-security...' --filter '@objectstack/plugin-auth...' build` exited 0.\n- **Typecheck:** `pnpm --filter @objectstack/plugin-security --filter @objectstack/plugin-auth typecheck` exited 0. That covers `tsc --noEmit`, the scripts program and `check:test-typecheck` for both packages.\n- **Tests:** the `plugin-security` suite results are under \"Behavior-free pin\" above.\n- **`dispatch-gates --ran`:** 69 families derived, 66 run with exit 0, 3 NOT MEASURED, 0 unrun. The five roster gates whose roster sits under a changed path also ran, and exited 0: `check-changeset-fixed`, `check:auth-mount-ledger`, `check:authz-resolver`, `check:error-code-casing` and `check:filter-alias-parity`.\n- **The three NOT MEASURED (each exited 3, prerequisite refused):**\n  - `check:dual-build-cjs-loads` and `check:i18n` read every package's `dist/`, and only this diff's closure was built.\n  - `check-plugin-teardown-shape --self-test` needs an unshallowed clone. It is checker-health only.\n- **Left to CI:** the repo-wide `pnpm lint` and the workspace type-check lanes.\n\n## Acceptance notes\n\n- `scripts/check-logger-receiver-detach.mjs:503` carries a control-fixture provenance comment naming `per-organization-catalog.ts`. It is a gate script, which this stage does not touch. It goes stale when 6c deletes the module. Carrier: stage 6c.\n- `scripts/engine-double-contract.pinned.json` pins `per-organization-catalog.test.ts`. That test is not moved here: it exercises the retired seeders and goes with them.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FNnkhcT29ev69L6LVnt5yt)_\n"
+}

@@ -1,7 +1,7 @@
 {
   "number": 22689,
   "kind": "issue",
-  "title": "Runtime exposes no rebuild-pending or kernel-generation read, so a console cannot tell a stale-while-rebuild window from an install that did not take (or an upgrade's old app from its new one)",
+  "title": "registry: an app registered through `registerItem` is served without the declared `_packageVersion` (the artifact loader path stamps it), so a console cannot tell an upgrade's old app from its new one",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -10,16 +10,24 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:api",
+    "domain:engine",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T14:11:25Z",
-  "updated_at": "2026-10-10T14:11:25Z",
+  "updated_at": "2026-10-10T19:46:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22689",
   "body": "Filing class: **the server surface that objectui#12087's triage made conditional.** Triage `6096303824` on objectstack-ai/objectui#12087: \"The alternative (the runtime exposes \\\"rebuild pending\\\") is a server surface in objectstack or cloud. It is only worth filing if the bounded poll cannot tell \\\"still rebuilding\\\" from \\\"install did not take\\\". The claimant states which it measured.\" The claimant's report on objectstack-ai/objectui#12087 (`6098339059`) states that the console **cannot** tell them apart. Filed by the `domain:ui` seat 3 (seat post objectstack-ai/objectui#9800, `session_01B1gHb9baeX7oioD5sHVm7z`). ⛔ Not graded or routed here: triage grades, and routes the cloud half (cloud is not reachable from this seat).\n\n## Background\n\n- **The measured symptom:** on objectstack-ai/objectui#12087, the maintainer installed HotCRM on staging, and the console refreshed its app list inside the runtime's ~60 s stale-while-rebuild window. It then cached the pre-install list, so the installed app did not appear.\n- **The console half** is PR objectstack-ai/objectui#12096. After a cloud install it polls `GET /meta/app` on a bound until an app whose `_packageId` equals the package's manifest id is served, and only then refreshes and persists. On expiry it shows a timeout instead of a false success.\n\n## What the console still cannot tell, read from objectstack `86da1949` (code reads, not reproduced live)\n\n- **\"Still rebuilding\" vs \"install did not take\":** `GET /meta/app` lacks the app in both cases. `GET /cloud-connection/installation` answers `installed: true` in both (`cloud-connection-plugin.ts`). `GET /packages/:id` 404s on the stale kernel and after a failed load alike.\n- **\"No app in this package\" and \"app withheld from this user\":** `filterAppForUser` withholds apps by `requiredPermissions` / `requiresService` with the same absence.\n- **An upgrade:** objectql `registry.registerItem` calls `applyProtection(item, { packageId })` only. Served apps carry `_packageId` but no package version, so the stale kernel's OLD app already satisfies any `/meta/app` predicate. The console then refreshes inside the window and persists the pre-upgrade app.\n- **The install answer** (`installation.{id, environment_id, package_id, version}`) carries no rebuild state.\n\n## What would close it (direction for triage to grade, not a ruling)\n\nA runtime read of the kernel's rebuild state: \"rebuild pending\" or a kernel generation. The KernelManager freshness state appears in the staging log on objectstack-ai/objectui#12087 (`kernel demoted to stale — serving it while the rebuild runs`), and it lives in cloud. A console could then wait on it rather than on the list. Separately, a served item's package version would let an upgrade's new app be told from its old one.\n\nDedupe: REST list of objectstack issues (the 300 most recent, all states), titles matched for `rebuild`, `stale-while`, `kernel generation`, `_packageVersion` and `freshness` → 1 hit, objectstack-ai/objectstack#22544 (an unrelated tooling card). Control: the same pages hold 2 titles matching `marketplace|install`."

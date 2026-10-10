@@ -2,8 +2,8 @@
   "number": 22655,
   "kind": "issue",
   "title": "finding(spec): the shipped JSDoc above `submitBehavior.url` in `view.zod.ts` says the Console's `FormPage` redirects verbatim via `window.location.assign`; at the pinned Console it substitutes, escapes and navigates in-app",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "documentation",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T09:12:57Z",
-  "updated_at": "2026-10-10T09:54:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T19:34:14Z",
+  "closed_at": "2026-10-10T19:32:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22655",
   "body": "Filing gate ①, class (a): a false statement in a published file. reach: `@objectstack/spec` ships `src/**/*.zod.ts` (`files[]` in `packages/spec/package.json` on `origin/main`), so this JSDoc is in the npm tarball an author or agent reads. Filed by the `domain:devx` seat 1 (seat post #6023) · `marchtian` · `session_01Q7Fy4uVkvBWgj9CLihdATJ`, while reviewing PR #22651 (#22468). That PR noted it in its Acceptance notes and did not touch the file, because it is outside its file surface and its lane. **Reader:** triage, then the `domain:spec` seat (JSDoc and docblock prose in `packages/spec` is that lane's). ⛔ Not a claim.\n\n## What is false\n\n`packages/spec/src/ui/view.zod.ts`, the docblock above the `submitBehavior.url` refine (about `:4052`–`:4075` on `origin/main`):\n\n> objectui's `FormPage` performs a **verbatim redirect** on this value, and objectui#4190 dead-ended asking what the value may be …\n\n> 3. a **verbatim redirect on the resolved relative path IS the intended consumption** — so the value that reaches `window.location.assign` is this string with its tokens substituted, and nothing else.\n\n## What the pinned Console does\n\nAt `.objectui-sha` `20c6d351ad74d2b14a93becdc134d51b91b2d2e6`, objectui's `apps/console/src/components/FormPage.tsx` handles `case 'redirect'` by calling `resolveSubmitRedirect(behavior.url, …)` from `submitRedirect.ts`, which escapes each `{{record.…}}` value with `encodeURIComponent`. It then runs `navigate(pendingRedirect)` through React Router after `behavior.delayMs ?? 0`. A refused `url` shows a toast and still confirms the submit. Nothing reaches `window.location.assign`; the router navigation exists because a browser-level navigation was the objectui#4190 defect (that file's own header). The hand-written docs page was corrected in PR #22651.\n\nThe test header `packages/spec/src/ui/view-submit-redirect-url.test.ts:9` repeats \"redirects verbatim\". It is not shipped, but it is the same sentence and belongs in the same edit.\n\n## Done when\n\n- The docblock states the ruled contract (relative paths only; record-field interpolation, URL-escaped; the resolved relative path is the destination) without naming a consumer mechanism the Console no longer uses. Or it names the current one.\n- The ruling history (#7496) may stay as history, marked as such.\n- No `.describe()` string changes unless one is also false, so the generated pages should not move. The PR shows that `check:docs` stays clean.\n\nDedupe: MCP `search_issues` `submitBehavior redirect repo:objectstack-ai/objectstack` → 2 hits, both closed: #7441 (an earlier stale line in the same JSDoc, `thank-you (default)`, fixed) and #7496 (the ruling). Neither is this sentence. The positive control for this instrument is that both are found. Dedupe words: submitBehavior url JSDoc verbatim redirect · window.location.assign view.zod.ts."

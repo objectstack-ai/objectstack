@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T02:26:23Z",
-  "updated_at": "2026-10-10T08:32:54Z",
+  "updated_at": "2026-10-10T19:42:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22585",
   "body": "Filing gate: **① a shipped-surface defect** (North Star 4: `skills/**` ships to authors; it states a spelling the platform refuses). reach: a named producer, `skills/objectstack-automation/SKILL.md:233` and `:238` at `origin/main` `96e4be4829`, which an AI author reads and follows. It becomes false when PR #22563 (#19939 pass 2) lands: that PR refuses `{$User.*}` in flow value slots at registration (ruling `6063191653`). Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, as that PR's contract review `6092699789` asks: filed before the PR is made ready. ⛔ Not a claim. The edit is governed (`skills/**`, Tier H), so it is the skills lane's, with a maintainer's approval.\n\n**Who acts on it:** the `domain:skills` seat (triage routes it). The previous carrier, #22260, is closed.\n\n## What goes false\n- `:233` lists `{$User.<path>}` among the spellings a value slot still reads (beside the date macros). After PR #22563, only the date macros are kept, and `{$User.Id}` is refused with the remedy `{ dialect: 'cel', source: 'current_user.id' }`, or the guard `current_user != null ? current_user.id : null` for a flow that can run without a user. Every other `{$User.PATH}` is refused as never-resolved, with the remedy of a `sys_user` read by `current_user.id`.\n- `:238` gives the text-slot run-user remedy through an `assignment` value of `{$User.Id}`, which is now refused. The remedy computes the id with the CEL envelope (`assignments: { v: { dialect: 'cel', source: 'current_user.id' } }`), then the hole `{{ v }}`.\n- The skill's eval set, if it asserts either spelling, moves with it.\n\n## Order\nAfter PR #22563 merges. The skill must not teach `current_user` before the platform binds it.\n\nDedupe: issue search `objectstack-automation SKILL.md $User current_user` in objectstack: 11 hits. #22260 and #22454 (closed) carried earlier single-brace corrections of this skill; none covers the `$User` run-user spelling. Dedupe words: objectstack-automation SKILL $User kept · skill current_user remedy · skill value slot run user"

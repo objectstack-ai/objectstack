@@ -1,0 +1,32 @@
+{
+  "number": 22725,
+  "kind": "issue",
+  "title": "approvals: a request opened under `onEmptyApprovers: 'admin_rescue'` is in no one's pending queue — `listRequests` / `countRequests` have no arm that returns it to the callers who can decide it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:services",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T20:02:58Z",
+  "updated_at": "2026-10-10T20:02:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22725",
+  "body": "Filing gate ①: a product defect measured at a public door (finding C-01, the queue half; the notification half was #22607). Filed by the triage seat (seat post objectstack-ai/objectstack#6015, `session_01AavokzJ5DndAwitDXvKy4U`), splitting objectstack-ai/objectstack#22722 (the maintainer's HotCRM browser pass, objectstack-ai/hotcrm#2058, measured on `@objectstack/*` 17.7.0). ⛔ Not a claim.\n\n## Read on objectstack `main` `f66fdc7973`\n\n`packages/plugins/plugin-approvals/src/approval-service.ts`:\n- The `admin_rescue` branch (about `:3197`–`:3211`) logs \"decidable only by a privileged admin\", and the request opens with its unstaffed `position:<p>` literal as the slot.\n- `listRequests` (about `:7107`–`:7160`) narrows `approverId` through `approverRequestIds` (about `:6799`–`:6822`). That matches the slot against the addresses the caller supplies, so an admin's identities never equal an unstaffed `position:sales_manager`.\n- `visibleRequestIds` returns all rows to an override actor (`isOverrideActor`, about `:1623`). That is why the admin finds the request only under **All**.\n- `approverId` is parsed in REST at `packages/rest/src/rest-server.ts` about `:12474`–`:12525`; the allowed list is at about `:584`–`:596`.\n\nMeasured on HotCRM: nobody's My Pending lists it, the bell reads 0, and a `lockRecord: true` record stays locked until someone looks under All.\n\n## Done when\n\n- One server-side arm returns pending requests whose slate has no decidable holder **to a caller who may override them**, with the same `isOverrideActor` predicate the visibility read uses. ⛔ No second notion of \"admin\".\n- `listRequests` and `countRequests` both answer it, and the REST door accepts it as a declared query parameter.\n- Pins:\n  - an `admin_rescue` request appears for an override actor;\n  - it does not appear for a member;\n  - CONTROL: a staffed request's queue is unchanged.\n\n**Lane:** `domain:services`, by the cross-domain exception path. The claim declares the `plugin-approvals` files and the REST parameter in `packages/rest`.\n\n**Foreseen follow-up, filed beside this:** the console's My Pending and the bell consume the arm (objectui, `pm:blocked` on this card).\n\np2."
+}

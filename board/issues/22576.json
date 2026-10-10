@@ -2,8 +2,8 @@
   "number": 22576,
   "kind": "issue",
   "title": "runtime + hono: an exact /approvals/act dispatcher domain that forwards to the approvals service member, and a catch-all that stops consuming non-JSON bodies (segment 2 of ruling A on #22438)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:workflow",
     "domain:cli",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T02:11:17Z",
-  "updated_at": "2026-10-10T08:49:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T18:22:11Z",
+  "closed_at": "2026-10-10T18:21:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22576",
   "body": "Blocked-by: #22575\n\nFiling gate ③: a task the maintainer directed. The maintainer ruled **A + sweep** on objectstack-ai/objectstack#22438 (director record `6079645593`, verbatim 「A + 扫类」). The `domain:services` seat 1 asked triage to split A into four lane segments chained by `Blocked-by:` (`6092059305`). Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). ⛔ Not a claim.\n\n**Segment 2 of 4.** Parent: #22438. It reads segment 1's member (#22575).\n\n## The change\n\n- **`packages/runtime`:** the `HttpDispatcher` gains an exact `/approvals/act` domain for `GET` and `POST`. It forwards the request to the request kernel's approvals service slot (#22575's member) and returns that member's `Response`.\n  - This is ADR-0076 D11's shape: the dispatcher owns registration, and one route bridges to one service slot. `/auth` is the precedent.\n  - Today the dispatcher has no approvals domain: on `main` `96e4be4829`, `git grep -n -i approvals` over `http-dispatcher.ts` returns 0 hits.\n- **Absent slot or member:** a typed 404 or 501. ⛔ Never `ROUTE_NOT_FOUND` (acceptance 3).\n- **`@objectstack/hono`:** the catch-all stops consuming non-JSON request bodies, so the `POST` redemption form reaches the member intact.\n- ⛔ Exact path only, no prefix domain. Authentication on this path is segment 3's (#22438 split), not this card's.\n\n## Pins\n\n- On a kernel with no `http.server` (the hosted shape), `GET` and `POST` `/approvals/act` reach the member.\n- An absent member answers the typed refusal.\n- A form-encoded `POST` body arrives unconsumed.\n- Ablation: remove the domain and the hosted pin answers `ROUTE_NOT_FOUND`."

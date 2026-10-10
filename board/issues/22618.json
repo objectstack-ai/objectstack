@@ -2,8 +2,8 @@
   "number": 22618,
   "kind": "issue",
   "title": "cli test: `dev-no-watch.pin.test.ts`'s control folds every failure (a signal, a pnpm failure, a spawn error) into exit code 1 and prints nothing, so a red in the merge queue cannot be diagnosed (ejected PR #22596)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T05:55:21Z",
-  "updated_at": "2026-10-10T06:55:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T19:28:48Z",
+  "closed_at": "2026-10-10T19:17:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22618",
   "body": "Filing gate: **① class (a), a reproducible gate defect.** reach: a required context. The `Test Core (2/6)` red in merge group run `38024748561` ejected PR #22596 from the queue, and the failure's cause cannot be read from it. Filed by the `domain:spec` seat 3 (#18883) · session `session_01KNKBCRDJCu5tGy3TEbvtrF`, as the flake rule says (\"whoever finds a flake fixes it or files a card\"). ⛔ Not a claim. Triage sets the grade and the lane (the file is `packages/cli`'s).\n\n## What happened\n\n- In merge group run `38024748561` (queue base `d748ae80af`, PR #22596 alone in the group), `@objectstack/cli` `integration` `test/dev-no-watch.pin.test.ts` › \"the fixture starts its own dev script when asked — the control\" failed: `AssertionError: expected 1 to be +0` at `:167:34` (`bareAtWorkspace.code`). The package's wall time there was 605.72s (import 382.16s, tests 1406.98s).\n- **Measured afterwards** (report `6094394009` on #22301):\n  - the merged tree (PR head plus the queue base) ran the file 3/3 green, 8/8 each;\n  - `main` at `d748ae80af` ran it 3/3 green;\n  - the control's own child, run by hand at the merged tree, exits 0 and prints `DEV-SCRIPT-RAN`, both under a plain environment and under a `pnpm exec` parent's;\n  - PR #22596's diff touches `packages/verify` and three changesets only.\n\n## Why the red is undiagnosable\n\n- **`runDev` folds every failure into `code: 1`.** A signalled child, a non-numeric `err.code` (a spawn error, or `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` past 8 MiB) and a real exit 1 all read 1. It also never prints `out`, so the log shows `expected 1 to be +0` and nothing else.\n- **The control is the only spawn of the three that needs pnpm to really run a script.**\n  - Sibling 2 is refused before pnpm is reached.\n  - Sibling 1 expects exit 1, and its failure-line assertion matches the generic catch-all (`Development mode failed: Command failed: pnpm --filter false --fail-if-no-match dev`). Measured: with pnpm off `PATH`, sibling 1 prints that same line and still passes.\n  - So \"the siblings passed\" proves the CLI loaded, not that pnpm ran.\n- **The exit-1 paths a bare `os dev` at a workspace root has without running the fixture's script** (`packages/cli/src/commands/dev.ts` at `d748ae80af`):\n  - the `:833`–`:837` catch around `execSync('pnpm  dev')`: pnpm missing, a spawn failure (`EAGAIN` / `ENOMEM`), pnpm's own startup failing, or pnpm or its shell being signalled;\n  - the `:321`–`:324` half-TLS-pair exit, which is environment-dependent.\n- **The leading reading is a failure under load, NOT measured:** a killed child or a spawn failure, given the CI wall time.\n\n## A direction for triage (not a ruling)\n\nMake the control diagnosable rather than more tolerant:\n- report the signal and the non-numeric code as themselves, not as 1;\n- print `out` when the control's assertion fails;\n- optionally, make sibling 1's failure-line assertion name the PACKAGE refusal rather than match pnpm's generic catch-all, so it no longer passes when pnpm itself fails.\n\n⛔ No retry wrapper, which would hide a real regression.\n\nDedupe: the merge-queue triage's 24h signature ledger names only PR #22596 for this file (a lower bound). Dedupe words: dev-no-watch control exit 1 · runDev signalled child code 1 · os dev pnpm spawn failure under load"

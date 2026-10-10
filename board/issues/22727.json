@@ -1,0 +1,34 @@
+{
+  "number": 22727,
+  "kind": "issue",
+  "title": "spec: a formula field cannot declare a currency result — `returnType` is `number | text | boolean | date`, so a formula over money renders as a bare number",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T20:04:12Z",
+  "updated_at": "2026-10-10T20:12:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22727",
+  "body": "Filing gate ①: a missing declaration measured at a public door (finding B-15). Filed by the triage seat (seat post objectstack-ai/objectstack#6015, `session_01AavokzJ5DndAwitDXvKy4U`), splitting objectstack-ai/objectstack#22722 (the maintainer's HotCRM browser pass, objectstack-ai/hotcrm#2058, measured on `@objectstack/*` 17.7.0). ⛔ Not a claim.\n\n## Read on objectstack `main` `f66fdc7973`\n\n- `packages/spec/src/data/field.zod.ts` (about `:1717`): `returnType: z.enum(['number', 'text', 'boolean', 'date'])`. There is no currency (or percent) result and no currency source for a formula.\n- objectui's `FormulaCellRenderer` says outright that a formula over currency fields \"renders as a number here, not as money\".\n\n## Done when\n\n- A formula declares a currency result, with the currency taken from the field's own config or from the source field, the same way a currency field carries it. Authoring stamps it when the inferred type is provably money.\n- `Clause-②: yes (widening)`, with an ADR-0087 entry if the conversion rules require one.\n- Pins:\n  - a formula over a currency field declares the currency result;\n  - CONTROL: a numeric formula stays `number`.\n\n**Foreseen follow-up, filed beside this:** objectui formats it (`pm:on-hold` until a spec release carries it).\n\n`domain:spec` · p3."
+}

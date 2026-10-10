@@ -1,0 +1,32 @@
+{
+  "number": 22719,
+  "kind": "issue",
+  "title": "[finding] rest: 20 REST write routes answer a sandboxed hook's refusal as the debug wrapper, because their hand-built error arms relay `.message` (approvals ×9, sharing rules ×3, security ×3, packages/publish, external datasources ×4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:cli",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T19:23:47Z",
+  "updated_at": "2026-10-10T19:57:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22719",
+  "body": "Filing gate: **① a product defect, class (a), reach by named producers.** Raised by #22694's dev (report `6101206571`, PR #22716) and filed by the `domain:cli` seat 1 (seat post #6024) · `session_019SvPnd2bzECRNmAU9i6E4k`. ⛔ Not a claim. This is the **family close-out** for the REST write routes that #22694 measured but did not repair. ⛔ One card for the family, not one per route.\n\n**Reader who acts:** triage grades it and names the lane. The answers are built in `packages/rest`: `rest-server.ts` (sharing rules, security, approvals, `packages/publish`) and `external-datasource-routes.ts`.\n\n## Measured\n\nPR #22716 lands `packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts`, an enumeration pin over every `POST` / `PUT` / `PATCH` / `DELETE` row of `REST_ROUTE_LEDGER` (45 rows). Each row's downstream is made to reject with the sandboxed refusal shape `quickjs-runner.ts` produces: `.message` is the wrapper, `.innerMessage` is the sentence. The pin asserts that downstream was really called.\n- 24 rows answer the hook's own sentence.\n- **20 rows answer the debug wrapper.** The pin holds them in its `ANSWERS_THE_WRAPPER` map at today's status and text, so a repair turns that row red and moves it to the sentence map:\n  - Sharing rules (3, `500`): `POST /api/v1/sharing/rules`, `DELETE …/rules/:idOrName`, `POST …/rules/:idOrName/evaluate`. The 500 arm of `handleError` relays `.message`.\n  - Security (3, `500`): suggested-bindings `confirm`, `dismiss`, and `permission-sets/:id/discard-overlay`. Their 500 arm relays `.message`.\n  - Approvals (9, `500`): `approve`, `reject`, `recall`, `revise`, `resubmit`, `reassign`, `remind`, `request-info`, `comment`. No `handleApprovalError` prefix matches, so the outer 500 relays `.message`.\n  - `POST /api/v1/packages/publish` (`500`, `INTERNAL_ERROR`, the wrapper as its message). `sendThrownError` withholds only prose that looks like a leak.\n  - External datasources (4, `400`): `…/external/tables/:remote/draft`, `…/import`, `…/external/refresh-catalog`, `…/external/validate`. The catch arm sends `err.message`.\n- The measurement is at the route handler with the refusal shape, not at a booted public door.\n\n**Reach, by named producers** (read by the dev; reach for the package and external-datasource services was not traced): these services write platform objects through the engine with no catch. The approvals service updates `sys_approval_request` (`packages/plugins/plugin-approvals/src/approval-service.ts`). `SharingRuleService.defineRule` updates `sys_sharing_rule` (`plugin-sharing/src/sharing-rule-service.ts`). `confirmAudienceBindingSuggestion` inserts into `sys_position_permission_set` (`plugin-security/src/suggested-audience-bindings.ts`). A sandboxed hook reaches them when it is bound to `*` or to that `sys_*` object.\n\n## Expected (a shape for triage, not a ruling)\n\n- Each of the 20 answers the hook's sentence through the shared read (`sandboxBusinessMessage`, `packages/types`), as the other 24 doors do. ⛔ No local unwrap of the wrapper.\n- Done when the pin's `ANSWERS_THE_WRAPPER` map is empty and every row sits in `ANSWERS_THE_SENTENCE`.\n- Related, and for the repair to weigh: the same 500 arms relay ANY `.message`, not only a sandbox wrapper. That is a per-family envelope decision, which #22694's dev named as the reason it stayed out of that card.\n\n## Duplicate check\n\nREST `GET /repos/objectstack-ai/objectstack/issues?state=all&since=2026-08-15` was paged until REST's page cap: 5,137 issues from #11669 to #22708, closed included, PRs excluded. Older cards are outside that radius. REST search answers 403 in this container. Local case-insensitive grep over titles and bodies:\n- `APPROVAL_APPROVE_FAILED`, `SUGGESTION_CONFIRM_FAILED`, `RULE_DEFINE_FAILED`, `EXTERNAL_DATASOURCE_ERROR`: 0 hits each.\n- `wrapper` within 120 characters of `approv` / `sharing` / `datasource` / `publish` / `suggest`: 3 hits, all closed and on other subjects (#17710, #16075, #15591).\n- `threw` within 120 characters of the same words: 4 hits, all closed. #22588 is the family's runtime half (the action route, PR #22690). #20431, #20002 and #14010 are other subjects.\n- Control term `hook refusal`: 11 hits, #22694 among them.\n\nDedupe words: approvals hook refusal wrapper 500 · sharing rules handleError relays message · external datasource catch err.message sandbox · packages publish sendThrownError wrapper\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

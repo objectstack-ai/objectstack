@@ -1,0 +1,34 @@
+{
+  "number": 22726,
+  "kind": "issue",
+  "title": "validation: a `severity: 'warning'` rule's hit is only logged — the data write answer carries no `warnings`, so no client can show the advisory #13889 calls UI-level",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T20:03:38Z",
+  "updated_at": "2026-10-10T20:13:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22726",
+  "body": "Filing gate ①: a declared surface whose effect no client can reach (findings A-05, B-10, C-10). Filed by the triage seat (seat post objectstack-ai/objectstack#6015, `session_01AavokzJ5DndAwitDXvKy4U`), splitting objectstack-ai/objectstack#22722 (the maintainer's HotCRM browser pass, objectstack-ai/hotcrm#2058, measured on `@objectstack/*` 17.7.0). ⛔ Not a claim.\n\n## Read on objectstack `main` `f66fdc7973`\n\n- **The evaluator returns nothing for a warning.** `packages/objectql/src/validation/rule-validator.ts` `evaluateValidationRules` (about `:3249`) returns `void`. A non-error hit goes only to `logger.warn(…)` (about `:3430`–`:3446`), or to the seed-load aggregation (#13889). Only `error` throws.\n- **The write answer has no slot for it.**\n  - `metadata-protocol` `createData` (about `:13367`) builds `{ object, id, record, droppedFields? }`, and REST relays it.\n  - `CreateDataResponseSchema` and `UpdateDataResponseSchema` (`packages/spec/src/api/protocol.zod.ts` about `:2048`, `:2230`) declare no warnings key.\n  - The preview's `ValidateDataResponseSchema.results[].warnings` (about `:2177`) carries value-shape admissions only.\n- **What the spec promises:**\n  - the rule's `message` is described as \"Error message to display to the user\";\n  - the liveness row (`liveness/validation.json` `severity`) records that warnings \"are logged and let the write proceed\";\n  - #13889's ruling calls a warning rule 「UI 级劝导」 and changed only its log shape.\n\n  So the declared meaning, a warning shown to the user, has no channel.\n\n## Done when\n\n- The create and update answers declare an optional `warnings`: the advisory hits of this write, each with its rule name and message. `Clause-②: yes (widening)`. The preview door fills the same key from the same evaluation.\n- The evaluator returns its advisory hits. ⛔ The rule semantics are unchanged: only `error` blocks, as #13889 keeps.\n- ⛔ No new authorable key. #13889's parked audience key (option A) stays parked.\n- Pins:\n  - a warning rule's hit appears in the write answer and the write succeeds;\n  - CONTROL: an error rule still refuses, and a write with no hit carries no `warnings`.\n\n**Lane:** `domain:spec`, by the cross-domain exception path. The claim declares:\n- the two response schemas in `packages/spec`;\n- the evaluator in `packages/objectql`;\n- the protocol's `createData` / `updateData`;\n- the REST relay.\n\n**Foreseen follow-up, filed beside this:** the console shows them (objectui, `pm:on-hold` until a spec release carries the key).\n\np3."
+}

@@ -2,8 +2,8 @@
   "number": 22467,
   "kind": "issue",
   "title": "pm tooling: the os-dev's PR-assignee write (`label-write.mjs --assign`) is refused by the auto-mode permission classifier on 4 of 12 objectui PRs in one seat's session — same command, same brief, nondeterministic",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,22 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [
-    "marchtian"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T11:05:24Z",
-  "updated_at": "2026-10-10T14:14:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T14:53:24Z",
+  "closed_at": "2026-10-10T14:51:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22467",
   "body": "**Filing gate ③ — a task the maintainer directed.** In the objectui `domain:ui` seat 3 session (`session_01CGZy1BGCjdN5cXqL9cnvB8`), 2026-10-09, about the refusal reported below, verbatim: 「这个给 skills 立卡。」 Routed to `domain:skills` through the maintainer's direct-dispatch channel; triage may grade it on first touch.\n\n**Who acts on it:** the objectstack `domain:skills` seat. The surface is the os-dev agent definition, `.claude/settings.json`'s allowlist and `scripts/pm/`. ⛔ Not a claim.\n\n## What happens\n\nThe os-dev's write budget includes one PR-assignee write: `.claude/agents/os-dev.md` (about `:36` and `:57` on `main` `33ae4bff0f`), \"PR assignee = 卡的: `--issue PR_NUMBER --assign LOGIN`\". The dispatched dev runs `node scripts/pm/label-write.mjs --repo objectstack-ai/objectui --issue PR --assign os-support-ai`.\n\nIn one objectui seat's session, with the same brief and the same command shape, that write landed on 8 PRs and was refused on 4:\n\n| PR | assignee after the dev's run |\n|:--|:--|\n| objectstack-ai/objectui#11837, #11975, #11994, #12051 | **none**: the write was refused |\n| objectstack-ai/objectui#12023, #12026, #12031, #12038, #12039, #12041, #12043, #12049 | `os-support-ai` |\n\nThe latest refusal, from objectui#12047's dev report, verbatim: \"The PR assignee write (label-write.mjs --assign os-support-ai) was refused by the auto-mode classifier before any request was sent: 0 requests, not retried\". Its deviation names the category: \"[External System Writes]\".\n\n**Why it does not heal itself.** A seat must never perform an action a subagent reports was refused by a permission check (permission laundering). So a refused assign leaves the PR without its assignee for good. The 4 PRs above landed that way, and the convention \"PR assignee = the card's\" is broken on each.\n\n## Measured and read (for the seat to verify)\n\n- `.claude/settings.json` on `main` `33ae4bff0f` allowlists `Bash(node scripts/pm/label-write.mjs *)` and `Bash(node --use-env-proxy scripts/pm/label-write.mjs *)` (about `:68` and `:70`), and still the classifier refused.\n- **Hypothesis, not measured** (#11114 measured the same mechanism for `git push`): the refused calls did not match an allow rule. They may have used a compound `cd /home/user/objectstack && node …`, an absolute script path, or a session whose project root is not objectstack. So they fell through to the auto-mode classifier, whose judgment varies. The 8 successes would then be calls that matched, or classifier passes. The dev transcripts hold the exact command lines.\n\n## Options (the skills seat's call)\n\n- **A:** make the allowlist match the shapes devs actually run (or document the one shape that matches, in os-dev.md's write rules), and pin it.\n- **B:** let the relay's `pr_create` carry `assignees` in the same stroke (`scripts/pm/fleet-write/dispatch.mjs`), so the dev makes no separate assign write and the budget drops a stroke.\n- **C:** move the PR assignee to the seat at ACCEPT time. This only moves the classifier exposure.\n\n## Duplicate check\n\n- Semantic issue search on objectstack-ai/objectstack (open and closed), *os-dev PR assignee label-write assign refused permission classifier auto mode*: 21 hits, 0 open on this cause. Related, closed:\n  - #11114: \"the auto-mode classifier's verdict varies with command chaining, not capability\". A bare `git push` passed seconds after the chained spelling was refused, which supports the hypothesis above.\n  - #19014: the allowlist missed the two landing calls, so landing fell to the non-deterministic classifier. Same mechanism, a different write.\n  - #10686: the classifier blocked the additive label write.\n- Each of the 4 refusals is recorded on its objectui card or ACCEPT as \"No PR assignee: … refused by a permission check, and the seat did not repeat it\".\n\nFiled by the objectui `domain:ui` execution seat 3 (seat post objectstack-ai/objectui#9800, session `session_01CGZy1BGCjdN5cXqL9cnvB8`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

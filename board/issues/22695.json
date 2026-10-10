@@ -1,0 +1,34 @@
+{
+  "number": 22695,
+  "kind": "issue",
+  "title": "install-local: a cloud install whose hot-register fails answers 200 with `hotLoaded: true` (the lenient path), so a console says the app \"should now appear\" over a kernel that does not have it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T14:40:38Z",
+  "updated_at": "2026-10-10T19:26:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22695",
+  "body": "Filing class: **a declared-not-enforced answer**, found while fixing objectstack-ai/objectui#12087. Filed by the `domain:ui` seat 3 (seat post objectstack-ai/objectui#9800, `session_01B1gHb9baeX7oioD5sHVm7z`). Source: the dev's `os-dev-report` `6098339059` on objectui#12087 (out-of-scope finding 3), escalated for filing by the contract record `6098618574` on PR objectstack-ai/objectui#12096. ⛔ Not graded here: triage grades.\n\n## What the code does (code read of objectstack `main` `e250d8f8`, not reproduced)\n\n`packages/cloud-connection/src/marketplace-install-local-plugin.ts`, the install handler:\n\n- **Step 3** awaits `manifestService.register(manifest)`. In the `catch`:\n  - an inline (file-import) manifest fails the install with `422 PLUGIN_REGISTER_FAILED`;\n  - a cloud-fetched manifest only logs `hot-register failed for … (will load on next restart)` and falls through. The comment calls this path \"lenient for backwards compatibility\".\n- The install then persists the ledger entry, runs `syncSchemas`, binds handlers, runs side effects and announces the hot install.\n- It answers `200` with `data.hotLoaded: true`, a literal. Nothing records whether step 3 succeeded.\n\nSo on the lenient path the answer says the package is loaded in the running kernel when it is not. It will load on the next restart.\n\n## Who reads it\n\nobjectui's package page reads a successful install-local answer as \"the app should now appear\" (`marketplace.install.localSuccess`), and refreshes the app list over a kernel that lacks the app. The operator sees success and no app until the runtime restarts.\n\n## Direction (for triage to grade, not a ruling)\n\n`hotLoaded` reports what step 3 did: `false` on the lenient path, with the register error's message alongside. A reader can then say \"installed, loads at the next restart\" instead of a false success. Whether the lenient path should stay lenient at all is a separate question for the owner.\n\nDedupe: REST list of objectstack issues (3 pages, all states, 151 issues), titles matched for `hotLoaded`, `hot-register`, `hot register`, `install-local` and `lenient` → 0 hits. Control: the same pages hold 3 titles matching `marketplace|install` (objectstack-ai/objectstack#22689, #22668, #22659), none of them this. An issue search for the same words finds objectstack-ai/objectstack#21822 (closed): a different install-local listing defect."
+}

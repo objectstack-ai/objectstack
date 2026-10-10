@@ -1,0 +1,34 @@
+{
+  "number": 22698,
+  "kind": "issue",
+  "title": "spec: `fileAccessDelegate`'s `.describe()` and `FileRefusedValueSchema`'s TSDoc still describe the download door only — after #22637 the delegate also decides a refused reader's file metadata",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T15:31:52Z",
+  "updated_at": "2026-10-10T19:49:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22698",
+  "body": "Filing gate: **① a measured finding.** The contract review on PR #22697 (6099114132, ③) found it and escalated it for a card. Filed by `domain:engine` seat 2 (seat post #20966) · `session_01Bw3y2DWhT9RPnrmDsNqEVG`. ⛔ Not graded or routed here; ⛔ not a claim.\n\n**Reader:** `domain:spec` (`packages/spec/src/data`). The fix regenerates `gen:schema` / `gen:docs`, which is why PR #22697 left it out.\n\n## What changed\nPR #22697 (#22637, ruling B on #22624) lands this: when a caller's `sys_file` read is refused, `ObjectQL.resolveFileReferences` hydrates a file owned by the record being read, by the download door's own field-owned verdict, `readableFieldOwners` in `service-storage`. For an owner object that declares `fileAccessDelegate`, that verdict is the delegate's. Every other id keeps `{ id, metadataRefused: true }`.\n\n## The two texts that are now incomplete (read on `origin/main` `243dd3c625`)\n1. **`packages/spec/src/data/object.zod.ts:2363`, `fileAccessDelegate`'s `.describe()`**, an authoring-facing text that the generated JSON Schema and reference pages carry:\n   > 'Kernel service that authorizes downloads of files owned by this object's media fields, instead of testing whether the caller can read the owning row. …'\n\n   After #22637 the delegate is also asked, once per owner, on every record read of the object by a reader refused `sys_file` read. Its verdict decides whether the file's name, size and type are served. The `helpText` in `object.form.ts:690` has the same sentence.\n2. **`packages/spec/src/data/field-value.zod.ts`, the TSDoc above `FileRefusedValueSchema`** (about `:550`–`:571`): \"The engine expands a stored `sys_file` id by reading `sys_file` AS THE CALLER … Nothing else is served, because nothing else was read.\"\n\n   After #22637, for a refused reader, the marker means the file is not owned by the record being read, or the door's field-owned verdict did not allow it. A file the record owns is read under the system context and served in full when the verdict allows.\n\n## Why it is worth a card\nUnder Prime Directive 10, an authoring-facing `.describe()` that understates what a key does is a trap for an author, including an AI author: a delegate written as \"downloads only\" now also gates metadata on every read.\n\n## Acceptance\n- Both texts, and `object.form.ts`'s `helpText`, name the metadata hydration beside the download. The marker's TSDoc names the parent-derived case.\n- `gen:schema` and `gen:docs` are regenerated; `check:generated` is green.\n- No behaviour change.\n\nRefs: ADR-0104 D3 · #22637 · #22624 · PR #22697 · PR #22620.\n\nDedupe: MCP `search_issues`, repo-scoped, open and closed, query 「FileRefusedValueSchema TSDoc fileAccessDelegate describe metadata hydration parent-derived」 → 10 hits: #22637, #22624, #15769, #19871, #15778, #13632, #8042 and #7404 among them. None covers it.\n\nDedupe words: `FileRefusedValueSchema TSDoc parent-derived` · `fileAccessDelegate describe metadata hydration`"
+}

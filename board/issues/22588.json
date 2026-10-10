@@ -2,8 +2,8 @@
   "number": 22588,
   "kind": "issue",
   "title": "runtime (17.7.0): three server-side defects seen from a metadata app — hook refusals reach users with an internal prefix, `?top=0` answers `total: 0`, and `security/explain` allows updates the write door refuses",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:api",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T02:37:49Z",
-  "updated_at": "2026-10-10T14:18:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T17:47:36Z",
+  "closed_at": "2026-10-10T15:09:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22588",
   "body": "Filing class: ① product defects — reach: public doors, each measured once on `@objectstack/*` 17.7.0. Folded into one checklist card under the per-fire filing cap; triage may split it. Maintainer instruction for platform problems found in the hotclm browser test, verbatim, 2026-10-10: 「你遇到的平台问题应该提交issue」.\n\n**Reader:** objectstack triage.\n\n**Source:** `objectstack-ai/hotclm` full browser pass objectstack-ai/hotclm#87 — `main` @ `c31c7e2`; full report on #87 and in `qa/browser-test-17-7/REPORT.md` on branch `claude/issue-87-browser-test-17-7` (screenshots by number in `qa/browser-test-17-7/screenshots/`).\n\n## Checklist\n\n- [ ] **1. A hook's business refusal reaches the user with the platform's internal prefix.** A `beforeUpdate` hook that throws `Error('1 deviation(s) are still open; decide each one before the contract enters approval.')`, reached through `POST /api/v1/actions/clm_contract/send_for_approval`, toasts `hook 'contract_state_machine' threw: Error: 1 deviation(s) are still open; …` (`053`; same for \"A current clean version is required before signing.\", `077`). The app's sentence is the user-facing part; `hook '…' threw: Error:` is not. Nearest prior: #17265 (closed — the refusal answered `500` with no toast).\n- [ ] **2. `GET /api/v1/data/clm_contract?top=0` answers `{\"total\":0}`** while `?top=1` answers `{\"total\":122}`. The Console issues this `top=0` probe on every list page, so any count read that way is wrong.\n- [ ] **3. `POST /api/v1/security/explain` (update) answers `allowed: true` where the data door refuses.** (a) A Records Manager whose row-level policy starts at `signing`: explain allows update on an `approved` contract that `GET /api/v1/data/clm_contract/ID` answers `404 RECORD_NOT_FOUND` for the same caller. (b) A `clm_admin` holder whose permission set carries no update RLS policy on the object (17.5 fails closed): explain allows, `PATCH` answers `403 \"You do not have access to this record\"`. This looks like another member of the open explain-vs-door family (#22571, and #22514 / #22550 / #22530 closed) — triage may fold it there.\n\n## Dedupe\n\nMCP `search_issues` on this repo: `hook threw error prefix shown to user toast internal message` → 2 hits (#21596, #17265 — closed, not the prefix) · `top=0 returns total 0 count query data route` → 0 hits (control: the explain query on the same tool returned 56) · `security explain allowed true but write denied row-level security update` → 56 hits, the family above, none covering the fail-closed-no-update-policy or read-invisible-row update cases.\n\n---\n_Filed by the `repo:hotclm` PM seat from a measured browser pass._"

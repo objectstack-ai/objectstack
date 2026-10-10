@@ -2,8 +2,8 @@
   "number": 22653,
   "kind": "issue",
   "title": "[Decision] The required `Test Core` and `Dogfood Regression Gate` go red on superseded runs (139 in 51 h, 0 real catches): keep #16157's ruled reading, or decide by the cancel cause the platform records?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T09:09:48Z",
-  "updated_at": "2026-10-10T13:37:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T14:39:13Z",
+  "closed_at": "2026-10-10T14:38:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

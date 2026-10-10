@@ -1,0 +1,36 @@
+{
+  "number": 22712,
+  "kind": "pull_request",
+  "title": "test(cli): dev-no-watch pin reports a failed child as itself and names pnpm's own PACKAGE refusal",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T18:33:57Z",
+  "updated_at": "2026-10-10T19:17:10Z",
+  "closed_at": "2026-10-10T19:17:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-10T19:17:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/22712",
+  "body": "Fixes #22618\nClause-②: no\n\n## What changed\n\nOne file, `packages/cli/test/dev-no-watch.pin.test.ts`. Test-only: nothing in `packages/cli`'s `files[]` (`dist`, `README.md`, `CHANGELOG.md`) changes.\n\n- **`runDev` reports a failed child as itself.** `Run` now carries `code: number | string | null` and `signal`, taken from `execFile`'s error as it is handed back: the exit status when there is one; `null` plus the signal for a signalled child; Node's own string code for a run that never produced an exit status (a spawn error such as `EAGAIN`, or `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`). Before this change all of those read `1`.\n- **Every spawned assertion prints the child's whole answer when it fails.** `told(run)` is passed as vitest's `expect(value, message)`, so a red reads `os dev ended with code …, signal …; its output (stdout, then stderr): …` instead of only `expected 1 to be +0`. The control is the case the card names. The siblings get the same message, because the tightened sibling-1 assertion below would otherwise be a second undiagnosable red.\n- **Sibling 1 (`os dev --watch=false`) now names pnpm's own PACKAGE refusal.** `dev.ts` has no sentence of its own for a PACKAGE that selects nothing: `--fail-if-no-match` hands that answer to pnpm. On that path the CLI's `✗` line (`Development mode failed: Command failed: pnpm --filter false --fail-if-no-match dev`) is the catch-all for every failure of `pnpm … dev`, so it names `false` whether or not pnpm ever ran. The it-block now also asserts pnpm's own no-match line (`PNPM_NO_PROJECTS`, `/^No projects found in \"/m`) and keeps the `false` check on the `✗` line.\n\n⛔ No retry wrapper, no wider timeout, no product change. A real regression stays red, and the red now says why.\n\n## Measured\n\nAll runs are on this branch at `d38422340`. The CLI child is the test's own (`tsx bin/run-dev.js dev`, the same fixture shapes, `NO_COLOR=1`).\n\n**The card's sibling-1 claim, reproduced.** With pnpm off `PATH`, the `--watch=false` child still exits 1 and prints the same `✗` line. The only difference is that pnpm's own `No projects found in \"DIR\"` line is missing (stdout, exit 1; the same under pnpm 10.28.0 and 10.31.0), and `/bin/sh: 1: pnpm: not found` appears instead. Under the same `PATH` the control's child also exits 1, which is the CI red's exact reading, and only its stderr names pnpm.\n\n\"pnpm off `PATH`\" means every `PATH` entry holding an executable `pnpm` is dropped, including pnpm's self-managed `~/.local/share/pnpm/.tools/pnpm/10.31.0/bin`, which `pnpm exec` puts on `PATH`. A first attempt that removed only `/opt/node22/bin` still resolved pnpm and ran 8/8 green. It does not count.\n\n| run | input | result |\n|---|---|---|\n| R1 | normal `PATH` | 8/8 pass |\n| R2 | pnpm off `PATH` | 2 fail, 6 pass: sibling 1's refusal assertion (`os dev ended with code 1, signal null; …` then `/bin/sh: 1: pnpm: not found`), and the control (the same message, then `expected 1 to be +0`) |\n| A1 | pnpm off `PATH`, the `PNPM_NO_PROJECTS` assertion deleted (`scripts/ablation-replace.mjs`, anchor 1 to 0, blob `7e8e5de` to `49986f4`) | 1 fail, 7 pass: sibling 1 is green again, so that one line is what turns it red. Restored: blob equals HEAD, `git diff HEAD` empty |\n| M1 | `timeout: 1` added to `runDev`'s `execFile` options | 4 fail, each reading `os dev ended with code null, signal \"SIGTERM\"`. Restored: blob equals HEAD |\n| M2 | `maxBuffer: 16` | 4 fail, each reading `code \"ERR_CHILD_PROCESS_STDIO_MAXBUFFER\", signal null`. Restored: blob equals HEAD |\n\nA1, M1 and M2 are one-time proofs; no permanent test was added for them. The subject under mutation is the test file itself, which vitest reads from disk, so no `dist/` sits on that path.\n\n## Local verification (at `d38422340`)\n\n- `pnpm --filter @objectstack/cli exec vitest run --project integration --maxWorkers=2 test/dev-no-watch.pin.test.ts`: 8/8 pass. The file is integration-tier because it spawns.\n- `pnpm --filter @objectstack/cli exec vitest run --project unit --maxWorkers=2`: 277 files pass. Two files (`published-subpath-console.pin`, `published-subpath-hook-body.pin`) refused because `packages/cli/dist` was missing. After `pnpm --filter @objectstack/cli build` they pass (2/2 files, 29/29 tests), so the layer is 279/279 files.\n- `pnpm --filter @objectstack/cli typecheck`: `tsc --noEmit` plus `check:test-typecheck` OK. The file is in `tsconfig.test.json`'s program (`tsc --listFilesOnly`).\n- Gates: the derived set (`node scripts/pm/dispatch-gates.mjs --commands`: 50 commands, identical to the dispatch's), plus `check:authz-resolver`, `check:error-code-casing` and `check:filter-alias-parity`. All exit 0. Two first answered a prerequisite (exit 3) and passed once it was met: `check-plugin-teardown-shape.mjs --self-test` (its pinned fixture commit fetched into the shallow clone) and `check:dual-build-cjs-loads` (dists present). `dispatch-gates --ran`: 50 derived, 50 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm lint`, narrowed to the touched file, with the narrowing proven:\n  - eslint's own config puts the file in the population (`isPathIgnored` false; `calculateConfigForFile` applies 5 rules);\n  - `eslint --no-inline-config --format json` on it counts 1 file, 0 errors, 0 warnings;\n  - no config object enables type-aware linting (`parserOptions` is only `ecmaVersion`/`sourceType`), so the diff cannot move any untouched file's verdict.\n- Not merged with `main`, which is 5 commits ahead at `9f159397f`. None of those commits touches this file, `dev.ts`, `test/helpers/serve-process.ts`, `vitest.config.ts` or `vitest-tiers.ts`. CI and the queue run the merge ref.\n\n## Acceptance notes\n\n- The `✗` line's naming of `false` is still asserted. It holds because the catch-all echoes the command pnpm ran; the PACKAGE refusal itself is pnpm's line.\n- If the next CI red of this file names a signal or a spawn error under load, that reading goes on #22618 (triage's direction). This PR does not give the control a budget of its own.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019SvPnd2bzECRNmAU9i6E4k)_\n"
+}
