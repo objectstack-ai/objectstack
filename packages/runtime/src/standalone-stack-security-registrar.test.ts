@@ -180,12 +180,12 @@ describe('createStandaloneStack — the artifact boot serves ONE copy of each se
     // Still one item per kind — two WRITERS, not two items; the last one wins.
     for (const kind of KINDS) expect(got[kind].map((i: any) => i.name), kind).toHaveLength(1);
     // …and the survivor is the raw copy: the defect this change removes, by
-    // type. `_packageVersion` and `scope` are the two keys no other seam can
-    // supply (the ObjectQL registry stamps `_packageId`/`_provenance` on the
-    // same object during package install, which is why only these two are
-    // asserted absent).
+    // type. `scope` is the one key no other seam can supply: the ObjectQL
+    // registry stamps `_packageId`/`_packageVersion`/`_provenance` on the same
+    // object during package install (`_packageVersion` since #22689), so the
+    // stamp no longer tells the two copies apart.
     expect(typeof got.sharing_rule[0].condition).toBe('string');
     expect(got.capability[0].scope).toBeUndefined();
-    expect(got.capability[0]._packageVersion).toBeUndefined();
+    expect(got.capability[0]._packageVersion).toBe('2.0.0');
   }, BOOT_TIMEOUT);
 });
