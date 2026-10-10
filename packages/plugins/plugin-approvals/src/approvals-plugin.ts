@@ -30,7 +30,7 @@ import {
 } from './lifecycle-hooks.js';
 import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.js';
 import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
-import { bindRequestReadGate } from './request-read-gate.js';
+import { bindRequestChildReadGates, bindRequestReadGate } from './request-read-gate.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
@@ -317,13 +317,18 @@ export class ApprovalsServicePlugin implements Plugin {
     // `disableAutoHooks`: that switch is the record lock's (a caller driving
     // the manual API), and a read through the generic door needs the gate
     // whichever API wrote the row.
+    // [#22589] …and its child tables, `sys_approval_action` (the decision log)
+    // and `sys_approval_approver` (the approver index): a row there is served
+    // only when its request is, by the same source.
     if (typeof (engine as any).registerMiddleware === 'function') {
-      bindRequestReadGate(engine as any, requestVisibilitySourceOf(this.service), ctx.logger);
+      const visibility = requestVisibilitySourceOf(this.service);
+      bindRequestReadGate(engine as any, visibility, ctx.logger);
+      bindRequestChildReadGates(engine as any, visibility, ctx.logger);
     } else {
       ctx.logger.warn(
-        'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request '
-        + 'through the generic data door are NOT narrowed to the approval requests the caller may see. '
-        + 'Grant no read on that object to non-administrators on this stack.',
+        'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request, '
+        + 'sys_approval_action and sys_approval_approver through the generic data door are NOT narrowed to the '
+        + 'approval requests the caller may see. Grant no read on those objects to non-administrators on this stack.',
       );
     }
 

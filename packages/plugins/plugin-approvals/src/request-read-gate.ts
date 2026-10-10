@@ -76,6 +76,31 @@
  * door only; a row served here never carries it, so every decision action's
  * `visible` predicate fails closed on this door, and a record reader admitted
  * by the tier is served the row read-only on both doors.
+ *
+ * ## The child tables (#22589)
+ *
+ * A request's two child tables declare the same `get` / `list` shape:
+ * `sys_approval_action`, the decision log (actor, decision, comment text), and
+ * `sys_approval_approver`, the pending-approver index. On the approvals door
+ * the decision log follows its request's visibility (`listActions` serves it
+ * through `getRequest`, and a decision attachment through `authorizeFileRead`),
+ * so the generic door applies that same answer to both tables, keyed by the
+ * row's `request_id`: {@link bindRequestChildReadGates}. ⛔ Still no rule here —
+ * the same source answers, and the conjunct is a constraint on `request_id`
+ * built from the ids it returned. Which request a read names
+ * ({@link requestChildReadTarget}):
+ *
+ *  - `request_id` pinned — a request's record page lists its Timeline this
+ *    way — is the request loaded by id, which carries its own anchor
+ *    (`listActions`);
+ *  - `id` pinned — `GET /data/sys_approval_action/ID` — is the row loaded by
+ *    id; the request it belongs to is the anchor, read by the source
+ *    (`authorizeFileRead`'s question);
+ *  - anything else is untargeted, the participant set alone.
+ *
+ * A read pinned to one request keeps it when visible and nothing otherwise;
+ * any other read keeps `request_id` among the visible set. A row whose request
+ * the caller may not see is not served, and by id answers as a missing one.
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -85,16 +110,29 @@ import { APPROVAL_REQUEST_OBJECT, type MiddlewareEngine } from './payload-redact
 /** The engine reads this gate narrows. */
 export const REQUEST_READ_OPS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
 
+/**
+ * [#22589] A request's child tables served on the generic door, each row
+ * keyed to its request by `request_id`.
+ */
+export const APPROVAL_REQUEST_CHILD_OBJECTS: readonly string[] = Object.freeze([
+  'sys_approval_action',
+  'sys_approval_approver',
+]);
+
 /** No real row matches it: the fail-closed conjunct. */
 export const REQUEST_READ_DENY_ALL: Readonly<Record<string, unknown>> = Object.freeze({
   id: '__approval_request_not_visible__',
 });
 
-/** The record a read names, in the approvals door's two spellings. */
+/**
+ * The record a read names, in the approvals door's two spellings — plus, for a
+ * child table, the row a read loads by id (`row`).
+ */
 export interface RequestReadTarget {
   object?: string;
   recordId?: string;
   requestId?: string;
+  row?: { object: string; id: string };
 }
 
 /**
@@ -102,11 +140,18 @@ export interface RequestReadTarget {
  * written by `ApprovalService`'s constructor and reached through
  * `requestVisibilitySourceOf`. `null` is "every request in scope"; a set is the
  * ids the approvals door would serve the caller for a read naming `target`.
+ * `target.row` names a child-table row loaded by id: the request it belongs to
+ * is the anchor, as `requestId` is for a request loaded by id.
  */
 export interface RequestVisibilitySource {
   visibleRequestIdsFor(
     context: ExecutionContext,
-    target?: { object?: string | null; recordId?: string | null; requestId?: string | null },
+    target?: {
+      object?: string | null;
+      recordId?: string | null;
+      requestId?: string | null;
+      row?: { object: string; id: string } | null;
+    },
   ): Promise<Set<string> | null>;
 }
 
@@ -125,18 +170,67 @@ export function requestReadTarget(where: unknown): RequestReadTarget | undefined
 }
 
 /**
+ * [#22589] The request a read of child table `object` names, read off its
+ * `where`: `requestId` when `request_id` is pinned, `row` when only the row's
+ * own `id` is, `undefined` when the read is untargeted.
+ */
+export function requestChildReadTarget(object: string, where: unknown): RequestReadTarget | undefined {
+  const requestId = pinnedEquality(where, 'request_id');
+  if (requestId !== null) return { requestId };
+  const id = pinnedEquality(where, 'id');
+  if (id !== null) return { row: { object, id } };
+  return undefined;
+}
+
+/**
  * The conjunct that confines a read to `visible`, or `null` to add none.
- * `pinnedId` is the one id the read is already pinned to, if any.
+ * `column` holds a request id — `id` on the request object, `request_id` on a
+ * child table — and `pinnedId` is the one request id the read already pins it
+ * to, if any.
  */
 export function requestVisibilityFilter(
   visible: ReadonlySet<string> | null,
   pinnedId: string | null,
+  column: 'id' | 'request_id' = 'id',
 ): Readonly<Record<string, unknown>> | null {
   if (visible === null) return null;
-  if (pinnedId !== null) return visible.has(pinnedId) ? { id: pinnedId } : REQUEST_READ_DENY_ALL;
+  if (pinnedId !== null) return visible.has(pinnedId) ? { [column]: pinnedId } : REQUEST_READ_DENY_ALL;
   if (visible.size === 0) return REQUEST_READ_DENY_ALL;
   const ids = [...visible];
-  return { id: ids.length === 1 ? ids[0] : { $in: ids } };
+  return { [column]: ids.length === 1 ? ids[0] : { $in: ids } };
+}
+
+type GateLogger = { warn?: (msg: string, meta?: Record<string, any>) => void };
+
+/**
+ * One read gate on `object`: ask `source` about the request(s) a read names
+ * and AND the answer into it as a constraint on `column`. Fails closed.
+ */
+function bindVisibilityGate(
+  engine: MiddlewareEngine,
+  object: string,
+  column: 'id' | 'request_id',
+  targetOf: (where: unknown) => RequestReadTarget | undefined,
+  source: RequestVisibilitySource,
+  logger?: GateLogger,
+): void {
+  engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+    const ast = opCtx?.ast as { where?: unknown } | undefined;
+    const context = opCtx?.context;
+    if (!REQUEST_READ_OPS.has(opCtx?.operation) || !ast || !context) return next();
+    let filter: Readonly<Record<string, unknown>> | null;
+    try {
+      const visible = await source.visibleRequestIdsFor(context, targetOf(ast.where));
+      filter = requestVisibilityFilter(visible, pinnedEquality(ast.where, column), column);
+    } catch (err: any) {
+      logger?.warn?.('[approvals] request read gate could not resolve which approval requests the caller may see — the read is denied (fail closed)', {
+        object, operation: opCtx.operation, error: err?.message ?? String(err),
+      });
+      filter = REQUEST_READ_DENY_ALL;
+    }
+    if (filter) ast.where = ast.where ? { $and: [ast.where, filter] } : filter;
+    return next();
+  }, { object });
 }
 
 /**
@@ -146,23 +240,23 @@ export function requestVisibilityFilter(
 export function bindRequestReadGate(
   engine: MiddlewareEngine,
   source: RequestVisibilitySource,
-  logger?: { warn?: (msg: string, meta?: Record<string, any>) => void },
+  logger?: GateLogger,
 ): void {
-  engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-    const ast = opCtx?.ast as { where?: unknown } | undefined;
-    const context = opCtx?.context;
-    if (!REQUEST_READ_OPS.has(opCtx?.operation) || !ast || !context) return next();
-    let filter: Readonly<Record<string, unknown>> | null;
-    try {
-      const visible = await source.visibleRequestIdsFor(context, requestReadTarget(ast.where));
-      filter = requestVisibilityFilter(visible, pinnedEquality(ast.where, 'id'));
-    } catch (err: any) {
-      logger?.warn?.('[approvals] request read gate could not resolve which approval requests the caller may see — the read is denied (fail closed)', {
-        operation: opCtx.operation, error: err?.message ?? String(err),
-      });
-      filter = REQUEST_READ_DENY_ALL;
-    }
-    if (filter) ast.where = ast.where ? { $and: [ast.where, filter] } : filter;
-    return next();
-  }, { object: APPROVAL_REQUEST_OBJECT });
+  bindVisibilityGate(engine, APPROVAL_REQUEST_OBJECT, 'id', requestReadTarget, source, logger);
+}
+
+/**
+ * [#22589] Register the gate on each of a request's child tables
+ * ({@link APPROVAL_REQUEST_CHILD_OBJECTS}): a row is served only when the
+ * request it belongs to is one `source` — the same approvals service — would
+ * serve the caller.
+ */
+export function bindRequestChildReadGates(
+  engine: MiddlewareEngine,
+  source: RequestVisibilitySource,
+  logger?: GateLogger,
+): void {
+  for (const object of APPROVAL_REQUEST_CHILD_OBJECTS) {
+    bindVisibilityGate(engine, object, 'request_id', (where) => requestChildReadTarget(object, where), source, logger);
+  }
 }
