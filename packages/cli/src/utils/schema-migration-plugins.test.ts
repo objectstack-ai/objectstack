@@ -640,7 +640,7 @@ describe('measureComposedCoverage (#13028)', () => {
       sync: async (n) => { synced.push(n); },
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), driver, true);
+    const out = await measureComposedCoverage(kernelWith(engine), [driver], true);
 
     expect(synced).toEqual(['sys_position', 'sys_permission_set']);
     expect(out.coverage).toMatchObject({
@@ -664,7 +664,7 @@ describe('measureComposedCoverage (#13028)', () => {
       driverFor: (n) => (n === 'sys_notification' ? planned : elsewhere),
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+    const out = await measureComposedCoverage(kernelWith(engine), [planned], true);
 
     expect(out.coverage).toMatchObject({
       registeredObjects: 3,
@@ -681,6 +681,27 @@ describe('measureComposedCoverage (#13028)', () => {
     expect(said).toContain('UNMEASURED');
   });
 
+  it('[#22579] examines an object on ANY planned driver — the telemetry sibling is diffed, not "elsewhere"', async () => {
+    // A development boot keeps lifecycle-classed objects on the `telemetry`
+    // sibling; the plan diffs both, so neither half is a shortfall. A third
+    // driver the plan does not diff still is.
+    const primary = driverDouble('primary');
+    const telemetry = driverDouble('telemetry');
+    const elsewhere = driverDouble('tenant');
+    const synced: string[] = [];
+    const engine = engineDouble({
+      objects: [{ name: 'sys_position' }, { name: 'sys_audit_log' }, { name: 'tenant_row' }],
+      driverFor: (n) => (n === 'sys_position' ? primary : n === 'sys_audit_log' ? telemetry : elsewhere),
+      sync: async (n) => { synced.push(n); },
+    });
+
+    const out = await measureComposedCoverage(kernelWith(engine), [primary, telemetry], true);
+
+    expect(synced).toEqual(['sys_position', 'sys_audit_log']);
+    expect(out.coverage).toMatchObject({ registeredObjects: 3, examinedObjects: 2, unexaminedObjects: 1 });
+    expect(out.coverage.reasons.otherDriver).toBe(1);
+  });
+
   it('counts federated, unbound and unsupported objects apart from one another', async () => {
     const planned = driverDouble('control');
     const engine = engineDouble({
@@ -692,7 +713,7 @@ describe('measureComposedCoverage (#13028)', () => {
       driverFor: (n) => (n === 'sys_position' ? planned : undefined),
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+    const out = await measureComposedCoverage(kernelWith(engine), [planned], true);
 
     expect(out.coverage.reasons).toMatchObject({ federated: 1, unbound: 1, otherDriver: 0 });
     const said = out.notes.join(' ');
@@ -708,7 +729,7 @@ describe('measureComposedCoverage (#13028)', () => {
       sync: async () => { throw new Error('pool is closed'); },
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+    const out = await measureComposedCoverage(kernelWith(engine), [planned], true);
 
     expect(out.coverage.examinedObjects).toBe(0);
     expect(out.coverage.reasons.failed).toBe(1);
@@ -721,7 +742,7 @@ describe('measureComposedCoverage (#13028)', () => {
     // #9285's contract, one layer out: "the registry holds nothing" and "the
     // registry could not be read" have opposite consequences, and only the
     // first is a truthful reason to report full coverage over an empty set.
-    const out = await measureComposedCoverage(kernelWith({ registry: {} }), driverDouble('control'), true);
+    const out = await measureComposedCoverage(kernelWith({ registry: {} }), [driverDouble('control')], true);
 
     expect(out.coverage.registeredObjects).toBe(0);
     const said = out.notes.join(' ');
@@ -741,7 +762,7 @@ describe('measureComposedCoverage (#13028)', () => {
       sync: async () => { synced++; },
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), planned, false);
+    const out = await measureComposedCoverage(kernelWith(engine), [planned], false);
 
     expect(synced).toBe(0);
     expect(out.notes.join(' ')).toContain('did not defer schema DDL');

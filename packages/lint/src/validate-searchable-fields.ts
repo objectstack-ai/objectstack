@@ -122,8 +122,6 @@
 import {
   resolveSearchFieldResolution,
   isVirtualSearchField,
-  SEARCHABLE_TEXTUAL_TYPES,
-  SEARCHABLE_ENUM_TYPES,
   SEARCH_AUTO_EXCLUDED_FIELDS,
   type SearchFieldMeta,
 } from '@objectstack/spec/data';
@@ -131,8 +129,8 @@ import { recordsOf, suggestName } from './object-graph.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
-  unprovisionedAnchorCause,
   unprovisionedAnchorHint,
+  unprovisionedAnchorVerdict,
 } from './system-fields.js';
 
 export const SEARCHABLE_FIELD_UNKNOWN = 'searchable-field-unknown';
@@ -171,6 +169,26 @@ export interface SearchableFieldFinding {
 export type SearchableFieldRole = 'canonical' | 'narrowing';
 
 type AnyRec = Record<string, unknown>;
+
+/**
+ * [#22161] The verdict clause for a virtual (`formula`) entry, shared by the
+ * SEARCH and SORT axes (`sort-field-unsortable` reads it from here) so the two
+ * rules state the one storage fact in one wording. Each rule appends its own
+ * consequence; the measured reading behind it is each id's `os explain` entry.
+ */
+export function virtualFieldClause(vtype: string | undefined): string {
+  return `a virtual '${vtype}' field: its value is computed on read and never stored`;
+}
+
+/**
+ * [#22161] The object's declared searchable set as a verdict quotes it: the
+ * first three names, then a count, so a long declaration cannot stretch the
+ * one-line verdict (the `fix:` line names where the set is declared).
+ */
+function declaredRoster(names: readonly string[]): string {
+  const shown = names.slice(0, 3).join(', ');
+  return names.length > 3 ? `${shown} (and ${names.length - 3} more)` : shown;
+}
 
 function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -340,10 +358,8 @@ export function checkSearchableFieldList(
         where,
         path: `${path}[${i}]`,
         message:
-          `${subject} entry "${name}" is not a field on object "${objectName}". ` +
-          `The declaration is stale: searching it can never match, and the engine ` +
-          `silently drops it — leaving a narrower search than declared, or the ` +
-          `auto-default set once every entry is dropped.` +
+          `${subject} entry "${name}" is not a field on object "${objectName}", so the ` +
+          `engine drops it from the search.` +
           (dotted ? '' : suggestName(name, known)),
         hint:
           (dotted
@@ -378,16 +394,14 @@ export function checkSearchableFieldList(
         rule: SEARCHABLE_FIELD_UNPROVISIONED,
         where,
         path: `${path}[${i}]`,
+        // [#22161] One verdict sentence: the shared short anchor clause and
+        // the role's consequence. Why a narrowing reaches the runtime at all
+        // (the `$searchFields` echo) is the id's `os explain` entry.
         message:
-          `${subject} entry "${name}" resolves on object "${objectName}", but ` +
-          `${unprovisionedAnchorCause(objectName, name)}` +
+          `${subject}: ${unprovisionedAnchorVerdict(objectName, name)}, so ` +
           (role === 'narrowing'
-            ? ` — clients echo this declaration verbatim as the '$searchFields' override, so ` +
-              `every toolbar search on this list scans a column that is empty on every ` +
-              `record: it reads as search coverage and matches nothing.`
-            : ` — 'search' scans it on every record and it can never match, so the object's ` +
-              `searchable set is narrower than it declares. Should it be the ONLY entry that ` +
-              `resolves, the set scans nothing at all.`),
+            ? `the list's toolbar search scans an empty column and matches nothing`
+            : `'search' never matches it and the searchable set is narrower than it declares`),
         hint: unprovisionedAnchorHint(objectName, name),
       });
     }
@@ -407,11 +421,8 @@ export function checkSearchableFieldList(
         where,
         path: `${path}[${i}]`,
         message:
-          `${subject} entry "${name}" on object "${objectName}" is a virtual ` +
-          `'${vtype}' field: its value is computed on read and never stored, so no ` +
-          `driver materializes a column for 'search' to scan and the entry can never ` +
-          `match. It reads as search coverage and delivers none — the runtime used to ` +
-          `admit it verbatim because the declaration named it.`,
+          `${subject} entry "${name}" on object "${objectName}" is ` +
+          `${virtualFieldClause(vtype)}, so 'search' never matches it`,
         hint:
           `Mirror the computed value onto a stored text field on "${objectName}" and ` +
           `declare that instead, or drop "${name}". At runtime the ingress gate now ` +
@@ -436,11 +447,8 @@ export function checkSearchableFieldList(
         where,
         path: `${path}[${i}]`,
         message:
-          `${subject} entry "${name}" is outside object "${objectName}"'s declared ` +
-          `searchableFields (${resolution.declaredList.join(', ')}) — the set 'search' ` +
-          `scans. Clients echo this declaration verbatim as the '$searchFields' ` +
-          `override, and the runtime refuses an entry outside the allowed set: every ` +
-          `toolbar search on this list returns 400 INVALID_FIELD.`,
+          `${subject} entry "${name}" is outside the declared searchableFields ` +
+          `(${declaredRoster(resolution.declaredList)}), so list search answers 400 INVALID_FIELD`,
         hint:
           `Add "${name}" to ${objectName}.searchableFields, or drop it from this ` +
           `view — a view narrows the object's searchable set, never widens it ` +
@@ -454,7 +462,7 @@ export function checkSearchableFieldList(
     const isReference = meta?.type === 'lookup' || meta?.type === 'master_detail';
     let why: string;
     if (SEARCH_AUTO_EXCLUDED_FIELDS.has(name)) {
-      why = 'a system/audit column, which the auto-default set never includes';
+      why = 'a system/audit column';
     } else if (meta?.hidden) {
       why = 'hidden';
     } else if (typeof meta?.type === 'string') {
@@ -467,13 +475,11 @@ export function checkSearchableFieldList(
       rule: SEARCHABLE_FIELD_UNSEARCHABLE,
       where,
       path: `${path}[${i}]`,
+      // [#22161] The auto-default set's type list and the `$searchFields`
+      // echo are the id's `os explain` entry.
       message:
-        `${subject} entry "${name}" on object "${objectName}" is ${why}. With no ` +
-        `'searchableFields' declared on the object, 'search' scans its text-like ` +
-        `columns (${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}). ` +
-        `Clients echo this declaration verbatim as the '$searchFields' override, and ` +
-        `the runtime refuses it: every toolbar search on this list returns ` +
-        `400 INVALID_FIELD.`,
+        `${subject} entry "${name}" is ${why}, so the auto-default search set excludes it ` +
+        `and list search answers 400 INVALID_FIELD`,
       hint:
         (isReference
           ? `A ${meta?.type} column stores only the referenced record's id, so it ` +

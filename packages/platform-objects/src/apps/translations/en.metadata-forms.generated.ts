@@ -423,7 +423,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fileAccessDelegate: {
         label: "File Access Delegate",
-        helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed."
+        helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, and decides whether a reader who may not read sys_file sees their name, size and type in a record read of this object (asked once per owning record on each such read), instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed."
       },
       lifecycle: {
         label: "Lifecycle",

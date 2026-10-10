@@ -167,10 +167,8 @@ send you to the same fix, so either message is greppable back to this section.
 `os validate` reports `searchable-field-unknown`:
 
 ```text
-searchableFields entry "project_id.name" is not a field on object "task". The
-declaration is stale: searching it can never match, and the engine silently
-drops it — leaving a narrower search than declared, or the auto-default set once
-every entry is dropped.
+searchableFields entry "project_id.name" is not a field on object "task", so the
+engine drops it from the search.
 
 hint: 'search' scans this object's own columns, so a related record's column
 cannot be a search target — expand the relation and search the related object,
