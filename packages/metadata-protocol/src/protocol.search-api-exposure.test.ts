@@ -86,7 +86,7 @@ function harness(objects: FixtureObject[]) {
             return null;
         }),
     };
-    const canReadObject = vi.fn(async () => true);
+    const canReadObject = vi.fn(async (_object: string, _context?: unknown) => true);
     const services = new Map<string, unknown>([['security', { canReadObject }]]);
     const protocol = new ObjectStackProtocolImplementation(engine as never, () => services as Map<string, any>);
     return { protocol, readCalls, canReadObject };
