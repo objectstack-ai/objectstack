@@ -414,6 +414,7 @@ export class ApprovalsServicePlugin implements Plugin {
         };
         const http = readServer('http.server') ?? readServer('http-server');
         const rawApp = http && typeof http.getRawApp === 'function' ? http.getRawApp() : null;
+        if (!rawApp) ctx.logger.info('ApprovalsServicePlugin: no raw HTTP app on this kernel — the actionable-link pages are not mounted here; they are served through the HTTP dispatcher\'s /approvals/act domain, which calls the approvals service\'s handleActionPage');
         if (!rawApp || !this.service) return;
         const svc = this.service;
         const ACT_PATH = '/api/v1/approvals/act';
