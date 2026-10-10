@@ -233,7 +233,7 @@ describe('positive control: the engine\'s own token path is unchanged', () => {
     const rows = await tokenRows(rig);
     expect(rows).toHaveLength(2);
     expect(rows.filter((r) => r.consumed_at).map((r) => r.action)).toEqual(['approve']);
-    const request: any = await rig.engine.findOne('sys_approval_request', { where: { id: rig.requestId }, context: SYSTEM } as any);
+    const request: any = await rig.engine.findOne('sys_approval_request', { where: { id: rig.requestId }, context: SYSTEM } satisfies EngineQueryOptions);
     expect(request?.status).toBe('approved');
   });
 });
