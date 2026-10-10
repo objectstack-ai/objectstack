@@ -163,10 +163,10 @@ describe('os migrate plan / apply plan each object against the database it lives
 
     const plan = command(f, ['plan', '--json']);
     expect(plan.exit, JSON.stringify(plan.payload).slice(0, 800)).toBe(0);
-    expect(plan.payload.telemetryDatabase).toBe(f.sibling);
     // Nothing to create anywhere — above all no lifecycle-classed object for the primary.
     expect(pendingTables(plan.payload)).toEqual([]);
     expect(plan.payload.changes).toEqual([]);
+    expect(plan.payload.telemetryDatabase).toBe(f.sibling);
     expect(plan.payload.composition?.coverage?.unexaminedObjects).toBe(0);
     // Both databases' objects examined: their tables, less the raw-DDL one.
     expect(plan.payload.managedTables).toBe(primaryTables.length - NOT_AN_OBJECT.length + siblingTables.length);
@@ -175,9 +175,9 @@ describe('os migrate plan / apply plan each object against the database it lives
 
     const apply = command(f, ['apply', '--yes', '--json']);
     expect(apply.exit, JSON.stringify(apply.payload).slice(0, 800)).toBe(0);
-    expect(apply.payload.telemetryDatabase).toBe(f.sibling);
     expect(apply.payload.created).toEqual([]);
     expect(apply.payload.applied).toEqual([]);
+    expect(apply.payload.telemetryDatabase).toBe(f.sibling);
     // No orphan in the primary, and nothing moved in either database.
     expect(tables(f.primary)).toEqual(primaryTables);
     expect({ primary: state(f.primary), sibling: state(f.sibling) }).toEqual(before);
@@ -204,10 +204,10 @@ describe('os migrate plan / apply plan each object against the database it lives
     const before = state(f.primary);
     const plan = command(f, ['plan', '--json']);
     expect(plan.exit, JSON.stringify(plan.payload).slice(0, 800)).toBe(0);
-    expect(plan.payload.telemetryDatabase).toBe(f.sibling);
     const pending = pendingTables(plan.payload);
     expect(pending).toEqual(expect.arrayContaining(['create_table:sys_audit_log', 'create_table:sys_metadata_audit']));
     expect(pending.every((p) => p.startsWith('create_table:')), pending.join(', ')).toBe(true);
+    expect(plan.payload.telemetryDatabase).toBe(f.sibling);
     expect(existsSync(f.sibling), 'a dry run brought the telemetry sibling into existence').toBe(false);
     expect(state(f.primary)).toEqual(before);
   }, CASE_TIMEOUT_MS);
