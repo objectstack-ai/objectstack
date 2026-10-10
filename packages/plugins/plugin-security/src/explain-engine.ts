@@ -413,6 +413,11 @@ export interface ExplainEngineDeps {
    * `true` only for absence; a read-time policy refusal answers `false`, and a
    * store fault propagates — exactly as the write path asks it, so the
    * explanation cannot drift from the answer the write gets.
+   *
+   * [#22571] Asked for every explained verb whose door is a by-id update or
+   * delete, read through {@link rlsOperationForVerb}: `update`, `delete`, and
+   * the lifecycle verbs that map onto them (`transfer` and `restore` onto
+   * update, `purge` onto delete).
    */
   recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
@@ -2250,8 +2255,19 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     // gates (which answer first, as they do here), for a principal with an
     // identity, on a record that exists. (A system principal reads every row,
     // so the question cannot change its verdict.)
+    //
+    // [#22571] The door asks that question of the by-id `update` and `delete`
+    // the caller addresses (`addressedByIdWriteId` in `security-plugin.ts`),
+    // and a lifecycle verb reaches it as the operation its door is: a transfer
+    // is the PATCH that writes `owner_id`, an update. So the guard reads the
+    // explained verb through the one mapping step 2.7 reads, `rlsOp`
+    // ({@link rlsOperationForVerb}), never the verb as asked: keyed on the raw
+    // verb, a transfer of a row the caller cannot read was reported visible
+    // beside the transfer door's 404. `restore` and `purge` map the same way
+    // and are refused at the object gate first, so the rewrite never reaches
+    // them while their grants are retired.
     if (
-      (operation === 'update' || operation === 'delete') &&
+      (rlsOp === 'update' || rlsOp === 'delete') &&
       deps.recordAbsentToCaller &&
       context?.userId &&
       recordVerdict.decidedBy !== 'required_permissions' &&

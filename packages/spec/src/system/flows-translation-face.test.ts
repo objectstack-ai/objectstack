@@ -6,7 +6,8 @@
  *
  * The family was closed one string at a time — the screen field's help text,
  * the launcher's flow label, the refused `end` node's message, then a screen
- * field's option labels and the terminal toasts — and each time the hole was
+ * field's option labels and the terminal toasts, then a screen's body text,
+ * picked by the engine like the refusal — and each time the hole was
  * found the same way: a fully translated app showed an English string to a
  * user, and no bundle the author could write reached it. This file moves that
  * discovery from a locale to the test run.
@@ -120,14 +121,12 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
   'node.boundaryConfig': noReader('a boundary event binding — node ids, error codes, timer and signal tokens'),
 
   // ScreenConfigSchema (a `screen` node's config)
-  'screen.title': keyed('screens.NODE.title', 'the heading above the screen'),
-  'screen.description': {
-    owed:
-      'the body text under the heading. The server renders it per run as a `{{ }}` template (`renderTextSlot` in '
-      + 'the screen executor), so a translation must be picked BEFORE that render, as the refusal message is — an '
-      + 'overlay on the served string would draw a translated hole literally. Which reader picks it (the engine in '
-      + "the run's locale, or the runner over a static description only) is the decision this row waits on.",
-  },
+  'screen.title': keyed('screens.NODE.title', "the heading above the screen, picked by the engine in the run's locale"),
+  'screen.description': keyed(
+    'screens.NODE.description',
+    "the body text under the heading, picked by the engine in the run's locale before its `{{ }}` holes are filled "
+      + '(ruling A on #22507), as the refusal message is',
+  ),
   'screen.fields[].name': noReader('the field name — the address of `fields.<field_name>`, and the variable the value binds'),
   'screen.fields[].label': keyed('screens.NODE.fields.FIELD.label'),
   'screen.fields[].type': noReader('a widget token'),
@@ -176,7 +175,7 @@ const OTHER_NODE_SLOTS: Readonly<Record<string, Disposition>> = {
 };
 
 /** The `owed` rows, pinned EXACTLY: a row leaves only by gaining a key or a route. */
-const OWED = ['screen.description', `${APPROVAL_NODE_TYPE}.decisionOutputs[].label`];
+const OWED = [`${APPROVAL_NODE_TYPE}.decisionOutputs[].label`];
 
 // ── The walk ────────────────────────────────────────────────────────────────
 

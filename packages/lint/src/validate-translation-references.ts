@@ -102,6 +102,12 @@
  * `flows.<name>.label` and `.screens.<id>.title` are leaf copy on a node that
  * resolved, so they need no check of their own — the schema closes the leaf
  * vocabulary (`.strict()`), which is a shape concern, not a reference.
+ * `.screens.<id>.description` (#22507) is judged against the screen itself:
+ * the engine picks a translated body text only where the screen authors a
+ * `config.description`, so a key over a screen that declares none is an
+ * orphan, `translation-target-unknown`, the toasts' rule one level down. Its
+ * `{{ }}` holes are the schema's to judge (`TranslationDataSchema`, the one
+ * text-slot judge).
  *
  * `flows.<name>.refusals.<node_id>.message` (#22450) is judged the same way one
  * level down: the node id must name an `end` node declaring
@@ -359,6 +365,13 @@ interface ScreenFacts {
    * "say where it belongs" redirect a misfiled `globalActions` key gets.
    */
   objectName?: string;
+  /**
+   * [#22507] Whether the screen AUTHORS body text (`config.description`, a
+   * non-empty string). The engine translates a screen's body text only where
+   * the screen authors one, so a `…screens.<node_id>.description` key over a
+   * screen without one resolves nothing.
+   */
+  hasDescription: boolean;
 }
 
 /** Everything a `flows.<name>.…` key may legally name under one flow. */
@@ -1412,7 +1425,12 @@ function buildUniverse(stack: AnyRec): Universe {
         const options = readScreenFieldOptions(field);
         if (options) fieldOptions.set(name, options);
       }
-      screens.set(nodeId, { fields, fieldOptions, objectName: strName(config?.objectName) });
+      screens.set(nodeId, {
+        fields,
+        fieldOptions,
+        objectName: strName(config?.objectName),
+        hasDescription: typeof config?.description === 'string' && config.description.length > 0,
+      });
     }
     flows.set(flowName, { screens, refusals, messages, otherNodes });
   };
@@ -1837,6 +1855,20 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             continue;
           }
           if (!isRec(rawScreen)) continue;
+          // ── …screens.<node_id>.description (#22507) ───────────────────
+          // The engine translates the body text only where the screen
+          // authors one, so a translation over a screen with none resolves
+          // nothing — the toast rule one level down.
+          if (rawScreen.description !== undefined && !screen.hasDescription) {
+            orphan(
+              `${inLocale} · flow "${flowName}" · screen "${nodeId}" · description`,
+              `${screenPath}.description`,
+              `Translations carry \`description\` for screen "${nodeId}" of flow "${flowName}", which ` +
+                `declares no \`config.description\`. Body text is translated only where the screen ` +
+                `authors one, so nothing resolves this key and the screen shows no body text.`,
+              `Declare \`config.description\` on the screen, or drop the key.`,
+            );
+          }
           for (const [fieldName, rawField] of Object.entries(asRecord(rawScreen.fields))) {
             if (screen.fields.has(fieldName)) {
               // [#22507] …fields.<field_name>.options.<value>, judged against the

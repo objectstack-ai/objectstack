@@ -1382,6 +1382,10 @@ describe('ApprovalService (node era)', () => {
     const emitted: any[] = [];
     svc.attachMessaging({ async emit(input) { emitted.push(input); } });
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    // The opening tells its approver first (`approval.requested`, pinned in
+    // approval-requested-notification.integration.test.ts); this test reads
+    // only what the step under test sends after it.
+    expect(emitted.splice(0).map(e => e.topic)).toEqual(['approval.requested']);
     await svc.reassign(req.id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
     expect(emitted).toHaveLength(1);
     expect(emitted[0]).toMatchObject({ topic: 'approval.reassigned', audience: ['u7'] });
@@ -1439,6 +1443,10 @@ describe('ApprovalService (node era)', () => {
     const emitted: any[] = [];
     svc.attachMessaging({ async emit(input) { emitted.push(input); } });
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    // The opening tells its approver first (`approval.requested`, pinned in
+    // approval-requested-notification.integration.test.ts); this test reads
+    // only what the step under test sends after it.
+    expect(emitted.splice(0).map(e => e.topic)).toEqual(['approval.requested']);
     const out = await svc.requestInfo(req.id, { actorId: 'u9', comment: 'Need the Q3 numbers' }, asUser('u9'));
     expect(out.request.status).toBe('pending');
     expect(out.request.pending_approvers).toEqual(['u9']);
@@ -1700,6 +1708,10 @@ describe('ApprovalService (node era)', () => {
     const req = await svc.openNodeRequest(
       openInput(['u9'], {}, { escalation: { timeoutHours: 2, action: 'notify', escalateTo: 'boss', notifySubmitter: true } }), CTX,
     );
+    // The opening tells its approver first (`approval.requested`, pinned in
+    // approval-requested-notification.integration.test.ts); this test reads
+    // only what the step under test sends after it.
+    expect(emitted.splice(0).map(e => e.topic)).toEqual(['approval.requested']);
     makeOverdue(req.id);
     const first = await svc.runEscalations();
     expect(first.escalated).toBe(1);
@@ -1787,6 +1799,10 @@ describe('ApprovalService (node era)', () => {
     const req = await svc.openNodeRequest(
       openInput(['u9'], {}, { escalation: { timeoutHours: 2, action: 'notify', escalateTo: 'approvals_supervisor', notifySubmitter: false } }), CTX,
     );
+    // The opening tells its approver first (`approval.requested`, pinned in
+    // approval-requested-notification.integration.test.ts); this test reads
+    // only what the step under test sends after it.
+    expect(emitted.splice(0).map(e => e.topic)).toEqual(['approval.requested']);
     makeOverdue(req.id);
     await svc.runEscalations();
     expect(emitted).toHaveLength(1);

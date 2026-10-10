@@ -410,7 +410,7 @@ describe('[ADR-0131 D3] Q2 = A — an edit that keeps, or a delete of, a name a 
       saveMetaItem: vi.fn(async (_request: Record<string, unknown>) => undefined),
       deleteMetaItem: vi.fn(async (_request: Record<string, unknown>) => undefined),
       // The real door's verdict, so the S10 refusal is in force for this double too.
-      packagedBaseRefusal: vi.fn((request: { type: string; name: string; operation: 'save' | 'delete' }) =>
+      packagedBaseRefusal: vi.fn((request: { type: string; name: string; operation: 'save' | 'create' | 'delete' }) =>
         b.protocol.packagedBaseRefusal(request) as Error | null),
     };
     const writeThrough = createPositionWriteThrough({
@@ -468,14 +468,52 @@ describe('[C2 stage S10, ADR-0048 addendum N.2/N.3] one namespace — a create o
     expect(await b.envRows(name)).toEqual([]);
   });
 
-  it('the refusal is the door\'s own, relayed as the door built it — the same verdict a metadata save gets', async () => {
+  it('the refusal is the door\'s own, relayed as the door built it — the same verdict a metadata CREATE gets', async () => {
+    // [#22591] A Setup create is a create, so it is the door's answer to a
+    // create that is relayed: the metadata door's first-write save
+    // (`parentVersion: null`, `If-None-Match: *` on its REST route).
     const b = await boot();
     const refusal: any = await refusalOf(create(b, { name: PKG_POSITION, label: 'Mine' }));
-    const door: any = await refusalOf(
-      b.protocol.saveMetaItem({ type: 'position', name: PKG_POSITION, item: { name: PKG_POSITION, label: 'Mine' } }),
-    );
+    const door: any = await refusalOf(b.protocol.saveMetaItem({
+      type: 'position', name: PKG_POSITION, item: { name: PKG_POSITION, label: 'Mine' }, parentVersion: null,
+    }));
     expect({ code: refusal?.code, status: refusal?.status, message: refusal?.message })
       .toEqual({ code: door?.code, status: door?.status, message: door?.message });
+  });
+
+  // [#22591] The remedy follows the act. The administrator is creating a
+  // position of their own (or renaming one into the name), so the refusal names
+  // the remedy a create has — a name no package or built-in holds, and where the
+  // held names are listed — never the edit remedy ("edit the source artifact and
+  // redeploy") of a position someone else declared. Pinned on the KIND: what the
+  // sentence points at, not its words. The door's edit refusal is the control.
+  const LISTING = 'GET /api/v1/meta/position';
+  const remedyKind = (message: unknown) => {
+    const text = String(message);
+    const newName = text.includes(LISTING);
+    const edit = /\bredeploy\b|\bsource\b/.test(text);
+    return newName && edit ? 'both' : newName ? 'new-name' : edit ? 'edit' : 'none';
+  };
+
+  it.each([
+    ['a package declares', PKG_POSITION],
+    ['the platform declares (everyone)', 'everyone'],
+  ])('a create under a name %s names a free name, not the edit remedy; the door\'s edit refusal keeps its own', async (_holder, name) => {
+    const b = await boot();
+    const refusal: any = await refusalOf(create(b, { name, label: 'Mine' }));
+    expect(envelope(refusal)).toEqual(DOOR_REFUSAL);
+    expect(remedyKind(refusal?.message)).toBe('new-name');
+    const edit: any = await refusalOf(b.protocol.saveMetaItem({ type: 'position', name, item: { name, label: 'Mine' } }));
+    expect(envelope(edit)).toEqual(DOOR_REFUSAL);
+    expect(remedyKind(edit?.message)).toBe('edit');
+  });
+
+  it('a rename into a held name names a free name too', async () => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'lane_lead', label: 'Lane lead' });
+    const refusal: any = await refusalOf(patch(b, created.id, { name: 'guest' }));
+    expect(envelope(refusal)).toEqual(DOOR_REFUSAL);
+    expect(remedyKind(refusal?.message)).toBe('new-name');
   });
 
   it('a bulk create carrying one held name is refused whole: no row of the write is kept', async () => {

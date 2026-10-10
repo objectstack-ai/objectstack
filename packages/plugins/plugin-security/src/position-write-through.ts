@@ -138,8 +138,10 @@ export interface PositionMetadataDoor {
    * would raise for `(type, name)` on that ground, or `null`
    * (`ObjectStackProtocolImplementation.packagedBaseRefusal`). Optional: a door
    * without it keeps the stand-down for a package-held name (module note).
+   * `create` is the save that takes a name for an item of the caller's own: the
+   * same verdict as `save`, with the remedy a create has.
    */
-  packagedBaseRefusal?(request: { type: string; name: string; operation: 'save' | 'delete' }): Error | null;
+  packagedBaseRefusal?(request: { type: string; name: string; operation: 'save' | 'create' | 'delete' }): Error | null;
 }
 
 export interface PositionWriteThroughDeps {
@@ -194,10 +196,17 @@ export function packageHoldsPosition(ql: any, name: string): boolean {
  * position taking `name` — its locked-base verdict, asked and never re-derived
  * (module note, "One namespace"). `null` when the door would not refuse that
  * save on the locked-base ground, or brings no such verdict.
+ *
+ * [#22591] Asked as a `create`, because that is what this write is: a create,
+ * or a rename into `name`, never an edit of the item that holds it (an edit
+ * that keeps a held name is never asked about: it stands down). The door's verdict
+ * is the `save` verdict; what the act changes is the remedy its sentence names
+ * — a name no package or built-in holds, not the source artifact of a position
+ * this administrator did not write.
  */
 function heldPositionNameRefusal(door: PositionMetadataDoor, name: unknown): Error | null {
   if (typeof name !== 'string' || name === '' || typeof door.packagedBaseRefusal !== 'function') return null;
-  return door.packagedBaseRefusal({ type: POSITION_METADATA_TYPE, name, operation: 'save' });
+  return door.packagedBaseRefusal({ type: POSITION_METADATA_TYPE, name, operation: 'create' });
 }
 
 let cachedPositionNameSchema: { safeParse(v: unknown): { success: boolean } } | null = null;

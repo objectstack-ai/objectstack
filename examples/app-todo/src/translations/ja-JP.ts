@@ -112,7 +112,7 @@ export const jaJP: TranslationData = {
             },
           },
         },
-        success_screen: { title: 'タスクを作成しました' },
+        success_screen: { title: 'タスクを作成しました', description: 'タスク「{{ subject }}」を作成しました！' },
       },
     },
   },

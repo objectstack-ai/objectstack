@@ -495,6 +495,7 @@
     "checkListViewChartBinding (function)",
     "checkPagePrintComposition (function)",
     "checkPageRequiresKind (function)",
+    "checkPageSlotPair (function)",
     "checkPageSourceCompleteness (function)",
     "columnSummaryAlias (function)",
     "compileListViewGroupQuery (function)",
