@@ -152,6 +152,11 @@ export default class MigratePlan extends Command {
         // own boot detector reported ten findings on the same database, and the
         // command those findings name is this one.
         composeHostStack: true,
+        // [#22506] …and what `os serve` mounts AROUND the stack — the auth
+        // family behind its auth gate, the provider of every capability it
+        // resolves — or an app declaring `requires: ['auth']` plans without
+        // `sys_account`, and its retired `issuer` column is never a drop.
+        composeServedPlatform: true,
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
