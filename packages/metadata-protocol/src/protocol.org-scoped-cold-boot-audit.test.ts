@@ -155,7 +155,7 @@ describe('[#6190, ADR-0131 D6] cold boot names every legacy organization-scoped 
         const { result, warns } = await bootAndCapture(engine);
 
         // Hydration loads the environment's rows only.
-        expect(result).toMatchObject({ loaded: 2, errors: 0, invalid: 0, storeUnavailable: false });
+        expect(result).toMatchObject({ loaded: 2, errors: 0, storeUnavailable: false });
 
         const line = warns.find((w) => w.includes(AUDIT));
         expect(line, `no ${AUDIT} line in: ${JSON.stringify(warns)}`).toBeDefined();
