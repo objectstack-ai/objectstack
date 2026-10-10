@@ -578,25 +578,13 @@ describe('[#11967] §7 distinct reads never share an entry', () => {
         expect((scoped.items as any[]).map((i) => i.name)).toEqual(['beta']);
     });
 
-    // ⚠️ [commit 96326040f] `view`, NOT `object`, and the type is LOAD-BEARING here in a
-    // way it is not in this section's three siblings. `getMetaItems` now
-    // resolves its own read scope through `organizationIdForMetaRead`, so a
-    // type the registry declares NON-overridable has exactly one partition to
-    // read: an `organizationId` handed in for `object` is gated to `undefined`
-    // before it ever reaches the cache key, and the two reads below would
-    // legitimately share one entry — this case would then be asserting that a
-    // key separation exists where the platform deliberately has none.
-    //
-    // The INVARIANT is unchanged and is what this case still pins: two reads
-    // at genuinely different org scopes must not answer from each other. It
-    // just has to be exercised on a type that HAS two org scopes, which since
-    // ADR-0005 tier A means one of `view` / `dashboard` / `report` /
-    // `translation` / `email_template`. See
-    // `get-meta-items-org-read-gate.test.ts` for the gate itself and for the
-    // `object` side of this — that an org-scoped read of a non-overridable
-    // type reads the env partition alone is pinned there, as behaviour rather
-    // than as a cache-key fact.
-    it('an org-scoped read does not answer from the env-wide entry', async () => {
+    // [ADR-0131 D6] The cache holds the environment's rows only. The one read
+    // that still reaches a legacy organization's rows — the anonymous form
+    // doors' `view` read, `legacyFormOrganizationId` — reads them uncached,
+    // on top of the environment's cached set, so it never answers from the
+    // environment-wide entry alone; and any other read naming an organization
+    // is the environment read.
+    it('the form doors\' legacy organization read does not answer from the env-wide entry', async () => {
         const h = makeHarness([
             storedRow('view', 'alpha'),
             storedRow('view', 'org_only', { organization_id: 'org_1', id: 'r_view_org' }),
@@ -605,13 +593,16 @@ describe('[#11967] §7 distinct reads never share an entry', () => {
         const envWide = await h.protocol.getMetaItems({ type: 'view' });
         const findsAfterEnvWide = h.finds.length;
 
-        const orgScoped = await h.protocol.getMetaItems({ type: 'view', organizationId: 'org_1' });
+        const legacy = await h.protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_1' });
         expect(h.finds.length).toBeGreaterThan(findsAfterEnvWide);
 
         expect((envWide.items as any[]).map((i) => i.name)).toEqual(['alpha']);
-        expect((orgScoped.items as any[]).map((i) => i.name).sort())
-            .toEqual(['alpha', 'org_only']);
+        expect((legacy.items as any[]).map((i) => i.name).sort()).toEqual(['alpha', 'org_only']);
+
+        const named = await h.protocol.getMetaItems({ type: 'view', organizationId: 'org_1' } as { type: string });
+        expect((named.items as any[]).map((i) => i.name)).toEqual(['alpha']);
     });
+
 
     it('two engines never share a bucket', async () => {
         const a = makeHarness([storedRow('object', 'from_engine_a')]);

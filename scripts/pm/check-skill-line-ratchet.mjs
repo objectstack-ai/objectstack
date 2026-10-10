@@ -1107,7 +1107,9 @@ export const CEILINGS = new Map([
   // contrast on the trailing newline or on session-id length.
   // Nothing else was paid in place: re-wrap funding is refused per the
   // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 469],
+  // Lowered 469 → 460 by the tool-first diet: nine readings a `scripts/pm` tool
+  // now holds were deleted whole (lowering is always legitimate). Landed count.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 460],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing

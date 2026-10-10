@@ -16581,6 +16581,55 @@ const step18: MigrationStep = {
         + 'set stays exactly `DEFAULT_METADATA_TYPE_REGISTRY` plus item-population growth, '
         + 'before and after.',
     },
+    // ADR-0131 D6 (C5, stage S5) — the read half of the retirement whose write half
+    // `metadata-write-organization-scope-refused` records: every metadata read is
+    // environment → code. Registered because a read that named an organization
+    // served that organization's rows and now serves the environment's, because
+    // the `organizationId` key leaves six declared request shapes and the drafts
+    // listing, and because `overlayScope` loses its `org` value.
+    {
+      id: 'metadata-read-organization-scope-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the organizationId member of the GetMetaItems, GetMetaItem, GetMetaItemLayered, AuditMetaItem, '
+        + 'HistoryMetaItem and GetMetaItemCached request schemas and of each ListDraftsResponse draft of '
+        + '@objectstack/spec, and the org value of GetMetaItemLayeredResponse overlayScope; and every '
+        + 'metadata read of @objectstack/metadata-protocol that served a row stored organization-scoped: '
+        + 'the item, list, layered, cached, history, diff, audit, drafts, commit timeline, lock, search '
+        + 'and references reads, and the boot hydration — plus an environment overlay row of an item a '
+        + 'managed package ships on a type sealed against overlays (any type whose registry entry admits '
+        + 'no overlay: a managed flow, action, hook, object or datasource, for example), which the reads '
+        + 'served over the package definition',
+      replacement:
+        'drop `organizationId` from the read request: every read serves the environment row, else the '
+        + 'code definition, to every caller, and `overlayScope` is `env` or null. A legacy row stored '
+        + 'organization-scoped is served by no read; boot names each one, per type, and the v18 migration '
+        + 'ceremony (ADR-0131 D10) carries it — nothing is deleted or rewritten before it. An environment '
+        + 'overlay of sealed managed content is not served either, and boot names it: keep the change by '
+        + 're-expressing it as a new item under a new name (a linkage-free clone), or delete the stored '
+        + 'row. The anonymous public-form doors alone keep reading the Default Organization\'s legacy '
+        + 'view rows, fail-closed, until the ceremony carries them',
+      reason:
+        'ADR-0131 D6 retires the per-organization overlay axis: environment metadata belongs to the '
+        + 'whole deployment. The doors stopped carrying an organization '
+        + '(meta-doors-organization-scope-retired) and the protocol refuses every organization-scoped '
+        + 'write (metadata-write-organization-scope-refused); a read that still served a legacy '
+        + 'organization row would keep a retired layer live, one caller at a time. D6 also seals managed '
+        + 'content: an overlay of a managed item of a sealed type sits in no regime D6 recognises, '
+        + 'so the package definition wins at read as the write doors already make it win at write. '
+        + 'Permission sets keep their own ruling on stored forks.',
+      acceptanceCriteria:
+        'With a legacy organization-scoped view row and an environment row of the same name stored, '
+        + 'getMetaItem, getMetaItems, getMetaItemLayered and getMetaItemCached serve the environment row '
+        + 'whether or not the request names the organization, and the organization-only name answers '
+        + 'nothing; historyMetaItem, auditMetaItem, listDrafts and listCommits show no legacy '
+        + 'organization row; the ETag is one validator for every caller; overlayScope is env or null. A '
+        + 'stored environment row of an action a managed package ships is not served — the package '
+        + 'definition is. Boot logs metadata_org_scoped_unserved and metadata_sealed_overlay_unserved, '
+        + 'per type. Remove organizationId from any typed read request literal: the key no longer '
+        + 'type-checks.',
+    },
     // ADR-0131 D6 (C5, stage S4) — the protocol half of the door narrowing
     // `meta-doors-organization-scope-retired` records: the metadata protocol itself
     // refuses every organization-scoped write, and the per-organization write path
@@ -21166,6 +21215,39 @@ const step18: MigrationStep = {
         + 'component carries a `submitText` whose localized values cover the locales the dropped '
         + 'strings covered, and switching the UI locale shows the submit button in that locale — or '
         + 'the author has decided the default copy is acceptable.',
+    },
+    // A translated flow screen heading is judged by the one text-slot judge, like
+    // the translated body text and refusal message beside it: the engine picks all
+    // three in the run's locale and renders them as double-brace templates.
+    // Semantic-only — a single-brace token in a translated heading always drew as
+    // literal text, so whether it was meant as a hole is the translator's call,
+    // and no D2 conversion rewrites it.
+    {
+      id: 'translation-flow-screen-title-text-slot-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'translation.flows.<flow>.screens.<node_id>.title — a translated screen heading, in a stack\'s translations '
+        + 'or a translation metadata item, carrying a single-brace token such as {name}, or a double-brace hole over a '
+        + 'dollar-named variable the flow engine does not bind',
+      replacement:
+        'the double-brace hole the refusal names, {{ name }}, where the heading should show the value — the holes of '
+        + 'the heading it translates, as the translated description and refusal message already keep them; plain text '
+        + 'where the braces were never meant as a hole. An empty string stays the untranslated slot.',
+      reason:
+        'The flow engine picks a translated screen heading in the run\'s locale and renders it through the flow '
+        + 'text-slot renderer, the double-brace dialect, exactly as it renders the translated body text and a refusing '
+        + 'end node\'s message. Those two refused a single-brace token when the bundle was parsed; the heading accepted '
+        + 'one and drew it as literal text, so a translator who wrote {name} by analogy with a messages entry shipped a '
+        + 'heading that showed the braces. It is now refused at the same parse, with the words the source heading '
+        + 'gets. No D2 conversion exists: a single-brace token in a translated heading drew as literal text on every '
+        + 'route the heading has taken, the console overlay before the engine pick included, so only the translator '
+        + 'can say whether it was meant as a hole.',
+      acceptanceCriteria:
+        'Run objectstack validate, which parses the stack\'s translations, and parse each stored translation item: '
+        + 'none is refused at a flows screens title. For each heading the refusal named, the translation now carries '
+        + 'the holes of the heading it translates, or plain text; run the screen flow in that locale and confirm the '
+        + 'heading shows the value, with no stray brace.',
     },
     // The judgment half of `translation-per-app-settings-removed`. The D2
     // conversion deletes the group mechanically; what it cannot say in a

@@ -11,8 +11,9 @@ import type { Cube } from '@objectstack/spec/data';
  * chain resolves a query's cube through it.
  *
  * Two sources write to it, both of them configuration, from `AnalyticsService`:
- * 1. **Manifest definitions** — `AnalyticsServiceConfig.cubes` (`registerAll`),
- *    i.e. explicit cube definitions authored in `objectstack.config.ts`.
+ * 1. **Manifest definitions** — `AnalyticsServiceConfig.cubes` (one `register`
+ *    per cube), i.e. explicit cube definitions authored in
+ *    `objectstack.config.ts`.
  * 2. **Compiled datasets** (ADR-0021) — `compileDataset()`'s Cube, registered
  *    under the dataset's name by `registerDataset`: the constructor's
  *    `datasets`, or an embedder. ⛔ Never by `queryDataset`, which compiles a
@@ -34,16 +35,41 @@ import type { Cube } from '@objectstack/spec/data';
  * repository calls (#15019). It is described at the method rather than
  * advertised here, because listing it would promise a source the platform does
  * not deliver.
+ *
+ * ## Admission — every write, one place
+ *
+ * The constructor takes an optional {@link CubeAdmission}, asked by
+ * {@link CubeRegistry.register} before the cube is stored, and every other write
+ * here goes through `register`. `AnalyticsService` passes the generic-exit
+ * gate's registration face (`api-exposure-door.ts`), so a cube whose base
+ * object or declared join the API does not serve is refused on every write
+ * path: the configured cubes, `registerDataset`, and a caller holding the
+ * service's public `cubeRegistry` directly. A registry constructed without one
+ * admits every cube, as it always has.
  */
+export type CubeAdmission = (cube: Cube) => void;
+
 export class CubeRegistry {
   private cubes = new Map<string, Cube>();
 
-  /** Register a single cube definition. Overwrites if name already exists. */
+  /** @param admit Asked before every write; a throw refuses the cube and stores nothing. */
+  constructor(private readonly admit?: CubeAdmission) {}
+
+  /**
+   * Register a single cube definition. Overwrites if name already exists. The
+   * admission hook, when there is one, is asked first, and its throw is this
+   * call's: the registry is left exactly as it was.
+   */
   register(cube: Cube): void {
+    this.admit?.(cube);
     this.cubes.set(cube.name, cube);
   }
 
-  /** Register multiple cube definitions at once. */
+  /**
+   * Register multiple cube definitions, in order. A refused cube throws at its
+   * turn, and the ones before it stay registered; a caller that wants every
+   * admissible cube registered calls {@link register} per cube.
+   */
   registerAll(cubes: Cube[]): void {
     for (const cube of cubes) {
       this.register(cube);

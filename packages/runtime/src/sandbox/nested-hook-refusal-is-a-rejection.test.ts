@@ -149,11 +149,15 @@ describe('[#17265] a nested sandboxed hook refusal keeps its business message', 
         expect(err.message).toContain("action 'submit_contract' threw:");
         expect(err.message).toContain("hook 'guard_contract_submit' threw:");
 
-        // Message-NEUTRAL: this repair moves the status, not the sentence. The
-        // client-facing text is byte-identical to what the 500 already carried
-        // — the VM's `SandboxError: ` name prefix is a debug artefact and has
-        // never reached the wire.
-        expect(err.innerMessage).toBe(`hook 'guard_contract_submit' threw: ${REFUSAL}`);
+        // [#22588 — FLIPPED] This line used to pin the sentence as
+        // `hook 'guard_contract_submit' threw: ${REFUSAL}`: #17265 moved the
+        // STATUS and deliberately left the sentence byte-identical to what the
+        // 500 had carried. That wrapper was then served by every door as the
+        // author's words — measured on `POST /actions/…` as
+        // `hook 'g' threw: Error: <sentence>` — so the sentence now crosses
+        // the hop on its own (`SANDBOX_REFUSAL_PROP`), and the hook frame lives
+        // only in the log-only `.message` asserted just above.
+        expect(err.innerMessage).toBe(REFUSAL);
         expect(err.innerMessage).not.toContain('SandboxError:');
     });
 
@@ -165,7 +169,9 @@ describe('[#17265] a nested sandboxed hook refusal keeps its business message', 
 
         expect(response.status).toBe(400);
         expect(response.body.error.code).toBe('VALIDATION_ERROR');
-        expect(response.body.error.message).toContain(REFUSAL);
+        // [#22588] `toBe`, not `toContain`: a `toContain` pin stayed green
+        // while the wire carried the hook's debug wrapper in front of it.
+        expect(response.body.error.message).toBe(REFUSAL);
     });
 
     it("a nested refusal's DECLARED status and code survive the hop", async () => {
@@ -187,7 +193,7 @@ describe('[#17265] a nested sandboxed hook refusal keeps its business message', 
 
         expect(response.status).toBe(409);
         expect(response.body.error.code).toBe('RECORD_LOCKED');
-        expect(response.body.error.message).toContain(REFUSAL);
+        expect(response.body.error.message).toBe(REFUSAL);
     });
 });
 

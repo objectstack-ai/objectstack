@@ -1278,6 +1278,59 @@ describe('translation unknown-key strictness', () => {
       expect(parse({ quick_add_task: { screens: { success_screen: { description: '' } } } }).success).toBe(true);
     });
 
+    // #22627 — the heading is the same kind of slot as the body text beside it:
+    // the engine picks it in the run's locale and renders it through
+    // `renderTextSlot`, so a `{name}` refused in `description` must not be
+    // accepted here and drawn literally.
+    it('refuses a single-brace `{token}` in a translated `title`, through the one text-slot judge (#22627)', () => {
+      const result = parse({ quick_add_task: { screens: { success_screen: { title: 'Welcome, {name}' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues[0]!;
+      expect(issue.code).toBe('custom');
+      expect(issue.path).toEqual(['flows', 'quick_add_task', 'screens', 'success_screen', 'title']);
+      expect(issue.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+      // …and the remedy names the hole spelling of the very token.
+      expect(issue.message).toContain('{{ name }}');
+      // The metadata-item door reads the same shape.
+      const item = TranslationItemSchema.safeParse({
+        locale: 'zh-CN',
+        flows: { quick_add_task: { screens: { success_screen: { title: 'Welcome, {name}' } } } },
+      });
+      expect(item.success).toBe(false);
+      expect(item.error!.issues[0]!.path).toEqual(['flows', 'quick_add_task', 'screens', 'success_screen', 'title']);
+    });
+
+    it('accepts a translated `title` that keeps the `{{ }}` holes, and an empty one (the skeleton slot)', () => {
+      const result = parse({ quick_add_task: { screens: { success_screen: { title: 'Welcome, {{ record.name }}' } } } });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect((result as { data: any }).data.flows.quick_add_task.screens.success_screen.title)
+        .toBe('Welcome, {{ record.name }}');
+      expect(parse({ quick_add_task: { screens: { success_screen: { title: '' } } } }).success).toBe(true);
+    });
+
+    it('judges every engine-picked template key alike — one dialect, one judge (#22627)', () => {
+      // The screen copy keys the engine asks for (`flowScreenCopyKey`) and the
+      // refusing `end` node's message (`flowRefusalMessageKey`): a key added to
+      // `FLOW_SCREEN_COPY_KEYS` without the judge fails here.
+      const faces: Array<[string, unknown, Array<string>]> = [
+        ...FLOW_SCREEN_COPY_KEYS.map((key): [string, unknown, Array<string>] => [
+          key,
+          { f: { screens: { s: { [key]: 'Hi {name}' } } } },
+          ['flows', 'f', 'screens', 's', key],
+        ]),
+        ['message', { f: { refusals: { r: { message: 'Hi {name}' } } } }, ['flows', 'f', 'refusals', 'r', 'message']],
+      ];
+      // A floor, so an emptied key list cannot pass this vacuously.
+      expect(faces.map(([key]) => key)).toEqual(expect.arrayContaining(['title', 'description', 'message']));
+      for (const [key, flows, path] of faces) {
+        const result = parse(flows);
+        expect(result.success, `\`${key}\` must be judged`).toBe(false);
+        const issue = result.error!.issues[0]!;
+        expect(issue.path, key).toEqual(path);
+        expect(issue.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL), key).toBe(true);
+      }
+    });
+
     it('keeps runner chrome out of the bundle', () => {
       // Cancel/Submit are the CONSOLE's words in every app; the maintainer
       // ruling on #7646 keeps them in its own message catalog rather than

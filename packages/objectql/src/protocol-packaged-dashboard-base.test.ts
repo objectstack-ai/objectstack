@@ -40,7 +40,6 @@ import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
 const PKG = 'com.objectstack.plugin-auth';
 const DASH = 'system_overview';
-const ORG = 'org_acme';
 
 const SHIPPED_TITLE = 'Total Users';
 const EDITED_TITLE = 'Total Users (edited)';
@@ -138,7 +137,8 @@ function seedOrgOverlay(rows: Record<string, unknown>[]) {
         type: 'dashboard',
         name: DASH,
         package_id: null,
-        organization_id: ORG,
+        // [ADR-0131 D6] An environment overlay: no read serves an organization's.
+        organization_id: null,
         state: 'active',
         metadata: JSON.stringify(overlayBody()),
     });
@@ -189,12 +189,12 @@ describe('#20680 getPackagedDashboardBase — the packaged declaration, never an
     });
 });
 
-describe('#20680 the published org overlay, through the protocol read and the translation', () => {
+describe('#20680 the published overlay, through the protocol read and the translation', () => {
     it('the item read serves the overlay — one identity for the write and the read', async () => {
         const s = makeSession();
         registerPackaged(s.registry);
         seedOrgOverlay(s.rows);
-        const served = await s.protocol.getMetaItem({ type: 'dashboard', name: DASH, organizationId: ORG });
+        const served = await s.protocol.getMetaItem({ type: 'dashboard', name: DASH });
         expect(titleOf(served.item)).toBe(EDITED_TITLE);
         // The code artifact's envelope rides on the overlay body; it names the
         // registering package, not a second identity the overlay missed.
@@ -205,7 +205,7 @@ describe('#20680 the published org overlay, through the protocol read and the tr
         const s = makeSession();
         registerPackaged(s.registry);
         seedOrgOverlay(s.rows);
-        const served = (await s.protocol.getMetaItem({ type: 'dashboard', name: DASH, organizationId: ORG })).item;
+        const served = (await s.protocol.getMetaItem({ type: 'dashboard', name: DASH })).item;
         const packagedBase = s.protocol.getPackagedDashboardBase(DASH);
 
         for (const locale of ['en', 'zh-CN']) {
@@ -221,7 +221,7 @@ describe('#20680 the published org overlay, through the protocol read and the tr
         const s = makeSession();
         registerPackaged(s.registry);
         seedOrgOverlay(s.rows);
-        const served = (await s.protocol.getMetaItem({ type: 'dashboard', name: DASH, organizationId: ORG })).item;
+        const served = (await s.protocol.getMetaItem({ type: 'dashboard', name: DASH })).item;
         expect(titleOf(translateDashboard(served, BUNDLE, { locale: 'en' }))).toBe(SHIPPED_TITLE);
         expect(titleOf(translateDashboard(served, BUNDLE, { locale: 'zh-CN' }))).toBe('用户总数');
     });
@@ -229,7 +229,7 @@ describe('#20680 the published org overlay, through the protocol read and the tr
     it('after reset (no overlay row) the shipped body is served and still translated', async () => {
         const s = makeSession();
         registerPackaged(s.registry);
-        const served = (await s.protocol.getMetaItem({ type: 'dashboard', name: DASH, organizationId: ORG })).item;
+        const served = (await s.protocol.getMetaItem({ type: 'dashboard', name: DASH })).item;
         const packagedBase = s.protocol.getPackagedDashboardBase(DASH);
         expect(titleOf(served)).toBe(SHIPPED_TITLE);
         expect(titleOf(translateDashboard(served, BUNDLE, { locale: 'zh-CN', packagedBase }))).toBe('用户总数');

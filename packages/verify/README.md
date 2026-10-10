@@ -100,9 +100,14 @@ expect(deal.expected_revenue).toBe(6_000);             // the hook derived it
 await expect(stack.hooks.run('crm_vault', 'insert', { name: 'x' }, { as: rep }))
   .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
 
-// An update as the system principal (no user): no permission gate, but the
-// hooks, the validations and the record-change flows all run.
+// A write as the system principal (no user), the write an integration or a
+// system job makes: no permission gate, but the hooks, the validations and the
+// record-change flows all run, with no trigger user. Insert, update or delete.
 await stack.hooks.run('crm_opportunity', 'update', { id: deal.id, stage: 'closed_won' }, { system: true });
+const lead = await stack.hooks.run('crm_lead', 'insert', { last_name: 'Ada', company: 'Globex' }, { system: true });
+// A delete-triggered flow is handed the pre-image, and the engine no longer
+// holds the row: its `get_record` of that id finds nothing.
+await stack.hooks.run('crm_lead', 'delete', { id: lead.id }, { system: true });
 
 // A predicate update: one payload for every matched row, hooks and record
 // flows once per row with that row's own `previous`. Resolves the count.
@@ -144,19 +149,21 @@ await stack.stop();
   stack — the handle resolves it through the dispatcher's own identity resolver
   (`contextFor(token)` exposes that context for services the handle does not
   cover). There is no way to run as "nobody"; `seed`, the default `rows` and
-  an update passed `{ system: true }` (`hooks.run(…, 'update', …)`,
-  `hooks.updateWhere`) run as the system principal, deliberately and by name.
+  a write passed `{ system: true }` (`hooks.run` on `insert`, `update` or
+  `delete`, and `hooks.updateWhere`) run as the system principal, deliberately
+  and by name. `seed` fires no record-change flow (it is end-state fixture
+  data); a `{ system: true }` write does.
 - A refusal from `flows.*` / `actions.run` is the route's ADR-0112 envelope
   (`VerifyRefusal`: `code`, `status`, `details`; `isVerifyRefusal(e)`); a
   refusal from `hooks.run` / `hooks.updateWhere` / `validate` / `rows` /
   `automation.evaluateCondition` is the engine's own error (a condition the
   engine cannot evaluate rejects, never answers `false`; on a stack with no
   automation service, `automation.evaluateCondition` rejects with the kernel's
-  own `SERVICE_NOT_REGISTERED` error naming `automation`). The two update doors refuse a malformed call themselves,
-  before the engine is touched, with `INVALID_REQUEST` / `400` (`{ system: true }`
-  on an insert or delete, a caller named twice, or a `hooks.updateWhere` the
-  engine would write by id). Assert on `code` (and `status` / `statusCode`),
-  never on a message alone.
+  own `SERVICE_NOT_REGISTERED` error naming `automation`). `hooks.run` and
+  `hooks.updateWhere` refuse a malformed call themselves, before the engine is
+  touched, with `INVALID_REQUEST` / `400` (a caller named twice, or a
+  `hooks.updateWhere` the engine would write by id). Assert on `code` (and
+  `status` / `statusCode`), never on a message alone.
 - Many files, one boot: `bootStackOnce(config, opts?)` memoises `bootStack` per
   `(config, opts)` object identity for the life of the process. Share it from
   one module, under vitest `isolate: false`, and never `stop()` a stack other

@@ -9,7 +9,7 @@
 //
 // Positions also reach the metadata service: `AppPlugin`'s security block
 // (`registerInMemory`, the `'app-plugin'` registrar) and the artifact door
-// (`MetadataPlugin._registerArtifactBodyCollections`, the `'artifact-door'`
+// (`registerArtifactBodyCollections` in `@objectstack/metadata`, the `'artifact-door'`
 // registrar) write them there, in `start()`. But neither runs
 // for a package the engine has not installed first: `AppPlugin.init()` registers
 // every package of the bundle through the `manifest` service in Phase 1 — a
