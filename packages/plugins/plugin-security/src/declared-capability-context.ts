@@ -18,17 +18,13 @@
  *
  * The predicate's docblock names two sources — the `sys_capability` rows
  * carrying `managed_by:'package'` at boot, the stack's own `capabilities`
- * array at authoring time. At the boot moment the anchor binding runs, the
- * rows DO NOT EXIST YET: `runBootstrap` binds the baseline to `everyone`
- * before it calls `bootstrapDeclaredCapabilities`, and that order is fixed by
- * two other constraints (the binding must follow `bootstrapBuiltinRoles`,
- * which seeds the anchor, and precede the suggestion reconciliation). Reading
- * the rows there would read an empty table on a first boot and refuse every
- * declared token — the defect this module removes, reintroduced one layer in.
+ * array at authoring time. No such row is written: a package's declared
+ * capability lives in the registry, its one home (ADR-0131 D3). Reading the
+ * rows would read an empty table and refuse every declared token — the defect
+ * this module removes, reintroduced one layer in.
  *
- * So all three runtime consumers read the DECLARATIONS, through the same
- * two-step the seeder itself reads them by (registry first, metadata service
- * as the fallback). One source for the three verdicts is not a convenience:
+ * So all three runtime consumers read the DECLARATIONS, through one two-step
+ * (registry first, metadata service as the fallback). One source for the three verdicts is not a convenience:
  * `confirmAudienceBindingSuggestion` is the friendly early rendition of the
  * gate the engine middleware re-enforces on the insert, so a second source
  * there would let a confirm pass its own check and then be refused by the
@@ -38,8 +34,9 @@
  * docblock says why: a "declared" list read off `systemPermissions` excuses
  * every token by construction and turns the gate off. And nothing here filters
  * by platform-ness: {@link describeHighPrivilegeBits} applies the platform
- * floor itself, so a capability declared under a curated platform name is
- * still high-privilege however it reaches this list.
+ * floor itself, so a capability declared under a curated platform name — the
+ * platform's own curated declarations (`builtin-capabilities.ts`) included —
+ * is still high-privilege however it reaches this list.
  *
  * Fails CLOSED at every step: an unreadable registry, an unreadable metadata
  * service, a declaration with no `name` and an empty stack all yield
@@ -48,7 +45,6 @@
 
 import type { AnchorBindingContext } from '@objectstack/spec/security';
 import { readDeclared } from './bootstrap-declared-permissions.js';
-import { withoutPlatformCapabilityItems } from './builtin-capabilities.js';
 
 /**
  * Read this stack's declared authorization capabilities as an
@@ -60,18 +56,13 @@ import { withoutPlatformCapabilityItems } from './builtin-capabilities.js';
  *
  * @param ql The ObjectQL engine handle (its registry is the primary source).
  * @param metadataService The metadata service, read only when the registry
- *   lists nothing — the same fallback `bootstrapDeclaredCapabilities` uses.
+ *   lists nothing.
  */
 export async function readDeclaredCapabilityContext(
   ql: any,
   metadataService?: any,
 ): Promise<AnchorBindingContext | undefined> {
-  // [ADR-0131 D3] The registry also holds the platform's curated capabilities,
-  // which this plugin declares itself (`builtin-capabilities.ts`). They are not
-  // a package's declaration, and the platform floor would discard them anyway;
-  // dropping them keeps the metadata-service fallback below answering on a
-  // registry that holds no package declaration, as it did before.
-  let caps: any[] = withoutPlatformCapabilityItems(readDeclared(ql, 'capability'));
+  let caps: any[] = readDeclared(ql, 'capability');
   if (caps.length === 0) {
     try {
       const listed = metadataService?.list?.('capability');
