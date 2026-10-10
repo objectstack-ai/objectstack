@@ -234,5 +234,30 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "更新日時"
       }
     }
+  },
+  sys_comment_reaction: {
+    label: "Comment Reaction",
+    pluralLabel: "Comment Reactions",
+    description: "An emoji reaction to a comment, owned by the user who reacted",
+    fields: {
+      id: {
+        label: "Reaction ID"
+      },
+      comment_id: {
+        label: "Comment",
+        help: "The id of the sys_comment this reaction is on. The reaction is readable exactly when that comment is."
+      },
+      emoji: {
+        label: "Emoji",
+        help: "The emoji, as the character sequence the client renders (for example 👍)"
+      },
+      user_id: {
+        label: "User",
+        help: "The user who reacted. Stamped from the session on create; a client-supplied value is replaced."
+      },
+      created_at: {
+        label: "Created At"
+      }
+    }
   }
 };

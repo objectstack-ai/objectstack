@@ -147,6 +147,7 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_audit_log: 'telemetry',
       sys_activity: 'telemetry',
       sys_comment: 'sqlite',
+      sys_comment_reaction: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();
@@ -159,6 +160,7 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
     expect(placement).toContain('sys_audit_log→telemetry');
     expect(placement).toContain('sys_activity→telemetry');
     expect(placement).toContain('sys_comment→sqlite');
+    expect(placement).toContain('sys_comment_reaction→sqlite');
 
     // …and the split itself is called out, because "absent from the database I
     // am looking at" is not "never created".
@@ -176,6 +178,7 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_audit_log: 'sqlite',
       sys_activity: 'sqlite',
       sys_comment: 'sqlite',
+      sys_comment_reaction: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();
@@ -196,6 +199,7 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
       sys_audit_log: undefined,
       sys_activity: 'sqlite',
       sys_comment: 'sqlite',
+      sys_comment_reaction: 'sqlite',
     });
     const { ctx, logs, fireReady } = makeCtx(engine);
     const plugin = new AuditPlugin();

@@ -5649,6 +5649,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-approval-node-config-contract-refused`.',
   },
   {
+    id: 'flow-binding-variable-dollar-name-refused',
+    order: 92,
+    text:
+      'The binding keys follow the same rule, so a flow cannot bind a `$` name it is then refused to read: '
+      + 'a node\'s `outputVariable` (`get_record`, `create_record`, `map`, `script`, `subflow`) refuses a name '
+      + 'that starts with `$`, and a `try_catch` `errorVariable` refuses every one but the engine\'s own '
+      + '`$error`, its default. The remedy is the same name without the `$`, read as `{{ name }}`. Each key '
+      + 'states the rule as a `pattern`, so the published JSON Schema refuses what the parse refuses, and the '
+      + 'node contract, `registerFlow`, `objectstack validate` and the run itself refuse such a name at the '
+      + 'key. No D2 conversion exists: the bare name may already be bound in the flow, and the reads of the '
+      + 'old name sit in every dialect a flow string speaks, so the rename is the author\'s. Its D3 record is '
+      + 'the semantic entry `flow-binding-variable-dollar-name-refused`.',
+  },
+  {
     id: 'flow-builtin-node-config-undeclared-keys-refused',
     order: 89,
     text:
@@ -5773,8 +5787,12 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`registerFlow`, `objectstack validate` and the executor alike — with the CEL spelling of each token. '
       + 'No D2 conversion exists: every authored spelling was measured lossy (an absent key writes nothing '
       + 'under the template and fails under CEL; CEL divides two integers as integers), so which value an '
-      + 'absent key should write is the author\'s judgment. The date macros and the `$User` paths keep their '
-      + 'meaning until CEL can spell them. Its D3 record is the semantic entry '
+      + 'absent key should write is the author\'s judgment. The `$User` paths are refused too: the flow CEL '
+      + 'scope binds `current_user`, the run\'s user or `null` in a run with none, so `{$User.Id}` is '
+      + '`current_user.id`, guarded where a flow can run without a user, and the other `$User` paths, which '
+      + 'never resolved, name a read of the user record. The date macros are refused too, with their CEL '
+      + 'string form (`{TODAY() + 7}` is `isoDate(daysFromNow(7))`, `{NOW()}` is `isoDatetime(now())`), so no '
+      + 'single-brace spelling is kept. Its D3 record is the semantic entry '
       + '`flow-value-slot-template-dialect-refused`.',
   },
   {
@@ -6188,6 +6206,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'deletes the key from those pages, retired from the load path, so stored rows and artifacts '
       + 'replay clean while authored sources are refused until edited; the delete is lossless. Its D3 '
       + 'record is the semantic entry `page-requires-non-compiled-kind-refused`.',
+  },
+  {
+    id: 'page-slots-details-beside-tabs-refused',
+    order: 92,
+    text:
+      'It also refuses a page that authors both `slots.details` and `slots.tabs`. The two slots read '
+      + 'as independent and are not: `details` is the body of the Details tab, that tab lives inside '
+      + 'the synthesized `page:tabs` strip, and `tabs` replaces the whole strip, so the console\'s '
+      + 'synthesizer never read a `details` authored beside it and its sections and hidden fields '
+      + 'silently never applied. `PageSchema` now refuses the pair at `slots.details`, naming both '
+      + 'slots and the fix — the `record:details` component as the `children` of a `tabs` item — so '
+      + '`objectstack validate` and the metadata save door agree; the platform\'s own `sys_user_detail` '
+      + 'page moved its details body into its first tab. No key is removed, so there is no tombstone, '
+      + 'and no D2 conversion exists: which tab carries the body is the author\'s decision. Its D3 '
+      + 'record is the semantic entry `page-slots-details-beside-tabs-refused`.',
   },
   {
     id: 'permission-restore-purge-bits-retired',
@@ -13539,6 +13572,54 @@ const step18: MigrationStep = {
         + 'row that exists only in `sys_metadata`. An approval node the contract accepts parses and '
         + 'registers byte-identically to before.',
     },
+    // #22502 — the binding half of the rule the text-slot judge reads
+    // (`flow-text-slot-unbound-dollar-root-refused`): the dollar names are the flow
+    // engine's, so a node's outputVariable and a try_catch errorVariable refuse one
+    // (the engine's own $error excepted, as errorVariable's default). It narrows a
+    // flow's accept set; no key is removed, so there is no tombstone and no
+    // RETIRED_KEYS_BY_MAJOR row. Semantic-only — no D2 conversion: the bare name may
+    // already be bound in the flow, and the reads of the old name sit in every
+    // dialect a flow string speaks.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'flow-binding-variable-dollar-name-refused',
+      surface:
+        'flows[].nodes[].config.outputVariable of a get_record, create_record, map, script or subflow node, and '
+        + 'flows[].nodes[].config.errorVariable of a try_catch node — a variable name that starts with a dollar sign '
+        + 'such as $caught, other than the default $error on errorVariable. Reachable wherever a flow is authored or '
+        + 'stored: defineStack flows sources, defineFlow, an exported stack passed to objectstack validate or '
+        + 'objectstack compile, a flow saved from the Studio flow designer, and a flow row already in sys_metadata',
+      replacement:
+        'the same name without the dollar sign, read as a hole over that name: errorVariable: \'caught\' read as '
+        + '{{ caught.message }}, outputVariable: \'lead\' read as {{ lead.name }}. A try_catch may instead drop '
+        + 'errorVariable and read the engine\'s default, {{ $error.message }}. Rename every read of the old name '
+        + 'with it — a text-slot hole, a CEL expression, a single-brace token in a value position',
+      reason:
+        'The dollar-named variables are the flow engine\'s own: it binds $record, $runId, $flowName, $flowLabel and '
+        + '$error, a flat-graph loop binds $loopItems and $loopIndex, and a resume signal may not write any dollar '
+        + 'name. A flow text slot refuses a hole whose root is a dollar name the engine does not bind, so a flow '
+        + 'that bound $caught as its errorVariable could not read {{ $caught.message }}: the refusal told the '
+        + 'author to drop the dollar sign, while the binding key itself took any string. One contract had two '
+        + 'answers to whether an author may own a dollar name. The binding keys now give the text slots\' answer: '
+        + 'each key states the rule as a JSON Schema pattern, so the published schema refuses what the parse '
+        + 'refuses, and the node contract, registerFlow, objectstack validate and the run itself refuse such a '
+        + 'name at the key, naming the same name without the dollar sign. A binding over an engine name '
+        + '(outputVariable: \'$record\') would also have overwritten the engine\'s value for the rest of the run. '
+        + 'No D2 conversion exists: the bare name may already be bound in the flow, and the reads of the old '
+        + 'name sit in every dialect a flow string speaks, so the rename is the author\'s. Where such a node '
+        + 'already sits the whole flow is refused: registered from the metadata registry or sys_metadata at boot '
+        + 'it is skipped with a warn naming it, its trigger not armed, while the flows beside it register; a '
+        + 'stack source throws StackSchemaInvalidError for the whole stack. ADR-0087, ADR-0031.',
+      acceptanceCriteria:
+        'Run objectstack validate over every stack authored in config files, and boot every deployed stack. '
+        + 'Each refusal names the node and the key — nodes.N.config.outputVariable or nodes.N.config.errorVariable, '
+        + 'or the region path nodes.N.config.try.nodes.M.config.outputVariable — and the name to write. Rename the '
+        + 'binding and every read of it, then (1) objectstack validate is clean, (2) each flow registers at boot '
+        + 'with no failed to register flow warn for it, and (3) the flow paths that read the variable — a '
+        + 'notification, a screen, a later node — carry its value, with no blank fragment.',
+    },
     // #21982 — the D3 entry for the build doors refusing an UNDECLARED KEY on the
     // builtin node types whose undeclared keys only `registerFlow` judged until
     // now: `get_record`, `create_record`, `update_record`, `delete_record`,
@@ -14222,8 +14303,9 @@ const step18: MigrationStep = {
         'a double-brace template hole, rendered by the formula template engine over the flow\'s variables: a variable '
         + 'path with an optional formatter, {{ record.name }}, {{ $error.message }}, {{ rows.0.subject }}, '
         + '{{ record.amount | currency }}. A token no hole can spell is computed into a variable first, with an '
-        + 'assignment node — arithmetic and functions as a CEL value envelope, the date macros and the run-user paths '
-        + 'as the value-slot spelling that still reads them — and written as {{ variable }}',
+        + 'assignment node — arithmetic and functions as a CEL value envelope, the date macros as the CEL value '
+        + 'envelope of their string form (isoDate(today()), isoDatetime(now())), the run user\'s id as the CEL value '
+        + 'envelope current_user.id — and written as {{ variable }}',
       reason:
         'ADR-0032 Decision 3 fixes one template delimiter, double braces, and deletes the single brace: it collides '
         + 'with CEL map literals, and an author who meets both dialects in one flow mixes them. The 17.x interpolator '
@@ -14257,8 +14339,10 @@ const step18: MigrationStep = {
         + '(message) — a string, or the source of a template envelope, carrying a double-brace hole whose root is a '
         + 'dollar-named variable the flow engine does not bind, such as {{ $User.Id }}',
       replacement:
-        'a variable the run has, written as a hole. The run user is computed first, with an assignment node whose '
-        + 'value slot still reads the run-user path (assignments: { by: \'{$User.Id}\' }), then written as {{ by }}. '
+        'a variable the run has, written as a hole. The run user\'s id is computed first, with an assignment node '
+        + 'whose CEL value envelope reads current_user, the run\'s user (assignments: { by: { dialect: \'cel\', source: '
+        + '\'current_user.id\' } }), then written as {{ by }}; every other run-user path never resolved in any shipped '
+        + 'run, and an email or a name is read from the user record by current_user.id. '
         + 'A variable the flow binds itself (a declared variable, an assignment target, an outputVariable, a try_catch '
         + 'errorVariable) is named without the dollar sign and written as {{ caught.message }}. The engine\'s own '
         + 'variables stay holes: {{ $error.message }}, {{ $record.name }}, {{ $runId }}, {{ $flowName }}, '
@@ -14318,8 +14402,10 @@ const step18: MigrationStep = {
     },
     // The template dialect leaves the flow value slots: one dialect for a computed
     // value, CEL. Semantic-only — every token spelling authored in flows was
-    // measured lossy under conversion, so no D2 conversion rewrites any of them,
-    // and the date macros and run-user paths CEL cannot write yet are kept.
+    // measured lossy under conversion, so no D2 conversion rewrites any of them.
+    // The run-user paths are refused too: the flow CEL scope binds current_user,
+    // the run's user or null. So are the date macros, with their CEL string form
+    // (isoDate / isoDatetime): no single-brace spelling is kept.
     {
       id: 'flow-value-slot-template-dialect-refused',
       // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -14327,30 +14413,56 @@ const step18: MigrationStep = {
       surface:
         'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
         + 'legacy bare config) and of create_record and update_record nodes (the fields map) — a string value, or a '
-        + 'string anywhere inside an array or object value, carrying a single-brace template token',
+        + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
+        + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included',
       replacement:
         'a CEL value envelope, { dialect: "cel", source: "…" }, evaluated to the value: a path is the same path '
         + '(record.owner; a numeric segment becomes an index, items[0]; a variable whose name starts with $ is read '
         + 'through vars, vars["$error"].message), arithmetic is the same arithmetic with every integer divisor written '
-        + 'as a double (round(x * 100) / 100.0), and text with holes is one concatenation (\'Hello \' + o.name). A '
-        + 'string with no token is the literal text it spells, and braces meant literally are a CEL string literal',
+        + 'as a double (round(x * 100) / 100.0), and text with holes is one concatenation (\'Hello \' + o.name). The '
+        + 'run user\'s id, $User.Id, is current_user.id — current_user is the run\'s user, or null when the run has '
+        + 'none — and in a flow that can run without a user it is current_user != null ? current_user.id : null, which '
+        + 'writes null where the template wrote nothing, so on update_record it clears a stored value the template '
+        + 'left alone. Every other run-user path ($User.Email, $User.Name, …) never resolved in any shipped run: '
+        + 'current_user carries only what the run holds (id, positions, organizationId, isPlatformAdmin), and an email '
+        + 'or a name is read from the user record by current_user.id (a get_record node on sys_user). A date macro is '
+        + 'its CEL string form on the UTC calendar: TODAY() is isoDate(today()), TODAY() + N and TODAY() - N are '
+        + 'isoDate(daysFromNow(N)) and isoDate(daysAgo(N)), NOW() is isoDatetime(now()), and NOW() plus or minus N is '
+        + 'isoDatetime(addDays(now(), N)) with N signed, which keeps the time of day where daysFromNow lands on '
+        + 'midnight; a variable offset is isoDate(addDays(today(), days)). Where an envelope is literal data — a string '
+        + 'inside an object or list value, or either legacy assignment shape — an envelope written in its place is '
+        + 'stored as the object it spells, so the whole value is one envelope building a CEL map or list literal, and '
+        + 'a legacy assignment moves into the assignments map. A string with no token is the literal text it spells, '
+        + 'and braces meant literally are a CEL string literal',
       reason:
         'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
         + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
         + 'wrote nothing under the template and fails the run under CEL; text with a null hole rendered nothing and '
         + 'CEL refuses + null; CEL divides two integers as integers, so round(x * 100) / 100 truncates 123.46 to 123. '
         + 'Where a value may be absent, which of nothing, null or a default the field should take is the author\'s '
-        + 'decision — the template decided it silently. Two spellings are kept with their old meaning, because CEL '
-        + 'cannot write them yet: the date macros NOW() and TODAY() with a day offset (CEL yields a Timestamp, not the '
-        + 'ISO text, and has no string form for one) and the run-user paths beginning $User. (the flow CEL scope binds '
-        + 'no user). A flow carrying a refused value is refused at registration, by objectstack validate and by the '
-        + 'executor; a stored flow carrying one is skipped at boot with a warn naming it.',
+        + 'decision — the template decided it silently. The run user\'s id was the run\'s userId under the template, '
+        + 'and nothing in a run with no user (a schedule, a record change made by a system write); the flow CEL scope '
+        + 'binds current_user to the run\'s user and to null in such a run, never a pseudo-user, so current_user.id '
+        + 'fails there and its guarded form writes null. The other run-user paths read a user object no run carries, '
+        + 'so they wrote nothing in every run. The date macros wrote the ISO text of the UTC day or instant, which '
+        + 'isoDate and isoDatetime write byte for byte for a whole number of days, but the template read an offset it '
+        + 'could not use as 0 — a variable it did not find, a value that is not a number, text that is neither — '
+        + 'where CEL fails the run, and it truncated a fractional offset after adding it to the day of the month, where '
+        + 'addDays truncates the offset itself and daysFromNow and daysAgo refuse a fraction at build. A flow carrying '
+        + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
+        + 'carrying one is skipped at boot with a warn naming it.',
       acceptanceCriteria:
         'Run objectstack validate: it reports each refused value as expression-invalid at the node and the value\'s '
         + 'path, with the CEL spelling of its tokens. Rewrite each as that envelope; where a variable or key may be '
-        + 'absent, guard it (has(record.owner) ? record.owner : null, has(vars.x) ? vars.x : null for a variable) or '
-        + 'route around the node. Re-run the flow paths that write those fields and compare the stored values with '
-        + 'the ones the template wrote.',
+        + 'absent, guard it a step at a time from vars, which holds only the variables the run has bound '
+        + '(has(vars.x) ? vars.x : null, has(vars.source) && has(vars.source.id) ? vars.source.id : null; a guard on '
+        + 'the last key alone, has(source.id), fails the run when source itself was never bound) or route around the '
+        + 'node. For the run user, find which flows can run without one (a schedule, a record change '
+        + 'a system write can make): there, guard current_user.id, or skip the node with a start condition or a '
+        + 'decision on current_user != null where an update_record must leave the stored value alone. For a date '
+        + 'macro with a variable offset, check the variable is always set to a number where the flow runs; write a '
+        + 'fractional offset as the whole number of days meant. Re-run the flow paths that write those fields and '
+        + 'compare the stored values with the ones the template wrote.',
     },
     // #21654 — the D3 entry for `FlowSchema`'s refusal of a write node aimed at a
     // stored-metadata table: the save-time half of #21624, which applies #21520's
@@ -15261,13 +15373,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — names '
+        + 'against, `.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 8281 tracked files (0 across the 8234 at f0268ad78, the 7754 at a58626c88, the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 8351 tracked files (0 across the 8281 at 47b1f0bb7, the 8234 at f0268ad78, the 7754 at a58626c88, the 7650 at 0abd4f9f8, the 7632 at 9dfaca654, the 7579 at 2e818d0b5, the 10267 at ab1879721, the 10071 at 89cad75d5, the 9912 at 31971ff1e, the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8, to 17468 and 7246 at a58626c88, to 17956 and 7522 at f0268ad78 and to 17980 and 7523 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310, to 15691 and 6206 at 31971ff1e, to 16044 and 6461 at 89cad75d5, to 16377 and 6665 at ab1879721, to 17227 and 7134 at 2e818d0b5, to 17313 and 7186 at 9dfaca654, to 17390 and 7209 at 0abd4f9f8, to 17468 and 7246 at a58626c88, to 17956 and 7522 at f0268ad78, to 17980 and 7523 at 47b1f0bb7 and to 18047 and 7545 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -15472,10 +15584,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a`, re-read from this tree — '
+        + '`.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '8281 tracked files, against lit controls timeout 1674, RuntimeConfig 337 and resourceLimits '
-        + '2 on the same corpus (0 across 8234, and 1658 / 337 / 2, at f0268ad78; 0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '8351 tracked files, against lit controls timeout 1694, RuntimeConfig 337 and resourceLimits '
+        + '2 on the same corpus (0 across 8281, and 1674 / 337 / 2, at 47b1f0bb7; 0 across 8234, and 1658 / 337 / 2, at f0268ad78; 0 across 7754, and 1431 / 299 / 2, at a58626c88; 0 across 7650, and 1360 / 293 / 2, at 0abd4f9f8; 0 across 7632, and 1360 / 293 / 2, at 9dfaca654; 0 across 7579, and 1351 / 276 / 2, at 2e818d0b5; 0 across 10267, and 1348 / 273 / 2, at ab1879721; 0 across 10071, and 1331 / 273 / 2, at 89cad75d5; 0 across 9912, and 1303 / 273 / 2, at 31971ff1e; 0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -15533,6 +15645,58 @@ const step18: MigrationStep = {
         + 'does NOT touch: packages/core/src/plugin-loader.ts declares its own local '
         + 'PluginStartupResult interface — a different type, carrying startTime rather than any '
         + 'duration key — which is not a reader of this schema and is unchanged.',
+    },
+    // The declared default of `ListView.userActions.editInline` moved from `false`
+    // to `true` (maintainer ruling 2026-10-10, the v18 line, verbatim:
+    // 「乙 v18 把 spec 默认翻成 true,editInline: false 变成关法。」). A default move
+    // reaches every silent document with no parse error and nothing in the
+    // author's diff, so the upgrade path carries it as a TODO: only the deployment
+    // can say which list that never declared the key was relying on read-only
+    // cells. The same class as `view-pagination-page-size-default-50` and
+    // protocol 12's `rest-requireauth-default-flip`: no key is removed, so there
+    // is no tombstone and no RETIRED_KEYS_BY_MAJOR row, and no D2 conversion
+    // exists — a mechanical pass writing `editInline: false` into every silent
+    // view would preserve the old posture and defeat the ruling, and one writing
+    // `true` would add nothing the default does not already do. The one-vocabulary
+    // rule the printed `reason` names is objectui#5144 (a boolean view-level
+    // `inlineEdit` folds into `editInline`; an explicit `editInline` wins); the
+    // citation lives here, not in the printed guidance, which carries no tracker
+    // number.
+    {
+      id: 'list-view-edit-inline-default-on',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'ui.UserActionsConfig.editInline — an OMITTED editInline inside a list view\'s '
+        + 'userActions block, or a page interfaceConfig.userActions block',
+      replacement: 'nothing, to take the platform default: the list is editable in place by a user who '
+        + 'may update the object, under the permission gate that already exists. To keep a list '
+        + 'read-only in place — a log, an audit trail, a history, a report roll-up — write it: '
+        + '`userActions: { editInline: false }`',
+      reason:
+        'A RULED behaviour change on a default, so there is nothing to rewrite and nothing to '
+        + 'refuse: the maintainer\'s ruling of 2026-10-10 made a list view editable in place by '
+        + 'default on the v18 line, and the declared default of `UserActionsConfigSchema.editInline` '
+        + 'moved from `false` to `true`. A `userActions` block that omits `editInline` now parses to '
+        + '`true` — the renderer offers the inline-edit toggle, and a user who may `update` the object '
+        + 'edits a cell in place with the field\'s type-aware widget; a user without `update` sees no '
+        + 'toggle, because the permission gate is untouched. A view with no `userActions` block at all '
+        + 'parses with none on either side; the renderer reads an absent key as the spec default. The '
+        + 'one-vocabulary rule objectui ruled for the fold stands: a boolean view-level `inlineEdit` folds into '
+        + '`editInline` (`true` reads on and opens the grid in edit mode), and an explicit `editInline` '
+        + 'wins. Not losslessly convertible because the question is intent, not text: only the '
+        + 'deployment knows which silent lists were relying on read-only cells. The accept set is '
+        + 'unchanged — a boolean — and every authored `editInline` parses exactly as before. A '
+        + 'document that serialised an earlier parse (an `os compile` artifact) carries a written '
+        + '`false` and stays read-only in place; recompile it, or delete the key.',
+      acceptanceCriteria:
+        'An empty `userActions` block parses to `editInline: true`, and a list view carrying '
+        + '`userActions: {}` parses to `userActions.editInline` true; an authored '
+        + '`userActions: { editInline: false }` still parses to `false`; a view-level `inlineEdit: true` '
+        + 'still parses as before, with no `userActions` block materialised. In the console, a grid view '
+        + 'that declares neither key offers the inline-edit toggle to a user with `update` on the object '
+        + 'and not to a user without it; `userActions: { editInline: false }` removes it; '
+        + '`inlineEdit: true` still opens the grid in edit mode. Every list that must stay read-only in '
+        + 'place declares `userActions: { editInline: false }` and shows no toggle.',
     },
     {
       id: 'list-view-navigation-view-retired',
@@ -15711,10 +15875,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — spells '
+        + 'objectui checkout — `.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 8281 tracked files, against lit controls `useState` 2630 and `timeout` 1674 on '
-        + 'the same corpus (all four 0 across 8234, against 2622 and 1658, at f0268ad78, 0 across 7754, against 2491 and 1431, at a58626c88, 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 8351 tracked files, against lit controls `useState` 2630 and `timeout` 1694 on '
+        + 'the same corpus (all four 0 across 8281, against 2630 and 1674, at 47b1f0bb7, 0 across 8234, against 2622 and 1658, at f0268ad78, 0 across 7754, against 2491 and 1431, at a58626c88, 0 across 7650, against 2478 and 1360, at 0abd4f9f8, 0 across 7632, against 2477 and 1360, at 9dfaca654, 0 across 7579, against 2477 and 1351, at 2e818d0b5, 0 across 10267, against 2476 and 1348, at ab1879721, 0 across 10071, against 2470 and 1331, at 89cad75d5, 0 across 9912, against 2469 and 1303, at 31971ff1e, 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -17396,6 +17560,60 @@ const step18: MigrationStep = {
         + '`page-requires-non-compiled-kind-removed` edit, and every page renders as it did before the '
         + 'upgrade.',
       conversionIds: ['page-requires-non-compiled-kind-removed'],
+    },
+    // #22568 — page `slots.details` refused beside `slots.tabs`. A narrowing of
+    // the slot map, not a key removal: both slots stay live on their own, so there
+    // is no tombstone and no RETIRED_KEYS_BY_MAJOR row — the parse refuses the
+    // pair through `checkPageSlotPair` (ui/page.zod.ts). No D2 conversion: where
+    // the details body goes inside an authored tab strip (which item, under which
+    // label) is the author's call, and the move makes visible a body that never
+    // rendered.
+    //
+    // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+    // inside a code span and a table cell.
+    {
+      id: 'page-slots-details-beside-tabs-refused',
+      surface:
+        'page.slots.details authored beside page.slots.tabs on one page — either slot a single component '
+        + 'or an array, an empty details array included, whatever the page kind',
+      replacement:
+        'One `tabs` slot whose items carry the details body: the `record:details` component (its '
+        + '`sections` and `hideFields` unchanged) as the `children` of a `tabs` item, the first one by '
+        + 'convention — e.g. `{ label: \'Details\', children: [{ type: \'record:details\', properties: { … } }] }` '
+        + '— and no `details` slot. To keep the synthesized tab strip with the authored details body in '
+        + 'its Details tab instead, delete `slots.tabs`.',
+      reason:
+        'The slot map declared `details` and `tabs` as two independent optional slots, and they are not: '
+        + 'on a slotted record page `details` replaces the body of the Details tab, that tab lives inside '
+        + 'the synthesized `page:tabs` strip, and `tabs` replaces the whole strip. The console\'s '
+        + 'default-page synthesizer therefore reads `tabs` and never reads `details` when both are '
+        + 'authored, so the pair passed `PageSchema.parse`, `objectstack validate` and the metadata save '
+        + 'door while the authored details body — its sections, its hidden fields — silently never '
+        + 'applied. The platform\'s own `sys_user_detail` page authored both, so its Identity and Audit '
+        + 'sections never showed and the ban columns it hides were never hidden by it; it now carries its '
+        + '`record:details` as the first `tabs` item. The parse now refuses the pair at `slots.details`, '
+        + 'naming both slots and the fix: `definePage`, `defineStack` (`STACK_SCHEMA_INVALID`, 422), '
+        + '`objectstack validate` and the metadata save door (`422 INVALID_METADATA`). '
+        + 'Measured reach before the narrowing: in this repository only `sys_user_detail` authored the '
+        + 'pair (no example app page does), and hotcrm\'s one slotted page authors `header` and '
+        + '`discussion` only. '
+        + '⚠️ No D2 conversion: which tab item carries the details body, and under which label, is the '
+        + 'author\'s decision, and moving it makes visible a body that never rendered — a change to the '
+        + 'page, not a respelling. '
+        + '⚠️ A page row already stored with the pair is replayed unchanged at load (no conversion '
+        + 'touches it), so it renders as before — the authored tabs, without the details body — while '
+        + 'its read diagnostics name the pair and saving it again is refused until the details body '
+        + 'moves. ADR-0087.',
+      acceptanceCriteria:
+        'Grep every page in `defineStack` pages sources, exported stacks and every page row in '
+        + '`sys_metadata` for a `slots` map carrying both a `details` and a `tabs` key. For each, move the '
+        + '`details` component(s) into the `tabs` items — as the `children` of a tab item, the first one by '
+        + 'convention, with its `sections` and `hideFields` unchanged — and delete `slots.details`, or '
+        + 'delete `slots.tabs` to keep the synthesized tabs. Then `objectstack validate` reports nothing '
+        + 'at `pages.N.slots.details`, saving each formerly affected page through the metadata API '
+        + 'succeeds instead of answering a 422 that names `slots.details`, and the record page shows the '
+        + 'authored details body (its sections, without its hidden fields) in the tab that now carries it. '
+        + 'A page authoring only one of the two slots parses and renders byte-identically to before.',
     },
     // #12497 (ADR-0049, maintainer ruling accepting #1883's recommendation B) — the
     // D3 entry of the `permission-allow-restore-purge-removed` family (ruling B on
@@ -19517,7 +19735,9 @@ const step18: MigrationStep = {
     // `400 INVALID_REQUEST`. Semantic only: no metadata type carries either
     // surface, so there is no authored source for a D2 conversion to rewrite —
     // what moves is caller code and the intent behind it, which only the caller
-    // can judge.
+    // can judge. The `sys_file.scope` select retires the option too, and the rows
+    // already stored with it are rewritten to `user` by the operator sweep
+    // `@objectstack/service-storage` exports (`backfill-sys-file-public-scope.ts`).
     {
       id: 'storage-scope-public-retired',
       // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
@@ -19538,13 +19758,21 @@ const step18: MigrationStep = {
         + 'anonymous download. Whether a given file must be readable before sign-in is the caller\'s '
         + 'call, so no rewrite can make it: an upload that meant public needs its stored file record '
         + 'marked, and one that did not needs only another scope. The upload request itself carries no '
-        + 'acl, and every upload is stored private. Files already stored with scope public are not '
-        + 'touched and download exactly as before. ADR-0049',
+        + 'acl, and every upload is stored private. The stored file record retires the value too: the '
+        + 'scope select of sys_file no longer lists public, so a deployment that stored files with it runs '
+        + 'the one-time operator sweep that @objectstack/service-storage exports '
+        + '(`planSysFilePublicScopeBackfill` for the dry run, then `applySysFilePublicScopeBackfill`), '
+        + 'which rewrites each of those records to scope user. No access changes: no reader tells user '
+        + 'apart from public, the storage key and the file bytes are not touched, and those files '
+        + 'download exactly as before. Until the sweep has run, a record write that names such a file '
+        + 'while another field already owns it is refused, because the copy it makes carries scope '
+        + 'public. ADR-0049',
       acceptanceCriteria:
         'No upload call names scope public and no ObjectStorageConfig declares it; each upload that did '
         + 'now names another scope or none and is answered 200. Each file that must render before '
         + "sign-in has acl 'public_read' on its stored file record, and fetching it with no session "
-        + 'serves it; fetching any other uploaded file with no session is answered 401.',
+        + 'serves it; fetching any other uploaded file with no session is answered 401. On each '
+        + 'deployment, a dry run of the sweep scans zero sys_file records with scope public.',
     },
     {
       id: 'strategy-context-aggregation-method-narrowed',
@@ -20376,10 +20604,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 8281 tracked '
-        + 'files at that sha, against lit controls window 4449, timeout 1674, period 249, '
-        + 'interval 213 and metrics 455 on that same corpus and sha (0 across 8234, against 4430 / '
+        + '`.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 8351 tracked '
+        + 'files at that sha, against lit controls window 4470, timeout 1694, period 249, '
+        + 'interval 213 and metrics 456 on that same corpus and sha (0 across 8281, against 4449 / '
+        + '1674 / 249 / 213 / 455, at 47b1f0bb7, 0 across 8234, against 4430 / '
         + '1658 / 249 / 213 / 404, at f0268ad78, 0 across 7754, against 4255 / '
         + '1431 / 247 / 200 / 401, at a58626c88, 0 across 7650, against 4194 / '
         + '1360 / 238 / 195 / 401, at 0abd4f9f8, 0 across 7632, against 4193 / '
@@ -20602,12 +20831,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8281 files '
+        + 'pinned objectui checkout — `.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8351 files '
         + 'tracked at that sha (the 517 Span and 57 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 17980 hits for the bare token objectstack, '
-        + 'and 7523 for the package specifier @objectstack/spec (at f0268ad78: 0 across 8234, Span 517, '
+        + 'two lit controls on that same corpus and sha: 18047 hits for the bare token objectstack, '
+        + 'and 7545 for the package specifier @objectstack/spec (at 47b1f0bb7: 0 across 8281, Span 517, '
+        + '17980 and 7523; at f0268ad78: 0 across 8234, Span 517, '
         + '17956 and 7522; at a58626c88: 0 across 7754, Span 509, '
         + '17468 and 7246; at 0abd4f9f8: 0 across 7650, Span 508, '
         + '17390 and 7209; at 9dfaca654: 0 across 7632, Span 508, '
@@ -20724,9 +20954,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `47b1f0bb71748a7d16f36edecc50059367d2e35a` — spells it 0 '
-        + 'times across 8281 tracked files, against lit controls `TTL` 184 and `tenant` 1338 on the '
-        + 'same corpus (0 across 8234, against 184 and 1338, at f0268ad78; 0 across 7754, against 184 and 1319, at a58626c88; 0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `20c6d351ad74d2b14a93becdc134d51b91b2d2e6` — spells it 0 '
+        + 'times across 8351 tracked files, against lit controls `TTL` 184 and `tenant` 1340 on the '
+        + 'same corpus (0 across 8281, against 184 and 1338, at 47b1f0bb7; 0 across 8234, against 184 and 1338, at f0268ad78; 0 across 7754, against 184 and 1319, at a58626c88; 0 across 7650, against 182 and 1318, at 0abd4f9f8; 0 across 7632, against 182 and 1318, at 9dfaca654; 0 across 7579, against 182 and 1317, at 2e818d0b5; 0 across 10267, against 180 and 1238, at ab1879721; 0 across 10071, against 181 and 1237, at 89cad75d5; 0 across 9912, against 181 and 1237, at 31971ff1e; 0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
@@ -23172,6 +23402,59 @@ const step18: MigrationStep = {
         + '`packages/lint` and `packages/platform-objects`; in objectui every joined-report '
         + 'fixture and docs example at the pin above (13 occurrences); in the cloud repo none '
         + 'exist.',
+    },
+    // The D3 entry for the list-view chart-binding check (#22491): the enforce arm
+    // of ADR-0049 enforce-or-remove, applied to the ADR-0021 single form the list
+    // chart block already required. It narrows a list view's accept set; no key is
+    // removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row. There is
+    // no D2 conversion either: which dataset a chart plots is the author's
+    // decision, and a fabricated binding is the defect this closes.
+    {
+      id: 'view-chart-binding-dataset-required',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span.
+      surface:
+        'A list view whose type is chart and whose effective chart binding names no dataset: no chart block '
+        + 'and no options.chart bag, or, on a flattened view overlay saved through the metadata write door, an '
+        + 'options.chart bag missing its dataset or its values while no chart block replaces it. Judged at every '
+        + 'list-view door: views[].list and views[].listViews, objects[].listViews, a view item config, and the '
+        + 'flattened list overlay.',
+      replacement:
+        'Bind the chart: declare a top-level `chart` block naming the ADR-0021 `dataset` to plot and at least one '
+        + 'of its measures in `values` (`dimensions`, the X / group axis, stays optional, and `chartType` defaults '
+        + 'to `bar`). A view whose only binding is the legacy `options.chart` bag completes the bag with `dataset` '
+        + 'and `values`, or, preferred, moves the binding to the top-level `chart` block, which replaces the bag '
+        + 'whole. A view that is not meant to be a chart takes another `type`.',
+      reason:
+        'ADR-0021 single form, enforced (ADR-0049 enforce-or-remove, the enforce arm; ADR-0078, a view that '
+        + 'renders nothing is refused rather than warned). A chart list view plots only the dataset its '
+        + 'effective binding names, and the renderer reads that binding as the `chart` block, else the '
+        + '`options.chart` bag, the block replacing the bag whole (objectui plugin-list `ListView`, '
+        + '`resolveListChartBinding`, at this repo\'s `.objectui-sha` pin and at objectui main alike). The '
+        + 'authoring `chart` block already required `dataset` and `values`, but a view with no block at all, or '
+        + 'with only the bag, never met that schema. Measured on `origin/main` at `e148ca98`: the flattened '
+        + 'overlay member accepted `type: \'chart\'` with no block and an `options.chart` bag holding only '
+        + '`chartType`, and both authoring doors accepted the block-less view. What such a view rendered was a '
+        + 'dead screen: at the pin the renderer fabricated a binding nobody wrote (an aggregate over a field '
+        + 'named name and a measure named value), and objectui has since retired that floor, after which '
+        + 'the chart component refuses on screen. Now refused at the view\'s own path, `chart`, or at '
+        + '`options.chart.dataset` / `options.chart.values`, with the binding to declare. Ships at once, no '
+        + 'grace window and no dual spelling (2026-08-27 maintainer ruling 「短期不考虑渐进」). Not convertible: '
+        + 'only the author knows which dataset a chart was meant to show.',
+      acceptanceCriteria:
+        'WHICH DOOR: the spec schema\'s refusal, so it lands wherever a list view is parsed through '
+        + '`@objectstack/spec` — `defineView`, `defineStack`, `os validate` / `os build`, and the metadata write '
+        + 'door (`PUT /api/v1/meta/view/:name`, answering `422 INVALID_METADATA`) — as one `custom` issue at '
+        + '`chart` for a view with no binding at all, or one per missing key at `options.chart.dataset` / '
+        + '`options.chart.values` for an incomplete bag (overlay only; the authoring doors refuse `options` by '
+        + 'name). A stored `sys_metadata` view row is neither rewritten nor refused on read: measured, the read '
+        + 'door serves it as stored with the same issue in its `_diagnostics`, and it is refused on its next '
+        + 'save. Fix each chart view by declaring its binding, then open it: it plots the dataset. A chart view '
+        + 'that already declares a complete `chart` block parses byte-identically to before, and every view of '
+        + 'another type is untouched, a grid that only offers a chart in `allowedVisualizations` included. '
+        + 'Census at the time of the change: the two chart list views in `examples/app-showcase` and the chart '
+        + 'list views in the `packages/lint` fixtures all bind a dataset and a measure; the only spec test that '
+        + 'parsed a block-less chart view was a type-acceptance pin, re-judged in the same change.',
     },
     // The absent-value half of the coupling #6227 declared, recorded beside its
     // array half (`view-filter-rule-scalar-operator-array-refused`) rather than

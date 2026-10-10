@@ -54,8 +54,15 @@ import {
   ListViewSchema,
   ObjectListViewSchema,
   checkListViewCalendarVisualization,
+  checkListViewChartBinding,
 } from './view.zod';
-import { PageSchema, checkPageSourceCompleteness, checkPageRequiresKind, checkPagePrintComposition } from './page.zod';
+import {
+  PageSchema,
+  checkPageSourceCompleteness,
+  checkPageRequiresKind,
+  checkPagePrintComposition,
+  checkPageSlotPair,
+} from './page.zod';
 import {
   GlobalFilterSchema,
   checkGlobalFilterDateDefaultValue,
@@ -210,6 +217,20 @@ const calendarFixtures: Fixture[] = [
   { label: 'no `appearance` at all', value: { type: 'grid', columns: ['name'] }, refusesAt: [] },
 ];
 
+// [#22491] Shape-valid on BOTH authoring doors, so no `options` bag here (the
+// two refuse it by name); the bag's paths are pinned on the overlay door in
+// `view-chart-binding.test.ts`. A block missing a key is a SHAPE failure, so
+// it is not a fixture of this check either.
+const chartBindingFixtures: Fixture[] = [
+  { label: "`type: 'chart'` with no `chart` block", value: { type: 'chart', columns: ['stage'] }, refusesAt: ['chart'] },
+  {
+    label: "`type: 'chart'` with a block naming a dataset and a measure",
+    value: { type: 'chart', columns: ['stage'], chart: { dataset: 'lead_metrics', values: ['amount_sum'] } },
+    refusesAt: [],
+  },
+  { label: 'a block-less view of another type', value: { type: 'kanban', columns: ['stage'] }, refusesAt: [] },
+];
+
 const PAGE_BASE = { name: 'home_page', label: 'Home', type: 'home' } as const;
 
 const pageSourceFixtures: Fixture[] = [
@@ -254,6 +275,28 @@ const pagePrintFixtures: Fixture[] = [
   { label: '`print.repeatFooter` with no `footer` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true, repeatFooter: true } }, refusesAt: ['print.repeatFooter'] },
   { label: '`print` on a `full` page with `regions` and its `header` region', value: { ...PAGE_BASE, regions: PRINT_REGIONS, print: { repeatHeader: true } }, refusesAt: [] },
   { label: 'a `slotted` page with no `print`', value: { ...PAGE_BASE, kind: 'slotted' }, refusesAt: [] },
+];
+
+// [#22568] `slots.details` beside `slots.tabs` is refused at `slots.details`:
+// the `tabs` slot replaces the strip the Details tab lives in, so the
+// `details` body never rendered. Every fixture is a `record` page with no
+// `print`, `source` or `requires`, so the three siblings stay silent and each
+// row exercises THIS check alone; the kind-less row is the one whose direct
+// call sees no `kind` while the parse sees the applied `full` default.
+const SLOT_DETAILS = { type: 'record:details', properties: { hideFields: ['id'] } } as const;
+const SLOT_TABS = {
+  type: 'page:tabs',
+  properties: { items: [{ label: 'Related', children: [{ type: 'record:related_list' }] }] },
+} as const;
+const SLOT_PAGE = { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted' } as const;
+const pageSlotPairFixtures: Fixture[] = [
+  { label: '`details` beside `tabs`, one component each', value: { ...SLOT_PAGE, slots: { details: SLOT_DETAILS, tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
+  { label: '`details` beside `tabs`, each an array', value: { ...SLOT_PAGE, slots: { details: [SLOT_DETAILS], tabs: [SLOT_TABS] } }, refusesAt: ['slots.details'] },
+  { label: 'an EMPTY `details: []` beside `tabs` — a present slot is refused, not its contents', value: { ...SLOT_PAGE, slots: { details: [], tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
+  { label: '`details` beside `tabs` on a page with no `kind` (the `full` default)', value: { ...PAGE_BASE, type: 'record', object: 'account', slots: { details: SLOT_DETAILS, tabs: SLOT_TABS } }, refusesAt: ['slots.details'] },
+  { label: '`details` alone', value: { ...SLOT_PAGE, slots: { details: SLOT_DETAILS } }, refusesAt: [] },
+  { label: '`tabs` alone, carrying the `record:details` in its first item', value: { ...SLOT_PAGE, slots: { tabs: { type: 'page:tabs', properties: { items: [{ label: 'Details', children: [SLOT_DETAILS] }] } } } }, refusesAt: [] },
+  { label: 'a slot map with neither', value: { ...SLOT_PAGE, slots: { discussion: [] } }, refusesAt: [] },
 ];
 
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
@@ -454,6 +497,7 @@ const chartMeasureArityFixtures: Fixture[] = [
 
 const listViewExports: ExportUnderTest[] = [
   { name: 'checkListViewCalendarVisualization', check: checkListViewCalendarVisualization, fixtures: calendarFixtures },
+  { name: 'checkListViewChartBinding', check: checkListViewChartBinding, fixtures: chartBindingFixtures },
 ];
 
 const MIRRORED: MirroredSchema[] = [
@@ -469,6 +513,7 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPageSourceCompleteness', check: checkPageSourceCompleteness, fixtures: pageSourceFixtures },
       { name: 'checkPageRequiresKind', check: checkPageRequiresKind, fixtures: pageRequiresFixtures },
       { name: 'checkPagePrintComposition', check: checkPagePrintComposition, fixtures: pagePrintFixtures },
+      { name: 'checkPageSlotPair', check: checkPageSlotPair, fixtures: pageSlotPairFixtures },
     ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
@@ -593,7 +638,7 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
   const declarations = (src: string, name: string): number =>
     src.match(new RegExp(`^\\s*(export )?function ${name}\\b`, 'gm'))?.length ?? 0;
 
-  it('view.zod.ts declares the export and chains it onto ListViewShapeSchema for ListViewSchema', () => {
+  it('view.zod.ts declares the exports and chains them onto ListViewShapeSchema for ListViewSchema', () => {
     const src = read('view.zod.ts');
     expect(src).toContain('export function checkListViewCalendarVisualization(');
     // Exactly one declaration — the count below keys on this name.
@@ -607,6 +652,14 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     // view.test.ts pins the behaviour; this pins that every attachment is the
     // export, by name, and none is an inline copy.
     expect(attachments(src, 'checkListViewCalendarVisualization')).toBe(3);
+    // [#22491] The chart-binding check: declared once, chained after the
+    // calendar check at the same three doors.
+    expect(src).toContain('export function checkListViewChartBinding(');
+    expect(declarations(src, 'checkListViewChartBinding')).toBe(1);
+    expect(src).toMatch(
+      /ListViewShapeSchema\s*\.superRefine\(checkListViewCalendarVisualization\)\s*\.superRefine\(checkListViewChartBinding\)/,
+    );
+    expect(attachments(src, 'checkListViewChartBinding')).toBe(3);
     // [#17063] `checkListViewPageMount` was retired with the `type: 'page'`
     // mount it policed, so neither a declaration nor an attachment of it may
     // return: a re-attachment would be a check with no rule left to enforce.
@@ -616,9 +669,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all three exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all four exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
@@ -648,9 +701,11 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   // an enumeration of every exported refinement.
   it.each([
     ['checkListViewCalendarVisualization', checkListViewCalendarVisualization],
+    ['checkListViewChartBinding', checkListViewChartBinding],
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
     ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkPagePrintComposition', checkPagePrintComposition],
+    ['checkPageSlotPair', checkPageSlotPair],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);
@@ -661,7 +716,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   // [#17063] The retired member, from the same surface, in the same leg. A
   // downstream mirror re-attaching a check it imports from here is the whole
   // point of this file, so the barrel is where a relapse would first become
-  // reachable — the runtime namespace answers it, with the four survivors
+  // reachable — the runtime namespace answers it, with the survivors
   // above as the lit control that the namespace is really populated.
   it('no longer exports `checkListViewPageMount` — retired with the mount it policed', () => {
     expect('checkListViewPageMount' in (ui as Record<string, unknown>)).toBe(false);

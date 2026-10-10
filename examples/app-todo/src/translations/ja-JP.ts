@@ -101,12 +101,18 @@ export const jaJP: TranslationData = {
           title: 'タスクの詳細',
           fields: {
             subject: { label: 'タスクの件名' },
-            priority: { label: '優先度' },
+            priority: {
+              label: '優先度',
+              options: { low: '低', normal: '通常', high: '高', urgent: '緊急' },
+            },
             dueDate: { label: '期日' },
-            category: { label: 'カテゴリ' },
+            category: {
+              label: 'カテゴリ',
+              options: { personal: '個人', work: '仕事', shopping: '買い物', health: '健康', finance: '財務', other: 'その他' },
+            },
           },
         },
-        success_screen: { title: 'タスクを作成しました' },
+        success_screen: { title: 'タスクを作成しました', description: 'タスク「{{ subject }}」を作成しました！' },
       },
     },
   },

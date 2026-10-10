@@ -279,6 +279,9 @@ describe('ADR-0118 D1 — every sys_user lookup approvals writes holds an id or 
     expect(actorOf('approval.reminder')).toEqual(['u_sub']);
     expect(actorOf('approval.reassigned')).toEqual(['u_legal', 'u_alice']);
     expect(actorOf('approval.returned')).toEqual(['u_alice']);
+    // The opening forwards the person whose run opened the step — never the
+    // email slot the `link` request opened on.
+    expect(actorOf('approval.requested')).toEqual(['u_sub']);
   });
 
   it('each machine actor writes null, and its notifications name no actor', async () => {

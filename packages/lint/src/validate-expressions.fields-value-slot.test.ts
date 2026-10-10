@@ -22,9 +22,9 @@
  *     slot is a located `error` under the same rule id, led by
  *     `VALUE_SLOT_TEMPLATE_REFUSAL` and naming the token's CEL spelling — in
  *     every value slot and both legacy `assignment` shapes. It replaced the
- *     `warning` hint ruling D point 1 put there for 17.x. The two spellings
- *     CEL cannot write yet (date macros, `$User` paths) and non-value slots
- *     get nothing.
+ *     `warning` hint ruling D point 1 put there for 17.x. A `$User` path is
+ *     refused too, naming `current_user.id` (#19939 pass 2); the one spelling
+ *     CEL cannot write yet (the date macros) and non-value slots get nothing.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -108,13 +108,14 @@ describe('`fields.*` value slot — the malformed envelope is a located error at
     expect(splitBySeverity(findings).errors).toHaveLength(1);
   });
 
-  it.each(NODE_TYPES)('%s: a valid envelope, the two kept spellings and literals are clean', (nodeType) => {
+  it.each(NODE_TYPES)('%s: a valid envelope, the run user as `current_user`, a date macro\'s CEL string form and literals are clean', (nodeType) => {
     expect(validate(nodeType, crud(nodeType, {
       total: { dialect: 'cel', source: 'round(price * 100) / 100.0' },
       subject: { dialect: 'cel', source: "'Quote for ' + string(price)" },
       label: 'Quote',
-      owner: '{$User.Id}',
-      due: '{TODAY() + 7}',
+      owner: { dialect: 'cel', source: 'current_user.id' },
+      due: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' },
+      at: { dialect: 'cel', source: 'isoDatetime(addDays(now(), -1))' },
       n: 3, ok: true, nothing: null,
       payload: { nested: { dialect: 'cel' } },   // a nested envelope is data
     }))).toEqual([]);
@@ -135,10 +136,15 @@ describe('the retired template dialect — a `{…}` token in a value slot is a 
     ['a function inside text', 'create_record', crud('create_record', { subject: 'Total: {max(price, 10)}' }), 'config.fields.subject', "\"'Total: ' + (max(price, 10))\""],
     ['a plain reference', 'update_record', crud('update_record', { subject: '{record.name}' }), 'config.fields.subject', "source: 'record.name'"],
     ['text with a reference hole', 'create_record', crud('create_record', { subject: 'Follow up on {record.name}' }), 'config.fields.subject', "\"'Follow up on ' + record.name\""],
-    ['a nested literal string', 'create_record', crud('create_record', { payload: { note: '{price}' } }), 'config.fields.payload.note', "source: 'price'"],
+    ['a nested literal string — the whole value as a CEL literal', 'create_record', crud('create_record', { payload: { note: '{price}' } }), 'config.fields.payload.note', "source: \"{'note': price}\""],
     ['the canonical assignment map', 'assignment', { assignments: { total: '{floor(price)}' } }, 'config.assignments.total', "source: 'floor(price)'"],
     ['the legacy assignment array', 'assignment', { assignments: [{ variable: 'total', value: '{price}' }] }, 'config.assignments[0].value', "source: 'price'"],
     ['the legacy bare assignment config', 'assignment', { total: '{price}' }, 'config.total', "source: 'price'"],
+    ['the run user\'s id', 'update_record', crud('update_record', { subject: '{$User.Id}' }), 'config.fields.subject', "source: 'current_user != null ? current_user.id : null'"],
+    ['another run-user path', 'create_record', crud('create_record', { subject: '{$User.Email}' }), 'config.fields.subject', 'never resolved in any shipped run'],
+    ['a date macro', 'create_record', crud('create_record', { due: '{TODAY() + 7}' }), 'config.fields.due', "source: 'isoDate(daysFromNow(7))'"],
+    ['a timestamp macro with an offset', 'assignment', { assignments: { at: '{NOW() + 2}' } }, 'config.assignments.at', "source: 'isoDatetime(addDays(now(), 2))'"],
+    ['a date macro beside the run user — once kept whole', 'update_record', crud('update_record', { subject: 'Due {TODAY()} by {$User.Id}' }), 'config.fields.subject', "\"'Due ' + isoDate(today()) + ' by ' + current_user.id\""],
   ];
 
   it.each(REFUSED)('%s — rule `expression-invalid`, severity `error`, located, with the CEL spelling', (_what, nodeType, config, at, spelling) => {
@@ -154,11 +160,11 @@ describe('the retired template dialect — a `{…}` token in a value slot is a 
     expect(splitBySeverity(findings).errors).toHaveLength(1);
   });
 
+  // No `{…}` spelling is kept since #19939's third pass: the date macros are
+  // refused above with their CEL string form (`isoDate` / `isoDatetime`).
   it.each([
-    ['a date macro — CEL has no string form of a Timestamp yet', '{NOW()}'],
-    ['a date macro with an offset', '{TODAY() + 7}'],
-    ['a `$User` path — the flow CEL scope binds no user yet', '{$User.Id}'],
     ['plain text', 'approved'],
+    ['a date macro\'s CEL string form', { dialect: 'cel', source: 'isoDate(today())' }],
   ])('says nothing for %s', (_why, value) => {
     for (const nodeType of NODE_TYPES) {
       expect(validate(nodeType, crud(nodeType, { v: value })), `${nodeType}: ${value}`).toEqual([]);

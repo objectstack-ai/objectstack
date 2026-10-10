@@ -125,18 +125,43 @@ export const CEL_CLAIMED_IDENTIFIERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * **Every identifier the flow CEL scope binds over a flow variable of the same
+ * name** — the flow runtime's claims, beside CEL's own
+ * ({@link CEL_CLAIMED_IDENTIFIERS}). `service-automation`'s
+ * `AutomationEngine.celScope` spreads the flow's variables at the top level
+ * and then binds these two after the spread, so each wins over a variable
+ * that shares its name:
+ *
+ *  - `vars` — the variables namespace itself (`vars.x`, `vars["$error"]`), so
+ *    for a variable named `vars`, `vars[0]` reads the namespace and fails
+ *    `No such key: 0`;
+ *  - `current_user` — the run's user (ADR-0068's canonical root), or `null`
+ *    when the run has none, so for a variable named `current_user`,
+ *    `current_user.name` reads the run user.
+ *
+ * {@link celPath} reads a path whose head is one of these through `vars`
+ * (`vars["vars"][0]`, `vars["current_user"].name`), the route a CEL-claimed
+ * head already takes. The spec cannot import the runtime, so this list is
+ * measured from `celScope`; `value-slot-template-grammar.test.ts` in that
+ * package evaluates both spellings for a variable of each name, so a name the
+ * scope starts binding without a line here reddens there.
+ */
+export const FLOW_SCOPE_CLAIMED_IDENTIFIERS: ReadonlySet<string> = new Set(['vars', 'current_user']);
+
+/**
  * Whether a path's head is read through `vars` — a `$`-named variable (CEL has
- * no identifier spelling for one) or one of {@link CEL_CLAIMED_IDENTIFIERS}.
+ * no identifier spelling for one), one of {@link CEL_CLAIMED_IDENTIFIERS}, or
+ * one of {@link FLOW_SCOPE_CLAIMED_IDENTIFIERS}.
  */
 export function celHeadReadsThroughVars(head: string): boolean {
-  return head.startsWith('$') || CEL_CLAIMED_IDENTIFIERS.has(head);
+  return head.startsWith('$') || CEL_CLAIMED_IDENTIFIERS.has(head) || FLOW_SCOPE_CLAIMED_IDENTIFIERS.has(head);
 }
 
 /**
  * A template path as CEL: `a.b.0` → `a.b[0]`. A head CEL cannot read as the
  * variable is read through `vars` ({@link celHeadReadsThroughVars}:
- * `vars["$error"].message`, `vars["list"][0]`), and a later segment that is a
- * keyword is indexed by name (`record["in"]`).
+ * `vars["$error"].message`, `vars["list"][0]`, `vars["vars"][0]`), and a
+ * later segment that is a keyword is indexed by name (`record["in"]`).
  */
 export function celPath(path: string): string {
   const [head, ...rest] = path.split('.');
@@ -149,7 +174,218 @@ export function celPath(path: string): string {
   return out;
 }
 
-/** A template expression as CEL: every integer divisor written as a double, so CEL divides as the template did. */
+/**
+ * The CEL spelling of the run user's id — what `{$User.Id}` read
+ * (`resolveToken` answers it with the run's `userId`). The flow CEL scope
+ * binds `current_user` to the run's `EvalUser`, and to `null` when the run has
+ * no user (ADR-0068, ADR-0118 D1, D4), so in a user-less run this read fails.
+ */
+export const CEL_RUN_USER_ID = 'current_user.id';
+
+/**
+ * {@link CEL_RUN_USER_ID} guarded for a run with no user — a schedule, or a
+ * record change made by a system write. It answers `null` there, where the
+ * template answered nothing.
+ */
+export const CEL_RUN_USER_ID_GUARDED = 'current_user != null ? current_user.id : null';
+
+/**
+ * Whether a `user` token reads the run user's id — `$User.Id`, the one
+ * `$User` path `resolveToken` answers from the run (its first segment is
+ * `Id`, and the rest is ignored). Every other path reads a user object no
+ * run carries.
+ */
+export function isRunUserIdToken(inner: string): boolean {
+  return inner.trim().slice('$User.'.length).split('.')[0] === 'Id';
+}
+
+/**
+ * Why a `$User.<path>` token other than the id ({@link isRunUserIdToken}) has
+ * nothing to convert, and what to write for the value it meant: it never
+ * resolved, and `current_user` carries only what the run holds, so an email
+ * or a name is read from the user record by `current_user.id`. `write` is how
+ * the remedy's last step spells the record's field — an envelope in a value
+ * slot, a hole in a text slot.
+ */
+export function runUserPathNeverResolved(text: string, write: (path: string) => string): string {
+  return (
+    `\`${text}\` never resolved in any shipped run: it read a user object no run carries, so the template `
+    + 'wrote nothing here. `current_user` carries only what the run holds — `id`, '
+    + '`positions`, `organizationId`, `isPlatformAdmin`. For the user\'s email or name, read the user record by '
+    + `\`current_user.id\`: compute the id into a variable with an \`assignment\` node (\`assignments: { uid: `
+    + `{ dialect: 'cel', source: '${CEL_RUN_USER_ID}' } }\`), read the record with a \`get_record\` node `
+    + '(`objectName: \'sys_user\'`, `filter: { id: \'{uid}\' }`, `outputVariable: \'me\'`), and write '
+    + `${write('me.email')} or ${write('me.name')}.`
+  );
+}
+
+/** The CEL spelling of a date macro ({@link celDateMacro}). */
+export interface CelDateMacro {
+  /**
+   * The CEL source whose value is the text the macro wrote: `isoDate(…)` for
+   * `TODAY()` (`YYYY-MM-DD`), `isoDatetime(…)` for `NOW()`, both on the UTC
+   * calendar the interpolator renders on.
+   */
+  readonly source: string;
+  /**
+   * What the remedy must say beside {@link source} — set when the two do not
+   * write the same text for every input: an offset that is not a whole number,
+   * a variable offset, or an offset that is neither.
+   */
+  readonly edge?: string;
+}
+
+/**
+ * **The CEL spelling of a date macro** — `{TODAY()}`, `{NOW()}`, with an
+ * optional `± N` day offset — read the way `resolveToken` reads it: the offset
+ * is a number literal, else a variable looked up by its whole text, else 0.
+ *
+ *  - `{TODAY()}` → `isoDate(today())`; `{TODAY() + N}` / `{TODAY() - N}` →
+ *    `isoDate(daysFromNow(N))` / `isoDate(daysAgo(N))`;
+ *  - `{NOW()}` → `isoDatetime(now())`; `{NOW() ± N}` →
+ *    `isoDatetime(addDays(now(), ±N))`, which keeps the time of day where
+ *    `daysFromNow` would land on midnight.
+ *
+ * Byte for byte with the interpolator for a whole number of days — the cell
+ * grid `stdlib-timestamp-text.test.ts` measures in `@objectstack/formula`, and
+ * the live parity pin beside `crud-fields-value-envelope.test.ts` in
+ * `service-automation` drives both engines over the same instants. The three
+ * edges where they part are named in {@link CelDateMacro.edge}:
+ *
+ *  - **a fraction** (`{TODAY() - 1.5}`): the template added the offset to the
+ *    day of the month and truncated the SUM, `addDays` truncates the OFFSET —
+ *    the same day forward, one day apart backward once the day of the month
+ *    passes the offset — and `daysFromNow` / `daysAgo` take a whole number, so
+ *    `daysAgo(1.5)` is refused at build;
+ *  - **a variable** (`{TODAY() + days}`): the template looked the offset up as
+ *    one variable name and added 0 days, silently, when it found none or the
+ *    value was not a number; CEL reads the path, an absent variable fails the
+ *    run, and a value that is not a number is an invalid date `isoDate` refuses;
+ *  - **neither** (`{TODAY() + 3d}`): the template added 0 days, silently.
+ *
+ * `undefined` for an `inner` that is not a date macro.
+ */
+export function celDateMacro(inner: string): CelDateMacro | undefined {
+  const match = DATE_MACRO.exec(inner.trim());
+  if (!match) return undefined;
+  const [, fn, signText, offsetText] = match;
+  const today = fn === 'TODAY';
+  const token = `{${inner.trim()}}`;
+  const base = today ? 'today()' : 'now()';
+  const render = (instant: string): string => (today ? `isoDate(${instant})` : `isoDatetime(${instant})`);
+  const unsigned = today ? 'daysFromNow(7)' : 'addDays(now(), 7)';
+  if (offsetText === undefined) return { source: render(base) };
+  const sign = signText === '-' ? -1 : 1;
+  const asNumber = Number(offsetText);
+  if (!Number.isNaN(asNumber)) {
+    const days = sign * asNumber;
+    // `resolveToken` skips a zero offset (`if (offset)`), so the macro wrote today.
+    if (days === 0) return { source: render(base) };
+    if (Number.isSafeInteger(days)) {
+      if (!today) return { source: render(`addDays(now(), ${days})`) };
+      return { source: render(days < 0 ? `daysAgo(${-days})` : `daysFromNow(${days})`) };
+    }
+    if (Number.isFinite(days)) {
+      const truncated = Math.trunc(days);
+      const whole = today ? (days < 0 ? 'daysAgo' : 'daysFromNow') : undefined;
+      // The day of the month is at least 1, so a fraction under one day moves
+      // back one day on every date, and a larger one only past that day.
+      const back = Math.ceil(-days);
+      const moved = days < 0
+        ? `moved ${back} day${back === 1 ? '' : 's'} back`
+          + (-days > 1 ? ` once the day of the month passed ${-days} (fewer near its start)` : '')
+          + `, where \`addDays\` moves ${-truncated} back`
+        : `moved ${truncated} day${truncated === 1 ? '' : 's'} forward, as \`addDays\` does`;
+      return {
+        source: render(`addDays(${base}, ${days})`),
+        edge:
+          `\`${token}\` is not a whole number of days, the only offset the template documents: it added the offset `
+          + `to the day of the month and truncated the sum, so it ${moved} by truncating the offset.`
+          + (whole ? ` \`${whole}(${Math.abs(days)})\` is refused at build: \`daysFromNow\` and \`daysAgo\` take a whole number.` : '')
+          + ' Write the whole number of days you mean.',
+      };
+    }
+    return {
+      source: render(base),
+      edge:
+        `\`${token}\` has an offset that is not a finite number: the template's date came out invalid and the run `
+        + `failed. Write the whole number of days you mean — \`${render(unsigned)}\` is seven days on.`,
+    };
+  }
+  if (VARIABLE_PATH.test(offsetText)) {
+    return {
+      source: render(`addDays(${base}, ${sign < 0 ? '-' : ''}${celPath(offsetText)})`),
+      edge:
+        `The template looked \`${offsetText}\` up as one variable name${offsetText.includes('.') ? ', never walking a dotted path,' : ''} `
+        + 'and added 0 days without a word when it found none or the value was not a number. CEL reads the path, an absent '
+        + 'variable fails the run, and a value that is not a number makes `addDays` an invalid date, which '
+        + `\`${today ? 'isoDate' : 'isoDatetime'}\` refuses. \`addDays\` truncates a fractional offset, where the `
+        + 'template truncated the day of the month plus the offset.',
+    };
+  }
+  return {
+    source: render(base),
+    edge:
+      `\`${offsetText}\` is neither a number nor a variable name, so the template added 0 days without a word — `
+      + `\`${render(base)}\` writes what it wrote. For the offset you meant, write a whole number of days: `
+      + `\`${render(unsigned)}\` is seven days on.`,
+  };
+}
+
+/**
+ * One lexeme of a template expression, in the order the alternatives are
+ * tried: a quoted string (its content is never rewritten), a number, a
+ * variable path in the interpolator's own spelling ({@link VARIABLE_PATH},
+ * numeric segments included), or any single other character.
+ */
+const EXPRESSION_LEXEME =
+  /(["'])(?:\\[\s\S]|(?!\1)[^\\])*\1|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[A-Za-z_$][\w$]*(?:\.(?:[A-Za-z_$][\w$]*|\d+))*|[\s\S]/g;
+
+/**
+ * A template expression as CEL — what the interpolator computed, spelled so
+ * the CEL value envelope evaluates it:
+ *
+ *  - every variable path is written by {@link celPath}'s rule, the one a
+ *    lone path token gets: `int * 2` → `vars["int"] * 2` (a head CEL claims),
+ *    `items.0 * 2` → `items[0] * 2` (an index), `$error.code + 1` →
+ *    `vars["$error"].code + 1`. A name in call position (`round(`) is a
+ *    function, a member selected off something else (`(x).y`) is not a head,
+ *    and the keywords (`true`, `false`, `null`, `in`) are CEL's own, so each
+ *    of those is left as written;
+ *  - every integer divisor is written as a double (`/ 100` → `/ 100.0`), so
+ *    CEL divides as the template did.
+ *
+ * Text inside a quoted string is never rewritten.
+ */
 export function celExpression(inner: string): string {
-  return inner.replace(/\/\s*(\d+)(?![\d.])/g, '/ $1.0');
+  const lexemes = inner.match(EXPRESSION_LEXEME) ?? [];
+  const significant = (from: number, step: 1 | -1): string | undefined => {
+    for (let at = from + step; at >= 0 && at < lexemes.length; at += step) {
+      if (!/^\s$/.test(lexemes[at]!)) return lexemes[at];
+    }
+    return undefined;
+  };
+  let out = '';
+  for (let at = 0; at < lexemes.length; at++) {
+    const lexeme = lexemes[at]!;
+    if (lexeme === '/') {
+      const next = lexemes.findIndex((candidate, index) => index > at && !/^\s$/.test(candidate));
+      if (next !== -1 && /^\d+$/.test(lexemes[next]!) && lexemes[next + 1] !== '.') {
+        out += `/ ${lexemes[next]}.0`;
+        at = next;
+        continue;
+      }
+      out += lexeme;
+      continue;
+    }
+    if (/^[A-Za-z_$]/.test(lexeme)) {
+      const isCall = significant(at, 1) === '(';
+      const isMember = significant(at, -1) === '.';
+      const isKeyword = CEL_KEYWORDS.has(lexeme);
+      out += isCall || isMember || isKeyword ? lexeme : celPath(lexeme);
+      continue;
+    }
+    out += lexeme;
+  }
+  return out;
 }

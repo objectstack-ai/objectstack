@@ -2211,6 +2211,127 @@ describe('validateTranslationReferences — flow refusals (#22450)', () => {
   });
 });
 
+describe('validateTranslationReferences — flow toasts and screen-field options (#22507)', () => {
+  /**
+   * hotclm's measured shape, trimmed: a screen flow that authors a completion
+   * toast and no failure toast, with a select whose values are strings and a
+   * second whose values are a number and a boolean — so each finding below is
+   * judged against the same metadata as the clean run.
+   */
+  const intakeStack = {
+    flows: [
+      {
+        name: 'contract_intake',
+        type: 'screen',
+        successMessage: 'Contract launched.',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          {
+            id: 'details',
+            type: 'screen',
+            label: 'Contract details',
+            config: {
+              fields: [
+                {
+                  name: 'our_entity', type: 'select',
+                  options: [{ value: 'hq', label: 'Head office' }, { value: 'apac', label: 'APAC subsidiary' }],
+                },
+                { name: 'tier', type: 'select', options: [{ value: 1, label: 'Tier 1' }, { value: true, label: 'Yes' }] },
+                { name: 'notes', type: 'textarea' },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const bundle = (flows: unknown) => ({ ...intakeStack, translations: [{ 'zh-CN': { flows } }] });
+  const firstSentence = (message: string) => message.slice(0, message.indexOf('. ') + 1);
+  const fieldsOf = (fields: unknown) => ({ contract_intake: { screens: { details: { fields } } } });
+
+  it('reports nothing for an authored toast and options keyed by their values read as text', () => {
+    expect(
+      validateTranslationReferences(bundle({
+        contract_intake: {
+          successMessage: '合同已发起。',
+          screens: {
+            details: {
+              fields: {
+                our_entity: { options: { hq: '总部', apac: '亚太子公司' } },
+                tier: { options: { '1': '一级', true: '是' } },
+              },
+            },
+          },
+        },
+      })),
+    ).toEqual([]);
+  });
+
+  it('refuses a toast the flow does not author — a bundle cannot add one', () => {
+    const findings = validateTranslationReferences(bundle({ contract_intake: { errorMessage: '发起失败。' } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.errorMessage');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Translations carry `errorMessage` for flow "contract_intake", which declares no `errorMessage`.',
+    );
+  });
+
+  it('warns on an option key that names no declared value, with the nearest value offered', () => {
+    const findings = validateTranslationReferences(bundle(fieldsOf({ our_entity: { options: { hk: '香港' } } })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_OPTION_KEY_UNKNOWN);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.screens.details.fields.our_entity.options.hk');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Option translation is keyed by "hk", which is not one of the values declared by screen field "our_entity" of screen "details" in flow "contract_intake".',
+    );
+    expect(findings[0].message).toContain('Did you mean "hq"?');
+  });
+
+  it('diagnoses an option keyed by its display label, naming the value to rename it to', () => {
+    const findings = validateTranslationReferences(bundle(fieldsOf({ our_entity: { options: { 'Head office': '总部' } } })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_OPTION_KEY_UNKNOWN);
+    expect(firstSentence(findings[0].message)).toBe(
+      'Option translation is keyed by the DISPLAY LABEL "Head office" instead of the stored value "hq".',
+    );
+    expect(findings[0].hint).toBe('Rename the key to "hq".');
+  });
+
+  it('warns on an options map under a screen field that declares no options', () => {
+    const findings = validateTranslationReferences(bundle(fieldsOf({ notes: { options: { a: 'x' } } })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_OPTION_KEY_UNKNOWN);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.screens.details.fields.notes.options');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Option translations are keyed under screen field "notes" of screen "details" in flow "contract_intake", which declares no `options`.',
+    );
+  });
+
+  it('reports nothing for a translated `description` over a screen that authors one (#22507)', () => {
+    const flow = structuredClone(intakeStack.flows[0]!) as { nodes: Array<{ id: string; config?: Record<string, unknown> }> };
+    flow.nodes.find((n) => n.id === 'details')!.config!.description = 'Review {{ record.name }}.';
+    const withBody = {
+      flows: [flow],
+      translations: [{ 'zh-CN': { flows: { contract_intake: { screens: { details: { description: '请核对 {{ record.name }}。' } } } } } }],
+    };
+    expect(validateTranslationReferences(withBody)).toEqual([]);
+  });
+
+  it('refuses a translated `description` over a screen that authors none — a bundle cannot add body text (#22507)', () => {
+    const findings = validateTranslationReferences(bundle({ contract_intake: { screens: { details: { description: '请核对。' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.screens.details.description');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Translations carry `description` for screen "details" of flow "contract_intake", which declares no `config.description`.',
+    );
+  });
+});
+
 describe('validateTranslationReferences — namespaces deliberately not judged', () => {
   it('ignores messages, validationMessages, settings, metadataForms and settingsCommon', () => {
     const findings = validateTranslationReferences({

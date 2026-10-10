@@ -39,6 +39,34 @@
  *   for every definition the catalog lists at the next boot, so the deleted
  *   position would come back.
  *
+ * ## One namespace — a name a package or a built-in holds is not taken (C2 stage S10)
+ *
+ * Positions hold one name per deployment (ADR-0048 addendum, N.2), and a write
+ * with no package provenance over a package-held name stays under ADR-0005
+ * overlay precedence (N.3): `position` takes no environment overlay
+ * (`allowOrgOverride: false`), so the metadata door refuses that save with its
+ * locked-base refusal (`403 NOT_OVERRIDABLE`). A Setup **create**, or a
+ * **rename into** such a name, is now answered with that same refusal, and the
+ * row write is undone — before this stage the write-through stood down and the
+ * row landed beside the package's (or the platform's) position under the same
+ * name, while a rename also deleted the renamed position's own definition.
+ *
+ * - **asked of its owner, never re-derived**: the verdict is the metadata
+ *   door's `packagedBaseRefusal` (the predicate and the emitter `saveMetaItem`
+ *   uses — the engine registry's artifact provenance,
+ *   `SchemaRegistry.getArtifactItem`), relayed as the door built it, code,
+ *   status and sentence; this module stamps no code of its own. It is asked
+ *   for the verdict alone, so nothing is written to environment metadata for
+ *   such a name, whatever the answer;
+ * - **after the engine's own checks**: the row first, as for every other write
+ *   here, so a refusal the engine already makes keeps its own answer (the
+ *   reserved built-in identity names `400 VALIDATION_FAILED`, one name per
+ *   organization `409 UNIQUE_VIOLATION`); only a row the engine accepted is
+ *   asked about, and its write is undone when the door refuses the name;
+ * - **a door without that verdict** (a protocol that does not bring
+ *   `packagedBaseRefusal`) keeps the stand-down below, as the `/automation`
+ *   doors keep theirs.
+ *
  * ## Where it stands down — the write proceeds exactly as before
  *
  * - **a system write** (`isSystem`): the seeders and the package door write
@@ -48,12 +76,14 @@
  *   (the walled half is a later stage's);
  * - **a kernel whose metadata protocol cannot save and delete**: the legacy
  *   direct write, as the permission-set write-through does;
- * - **a name a package or a built-in holds**: its definition is the package's
- *   (or the platform's), and the metadata door refuses an environment save over
- *   it (`403 NOT_OVERRIDABLE`, `allowOrgOverride: false`). The question is read
- *   from the engine registry's artifact provenance
+ * - **an edit that keeps a name a package or a built-in holds, and a delete
+ *   of such a row**: its definition is the package's (or the platform's), and
+ *   the metadata door refuses an environment save over it. The question is
+ *   read from the engine registry's artifact provenance
  *   (`SchemaRegistry.getArtifactItem`), the same source the door decides
- *   `NOT_OVERRIDABLE` from (seat re-rule, Q2 = A);
+ *   `NOT_OVERRIDABLE` from (seat re-rule, Q2 = A). Whether the data door admits
+ *   such an edit at all is the system-row gate's call, on the row's provenance
+ *   stamp;
  * - **an edit of a row whose name the metadata door does not accept**, with the
  *   name unchanged: such a row predates this stage, has no definition and can
  *   have none, so the edit stays a row write (Q1 = A's control). The predicate
@@ -103,6 +133,15 @@ export interface PositionWriteThroughLogger {
 export interface PositionMetadataDoor {
   saveMetaItem(request: { type: string; name: string; item: Record<string, unknown>; actor?: string }): Promise<unknown>;
   deleteMetaItem(request: { type: string; name: string; actor?: string }): Promise<unknown>;
+  /**
+   * The door's locked-base verdict without a write: the refusal `saveMetaItem`
+   * would raise for `(type, name)` on that ground, or `null`
+   * (`ObjectStackProtocolImplementation.packagedBaseRefusal`). Optional: a door
+   * without it keeps the stand-down for a package-held name (module note).
+   * `create` is the save that takes a name for an item of the caller's own: the
+   * same verdict as `save`, with the remedy a create has.
+   */
+  packagedBaseRefusal?(request: { type: string; name: string; operation: 'save' | 'create' | 'delete' }): Error | null;
 }
 
 export interface PositionWriteThroughDeps {
@@ -150,6 +189,24 @@ export function packageHoldsPosition(ql: any, name: string): boolean {
     // still refuses a save over a packaged name itself.
   }
   return false;
+}
+
+/**
+ * [C2 stage S10, ADR-0048 addendum N.2/N.3] The metadata door's refusal of a
+ * position taking `name` — its locked-base verdict, asked and never re-derived
+ * (module note, "One namespace"). `null` when the door would not refuse that
+ * save on the locked-base ground, or brings no such verdict.
+ *
+ * [#22591] Asked as a `create`, because that is what this write is: a create,
+ * or a rename into `name`, never an edit of the item that holds it (an edit
+ * that keeps a held name is never asked about: it stands down). The door's verdict
+ * is the `save` verdict; what the act changes is the remedy its sentence names
+ * — a name no package or built-in holds, not the source artifact of a position
+ * this administrator did not write.
+ */
+function heldPositionNameRefusal(door: PositionMetadataDoor, name: unknown): Error | null {
+  if (typeof name !== 'string' || name === '' || typeof door.packagedBaseRefusal !== 'function') return null;
+  return door.packagedBaseRefusal({ type: POSITION_METADATA_TYPE, name, operation: 'create' });
 }
 
 let cachedPositionNameSchema: { safeParse(v: unknown): { success: boolean } } | null = null;
@@ -225,8 +282,10 @@ function logError(logger: PositionWriteThroughLogger | undefined, message: strin
 
 /**
  * Engine middleware: under `single`, write every non-system data-door create,
- * edit, rename and delete of a position through to its environment definition.
- * See the module note for the order, the undo and where it stands down.
+ * edit, rename and delete of a position through to its environment definition,
+ * and refuse a create or a rename into a name a package or a built-in holds.
+ * See the module note for the order, the undo, the refusal and where it stands
+ * down.
  */
 export function createPositionWriteThrough(
   deps: PositionWriteThroughDeps,
@@ -281,7 +340,7 @@ export function createPositionWriteThrough(
           `[security] a ${POSITION_OBJECT} create was refused by the metadata door, and undoing its row FAILED: the ` +
             `position '${String(row.name)}' exists as a row with no environment definition while the caller was told ` +
             'the create was refused. Fix: delete the row by hand, then create the position again under a name the ' +
-            'metadata door accepts (lowercase snake_case).',
+            'metadata door accepts (lowercase snake_case, and not a name a package or a built-in already holds).',
           e,
           { id: row.id, name: row.name },
         );
@@ -326,9 +385,23 @@ export function createPositionWriteThrough(
       const result = opCtx.result;
       const written = (Array.isArray(result) ? result : [result])
         .filter((r: unknown): r is Record<string, unknown> => !!r && typeof r === 'object' && scalarId((r as any).id));
+      const createdRows: Record<string, unknown>[] = [];
+      for (const created of written) createdRows.push((await readRowById(ql, created.id)) ?? created);
+      // [S10] A name a package or a built-in holds is not taken: the door's
+      // refusal is the answer, asked before any definition is saved. A verdict
+      // the door could not reach (it re-raises anything but its refusal) is
+      // no answer either: the rows go, and the failure is the answer.
+      try {
+        for (const row of createdRows) {
+          const refusal = heldPositionNameRefusal(door, row.name);
+          if (refusal) throw refusal;
+        }
+      } catch (e) {
+        await undoInsert(written);
+        throw e;
+      }
       const saved: Record<string, unknown>[] = [];
-      for (const created of written) {
-        const row = (await readRowById(ql, created.id)) ?? created;
+      for (const row of createdRows) {
         if (!environmentOwns(row.name)) continue;
         try {
           await saveDefinition(door, row, actor);
@@ -362,6 +435,19 @@ export function createPositionWriteThrough(
     for (const pre of targets) {
       const post = await readRowById(ql, pre.id);
       if (post) posts.push({ pre, post });
+    }
+
+    // [S10] A rename into a name a package or a built-in holds is not taken:
+    // the door's refusal (or its failure to answer) is the answer, and the row
+    // gets its old values back. An edit that keeps such a name stands down below.
+    try {
+      for (const { pre, post } of posts) {
+        const refusal = pre.name !== post.name ? heldPositionNameRefusal(door, post.name) : null;
+        if (refusal) throw refusal;
+      }
+    } catch (e) {
+      await undoUpdate(targets, patch);
+      throw e;
     }
 
     // Every new definition first; the old names' definitions go only once all landed.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS, flowRefusalMessageKey } from './i18n-resolver';
+import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS, FLOW_TERMINAL_MESSAGE_KEYS, flowRefusalMessageKey, flowScreenCopyKey } from './i18n-resolver';
 import { TEXT_SLOT_TEMPLATE_REFUSAL } from '../automation/flow-text-slot-template';
 import { FlowSchema } from '../automation/flow.zod';
 import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
@@ -1208,10 +1208,74 @@ describe('translation unknown-key strictness', () => {
       }
     });
 
-    it('says why select-option labels are not translatable here', () => {
-      const message = parse({ lead_conversion: { screens: { s1: { fields: { f: { options: {} } } } } } })
-        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
-      expect(message).toContain('unconstrained');
+    it('keys a screen field\'s option labels by the option value read as text (#22507)', () => {
+      // The face's own convention for an option map (an object field's
+      // `options`, an action param's): value → translated label. A screen
+      // field's value is `z.unknown()`, so a number or boolean value is
+      // addressed as `String(value)` — the key `1`, the key `true`.
+      const result = parse({
+        contract_intake: {
+          screens: { details: { fields: { our_entity: { options: { hq: '总部', '1': '一级', true: '是' } } } } },
+        },
+      });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect((result as { data: any }).data.flows.contract_intake.screens.details.fields.our_entity.options)
+        .toEqual({ hq: '总部', '1': '一级', true: '是' });
+      // The map holds labels — a non-string label is refused like any leaf.
+      expect(parse({ f: { screens: { s: { fields: { n: { options: { hq: 1 } } } } } } }).success).toBe(false);
+    });
+
+    it('renames the option-map spellings of its neighbouring surfaces onto `options`', () => {
+      for (const spelling of ['choices', 'values']) {
+        const issue = parse({ f: { screens: { s: { fields: { n: { [spelling]: { hq: 'x' } } } } } } })
+          .error?.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(issue, spelling).toBeDefined();
+        expect(issue?.message).toContain(`\`${spelling}\` → \`options\``);
+      }
+    });
+
+    it('keys the flow\'s terminal toasts, and renames their action-face spellings (#22507)', () => {
+      const result = parse({ contract_intake: { successMessage: '合同已发起。', errorMessage: '发起失败。' } });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      for (const [spelling, key] of [['success', 'successMessage'], ['successText', 'successMessage'], ['error', 'errorMessage'], ['errorText', 'errorMessage']]) {
+        const issue = parse({ f: { [spelling!]: 'x' } }).error?.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(issue?.message, spelling).toContain(`\`${spelling}\` → \`${key}\``);
+      }
+    });
+
+    it('keys a screen\'s `description` — a translated template that keeps the `{{ }}` holes (#22507)', () => {
+      // Ruling A on #22507: the engine picks this template in the run's locale
+      // before it fills the holes, so a translation carries the holes of the
+      // body text it translates, and the address is the one the engine asks for.
+      const result = parse({ quick_add_task: { screens: { success_screen: { description: '任务“{{ subject }}”已创建。' } } } });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect((result as { data: any }).data.flows.quick_add_task.screens.success_screen.description)
+        .toBe('任务“{{ subject }}”已创建。');
+      expect(flowScreenCopyKey('quick_add_task', 'success_screen', 'description'))
+        .toBe('flows.quick_add_task.screens.success_screen.description');
+      expect(flowScreenCopyKey('quick_add_task', 'success_screen', 'title'))
+        .toBe('flows.quick_add_task.screens.success_screen.title');
+    });
+
+    it('refuses a single-brace `{token}` in a translated `description`, through the one text-slot judge', () => {
+      const result = parse({ quick_add_task: { screens: { success_screen: { description: '任务 {subject} 已创建' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues[0]!;
+      expect(issue.code).toBe('custom');
+      expect(issue.path).toEqual(['flows', 'quick_add_task', 'screens', 'success_screen', 'description']);
+      expect(issue.message.slice(0, issue.message.indexOf('. ') + 1)).toBe(TEXT_SLOT_TEMPLATE_REFUSAL);
+      expect(issue.message).toContain('{{ subject }}');
+      // The metadata-item door reads the same shape.
+      const item = TranslationItemSchema.safeParse({
+        locale: 'zh-CN',
+        flows: { quick_add_task: { screens: { success_screen: { description: '任务 {subject} 已创建' } } } },
+      });
+      expect(item.success).toBe(false);
+      expect(item.error!.issues[0]!.path).toEqual(['flows', 'quick_add_task', 'screens', 'success_screen', 'description']);
+    });
+
+    it('accepts an empty `description` — the untranslated slot `os i18n extract` writes into a skeleton', () => {
+      expect(parse({ quick_add_task: { screens: { success_screen: { description: '' } } } }).success).toBe(true);
     });
 
     it('keeps runner chrome out of the bundle', () => {
@@ -1273,22 +1337,28 @@ describe('translation unknown-key strictness', () => {
       for (const key of FLOW_SCREEN_FIELD_COPY_KEYS) {
         expect(parse({ f: { screens: { s: { fields: { n: { [key]: 'x' } } } } } }).success, `field \`${key}\` must be declared`).toBe(true);
       }
+      for (const key of FLOW_TERMINAL_MESSAGE_KEYS) {
+        expect(parse({ f: { [key]: 'x' } }).success, `flow \`${key}\` must be declared`).toBe(true);
+      }
       const full = (parse({
         f: {
           label: 'x',
+          ...Object.fromEntries(FLOW_TERMINAL_MESSAGE_KEYS.map((k) => [k, 'x'])),
           screens: {
             s: {
               ...Object.fromEntries(FLOW_SCREEN_COPY_KEYS.map((k) => [k, 'x'])),
-              fields: { n: Object.fromEntries(FLOW_SCREEN_FIELD_COPY_KEYS.map((k) => [k, 'x'])) },
+              fields: { n: { ...Object.fromEntries(FLOW_SCREEN_FIELD_COPY_KEYS.map((k) => [k, 'x'])), options: { v: 'x' } } },
             },
           },
         },
       }) as { success: true; data: any }).data.flows.f;
-      // The flow face is `label` + the `screens` drill; the screen face is the
-      // copy list + the `fields` drill; the field face is its list exactly.
-      expect(Object.keys(full).sort()).toEqual(['label', 'screens']);
+      // The flow face is `label`, the toast pair + the `screens` drill (the
+      // `refusals` drill is pinned in its own block); the screen face is the
+      // copy list + the `fields` drill; the field face is its string list plus
+      // the `options` map, which `resolveFlowScreenFieldOptions` resolves.
+      expect(Object.keys(full).sort()).toEqual(['label', ...FLOW_TERMINAL_MESSAGE_KEYS, 'screens'].sort());
       expect(Object.keys(full.screens.s).sort()).toEqual([...FLOW_SCREEN_COPY_KEYS, 'fields'].sort());
-      expect(Object.keys(full.screens.s.fields.n).sort()).toEqual([...FLOW_SCREEN_FIELD_COPY_KEYS].sort());
+      expect(Object.keys(full.screens.s.fields.n).sort()).toEqual([...FLOW_SCREEN_FIELD_COPY_KEYS, 'options'].sort());
     });
   });
 

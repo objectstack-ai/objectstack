@@ -174,12 +174,14 @@ export default class MigrateApply extends Command {
       // `composeHostStack` (#12938): reconcile the object set this deployment
       // actually serves. It must be the SAME set `os migrate plan` diffed —
       // the plan the operator just read is the thing being confirmed — so the
-      // two commands pass it identically.
+      // two commands pass it identically — `composeServedPlatform` (#22506)
+      // included.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         deferSchemaDdl: true,
         composeHostStack: true,
+        composeServedPlatform: true,
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

@@ -15931,10 +15931,21 @@ export class ObjectStackProtocolImplementation implements
      *    package door gives (`ITEM_LOCKED` on a read-only base), so asking
      *    here never moves that door's vocabulary.
      *
+     * ## `create` — a save that TAKES the name
+     *
+     * [#22591] A door that knows its write brings an item of the caller's own
+     * into existence under `name` — a create, or a rename into the name — asks
+     * with `operation: 'create'` (Setup's position write-through does). The
+     * verdict is the `save` verdict: the same predicate, code and status, so
+     * no write moves. Only the sentence follows the act: it names the remedy a
+     * create has, a name no package or built-in holds, never the edit remedy
+     * (`managedItemSealedSentence` in `./packaged-base-regime.ts`). A door that
+     * cannot tell an edit from a create asks `save`, and keeps the edit remedy.
+     *
      * @returns the refusal to relay, or `null` when the `/meta` door would not
      *          refuse this write or removal on the locked-base ground.
      */
-    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null }): Error | null {
+    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'create' | 'delete'; packageId?: string | null }): Error | null {
         // [#9009] Folded HERE, at the producer of the verdict, so a caller that
         // arrives with a plural spelling cannot address around the lock.
         const folded = canonicalizeMetaRequestType(request);
@@ -15945,7 +15956,7 @@ export class ObjectStackProtocolImplementation implements
                     type: folded.type,
                     name: folded.name,
                     ...(folded.packageId ? { packageId: folded.packageId } : {}),
-                });
+                }, folded.operation);
             }
         } catch (err) {
             if (ObjectStackProtocolImplementation.isPackagedBaseRefusal(err)) return err;
@@ -16323,10 +16334,15 @@ export class ObjectStackProtocolImplementation implements
      * `/meta`'s handling of every OTHER type is unchanged, so for those this
      * returns `null` and the caller proceeds exactly as before.
      *
+     * [#22591] `operation: 'create'` says the write takes the name for a flow of
+     * the caller's own (the `/meta` door's first-write pin); rule 1's refusal
+     * then names the create remedy. The verdict is the same; absent, the write
+     * is an edit.
+     *
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
      */
-    async tenantAuthoredWriteRefusal(request: { type: string; name: string; item: unknown; packageId?: string | null }): Promise<Error | null> {
+    async tenantAuthoredWriteRefusal(request: { type: string; name: string; item: unknown; packageId?: string | null; operation?: 'save' | 'create' }): Promise<Error | null> {
         const folded = canonicalizeMetaRequestType(request);
         const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
         if (singular !== 'flow') return null;
@@ -16335,7 +16351,7 @@ export class ObjectStackProtocolImplementation implements
             const locked = this.packagedBaseRefusal({
                 type: folded.type,
                 name: folded.name,
-                operation: 'save',
+                operation: folded.operation ?? 'save',
                 ...(folded.packageId ? { packageId: folded.packageId } : {}),
             });
             if (locked) return locked;
@@ -16453,9 +16469,15 @@ export class ObjectStackProtocolImplementation implements
      * sentence names the managed package ({@link managedItemSealedSentence}, the
      * one builder the repository's type door reads too); the code and the status
      * are unchanged.
+     *
+     * [#22591] `operation` is what the save does to the name — `create` when the
+     * caller takes it for an item of its own, `save` (an edit) otherwise — and
+     * only the sentence reads it: the remedy follows the act. The predicate, the
+     * limbs, the code and the status are the same for both.
      */
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
+        operation: 'save' | 'create' = 'save',
     ): void {
         if (this.isSealedManagedItem(request.type, request.name)) {
             // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
@@ -16522,8 +16544,9 @@ export class ObjectStackProtocolImplementation implements
             }
             // [#20819, ADR-0131 D6] The SENTENCE is chosen per ADR-0126 regime,
             // and names the managed package for every other type; the code and
-            // the status are unchanged.
-            const err = new Error(managedItemSealedSentence(request.type, request.name, 'save'));
+            // the status are unchanged. [#22591] A create reads the held-name
+            // remedy instead, whatever the type.
+            const err = new Error(managedItemSealedSentence(request.type, request.name, operation));
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
             throw err;
@@ -19396,12 +19419,21 @@ export class ObjectStackProtocolImplementation implements
         // are no caller's claim about anything: a row stored before the
         // #16702 strip may still carry stale stamps, and rewriting it keeps
         // the silent strip it always had rather than failing the rewrite.
+        //
+        // [#22591] What this save does to the name, read for the sealed-item
+        // refusal's remedy and nothing else: a present `null` parent is the
+        // first-write pin (`If-None-Match: *` on the REST door) — the caller
+        // holds no row under the name and is writing one of its own, a create.
+        // Every other save is an edit. Read by the flow rule just below and by
+        // the package door further down.
+        const sealedWrite: 'save' | 'create' = request.parentVersion === null ? 'create' : 'save';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
                 name: request.name,
                 item: request.item,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...(sealedWrite === 'create' ? { operation: sealedWrite } : {}),
             });
             if (authored) throw authored;
         }
@@ -19562,7 +19594,10 @@ export class ObjectStackProtocolImplementation implements
         // enforcement" kept such deployments "any type writable", but the
         // repository has refused these writes on them all along; the door
         // only answers first.
-        this.refusePackagedBaseOverride(request);
+        //
+        // [#22591] A first write (`sealedWrite`, above) reads the create
+        // remedy; the verdict is the same.
+        this.refusePackagedBaseOverride(request, sealedWrite);
 
         // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
         // overlay `_lock`) blocks save independent of the L1 type-level

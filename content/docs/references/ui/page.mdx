@@ -145,7 +145,7 @@ View filter rule
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
-| **editInline** | `boolean` | optional (default: `false`) | Allow users to edit records inline — click a cell to edit it with the field's type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in. |
+| **editInline** | `boolean` | optional (default: `true`) | Allow users to edit records inline. On by default: a user who may update the object edits a cell in place with the field's type-aware widget (the same control the form uses), under the permission gate that already decides whether the object is editable at all. Declare `editInline: false` to make the list read-only in place. |
 | **hideFields** | `boolean` | optional (default: `false`) | Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component's `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in. |
 | **rowColor** | `boolean` | optional (default: `false`) | Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in. |
 | **buttons** | `string[]` | optional | Custom action button IDs to show in the toolbar |
@@ -260,7 +260,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'record:approval_decision' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec's own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable; `ai:chat_window` — no renderer by design, the floating chat overlay is the AI chat entry point; `element:filter` and `element:form` — retired whole, no renderer for either ever shipped) is refused at the parse itself, with the retirement prescription. |
+| **type** | `Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| 'page:card' \| 'page:section' \| 'record:details' \| 'record:highlights' \| 'record:related_list' \| 'record:activity' \| 'record:chatter' \| 'record:discussion' \| 'record:path' \| 'record:alert' \| 'record:quick_actions' \| 'record:reference_rail' \| 'record:history' \| 'record:approval_decision' \| 'record:approvals' \| 'record:attachments' \| 'app:launcher' \| 'nav:menu' \| 'nav:breadcrumb' \| 'global:search' \| 'global:notifications' \| 'ai:suggestion' \| 'element:text' \| 'element:number' \| 'element:image' \| 'element:divider' \| 'element:button' \| 'element:record_picker' \| 'element:text_input'> \| string` | ✅ | Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec's own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable; `ai:chat_window` — no renderer by design, the floating chat overlay is the AI chat entry point; `element:filter` and `element:form` — retired whole, no renderer for either ever shipped) is refused at the parse itself, with the retirement prescription. |
 | **id** | `string` | optional | Unique instance ID |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **properties** | `Record<string, any>` | optional (default: `{}`) | Component props passed to the widget. See component.zod.ts for schemas. |
@@ -327,6 +327,8 @@ View filter rule
 * `record:reference_rail`
 * `record:history`
 * `record:approval_decision`
+* `record:approvals`
+* `record:attachments`
 * `app:launcher`
 * `nav:menu`
 * `nav:breadcrumb`

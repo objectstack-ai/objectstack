@@ -2784,7 +2784,10 @@ describe('translatePage — a bundle label never replaces a header title that sa
         expect(headerOf(root, out).title).toBe('客户 {name}');
       });
 
-      it('CONTROL: a header with no authored title still shows the bundle `label`', () => {
+      // The fixture page carries no `type` and no `object`, so as served it is
+      // NOT a record page and its untitled header derives nothing from a
+      // record. On a record page the label does not fill (#22536, below).
+      it('CONTROL: a header with no authored title on a non-record page still shows the bundle `label`', () => {
         for (const header of [{}, { title: '' }, { subtitle: 'Overview' }]) {
           const out = translatePage(pageWith(root, header), labelOnly, { locale: 'zh-CN' });
           expect({ header, title: headerOf(root, out).title }).toEqual({ header, title: '客户详情' });
@@ -2809,6 +2812,142 @@ describe('translatePage — a bundle label never replaces a header title that sa
     for (const root of ROOTS) {
       const out = translateMetadataDocument('page', pageWith(root, { title: '{name}' }), labelOnly, { locale: 'en' });
       expect({ root, title: headerOf(root, out).title }).toEqual({ root, title: '{name}' });
+    }
+  });
+});
+
+// #22536: on a record page, a header with no title is the sanctioned spelling
+// for "the renderer derives the heading from the record"
+// (`PageHeaderProps.title`). Filling it with the bundle's page `label` put the
+// page's static name in place of the record's, in every locale whose pack
+// carries the label, the en skeleton `os i18n extract` writes included. The
+// label now does not fill an untitled header when the page's `type` is
+// `'record'` as served, its `object` is a non-empty string, and the header
+// keeps its record chrome. Everywhere else it still fills, as before.
+describe('translatePage — a bundle label does not fill the untitled header of a record page', () => {
+  const PAGE = 'account_record';
+  type Root = 'region' | 'slot';
+  const ROOTS: readonly Root[] = ['region', 'slot'];
+
+  /**
+   * The Studio seed's shape: objectui's `createSeed` writes `type: 'record'`,
+   * the chosen `object`, and the synthesized `page:header`, which carries
+   * `recordChrome: true` and no `title`.
+   */
+  const SEED_PAGE: Record<string, unknown> = { label: 'Account Record', type: 'record', object: 'account' };
+  const SEED_HEADER = { recordChrome: true };
+
+  const pageWith = (
+    root: Root,
+    header: Record<string, unknown>,
+    page: Record<string, unknown> = SEED_PAGE,
+  ): any => {
+    const component = { type: 'page:header', properties: header };
+    return root === 'region'
+      ? { name: PAGE, ...page, regions: [{ name: 'main', components: [component] }] }
+      : { name: PAGE, ...page, kind: 'slotted', regions: [], slots: { header: component } };
+  };
+  const headerOf = (root: Root, page: any): Record<string, unknown> =>
+    root === 'region' ? page.regions[0].components[0].properties : page.slots.header.properties;
+
+  /** A zh-CN pack carrying the page label and nothing else. */
+  const zhLabelOnly: TranslationBundle = {
+    'zh-CN': { pages: { [PAGE]: { label: '客户记录页' } } },
+  };
+  /** The en skeleton `os i18n extract` writes: the authored label, restated. */
+  const enSkeleton: TranslationBundle = {
+    en: { pages: { [PAGE]: { label: 'Account Record' } } },
+  };
+  const CASES = [
+    { pack: 'zh-CN label only', bundle: zhLabelOnly, locale: 'zh-CN', label: '客户记录页' },
+    { pack: 'en extract skeleton', bundle: enSkeleton, locale: 'en', label: 'Account Record' },
+  ] as const;
+
+  for (const root of ROOTS) {
+    describe(`at a ${root} root`, () => {
+      for (const { pack, bundle, locale, label } of CASES) {
+        it(`keeps the Studio-seeded record header untitled with the ${pack} pack`, () => {
+          const out = translatePage(pageWith(root, SEED_HEADER), bundle, { locale });
+          expect(headerOf(root, out)).toEqual({ recordChrome: true });
+          expect('title' in headerOf(root, out)).toBe(false);
+          // The page's own label still translates; only the header stays as authored.
+          expect(out.label).toBe(label);
+        });
+      }
+
+      it('keeps an untitled header untitled when `recordChrome` is left at its default', () => {
+        const headers: Array<Record<string, unknown>> = [{}, { title: '' }];
+        for (const header of headers) {
+          const out = translatePage(pageWith(root, header), zhLabelOnly, { locale: 'zh-CN' });
+          expect(headerOf(root, out)).toEqual(header);
+        }
+      });
+
+      it('still applies the bundle subtitle beside the untitled header', () => {
+        const subtitled: TranslationBundle = {
+          'zh-CN': { pages: { [PAGE]: { label: '客户记录页', subtitle: '客户概览' } } },
+        };
+        const out = translatePage(pageWith(root, SEED_HEADER), subtitled, { locale: 'zh-CN' });
+        expect(headerOf(root, out)).toEqual({ recordChrome: true, subtitle: '客户概览' });
+      });
+
+      // One control per condition: drop any one of the three and the header
+      // derives nothing from a record, so the label fills it as before.
+      it('CONTROL: a page with no `type` is not a record page as served, and the label fills', () => {
+        const untyped = { label: SEED_PAGE.label, object: SEED_PAGE.object };
+        const out = translatePage(pageWith(root, SEED_HEADER, untyped), zhLabelOnly, { locale: 'zh-CN' });
+        expect(headerOf(root, out).title).toBe('客户记录页');
+      });
+
+      it('CONTROL: a record page with no `object`, or an empty one, has no record to derive from, and the label fills', () => {
+        const unbound = { label: SEED_PAGE.label, type: SEED_PAGE.type };
+        const pages: Array<Record<string, unknown>> = [unbound, { ...SEED_PAGE, object: '' }];
+        for (const page of pages) {
+          const out = translatePage(pageWith(root, SEED_HEADER, page), zhLabelOnly, { locale: 'zh-CN' });
+          expect({ object: page.object, title: headerOf(root, out).title })
+            .toEqual({ object: page.object, title: '客户记录页' });
+        }
+      });
+
+      it('CONTROL: a record-page header with `recordChrome: false` draws the bare heading, and the label fills', () => {
+        const out = translatePage(pageWith(root, { recordChrome: false }), zhLabelOnly, { locale: 'zh-CN' });
+        expect(headerOf(root, out)).toEqual({ recordChrome: false, title: '客户记录页' });
+      });
+
+      it('CONTROL: an object-bound page of another `type` derives nothing from a record, and the label fills', () => {
+        for (const type of ['list', 'app', 'home', 'utility']) {
+          const out = translatePage(pageWith(root, SEED_HEADER, { ...SEED_PAGE, type }), zhLabelOnly, { locale: 'zh-CN' });
+          expect({ type, title: headerOf(root, out).title }).toEqual({ type, title: '客户记录页' });
+        }
+      });
+
+      // An authored title on a record page follows #22508 unchanged.
+      it('an authored template title on a record page is kept against a label-only pack', () => {
+        const out = translatePage(pageWith(root, { ...SEED_HEADER, title: '{name}' }), zhLabelOnly, { locale: 'zh-CN' });
+        expect(headerOf(root, out).title).toBe('{name}');
+      });
+
+      it('an authored title on a record page that restates the page label takes the label translation', () => {
+        const out = translatePage(pageWith(root, { ...SEED_HEADER, title: 'Account Record' }), zhLabelOnly, { locale: 'zh-CN' });
+        expect(headerOf(root, out).title).toBe('客户记录页');
+      });
+
+      it('a pack with `title` replaces an authored title on a record page', () => {
+        const withTitle: TranslationBundle = {
+          'zh-CN': { pages: { [PAGE]: { label: '客户记录页', title: '客户 {name}' } } },
+        };
+        const out = translatePage(pageWith(root, { ...SEED_HEADER, title: '{name}' }), withTitle, { locale: 'zh-CN' });
+        expect(headerOf(root, out).title).toBe('客户 {name}');
+      });
+    });
+  }
+
+  it('serves the same answer through `translateMetadataDocument`, the function the REST page doors call', () => {
+    for (const root of ROOTS) {
+      for (const { bundle, locale } of CASES) {
+        const out = translateMetadataDocument('page', pageWith(root, SEED_HEADER), bundle, { locale });
+        expect({ root, locale, header: headerOf(root, out) }).toEqual({ root, locale, header: { recordChrome: true } });
+      }
     }
   });
 });
@@ -3970,7 +4109,7 @@ describe('translateFlow — screen-flow copy from the `flows` bundle group', () 
     expect(screenOf(out).label).toBe('Conversion Details');
   });
 
-  it('ignores off-spec bundle keys the schema refuses — never overlays them (`description`, `help`)', () => {
+  it('ignores off-spec bundle keys the schema refuses — never overlays them (a field\'s `help`)', () => {
     // The resolver is deliberately schema-independent (stored rows reach it
     // via the raw sync path), so the negative is pinned on its own, the same
     // way `translatePage` pins the retired `submitLabel`.
@@ -3980,7 +4119,6 @@ describe('translateFlow — screen-flow copy from the `flows` bundle group', () 
           lead_conversion: {
             screens: {
               screen_1: {
-                description: '不应出现',
                 fields: { opportunityName: { help: '不应出现' } },
               },
             },
@@ -3990,8 +4128,32 @@ describe('translateFlow — screen-flow copy from the `flows` bundle group', () 
     } as unknown as FlowTestBundle;
     const out = translateFlow(leadConversion(), offSpec, { locale: 'zh-CN' });
     const screen = screenOf(out);
-    expect(screen.config.description).toBe('Review the details below.');
     expect(screen.config.fields.find((f: any) => f.name === 'opportunityName').help).toBeUndefined();
+  });
+
+  it('overlays a screen\'s body text TEMPLATE where the screen authors one, and never adds one (#22507)', () => {
+    // The document-level twin of the engine's pick: the translated template
+    // replaces `config.description` before any render, holes and all.
+    const withBody: FlowTestBundle = {
+      'zh-CN': {
+        flows: {
+          lead_conversion: {
+            screens: {
+              screen_1: { description: '请核对 {{ record.name }} 的详情。' },
+              screen_2: { description: '不应出现' },
+            },
+          },
+        },
+      },
+    };
+    const doc = leadConversion();
+    doc.nodes.push({ id: 'screen_2', type: 'screen', label: 'No Body', config: { title: 'No Body' } } as any);
+    const out = translateFlow(doc, withBody, { locale: 'zh-CN' });
+    expect(screenOf(out).config.description).toBe('请核对 {{ record.name }} 的详情。');
+    // A screen with no authored body text gets none from the bundle, and
+    // nothing else on it resolved, so it comes back as the same node.
+    expect(screenOf(out, 'screen_2').config.description).toBeUndefined();
+    expect(screenOf(out, 'screen_2')).toBe(doc.nodes[3]);
   });
 
   it('touches only screen nodes with an id, and does not mutate the input document', () => {
@@ -4250,6 +4412,161 @@ describe('resolveFlowScreenTitle — a screen title from the `flows` bundle grou
   it('applies the BCP-47 ladder the rest of the surface uses', () => {
     expect(resolveFlowScreenTitle(bundle, 'lead_conversion', { nodeId: 'screen_1' }, { locale: 'zh' }))
       .toBe('转化详情');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// #22507 — the terminal toasts and a screen field's option labels
+// ════════════════════════════════════════════════════════════════════════════
+
+import { resolveFlowScreenFieldOptions } from './i18n-resolver';
+
+describe('translateFlow — the terminal toasts and option labels (#22507)', () => {
+  // hotclm's measured case: the zh-CN `contract_intake` wizard translated its
+  // labels and placeholders and kept its select options and completion toast
+  // in English, because the face had no key for either.
+  const bundle: FlowTestBundle = {
+    'zh-CN': {
+      flows: {
+        contract_intake: {
+          successMessage: '合同已发起。',
+          errorMessage: '合同发起失败。',
+          screens: {
+            details: {
+              fields: {
+                our_entity: { options: { hq: '总部', apac: '亚太子公司' } },
+                tier: { options: { '1': '一级', true: '是' } },
+              },
+            },
+          },
+        },
+      },
+    },
+    en: {
+      flows: {
+        contract_intake: {
+          screens: { details: { fields: { our_entity: { options: { emea: 'EMEA entity (en)' } } } } },
+        },
+      },
+    },
+  };
+
+  const contractIntake = (): any => ({
+    name: 'contract_intake',
+    label: 'Launch Contract',
+    type: 'screen',
+    successMessage: 'Contract launched.',
+    errorMessage: 'Contract launch failed.',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'details',
+        type: 'screen',
+        label: 'Contract details',
+        config: {
+          title: 'Contract details',
+          fields: [
+            {
+              name: 'our_entity', label: 'Our signing entity', type: 'select',
+              options: [
+                { value: 'hq', label: 'Head office' },
+                { value: 'apac', label: 'APAC subsidiary' },
+                { value: 'emea', label: 'EMEA entity' },
+                { value: 'latam', label: 'LATAM entity' },
+              ],
+            },
+            { name: 'tier', label: 'Tier', type: 'select', options: [{ value: 1, label: 'Tier 1' }, { value: true, label: 'Yes' }] },
+            { name: 'notes', label: 'Notes', type: 'textarea' },
+          ],
+        },
+      },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'details' }],
+  });
+
+  const fieldOf = (doc: any, name: string) =>
+    doc.nodes.find((n: any) => n.id === 'details').config.fields.find((f: any) => f.name === name);
+
+  it('translates the completion and failure toasts the flow authors', () => {
+    const out = translateFlow(contractIntake(), bundle, { locale: 'zh-CN' });
+    expect(out.successMessage).toBe('合同已发起。');
+    expect(out.errorMessage).toBe('合同发起失败。');
+  });
+
+  it('never ADDS a toast the flow does not author — the runner\'s own sentence stays', () => {
+    const doc = contractIntake();
+    delete doc.successMessage;
+    delete doc.errorMessage;
+    const out = translateFlow(doc, bundle, { locale: 'zh-CN' });
+    expect(out.successMessage).toBeUndefined();
+    expect(out.errorMessage).toBeUndefined();
+  });
+
+  it('translates the toast a runner holds from the served result, as it does the served label', () => {
+    // The runner holds `AutomationResult.successMessage` and the flow name,
+    // not the flow document — the same call shape as its label resolution.
+    expect(translateFlow({ name: 'contract_intake', successMessage: 'Contract launched.' }, bundle, { locale: 'zh-CN' }).successMessage)
+      .toBe('合同已发起。');
+    expect(translateFlow({ name: 'contract_intake', errorMessage: 'Contract launch failed.' }, bundle, { locale: 'zh' }).errorMessage)
+      .toBe('合同发起失败。');
+    // No entry for the locale: the served string comes back.
+    expect(translateFlow({ name: 'contract_intake', successMessage: 'Contract launched.' }, bundle, { locale: 'ja-JP' }).successMessage)
+      .toBe('Contract launched.');
+  });
+
+  it('overlays option labels by the value read as text, option by option, falling back to the authored label', () => {
+    const out = translateFlow(contractIntake(), bundle, { locale: 'zh-CN', fallbackChain: ['en'] });
+    expect(fieldOf(out, 'our_entity').options).toEqual([
+      { value: 'hq', label: '总部' },
+      { value: 'apac', label: '亚太子公司' },
+      { value: 'emea', label: 'EMEA entity (en)' },   // the next DECLARED locale
+      { value: 'latam', label: 'LATAM entity' },      // no entry anywhere: authored
+    ]);
+    // A number and a boolean value are addressed as `String(value)`, and keep
+    // their own type — only the label is overlaid.
+    expect(fieldOf(out, 'tier').options).toEqual([{ value: 1, label: '一级' }, { value: true, label: '是' }]);
+  });
+
+  it('leaves untouched what it does not translate — same references, input not mutated', () => {
+    const doc = contractIntake();
+    const frozen = JSON.parse(JSON.stringify(doc));
+    const out = translateFlow(doc, bundle, { locale: 'zh-CN' });
+    expect(doc).toEqual(frozen);
+    expect(fieldOf(out, 'notes')).toBe(fieldOf(doc, 'notes'));
+    // A flow the bundle does not carry comes back as the same reference.
+    const other = { ...contractIntake(), name: 'other_flow' };
+    expect(translateFlow(other, bundle, { locale: 'zh-CN' })).toBe(other);
+  });
+});
+
+describe('resolveFlowScreenFieldOptions — a served field\'s options from the `flows` bundle group', () => {
+  const bundle: FlowTestBundle = {
+    'zh-CN': { flows: { intake: { screens: { s1: { fields: { tier: { options: { gold: '金牌', '2': '二级' } } } } } } } },
+  };
+  const served = { name: 'tier', label: 'Tier', options: [{ value: 'gold', label: 'Gold' }, { value: 2, label: 'Two' }, { value: 'x', label: 'X' }] };
+
+  it('resolves a ScreenFieldSpec-shaped field beside the screen\'s nodeId', () => {
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's1', served, { locale: 'zh-CN' })).toEqual([
+      { value: 'gold', label: '金牌' },
+      { value: 2, label: '二级' },
+      { value: 'x', label: 'X' },
+    ]);
+  });
+
+  it('returns the field\'s own array when nothing resolves — the identity callers read', () => {
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's2', served, { locale: 'zh-CN' })).toBe(served.options);
+    expect(resolveFlowScreenFieldOptions(bundle, 'other', 's1', served, { locale: 'zh-CN' })).toBe(served.options);
+    expect(resolveFlowScreenFieldOptions(undefined, 'intake', 's1', served, { locale: 'zh-CN' })).toBe(served.options);
+    const noOptions = { name: 'tier', label: 'Tier' };
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's1', noOptions, { locale: 'zh-CN' })).toBeUndefined();
+    // A field with no name has no address.
+    const anonymous = { label: 'Tier', options: served.options };
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's1', anonymous, { locale: 'zh-CN' })).toBe(served.options);
+  });
+
+  it('reads only the map\'s own keys — a value spelled like a prototype member resolves nothing', () => {
+    const field = { name: 'tier', options: [{ value: 'toString', label: 'To string' }, { value: 'constructor', label: 'Ctor' }] };
+    expect(resolveFlowScreenFieldOptions(bundle, 'intake', 's1', field, { locale: 'zh-CN' })).toBe(field.options);
   });
 });
 

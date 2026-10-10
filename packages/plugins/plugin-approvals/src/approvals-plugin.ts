@@ -12,9 +12,11 @@ import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalToken } from './sys-approval-token.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
+import { SysApprovalRequestDetailPage } from './sys-approval-request.page.js';
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
   ApprovalService,
+  requestVisibilitySourceOf,
   ESCALATION_JOB_NAME,
   ESCALATION_SCAN_INTERVAL_MS,
   type ApprovalEngine,
@@ -28,6 +30,7 @@ import {
 } from './lifecycle-hooks.js';
 import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.js';
 import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
+import { bindRequestChildReadGates, bindRequestReadGate } from './request-read-gate.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
@@ -69,7 +72,10 @@ export interface ApprovalsPluginOptions {
    * on upgrade. Opting in is per object and deliberate: enabling it for a
    * ledger object does not enable it anywhere else.
    *
-   * **What an enabled object exposes**, so the opt-in is informed: the request
+   * **What an enabled object exposes**, so the opt-in is informed — on the
+   * approvals door and, for a deployment that grants read on
+   * `sys_approval_request`, on the generic data door alike (one rule serves
+   * both, `request-read-gate.ts`): the request
    * row (including its `payload` snapshot of the record at submission time) and
    * the full action history — actor, decision, timestamp, the action's COMMENT
    * text, and any decision attachments. Enable it on objects whose approval
@@ -124,6 +130,12 @@ export class ApprovalsServicePlugin implements Plugin {
       defaultDatasource: 'cloud',
       namespace: 'sys',
       objects: [SysApprovalRequest, SysApprovalAction, SysApprovalApprover, SysApprovalToken, SysApprovalDelegation],
+      // The request's record-detail page (a slotted page, default for every
+      // sys_approval_request record): the decision panel, the request's
+      // fields, and its timeline. This plugin owns the object, so it ships its
+      // page too — the shape plugin-auth ships sys_user's. The page and its
+      // slot map are documented on `SysApprovalRequestDetailPage`.
+      pages: [SysApprovalRequestDetailPage],
       // ADR-0029 D7 — contribute the Approvals entries into the Setup app's
       // `group_approvals` slot. This plugin owns these objects (K2.b), so it
       // ships their menu too; when the plugin isn't installed the slot is empty.
@@ -296,6 +308,28 @@ export class ApprovalsServicePlugin implements Plugin {
       } catch (err: any) {
         ctx.logger.warn?.('[approvals] failed to bind approval hooks', { error: err?.message });
       }
+    }
+
+    // [#22559] The generic data door's read gate: a read of
+    // `sys_approval_request` there returns only the requests this service's
+    // own door would serve the caller — one visibility rule for both doors
+    // (`request-read-gate.ts`). Bound whenever the service runs, NOT behind
+    // `disableAutoHooks`: that switch is the record lock's (a caller driving
+    // the manual API), and a read through the generic door needs the gate
+    // whichever API wrote the row.
+    // [#22589] …and its child tables, `sys_approval_action` (the decision log)
+    // and `sys_approval_approver` (the approver index): a row there is served
+    // only when its request is, by the same source.
+    if (typeof (engine as any).registerMiddleware === 'function') {
+      const visibility = requestVisibilitySourceOf(this.service);
+      bindRequestReadGate(engine as any, visibility, ctx.logger);
+      bindRequestChildReadGates(engine as any, visibility, ctx.logger);
+    } else {
+      ctx.logger.warn(
+        'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request, '
+        + 'sys_approval_action and sys_approval_approver through the generic data door are NOT narrowed to the '
+        + 'approval requests the caller may see. Grant no read on those objects to non-administrators on this stack.',
+      );
     }
 
     ctx.registerService('approvals', this.service);

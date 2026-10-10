@@ -33,12 +33,16 @@ const TRANSLATION_HISTORY =
 /**
  * The measured exclusion on `objects.<o>._views.<v>.bulkActions.<def>.params.<p>`.
  *
- * Identical in kind to `FLOW_SCREEN_FIELD_NO_OPTIONS` below, and for the same
- * measured reason rather than by symmetry: `BulkActionParamSchema.options[].value`
- * is `z.union([z.string(), z.number(), z.boolean()])`, so an option map keyed by
+ * Measured, not by symmetry: `BulkActionParamSchema.options[].value` is
+ * `z.union([z.string(), z.number(), z.boolean()])`, so an option map keyed by
  * value — the shape `objects.<object>.fields.<field>.options` uses — cannot
  * address `true` and `"true"` apart. There is no right key to send the author
  * to, which is why this is `guidance` and not an alias.
+ *
+ * A screen field's options carried the same exclusion until the `flows` face
+ * keyed them by `String(value)` and `ScreenFieldConfigSchema` began refusing
+ * two options of one field that collide as text. This surface was not part of
+ * that change and keeps its exclusion.
  */
 const BULK_PARAM_NO_OPTIONS =
   'select-option labels are not translatable on a bulk-action param: '
@@ -716,25 +720,6 @@ const DATASET_MEMBER_NO_DESCRIPTION =
   + "'datasets.<dataset_name>.description'.";
 
 /**
- * The measured exclusion on `flows.<flow>.screens.<node>.fields.<field>`.
- *
- * `options` is a key an author reaches for from a neighbouring surface — an
- * object FIELD translation and a settings key both carry it. There is no right
- * key on THIS surface to send them to, which is why this is `guidance` and not
- * an alias.
- *
- * The face's other neighbouring-surface miss, the help spellings, is no longer
- * an exclusion: the face carries `inlineHelpText`, the screen field's own key
- * for its help line, so `help` / `helpText` / `hint` / `tooltip` /
- * `description` are aliases onto it (#17306).
- */
-const FLOW_SCREEN_FIELD_NO_OPTIONS =
-  'select-option labels are not translatable on a screen field: `ScreenFieldConfig.options[].value` is '
-  + 'unconstrained (numbers and booleans are legal), so an option map keyed by value — the shape '
-  + '`objects.<object>.fields.<field>.options` uses — cannot address them unambiguously. Author the '
-  + "option labels on the node's `config`.";
-
-/**
  * The tombstone prescription for `dashboards.<name>.widgets.<id>.subCaption`
  * — the metric sub-caption, retired at both ends by ruling C on
  * objectui#11389 (batch #264 item 5), which reverses #5428 item 4.
@@ -1190,11 +1175,20 @@ const appTranslationDataShape = () => ({
    *
    * Convention:
    *   flows.<flow_name>.label
-   *   flows.<flow_name>.screens.<node_id>.title
+   *   flows.<flow_name>.successMessage                 (the terminal toasts, #22507)
+   *   flows.<flow_name>.errorMessage
+   *   flows.<flow_name>.screens.<node_id>.title          (picked by the engine, #22507)
+   *   flows.<flow_name>.screens.<node_id>.description    (picked by the engine, #22507)
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.label
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.placeholder
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.inlineHelpText
+   *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>   (#22507)
    *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
+   *
+   * Every user-read string slot of the flow schemas is either one of these
+   * keys or recorded, with its reason, in the family pin
+   * (`flows-translation-face.test.ts`), so a new slot added without a key
+   * fails there rather than in a locale.
    *
    * **The hole this closes (#7646).** A `type: 'screen'` flow is a wizard the
    * user reads — a heading, a list of labelled inputs — and the bundle had no
@@ -1244,14 +1238,16 @@ const appTranslationDataShape = () => ({
    * ruling on #7646).
    *
    * The runner half was a separate, downstream change, and it has landed
-   * client-side for both halves of the group. objectui's `FlowRunner` reads
-   * `screens`: each screen's `title`, and each field's copy over
-   * `FLOW_SCREEN_FIELD_COPY_KEYS` (`label`, `placeholder`, `inlineHelpText`).
-   * It reads `label` through `translateFlow` to name the flow in its header
-   * and in the completion toast, falling back to the label the engine serves
-   * as `AutomationResult.flowLabel` and then to the flow's API name. Both were
+   * client-side for each field's copy and the flow label. objectui's
+   * `FlowRunner` reads each field's copy over `FLOW_SCREEN_FIELD_COPY_KEYS`
+   * (`label`, `placeholder`, `inlineHelpText`). It reads `label` through
+   * `translateFlow` to name the flow in its header and in the completion
+   * toast, falling back to the label the engine serves as
+   * `AutomationResult.flowLabel` and then to the flow's API name. Both were
    * measured at the `.objectui-sha` pin `0abd4f9f8`. See the `flows` rows in
-   * `liveness/translation.json`: the group and its children are `live`.
+   * `liveness/translation.json`: the group and its children are `live`. A
+   * screen's `title` and `description` are the engine's to pick, not the
+   * runner's (see "picked by the engine" below).
    *
    * ## `refusals` — a refused `end` node's message (#22450)
    *
@@ -1279,6 +1275,75 @@ const appTranslationDataShape = () => ({
    * as `EndConfigSchema` refuses it on the source. `objectstack validate`
    * refuses a key over an unknown flow, an unknown node, or a node that is not
    * a refused `end`, as it does for the screen keys.
+   *
+   * ## `successMessage` / `errorMessage` — the terminal toasts (#22507)
+   *
+   *   flows.<flow_name>.successMessage
+   *   flows.<flow_name>.errorMessage
+   *
+   * The flow's own completion and failure text (`FlowSchema.successMessage` /
+   * `.errorMessage`). The engine carries each VERBATIM on the terminal
+   * `AutomationResult` — a plain string, never interpolated — and the console
+   * draws it as the toast at the end of a run, so the text needs no pick
+   * before a render and the overlay is client-side, exactly as for the flow
+   * `label` the engine serves as `AutomationResult.flowLabel`. Translated
+   * only where the flow authors the message: a bundle cannot ADD a toast to a
+   * flow that declares none (`translateFlow`; `objectstack validate` refuses
+   * such a key). The toast's chrome sentence (`Flow "…" completed`, shown when
+   * the flow declares no `successMessage`) stays the console's own words.
+   *
+   * ## `options.<value>` — a screen field's option labels (#22507)
+   *
+   *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>
+   *
+   * Keyed by the option's value coerced to a string
+   * (`flowScreenFieldOptionKey`, `String(value)`) — the console select's own
+   * identity for the option, and the coercion an action param's inline
+   * `options` translation already uses. `ScreenFieldConfigSchema` refuses two
+   * options of one field whose values collide as text (`1` and `"1"`), so a
+   * key names exactly one option. ⛔ Not by position, which would re-point
+   * every translation when an option is inserted; ⛔ not by the label of an
+   * object field the screen field happens to mirror — a screen field declares
+   * no such binding, so a runner has nothing to read it from.
+   *
+   * Both new groups of keys are the spec half of a contract-first split, like
+   * `screens` was (#7646): objectui's `FlowRunner` reads them in a downstream
+   * change, and their liveness rows are `planned` until it lands.
+   *
+   * ## `screens.<node_id>.title` / `.description` — picked by the engine (#22507)
+   *
+   *   flows.<flow_name>.screens.<node_id>.title
+   *   flows.<flow_name>.screens.<node_id>.description
+   *
+   * A screen's heading and body text are `{{ }}` templates the server renders
+   * per run (`renderTextSlot` in the screen executor), so an overlay on the
+   * served string would draw a translated hole as literal text. Maintainer
+   * ruling A on #22507 states the rule once: a user-read flow string the
+   * server renders per run is translated where it is rendered, in the run's
+   * locale, before its holes are filled, and a client overlay never touches a
+   * server-rendered slot. So the screen executor asks the engine for each
+   * translated TEMPLATE (`flowScreenCopyKey`, `system/i18n-resolver.ts`)
+   * through the `i18n` service, in the run's `AutomationContext.locale`, the
+   * one channel the `refusals` message is read through, and renders it in
+   * place of the authored template. With no locale, or no entry, the authored
+   * template renders. The served `ScreenSpec` arrives translated and filled,
+   * and the runner draws it as served.
+   *
+   * - **`title`** covers the node label too: the executor draws
+   *   `config.title ?? node.label`, so one key translates whichever heading the
+   *   screen shows. Its address is unchanged from the client-side route it had
+   *   before.
+   * - **`description`** is translated only where the screen authors one. A
+   *   bundle cannot add body text the author did not write; `objectstack
+   *   validate` refuses such a key. It is judged as the text slot it
+   *   translates: the one text-slot judge (`textSlotTemplateRefusal`) refuses
+   *   a single-brace `{token}` here exactly as `ScreenConfigSchema` refuses it
+   *   on the source.
+   * - ⚠️ A `title` translation is not judged by that judge yet. The key
+   *   predates the engine pick, and refusing a token in it narrows what the
+   *   face accepts, which is a change of its own. A single-brace token in a
+   *   translated heading renders as literal text, as it did when the console
+   *   overlaid the heading.
    */
   flows: z.record(z.string(), strictObject({
     surface: 'this flow translation',
@@ -1286,21 +1351,21 @@ const appTranslationDataShape = () => ({
     aliases: {
       name: 'label', title: 'label', nodes: 'screens', steps: 'screens', screen: 'screens', pages: 'screens',
       refusal: 'refusals', ends: 'refusals',
-    },
-    guidance: {
-      successMessage:
-        '`flow.successMessage` / `flow.errorMessage` are not part of the flows translation surface — '
-        + 'it carries the flow label, per-screen headings, per-screen field copy and the message of '
-        + "each `end` node declaring `outcome: 'refused'` (`refusals.<node_id>.message`). The "
-        + 'terminal toast renders the string authored on the flow.',
-      errorMessage:
-        '`flow.errorMessage` / `flow.successMessage` are not part of the flows translation surface — '
-        + 'it carries the flow label, per-screen headings, per-screen field copy and the message of '
-        + "each `end` node declaring `outcome: 'refused'` (`refusals.<node_id>.message`). The "
-        + 'terminal toast renders the string authored on the flow.',
+      // The spellings the toast pair arrives in from an action translation,
+      // which spells its own success toast `successMessage` with these aliases.
+      success: 'successMessage', successText: 'successMessage',
+      error: 'errorMessage', errorText: 'errorMessage',
     },
   }, {
     label: z.string().optional().describe('Translated flow label'),
+    successMessage: z.string().optional().describe(
+      "Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries "
+      + 'verbatim on the terminal result; only a flow that authors one is translated',
+    ),
+    errorMessage: z.string().optional().describe(
+      "Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries "
+      + 'verbatim on the terminal result; only a flow that authors one is translated',
+    ),
     screens: z.record(z.string(), strictObject({
       surface: 'this flow screen translation',
       history: TRANSLATION_HISTORY,
@@ -1309,38 +1374,55 @@ const appTranslationDataShape = () => ({
       // `dashboards.widgets` and `pages.components` both name, so it gets the
       // same alias table.
       aliases: { label: 'title', name: 'title', heading: 'title', header: 'title', inputs: 'fields', items: 'fields' },
-      guidance: {
-        description:
-          "`description` — a screen's body text (`config.description`) — is not part of the flows "
-          + 'translation surface, which carries the heading (`title`) and per-field copy.',
-      },
     }, {
-      // Overlays the screen node's `config.title`. A screen that declares no
-      // `title` shows its node `label` instead (`ScreenConfigSchema.title`,
-      // "falls back to the node label"), so this one key covers whichever of
-      // the two the runner ends up drawing — the same one-string-one-spelling
-      // rule `pages.<name>.title` follows over `label`.
-      title: z.string().optional().describe('Translated screen heading (overlays `config.title`, or the node label when the screen declares none)'),
+      // [#22507] Picked by the ENGINE in the run's locale and rendered in place
+      // of the screen node's `config.title`. A screen that declares no `title`
+      // shows its node `label` instead (`ScreenConfigSchema.title`, "falls back
+      // to the node label"), so this one key covers whichever of the two the
+      // screen shows — the same one-string-one-spelling rule
+      // `pages.<name>.title` follows over `label`.
+      title: z.string().optional().describe(
+        'Translated screen heading — a `{{ }}` template like the heading it translates, picked by the engine in the '
+        + "run's locale and rendered in place of `config.title` (or the node label when the screen declares none)",
+      ),
+      // [#22507] The screen's body text, picked the same way. No `.min(1)`,
+      // like every sibling leaf: an empty string is the untranslated slot
+      // `os i18n extract` writes into a skeleton, and the engine reads it as no
+      // translation (the authored body text renders).
+      description: z.string()
+        // The one text-slot judge, applied to the translation exactly as
+        // `ScreenConfigSchema` applies it to the body text it translates.
+        .superRefine((value, ctx) => {
+          const refusal = textSlotTemplateRefusal(value);
+          if (refusal !== undefined) ctx.addIssue({ code: 'custom', message: refusal });
+        })
+        .optional()
+        .describe(
+          'Translated screen body text — a `{{ }}` template like the `config.description` it translates, picked by '
+          + "the engine in the run's locale and rendered in its place; translated only where the screen authors one",
+        ),
       fields: z.record(z.string(), strictObject({
         surface: 'this flow screen field translation',
         history: TRANSLATION_HISTORY,
         // The help spellings are the ones `ScreenFieldConfigSchema` renames
         // onto `inlineHelpText` (the object field's table), plus
         // `description`, which an object field uses for its tooltip copy.
+        // `choices` / `values` → `options` are the object field translation's
+        // and the action param's own renames for the same map.
         aliases: {
           name: 'label', title: 'label', text: 'label',
           help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
           description: 'inlineHelpText',
-        },
-        guidance: {
-          options: FLOW_SCREEN_FIELD_NO_OPTIONS,
-          choices: FLOW_SCREEN_FIELD_NO_OPTIONS,
-          values: FLOW_SCREEN_FIELD_NO_OPTIONS,
+          choices: 'options', values: 'options',
         },
       }, {
         label: z.string().optional().describe('Translated screen field label'),
         placeholder: z.string().optional().describe('Translated screen field placeholder'),
         inlineHelpText: z.string().optional().describe('Translated screen field help text (drawn under the input)'),
+        options: z.record(z.string(), z.string()).optional().describe(
+          'Translated option labels keyed by the option value read as text (`String(value)`) — never by the label '
+          + 'or the position',
+        ),
       })).optional().describe('Screen field translations keyed by field name (`ScreenFieldConfig.name`)'),
     })).optional().describe('Screen translations keyed by screen node id (`FlowNode.id`, the client\'s `ScreenSpec.nodeId`)'),
     refusals: z.record(z.string(), strictObject({

@@ -187,10 +187,11 @@ function writtenRowCount(result: unknown): number {
  *    template dialect never reaches this point: the executor's
  *    `parseNodeConfig` refuses it through `FlowValueSlotSchema` (the same
  *    judge `registerFlow` and `objectstack validate` call), so a literal here
- *    carries no token — or only the two spellings CEL cannot write yet and
- *    the retirement keeps, the date macros (`{NOW()}`, `{TODAY() + 7}`) and
- *    `{$User.*}`, which `interpolate()` still resolves. On every other
- *    literal `interpolate()` is the identity.
+ *    carries no token: the retirement keeps no spelling — the date macros
+ *    are refused too, naming their CEL string form (`isoDate(today())`) —
+ *    and `interpolate()` is the identity on every literal that reaches it.
+ *    The run's `context` reaches the envelope too: it is what
+ *    `current_user` is in the CEL scope.
  *
  * Before this, the executor handed the whole map to `interpolate()`, which
  * recursed into an envelope as plain data: a text or JSON column received the
@@ -206,7 +207,7 @@ function resolveFieldValues(
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(fields ?? {})) {
         out[key] = isExpressionEnvelopeShaped(value)
-            ? engine.evaluateValueEnvelope(value, variables, `fields.${key}`)
+            ? engine.evaluateValueEnvelope(value, variables, `fields.${key}`, context)
             : interpolate(value, variables, context);
     }
     return out;

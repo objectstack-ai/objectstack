@@ -1512,6 +1512,15 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
  * other core toolbar controls, while `hideFields` / `rowColor` default OFF
  * (`=== true`) — column hiding and row colouring are opt-in affordances.
  *
+ * `editInline` defaults ON by maintainer ruling (2026-10-10, the v18 line:
+ * 「乙 v18 把 spec 默认翻成 true,editInline: false 变成关法。」): a list view
+ * is editable in place by default under the permission gate that already
+ * exists, and `editInline: false` is the opt-out. The renderer reads an absent
+ * key as this default; a boolean `inlineEdit` on the view folds into it, and
+ * an explicit `editInline` wins (objectui#5144's one-vocabulary rule, whose
+ * default value this flip changes and whose fold it leaves alone). D3 entry:
+ * `list-view-edit-inline-default-on` (protocol 18).
+ *
  * Name-collision note (same key NAME, different shape, on OTHER surfaces —
  * deliberate, each toggle is named after the config it gates): these three are
  * booleans HERE, while `rowColor` on the list view itself is a
@@ -1532,7 +1541,7 @@ export const UserActionsConfigSchema = lazySchema(() => strictObject({
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
   group: z.boolean().default(true).describe('Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
-  editInline: z.boolean().default(false).describe('Allow users to edit records inline — click a cell to edit it with the field\'s type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in.'),
+  editInline: z.boolean().default(true).describe('Allow users to edit records inline. On by default: a user who may update the object edits a cell in place with the field\'s type-aware widget (the same control the form uses), under the permission gate that already decides whether the object is editable at all. Declare `editInline: false` to make the list read-only in place.'),
   hideFields: z.boolean().default(false).describe('Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component\'s `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in.'),
   rowColor: z.boolean().default(false).describe('Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in.'),
   buttons: z.array(z.string()).optional().describe('Custom action button IDs to show in the toolbar'),
@@ -2195,14 +2204,26 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * `.strict()`, and `LIST_VIEW_LOCAL_OVERRIDES` `1437` -> `1506`, the whole
  * list byte-identical and still without `map`; and the two `getMapConfig`
  * lines `415` -> `449` and `420` -> `454`, byte-identical, objectui#11819's
- * WebGL2 probe landing above them. Each anchor quotes the line it was read at,
+ * WebGL2 probe landing above them. RE-READ again at pin `20c6d351a` on
+ * 2026-10-10: that bump redded three anchors, and none of them changed what
+ * it reads. `ListView.tsx` (+281/-235: objectui#6152 rounds 14 and 15 among
+ * others) grew above `resolveListMapConfig`, `147` -> `200`, byte-identical,
+ * while `FLAT_MAP_CONFIG_SPELLING` did not move from `86`; `case 'map':` in
+ * `ObjectView.tsx` `2340` -> `2461`, the whole arm byte-identical
+ * (objectui#6152 rounds 14 and 15, objectui#5144 and objectui#12053 changed
+ * the file around it); in `objectql.zod.ts` (+49/-38: objectui#6152 rounds 14
+ * and 15, objectui#12063) `ObjectMapConfigSchema` `2513` -> `2523`, its
+ * declaration byte-identical and still closed with `.strict()`, while
+ * `LIST_VIEW_LOCAL_OVERRIDES` did not move from `1506`, the whole list
+ * byte-identical and still without `map`; `ObjectMap.tsx` is byte-identical,
+ * so the two `getMapConfig` lines did not move. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
- *   (`packages/plugin-list/src/ListView.tsx:147` first line
+ *   (`packages/plugin-list/src/ListView.tsx:200` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2340` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2461` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
  *   (`packages/plugin-list/src/ListView.tsx:86` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
@@ -2214,7 +2235,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:2513` first line
+ *   `packages/types/src/zod/objectql.zod.ts:2523` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object` at `dd3f7e1be`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. ⚠️ At `db11afd49` the declaration is closed with `.strict()`
@@ -2555,6 +2576,97 @@ export function checkListViewCalendarVisualization(
   }
 }
 
+/** The remedy both chart-binding refusals close with — the top-level block, spelled out. */
+const LIST_VIEW_CHART_BINDING_REMEDY =
+  "Declare `chart: { dataset: '<dataset_name>', values: ['<measure_name>'] }`: `dataset` names the "
+  + 'ADR-0021 dataset to plot, `values` at least one of its measures, and `dimensions` (the X / group '
+  + 'axis) is optional. There is no default binding to fall back on: the renderer plots only the names '
+  + 'the author wrote.';
+
+/** [#22491] `type: 'chart'` with no binding at all — refused at `chart`. */
+const LIST_VIEW_CHART_NEEDS_BINDING =
+  "This list view is `type: 'chart'` but declares no `chart` block, so it binds no dataset and there is "
+  + `nothing to plot. ${LIST_VIEW_CHART_BINDING_REMEDY} A view that is not meant to be a chart takes another \`type\`.`;
+
+/**
+ * [#22491] `type: 'chart'` whose only binding is the legacy `options.chart`
+ * bag, missing a key the `chart` block requires — refused at that key.
+ */
+const listViewChartBagMissing = (key: (typeof LIST_CHART_BINDING_KEYS)[number]): string =>
+  "This list view is `type: 'chart'` and its only chart binding is the legacy `options.chart` bag, "
+  + `which names no ${key === 'dataset' ? '`dataset`' : 'measure in `values`'}, so there is nothing to plot. `
+  + 'With no top-level `chart` block the bag IS the binding, so it must carry what that block requires. '
+  + `${LIST_VIEW_CHART_BINDING_REMEDY} The top-level block replaces the bag whole; prefer it to completing the bag.`;
+
+/**
+ * [#22491] The keys that make a chart block a binding: the required keys of
+ * {@link ListChartConfigSchema} (`chartType` defaults, `dimensions` is
+ * optional). Hand-listed for the messages above; `view-chart-binding.test.ts`
+ * derives the block's required keys from the schema and fails if the two part.
+ */
+const LIST_CHART_BINDING_KEYS = ['dataset', 'values'] as const;
+
+/**
+ * [#22491] A `type: 'chart'` list view must bind a dataset — the view's
+ * EFFECTIVE chart binding names a `dataset` and at least one measure.
+ *
+ * The effective binding is read the way the renderer reads it: the top-level
+ * `chart` block, else the legacy `options.chart` bag, and the block replaces
+ * the bag WHOLE — objectui `plugin-list/src/ListView.tsx`
+ * `resolveListChartBinding`, `schema.chart || schema.options?.chart || {}`
+ * (`:207` at this repo's `.objectui-sha` pin `f0268ad7`, `:260` at objectui
+ * `2a48bd40`). So, unlike the merged per-key underlays
+ * {@link listViewKindBlocks} describes, the bag is not one layer of the chart
+ * block: when no block is declared it is the whole of it, and it owes what
+ * the block requires.
+ *
+ * - No block and no bag ⇒ one issue at `chart`.
+ * - No block, a bag missing `dataset` / `values` ⇒ one issue per missing key,
+ *   at `options.chart.KEY` (the bag lives on the flattened overlay only; the
+ *   two authoring doors refuse `options` by name).
+ * - A declared `chart` block ⇒ nothing here: its own strict schema already
+ *   requires both keys, at `chart.dataset` / `chart.values`.
+ *
+ * What such a view renders is a dead screen either way: at the pin the
+ * renderer fabricates a binding nobody wrote (an aggregate over `'name'` /
+ * `'value'`); from objectui#6152 round 15 (objectui `0253416`) that floor is
+ * retired and `ObjectChart` refuses on screen (`chart-missing-category-axis`).
+ * ⛔ Never fabricate a default here either — only the author knows the dataset.
+ *
+ * Reads `type` as the door hands it: the authoring shapes apply the `grid`
+ * default first; the overlay member reads the input side (no default), so a
+ * PATCH that names no `type` is not judged — it shadows a view whose own
+ * binding decides.
+ *
+ * ⚠️ Scope: `type: 'chart'` only. A view of another type that merely OFFERS a
+ * chart (`appearance.allowedVisualizations`) is not judged: objectui's
+ * `availableViews` gate asks the same resolver and never offers an unbound
+ * chart, so that view degrades to its own type rather than rendering dead.
+ *
+ * Attached at the same three list-view doors as
+ * {@link checkListViewCalendarVisualization}, and exported for the same
+ * reason: a mirror built from `ListViewSchema.shape` re-attaches it.
+ */
+export function checkListViewChartBinding(
+  view: { type?: unknown; chart?: unknown; options?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (view.type !== 'chart' || view.chart !== undefined) return;
+  const bag = view.options !== null && typeof view.options === 'object'
+    ? (view.options as { chart?: unknown }).chart
+    : undefined;
+  if (bag === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['chart'], message: LIST_VIEW_CHART_NEEDS_BINDING });
+    return;
+  }
+  // A bag that is not an object is refused by the bag's own schema.
+  if (bag === null || typeof bag !== 'object') return;
+  for (const key of LIST_CHART_BINDING_KEYS) {
+    if ((bag as Record<string, unknown>)[key] !== undefined) continue;
+    ctx.addIssue({ code: 'custom', path: ['options', 'chart', key], message: listViewChartBagMissing(key) });
+  }
+}
+
 /**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
@@ -2590,8 +2702,9 @@ export function checkListViewCalendarVisualization(
  * containing refinements"`, thrown at construction), and
  * {@link ObjectListViewSchema} is built by omitting `userFilters` from this
  * shape. So the shape stays refinement-free and BOTH terminals attach
- * {@link checkListViewCalendarVisualization} themselves — one check function,
- * two attachment points, no second copy of the rule.
+ * {@link checkListViewCalendarVisualization} and {@link checkListViewChartBinding}
+ * themselves — one function per check, attached at each door, no second copy
+ * of either rule.
  *
  * ⛔ Not exported, deliberately: a top-level EXPORTED schema binding mints a
  * new protocol def in `json-schema.manifest/` and a full set of ratcheted
@@ -2754,7 +2867,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   gantt: GanttConfigSchema.optional().describe('Gantt-timeline configuration — applies when the view renders as a gantt layout'),
   gallery: GalleryConfigSchema.optional(),
   timeline: TimelineConfigSchema.optional(),
-  chart: ListChartConfigSchema.optional(),
+  chart: ListChartConfigSchema.optional()
+    .describe('Chart binding — applies when the view renders as a chart. A `type: \'chart\'` view must bind one: it names the ADR-0021 `dataset` and the measures (`values`) the chart plots, and there is no default binding'),
   map: ListMapConfigSchema.optional().describe('Map configuration — applies when the view renders as a map layout'),
   tree: TreeConfigSchema.optional().describe('Tree/hierarchy configuration — applies when the view renders as a tree layout'),
 
@@ -2990,16 +3104,17 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * List View Schema (Expanded) — {@link ListViewShapeSchema} plus the
- * `allowedVisualizations` ⇄ `calendar` binding check. See that shape for why
- * shape and checks are separate bindings, and
- * {@link checkListViewCalendarVisualization} for what the check refuses.
- * (#17063 removed the `type: 'page'` ⇄ `pageName` binding check with the mount
- * it policed.)
+ * List View Schema (Expanded) — {@link ListViewShapeSchema} plus two binding
+ * checks: `allowedVisualizations` ⇄ `calendar`
+ * ({@link checkListViewCalendarVisualization}) and `type: 'chart'` ⇄ a dataset
+ * binding ({@link checkListViewChartBinding}). See that shape for why shape and
+ * checks are separate bindings. (#17063 removed the `type: 'page'` ⇄
+ * `pageName` binding check with the mount it policed.)
  */
 export const ListViewSchema = lazySchema(() =>
   ListViewShapeSchema
-    .superRefine(checkListViewCalendarVisualization));
+    .superRefine(checkListViewCalendarVisualization)
+    .superRefine(checkListViewChartBinding));
 
 /**
  * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
@@ -3286,7 +3401,13 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `47b1f0bb7`, re-read there 2026-10-09:
+   * (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
+   * byte-identical to `47b1f0bb7` (`git diff --quiet`), so `resolveColSpan`
+   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid`
+   * mapping, `spanLadderFor` `:274-301` and its one call site `:3202` held
+   * unmoved, so it still emits the ladder. At `47b1f0bb7`, re-read there
+   * 2026-10-09:
    * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
    * byte-identical to `f0268ad78` (`git diff --quiet`), so `resolveColSpan`
    * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid`
@@ -3365,7 +3486,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * had changed only in its registration's input list, objectui#9910's
    * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `47b1f0bb7174`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `20c6d351ad74`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -4745,11 +4866,12 @@ export const ObjectListViewSchema = lazySchema(() =>
   ListViewShapeSchema.omit({ userFilters: true })
     .extend({ userFilters: ObjectUserFiltersSchema.optional() })
     // Derived from the UNREFINED shape (zod 4 refuses `.omit()` on a refined
-    // object), so the binding check is re-attached here rather than inherited.
-    // Dropping this line would leave `objects[].listViews.*` — the ADR-0047
+    // object), so the binding checks are re-attached here rather than inherited.
+    // Dropping either line would leave `objects[].listViews.*` — the ADR-0047
     // authoring surface — as the one door where a calendar-enabled view with
-    // no `calendar:` block parses clean.
-    .superRefine(checkListViewCalendarVisualization));
+    // no `calendar:` block, or a chart view binding no dataset, parses clean.
+    .superRefine(checkListViewCalendarVisualization)
+    .superRefine(checkListViewChartBinding));
 
 /**
  * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
@@ -6227,8 +6349,10 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
  * `'form'` only), and it judges a column-less PATCH as well as a full inline
  * config — see {@link listOverlayPatchFields}. A column-less body that names a
  * `type` is a full config missing its columns and is refused at `columns`
- * ({@link checkListOverlayTypeNeedsColumns}). The three attached checks run in
+ * ({@link checkListOverlayTypeNeedsColumns}). The attached checks run in
  * order: that refusal reads the input side, the calendar check is unchanged,
+ * the chart-binding check ({@link checkListViewChartBinding}, #22491) reads the
+ * input side too and is the one door check that sees the `options.chart` bag,
  * and {@link applyListOverlayTypeDefault} restores the `grid` default last.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
@@ -6250,6 +6374,7 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   }).strip()
     .superRefine(checkListOverlayTypeNeedsColumns)
     .superRefine(checkListViewCalendarVisualization)
+    .superRefine(checkListViewChartBinding)
     .overwrite(applyListOverlayTypeDefault),
 );
 

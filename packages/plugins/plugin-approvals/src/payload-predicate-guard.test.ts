@@ -30,6 +30,8 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
+import { SysApprovalApprover } from './sys-approval-approver.object.js';
+import { SysApprovalAction } from './sys-approval-action.object.js';
 import { namedSnapshotColumn, pinnedSubjectObject } from './payload-predicate-guard.js';
 
 const REQUEST_OBJECT = 'sys_approval_request';
@@ -132,7 +134,7 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
       useNullAsDefault: true,
     }), true);
     await engine.init();
-    for (const o of [SysApprovalRequest, subjectObject, openSubject]) {
+    for (const o of [SysApprovalRequest, SysApprovalApprover, SysApprovalAction, subjectObject, openSubject]) {
       engine.registry.registerObject(o as any, HARNESS_PACKAGE);
     }
     await engine.syncSchemas();
@@ -141,8 +143,19 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
       object_name: subject, record_id: String(row.id), status: 'pending',
       process_name: 'flow:ppg', submitter_id: 'u_ppg_submitter', payload_json: JSON.stringify(row),
     });
-    await engine.insert(REQUEST_OBJECT, snapshot(SUBJECT, { id: 's1', name: 'subject', f_masked: V.masked, f_unserved: V.unserved }), { context: SYS });
-    await engine.insert(REQUEST_OBJECT, snapshot(OPEN_SUBJECT, { id: 'o1', name: 'open', f_open: V.open }), { context: SYS });
+    const requests = [
+      await engine.insert(REQUEST_OBJECT, snapshot(SUBJECT, { id: 's1', name: 'subject', f_masked: V.masked, f_unserved: V.unserved }), { context: SYS }),
+      await engine.insert(REQUEST_OBJECT, snapshot(OPEN_SUBJECT, { id: 'o1', name: 'open', f_open: V.open }), { context: SYS }),
+    ];
+    // [#22559] The generic door serves a request only to whom the approvals
+    // door does, so the three readers are the requests' current approvers (the
+    // pending-approver index): the rows they query are rows they may read, and
+    // what this file measures stays the snapshot guard's answer alone.
+    for (const request of requests) {
+      for (const reader of [MASKED_READER, UNSERVED_READER, CONTROL]) {
+        await engine.insert('sys_approval_approver', { request_id: String(request.id), approver: reader!.userId }, { context: SYS });
+      }
+    }
 
     // The plugin mounts its own generic-door seams onto this engine.
     const services: Record<string, unknown> = { objectql: engine, security };

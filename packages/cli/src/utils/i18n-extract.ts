@@ -105,9 +105,12 @@
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
  *   flows.<flow>.label
  *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
+ *   flows.<flow>.screens.<node_id>.description                 (#22507)
  *   flows.<flow>.screens.<node_id>.fields.<field>.label
  *   flows.<flow>.screens.<node_id>.fields.<field>.placeholder
  *   flows.<flow>.screens.<node_id>.fields.<field>.inlineHelpText
+ *   flows.<flow>.screens.<node_id>.fields.<field>.options.<value>   (#22507)
+ *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
@@ -133,10 +136,11 @@ import {
   PAGE_COMPONENT_COPY_KEYS,
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
+  FLOW_TERMINAL_MESSAGE_KEYS,
   globalFilterKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
@@ -1788,10 +1792,15 @@ function collectFlowNodesDeep(nodes: unknown): any[] {
  *
  * - **A screen's `title` falls back to the node `label`.** The executor builds
  *   the wire title as `config.title ?? node.label` (`ScreenSpec.title`), and
- *   `translateFlow` overlays the bundle onto `config.title` for that reason —
- *   one key covers whichever of the two the runner draws. So the seed, and the
- *   `inline` the coverage gate judges, is that same pair: a screen with only a
- *   canvas label still shows English text a translator owes a translation for.
+ *   the engine picks the translated `title` template for whichever of the two
+ *   it renders (#22507) — one key covers both. So the seed, and the `inline`
+ *   the coverage gate judges, is that same pair: a screen with only a canvas
+ *   label still shows English text a translator owes a translation for.
+ * - **A screen's `description` is asked for only where it is authored.** The
+ *   engine translates body text only where the screen authors one (#22507), so
+ *   the seed is the authored TEMPLATE, holes and all — a translator keeps the
+ *   `{{ }}` holes, and the schema judges the translation as the same text
+ *   slot, like a refusal message.
  * - **A field's `label` falls back to its `name`.** `ScreenFieldConfig.label`
  *   is optional and forwarded as-is (`ScreenFieldSpec.label`), so the runner
  *   renders the field name when the author wrote no label. That is a derived
@@ -1849,8 +1858,26 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     // is stored and never read. When a reader of a non-screen flow's label
     // lands (a run-result toast, say), this predicate widens in the same change
     // as that reader.
-    if (nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE)) {
+    const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
+    if (hasScreen) {
       pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
+    }
+
+    // `flows.<flow>.successMessage` / `.errorMessage` (#22507) — the terminal
+    // toasts, seeded from the flow's own text and emitted ONLY where the flow
+    // authors one: `translateFlow` overlays a toast only there, so a key for a
+    // flow with none would ask for a string nothing shows. Each predicate
+    // mirrors the reader of its toast. The completion toast is drawn by the
+    // console's screen-flow runner alone (a launch that completes without
+    // pausing toasts the invoking ACTION's message), so it is demanded for a
+    // flow with a screen, like the label. The failure toast is drawn wherever
+    // the console reports a failed run — the runner's resume and both launch
+    // hosts, for a flow of any type started by a click — so it is demanded for
+    // every flow, like a refusal.
+    for (const key of FLOW_TERMINAL_MESSAGE_KEYS) {
+      if (key === 'successMessage' && !hasScreen) continue;
+      const authored = inlineText(flow[key]);
+      if (authored !== undefined) pushEntry(out, ['flows', flowName, key], authored, 'flow', scope);
     }
     for (const node of nodes) {
       if (!node || typeof node !== 'object' || node.type !== SCREEN_NODE_TYPE) continue;
@@ -1866,6 +1893,11 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
         const authored = key === 'title'
           ? (asAuthoredLabel(cfg[key]) ?? asAuthoredLabel(node.label))
           : asAuthoredLabel(cfg[key]);
+        // [#22507] Body text is read only where the screen authors one (the
+        // engine never adds it), so an unauthored `description` is not even a
+        // seed-less entry: a bundle externalizing one would otherwise be
+        // demanded in every locale for a string nothing shows.
+        if (key === 'description' && authored === undefined) continue;
         pushOptional(out, [...screenRoot, key], authored, 'flow', scope);
       }
 
@@ -1882,6 +1914,15 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
           } else {
             pushOptional(out, [...fieldRoot, key], authored, 'flow', scope);
           }
+        }
+        // `…fields.<field>.options.<value>` (#22507) — each option's label,
+        // keyed by its value read as text through the one key function
+        // `translateFlow` looks it up by (`flowScreenFieldOptionKey`), so the
+        // skeleton offers exactly the keys the resolver reads.
+        const options: any[] = Array.isArray(field.options) ? field.options : [];
+        for (const option of options) {
+          if (!option || typeof option !== 'object') continue;
+          pushEntry(out, [...fieldRoot, 'options', flowScreenFieldOptionKey(option.value)], option.label, 'flow', scope);
         }
       }
     }

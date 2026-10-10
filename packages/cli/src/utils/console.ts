@@ -334,12 +334,12 @@ function findConsoleBuildRoot(consolePath: string): string | null {
 }
 
 /**
- * What is missing and what fixes it, for a resolved console package with no
- * built `dist/` — the ONE remedy picker, which both the boot warning and the
- * HTTP answer render ({@link formatConsoleDistMissingWarning},
- * {@link createConsoleNotBuiltPlugin}).
+ * What is missing and what fixes it, for a console package with no built
+ * `dist/` — or no console package at all (`consolePath` is `null`) — the ONE
+ * remedy picker, which both the boot warning and the HTTP answer render
+ * ({@link formatConsoleDistMissingWarning}, {@link createConsoleNotBuiltPlugin}).
  *
- * Two places reach it, and each gets the remedy that works there:
+ * Three places reach it, and each gets the remedy that works there:
  *
  *   - the framework repo, where `packages/console/dist` is a gitignored build
  *     that `pnpm build` never produces — `pnpm objectui:build`, run at the
@@ -350,6 +350,12 @@ function findConsoleBuildRoot(consolePath: string): string | null {
  *     remedy is that package install. (An installed `@object-ui/console`,
  *     which this text used to name, is never consulted: that name is matched
  *     only as the workspace package of a sibling `../objectui` checkout.)
+ *   - an install where `@objectstack/console` did not resolve at all, or only
+ *     at a major version this CLI ignores ({@link resolveConsolePath} returned
+ *     `null`). That is the same broken install as the arm above, one step
+ *     further gone, so it gets the same reinstall sentence; only what is
+ *     missing differs. Inside the framework repo the CLI always resolves its
+ *     own workspace `packages/console`, so this arm is never reached there.
  *
  * `hostPaths` decides whether the text names absolute paths on this host. The
  * terminal's reader is the operator, who is told exactly where to look. The
@@ -358,7 +364,11 @@ function findConsoleBuildRoot(consolePath: string): string | null {
  * reinstall) is the same sentence either way, and the repository-relative
  * `packages/console/dist` stays because it is the repository's public layout.
  */
-function describeConsoleDistMissing(consolePath: string, hostPaths: boolean): string {
+function describeConsoleDistMissing(consolePath: string | null, hostPaths: boolean): string {
+  const reinstall =
+    `the Console ships prebuilt in \`${CONSOLE_PACKAGE}\`, ` +
+    `a dependency of \`@objectstack/cli\`; reinstall it at the same version as the CLI.`;
+  if (consolePath === null) return `Console package \`${CONSOLE_PACKAGE}\` not found — ${reinstall}`;
   const dist = path.join(consolePath, 'dist');
   const buildRoot = findConsoleBuildRoot(consolePath);
   if (buildRoot) {
@@ -368,14 +378,14 @@ function describeConsoleDistMissing(consolePath: string, hostPaths: boolean): st
       `(uses a ../objectui checkout if present, else clones objectui at the pinned commit — needs network).`
     );
   }
-  return (
-    `Console dist not found${hostPaths ? ` at ${dist}` : ''} — the Console ships prebuilt in \`${CONSOLE_PACKAGE}\`, ` +
-    `a dependency of \`@objectstack/cli\`; reinstall it at the same version as the CLI.`
-  );
+  return `Console dist not found${hostPaths ? ` at ${dist}` : ''} — ${reinstall}`;
 }
 
-/** The boot warning for a resolved console package with no built `dist/`. */
-export function formatConsoleDistMissingWarning(consolePath: string): string {
+/**
+ * The boot warning for a console package with no built `dist/`, or for no
+ * console package at all (`null`, see {@link describeConsoleDistMissing}).
+ */
+export function formatConsoleDistMissingWarning(consolePath: string | null): string {
   return `  ⚠ ${describeConsoleDistMissing(consolePath, true)}`;
 }
 
@@ -461,15 +471,22 @@ export function formatConsoleShaDriftWarning(drift: ConsoleShaDrift): string {
 }
 
 /**
- * The refusal block — `os dev` declines to mount a drifted console. Mirrors
- * the remediation of `scripts/check-console-sha.mjs` verbatim (rebuild at the
- * *pinned* SHA with `pnpm objectui:build`; `objectui:refresh` would re-bump
- * the pin to the local ../objectui HEAD, which is the opposite of the fix).
+ * What the drift refusal says below its headline — the two SHAs, why the stale
+ * build is refused, the remedy and the escape hatch. The ONE text both the
+ * refusal block ({@link formatConsoleShaDriftRefusal}) and the HTTP answer
+ * ({@link createConsoleShaDriftRefusalPlugin}) render, so the two cannot name
+ * different fixes.
+ *
+ * `hostPaths` decides whether the pin file is named by its absolute path on
+ * this host, by the rule {@link describeConsoleDistMissing} states: the
+ * terminal's reader is the operator, the HTTP answer's reader is whoever
+ * requests `/_console/`, with no credential. The SHAs stay in both: they name
+ * commits of the public objectui repository, not anything about this host.
  */
-export function formatConsoleShaDriftRefusal(drift: ConsoleShaDrift): string {
+function describeConsoleShaDrift(drift: ConsoleShaDrift, hostPaths: boolean): string {
+  const pinFile = hostPaths ? drift.pinFile : '.objectui-sha at the checkout root';
   return (
-    `\n  ✗ Console version drift — refusing to serve /_console in dev.\n\n` +
-    `      pinned  (${drift.pinFile}):              objectui@${drift.pin.slice(0, 12)}\n` +
+    `      pinned  (${pinFile}):              objectui@${drift.pin.slice(0, 12)}\n` +
     `      built   (console/dist/.objectui-sha): objectui@${drift.stamp.slice(0, 12)}\n\n` +
     `    packages/console/dist is a gitignored local build that 'turbo run build' does NOT refresh,\n` +
     `    so this server would serve a Console SPA the repo no longer pins — and anything you\n` +
@@ -479,6 +496,16 @@ export function formatConsoleShaDriftRefusal(drift: ConsoleShaDrift): string {
     `    (Use 'pnpm objectui:refresh' only when you intend to move the pin to your local ../objectui HEAD.)\n` +
     `    To boot anyway with the stale bundle: ${DRIFT_OVERRIDE_ENV}=1 — the API still serves either way.\n`
   );
+}
+
+/**
+ * The refusal block — `os dev` declines to mount a drifted console. Mirrors
+ * the remediation of `scripts/check-console-sha.mjs` verbatim (rebuild at the
+ * *pinned* SHA with `pnpm objectui:build`; `objectui:refresh` would re-bump
+ * the pin to the local ../objectui HEAD, which is the opposite of the fix).
+ */
+export function formatConsoleShaDriftRefusal(drift: ConsoleShaDrift): string {
+  return `\n  ✗ Console version drift — refusing to serve /_console in dev.\n\n${describeConsoleShaDrift(drift, true)}`;
 }
 
 /** Env switch that downgrades the dev refusal back to a warning. */
@@ -808,44 +835,46 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
 }
 
 /**
- * What `/_console/` answers when the console package resolved but has no built
- * `dist/` — mounted by `os serve` in place of {@link createConsoleStaticPlugin},
- * on the boot that prints {@link formatConsoleDistMissingWarning}.
+ * The ONE route-mounting body for a Console that `os serve` decided not to
+ * serve: what `/_console/` answers instead of the router's bare 404. Mounted in
+ * place of {@link createConsoleStaticPlugin} by the responder for each refused
+ * position — {@link createConsoleNotBuiltPlugin} (no built `dist/`, or no
+ * console package) and {@link createConsoleShaDriftRefusalPlugin} (a dev build
+ * that is not the repo's pin). Each responder brings its `answer`, rendered from
+ * the same text its boot message prints; this body decides nothing about it.
  *
- * Without it nothing was mounted, so `GET /_console/` got the router's bare
- * `ENDPOINT_NOT_FOUND` and `GET /` an empty 404: a missing build read exactly
- * like a wrong URL, and only the terminal said why (AGENTS.md, Route & surface
- * ownership rule 3, "Absence must be loud"). It mounts the same three routes the
- * static plugin would, so who owns each path does not change with the build:
+ * Without a responder nothing was mounted, so `GET /_console/` got the router's
+ * bare `ENDPOINT_NOT_FOUND` and `GET /` an empty 404: a refused Console read
+ * exactly like a wrong URL, and only the terminal said why (AGENTS.md, Route &
+ * surface ownership rule 3, "Absence must be loud"). It mounts the same three
+ * routes the static plugin would, so who owns each path does not change with
+ * the build:
  *
  *   - `GET /` and `GET /_console` redirect to `/_console/`, as they do once the
- *     Console is built — so `/` keeps one owner and one answer, the Console's;
- *   - `GET /_console/*` answers `503` with a short `text/plain` body saying the
- *     Console is not built, then the remedy {@link describeConsoleDistMissing}
- *     picked for the warning, rendered without host paths.
+ *     Console is served — so `/` keeps one owner and one answer, the Console's;
+ *   - `GET /_console/*` answers `503` with the responder's `text/plain` answer.
  *
- * `503`, not `404`: the address is right and the server is missing a build it
- * needs, which the operator fixes and a caller cannot — and a caller reading
- * only the status still tells it apart from a wrong URL. Plain text rather than
- * a JSON envelope: these are the Console's static-asset routes, not API
- * surface (`console-route-ledger.ts`), read by a browser or by `curl`.
- * `no-store`, so a browser never keeps the answer past the restart that serves
- * the real Console.
+ * `503`, not `404`: the address is right and the server is missing a Console
+ * build it can serve, which the operator fixes and a caller cannot — and a
+ * caller reading only the status still tells it apart from a wrong URL. Plain
+ * text rather than a JSON envelope: these are the Console's static-asset
+ * routes, not API surface (`console-route-ledger.ts`), read by a browser or by
+ * `curl`. `no-store`, so a browser never keeps the answer past the restart that
+ * serves the real Console.
+ *
+ * `--no-ui` and `--no-console` mount none of this: the operator chose to serve
+ * no Console, and those routes stay the router's 404.
  */
-export function createConsoleNotBuiltPlugin(consolePath: string) {
-  const answer =
-    `The ObjectStack Console is not built, so this server has no Console to serve at ${CONSOLE_PATH}/.\n\n` +
-    `${describeConsoleDistMissing(consolePath, false)}\n\n` +
-    'Then restart the server. The API is served either way.\n';
+function createConsoleUnavailablePlugin(name: string, what: string, answer: string) {
   return {
-    name: 'com.objectstack.console-not-built',
+    name,
 
     init: async () => {},
 
     start: async (ctx: any) => {
       const httpServer = await resolveHttpServer(ctx);
       if (!httpServer?.getRawApp) {
-        ctx.logger?.warn?.('Console not-built answer: http.server service not found — skipping');
+        ctx.logger?.warn?.(`Console ${what} answer: http.server service not found — skipping`);
         return;
       }
 
@@ -855,6 +884,40 @@ export function createConsoleNotBuiltPlugin(consolePath: string) {
       app.get(`${CONSOLE_PATH}/*`, (c: any) => c.text(answer, 503, { 'cache-control': 'no-store' }));
     },
   };
+}
+
+/**
+ * The responder for a console package with no built `dist/`, or with no
+ * console package at all (`consolePath` is `null`): mounted by `os serve` on
+ * the boot that prints {@link formatConsoleDistMissingWarning}. Its answer says
+ * the Console is not built (or not installed), then the remedy
+ * {@link describeConsoleDistMissing} picked for the warning, rendered without
+ * host paths. The routes are {@link createConsoleUnavailablePlugin}'s.
+ */
+export function createConsoleNotBuiltPlugin(consolePath: string | null) {
+  const answer =
+    `The ObjectStack Console is ${consolePath === null ? 'not installed' : 'not built'}, ` +
+    `so this server has no Console to serve at ${CONSOLE_PATH}/.\n\n` +
+    `${describeConsoleDistMissing(consolePath, false)}\n\n` +
+    'Then restart the server. The API is served either way.\n';
+  return createConsoleUnavailablePlugin('com.objectstack.console-not-built', 'not-built', answer);
+}
+
+/**
+ * The responder for a dev boot that refused a drifted Console
+ * ({@link decideConsoleMount} answered `refusedForDrift`): mounted by `os serve`
+ * on the boot that prints {@link formatConsoleShaDriftRefusal}. Its answer says
+ * the Console's build is not the repo's pin, then the refusal's own text
+ * ({@link describeConsoleShaDrift}) without the pin file's absolute path. The
+ * routes are {@link createConsoleUnavailablePlugin}'s.
+ */
+export function createConsoleShaDriftRefusalPlugin(drift: ConsoleShaDrift) {
+  const answer =
+    `The ObjectStack Console here was built from a different objectui commit than this checkout pins, ` +
+    `so this dev server refuses to serve it at ${CONSOLE_PATH}/.\n\n` +
+    `${describeConsoleShaDrift(drift, false)}\n` +
+    'Then restart the server.\n';
+  return createConsoleUnavailablePlugin('com.objectstack.console-sha-drift-refused', 'drift-refusal', answer);
 }
 
 // ─── Runtime Assets Plugin ──────────────────────────────────────────

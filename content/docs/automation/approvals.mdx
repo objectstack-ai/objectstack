@@ -29,7 +29,7 @@ This is **not** a schedule-only concern, and for approvals it is the common case
 
 ### 3. The approval node
 
-The node declares **who approves** (a named user, a position, the submitter's manager, …) and what happens on approve / reject / escalate. Not every kind is configured the same way: the submitter's manager resolves from a column no product surface writes, so read the `manager` callout below before you reach for it. The authoritative shape is [`ApprovalNodeConfig` / `ApproverType`](/docs/references/automation/approval); a flow strings the trigger, the approval node, and the post-decision branches together.
+The node declares **who approves** (a named user, a position, the submitter's manager, …) and what happens on approve / reject / escalate. Not every kind is configured the same way: the submitter's manager resolves from a column a platform admin sets on the user (**Setup → Users → ⋯ → Set Manager**), not on the node, so read the `manager` callout below before you reach for it. The authoritative shape is [`ApprovalNodeConfig` / `ApproverType`](/docs/references/automation/approval); a flow strings the trigger, the approval node, and the post-decision branches together.
 
 ```ts
 // Illustrative — see the Approval reference for the exact node schema.
@@ -74,7 +74,9 @@ column is not a profile field: it is `readonly` on the user form and the data AP
 managed-update whitelist is `{name, image, locale}`, so it is never populated by editing the user
 in the Console.
 
-It has a dedicated admin operation instead. A platform admin posts the link:
+It has a dedicated admin operation instead. In the Console a platform admin sets it from
+**Setup → Users → ⋯ → Set Manager** (the user's row menu, or the user record's header), which
+posts the link to the endpoint below; a script can post it directly:
 
 ```http
 POST /api/v1/auth/admin/set-user-manager
@@ -377,8 +379,8 @@ implemented** by the runtime and is no longer offered for authoring (#3508) —
 a queue entry resolves to nobody. Route to a `team`, `department`, or
 `position` instead. `field`, `manager`, and `expression` resolve against the record's
 **live** state at node entry (#3447); `manager` additionally depends on
-`sys_user.manager_id`, which no product surface writes — see [the `manager`
-callout above](#3-the-approval-node). `position`, `department`,
+`sys_user.manager_id`, which a platform admin sets from **Setup → Users → ⋯ →
+Set Manager** — see [the `manager` callout above](#3-the-approval-node). `position`, `department`,
 `org_membership_level` and `expression` may additionally name which
 organization's directory resolves them — see
 [Approving across organizations](#cross-org-approvers). An entry that resolves
@@ -447,13 +449,26 @@ as the decision it hangs off, never more (`sys_approval_action` delegates that
 question back to this service via `fileAccessDelegate`).
 </Callout>
 
-<Callout type="warn">
-**Opening a request notifies nobody.** There is no built-in "you have an
-approval waiting" message today — an approver only discovers it by looking at
-the queue. If people need to be told, do one of: add a `notify` node next to
-the approval node in the flow (the practical answer), or install a messaging
-service and drive `remind()`. Reminder, escalation, return, and reassignment
-*do* publish notification topics — the initial request doesn't.
+<Callout type="info">
+**Opening a step tells its approvers.** When a request opens, each concrete
+approver on its slate gets one `approval.requested` notification ("Approval
+requested", linked to that request in the Approvals Inbox): a named user, every
+holder of a staffed position or member of a team, and the `fallbackApprovers`
+when the node's `onEmptyApprovers: 'fallback'` opened on them. It goes through
+the installed messaging service, the same way as the reminder, reassignment,
+escalation, and return notifications, and the same delivery preferences apply.
+Without a messaging service, no approval notification is delivered at all.
+
+Two cases tell nobody by design. A slot no one holds (`position:<name>` with
+no holders) names no person, so a step that resolves to nobody notifies no
+one: its `onEmptyApprovers` policy decides what happens instead. An
+out-of-office delegate gets one message, `approval.ooo_substituted`, not a
+second one for the opening.
+
+If a flow has a `notify` node beside its approval node only to tell the
+approvers that a request is waiting, remove that node: those approvers are now
+told twice. Keep `notify` nodes that address someone else, such as the
+submitter or a watcher, or that report the decision.
 </Callout>
 
 ### Mount the approvals inbox in your app
@@ -613,7 +628,9 @@ You rarely call these routes by hand. The decision verbs above ship as
 **server-declared actions** on `sys_approval_request` (`actions[]` in its object
 metadata) — `approval_approve`, `approval_reject`, `approval_reassign`,
 `approval_send_back`, `approval_request_info`, `approval_remind`,
-`approval_recall`, `approval_resubmit`. The console's generic action runtime
+`approval_recall`, `approval_resubmit`, `approval_comment`. `approval_comment`
+is the thread reply: a pending approver sees it, and so does the submitter while
+the request is `pending`; it has no admin-override arm. The console's generic action runtime
 renders and executes them wherever the object is surfaced — the **Approvals
 inbox** included — so a decision (comment, a file-upload for `attachments`, the
 reassign user-picker) is collected by the generic action dialog with **no

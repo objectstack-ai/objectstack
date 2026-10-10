@@ -646,12 +646,61 @@ export const SysApprovalRequest = ObjectSchema.create({
       successMessage: 'Resubmitted.',
       refreshAfter: true,
     },
+
+    // ── Thread reply ────────────────────────────────────────────────
+    // A free-form reply on the request's thread, from either side of it. It
+    // moves nothing: `ApprovalService.comment` stores one `sys_approval_action`
+    // row with action `comment` (the comment, and any attachments) and
+    // notifies the other side, and the request page's Timeline lists that row.
+    //
+    // `visible` is the route's own admission, spelled over the viewer block.
+    // `ApprovalService.comment` loads the request with `loadPendingRow` (it
+    // refuses any status but `pending`) and admits the submitter, or a caller
+    // who takes one of the pending slots (`takenSlot` → `heldSlot`):
+    //
+    //   - the first arm is `can_act`, which `attachViewers` computes as
+    //     `status === 'pending'` AND `heldSlot(...)` for the default actor — the
+    //     slot test itself, so it is already pending-scoped;
+    //   - the second arm is `is_submitter`, which `attachViewers` computes with
+    //     NO status test, so this predicate adds the `pending` test the route's
+    //     `loadPendingRow` applies.
+    //
+    // There is deliberately no `can_override` arm: the route has none. An
+    // override admin who holds no slot and did not submit is refused with
+    // FORBIDDEN, and a button for them would be a lever that fails on use.
+    // The two admissions the predicate does not reach are both NARROWER, never
+    // wider: a system context (the route lets it through; its viewer block is
+    // all-false) and a caller naming another identity in `actorId` (this
+    // action posts no actor, so the route acts as the caller).
+    {
+      name: 'approval_comment',
+      label: 'Reply',
+      icon: 'message-square',
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/approvals/requests/{id}/comment',
+      params: [
+        { name: 'comment', label: 'Comment', type: 'textarea', required: true },
+        // The same decision-attachment param approve/reject declare: the
+        // console uploads through the shared widget and POSTs `attachments:
+        // string[]`, which the comment route persists on the action row.
+        { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
+      ],
+      visible:
+        'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
+        ' || has(record.status) && record.status == "pending"' +
+        ' && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
+      locations: ['record_section'],
+      successMessage: 'Reply posted.',
+      refreshAfter: true,
+    },
   ],
 
   enable: {
     // [ADR-0103] Engine-owned: the approval engine owns the request lifecycle
     // (SYSTEM_CTX); users act via domain actions (Submit/Approve/Recall), never
-    // generic CRUD. Reads stay open.
+    // generic CRUD. Reads stay open, and serve each caller only the requests
+    // the approvals door would (#22559, `request-read-gate.ts`).
     apiMethods: ['get', 'list'],
   },
 });
