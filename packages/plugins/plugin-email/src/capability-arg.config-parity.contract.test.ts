@@ -43,7 +43,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { EmailServiceConfigSchema } from '@objectstack/spec/system';
 import type { EmailServiceConfig } from '@objectstack/spec/system';
 import { resolveEmailCapabilityArg } from './capability-arg.js';
@@ -55,10 +54,10 @@ import { resolveEmailCapabilityArg } from './capability-arg.js';
 // suppression.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
-const READER_SOURCE = readFileSync(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'capability-arg.ts'),
-  'utf8',
-);
+// Seeded from `__dirname`, as this package's `smtp-port-contract.test.ts` is:
+// the package's build config compiles to CommonJS, where `import.meta` does
+// not type-check.
+const READER_SOURCE = readFileSync(path.resolve(__dirname, 'capability-arg.ts'), 'utf8');
 
 /**
  * `capability-arg.ts` with every comment span blanked (offsets preserved,
