@@ -4,7 +4,7 @@
 
 feat(rest): the `/meta` read gate enforces a list view's and a dashboard's `requiredPermissions` (#22639)
 
-Clause-②: no
+Clause-②: yes (widening)
 
 - **What the server now does.** `requiredPermissions` on a list view and on a dashboard is a list of capabilities a user must ALL hold, the same key and meaning as on an app, a navigation item and an action. The `/meta` read gate applies it through the one predicate the app arm uses (`holdsRequiredPermissions`), on both transports (`RestServer` and the runtime dispatcher's `/meta` domain):
   - `GET /api/v1/meta/view` and `GET /api/v1/meta/dashboard` list only what the caller may open. A view the caller does not hold is left out, so the console's view switcher (`?object=`) lists only the views the caller may open. A view container is listed minus the `list` / `listViews` entries the caller does not hold.
