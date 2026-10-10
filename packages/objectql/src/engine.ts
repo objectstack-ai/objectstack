@@ -11929,11 +11929,15 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * Resolve file-field id references to their expanded `FileValueSchema` form
-   * (ADR-0104 D3 wave 2). A `file`/`image`/`avatar`/`video`/`audio` value
-   * stored as an opaque `sys_file` id string is enriched, in place, to
-   * `{ id, name, size, mimeType, url }` — `url` derived from the stable
-   * `/files/:fileId` resolver, never stored.
+   * Resolve file-field id references to their expanded read form (ADR-0104 D3
+   * wave 2). A `file`/`image`/`avatar`/`video`/`audio` value stored as an
+   * opaque `sys_file` id string whose servable row this read finds (committed,
+   * or a tombstone still held) is enriched, in place, to the `FileValueSchema`
+   * object `{ id, name, size, mimeType, url }` — `url` derived from the stable
+   * `/files/:fileId` resolver, never stored. That is one of three expanded
+   * forms: an id nothing resolves stays the bare id (DUAL-MODE SAFE, and the
+   * fail-open `catch` below), and an id whose `sys_file` read is refused to the
+   * caller becomes `FileRefusedValueSchema` (REFUSED IS NOT ABSENT).
    *
    * DUAL-MODE SAFE: an inline-blob value (an object) and a string that does
    * NOT match a committed `sys_file` row (e.g. an external url) pass through
@@ -12679,8 +12683,11 @@ export class ObjectQL implements IObjectQLEngine {
           }
 
           // Post-process: resolve file-field id references to their expanded
-          // FileValueSchema form (ADR-0104 D3). Always-on but free unless a file
-          // field holds an id string; dual-mode-safe (blobs pass through).
+          // read form (ADR-0104 D3), one of three: the FileValueSchema file
+          // object, the bare id when nothing resolves it, or
+          // FileRefusedValueSchema's `{ id, metadataRefused: true }` when this
+          // caller is refused the `sys_file` read. Always-on but free unless a
+          // file field holds an id string; dual-mode-safe (blobs pass through).
           if (Array.isArray(result)) {
             result = await this.resolveFileReferences(object, result, opCtx.context);
           }
