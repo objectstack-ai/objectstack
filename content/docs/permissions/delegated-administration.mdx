@@ -158,8 +158,8 @@ Two independent switches, and you need both:
 | An `adminScope`-carrying permission set | *What* the invitation may place (subtree + allowlist) | The gate refuses every placement — the role alone administers nothing |
 
 The role carries no ObjectStack authority of its own: it passes through as a
-position name, and with no `sys_position_permission_set` binding it resolves to
-nothing. **Role = can reach the endpoint. `adminScope` = what the endpoint
+position name, and with no position of that name declaring `permissionSets` it
+resolves to nothing. **Role = can reach the endpoint. `adminScope` = what the endpoint
 permits.** A default deployment is unaffected — nobody holds the role until you
 set it.
 

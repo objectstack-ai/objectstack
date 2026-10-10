@@ -18,7 +18,7 @@ Everything a profile did is expressed with the remaining vocabulary:
 |:---|:---|
 | A user's baseline permissions | A permission set bound to the **`everyone`** audience anchor (default grants for all authenticated users), or the configured baseline set (`member_default`) — both **additive** (ADR-0090 D5) |
 | A package's default access posture | `isDefault: true` on the package's permission set — an install-time **suggestion** to bind it to `everyone`; the admin confirms, nothing auto-binds |
-| A job function's permissions ("Sales Rep") | An ordinary permission set bound to a **[position](/docs/permissions/positions)** (`sales_rep`) via `sys_position_permission_set` |
+| A job function's permissions ("Sales Rep") | An ordinary permission set named in a **[position](/docs/permissions/positions)**'s `permissionSets` (`sales_rep`) |
 | Tab/app visibility defaults | `tabPermissions` on any permission set (unchanged) |
 
 The former `isProfile` flag was deleted from `PermissionSetSchema`; the

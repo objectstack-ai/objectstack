@@ -332,9 +332,9 @@ export const SysHolidayCalendar = ObjectSchema.create({
 ```
 
 The reason is leverage, not authorization. The bucket's charter members are the
-RBAC link tables — `sys_user_position`, `sys_user_permission_set`,
-`sys_position_permission_set` — which are the grant surface of the entire
-permission model. Every row a CSV import writes still passes the delegated-admin
+RBAC link tables — `sys_user_position` and `sys_user_permission_set`, the grant
+surface of the entire permission model, and `sys_position_permission_set`,
+whose rows no longer grant (a position's sets are its `permissionSets`). Every row a CSV import writes still passes the delegated-admin
 gate, RLS and permission-set adjudication one at a time, so an admin who cannot
 grant a permission set by hand cannot grant it by file either. What differs is
 blast radius: row by row, one misclick affects one person; one wrong CSV is a
