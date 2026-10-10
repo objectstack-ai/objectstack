@@ -49,7 +49,8 @@ import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
-import { installerGrantRows, INSTALLER_USER_ID } from './install-local-principal.fixtures.js';
+import { installerGrantRows, INSTALLER_USER_ID, INSTALLER_SET } from './install-local-principal.fixtures.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 type Handler = (c: any) => Promise<any>;
 type Row = Record<string, unknown> & { id: string };
@@ -131,7 +132,7 @@ async function restartWith(
         if (!objects.has(object)) throw new Error(`Object '${object}' not found`);
         return (tables[object] ??= []);
     };
-    const engine = {
+    const engine = bindTestSecurityCatalog({
         syncSchemas: vi.fn(async () => undefined),
         registry: { getAllPackages: () => [] },
         async find(object: string, query?: any): Promise<unknown[]> {
@@ -164,7 +165,7 @@ async function restartWith(
             writes.push(`delete ${object}#${String(dispatch.id)}`);
             return true;
         },
-    };
+    }, { permissions: [INSTALLER_SET] });
     const register = vi.fn((m: any) => { for (const o of m?.objects ?? []) objects.set(o.name, o); });
     const i18n = { loadTranslations: vi.fn() };
     const services: Record<string, unknown> = {

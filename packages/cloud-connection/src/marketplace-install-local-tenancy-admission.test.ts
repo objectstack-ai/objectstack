@@ -67,6 +67,7 @@ import {
     AUTHZ_STORE_UNAVAILABLE_STATUS,
 } from '@objectstack/core';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 const LEDGER_FILE = 'com.acme.tenancy.json';
@@ -157,14 +158,14 @@ function permissionStore(opts: { syncSchemas: () => Promise<void> }) {
             { id: 'ps_install', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access'] },
         ],
     };
-    return {
+    return bindCatalogFromTables({
         syncSchemas: opts.syncSchemas,
         find: async (object: string, q: any = {}) => {
             const rows = (tables[object] ?? []).filter((row) => matchesWhere(row, q?.where));
             // The caller's bound is held BY PRESENCE, never re-derived here.
             return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
         },
-    };
+    }, tables);
 }
 
 type Tenancy =

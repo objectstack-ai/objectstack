@@ -69,6 +69,7 @@ import { tmpdir } from 'node:os';
 import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource } from './local-manifest-source.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -163,7 +164,7 @@ async function mount(shape: Shape, storageDir: string) {
     const services: Record<string, any> = {
         manifest: { register: vi.fn() },
         auth: { api: { getSession: async () => (sessionUser ? { user: sessionUser, session: {} } : null) } },
-        objectql: { syncSchemas: vi.fn(async () => undefined), find: async (object: string) => rows[object] ?? [] },
+        objectql: bindCatalogFromTables({ syncSchemas: vi.fn(async () => undefined), find: async (object: string) => rows[object] ?? [] }, rows),
         metadata: {},
     };
     const ctx: any = {

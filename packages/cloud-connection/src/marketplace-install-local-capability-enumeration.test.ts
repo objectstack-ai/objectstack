@@ -87,6 +87,7 @@ vi.mock('@objectstack/runtime', () => ({
 
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -191,11 +192,11 @@ async function mount(shape: Shape, storageDir: string) {
     const services: Record<string, any> = {
         manifest: { register },
         auth: { api: { getSession: async () => (sessionUser ? { user: sessionUser, session: {} } : null) } },
-        objectql: {
+        objectql: bindCatalogFromTables({
             syncSchemas,
             find: async (object: string) => (object === 'widget' ? widgets.map((w) => ({ ...w })) : rows[object] ?? []),
             delete: engineDelete,
-        },
+        }, rows),
         metadata: { getObject: async () => ({ name: 'widget', fields: {} }) },
     };
     const ctx: any = {
