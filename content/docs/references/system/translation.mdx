@@ -260,7 +260,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated flow label |
 | **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
 | **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **screens** | `Record<string, { title?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+| **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 
 ### Nested Shape: `PlatformTranslationData.metadataForms[string]`
@@ -461,7 +461,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated flow label |
 | **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
 | **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **screens** | `Record<string, { title?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+| **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 
 ### Nested Shape: `TranslationData.metadataForms[string]`
@@ -623,7 +623,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated flow label |
 | **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
 | **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **screens** | `Record<string, { title?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
+| **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 
 ### Nested Shape: `TranslationItem.metadataForms[string]`
