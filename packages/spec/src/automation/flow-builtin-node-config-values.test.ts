@@ -52,8 +52,9 @@ const VALID: Readonly<Record<string, Config>> = {
     fields: [{ name: 'qty', label: 'Qty', type: 'number', required: true, min: 1, max: 10 }],
     waitForInput: true,
   },
-  script: { function: 'score_lead', inputs: { leadId: '{record.id}' }, outputVariable: 'score' },
-  subflow: { flowName: 'child_flow', input: { id: '{record.id}' }, outputVariable: 'out' },
+  // [#19939] `inputs.*` / `input.*` are value slots: the id is a CEL envelope.
+  script: { function: 'score_lead', inputs: { leadId: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'score' },
+  subflow: { flowName: 'child_flow', input: { id: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'out' },
   map: { collection: '{rows}', flowName: 'per_item', iteratorVariable: 'item' },
   loop: { collection: '{rows}', iteratorVariable: 'row', maxIterations: 50, body: REGION },
   parallel: { branches: [{ name: 'a', ...region('inner_a') }, { name: 'b', ...region('inner_b') }] },

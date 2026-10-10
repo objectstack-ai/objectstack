@@ -54,11 +54,13 @@
  * at the parse. Lint saying "the stack is fine" about a name the parser then
  * refuses is the declared-not-enforced shape inverted: the author's EARLIEST
  * feedback channel was the one that stayed quiet. So the arm below reports it,
- * and the reported text is `RETIRED_PAGE_COMPONENT_TYPES`'s own entry —
- * relayed verbatim, never re-authored, so this file cannot drift from the enum
- * error map and the kept props row that carry the same string. The pin is byte
- * equality against the map (`validate-component-types.test.ts`), which is also
- * what makes a member retired tomorrow arrive here already covered.
+ * and the reported text is `RETIRED_PAGE_COMPONENT_TYPES`'s own entry, quoted
+ * to its head ({@link retiredTypeHead}, [#22161]: one verdict line) — cut,
+ * never re-authored, so this file cannot drift from the enum error map and the
+ * kept props row that carry the whole string. The pin is that the verdict
+ * opens with a prefix of the map's entry (`validate-component-types.test.ts`),
+ * which is also what makes a member retired tomorrow arrive here already
+ * covered.
  *
  * ⛔ `isKnownComponentType` is NOT the seam for this. Flipping it would MOVE
  * the refusal out of the props door instead of ADDING a report here, and would
@@ -122,6 +124,22 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
+/**
+ * [#22161] A retired type's prescription, cut to its HEAD — the clause before
+ * its first ` — ` (`\`element:filter\` was removed in @objectstack/spec 17
+ * (ADR-0049)`, `\`user:profile\` is not a page-placeable element`), else its
+ * first sentence, else the whole entry. It cuts and never rewrites, so the
+ * verdict is still a prefix of `RETIRED_PAGE_COMPONENT_TYPES`' own text and no
+ * second copy of the guidance exists; the whole prescription is what the parse
+ * door (`PageComponentSchema.type`) answers the same name with.
+ */
+export function retiredTypeHead(prescription: string): string {
+  const dash = prescription.indexOf(' — ');
+  if (dash > 0) return prescription.slice(0, dash);
+  const stop = prescription.indexOf('. ');
+  return stop > 0 ? prescription.slice(0, stop) : prescription.replace(/\.$/, '');
+}
+
 export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
   const findings: ComponentTypeFinding[] = [];
   if (!isRec(stack)) return findings;
@@ -138,7 +156,7 @@ export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
 
       // EXACT-name arm, judged before the namespace guard (header: `user:`
       // stopped being a reserved namespace when its only member was retired).
-      // The message IS the map's entry — relayed, never re-authored.
+      // The message QUOTES the map's entry — cut to its head, never re-authored.
       const prescription = RETIRED_PAGE_COMPONENT_TYPES.get(type);
       if (prescription !== undefined) {
         findings.push({
@@ -146,7 +164,7 @@ export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
           rule: COMPONENT_TYPE_UNKNOWN,
           where: `page "${pageName}" · ${type}`,
           path: `${path}.type`,
-          message: prescription,
+          message: `${retiredTypeHead(prescription)}, so the parse refuses this node by name (\`os validate\` prints the prescription)`,
           hint:
             `Apply the prescription above: \`${type}\` is a retired component type, refused by ` +
             'name at the parse door (`PageComponentSchema.type`), so this page cannot validate or ' +
@@ -165,11 +183,11 @@ export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
         rule: COMPONENT_TYPE_UNKNOWN,
         where: `page "${pageName}" · ${type}`,
         path: `${path}.type`,
+        // [#22161] One verdict sentence; why a reserved namespace is closed
+        // while the open arm stays open is the id's `os explain` entry.
         message:
-          `\`${type}\` is not a component type the platform vocabulary declares. Its namespace ` +
-          `(\`${type.slice(0, type.indexOf(':'))}:\`) belongs to the standard component vocabulary, so nothing ` +
-          'will ever render this node — the page would validate, publish, and then draw a placeholder ' +
-          'scaffold in front of the end user.' +
+          `\`${type}\` is not a declared type of the reserved \`${type.slice(0, type.indexOf(':'))}:\` ` +
+          'namespace, so the page draws a placeholder in its place.' +
           (suggestion ? ` ${suggestion}` : ''),
         hint: suggestions.length
           ? `Rename \`${type}\` → \`${suggestions[0]}\`.`

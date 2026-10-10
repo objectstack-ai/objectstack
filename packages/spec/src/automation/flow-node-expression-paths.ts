@@ -135,6 +135,14 @@ export type FlowNodeExpressionRole =
    * map too (#11182 ruling D: CEL usable in every value slot in 17.x) — where
    * most authored value expressions live — declared and evaluated in the same
    * change, so the slot was never declared without its executor half.
+   *
+   * Declared since #19939 for the three maps a node hands to a CALLEE as its
+   * inputs — a `subflow`'s `input` (the child flow's input variables), a
+   * `map`'s `input` (each item's child flow, evaluated per item with the item
+   * variable bound) and a `script`'s `inputs` (the registered function's
+   * `input`) — again declared and evaluated in the same change: the three
+   * executors resolve the map through the one per-key resolver the CRUD
+   * `fields` map uses (`service-automation`'s `resolveValueSlotMap`).
    */
   | 'value';
 
@@ -192,11 +200,13 @@ export interface FlowNodeExpressionPath {
  * are *structural* predicate surfaces on every node and edge rather than
  * declared config properties, and both validators already walk them.
  *
- * Also deliberately absent: config values that merely INTERPOLATE `{token}`
- * templates — `script.inputs` / `script.variables` / `subflow.input` and so
- * on — and the TEXT slots, which render `{{ }}` holes since #22110 (a notify
- * `title` / `message`, a screen `title` / `description`, an `end` `message`;
- * their one judge and list is `flow-text-slot-template.ts`). Those are text-with-holes,
+ * Also deliberately absent: the config values that still INTERPOLATE
+ * `{token}` templates — the positions the #19939 retirement has not reached
+ * yet (a `screen`'s `defaults`, a `notify` `recipients` entry, an `http` body,
+ * a CRUD `filter` value, and so on) — and the TEXT slots, which render `{{ }}`
+ * holes since #22110 (a notify `title` / `message`, a screen `title` /
+ * `description`, an `end` `message`; their one judge and list is
+ * `flow-text-slot-template.ts`). Those are text-with-holes,
  * the shape essentially every node config string has, already covered
  * generically (`validate-flow-template-paths`, the CLI flow linter's
  * `collectTemplateStrings`). A `flow-template` ledger entry means something
@@ -208,19 +218,23 @@ export interface FlowNodeExpressionPath {
  * A `value` entry (#14149) is listed for a third reason, not either of those:
  * the slot's authored value may be an expression *envelope* — `{ dialect:
  * 'cel', source }`, a shape no `{token}` interpolation ever produced — and only
- * that form is resolved. Three maps are such slots: the `assignment` node's
- * `assignments` (#14149) and the `create_record` / `update_record` `fields`
- * (#19938). Their strings are NOT the generic text-with-holes case above:
- * since #19939 a `{token}` in a value slot is refused
- * (`flow-value-slot-template.ts`), and a token-free string is a literal. Each
- * is declared through the spec Zod channel (the map
- * value's `.meta({ xExpression: 'value' })` on `AssignmentConfigSchema` /
- * `CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, exposed to the
- * ratchet through `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` in
- * `schemaless-node-config.zod.ts`) because each node's descriptor declares
- * the map as `additionalProperties: true` with no marker; the ratchet walks
- * an object-valued `additionalProperties` as the `*` segment and maps the
- * `value` marker to this role.
+ * that form is resolved. Six maps are such slots: the `assignment` node's
+ * `assignments` (#14149), the `create_record` / `update_record` `fields`
+ * (#19938), and — since #19939 — the three maps a node hands to a callee as
+ * its inputs: `subflow.input`, `map.input` and `script.inputs`. Their strings
+ * are NOT the generic text-with-holes case above: since #19939 a `{token}` in
+ * a value slot is refused (`flow-value-slot-template.ts`), and a token-free
+ * string is a literal. Each is declared through the spec Zod channel — the
+ * map value is `FlowValueSlotSchema` (or `AssignmentValueSchema`, the same
+ * rule), whose `.meta({ xExpression: 'value' })` the ratchet reads. For
+ * `subflow` and `script`, which publish no descriptor `configSchema`, that is
+ * their contract in `SCHEMALESS_NODE_CONFIG_SCHEMAS`. For the other four it is
+ * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` (`AssignmentConfigSchema`,
+ * `CreateRecordConfigSchema`, `UpdateRecordConfigSchema`, `MapConfigSchema`),
+ * because each of those nodes' descriptors declares the map as
+ * `additionalProperties: true` with no marker; the ratchet walks an
+ * object-valued `additionalProperties` as the `*` segment and maps the `value`
+ * marker to this role.
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -308,6 +322,40 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     path: 'fields.*',
     role: 'value',
     label: 'update_record field value',
+  },
+  {
+    // [#19939] The maps a node hands to a CALLEE as its inputs (#11182
+    // ruling D; ADR-0032 Decision 2, a computed value is whole-field CEL).
+    // Every value of `input` — `{ <child input variable>: <value> }`, keys
+    // authored by the flow author — is a `value` slot, evaluated in the
+    // PARENT's scope and handed to the child flow as its params. Declared
+    // through the schemaless channel: `subflow` publishes no descriptor
+    // `configSchema`, so the marker rides `SubflowConfigSchema.input`'s map
+    // value (`FlowValueSlotSchema`).
+    nodeType: 'subflow',
+    path: 'input.*',
+    role: 'value',
+    label: 'subflow input value',
+  },
+  {
+    // The same map on the `map` node, evaluated once per item with the item
+    // (and index) variable bound, and handed to that item's child flow.
+    // Declared through `MapConfigSchema.input` (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`):
+    // the descriptor's own `input` is `additionalProperties: true` with no
+    // marker, exactly like the `fields` maps above. ⛔ Not `map.collection`,
+    // which keeps its `flow-template` entry above.
+    nodeType: 'map',
+    path: 'input.*',
+    role: 'value',
+    label: 'map item input value',
+  },
+  {
+    // A `script` node's `inputs` — the registered function's `input`.
+    // Declared through `ScriptConfigSchema.inputs` (the schemaless channel).
+    nodeType: 'script',
+    path: 'inputs.*',
+    role: 'value',
+    label: 'script input value',
   },
 ];
 

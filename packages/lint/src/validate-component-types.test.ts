@@ -13,9 +13,29 @@ import {
   RETIRED_PAGE_COMPONENT_TYPES,
 } from '@objectstack/spec/ui';
 import {
-  validateComponentTypes,
+  validateComponentTypes as validateComponentTypesUnrecorded,
+  retiredTypeHead,
   COMPONENT_TYPE_UNKNOWN,
 } from './validate-component-types.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to carry
+// is the id's `os explain` entry. Every call below records what it fired, and
+// the last cases in this file hold each recorded verdict to one line of at most
+// 200 characters — so the pin covers every firing variant this suite exercises
+// (every retired type included), not a chosen few. Run the whole file: those
+// cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateComponentTypes: typeof validateComponentTypesUnrecorded = (...args) => {
+  const findings = validateComponentTypesUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The verdict the retired arm prints for `type`: the prescription's head, then the parse door. */
+const retiredVerdict = (type: string): string =>
+  `${retiredTypeHead(RETIRED_PAGE_COMPONENT_TYPES.get(type)!)}, so the parse refuses this node by name ` +
+  '(`os validate` prints the prescription)';
 
 const page = (components: unknown[], name = 'p1', extra: Record<string, unknown> = {}) => ({
   pages: [{ name, regions: [{ name: 'main', components }], ...extra }],
@@ -145,10 +165,10 @@ describe('leaves the declared vocabulary and the open arm alone', () => {
  * exactly what made this rule walk past it in silence while
  * `PageComponentSchema.type` refuses the same name at the parse. Measured on
  * both sides of the #17592 review: `element:filter` → no finding, before and
- * after. This suite pins the report, and pins it BYTE-EQUAL to
- * `RETIRED_PAGE_COMPONENT_TYPES` — the rule relays the spec's prescription, it
- * does not author a second copy, so drift between the three doors is not
- * expressible.
+ * after. This suite pins the report, and pins it to
+ * `RETIRED_PAGE_COMPONENT_TYPES` — the rule relays the spec's prescription
+ * ([#22161] quoted to its head, a prefix of the map's text), it does not author
+ * a second copy, so drift between the three doors is not expressible.
  *
  * Driven off the map rather than a restated list: a type retired tomorrow
  * arrives here covered on the day it lands.
@@ -168,8 +188,12 @@ describe('reports an EXACT retired component type, relaying the spec prescriptio
     expect(f.severity).toBe('error');
     expect(f.path).toBe('pages[0].regions[0].components[0].type');
     expect(f.where).toBe(`page "p1" · ${type}`);
-    // Verbatim, not "contains": the relay is the contract.
-    expect(f.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get(type));
+    // The relay is the contract: [#22161] the map's own text, cut to its head —
+    // a PREFIX of the prescription, never a paraphrase of it.
+    const prescription = RETIRED_PAGE_COMPONENT_TYPES.get(type)!;
+    expect(f.message).toBe(retiredVerdict(type));
+    expect(prescription.startsWith(retiredTypeHead(prescription))).toBe(true);
+    expect(retiredTypeHead(prescription)).toContain(`\`${type}\``);
     expect(f.hint).toContain(type);
   });
 
@@ -184,7 +208,7 @@ describe('reports an EXACT retired component type, relaying the spec prescriptio
     expect(hasReservedComponentNamespace('user:profile')).toBe(false);
     const findings = validateComponentTypes(page([{ type: 'user:profile' }]));
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get('user:profile'));
+    expect(findings[0].message).toBe(retiredVerdict('user:profile'));
   });
 
   it('reaches a retired type nested under a tab item, at its own path', () => {
@@ -280,5 +304,57 @@ describe('retired types are never proposed as typo suggestions (#15110)', () => 
       .toContain('element:button');
     expect(validateComponentTypes(page([{ type: 'record:detials' }]))[0].hint)
       .toContain('record:details');
+  });
+});
+
+describe('[#22161] one-line verdicts — component-type-unknown', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: the id fired, and the retired arm fired for
+    // every retired type, so the shape assertion below cannot pass over a
+    // record that skipped an arm.
+    expect([...new Set(fired.map((f) => f.rule))]).toEqual([COMPONENT_TYPE_UNKNOWN]);
+    for (const type of RETIRED_PAGE_COMPONENT_TYPES.keys()) {
+      expect(fired.some((f) => f.message === retiredVerdict(type)), type).toBe(true);
+    }
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the namespace verdict reads as one sentence', () => {
+    const [f] = validateComponentTypes(page([{ type: 'global:serch' }]));
+    expect(f.message).toBe(
+      "`global:serch` is not a declared type of the reserved `global:` namespace, so the page draws a " +
+        "placeholder in its place. Did you mean 'global:search'?",
+    );
+  });
+
+  it('retiredTypeHead cuts at the first dash, else the first sentence, and never rewrites', () => {
+    expect(retiredTypeHead('`a:b` is gone — use `a:c` instead.')).toBe('`a:b` is gone');
+    expect(retiredTypeHead('`a:b` is gone. Use `a:c` instead.')).toBe('`a:b` is gone');
+    expect(retiredTypeHead('`a:b` is gone.')).toBe('`a:b` is gone');
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(COMPONENT_TYPE_UNKNOWN);
+    expect(entry, 'no `os explain component-type-unknown` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'an arbitrary string parses',
+      'component-placeholder scaffold',
+      '`ComponentPropsMap`',
+      'measured clean',
+      '`RETIRED_PAGE_COMPONENT_TYPES`',
+      '`user:profile`',
+      '`os validate`',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+    // One copy of the guidance: the explanation names where the prescription
+    // lives and never restates one.
+    for (const prescription of RETIRED_PAGE_COMPONENT_TYPES.values()) {
+      expect(text).not.toContain(prescription.slice(0, 80));
+    }
   });
 });
