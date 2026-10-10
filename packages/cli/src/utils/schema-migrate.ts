@@ -439,20 +439,23 @@ export function resolveDatabaseSource(
   resolved: { readonly source: string; readonly datasourceName?: string },
   explicitUrl: string | undefined,
 ): DatabaseSource {
+  /** A variable's source: the `.env*` file it was loaded from, or the process environment. */
+  const fromVariable = (variable: string): DatabaseSource => {
+    const provenance = provenanceOf(load.reading, variable, load.shellEnv);
+    return provenance.source === 'file' && provenance.file
+      ? { kind: 'env-file', variable, file: path.basename(provenance.file) }
+      : { kind: 'process-env', variable };
+  };
   switch (resolved.source) {
     case 'explicit':
-      // Every caller's `--database-url` declares `env: 'OS_DATABASE_URL'`, which
-      // oclif reads at parse time — before the load, so from the shell only.
-      return explicitUrl !== undefined && load.shellEnv.OS_DATABASE_URL === explicitUrl
-        ? { kind: 'process-env', variable: 'OS_DATABASE_URL' }
+      // Every caller's `--database-url` declares `env: 'OS_DATABASE_URL'`, so
+      // oclif hands the variable's value over as the flag's. An explicit URL
+      // equal to it is the variable, wherever that came from.
+      return explicitUrl !== undefined && process.env.OS_DATABASE_URL === explicitUrl
+        ? fromVariable('OS_DATABASE_URL')
         : { kind: 'flag' };
-    case 'env': {
-      const variable = envRungVariable(process.env);
-      const provenance = provenanceOf(load.reading, variable, load.shellEnv);
-      return provenance.source === 'file' && provenance.file
-        ? { kind: 'env-file', variable, file: path.basename(provenance.file) }
-        : { kind: 'process-env', variable };
-    }
+    case 'env':
+      return fromVariable(envRungVariable(process.env));
     case 'config-datasource':
       return { kind: 'config-datasource', datasource: resolved.datasourceName ?? 'default' };
     default:

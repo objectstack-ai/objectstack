@@ -19,7 +19,7 @@ The two commands now also compose, each through the rule `os serve` itself reads
 
 Each piece is composed for its declarations only. Its `init()` runs, and its `start()` and lifecycle hooks do not, so no dispatcher, scheduler or seed runs inside a dry run.
 
-**What an operator sees.** On the shape that looped, `os migrate plan` lists `sys_account.issuer` and `uniq_sys_account_issuer_account_id` as destructive drops. `os migrate apply --allow-destructive` drops both, `os migrate account-issuer` reads zero, and the next boot prints no drift line for them. When no auth secret is set and the boot is not a development one, the plan says it did not compose the auth family, and how to compose it: run with the deployment's `OS_AUTH_SECRET` exported. `os migrate` reads no `.env` file.
+**What an operator sees.** On the shape that looped, `os migrate plan` lists `sys_account.issuer` and `uniq_sys_account_issuer_account_id` as destructive drops. `os migrate apply --allow-destructive` drops both, `os migrate account-issuer` reads zero, and the next boot prints no drift line for them. When no auth secret is set and the boot is not a development one, the plan says it did not compose the auth family, and how to compose it: run with the deployment's `OS_AUTH_SECRET`.
 
 **driver-sql.** The deferred-DDL preview answers a rotation-declared object (`lifecycle.storage.strategy: 'rotation'`, such as `sys_activity`) from the rotator's facts: when the current shard and the read view exist, nothing is pending. It used to list `create_table` for such an object on every plan, and `apply` then created nothing.
 
