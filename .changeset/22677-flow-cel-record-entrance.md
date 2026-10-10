@@ -29,5 +29,3 @@ A start `config.objectName` alone is no entrance: with no `record-*` trigger not
 **The one-line fix: read a flow variable by its name or through `vars`, and read `record` only on a flow an entrance hands one.**
 
 **Who is affected, measured.** With this judge over every flow CEL site: the example apps (`app-crm`, `app-todo`, `app-multi-package`, `app-showcase`: 35 flows, 14 that read `record`), `packages/platform-objects` (no flows) and `objectstack-ai/hotcrm` at `1d7148b` (32 flows, 14 that read `record`): 0 newly refused. Every flow that reads `record` there is a record-change, time-relative or inbound-hook flow. Deployed metadata and other repositories were not measured.
-
-The #22642 note in this release says `objectstack validate` does not refuse such a `record` read yet. From this release it does.
