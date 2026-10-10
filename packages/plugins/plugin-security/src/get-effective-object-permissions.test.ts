@@ -103,19 +103,6 @@ const SCHEMAS: Record<string, any> = {
   report: { name: 'report', label: 'Report', enable: { apiMethods: ['get', 'list'] }, fields: { id: { name: 'id' } } },
 };
 
-/** `where` matcher: scalar equality plus the `$in` form the resolver sends; any other operator REFUSES. */
-function matches(row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean {
-  return Object.entries(where ?? {}).every(([key, cond]) => {
-    if (key.startsWith('$')) throw new Error(`fake engine: unsupported operator ${key}`);
-    const value = row[key] ?? null;
-    if (cond && typeof cond === 'object' && Array.isArray((cond as { $in?: unknown }).$in)) {
-      return ((cond as { $in: unknown[] }).$in).includes(value);
-    }
-    if (cond && typeof cond === 'object') throw new Error(`fake engine: unsupported condition on ${key}`);
-    return value === (cond ?? null);
-  });
-}
-
 function bootPlugin(
   opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?: boolean; schemas?: Record<string, any> } = {},
 ) {
@@ -148,11 +135,8 @@ function bootPlugin(
       isPackageDisabled: () => false,
     },
     getSchema: (name: string) => schemas[name] ?? null,
-    find: async (_object: string, query: any) => {
-      const rows = ([] as Array<Record<string, unknown>>).filter((r) => matches(r, query?.where));
-      // Hold the caller's bound (`check:objectql-double-limit`).
-      return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
-    },
+    // No table answers here: every set is the catalog's (above).
+    find: async () => [],
   };
   if (opts.engineSeam !== false) {
     ql.registerEffectiveObjectPermissionsResolver = (fn: (context: unknown) => Promise<unknown>) => registered.push(fn);

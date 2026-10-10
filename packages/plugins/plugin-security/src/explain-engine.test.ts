@@ -9,7 +9,7 @@ import { explainAccess, buildContextForUser, resolveDelegatorContext, type Expla
 import { RLS_DENY_FILTER } from './rls-compiler';
 import { unresolvedPostureRemedy } from './unresolved-posture';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
-import { bindCatalogFromTables, bindTestSecurityCatalog, ledgerFromTables } from './__tests__/security-catalog.testkit.js';
+import { bindCatalogFromTables, ledgerFromTables } from './__tests__/security-catalog.testkit.js';
 
 // [commit a68c61267] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
 // (ADR-0122), in which every `.default([])` member is OPTIONAL before a parse:
@@ -1128,20 +1128,15 @@ describe('buildContextForUser', () => {
   });
 
   it('a grant naming a set the catalog does not hold is reported neither expired nor deactivated — there is no set to lose', async () => {
-    const ql = bindTestSecurityCatalog({
-      async find(object: string, opts: any) {
-        const rows: Rows = {
-          sys_user_permission_set: [
-            { user_id: 'u2', permission_set_id: 'ps_gone', permission_set: 'gone_set', valid_until: '2026-06-01T00:00:00Z' },
-            { user_id: 'u2', permission_set_id: 'ps_gone2', permission_set: 'gone_off' },
-          ],
-          sys_metadata_activation: [{ metadata_type: 'permission', name: 'gone_off', active: false }],
-        };
-        const where = opts?.where ?? {};
-        return (rows[object] ?? []).filter((row) => Object.entries(where).every(([k, c]) =>
-          c && typeof c === 'object' && '$in' in (c as any) ? ((c as any).$in as unknown[]).includes(row[k]) : row[k] === c));
-      },
-    }, { permissions: [], positions: [] });
+    // No `sys_permission_set` row, so the catalog these tables convert to holds
+    // neither name; the ledger switches one of them off all the same.
+    const ql = makeGrantQl({
+      sys_user_permission_set: [
+        { user_id: 'u2', permission_set_id: 'ps_gone', permission_set: 'gone_set', valid_until: '2026-06-01T00:00:00Z' },
+        { user_id: 'u2', permission_set_id: 'ps_gone2', permission_set: 'gone_off' },
+      ],
+      sys_metadata_activation: [{ metadata_type: 'permission', name: 'gone_off', active: false }],
+    });
     const ctx = await buildContextForUser(ql, 'u2', NOW);
     expect(ctx.droppedGrants).toEqual([]);
   });
