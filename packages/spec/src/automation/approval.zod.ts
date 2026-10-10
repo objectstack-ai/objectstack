@@ -138,20 +138,46 @@ export const NON_AUTHORABLE_APPROVER_TYPES: readonly string[] = [
 /**
  * How a designer must source an approver row's `value`, per approver type —
  * the single declaration of the "metadata registry vs data records" split
- * (#3508). The engine (`plugin-approvals` `resolveApproverSpec` +
- * `expand*Users`) resolves these against DATA rows in the system directory
- * objects, so the matching picker is a RECORD lookup via the data API —
- * `GET /api/v1/meta/user` lists metadata types, never `sys_user` rows.
+ * (#3508). The two halves are not interchangeable, and picking the wrong one
+ * leaves the picker with no candidates:
+ *
+ *   - a directory kind (`user`, `team`, `department`) names a DATA row in a
+ *     system directory object, which the engine (`plugin-approvals`
+ *     `resolveApproverSpec` + `expand*Users`) reads — so its picker is a
+ *     RECORD lookup via the data API; `GET /api/v1/meta/user` lists metadata
+ *     types, never `sys_user` rows;
+ *   - a catalog kind (`position`) names a declared ITEM by its machine name
+ *     (ADR-0131 D4: "References to declared items are by machine name,
+ *     resolved registry-first") — so its picker lists the metadata registry.
  */
 export type ApproverValueBinding =
   /**
    * `value` identifies a row of `object`; the designer stores the row's
-   * `valueField`. Note `position` routes by machine **name** (the engine
-   * filters `sys_user_position.position` by name — deliberate, names are
-   * portable across environments the way ids are not), and `department`
-   * resolves against `sys_business_unit`, not a `sys_department`.
+   * `valueField`. `department` resolves against `sys_business_unit`, not a
+   * `sys_department`.
    */
   | { source: 'record'; object: string; valueField: 'id' | 'name' }
+  /**
+   * `value` is the machine name of an item of metadata `type` — a member of
+   * the registry's own type vocabulary (`MetadataTypeSchema`, singular, as the
+   * meta API spells it; `approval.test.ts` holds every bound `type` to it,
+   * which keeps this module's import graph free of the kernel). The picker
+   * lists `GET /api/v1/meta/<type>`, which serves both provenances, the
+   * code-declared items and the environment-authored ones (ADR-0131 D2), and
+   * commits the item's `name`. There is no `valueField`: a catalog item has no
+   * row id, so its name is the only reference it has (ADR-0131 D4), and a key
+   * with one legal value would choose nothing.
+   *
+   * `position` is bound here, not to `sys_position` rows: positions are
+   * declared metadata (ADR-0131 D2), the registry is their one catalog (D3),
+   * and the table is a mirror that retires in the ADR-0131 cutover, so a
+   * picker reading it offers whatever the mirror holds rather than the
+   * catalog. The engine needs nothing from the item to route — it filters
+   * `sys_user_position.position` by the name (names are portable across
+   * environments the way ids are not), so the binding moved without changing
+   * the stored value.
+   */
+  | { source: 'registry'; type: string }
   /** Closed value set — render a strict select, never free text. */
   | { source: 'enum'; values: readonly string[] }
   /**
@@ -203,7 +229,8 @@ export const APPROVER_VALUE_BINDINGS = {
   // Deprecated alias — same binding as its canonical spelling so a stored
   // legacy row still renders with the right control during its window.
   role: { source: 'enum', values: ORG_MEMBERSHIP_LEVELS },
-  position: { source: 'record', object: 'sys_position', valueField: 'name' },
+  // A catalog item, named — see the `registry` member of ApproverValueBinding.
+  position: { source: 'registry', type: 'position' },
   team: { source: 'record', object: 'sys_team', valueField: 'id' },
   department: { source: 'record', object: 'sys_business_unit', valueField: 'id' },
   manager: { source: 'auto' },
@@ -220,15 +247,26 @@ export const APPROVER_VALUE_BINDINGS = {
  * — and never where that picker's candidates come from. So the designer had to
  * carry its own copy of the data contract, and the first copy was wrong: every
  * directory kind was wired to `GET /api/v1/meta/:type`, the metadata registry,
- * which does not hold `sys_user` / `sys_team` / `sys_business_unit` /
- * `sys_position` ROWS. Candidates came back empty and the control degraded to a
- * free-text box (#3508).
+ * which holds no `sys_user` / `sys_team` / `sys_business_unit` ROWS.
+ * Candidates came back empty and the control degraded to a free-text box
+ * (#3508).
  *
- * Publishing the binding closes that gap at the source: a renderer reads which
- * object to query and which column to commit off the schema instead of
- * re-deriving it, and a new {@link ApproverType} member cannot leave a stale
- * mirror behind — `satisfies` above already makes an undeclared member a
- * compile error, and this projection inherits that guarantee.
+ * The cure is NOT "never the registry": it is "the source the kind's value
+ * actually names". So two lookup sources reach the wire:
+ *
+ *   - `data` — a directory row. Query the data API for `object`, commit the
+ *     row's `valueField`. `user`, `team` and `department`.
+ *   - `registry` — a catalog item. List `GET /api/v1/meta/<type>` and commit
+ *     the item's `name`. `position`: positions are declared metadata
+ *     (ADR-0131 D2), referenced by machine name and resolved registry-first
+ *     (D4). A renderer that still reads `sys_position` rows for it lists a
+ *     mirror the ADR-0131 cutover retires, not the catalog.
+ *
+ * Publishing the binding closes that gap at the source: a renderer reads where
+ * to look and what to commit off the schema instead of re-deriving it, and a
+ * new {@link ApproverType} member cannot leave a stale mirror behind —
+ * `satisfies` above already makes an undeclared member a compile error, and
+ * this projection inherits that guarantee.
  *
  * Presentation stays with the renderer: which field to SHOW, whether to open a
  * people-picker, what subtitle to put under a row are objectui's calls. This
@@ -240,15 +278,20 @@ export const APPROVER_VALUE_SOURCES = Object.fromEntries(
     type,
     binding.source === 'record'
       // `data` names the DATA API, in contrast to the metadata registry the
-      // designer used to query — the whole point of the annotation.
+      // designer used to query for rows — the whole point of the annotation.
       ? { source: 'data', object: binding.object, valueField: binding.valueField }
-      : binding.source === 'enum'
-        ? { source: 'enum', values: [...binding.values] }
-        : { source: binding.source },
+      : binding.source === 'registry'
+        // `registry` names the metadata registry, for a kind whose value IS a
+        // registry item's name (ADR-0131 D4).
+        ? { source: 'registry', type: binding.type }
+        : binding.source === 'enum'
+          ? { source: 'enum', values: [...binding.values] }
+          : { source: binding.source },
   ]),
 ) as Record<
   z.infer<typeof ApproverType>,
   | { source: 'data'; object: string; valueField: string }
+  | { source: 'registry'; type: string }
   | { source: 'enum'; values: string[] }
   | { source: 'auto' | 'trigger-field' | 'expression' | 'unsupported' }
 >;
@@ -454,9 +497,11 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
   // `xRef` marks this string as a *polymorphic* typed reference (ADR-0018
   // §configSchema): the concrete picker follows the sibling `type` column.
   // How each kind is BACKED (a data-record lookup on a directory object, a
-  // closed enum, an auto-resolved value, a trigger-object field) is declared
-  // once in {@link APPROVER_VALUE_BINDINGS} — designers must source the
-  // record-backed kinds from the DATA API, not the metadata registry (#3508).
+  // registry item named by its machine name, a closed enum, an auto-resolved
+  // value, a trigger-object field) is declared once in
+  // {@link APPROVER_VALUE_BINDINGS} — designers must source the record-backed
+  // kinds from the DATA API (#3508) and the registry-backed kind (`position`,
+  // ADR-0131 D4) from the metadata registry, never one for the other.
   // A single `.meta()` carries both description and annotation.
   //
   // The `role` → `org-membership-level` picker kind is the deprecated alias's
@@ -488,16 +533,21 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
       // Where each kind's candidates actually live, and what the picker
       // commits — see {@link APPROVER_VALUE_SOURCES}. `map` alone named a
       // picker but never its data source, which is how the designer ended up
-      // querying the metadata registry for data records (#3508).
+      // querying the metadata registry for data records (#3508). `position`'s
+      // entry names the registry, because its value is a catalog item's name.
       sources: APPROVER_VALUE_SOURCES,
     },
   }),
   /**
    * #3447 P2, `expression` approvers only: how the expression's resolved values
    * are turned into people. `user` (default) treats each value as a user id.
-   * `department` / `position` / `team` treat each value as that kind of id and
-   * expand it through the same graph lookups the static approver types use —
-   * e.g. an expression yielding department ids + `resolveAs: 'department'`
+   * `department` / `position` / `team` treat each value as the value the
+   * approver type of the same name takes ({@link APPROVER_VALUE_BINDINGS}): a
+   * `sys_business_unit` id, a position's machine NAME (never a `sys_position`
+   * id: the engine filters `sys_user_position.position` by name, ADR-0131 D4),
+   * a `sys_team` id — and expand it through the same graph lookups the static
+   * approver types use — e.g. an expression yielding department ids +
+   * `resolveAs: 'department'`
    * fans out into every member of every returned department. With
    * `behavior: 'per_group'`, each intermediate value forms its own group (one
    * sign-off per returned department), keyed by that value.
@@ -554,7 +604,7 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
   /**
    * A TYPED decision-output declaration (#3447 P2 follow-up). The bare-string
    * form of a `decisionOutputs` entry renders as free text; this form tells the
-   * decision UI which picker to render and whether to collect one id or many.
+   * decision UI which picker to render and whether to collect one value or many.
    * The runtime treats `key` as the whitelist entry either way — `type` and
    * `multiple` only shape the INPUT WIDGET, never the accepted value.
    */
@@ -571,14 +621,24 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
   /** Display label for the decision-dialog field; defaults to a title-cased key. */
   label: z.string().optional().describe('Field label in the decision dialog'),
   /**
-   * Input widget: `text` (default — free text), or a record picker —
-   * `user` (sys_user), `department` (sys_business_unit), `position`
-   * (sys_position), `team` (sys_team). Picker values are record ids.
+   * Input widget: `text` (default — free text), or a picker. Each picker kind
+   * is sourced, and commits, exactly what the approver type of the same name
+   * takes ({@link APPROVER_VALUE_BINDINGS}), because that is what reads the
+   * output downstream — an `expression` approver with the matching
+   * `resolveAs`:
+   *   - `user` (`sys_user`), `department` (`sys_business_unit`) and `team`
+   *     (`sys_team`) are record pickers, and commit record ids;
+   *   - `position` lists the position registry and commits a position's
+   *     machine NAME (ADR-0131 D4). A `sys_position` id would expand to
+   *     nobody: the engine filters `sys_user_position.position` by name.
    */
   type: z.enum(['text', 'user', 'department', 'position', 'team']).optional()
-    .describe("Decision-dialog input widget (default 'text')"),
-  /** Collect an id array instead of a single value (multi-select picker). */
-  multiple: z.boolean().optional().describe('Collect multiple values (id array)'),
+    .describe(
+      "Decision-dialog input widget (default 'text'). The user, department and team pickers commit "
+      + 'record ids; the position picker commits position machine names',
+    ),
+  /** Collect an array of what the picker commits instead of a single value (multi-select picker). */
+  multiple: z.boolean().optional().describe('Collect multiple values (an array of what the picker commits)'),
   /**
    * The approver must supply this output to APPROVE (objectui#2955).
    *
@@ -919,12 +979,14 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    *
    * An entry is either a bare key (a plain text input in the decision UI) or a
    * TYPED declaration — `{ key, type, multiple }` — that tells the decision UI
-   * to render a record picker instead of free text: `user` → a sys_user
-   * picker, `department`/`position`/`team` → the matching system-object
-   * picker. `multiple: true` collects an id ARRAY (the natural fan-out shape
-   * for an `expression` approver downstream). The type describes the INPUT
-   * WIDGET only — the runtime accepts whatever value shape arrives (single id,
-   * id[], CSV) and hands it to the flow verbatim.
+   * to render a picker instead of free text, sourced like the approver type of
+   * the same name ({@link DecisionOutputDefSchema}'s `type`): `user` /
+   * `department` / `team` → a record picker committing ids, `position` → the
+   * position registry, committing machine names. `multiple: true` collects an
+   * ARRAY of them (the natural fan-out shape for an `expression` approver
+   * downstream). The type describes the INPUT WIDGET only — the runtime accepts
+   * whatever value shape arrives (a single value, an array, CSV) and hands it
+   * to the flow verbatim.
    */
   decisionOutputs: z.array(z.union([
     z.string(),

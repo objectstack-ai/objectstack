@@ -188,7 +188,7 @@ a CEL value envelope, and text is a `{{ }}` template.**
 | Start-node `condition` | CEL — bare, no braces | `record.amount > 500` |
 | Edge `condition` | CEL — bare, no braces | `record.status == 'open'` |
 | Decision `conditions[].expression` | CEL — bare, no braces | `order_amount > 10000` |
-| Value slots — `create_record` / `update_record` `fields`, `assignment` values | CEL value envelope; a plain string is the literal text it spells | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'` |
+| Value slots — `create_record` / `update_record` `fields`, `assignment` values, and the maps handed to a callee: `subflow` / `map` `input`, `script` `inputs` | CEL value envelope; a plain string is the literal text it spells | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'` |
 | Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
 
 A value slot refuses every `{…}` template token — `registerFlow()` and
@@ -208,8 +208,19 @@ Inside an object or list value, and in the legacy `assignment` shapes, an
 envelope is data: build the whole value as one envelope (a CEL map or list
 literal, its mixed values wrapped in `dyn(…)`), or move the assignment into the
 `assignments` map. Other value-like positions — a `filter`, `recipients`, an
-`http` payload, `subflow.input` — still read the single-brace dialect
+`http` payload, a screen's `defaults` — still read the single-brace dialect
 (`{record.id}`).
+
+A `subflow` or `map` `input`, and a `script`'s `inputs`, hand their values to a
+callee: each envelope is evaluated in the calling flow's scope (on a `map`, once
+per item, with the item variable bound) and handed over as the value it
+computes — a list stays a list. A value handed to a child flow is *supplied*,
+`null` included, so it wins over the child variable's `defaultValue`. Where the
+template resolved a token to nothing it handed nothing, and the default applied;
+the guarded form `has(vars.x) ? vars.x : null` hands `null`. To keep the default
+for an absent value, write it in the guard (`has(vars.x) ? vars.x : 'standard'`),
+or leave the key out where the value is never meant to be supplied. A function
+is handed `null` there, where the template handed `undefined`.
 
 The run's user is **`current_user`** in every flow CEL expression: `id`,
 `positions`, `organizationId`, `isPlatformAdmin`, nothing more. In a run with no
@@ -411,7 +422,11 @@ author-visible split/join gateway.
   label: 'Validate Address',
   config: {
     flowName: 'validate_address',
-    input: { street: '{input.street}', city: '{input.city}' },
+    // Each value is a CEL value envelope, evaluated in this flow's scope.
+    input: {
+      street: { dialect: 'cel', source: 'input.street' },
+      city: { dialect: 'cel', source: 'input.city' },
+    },
     outputVariable: 'validated_address',
   },
 }
