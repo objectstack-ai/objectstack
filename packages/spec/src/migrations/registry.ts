@@ -5790,8 +5790,10 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'absent key should write is the author\'s judgment. The `$User` paths are refused too: the flow CEL '
       + 'scope binds `current_user`, the run\'s user or `null` in a run with none, so `{$User.Id}` is '
       + '`current_user.id`, guarded where a flow can run without a user, and the other `$User` paths, which '
-      + 'never resolved, name a read of the user record. The date macros keep their meaning until CEL can '
-      + 'spell them. Its D3 record is the semantic entry `flow-value-slot-template-dialect-refused`.',
+      + 'never resolved, name a read of the user record. The date macros are refused too, with their CEL '
+      + 'string form (`{TODAY() + 7}` is `isoDate(daysFromNow(7))`, `{NOW()}` is `isoDatetime(now())`), so no '
+      + 'single-brace spelling is kept. Its D3 record is the semantic entry '
+      + '`flow-value-slot-template-dialect-refused`.',
   },
   {
     id: 'flow-write-node-stored-metadata-target-refused',
@@ -14301,9 +14303,9 @@ const step18: MigrationStep = {
         'a double-brace template hole, rendered by the formula template engine over the flow\'s variables: a variable '
         + 'path with an optional formatter, {{ record.name }}, {{ $error.message }}, {{ rows.0.subject }}, '
         + '{{ record.amount | currency }}. A token no hole can spell is computed into a variable first, with an '
-        + 'assignment node — arithmetic and functions as a CEL value envelope, the date macros as the value-slot '
-        + 'spelling that still reads them, the run user\'s id as the CEL value envelope current_user.id — and written as '
-        + '{{ variable }}',
+        + 'assignment node — arithmetic and functions as a CEL value envelope, the date macros as the CEL value '
+        + 'envelope of their string form (isoDate(today()), isoDatetime(now())), the run user\'s id as the CEL value '
+        + 'envelope current_user.id — and written as {{ variable }}',
       reason:
         'ADR-0032 Decision 3 fixes one template delimiter, double braces, and deletes the single brace: it collides '
         + 'with CEL map literals, and an author who meets both dialects in one flow mixes them. The 17.x interpolator '
@@ -14400,9 +14402,10 @@ const step18: MigrationStep = {
     },
     // The template dialect leaves the flow value slots: one dialect for a computed
     // value, CEL. Semantic-only — every token spelling authored in flows was
-    // measured lossy under conversion, so no D2 conversion rewrites any of them,
-    // and the date macros CEL cannot write yet are kept. The run-user paths are
-    // refused too: the flow CEL scope binds current_user, the run's user or null.
+    // measured lossy under conversion, so no D2 conversion rewrites any of them.
+    // The run-user paths are refused too: the flow CEL scope binds current_user,
+    // the run's user or null. So are the date macros, with their CEL string form
+    // (isoDate / isoDatetime): no single-brace spelling is kept.
     {
       id: 'flow-value-slot-template-dialect-refused',
       // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -14411,7 +14414,7 @@ const step18: MigrationStep = {
         'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
         + 'legacy bare config) and of create_record and update_record nodes (the fields map) — a string value, or a '
         + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
-        + 'paths beginning $User. included',
+        + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included',
       replacement:
         'a CEL value envelope, { dialect: "cel", source: "…" }, evaluated to the value: a path is the same path '
         + '(record.owner; a numeric segment becomes an index, items[0]; a variable whose name starts with $ is read '
@@ -14422,8 +14425,15 @@ const step18: MigrationStep = {
         + 'writes null where the template wrote nothing, so on update_record it clears a stored value the template '
         + 'left alone. Every other run-user path ($User.Email, $User.Name, …) never resolved in any shipped run: '
         + 'current_user carries only what the run holds (id, positions, organizationId, isPlatformAdmin), and an email '
-        + 'or a name is read from the user record by current_user.id (a get_record node on sys_user). A string with no '
-        + 'token is the literal text it spells, and braces meant literally are a CEL string literal',
+        + 'or a name is read from the user record by current_user.id (a get_record node on sys_user). A date macro is '
+        + 'its CEL string form on the UTC calendar: TODAY() is isoDate(today()), TODAY() + N and TODAY() - N are '
+        + 'isoDate(daysFromNow(N)) and isoDate(daysAgo(N)), NOW() is isoDatetime(now()), and NOW() plus or minus N is '
+        + 'isoDatetime(addDays(now(), N)) with N signed, which keeps the time of day where daysFromNow lands on '
+        + 'midnight; a variable offset is isoDate(addDays(today(), days)). Where an envelope is literal data — a string '
+        + 'inside an object or list value, or either legacy assignment shape — an envelope written in its place is '
+        + 'stored as the object it spells, so the whole value is one envelope building a CEL map or list literal, and '
+        + 'a legacy assignment moves into the assignments map. A string with no token is the literal text it spells, '
+        + 'and braces meant literally are a CEL string literal',
       reason:
         'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
         + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -14434,18 +14444,25 @@ const step18: MigrationStep = {
         + 'and nothing in a run with no user (a schedule, a record change made by a system write); the flow CEL scope '
         + 'binds current_user to the run\'s user and to null in such a run, never a pseudo-user, so current_user.id '
         + 'fails there and its guarded form writes null. The other run-user paths read a user object no run carries, '
-        + 'so they wrote nothing in every run. One spelling is kept with its old meaning, because CEL cannot write it '
-        + 'yet: the date macros NOW() and TODAY() with a day offset (CEL yields a Timestamp, not the ISO text, and has '
-        + 'no string form for one). A flow carrying a refused value is refused at registration, by objectstack '
-        + 'validate and by the executor; a stored flow carrying one is skipped at boot with a warn naming it.',
+        + 'so they wrote nothing in every run. The date macros wrote the ISO text of the UTC day or instant, which '
+        + 'isoDate and isoDatetime write byte for byte for a whole number of days, but the template read an offset it '
+        + 'could not use as 0 — a variable it did not find, a value that is not a number, text that is neither — '
+        + 'where CEL fails the run, and it truncated a fractional offset after adding it to the day of the month, where '
+        + 'addDays truncates the offset itself and daysFromNow and daysAgo refuse a fraction at build. A flow carrying '
+        + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
+        + 'carrying one is skipped at boot with a warn naming it.',
       acceptanceCriteria:
         'Run objectstack validate: it reports each refused value as expression-invalid at the node and the value\'s '
         + 'path, with the CEL spelling of its tokens. Rewrite each as that envelope; where a variable or key may be '
-        + 'absent, guard it (has(record.owner) ? record.owner : null, has(vars.x) ? vars.x : null for a variable) or '
-        + 'route around the node. For the run user, find which flows can run without one (a schedule, a record change '
+        + 'absent, guard it a step at a time from vars, which holds only the variables the run has bound '
+        + '(has(vars.x) ? vars.x : null, has(vars.source) && has(vars.source.id) ? vars.source.id : null; a guard on '
+        + 'the last key alone, has(source.id), fails the run when source itself was never bound) or route around the '
+        + 'node. For the run user, find which flows can run without one (a schedule, a record change '
         + 'a system write can make): there, guard current_user.id, or skip the node with a start condition or a '
-        + 'decision on current_user != null where an update_record must leave the stored value alone. Re-run the '
-        + 'flow paths that write those fields and compare the stored values with the ones the template wrote.',
+        + 'decision on current_user != null where an update_record must leave the stored value alone. For a date '
+        + 'macro with a variable offset, check the variable is always set to a number where the flow runs; write a '
+        + 'fractional offset as the whole number of days meant. Re-run the flow paths that write those fields and '
+        + 'compare the stored values with the ones the template wrote.',
     },
     // #21654 — the D3 entry for `FlowSchema`'s refusal of a write node aimed at a
     // stored-metadata table: the save-time half of #21624, which applies #21520's
@@ -15628,6 +15645,58 @@ const step18: MigrationStep = {
         + 'does NOT touch: packages/core/src/plugin-loader.ts declares its own local '
         + 'PluginStartupResult interface — a different type, carrying startTime rather than any '
         + 'duration key — which is not a reader of this schema and is unchanged.',
+    },
+    // The declared default of `ListView.userActions.editInline` moved from `false`
+    // to `true` (maintainer ruling 2026-10-10, the v18 line, verbatim:
+    // 「乙 v18 把 spec 默认翻成 true,editInline: false 变成关法。」). A default move
+    // reaches every silent document with no parse error and nothing in the
+    // author's diff, so the upgrade path carries it as a TODO: only the deployment
+    // can say which list that never declared the key was relying on read-only
+    // cells. The same class as `view-pagination-page-size-default-50` and
+    // protocol 12's `rest-requireauth-default-flip`: no key is removed, so there
+    // is no tombstone and no RETIRED_KEYS_BY_MAJOR row, and no D2 conversion
+    // exists — a mechanical pass writing `editInline: false` into every silent
+    // view would preserve the old posture and defeat the ruling, and one writing
+    // `true` would add nothing the default does not already do. The one-vocabulary
+    // rule the printed `reason` names is objectui#5144 (a boolean view-level
+    // `inlineEdit` folds into `editInline`; an explicit `editInline` wins); the
+    // citation lives here, not in the printed guidance, which carries no tracker
+    // number.
+    {
+      id: 'list-view-edit-inline-default-on',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'ui.UserActionsConfig.editInline — an OMITTED editInline inside a list view\'s '
+        + 'userActions block, or a page interfaceConfig.userActions block',
+      replacement: 'nothing, to take the platform default: the list is editable in place by a user who '
+        + 'may update the object, under the permission gate that already exists. To keep a list '
+        + 'read-only in place — a log, an audit trail, a history, a report roll-up — write it: '
+        + '`userActions: { editInline: false }`',
+      reason:
+        'A RULED behaviour change on a default, so there is nothing to rewrite and nothing to '
+        + 'refuse: the maintainer\'s ruling of 2026-10-10 made a list view editable in place by '
+        + 'default on the v18 line, and the declared default of `UserActionsConfigSchema.editInline` '
+        + 'moved from `false` to `true`. A `userActions` block that omits `editInline` now parses to '
+        + '`true` — the renderer offers the inline-edit toggle, and a user who may `update` the object '
+        + 'edits a cell in place with the field\'s type-aware widget; a user without `update` sees no '
+        + 'toggle, because the permission gate is untouched. A view with no `userActions` block at all '
+        + 'parses with none on either side; the renderer reads an absent key as the spec default. The '
+        + 'one-vocabulary rule objectui ruled for the fold stands: a boolean view-level `inlineEdit` folds into '
+        + '`editInline` (`true` reads on and opens the grid in edit mode), and an explicit `editInline` '
+        + 'wins. Not losslessly convertible because the question is intent, not text: only the '
+        + 'deployment knows which silent lists were relying on read-only cells. The accept set is '
+        + 'unchanged — a boolean — and every authored `editInline` parses exactly as before. A '
+        + 'document that serialised an earlier parse (an `os compile` artifact) carries a written '
+        + '`false` and stays read-only in place; recompile it, or delete the key.',
+      acceptanceCriteria:
+        'An empty `userActions` block parses to `editInline: true`, and a list view carrying '
+        + '`userActions: {}` parses to `userActions.editInline` true; an authored '
+        + '`userActions: { editInline: false }` still parses to `false`; a view-level `inlineEdit: true` '
+        + 'still parses as before, with no `userActions` block materialised. In the console, a grid view '
+        + 'that declares neither key offers the inline-edit toggle to a user with `update` on the object '
+        + 'and not to a user without it; `userActions: { editInline: false }` removes it; '
+        + '`inlineEdit: true` still opens the grid in edit mode. Every list that must stay read-only in '
+        + 'place declares `userActions: { editInline: false }` and shows no toggle.',
     },
     {
       id: 'list-view-navigation-view-retired',

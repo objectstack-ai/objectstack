@@ -1515,6 +1515,15 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
  * other core toolbar controls, while `hideFields` / `rowColor` default OFF
  * (`=== true`) — column hiding and row colouring are opt-in affordances.
  *
+ * `editInline` defaults ON by maintainer ruling (2026-10-10, the v18 line:
+ * 「乙 v18 把 spec 默认翻成 true,editInline: false 变成关法。」): a list view
+ * is editable in place by default under the permission gate that already
+ * exists, and `editInline: false` is the opt-out. The renderer reads an absent
+ * key as this default; a boolean `inlineEdit` on the view folds into it, and
+ * an explicit `editInline` wins (objectui#5144's one-vocabulary rule, whose
+ * default value this flip changes and whose fold it leaves alone). D3 entry:
+ * `list-view-edit-inline-default-on` (protocol 18).
+ *
  * Name-collision note (same key NAME, different shape, on OTHER surfaces —
  * deliberate, each toggle is named after the config it gates): these three are
  * booleans HERE, while `rowColor` on the list view itself is a
@@ -1535,7 +1544,7 @@ export const UserActionsConfigSchema = lazySchema(() => strictObject({
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
   group: z.boolean().default(true).describe('Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
-  editInline: z.boolean().default(false).describe('Allow users to edit records inline — click a cell to edit it with the field\'s type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in.'),
+  editInline: z.boolean().default(true).describe('Allow users to edit records inline. On by default: a user who may update the object edits a cell in place with the field\'s type-aware widget (the same control the form uses), under the permission gate that already decides whether the object is editable at all. Declare `editInline: false` to make the list read-only in place.'),
   hideFields: z.boolean().default(false).describe('Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component\'s `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in.'),
   rowColor: z.boolean().default(false).describe('Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in.'),
   buttons: z.array(z.string()).optional().describe('Custom action button IDs to show in the toolbar'),
