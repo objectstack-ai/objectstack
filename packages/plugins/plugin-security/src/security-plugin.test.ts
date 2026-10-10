@@ -4426,7 +4426,11 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
     // where `everyone` names the baseline the boot binding above judges.
     const items = new Map<string, any>();
     const registry = {
-      registerItem: (type: string, item: any) => { items.set(`${type}:${item.name}`, item); },
+      // Stamped with `_packageId` as the engine registry stamps it: the declared-capability
+      // reader tells the platform's own capability items apart by it.
+      registerItem: (type: string, item: any, _key?: string, packageId?: string) => {
+        items.set(`${type}:${item.name}`, packageId ? { ...item, _packageId: packageId } : item);
+      },
       getItem: (type: string, name: string) => items.get(`${type}:${name}`),
       listItems: (type: string) => [...items.entries()].filter(([k]) => k.startsWith(`${type}:`)).map(([, v]) => v),
       isPackageDisabled: () => false,
