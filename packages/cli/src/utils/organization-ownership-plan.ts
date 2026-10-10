@@ -317,7 +317,7 @@ interface Catalog {
   columns: Map<string, Set<string>>;
 }
 
-async function readCatalog(sql: Sql, reader: PlanReader): Promise<Catalog> {
+async function readCatalog(sql: Sql, reader: PlanReader, inventoried: ReadonlySet<string>): Promise<Catalog> {
   const listSql = physicalTableListSql(reader.client);
   if (!listSql) {
     throw new OrganizationOwnershipPlanRefusal(
@@ -344,11 +344,11 @@ async function readCatalog(sql: Sql, reader: PlanReader): Promise<Catalog> {
     list.push(table);
     bases.set(base, list);
   }
-  if (!bases.has('sys_organization')) {
+  if (![...bases.keys()].some((base) => hasPlatformObjectPrefix(base) && inventoried.has(base))) {
     throw new OrganizationOwnershipPlanRefusal(
       'not-an-objectstack-database',
-      `This database holds no sys_organization table (${rows.length} table(s) listed), so it is not an ObjectStack ` +
-        'database the ceremony can plan — check --database-url / $OS_DATABASE_URL.',
+      `This database holds none of the platform tables the inventory names (${rows.length} table(s) listed), so it is ` +
+        'not an ObjectStack database the ceremony can plan — check --database-url / $OS_DATABASE_URL.',
     );
   }
   const columns = new Map<string, Set<string>>();
@@ -737,12 +737,17 @@ export async function buildOrganizationOwnershipPlan(opts: {
     );
   }
   const sql = new Sql(opts.reader, dialect);
-  const catalog = await readCatalog(sql, opts.reader);
   const byObject = new Map(inventory.map((e) => [e.object, e]));
+  const catalog = await readCatalog(sql, opts.reader, new Set(byObject.keys()));
 
-  const organizations = await sql.count('sys_organization', `SELECT COUNT(*) AS n FROM ${sql.q('sys_organization', 'sys_organization')}`);
+  // No sys_organization table (a deployment composed without the auth family)
+  // holds no organization at all: nothing derives to a Default Organization.
+  const hasOrganizations = catalog.bases.has('sys_organization');
+  const organizations = hasOrganizations
+    ? await sql.count('sys_organization', `SELECT COUNT(*) AS n FROM ${sql.q('sys_organization', 'sys_organization')}`)
+    : 0;
   let defaultOrganizationId: string | null = null;
-  if (catalog.columns.get('sys_organization')?.has('slug')) {
+  if (hasOrganizations && catalog.columns.get('sys_organization')?.has('slug')) {
     const rows = await sql.read(
       'sys_organization',
       `SELECT ${sql.q(ID, 'sys_organization')} AS id FROM ${sql.q('sys_organization', 'sys_organization')} WHERE ${sql.q('slug', 'sys_organization')} = ?`,

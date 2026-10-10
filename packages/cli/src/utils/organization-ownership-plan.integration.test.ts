@@ -185,6 +185,13 @@ describe('ADR-0131 D10 preflight — the per-table plan', () => {
     expect(p.summary.unattributableRows).toBe(0);
   });
 
+  it('a deployment composed without the auth family holds no organization: nothing derives, the plan still runs', async () => {
+    db.exec('DROP TABLE sys_organization');
+    const p = await plan('single');
+    expect(p).toMatchObject({ organizations: 0, defaultOrganization: null });
+    expect(table(p, 'crm_deal').unattributable).toEqual([{ id: 'deal_2', reason: expect.stringContaining('no Default Organization') }]);
+  });
+
   it('under single with no Default Organization, nothing is assigned and the reason says why', async () => {
     db.exec("UPDATE sys_organization SET slug = 'renamed' WHERE id = 'org_default'");
     const p = await plan('single');
@@ -220,7 +227,9 @@ describe('ADR-0131 D10 preflight — it refuses a table it cannot enumerate, nam
   });
 
   it('a database that is not an ObjectStack one (the wrong --database-url)', async () => {
-    db.exec('DROP TABLE sys_organization');
+    for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'sys%'").all() as Array<{ name: string }>) {
+      db.exec(`DROP TABLE "${name}"`);
+    }
     const r = await refusal(plan('isolated'));
     expect(r.reason).toBe('not-an-objectstack-database');
   });
