@@ -50,6 +50,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin, type ApprovalsPluginOptions } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
@@ -206,10 +207,11 @@ describe('the record-reader tier OFF (the default)', () => {
     const ctx = asUser(OUTSIDER);
     expect(await listIds(rig, ctx)).toEqual({ ids: [], total: 0 });
     expect(await listIds(rig, ctx, forRecord(rig.ids.recordA))).toEqual({ ids: [], total: 0 });
-    expect(await rig.engine.count(REQUEST, { context: ctx } as any)).toBe(0);
-    const groups = await rig.engine.aggregate(REQUEST, {
+    expect(await rig.engine.count(REQUEST, { context: ctx } satisfies EngineCountOptions)).toBe(0);
+    const grouped: EngineAggregateOptions = {
       groupBy: ['status'], aggregations: [{ function: 'count', alias: 'n' }], context: ctx,
-    } as any);
+    };
+    const groups = await rig.engine.aggregate(REQUEST, grouped);
     expect(groups).toEqual([]);
   });
 
@@ -226,7 +228,7 @@ describe('the record-reader tier OFF (the default)', () => {
     const rig = await boot();
     const ctx = asUser(READER);
     // The control half first: this caller really can read the record.
-    expect((await rig.engine.find(OBJECT, { where: { id: rig.ids.recordA }, context: ctx } as any)).length).toBe(1);
+    expect((await rig.engine.find(OBJECT, { where: { id: rig.ids.recordA }, context: ctx } satisfies EngineQueryOptions)).length).toBe(1);
     expect(await listIds(rig, ctx, forRecord(rig.ids.recordA))).toEqual({ ids: [], total: 0 });
     expect((await byId(rig, ctx, rig.ids.requestA)).error?.status).toBe(404);
   });
@@ -245,13 +247,13 @@ describe('the record-reader tier OFF (the default)', () => {
     const rig = await boot();
     const all = [rig.ids.requestA, rig.ids.requestB].sort();
     expect(await listIds(rig, ADMIN)).toEqual({ ids: all, total: 2 });
-    expect(await rig.engine.count(REQUEST, { context: ADMIN } as any)).toBe(2);
+    expect(await rig.engine.count(REQUEST, { context: ADMIN } satisfies EngineCountOptions)).toBe(2);
     expect((await byId(rig, ADMIN, rig.ids.requestB)).record?.id).toBe(rig.ids.requestB);
   });
 
   it('control: the approval engine\'s own reads, as the system, are not narrowed', async () => {
     const rig = await boot();
-    expect((await rig.engine.find(REQUEST, { context: SYSTEM } as any)).length).toBe(2);
+    expect((await rig.engine.find(REQUEST, { context: SYSTEM } satisfies EngineQueryOptions)).length).toBe(2);
     // …and the approvals door, which reads that way, still serves its callers.
     expect((await rig.svc.listRequests({}, asUser(SUBMITTER_A))).map((r) => r.id)).toEqual([rig.ids.requestA]);
   });
