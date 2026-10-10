@@ -16,9 +16,25 @@
 import { describe, expect, it } from 'vitest';
 import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
 
-import { validateRlsPredicateEnforceability, RLS_PREDICATE_UNENFORCEABLE } from './validate-rls-predicate-enforceability.js';
+import {
+  validateRlsPredicateEnforceability as validateRlsPredicateEnforceabilityUnrecorded,
+  RLS_PREDICATE_UNENFORCEABLE,
+} from './validate-rls-predicate-enforceability.js';
 import { AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is the id's `os explain` entry. Every call below records what it
+// fired, and the last case in this file holds each recorded verdict to one
+// line of at most 200 characters. Run the whole file: that case reads what the
+// cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateRlsPredicateEnforceability: typeof validateRlsPredicateEnforceabilityUnrecorded = (...args) => {
+  const findings = validateRlsPredicateEnforceabilityUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 interface JudgeCall {
   object: string;
@@ -78,7 +94,7 @@ describe('validateRlsPredicateEnforceability — the engine judge is an INPUT (#
     ]);
   });
 
-  it('turns a refusal into ONE rls-predicate-unenforceable finding that quotes the engine verbatim', () => {
+  it('turns a refusal into ONE rls-predicate-unenforceable finding that quotes the engine\'s verdict', () => {
     const { judgeFilter } = recordingJudge(REFUSAL);
     const findings = validateRlsPredicateEnforceability(stackWith({ using: "amount.startsWith('5')" }), {
       judgeFilter,
@@ -91,8 +107,24 @@ describe('validateRlsPredicateEnforceability — the engine judge is an INPUT (#
       where: 'permission set "sales" policy "p" on object "deal"',
     });
     const refusal = REFUSAL as Extract<EngineFilterJudgement, { ok: false }>;
-    expect(findings[0].message).toContain(`(${refusal.code} / ${refusal.status}): ${refusal.message}`);
-    expect(findings[0].message).toMatch(/^RLS using `amount\.startsWith\('5'\)` lowers, but the engine refuses/);
+    expect(findings[0].message).toBe(`RLS using (${refusal.code} / ${refusal.status}): ${refusal.message}`);
+  });
+
+  it('[#22161] quotes the verdict half of the engine\'s leading sentence, never its reasoning or remedy', () => {
+    const { judgeFilter } = recordingJudge({
+      ok: false,
+      code: 'INVALID_FIELD',
+      status: 400,
+      message:
+        "find('deal') filters on 'amount', a virtual field — no driver materialises it. The predicate was not applied. " +
+        "Denormalise the value onto 'deal'.",
+    });
+    const [finding] = validateRlsPredicateEnforceability(stackWith({ using: "amount.startsWith('5')" }), { judgeFilter });
+    expect(finding.message).toBe("RLS using (INVALID_FIELD / 400): find('deal') filters on 'amount', a virtual field");
+    // What the refusal costs is the `os explain` entry's.
+    expect(explainRule(RLS_PREDICATE_UNENFORCEABLE)?.paragraphs.join('\n')).toContain(
+      'every analytics query over the object that this policy scopes is refused',
+    );
   });
 
   it('prescribes by the engine CODE: a placeholder is sent to `current_user`, a field to denormalisation', () => {
@@ -210,5 +242,17 @@ describe('the judge reaches the rule through BOTH run signatures (#20158)', () =
     });
     expect(result.rulesRun).toContain('validateRlsPredicateEnforceability');
     expect(result.errors.filter((f) => f.rule.startsWith('rls-predicate-'))).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: the cases above fired the engine verdict, so
+    // the shape assertion cannot pass over an empty record.
+    expect(fired.some((f) => f.message.startsWith('RLS using (INVALID_FILTER / 400): '))).toBe(true);
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });
