@@ -217,7 +217,7 @@ describe.each(NODE_TYPES)('%s `fields.*` — the retired `{…}` template dialec
   const TEMPLATED: ReadonlyArray<[string, Record<string, unknown>, string, string]> = [
     ['a sole token', { total: '{price}' }, 'config.fields.total', "source: 'price'"],
     ['text with holes', { subject: 'Quote for {name} at {price}' }, 'config.fields.subject', `"'Quote for ' + name + ' at ' + price"`],
-    ['a string inside a literal', { payload: { note: 'for {name}' } }, 'config.fields.payload.note', `"'for ' + name"`],
+    ['a string inside a literal — the whole value as a CEL literal', { payload: { note: 'for {name}' } }, 'config.fields.payload.note', `"{'note': 'for ' + name}"`],
     ['a template expression', { total: '{round(price * 100) / 100}' }, 'config.fields.total', "source: 'round(price * 100) / 100.0'"],
   ];
 
