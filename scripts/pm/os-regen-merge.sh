@@ -356,15 +356,16 @@
 #
 # ## Class 3 is not ONE instruction, and the ledger is what shows it
 #
-# "Resolve by regeneration" is correct for three of the ledger's thirty tracked
+# "Resolve by regeneration" is correct for two of the ledger's thirty tracked
 # entries and WRONG for the rest, so membership alone cannot carry the message:
 #
-#   `packages/spec/src/migrations/registry.ts`, `skills/README.md` and
-#   `content/docs/ai/skills-reference.mdx` are MIXED — a generator owns the text
-#   between a marker pair, a human owns everything outside it. A conflict INSIDE
-#   a region is resolved by rerunning that generator and by nothing else; the
-#   prose outside it is a hand merge. The module's own header names these three
-#   as the files `NOT_DRIVER_MANAGED` "turns away", and one more of that shape
+#   `skills/README.md` and `content/docs/ai/skills-reference.mdx` are MIXED (the
+#   migration registry was the third until #22554 made it git-ignored build
+#   output) — a generator owns the text between a marker pair, a human owns
+#   everything outside it. A conflict INSIDE a region is resolved by rerunning
+#   that generator and by nothing else; the prose outside it is a hand merge.
+#   The module's own header names these two as the files `NOT_DRIVER_MANAGED`
+#   "turns away", and one more of that shape
 #   (`content/docs/permissions/tenant-audit-census.mdx`) is reached through a
 #   directory entry rather than named outright.
 #
@@ -2005,20 +2006,24 @@ mode_self_test() {
   #         the surface it reads still has the shape and still declares the path
   #         the card is about. If a later change routes that file or drops its
   #         entry, this reddens and the classification gets revisited instead of
-  #         silently reverting to the old label.
+  #         silently reverting to the old label. The pinned path is
+  #         `skills/README.md` since #22554: the migration registry it first
+  #         pinned became git-ignored build output, an `untracked` row the
+  #         reader skips, and `skills/README.md` is the same shape — tracked,
+  #         MIXED, marked regions, a generator.
   ndm_real="$(read_not_driver_managed "$(dirname "$SELF")/../regen-artifacts.mjs")" || ndm_real=''
   st_case 'the real ledger is readable and non-empty' \
     "$([ "$(printf '%s' "$ndm_real" | grep -c . || true)" -gt 0 ] && echo yes || echo no)" yes
-  st_case 'and still declares the migrations registry (the card s path)' \
-    "$(printf '%s\n' "$ndm_real" | awk -F'\t' '$1 == "packages/spec/src/migrations/registry.ts"' | grep -c . || true)" 1
+  st_case 'and still declares a MIXED marked-region file (skills/README.md)' \
+    "$(printf '%s\n' "$ndm_real" | awk -F'\t' '$1 == "skills/README.md"' | grep -c . || true)" 1
   st_case 'and records the generator that resolves its regions' \
-    "$(printf '%s\n' "$ndm_real" | awk -F'\t' '$1 == "packages/spec/src/migrations/registry.ts" { print $2 }' \
-       | grep -c 'gen:migration-registry' || true)" 1
+    "$(printf '%s\n' "$ndm_real" | awk -F'\t' '$1 == "skills/README.md" { print $2 }' \
+       | grep -c 'gen:skill-docs' || true)" 1
   st_case 'control: a fabricated path is not in it' \
     "$(printf '%s\n' "$ndm_real" | awk -F'\t' '$1 == "packages/spec/no-such-ledger-entry.json"' | grep -c . || true)" 0
   st_case 'control: that file really is unrouted, so it can only reach class 3' \
-    "$(cd "$(dirname "$SELF")/../.." && git check-attr merge -- packages/spec/src/migrations/registry.ts)" \
-    'packages/spec/src/migrations/registry.ts: merge: unspecified'
+    "$(cd "$(dirname "$SELF")/../.." && git check-attr merge -- skills/README.md)" \
+    'skills/README.md: merge: unspecified'
 
   # --- 9d. AN UNREADABLE LEDGER IS LOUD, never a silent class-1 sweep. This is
   #         the failure mode that would restore the defect with the evidence
