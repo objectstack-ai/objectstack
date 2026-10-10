@@ -24,8 +24,8 @@
   "predicate": "resolveTenantFieldName(registered schema) !== null, where the registered schema is the authored schema plus the columns resolveInjectedSystemColumns says the registration injects (the applySystemFields pass). Both functions are loaded from source and executed; neither is re-spelled here.",
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
-    "registered": 83,
-    "inReach": 48,
+    "registered": 84,
+    "inReach": 49,
     "outOfReach": 35
   },
   "reasonTotals": {
@@ -150,6 +150,13 @@
     {
       "name": "sys_comment",
       "file": "packages/plugins/plugin-audit/src/objects/sys-comment.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_comment_reaction",
+      "file": "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.ts",
       "reach": "in",
       "tenantField": "organization_id",
       "reasons": []

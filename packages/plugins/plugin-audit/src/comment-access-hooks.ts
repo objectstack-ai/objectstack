@@ -80,6 +80,31 @@
  * (`enable.feeds`), this one answers "may THIS caller see/touch THIS record's
  * comments". Both are fail-closed 403s, so their relative order is not
  * load-bearing.
+ *
+ * ## A comment's reactions ride the same two installers
+ *
+ * `sys_comment_reaction` (#22566, ruling A amended on #22505) is one emoji
+ * reaction, the reactor's own record, keyed to its comment by `comment_id`.
+ * Its access derives from its COMMENT the way a comment's derives from its
+ * parent record, so the two installers below answer for it too, with the
+ * same handler registered on both objects:
+ *
+ *  - read: a reaction is readable exactly when its comment is. The gate asks
+ *    {@link resolveReadableParentIds} about `sys_comment` under the caller's
+ *    context — one caller-scoped read of the comments, which runs the
+ *    comment's own grant, row scope and thread gate. No rule about who may
+ *    read a comment is restated for its reactions.
+ *  - create: a caller reacts only to a comment that same question says they
+ *    can read, and `user_id` is stamped from the session.
+ *  - delete: deliberately NOT here. A reaction is its reactor's own record, so
+ *    the platform's own-record floor (`owner_only_deletes`, plugin-security)
+ *    is the whole rule; a second, gate-local ownership check would be the
+ *    widener-blind second implementation that floor's provenance warns about.
+ *  - update: not offered (`apiMethods`), so nothing to gate.
+ *
+ * One handler per seam, not one per object, on purpose: the system and
+ * context-less early return each installer opens with is read ONCE for both
+ * objects, so the two can never disagree about who is exempt.
  */
 
 import { withoutOperationPrivateKeys } from '@objectstack/core';
@@ -176,6 +201,18 @@ const READ_OPS = new Set(['find', 'findOne', 'count', 'aggregate']);
 /** No real row matches — the fail-closed sentinel (mirrors plugin-sharing's
  * `{ id: '__deny_all__' }` read-filter deny). */
 const READ_DENY_ALL = { id: '__comment_thread_denied__' } as const;
+
+/** The object a reaction's access derives from. */
+const COMMENT_OBJECT = 'sys_comment';
+
+/**
+ * A comment's emoji reactions — one row per (comment, emoji, user), the
+ * reactor's own record (`objects/sys-comment-reaction.object.ts`).
+ */
+export const COMMENT_REACTION_OBJECT = 'sys_comment_reaction';
+
+/** The reaction read gate's fail-closed sentinel. */
+const REACTION_READ_DENY_ALL = { id: '__comment_reaction_denied__' } as const;
 
 /** Object machine-name shape (`ObjectSchema.name` in packages/spec). */
 const OBJECT_NAME_RE = /^[a-z_][a-z0-9_]*$/;
@@ -449,39 +486,78 @@ export function installCommentAccessHooks(
     return answer.outcome === 'allow' || answer.outcome === 'not_applicable';
   };
 
+  /**
+   * [#22566] Create a reaction: the reactor is the session's user, and the
+   * comment must be one the caller can read.
+   *
+   * `user_id` is stamped, never taken from the client — a reaction recorded
+   * under someone else's name is the spoofed provenance `author_id` stamping
+   * exists to stop. A session with no user has nobody to record, so it is
+   * refused rather than left to whatever the client sent.
+   *
+   * "Can read the comment" is asked of {@link resolveReadableParentIds}, the
+   * evaluator the reaction read gate asks, so the create door never admits a
+   * reaction the read door would hide.
+   */
+  const authorizeReactionInsert = async (ctx: any, data: Record<string, unknown>): Promise<void> => {
+    const userId: unknown = ctx.session.userId;
+    if (typeof userId !== 'string' || userId === '') {
+      forbid('Cannot react: there is no signed-in user to record as the one reacting');
+    }
+    data.user_id = userId;
+
+    const commentId = data.comment_id;
+    if ((typeof commentId !== 'string' && typeof commentId !== 'number') || String(commentId) === '') {
+      forbid(`Cannot react: comment_id ${JSON.stringify(commentId ?? null)} does not name a comment`);
+    }
+    const readable = await resolveReadableParentIds(
+      engine,
+      callerContext(ctx),
+      new Map([[COMMENT_OBJECT, new Set([String(commentId)])]]),
+    );
+    if (!readable.get(COMMENT_OBJECT)?.has(String(commentId))) {
+      forbid(`Cannot react to comment ${String(commentId)}: the comment does not exist or you cannot read it`);
+    }
+  };
+
   // ── Create: parent-record READ access + author_id stamping ──────────
-  engine.registerHook(
-    'beforeInsert',
-    async (ctx: any) => {
-      if (ctx?.session?.isSystem) return;
-      if (!ctx?.session) return; // context-less programmatic call (bare kernel)
-      const data: any = ctx?.input?.data;
-      if (!data || typeof data !== 'object') return;
+  // One handler for both objects (see "A comment's reactions" in the module
+  // header): the system / context-less exemption is decided once.
+  const onInsert = async (ctx: any): Promise<void> => {
+    if (ctx?.session?.isSystem) return;
+    if (!ctx?.session) return; // context-less programmatic call (bare kernel)
+    const data: any = ctx?.input?.data;
+    if (!data || typeof data !== 'object') return;
 
-      // Server stamps provenance: the session identity wins over whatever the
-      // client sent. Without this the author-or-parent-editor rule below is
-      // spoofable — a caller could post as anyone, then "author-delete" it.
-      if (ctx.session.userId) data.author_id = ctx.session.userId;
+    if (ctx.object === COMMENT_REACTION_OBJECT) {
+      await authorizeReactionInsert(ctx, data);
+      return;
+    }
 
-      const target = parseCommentThreadId(data.thread_id);
-      if (!target) {
-        forbid(
-          `Cannot comment: thread_id ${JSON.stringify(data.thread_id ?? null)} does not name a record ` +
-            '(expected `{object_name}:{record_id}`)',
-        );
-      }
-      // Commenting requires READ on the parent — a user who may see a record
-      // may discuss it. The parent's OWD/sharing/RLS/CRUD decide, so a
-      // permission set that reads nothing (a portal/guest set) cannot comment.
-      if (!(await callerCanRead(ctx, target))) {
-        forbid(
-          `Cannot comment on ${target.object}/${target.recordId}: the record does not exist or you cannot read it`,
-          target.object,
-        );
-      }
-    },
-    { object: 'sys_comment', packageId: PACKAGE_ID },
-  );
+    // Server stamps provenance: the session identity wins over whatever the
+    // client sent. Without this the author-or-parent-editor rule below is
+    // spoofable — a caller could post as anyone, then "author-delete" it.
+    if (ctx.session.userId) data.author_id = ctx.session.userId;
+
+    const target = parseCommentThreadId(data.thread_id);
+    if (!target) {
+      forbid(
+        `Cannot comment: thread_id ${JSON.stringify(data.thread_id ?? null)} does not name a record ` +
+          '(expected `{object_name}:{record_id}`)',
+      );
+    }
+    // Commenting requires READ on the parent — a user who may see a record
+    // may discuss it. The parent's OWD/sharing/RLS/CRUD decide, so a
+    // permission set that reads nothing (a portal/guest set) cannot comment.
+    if (!(await callerCanRead(ctx, target))) {
+      forbid(
+        `Cannot comment on ${target.object}/${target.recordId}: the record does not exist or you cannot read it`,
+        target.object,
+      );
+    }
+  };
+  engine.registerHook('beforeInsert', onInsert, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
+  engine.registerHook('beforeInsert', onInsert, { object: COMMENT_REACTION_OBJECT, packageId: PACKAGE_ID });
 
   /** Resolve every sys_comment row a write matches, under SYSTEM context — the
    * caller may legitimately be unable to READ rows they are allowed to touch,
@@ -705,27 +781,101 @@ export function installCommentReadVisibility(
     ctx.ast.where = ctx.ast.where ? { $and: [ctx.ast.where, filter] } : filter;
   };
 
-  engine.registerMiddleware(
-    async (ctx, next) => {
-      // Only reads carry an `ast` to constrain; writes are gated by the hooks
-      // above. System / context-less (internal) reads are not narrowed.
-      if (!READ_OPS.has(ctx.operation) || !ctx.ast || !ctx.context || ctx.context.isSystem) {
-        return next();
-      }
-      try {
-        const filter = await computeThreadVisibilityFilter(engine, ctx, logger);
-        if (filter) andIn(ctx, filter);
-      } catch (err) {
-        // A filter-compute failure must never fall open into a leak.
-        logger.warn(
-          `[audit] comment read visibility: filter failed, denying all (${(err as Error)?.message ?? err})`,
-        );
-        andIn(ctx, READ_DENY_ALL);
-      }
+  // One handler for both objects (see "A comment's reactions" in the module
+  // header): the system / context-less exemption is decided once.
+  const gate = async (ctx: CommentReadMiddlewareCtx, next: () => Promise<void>): Promise<void> => {
+    // Only reads carry an `ast` to constrain; writes are gated by the hooks
+    // above. System / context-less (internal) reads are not narrowed.
+    if (!READ_OPS.has(ctx.operation) || !ctx.ast || !ctx.context || ctx.context.isSystem) {
       return next();
-    },
-    { object: 'sys_comment' },
-  );
+    }
+    const reaction = ctx.object === COMMENT_REACTION_OBJECT;
+    try {
+      const filter = reaction
+        ? await computeReactionVisibilityFilter(engine, ctx, logger)
+        : await computeThreadVisibilityFilter(engine, ctx, logger);
+      if (filter) andIn(ctx, filter);
+    } catch (err) {
+      // A filter-compute failure must never fall open into a leak.
+      logger.warn(
+        `[audit] ${reaction ? 'comment reaction' : 'comment'} read visibility: filter failed, denying all ` +
+          `(${(err as Error)?.message ?? err})`,
+      );
+      andIn(ctx, reaction ? REACTION_READ_DENY_ALL : READ_DENY_ALL);
+    }
+    return next();
+  };
+  engine.registerMiddleware(gate, { object: COMMENT_OBJECT });
+  engine.registerMiddleware(gate, { object: COMMENT_REACTION_OBJECT });
+}
+
+/**
+ * [#22566] Resolve the WHERE predicate for one `sys_comment_reaction` read: a
+ * reaction is readable exactly when its comment is.
+ *
+ * Returns `null` when the query matches no rows (nothing to narrow), a
+ * `comment_id` `$in` of the comments the caller can read, or the deny-all
+ * sentinel.
+ *
+ * Nothing here decides whether a comment is readable. The candidate comment
+ * ids are handed to {@link resolveReadableParentIds} as one caller-scoped read
+ * of `sys_comment`, and that read runs everything a direct read of those
+ * comments runs: the caller's grant on `sys_comment`, its row scope, and the
+ * thread gate above, which in turn asks the record each thread names. A
+ * reaction whose comment no longer exists is not found by that read, so it is
+ * excluded (fail closed), as is a row naming no comment at all.
+ */
+async function computeReactionVisibilityFilter(
+  engine: CommentAccessEngine,
+  ctx: CommentReadMiddlewareCtx,
+  logger: CommentAccessLogger,
+): Promise<unknown | null> {
+  // 1. The comment ids the query would touch, read under SYSTEM context (the
+  //    caller may not see the rows yet; that is what is being decided). The
+  //    caller's own order rides along, so on a table larger than the scan
+  //    bound the window scanned is the window the caller pages through.
+  const orderBy = (ctx.ast as { orderBy?: unknown } | undefined)?.orderBy;
+  const candidates = await engine.find(COMMENT_REACTION_OBJECT, {
+    where: (ctx.ast?.where as Record<string, unknown>) ?? {},
+    fields: ['comment_id'],
+    ...(Array.isArray(orderBy) && orderBy.length > 0 ? { orderBy } : {}),
+    limit: READ_SCAN_LIMIT,
+    context: { ...SYSTEM_CTX },
+  });
+  if (!candidates.length) return null;
+  if (candidates.length >= READ_SCAN_LIMIT) {
+    // Not silent (fail-closed truncation): rows beyond the scan window are
+    // excluded, so a very broad read may omit reactions the caller could see.
+    // A comment feed reads the reactions of the comments it shows, by
+    // `comment_id`, and never hits this.
+    logger.warn(
+      `[audit] comment reaction read visibility: candidate pre-scan hit the ${READ_SCAN_LIMIT}-row cap; ` +
+        'the visibility filter for this broad read is fail-closed and may omit visible rows — scope the query by comment_id',
+    );
+  }
+
+  /** comment id as compared → the value as STORED, which is what the emitted
+   * filter carries, so it can only match rows the pre-scan actually saw. */
+  const commentIds = new Map<string, unknown>();
+  for (const row of candidates) {
+    const stored = row.comment_id;
+    if (typeof stored !== 'string' && typeof stored !== 'number') continue;
+    const key = String(stored);
+    if (key === '' || commentIds.has(key)) continue;
+    commentIds.set(key, stored);
+  }
+  if (commentIds.size === 0) return REACTION_READ_DENY_ALL;
+
+  // 2. The one readability answer: the comments the CALLER can read.
+  const readable = (
+    await resolveReadableParentIds(engine, ctx.context, new Map([[COMMENT_OBJECT, new Set(commentIds.keys())]]))
+  ).get(COMMENT_OBJECT);
+
+  // 3. Keep the stored values of the readable comments.
+  const kept: unknown[] = [];
+  for (const [key, stored] of commentIds) if (readable?.has(key)) kept.push(stored);
+  if (kept.length === 0) return REACTION_READ_DENY_ALL;
+  return { comment_id: { $in: kept } };
 }
 
 /**

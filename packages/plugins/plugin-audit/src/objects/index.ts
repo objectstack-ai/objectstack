@@ -5,7 +5,8 @@
  * (ADR-0029 K2). Moved here from the `@objectstack/platform-objects` monolith
  * so the plugin owns its data model + behavior — exactly the objects the audit
  * writers produce/observe (sys_audit_log + sys_activity rows; sys_comment
- * @mention hook).
+ * @mention hook), and `sys_comment_reaction`, the reactor's own record of an
+ * emoji reaction to a comment.
  *
  * Intentionally NOT moved here:
  *   - `sys_notification` — the ADR-0030 rework landed, and the object is the
@@ -19,3 +20,4 @@
 export { SysAuditLog } from './sys-audit-log.object.js';
 export { SysActivity } from './sys-activity.object.js';
 export { SysComment } from './sys-comment.object.js';
+export { SysCommentReaction } from './sys-comment-reaction.object.js';
