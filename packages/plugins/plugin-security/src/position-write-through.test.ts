@@ -508,10 +508,13 @@ describe('[C2 stage S10, ADR-0048 addendum N.2/N.3] one namespace — a create o
     expect(await b.envRows(held)).toEqual([]);
   });
 
-  it('control: the engine\'s own refusals keep their answer — a reserved identity name stays 400 VALIDATION_FAILED', async () => {
+  it('control: the engine\'s own refusals keep their answer — a reserved identity name stays VALIDATION_FAILED', async () => {
     const b = await boot();
-    const refusal = await refusalOf(create(b, { name: 'org_admin', label: 'Mine' }));
-    expect(envelope(refusal)).toEqual({ code: 'VALIDATION_FAILED', status: 400 });
+    // The platform holds `org_admin` too, but the engine's rule validator refuses
+    // the row before the door is asked (the REST layer answers it 400).
+    const refusal: any = await refusalOf(create(b, { name: 'org_admin', label: 'Mine' }));
+    expect({ name: refusal?.name, code: refusal?.code }).toEqual({ name: 'ValidationError', code: 'VALIDATION_FAILED' });
+    expect(await b.rows('org_admin')).toEqual([]);
   });
 
   it('control: an edit that keeps a held name stays a row write, with no definition and no refusal', async () => {
