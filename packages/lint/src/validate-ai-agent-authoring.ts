@@ -160,15 +160,14 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
       rule: AGENT_AUTHORING_WITHDRAWN,
       where: `agent "${name}"`,
       path: `agents[${ai}]`,
+      // [#22161] One verdict per arm; the withdrawal, how the runtime enforces
+      // it and why this is a warning are `os explain` text.
       message: isPlatformName
-        ? `This stack declares an agent named "${name}", which is a PLATFORM agent id. The ` +
-          `runtime serves its own record for that name and ignores this one — the declaration ` +
-          `has no effect and will drift from the platform's definition.`
-        : `This stack declares the agent "${name}", but tenant/app-package agents were withdrawn ` +
-          `(ADR-0063 §2): the kernel ships exactly two agents (\`ask\`, \`build\`) and the surface ` +
-          `the user is in binds one. The runtime filters this record out of the agent catalog and ` +
-          `refuses to load it, so it never runs — it parses, validates, and ships as inert ` +
-          `metadata.`,
+        ? `This stack declares an agent named "${name}", which is a PLATFORM agent id, so the ` +
+          `runtime serves its own record for that name and this declaration has no effect`
+        : `This stack declares the agent "${name}", but app-package agents were withdrawn ` +
+          `(ADR-0063 §2): the runtime filters it out of the agent catalog and refuses to load it, ` +
+          `so it never runs`,
       hint: isPlatformName
         ? `Remove the declaration; the platform owns "${name}". Extend it with skills instead.`
         : `Delete the agent and express its capability as skills. Everything an agent carried ` +
@@ -202,13 +201,11 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
         rule: DEFAULT_AGENT_LEGACY_ALIAS,
         where: `app "${appName}".defaultAgent`,
         path: `apps[${appIdx}].defaultAgent`,
+        // [#22161] One verdict; what the alias registry is for and why the
+        // aliased pin is the weaker one are `os explain` text.
         message:
-          `app "${appName}" pins \`defaultAgent\` to "${defaultAgent}", the RETIRED alias of the ` +
-          `platform agent "${canonical}". It still resolves — the alias registry maps legacy ` +
-          `names to canonical ones for old bookmarks and persisted \`agent_id\`s (ADR-0063 §2) — ` +
-          `so nothing is broken at runtime; what is wrong is the spelling in the artifact. It is ` +
-          `also the weaker pin: resolution depends on the owning package's in-process alias ` +
-          `registration having run, which the canonical id does not.`,
+          `app "${appName}" pins \`defaultAgent\` to "${defaultAgent}", the RETIRED alias of ` +
+          `platform agent "${canonical}": it still resolves, but only through the alias registry`,
         hint:
           `Write \`defaultAgent: '${canonical}'\`. The aliases are back-compat resolution, not ` +
           `authoring vocabulary — always author the canonical id (${roster}).`,
@@ -221,12 +218,11 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
       rule: DEFAULT_AGENT_OUTSIDE_ROSTER,
       where: `app "${appName}".defaultAgent`,
       path: `apps[${appIdx}].defaultAgent`,
+      // [#22161] One verdict; how the key resolves and why it is not a schema
+      // enum are `os explain` text.
       message:
         `app "${appName}" pins \`defaultAgent\` to "${defaultAgent}", which is not a platform ` +
-        `agent (${roster}). The kernel ships exactly two agents (ADR-0063 §2) and resolves this ` +
-        `key against them and their legacy aliases only — an unrecognized name is not rejected, ` +
-        `it silently falls back to the platform default at runtime, so the pin has no effect and ` +
-        `the value drifts from what actually serves the app.`,
+        `agent (${roster}), so it silently falls back to the platform default and the pin has no effect`,
       hint:
         `Set \`defaultAgent\` to one of the platform agent names: ${roster}. If the goal is a ` +
         `dedicated persona or capability, express it as skills instead — they attach to "ask" ` +

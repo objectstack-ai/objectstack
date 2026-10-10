@@ -940,6 +940,12 @@ export {
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
   UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
+  // [#22161] Three `lintDataModel` ids that had no constant, published so a
+  // `RULE_EXPLANATIONS` key can be held to one (`rule-explanations.test.ts`)
+  // and a consumer can compare `f.rule` against a name, not a retyped slug.
+  RELATIONSHIP_MASTER_DETAIL_REQUIRED,
+  RELATIONSHIP_DELETE_BEHAVIOR,
+  ROLLUP_NON_NUMERIC_AGGREGAND,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
 
