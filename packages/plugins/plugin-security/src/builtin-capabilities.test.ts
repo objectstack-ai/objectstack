@@ -16,6 +16,7 @@ import {
   withoutPlatformCapabilityItems,
 } from './builtin-capabilities.js';
 import { SECURITY_PLUGIN_ID } from './manifest.js';
+import { readDeclaredCapabilityContext } from './declared-capability-context.js';
 
 describe('securityBuiltinCapabilities', () => {
   it('is the spec’s curated list itself, not a copy', () => {
@@ -123,5 +124,20 @@ describe('withoutPlatformCapabilityDeclarations', () => {
     const bare = { insert: async () => undefined };
     expect(withoutPlatformCapabilityDeclarations(bare)).toBe(bare);
     expect(withoutPlatformCapabilityDeclarations(undefined)).toBeUndefined();
+  });
+});
+
+describe('readDeclaredCapabilityContext, beside the curated declarations', () => {
+  const APP = { name: 'field.export', _packageId: 'com.example.field' };
+  const engineWith = (capabilities: unknown[]) => ({ registry: { listItems: (type: string) => (type === 'capability' ? capabilities : []) } });
+
+  it('still falls back to the metadata service when the registry holds only the platform’s curated declarations', async () => {
+    const metadata = { list: async (type: string) => (type === 'capability' ? [APP] : []) };
+    expect(await readDeclaredCapabilityContext(engineWith([OWN]), metadata)).toEqual({ declaredCapabilities: [APP] });
+    expect(await readDeclaredCapabilityContext(engineWith([OWN]), { list: async () => [] })).toBeUndefined();
+  });
+
+  it('reads the registry’s package declarations without the curated ones', async () => {
+    expect(await readDeclaredCapabilityContext(engineWith([OWN, APP]), undefined)).toEqual({ declaredCapabilities: [APP] });
   });
 });
