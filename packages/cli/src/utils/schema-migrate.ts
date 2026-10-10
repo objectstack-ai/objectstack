@@ -12,8 +12,11 @@
  * outside that set are never examined or altered. The two SCHEMA commands
  * (`plan`/`apply`) therefore pass `composeHostStack` so the set is the one the
  * deployment's own `os serve` boot registers — its `objectstack.config.ts` plus
- * the platform floor `serve` composes unconditionally (#12938). The DATA
- * subcommands keep their own narrower set (`./data-migration-plugins.ts`).
+ * the platform floor `serve` composes unconditionally (#12938) — and
+ * `composeServedPlatform`, so it includes what `serve` mounts around the stack:
+ * the auth family behind its auth gate and the provider of every capability it
+ * resolves (#22506). The DATA subcommands keep their own narrower set
+ * (`./data-migration-plugins.ts`).
  * A project with neither a config nor a compiled artifact still diffs the data
  * stack alone — run `os build` first so its objects are visible.
  */
@@ -464,6 +467,16 @@ export async function bootSchemaStack(
      * every one-shot command boots it — no `dev` key, so no dev schema self-heal.
      */
     serveFlags?: { readonly dev?: boolean; readonly preset?: string };
+    /**
+     * [#22506] With {@link composeHostStack}, also compose what `os serve`
+     * mounts AROUND the stack, each piece for its declarations only: the auth
+     * family behind its auth gate, the provider of every capability its
+     * resolver mounts (the stack's `requires` and the always-on slate), and
+     * the REST API plugin. Set by `os migrate plan` and `os migrate apply`, and
+     * by nothing else — their subject is the deployment's whole object set.
+     * See `buildSchemaMigrationPlugins`'s `servedPlatform`.
+     */
+    composeServedPlatform?: boolean;
   },
 ): Promise<SchemaStack> {
   // Taken BEFORE the first line the boot can print. `createStandaloneStack`
@@ -551,6 +564,11 @@ export async function bootSchemaStack(
           ? { authGatedSecurity: { artifactRequires: stack.requires } }
           : {}),
         ...(opts.serveFlags ? { serveFlags: opts.serveFlags } : {}),
+        // [#22506] The compiled artifact's `requires`, as `serve`'s merge lays
+        // them over the config's, for the auth gate and the provider tokens.
+        ...(opts.composeServedPlatform === true
+          ? { servedPlatform: { artifactRequires: stack.requires } }
+          : {}),
       })
     : {
         plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
