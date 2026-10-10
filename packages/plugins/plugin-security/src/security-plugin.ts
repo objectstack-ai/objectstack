@@ -4537,9 +4537,11 @@ export class SecurityPlugin implements Plugin {
     // rename or delete of a position also writes its DEFINITION through the
     // metadata door at environment scope — the row first, then the
     // definition; a refused definition undoes the row. Registered AFTER the
-    // security middleware, so it runs INSIDE it. Stands down for a walled
-    // posture, a name a package or built-in holds, and a kernel without a
-    // capable metadata protocol. See `position-write-through.ts`.
+    // security middleware, so it runs INSIDE it. A create or a rename into a
+    // name a package or built-in holds answers the metadata door's own
+    // refusal (C2 stage S10). Stands down for a walled posture, an edit that
+    // keeps or a delete of such a name, and a kernel without a capable
+    // metadata protocol. See `position-write-through.ts`.
     ql.registerMiddleware(
       createPositionWriteThrough({
         ql,
