@@ -65,7 +65,9 @@ function fakeEngine(opts: { owner?: string; provider?: boolean } = {}) {
     find: vi.fn(async (object: string, query?: any, options?: any) => {
       const context = options?.context ?? query?.context;
       if (object === 'sys_api_key') return [{ id: 'k1', user_id: owner, revoked: false }];
-      if (object.startsWith('sys_metadata') && context?.userId !== ADMIN) {
+      // The two metadata tables this suite serves — not the activation ledger
+      // the authorization resolver reads under a system context (ADR-0131 D3).
+      if ((object === 'sys_metadata' || object === 'sys_metadata_history') && context?.userId !== ADMIN) {
         throw Object.assign(new Error(`Permission denied: cannot read '${object}'`), { code: 'PERMISSION_DENIED', status: 403 });
       }
       const rows = (TABLES[object] ?? []).filter((row) => matches(row, query?.where));

@@ -312,11 +312,13 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * deadline and when it is settled), and 77 → 78 when it gained
      * `conditionalFormatting` (#22228, a field's cell formatting rules).
      * `dashboard` moved 21 → 22 the same way when it gained
-     * `requiredPermissions` (#22611, the audience gate).
+     * `requiredPermissions` (#22611, the audience gate). `position` moved
+     * 12 → 13 the same way when it gained `permissionSets` (ADR-0131 D3/D4,
+     * the sets a position distributes).
      */
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 26, app: 30, dashboard: 22, dataset: 16, field: 78, flow: 23,
-        hook: 22, object: 45, page: 25, position: 12, report: 21, skill: 17, tool: 14,
+        hook: 22, object: 45, page: 25, position: 13, report: 21, skill: 17, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(
