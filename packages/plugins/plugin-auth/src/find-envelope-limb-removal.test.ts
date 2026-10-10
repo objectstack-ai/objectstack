@@ -564,10 +564,10 @@ describe('#15597 — settleSelfRegistrationGrant refuses on a malformed row inst
     expect(lines.join('\n')).toContain('no usable id');
   });
 
-  it('a DEACTIVATED row is still an ordinary non-resolution, not a malformed-row refusal', async () => {
-    // The `active !== false` clause is a selection predicate and stays one:
-    // deactivating a set must keep reporting "does not resolve", not start
-    // reporting a malformed row. This is the boundary between the two clauses.
+  it('[ADR-0131 D3] the row\'s `active` no longer selects — the row carries the id, the ledger the switch', async () => {
+    // Whether the set grants was asked at admission, of the catalog and the
+    // activation ledger; the resolver reads no catalog row, so a row flag is
+    // not a deactivation and the settlement does not read it.
     const engine = await bootEngine();
     await engine.insert('sys_user', USER, SYSTEM);
     await engine.insert('sys_permission_set', { id: 'ps_off', name: 'portal_user', label: 'Portal', active: false }, SYSTEM);
@@ -575,9 +575,9 @@ describe('#15597 — settleSelfRegistrationGrant refuses on a malformed row inst
     const lines: string[] = [];
     await settle(engine, 'portal_user', lines);
 
-    expect(await grants(engine)).toEqual([]);
-    const report = lines.join('\n');
-    expect(report).toContain("no active sys_permission_set row named 'portal_user'");
-    expect(report).not.toContain('no usable id');
+    const rows = await grants(engine);
+    expect(rows.length).toBe(1);
+    expect((rows[0] as { permission_set_id: string }).permission_set_id).toBe('ps_off');
+    expect(lines.join('\n')).not.toContain('no usable id');
   });
 });

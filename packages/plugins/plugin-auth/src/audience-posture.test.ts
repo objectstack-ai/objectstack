@@ -23,6 +23,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
 import { AuthManager } from './auth-manager';
+import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit.js';
 import {
   assertAudienceConfig,
   classifyCreationMethod,
@@ -113,11 +114,19 @@ const createMemoryEngine = () => {
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-4785';
 
+/**
+ * [ADR-0131 D3/D4] The sets the fixture's `sys_permission_set` rows name are
+ * catalog definitions too — the admission asks the catalog whether a set
+ * grants, and the grant is written with the row's id.
+ */
+const bindRowCatalog = (engine: any) =>
+  bindTestSecurityCatalog(engine, () => catalogFromTables({ sys_permission_set: engine.tables.get('sys_permission_set') }));
+
 const makeManager = (engine: any, config: Record<string, unknown> = {}) =>
   new AuthManager({
     secret: SECRET,
     baseUrl: 'http://localhost:3000',
-    dataEngine: engine,
+    dataEngine: bindRowCatalog(engine),
     ...config,
   } as any);
 

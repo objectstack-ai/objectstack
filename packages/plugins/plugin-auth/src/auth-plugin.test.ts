@@ -5,6 +5,7 @@ import { AuthPlugin } from './auth-plugin';
 import { AuthManager } from './auth-manager';
 import type { PluginContext } from '@objectstack/core';
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 describe('AuthPlugin', () => {
   let mockContext: PluginContext;
@@ -1355,6 +1356,8 @@ describe('AuthPlugin', () => {
       hookCapture = createHookCapture();
       middlewares = [];
       ql = makeQl();
+      // [ADR-0131 D3/D4] The set the fixture's rows name is a catalog definition.
+      bindCatalogFromTables(ql, ql.tables);
       mockContext.hook = hookCapture.hookFn;
       mockContext.getService = vi.fn((name: string) => {
         if (name === 'manifest') return { register: vi.fn() };
@@ -1610,6 +1613,8 @@ describe('AuthPlugin', () => {
       delete process.env.OS_SKIP_MEMBERSHIP_BACKFILL;
       hookCapture = createHookCapture();
       ql = makeQl();
+      // [ADR-0131 D3/D4] The set the fixture's rows name is a catalog definition.
+      bindCatalogFromTables(ql, ql.tables);
       mockContext.hook = hookCapture.hookFn;
       mockContext.getService = vi.fn((name: string) => {
         if (name === 'manifest') return { register: vi.fn() };

@@ -13,6 +13,7 @@ import {
 } from './ensure-default-organization.js';
 import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
 import { createEnsureDefaultOrganizationOnce } from './default-org-bootstrap-once.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 // [#11973] The config anchor reads `OS_PLATFORM_OWNER_EMAIL` live (memoized on
 // the raw value), so every case in this file pins the variable's state instead
@@ -88,7 +89,8 @@ function makeQl(seed: Partial<Record<string, Row[]>> = {}) {
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       return v === null ? row[k] == null : row[k] === v;
     });
-  return {
+  // [ADR-0131 D3/D4] The set the fixture's rows name is a catalog definition.
+  return bindCatalogFromTables({
     tables,
     find: vi.fn(async (object: string, q: any) =>
       (tables[object] ?? []).filter((r) => matches(r, q?.where)).slice(0, q?.limit ?? 100),
@@ -97,7 +99,7 @@ function makeQl(seed: Partial<Record<string, Row[]>> = {}) {
       (tables[object] ??= []).push(data);
       return data;
     }),
-  };
+  }, tables);
 }
 
 describe('ensureDefaultOrganization (plugin-auth home)', () => {
