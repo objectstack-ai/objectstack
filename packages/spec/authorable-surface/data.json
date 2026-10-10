@@ -418,6 +418,8 @@
     "data/FilePersistenceConfig:autoSaveIntervalMs",
     "data/FilePersistenceConfig:path",
     "data/FilePersistenceConfig:type",
+    "data/FileRefusedValue:id",
+    "data/FileRefusedValue:metadataRefused",
     "data/FileValue:alt",
     "data/FileValue:duration [RETIRED]",
     "data/FileValue:durationSeconds",
