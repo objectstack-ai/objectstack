@@ -123,14 +123,33 @@ function bootPlugin(
   const schemas = opts.schemas ?? SCHEMAS;
   const permissionSetReads: string[][] = [];
   const registered: Array<(context: unknown) => Promise<unknown>> = [];
+  // [ADR-0131 D3/D4] The sets are the security catalog's definitions — each
+  // row above as the registry holds it once saved through the metadata door —
+  // read live, so a set taken away is gone from the next resolution.
+  const definitionOf = (row: Record<string, unknown>) => ({
+    name: row.name,
+    label: row.label,
+    objects: JSON.parse(String(row.object_permissions ?? '{}')),
+    fields: JSON.parse(String(row.field_permissions ?? '{}')),
+    systemPermissions: JSON.parse(String(row.system_permissions ?? '[]')),
+    tabPermissions: JSON.parse(String(row.tab_permissions ?? '{}')),
+  });
   const ql: any = {
     registerMiddleware: () => {},
-    registry: { getAllObjects: () => Object.values(schemas) },
+    registry: {
+      getAllObjects: () => Object.values(schemas),
+      getItem: (type: string, name: string) => {
+        if (type !== 'permission') return undefined;
+        permissionSetReads.push([name]);
+        const row = dbRows.find((r) => r.name === name);
+        return row ? definitionOf(row) : undefined;
+      },
+      listItems: (type: string) => (type === 'permission' ? dbRows.map(definitionOf) : []),
+      isPackageDisabled: () => false,
+    },
     getSchema: (name: string) => schemas[name] ?? null,
     find: async (object: string, query: any) => {
-      const tables: Record<string, Array<Record<string, unknown>>> = { sys_permission_set: dbRows };
-      if (object === 'sys_permission_set') permissionSetReads.push(query?.where?.name?.$in ?? []);
-      const rows = (tables[object] ?? []).filter((r) => matches(r, query?.where));
+      const rows = ([] as Array<Record<string, unknown>>).filter((r) => matches(r, query?.where));
       // Hold the caller's bound (`check:objectql-double-limit`).
       return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
     },
