@@ -48,6 +48,7 @@
 
 import type { AnchorBindingContext } from '@objectstack/spec/security';
 import { readDeclared } from './bootstrap-declared-permissions.js';
+import { withoutPlatformCapabilityItems } from './builtin-capabilities.js';
 
 /**
  * Read this stack's declared authorization capabilities as an
@@ -65,7 +66,12 @@ export async function readDeclaredCapabilityContext(
   ql: any,
   metadataService?: any,
 ): Promise<AnchorBindingContext | undefined> {
-  let caps: any[] = readDeclared(ql, 'capability');
+  // [ADR-0131 D3] The registry also holds the platform's curated capabilities,
+  // which this plugin declares itself (`builtin-capabilities.ts`). They are not
+  // a package's declaration, and the platform floor would discard them anyway;
+  // dropping them keeps the metadata-service fallback below answering on a
+  // registry that holds no package declaration, as it did before.
+  let caps: any[] = withoutPlatformCapabilityItems(readDeclared(ql, 'capability'));
   if (caps.length === 0) {
     try {
       const listed = metadataService?.list?.('capability');
