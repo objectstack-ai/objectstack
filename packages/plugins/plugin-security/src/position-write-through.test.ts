@@ -19,9 +19,13 @@
  * - a create, or a rename, into a name the metadata door refuses answers the
  *   door's own refusal and keeps nothing (seat re-rule Q1 = A); an edit of a
  *   row that already carries such a name still lands as a row write;
- * - a name a package or a built-in holds stands the write-through down: the
- *   write is passed on and nothing reaches metadata (Q2 = A), pinned at the
- *   write-through's own level rather than at the data door's answer;
+ * - an edit that keeps a name a package or a built-in holds, and a delete of
+ *   such a row, stand the write-through down: the write is passed on and
+ *   nothing reaches metadata (Q2 = A), pinned at the write-through's own level
+ *   rather than at the data door's answer;
+ * - a create, or a rename into, a name a package or a built-in holds answers
+ *   the metadata door's own locked-base refusal and keeps nothing (C2 stage
+ *   S10, ADR-0048 addendum N.2/N.3); the engine's own refusals keep theirs;
  * - a package registering a name a Setup position holds in the environment
  *   ledger is refused `NAMESPACE_CONFLICT` (Q3 = A, within Q4 = A);
  * - controls: a walled posture, a system write and a kernel without a metadata
@@ -393,17 +397,21 @@ describe('[ADR-0131 D3] Q1 = A — a name the metadata door refuses is refused w
   });
 });
 
-describe('[ADR-0131 D3] Q2 = A — a name a package or a built-in holds stands the write-through down', () => {
+describe('[ADR-0131 D3] Q2 = A — an edit that keeps, or a delete of, a name a package or a built-in holds stands the write-through down', () => {
   // Pinned at the write-through's own level, never at the data door's answer:
   // whether the data door admits an edit of a package-declared row is the
   // system-row gate's call, decided on the row's provenance stamp, and that
   // stamp is another change's. The write-through must stand down whatever the
   // stamp says, because it reads the name's holder from the engine registry.
-  it('the write-through passes a write on a package-held or built-in name to the next step, and writes nothing to metadata', async () => {
+  // A CREATE under such a name is no stand-down since stage S10 (below).
+  it('the write-through passes an edit or a delete on a package-held name to the next step, and writes nothing to metadata', async () => {
     const b = await boot();
     const door = {
       saveMetaItem: vi.fn(async (_request: Record<string, unknown>) => undefined),
       deleteMetaItem: vi.fn(async (_request: Record<string, unknown>) => undefined),
+      // The real door's verdict, so the S10 refusal is in force for this double too.
+      packagedBaseRefusal: vi.fn((request: { type: string; name: string; operation: 'save' | 'delete' }) =>
+        b.protocol.packagedBaseRefusal(request) as Error | null),
     };
     const writeThrough = createPositionWriteThrough({
       ql: b.engine, getProtocol: () => door, getPosture: () => 'single', logger: b.logger,
@@ -418,9 +426,6 @@ describe('[ADR-0131 D3] Q2 = A — a name a package or a built-in holds stands t
     const edit = { object: 'sys_position', operation: 'update', data: { id: 'pos_pkg', label: 'Edited', delegatable: true }, context: b.admin };
     expect(await passOn(edit, () => b.engine.update('sys_position', { id: 'pos_pkg', label: 'Edited', delegatable: true }, { context: SYS } as any)))
       .toBe(1);
-    // A create under a built-in name (the plugin registers the six under its own package).
-    const builtIn = { object: 'sys_position', operation: 'insert', data: { name: 'everyone', label: 'Everyone' }, context: b.admin };
-    expect(await passOn(builtIn, async () => ({ id: 'pos_builtin', name: 'everyone' }))).toBe(1);
     // A delete of the package-declared row.
     const del = { object: 'sys_position', operation: 'delete', options: { where: { id: 'pos_pkg' } }, context: b.admin };
     expect(await passOn(del, () => b.engine.delete('sys_position', { where: { id: 'pos_pkg' }, context: SYS } as any))).toBe(1);
@@ -443,6 +448,112 @@ describe('[ADR-0131 D3] Q2 = A — a name a package or a built-in holds stands t
       b.protocol.saveMetaItem({ type: 'position', name: PKG_POSITION, item: { name: PKG_POSITION, label: 'x' } }),
     );
     expect(envelope(refusal)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+  });
+});
+
+describe('[C2 stage S10, ADR-0048 addendum N.2/N.3] one namespace — a create or a rename into a held name answers the door\'s refusal', () => {
+  /** The metadata door's own envelope for an environment save over a name a package or a built-in holds. */
+  const DOOR_REFUSAL = { code: 'NOT_OVERRIDABLE', status: 403 };
+
+  it.each([
+    ['a package declares', PKG_POSITION],
+    ['the platform declares as an audience anchor', 'everyone'],
+    ['the platform declares as an audience anchor (guest)', 'guest'],
+  ])('a create under a name %s is refused with the door\'s envelope, and keeps no row and no definition', async (_holder, name) => {
+    const b = await boot();
+    const before = (await b.rows(name)).map((r) => r.id);
+    const refusal = await refusalOf(create(b, { name, label: 'Mine' }));
+    expect(envelope(refusal)).toEqual(DOOR_REFUSAL);
+    expect((await b.rows(name)).map((r) => r.id), 'the created row was undone').toEqual(before);
+    expect(await b.envRows(name)).toEqual([]);
+  });
+
+  it('the refusal is the door\'s own, relayed as the door built it — the same verdict a metadata save gets', async () => {
+    const b = await boot();
+    const refusal: any = await refusalOf(create(b, { name: PKG_POSITION, label: 'Mine' }));
+    const door: any = await refusalOf(
+      b.protocol.saveMetaItem({ type: 'position', name: PKG_POSITION, item: { name: PKG_POSITION, label: 'Mine' } }),
+    );
+    expect({ code: refusal?.code, status: refusal?.status, message: refusal?.message })
+      .toEqual({ code: door?.code, status: door?.status, message: door?.message });
+  });
+
+  it('a bulk create carrying one held name is refused whole: no row of the write is kept', async () => {
+    const b = await boot();
+    const refusal = await refusalOf(b.engine.insert('sys_position', [
+      { name: 'bulk_lead', label: 'Bulk lead' },
+      { name: PKG_POSITION, label: 'Mine' },
+    ], { context: b.admin } as any));
+    expect(envelope(refusal)).toEqual(DOOR_REFUSAL);
+    expect(await b.rows('bulk_lead')).toEqual([]);
+    expect(await b.envRows('bulk_lead')).toEqual([]);
+    expect((await b.rows(PKG_POSITION)).map((r) => r.id)).toEqual(['pos_pkg']);
+  });
+
+  it.each([
+    ['a package declares', PKG_POSITION],
+    ['the platform declares', 'guest'],
+  ])('a rename into a name %s is refused; the row and its definition keep the old name', async (_holder, held) => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'route_lead', label: 'Route lead' });
+    const refusal = await refusalOf(patch(b, created.id, { name: held, label: 'Renamed' }));
+    expect(envelope(refusal)).toEqual(DOOR_REFUSAL);
+    const [row] = await b.rows('route_lead');
+    expect({ id: row?.id, label: row?.label }).toEqual({ id: created.id, label: 'Route lead' });
+    expect((await b.rows(held)).map((r) => r.id)).not.toContain(created.id);
+    // Before S10 the rename stood down for the new name and then deleted the old name's definition.
+    expect((await b.envRows('route_lead')).map((r) => r.body)).toEqual([
+      { name: 'route_lead', label: 'Route lead', delegatable: false },
+    ]);
+    expect(await b.envRows(held)).toEqual([]);
+  });
+
+  it('a verdict the door cannot reach is no admission: the create and the rename are undone, and the failure is the answer', async () => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'yard_lead', label: 'Yard lead' });
+    const unreadable = Object.assign(new Error('registry unreadable'), { code: 'METADATA_STORE_UNAVAILABLE', status: 503 });
+    vi.spyOn(b.protocol, 'packagedBaseRefusal').mockImplementation(() => { throw unreadable; });
+    expect(await refusalOf(create(b, { name: 'dock_lead', label: 'Dock lead' }))).toBe(unreadable);
+    expect(await b.rows('dock_lead')).toEqual([]);
+    expect(await refusalOf(patch(b, created.id, { name: 'gate_lead' }))).toBe(unreadable);
+    expect((await b.rows('yard_lead')).map((r) => r.id)).toEqual([created.id]);
+    expect(await b.rows('gate_lead')).toEqual([]);
+  });
+
+  it('control: the engine\'s own refusals keep their answer — a reserved identity name stays VALIDATION_FAILED', async () => {
+    const b = await boot();
+    // The platform holds `org_admin` too, but the engine's rule validator refuses
+    // the row before the door is asked (the REST layer answers it 400).
+    const refusal: any = await refusalOf(create(b, { name: 'org_admin', label: 'Mine' }));
+    expect({ name: refusal?.name, code: refusal?.code }).toEqual({ name: 'ValidationError', code: 'VALIDATION_FAILED' });
+    expect(await b.rows('org_admin')).toEqual([]);
+  });
+
+  it('control: an edit that keeps a held name stays a row write, with no definition and no refusal', async () => {
+    const b = await boot();
+    // A row that predates this stage: an organization's own row under the package's name.
+    await b.engine.insert('sys_position', {
+      id: 'pos_twin', name: PKG_POSITION, label: 'Twin', organization_id: ORG,
+    }, { context: SYS } as any);
+    await patch(b, 'pos_twin', { label: 'Twin (relabelled)' });
+    expect((await b.rows(PKG_POSITION)).find((r) => r.id === 'pos_twin')?.label).toBe('Twin (relabelled)');
+    expect(await b.envRows(PKG_POSITION)).toEqual([]);
+  });
+
+  it('control: a door that brings no locked-base verdict keeps the stand-down', async () => {
+    const b = await boot();
+    const door = {
+      saveMetaItem: vi.fn(async (_request: Record<string, unknown>) => undefined),
+      deleteMetaItem: vi.fn(async (_request: Record<string, unknown>) => undefined),
+    };
+    const writeThrough = createPositionWriteThrough({
+      ql: b.engine, getProtocol: () => door, getPosture: () => 'single', logger: b.logger,
+    });
+    const opCtx: any = { object: 'sys_position', operation: 'insert', data: { name: 'everyone', label: 'Everyone' }, context: b.admin };
+    const next = vi.fn(async () => { opCtx.result = { id: 'pos_builtin', name: 'everyone' }; });
+    await writeThrough(opCtx, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(door.saveMetaItem).not.toHaveBeenCalled();
   });
 });
 
