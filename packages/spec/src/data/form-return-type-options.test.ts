@@ -39,11 +39,20 @@
  *
  * ## What the historical-roster assertions are for
  *
- * The two removed members are additionally pinned as REFUSED-and-UNOFFERED.
+ * The two removed members were additionally pinned as REFUSED-and-UNOFFERED.
  * That is not a duplicate of the set equality: it is the pin that fires if the
  * platform ever decides a formula may return a datetime or a currency. Widening
  * the enum is a product decision with its own card, and this is where it is
  * made to notice that the two forms must move in the same change.
+ *
+ * ## #22727 — the decision, for `currency` only
+ *
+ * That decision was made once, for one member: a formula may return
+ * `currency`, carrying its currency in its own `currencyConfig` exactly as a
+ * currency field does, and `@objectstack/formula`'s `inferFormulaReturn` is the
+ * producer that proves a result is money. So `currency` left the roster below
+ * and both forms offer it, moved in the same change as the enum. `datetime`
+ * stays refused and unoffered: nothing infers it, and it has no card.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -86,7 +95,13 @@ function schemaReturnTypeMembers(): string[] {
  * above is derived. If one of these ever becomes a declared member, the
  * assertions below fail and the forms are re-opened on purpose.
  */
-const HISTORICALLY_OFFERED_NON_MEMBERS = ['datetime', 'currency'] as const;
+const HISTORICALLY_OFFERED_NON_MEMBERS = ['datetime'] as const;
+
+/**
+ * The member #22727 declared — once on the roster above, now offered by both
+ * forms. Literal for the same reason the roster is: it records a decision.
+ */
+const DECLARED_BY_22727 = 'currency' as const;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Locating the declarations
@@ -183,11 +198,17 @@ describe('`returnType` is never offered a value the schema refuses', () => {
         }
       });
 
-      it('offers neither of the two members the grid used to carry', () => {
+      it('offers no member the schema still refuses that the grid used to carry', () => {
         const offered = offeredValues(decls[0]);
         for (const value of HISTORICALLY_OFFERED_NON_MEMBERS) {
           expect(offered).not.toContain(value);
         }
+      });
+
+      it('offers `currency`, the member #22727 declared, and it parses', () => {
+        expect(offeredValues(decls[0])).toContain(DECLARED_BY_22727);
+        const parsed = (FieldSchema as unknown as z.ZodType).safeParse(formulaFieldWith(DECLARED_BY_22727));
+        expect(parsed.success, JSON.stringify((parsed as { error?: unknown }).error)).toBe(true);
       });
 
       it('is expressible in the form DSL as it stands — no schema extension', () => {
@@ -199,7 +220,7 @@ describe('`returnType` is never offered a value the schema refuses', () => {
     });
   }
 
-  it('the two removed members are refused by the schema, which is why they went', () => {
+  it('the member still on the roster is refused by the schema, which is why it went', () => {
     // The justification for the narrowing, asserted rather than asserted-about.
     // Should the platform ever declare one of these, this fails and the two
     // forms are re-opened in the same change that widens the enum.
