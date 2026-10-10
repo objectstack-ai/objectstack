@@ -199,7 +199,7 @@ export default class MigrateAccountIssuer extends Command {
 
       if (report.ok) {
         printSuccess(
-          'Pre-flight clean. Take a backup, then run "os migrate apply --allow-destructive" to drop the column.',
+          'Pre-flight clean. While "os migrate plan" still lists the sys_account.issuer drop, take a backup and run "os migrate apply --allow-destructive"; once it lists none, the retirement is done.',
         );
         console.log(chalk.dim(`  ${timer.display()}`));
         return;

@@ -30,7 +30,12 @@
  *     type): refused in both faces, exit 1, naming the column and the record
  *     id, no record emitted;
  *  7. the door writes nothing: the schema and every row are byte-identical
- *     after it ran.
+ *     after it ran;
+ *  8. [#22506] a PLATFORM object the plan declares — `sys_account`, behind
+ *     `os serve`'s auth gate, carrying the retired `issuer` column — is
+ *     resolved and read, the same column set the plan reports for its table,
+ *     not refused as `OBJECT_NOT_FOUND`. The plan composes what `os serve`
+ *     mounts around the stack, so this door has to boot that object set too.
  *
  * The runtime half, that the engine's data door never serves these columns, is
  * the read narrowing's own pin
@@ -130,6 +135,13 @@ await raw.knex.raw('ALTER TABLE um_contact ADD COLUMN ${HASH_SHADOW} text');
 await raw.knex('um_contact').update({ ${HASH_SHADOW}: 'shadow' });
 await raw.knex.raw('ALTER TABLE um_blob ADD COLUMN legacy_bytes blob');
 await raw.knex('um_blob').update({ legacy_bytes: Buffer.from([1, 2, 255]) });
+// [#22506] A platform table the auth family declares, in the shape a
+// pre-retirement deployment left it: today's definition plus the retired
+// \`issuer\` column, one account row carrying a value in it.
+const { SysAccount } = await import('@objectstack/platform-objects/identity');
+await raw.initObjects([SysAccount]);
+await raw.knex.raw('ALTER TABLE sys_account ADD COLUMN issuer text');
+await raw.knex('sys_account').insert({ id: 'acc_os22506', provider_id: 'credential', account_id: 'u1', user_id: 'u1', issuer: 'local:credential' });
 await raw.disconnect();
 process.stderr.write('[fixture] seeded\\n');
 process.exit(0);
@@ -185,6 +197,9 @@ function runCli(argv: string[]): Promise<Run> {
         NO_COLOR: '1',
         OS_ARTIFACT_PATH: join(dir, 'dist', 'objectstack.json'),
         OS_SECRET_KEY: '0e2e'.repeat(16),
+        // [#22506] Auth-enabled, as a serving deployment is: `os serve`'s auth
+        // gate composes the auth family when a secret resolves.
+        OS_AUTH_SECRET: 'os22506-unmapped-secret-at-least-32-chars',
       }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -217,6 +232,7 @@ let unknownJson: Run;
 let cappedJson: Run;
 let bytesJson: Run;
 let bytesHuman: Run;
+let platformJson: Run;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-21573-'));
@@ -241,6 +257,7 @@ beforeAll(async () => {
   cappedJson = await runCli(door('um_contact', '--max-records', '2', '--json'));
   bytesJson = await runCli(door('um_blob', '--json'));
   bytesHuman = await runCli(door('um_blob'));
+  platformJson = await runCli(door('sys_account', '--json'));
   after = readState();
   planJson = await runCli(['migrate', 'plan', '--json']);
 }, HOOK_TIMEOUT_MS);
@@ -327,5 +344,21 @@ describe('os migrate unmapped-columns: the other answers', () => {
     expect(bytesHuman.stdout).toMatch(says);
     // Neither face carries the stand-in a JSON serialisation of the bytes would be.
     for (const out of [bytesJson.stdout, bytesHuman.stdout]) expect(out).not.toContain('"type":"Buffer"');
+  });
+});
+
+describe('os migrate unmapped-columns: a platform object the plan declares (#22506)', () => {
+  it('resolves sys_account on an auth-enabled stack and reads the column the plan reports, not OBJECT_NOT_FOUND', () => {
+    expect(platformJson.code, `${platformJson.stdout}\n${platformJson.stderr}`).toBe(0);
+    const doc = JSON.parse(platformJson.stdout);
+    expect(doc).toMatchObject({ object: 'sys_account', table: 'sys_account', count: 1 });
+    expect(doc.records).toEqual([{ id: 'acc_os22506', values: { issuer: 'local:credential' } }]);
+    // ONE column set with the plan, on this platform table too.
+    const plan = JSON.parse(planJson.stdout);
+    const planned = (plan.changes as Array<{ kind: string; table: string; column: string; actual: string }>)
+      .filter((c) => c.kind === 'unmapped_column' && c.table === 'sys_account')
+      .map((c) => ({ column: c.column, actual: c.actual }));
+    expect(planned.map((c) => c.column)).toEqual(['issuer']);
+    expect(doc.columns).toEqual(planned);
   });
 });
