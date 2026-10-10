@@ -1,11 +1,13 @@
 ---
-'@objectstack/metadata-protocol': patch
-'@objectstack/plugin-security': patch
+'@objectstack/metadata-protocol': minor
+'@objectstack/plugin-security': minor
 ---
 
 fix(metadata-protocol): a create under a name a managed package or a built-in holds is told to choose another name, not to edit the source artifact (#22591)
 
-Clause-②: no
+Clause-②: yes
+
+The public input surface widens: `packagedBaseRefusal` accepts `operation: 'create'`, and `tenantAuthoredWriteRefusal` takes an optional operation; no verdict, code or status moves.
 
 A write onto an item a managed package ships, on a type with no environment overlay, is refused with `403 NOT_OVERRIDABLE`. The refusal's remedy used to assume the write was an edit of that item: "Edit the source artifact and redeploy", or, for a flow, an action or a permission set, its clone or on/off switch. That remedy is wrong for a create. An administrator who creates a position of their own under a name a package or a built-in already holds (`manager`, `everyone`, `guest`, …), or renames one into such a name, cannot edit a source artifact they did not write, and did not ask to customize the package's item.
 
