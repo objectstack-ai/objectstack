@@ -17,11 +17,9 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // {@link SharingRuleService.hasPlatformAuthority}, and reading it as authority
 // became an escalation channel once `positions[]` started carrying ADR-0057 D4
 // `sys_user_position` names; that predicate now reads the ADR-0095 rung.
-// [commit 04d03c3a0] The ONE predicate for `sys_position.active` / `sys_permission_set.active`
-// (#8613). Reused rather than re-spelled: two notions of "is this row active"
-// — one honouring the 1/0 and 'false' storage shapes, one not — is how the
-// enforcement hole this closes gets re-opened one seam over.
-import { isRowActive } from '@objectstack/core';
+// [ADR-0131 D3, ADR-0126 §4] The activation ledger a position's deactivation is
+// read from — the table the authorization resolver reads it from, by name.
+import { METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 // [#14754] The engine's organization refusal for a system write on a
 // tenant-scoped object (#8844). The runtime check is a `code` compare, which is
 // the convention that refusal itself documents ("a caller that catches it
@@ -203,7 +201,7 @@ export interface SharingRuleServiceOptions {
  * down, discarded with the pass.
  */
 type RuleEvaluationPass = {
-  /** `sys_position.active` verdicts, keyed `${organization}::${name}`. */
+  /** Position activation verdicts (the activation ledger), keyed by position name. */
   positionActive?: Map<string, boolean>;
 };
 
@@ -1449,7 +1447,7 @@ export class SharingRuleService implements ISharingRuleService {
       // expansion, not after it, so the rule's desired grant set is empty and
       // the reconcilers' existing revoke-the-remainder branches retract what it
       // already materialised. See {@link positionConfersAccess}.
-      if (!(await this.positionConfersAccess(rule.recipient_id, rule.organization_id ?? null, pass))) {
+      if (!(await this.positionConfersAccess(rule.recipient_id, pass))) {
         return [];
       }
       // ADR-0090 D3 — positions are flat; expand holders via the platform
@@ -1537,8 +1535,8 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [commit 04d03c3a0] Does `positionName` still CONFER access in this rule's
-   * organization? Memoised for the pass; the extra read is accepted.
+   * [commit 04d03c3a0] Does `positionName` still CONFER access? Memoised for
+   * the pass; the extra read is accepted.
    *
    * Maintainer ruling, 2026-08-15, verbatim:
    *
@@ -1565,79 +1563,55 @@ export class SharingRuleService implements ISharingRuleService {
    */
   private async positionConfersAccess(
     positionName: string,
-    organizationId: string | null,
     pass: RuleEvaluationPass,
   ): Promise<boolean> {
     if (!positionName) return true; // nothing to read; the expansion answers [] anyway
     const memo = (pass.positionActive ??= new Map<string, boolean>());
-    const key = `${organizationId ?? '*'}::${positionName}`;
-    const seen = memo.get(key);
+    const seen = memo.get(positionName);
     if (seen !== undefined) return seen;
-    const verdict = await this.readPositionActive(positionName, organizationId);
-    memo.set(key, verdict);
+    const verdict = await this.readPositionActive(positionName);
+    memo.set(positionName, verdict);
     return verdict;
   }
 
   /**
-   * [commit 04d03c3a0] The catalogue verdict for one position name. Three fallbacks, each
-   * of them a way this could otherwise have become a silent mass revocation:
+   * [ADR-0131 D3, ADR-0126 §4] Whether the activation ledger leaves
+   * `positionName` switched on — the one place a position's deactivation lives
+   * (ADR-0126 §3 regime C, as ADR-0131 D6 amends it), read exactly as the
+   * authorization resolver reads it (`readDisabledCatalogNames`,
+   * `@objectstack/core`): a `position` row of that name whose `active` reads
+   * false (a driver `0` included) switches it off; no row means ACTIVE. The
+   * `sys_position` row's `active` is not read — the resolver reads no catalog
+   * row, so a flag there switches nothing.
    *
-   *  1. **A name with no `sys_position` row is untouched.** Position names
-   *     reach a rule through `sys_member.role` too (ADR-0057 D4's transition
-   *     source), and those have no catalogue row at all — the same names #8613
-   *     leaves alone, because a name with no row has no flag to read. Note
-   *     `isRowActive(undefined)` is `false`, so "no row" must never be handed
-   *     to the predicate: only a row that really reads deactivated revokes.
-   *  2. **The row is chosen per ORGANIZATION.** `sys_position.name` is unique
-   *     per organization (#8468), so a same-named row in another tenant is a
-   *     DIFFERENT position; reading the flag off it would export one admin's
-   *     deactivation into every other tenant. Platform-seeded built-ins
-   *     (`bootstrapBuiltinRoles`, `organization_id` null) are the fallback for
-   *     an organization that has no row of its own.
-   *  3. **A failed read still grants.** On a minimal stack `sys_position` may
-   *     not exist, and a query failure is indistinguishable from that here.
-   *     Revoking every position share because a read threw is exactly the mass
-   *     revocation `isRowActive`'s "absent means active" rule exists to avoid.
-   *
-   * Within one scope the verdict is fail-CLOSED (any row that reads
-   * deactivated wins), matching `resolveAuthzContext`'s treatment of duplicate
-   * rows; the unique index means that case is legacy data only.
+   *  1. **A name with no ledger row is untouched.** Position names reach a
+   *     rule through `sys_member.role` too (ADR-0057 D4's transition source),
+   *     and a name no catalog holds has nothing to switch off — the same names
+   *     the resolver leaves alone. Only a row that really reads off revokes.
+   *  2. **The verdict is deployment-wide.** The ledger carries no tenant
+   *     column, so a switched-off position is off in every organization, as it
+   *     is for the resolver; the rule's organization does not choose a row.
+   *  3. **A failed read still grants.** On a minimal stack the ledger may not
+   *     be registered or provisioned, and a query failure is indistinguishable
+   *     from that here. Revoking every position share because a read threw is
+   *     the mass revocation "absence means active" exists to avoid.
    */
-  private async readPositionActive(positionName: string, organizationId: string | null): Promise<boolean> {
-    if (organizationId) {
-      const own = await this.readPositionRows({ name: positionName, organization_id: organizationId });
-      if (own === null) return true;
-      if (own.length > 0) return !own.some((r) => !isRowActive(r));
-    }
-    const all = await this.readPositionRows({ name: positionName });
-    if (all === null) return true;
-    const platformSeeded = all.filter((r) => (r as any).organization_id == null);
-    if (platformSeeded.length === 0) return true;
-    return !platformSeeded.some((r) => !isRowActive(r));
-  }
-
-  /**
-   * `sys_position` rows for one filter, or `null` when the read itself failed
-   * (see {@link readPositionActive} fallback 3). The `active` flag is judged in
-   * MEMORY, never pushed into a driver `where`: SQLite stores booleans as 1/0,
-   * a JSON column can hand back `'false'`, and a predicate `where` would also
-   * drop the NULL rows that mean "active" (row-active.ts).
-   */
-  private async readPositionRows(filter: Record<string, unknown>): Promise<any[] | null> {
+  private async readPositionActive(positionName: string): Promise<boolean> {
     try {
-      const rows = await this.engine.find('sys_position', {
-        filter,
-        fields: ['id', 'name', 'active', 'organization_id'],
-        limit: 200,
+      const rows = await this.engine.find(METADATA_ACTIVATION_TABLE, {
+        filter: { metadata_type: 'position', name: positionName },
+        fields: ['metadata_type', 'name', 'active'],
+        limit: 1,
         context: SYSTEM_CTX,
       });
-      return Array.isArray(rows) ? rows : [];
+      const row = Array.isArray(rows) ? (rows[0] as { active?: unknown } | undefined) : undefined;
+      return !(row !== undefined && (row.active === false || row.active === 0));
     } catch (err: any) {
       this.logger?.warn?.(
-        '[sharing-rule] sys_position read failed — position treated as ACTIVE for this pass',
-        { position: filter.name, error: err?.message },
+        `[sharing-rule] ${METADATA_ACTIVATION_TABLE} read failed — position treated as ACTIVE for this pass`,
+        { position: positionName, error: err?.message },
       );
-      return null;
+      return true;
     }
   }
 
