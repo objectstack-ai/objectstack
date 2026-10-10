@@ -29,10 +29,13 @@
  * §3 pins door-to-row agreement directly: the row's sentence IS what
  * `mapDataError` (the create door) answers for the same error, including for a
  * sentence `sanitizeRowError` would have paraphrased. §4 holds the controls.
+ * §5 (#22718) holds the two sandboxed failures the door answers as a fault, a
+ * crashed body and a refusal that declared a 5xx: their row reads the door's
+ * sentence.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { mapDataError } from '@objectstack/types';
+import { mapDataError, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { runImport, sanitizeRowError, type ImportProtocolLike } from './import-runner';
 import type { ExportFieldMeta } from './import-field-meta.js';
 
@@ -176,17 +179,6 @@ describe('[#22694] §3 — the row answers what the create door answers', () => 
 });
 
 describe('[#22694] §4 — controls: what the read must NOT change', () => {
-  it('CONTROL — a hook body that CRASHED is not a refusal: its row is built from `.message` exactly as before', async () => {
-    const crash = sandboxCrash();
-    const row = await rowFor(sandboxCrash);
-
-    // `sandboxBusinessMessage` declines a crash, so the native error text is
-    // never presented as the author's sentence.
-    expect(row.error).not.toBe('TypeError: boom');
-    expect(row.error).toBe(sanitizeRowError(crash.message));
-    expect(row.code).toBe('IMPORT_ROW_FAILED');
-  });
-
   it('CONTROL — a plain error whose own text looks like the wrapper is relayed as it always was', async () => {
     // No `innerMessage`: nothing about this error came from the sandbox, so a
     // pattern-strip would be the only thing that could change it.
@@ -206,5 +198,28 @@ describe('[#22694] §4 — controls: what the read must NOT change', () => {
     const sql = "insert into `mz_locked` (`name`) values ('r1') - SQLITE_BUSY: database is locked";
     const row = await rowFor(() => new Error(sql));
     expect(row.error).toBe('SQLITE_BUSY: database is locked');
+    // [#22718] The door answers this as a fault too, so §5's gate is the
+    // sandbox origin, never the door's 5xx alone.
+    expect(mapDataError(new Error(sql), OBJECT).status).toBeGreaterThanOrEqual(500);
+  });
+});
+
+/** A refusal that DECLARED a server-band status: the doors keep the status and code and withhold the prose. */
+const sandboxDeclared5xx = () => sandboxRefusal('The ledger service is down.', { status: 503, code: 'SERVICE_UNAVAILABLE' });
+
+describe('[#22718] §5 — a sandboxed body the door answers as a fault reads as that fault', () => {
+  it.each([
+    ['a body that CRASHED', sandboxCrash, 'IMPORT_ROW_FAILED', /TypeError|boom|threw:/],
+    ['a refusal that declared a 5xx', sandboxDeclared5xx, 'SERVICE_UNAVAILABLE', /ledger|threw:/],
+  ] as const)('%s', async (_label, err, code, leak) => {
+    const door = mapDataError(err(), OBJECT);
+    // Anti-vacuity: the door answers a fault and withholds the text.
+    expect(door.status).toBeGreaterThanOrEqual(500);
+    expect(door.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+
+    const row = await rowFor(err);
+    // The door's sentence, never the native text or the prose; the code still reads as a fault.
+    expect(row).toEqual({ row: 1, ok: false, action: 'failed', error: door.body.error, code });
+    expect(JSON.stringify(row)).not.toMatch(leak);
   });
 });
