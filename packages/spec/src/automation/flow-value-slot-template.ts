@@ -107,7 +107,6 @@ import {
   TEMPLATE_TOKEN,
   celDateMacro,
   celExpression,
-  celHeadReadsThroughVars,
   celPath,
   isRunUserIdToken,
   runUserPathNeverResolved,
@@ -151,23 +150,33 @@ function spanOf(source: string): string {
 type Write = (source: string) => string;
 
 /**
- * A `has()` guard for a path of keys — the absent-key remedy. `has()` takes a
- * field selection over names alone: an index anywhere in its argument
- * (`has(a[0].b)`, `has(vars["$x"].y)`) is refused when it runs, so a path with
- * a numeric segment, a `$`-named head or a keyword segment gets no guard. A
- * bare variable, and a path whose head CEL or the flow scope claims
- * ({@link celHeadReadsThroughVars}), is selected off `vars`
- * (`has(vars.list.tags)`, `has(vars.vars.tags)`).
+ * A `has()` guard for a path of keys — the absent-variable and absent-key
+ * remedy. `has()` takes a field selection over names alone: an index anywhere
+ * in its argument (`has(a[0].b)`, `has(vars["$x"].y)`) is refused when it
+ * runs, so a path with a numeric segment, a `$`-named head or a keyword
+ * segment gets no guard.
+ *
+ * The guard tests one step at a time, from `vars`, which holds only the
+ * variables the run has bound: `has(vars.source) && has(vars.source.id) ?
+ * vars.source.id : null`. `has()` evaluates everything but its last selection,
+ * so `has(source.id)` fails the run (`Unknown variable`) when `source` was
+ * never bound — an `isInput` variable the caller left out, with no default —
+ * and `has(vars.source.id)` fails it too (`No such key`). The chain answers
+ * `null` there, and where a key on the way is absent, `null`, or not a map
+ * (`&&` stops at the first `false`). A path whose head CEL or the flow scope
+ * claims (`celHeadReadsThroughVars` in the token module) is selected off
+ * `vars` like any other (`has(vars.list) && has(vars.list.tags)`).
  */
 function guardOf(path: string): string | undefined {
   const segments = path.split('.');
   if (segments[0]!.startsWith('$') || segments.some((s) => /^\d+$/.test(s) || CEL_KEYWORDS.has(s))) return undefined;
-  const read = segments.length === 1 || celHeadReadsThroughVars(segments[0]!) ? `vars.${path}` : path;
-  return `has(${read}) ? ${read} : null`;
+  const steps = segments.map((_, at) => `vars.${segments.slice(0, at + 1).join('.')}`);
+  return `${steps.map((step) => `has(${step})`).join(' && ')} ? ${steps[steps.length - 1]} : null`;
 }
 
 const ABSENT_SENTENCE =
-  'CEL refuses an absent variable or key where the template wrote nothing, so guard one that may be absent with `has()`';
+  'CEL refuses an absent variable or key where the template wrote nothing, so guard one that may be absent with '
+  + '`has()`, a step at a time from `vars`, which holds only the variables the run has bound';
 
 /**
  * The remedy for `{$User.Id}` as a whole value: `current_user.id`, and for a

@@ -2720,6 +2720,21 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         }
       });
 
+      // #19939 pass 3: the `has()` guard the hint carries for "one that may be
+      // absent" must hold where the VARIABLE is absent too: `has(source.id)`
+      // fails the run when `source` was never bound (an `isInput` variable the
+      // caller left out). The judge's guard tests each step off `vars`, and
+      // the hint carries the judge's words — that the guard answers `null`
+      // there is pinned through the engine in `service-automation`'s
+      // `value-slot-template-grammar.test.ts`.
+      it('the `has()` guard it carries tests each step off `vars`, and passes every judge as an envelope', () => {
+        const [f] = bareDollar(valueFlow('create_record', { objectName: 'task', fields: { who: '$source.id' } }));
+        const guard = 'has(vars.source) && has(vars.source.id) ? vars.source.id : null';
+        expect(f!.hint).toContain(`\`${guard}\``);
+        expect(f!.hint).not.toContain('`has(source.id)');
+        expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { who: CEL(guard) } }))).toEqual(NONE);
+      });
+
       it('control: outside the value and text slots the single brace still resolves, and the hint still names it', () => {
         const [f] = lintFlowPatterns(httpFlow({ ticket: '$source.id' })).filter((x) => x.rule === FLOW_BARE_DOLLAR_REF);
         expect(f!.hint).toContain('Wrap it and bind a variable: `{source.id}`');

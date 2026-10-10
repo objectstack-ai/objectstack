@@ -73,10 +73,18 @@ describe('a value-slot string in the retired `{…}` dialect is refused, with th
     expect(message).toContain('the guarded form writes `null`');
   });
 
-  it('a dotted path: the same path in CEL, guarded on its last key', () => {
+  // A guard on the last key alone does not hold where the VARIABLE is absent:
+  // `has(source.id)` fails the run when `source` was never bound (`Unknown
+  // variable`). So the guard tests each step off `vars`, which holds only the
+  // bound variables. That it answers `null` there is pinned through the
+  // engine in `service-automation`'s `value-slot-template-grammar.test.ts`.
+  it('a dotted path: the same path in CEL, guarded a step at a time from `vars`', () => {
     const message = refusalOf('{record.assignee}');
     expect(message).toContain("{ dialect: 'cel', source: 'record.assignee' }");
-    expect(message).toContain('`has(record.assignee) ? record.assignee : null`');
+    expect(message).toContain('`has(vars.record) && has(vars.record.assignee) ? vars.record.assignee : null`');
+    expect(message).toContain('a step at a time from `vars`, which holds only the variables the run has bound');
+    expect(message).not.toContain('`has(record.assignee)');
+    expect(refusalOf('{a.b.c}')).toContain('`has(vars.a) && has(vars.a.b) && has(vars.a.b.c) ? vars.a.b.c : null`');
   });
 
   it('a numeric segment indexes the list: `userList.0` becomes `userList[0]`', () => {
@@ -147,8 +155,8 @@ describe('a head CEL claims is read through `vars`, the route a `$`-named head t
 
   it('a bare claimed variable keeps its guard, selected off `vars`; a keyword cannot be selected, so it gets none', () => {
     expect(refusalOf('{list}')).toContain('`has(vars.list) ? vars.list : null`');
-    expect(refusalOf('{list.tags}')).toContain('`has(vars.list.tags) ? vars.list.tags : null`');
-    expect(refusalOf('{for.tags}')).toContain('`has(vars.for.tags) ? vars.for.tags : null`');
+    expect(refusalOf('{list.tags}')).toContain('`has(vars.list) && has(vars.list.tags) ? vars.list.tags : null`');
+    expect(refusalOf('{for.tags}')).toContain('`has(vars.for) && has(vars.for.tags) ? vars.for.tags : null`');
     expect(refusalOf('{null}')).not.toContain('the guarded form');
     expect(refusalOf('{in.tags}')).not.toContain('the guarded form');
   });
@@ -174,7 +182,9 @@ describe('a head CEL claims is read through `vars`, the route a `$`-named head t
       expect(CEL_CLAIMED_IDENTIFIERS.has(ordinary)).toBe(false);
       expect(celPath(`${ordinary}.0.key`)).toBe(`${ordinary}[0].key`);
     }
-    expect(refusalOf('{record.assignee}')).toContain('`has(record.assignee) ? record.assignee : null`');
+    // The path is read bare; its guard, like every head's, tests each step off `vars`.
+    expect(refusalOf('{record.assignee}')).toContain("source: 'record.assignee' }");
+    expect(refusalOf('{record.assignee}')).toContain('`has(vars.record) && has(vars.record.assignee) ? vars.record.assignee : null`');
     expect(celPath('$error.message')).toBe('vars["$error"].message');
   });
 });
@@ -197,7 +207,7 @@ describe('a head the flow CEL scope claims is read through `vars`', () => {
     expect(celPath(`${name}.0`)).toBe(`vars["${name}"][0]`);
     expect(celPath(`${name}.tags`)).toBe(`vars["${name}"].tags`);
     expect(refusalOf(`{${name}.0}`)).toContain(`source: 'vars["${name}"][0]' }`);
-    expect(refusalOf(`{${name}.tags}`)).toContain(`\`has(vars.${name}.tags) ? vars.${name}.tags : null\``);
+    expect(refusalOf(`{${name}.tags}`)).toContain(`\`has(vars.${name}) && has(vars.${name}.tags) ? vars.${name}.tags : null\``);
   });
 });
 

@@ -265,7 +265,7 @@ for some input, so the rewrite is yours to judge.
 
 | you wrote | write instead | what changes |
 |:---|:---|:---|
-| `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an **absent** variable or key where the template wrote nothing — guard one that may be absent: `has(record.owner) ? record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`) |
+| `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an **absent** variable or key where the template wrote nothing — guard one that may be absent a step at a time from `vars`, which holds only the variables the run has bound: `has(vars.record) && has(vars.record.owner) ? vars.record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`). A guard on the last key alone does not hold where the variable is absent: `has(source.id)` fails the run when `source` was never bound (an `isInput` variable the caller left out) |
 | `'{items.0}'` | `source: 'items[0]'` | an empty list fails the run |
 | `'{$error.message}'` | `source: 'vars["$error"].message'` | a `$`-named variable is read through `vars` |
 | `'{round(x * 100) / 100}'` | `source: 'round(x * 100) / 100.0'` | CEL divides two integers as integers: keep a decimal operand on every division |

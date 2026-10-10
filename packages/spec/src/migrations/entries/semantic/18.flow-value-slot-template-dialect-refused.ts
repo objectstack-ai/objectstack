@@ -56,8 +56,10 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'Run objectstack validate: it reports each refused value as expression-invalid at the node and the value\'s '
     + 'path, with the CEL spelling of its tokens. Rewrite each as that envelope; where a variable or key may be '
-    + 'absent, guard it (has(record.owner) ? record.owner : null, has(vars.x) ? vars.x : null for a variable) or '
-    + 'route around the node. For the run user, find which flows can run without one (a schedule, a record change '
+    + 'absent, guard it a step at a time from vars, which holds only the variables the run has bound '
+    + '(has(vars.x) ? vars.x : null, has(vars.source) && has(vars.source.id) ? vars.source.id : null; a guard on '
+    + 'the last key alone, has(source.id), fails the run when source itself was never bound) or route around the '
+    + 'node. For the run user, find which flows can run without one (a schedule, a record change '
     + 'a system write can make): there, guard current_user.id, or skip the node with a start condition or a '
     + 'decision on current_user != null where an update_record must leave the stored value alone. For a date '
     + 'macro with a variable offset, check the variable is always set to a number where the flow runs; write a '

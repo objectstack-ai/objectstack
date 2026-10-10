@@ -35,12 +35,15 @@
  *    template — including a head variable named like an identifier CEL claims
  *    for itself (`{list.0}` → `vars["list"][0]`, #22290), or one the flow
  *    scope binds over it (`{vars.0}` → `vars["vars"][0]`), and inside an
- *    EXPRESSION token (`{int * 2}` → `vars["int"] * 2`).
+ *    EXPRESSION token (`{int * 2}` → `vars["int"] * 2`) — and the `has()`
+ *    guard it prints answers `null`, rather than failing the run, where the
+ *    variable itself was never bound (#19939 pass 3).
  */
 
 import { describe, expect, it } from 'vitest';
 import { VALUE_SLOT_TEMPLATE_REFUSAL, valueSlotTemplateRefusals } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
+import { registerLogicNodes } from './logic-nodes.js';
 import { interpolateString } from './template.js';
 
 const VARIABLES = new Map<string, unknown>([
@@ -196,9 +199,60 @@ describe('the remedy a refused path prints reads, through CEL, the value the int
   });
 
   it('the guard is read off the refusal too, so each row above evaluates it where one is printed', () => {
-    expect(printedSpellings('{list.tags}')).toEqual(['vars["list"].tags', 'has(vars.list.tags) ? vars.list.tags : null']);
+    expect(printedSpellings('{list.tags}')).toEqual(['vars["list"].tags', 'has(vars.list) && has(vars.list.tags) ? vars.list.tags : null']);
     expect(printedSpellings('{list}')).toEqual(['vars["list"]', 'has(vars.list) ? vars.list : null']);
     expect(printedSpellings('{null.tags}')).toEqual(['vars["null"].tags']);
+  });
+
+  // The guard is for "one that may be absent" — the VARIABLE as well as a key.
+  // A variable the run never bound (an `isInput` one the caller left out, with
+  // no default: `seedDeclaredVariables` sets nothing for it) is absent from the
+  // scope, and `has()` evaluates everything but its last selection, so a guard
+  // on the last key alone, `has(source.id)`, fails the run there. The printed
+  // guard tests each step off `vars`, which holds only the bound variables.
+  it.each([
+    ['{source.id}', 'source', { id: 'r1' }, 'r1'],
+    ['{record.owner.name}', 'record', { owner: { name: 'Ada' } }, 'Ada'],
+    ['{list.tags}', 'list', { tags: 'T' }, 'T'],
+    ['{x}', 'x', 7, 7],
+  ])('the printed guard of %s answers `null` where the variable, or a key on the way, is absent', (token, root, bound, value) => {
+    const guard = printedSpellings(token)[1]!;
+    expect(guard, token).toMatch(/^has\(vars\./);
+    const evaluate = (variables: Map<string, unknown>) =>
+      engine.evaluateValueEnvelope({ dialect: 'cel', source: guard }, variables, token);
+    expect(evaluate(new Map()), `${guard} — ${root} unbound`).toBeNull();
+    expect(evaluate(new Map([[root, null]])), `${guard} — ${root} null`).toBeNull();
+    if (typeof bound === 'object') expect(evaluate(new Map([[root, {}]])), `${guard} — a key absent`).toBeNull();
+    const variables = new Map<string, unknown>([[root, bound]]);
+    expect(interpolateString(token, variables, CONTEXT)).toEqual(value);
+    expect(evaluate(variables), `${guard} — bound`).toEqual(value);
+  });
+
+  it('through a run: an `isInput` variable the caller left out — the printed guard writes `null`, a guard on the last key fails the run', async () => {
+    const guard = printedSpellings('{source.id}')[1]!;
+    expect(guard).toBe('has(vars.source) && has(vars.source.id) ? vars.source.id : null');
+    const run = async (source: string) => {
+      const flowEngine = new AutomationEngine(quiet);
+      registerLogicNodes(flowEngine, { logger: quiet, getService: () => undefined } as never);
+      flowEngine.registerFlow('guarded', {
+        name: 'guarded', label: 'Guarded', type: 'autolaunched',
+        variables: [{ name: 'source', type: 'object', isInput: true }, { name: 'who', type: 'text', isOutput: true }],
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'assign', type: 'assignment', label: 'Assign', config: { assignments: { who: { dialect: 'cel', source } } } },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'assign' }, { id: 'e2', source: 'assign', target: 'end' }],
+      } as never);
+      return flowEngine.execute('guarded', { params: {} } as never);
+    };
+    const guarded = await run(guard);
+    expect(guarded.success, guarded.error).toBe(true);
+    expect(guarded.output).toEqual({ who: null });
+    // Control: the guard the refusal printed before — `has()` on the last key alone.
+    const lastKeyOnly = await run('has(source.id) ? source.id : null');
+    expect(lastKeyOnly.success).toBe(false);
+    expect(lastKeyOnly.error).toContain('Unknown variable: source');
   });
 
   it('a later keyword segment, and an index in the middle of a path', () => {
