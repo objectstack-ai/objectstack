@@ -3324,6 +3324,11 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
   const OWNER_BACKSTOP = { type: 'user' as const, value: 'u_backstop' };
   const said = (warnings: any[], needle: string) =>
     warnings.some(([msg]) => String(msg).includes(needle));
+  // The fallback-FIRED warning. Not the bare policy spelling: the empty
+  // `manager` rung's own warning names `onEmptyApprovers: 'fallback'` as its
+  // remedy (#22558), so that needle would read "the fallback fired" off a
+  // warning that only recommends it.
+  const FALLBACK_FIRED = "per onEmptyApprovers: 'fallback'";
 
   it('opens the request on the declared fallback, never on the manager:undefined literal', async () => {
     const engine = makeFakeEngine();
@@ -3336,7 +3341,7 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     expect(req.status).toBe('pending');
     expect(req.pending_approvers).toEqual(['u_backstop']);
     expect(req.pending_approvers).not.toContain('manager:undefined');
-    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(true);
+    expect(said(warnings, FALLBACK_FIRED)).toBe(true);
     // The request is decidable by a person, so the admin-takeover warning must
     // NOT fire — it would be false about this request.
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(false);
@@ -3424,7 +3429,7 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     } as any, CTX) as any;
 
     expect(req.pending_approvers).toEqual(['u9']);
-    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(false);
+    expect(said(warnings, FALLBACK_FIRED)).toBe(false);
   });
 
   // ── negative controls ─────────────────────────────────────────────
@@ -3460,7 +3465,7 @@ describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named res
     }), CTX) as any;
     expect(req.pending_approvers).toEqual([]);
     expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
-    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(false);
+    expect(said(warnings, FALLBACK_FIRED)).toBe(false);
   });
 });
 
