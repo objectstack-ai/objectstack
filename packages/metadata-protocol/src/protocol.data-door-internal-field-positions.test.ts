@@ -38,6 +38,18 @@ const VAULT: ServiceObject = {
         // The flagged column — a one-way digest in a `text` column, the shape
         // the flag exists for (#7728). Non-hidden, so nothing else withholds it.
         secret_hash: { name: 'secret_hash', label: 'Secret', type: 'text', internal: true },
+        inner_id: { name: 'inner_id', label: 'Inner', type: 'lookup', reference: 'pv_inner' },
+    },
+} as unknown as ServiceObject;
+
+/** The grand target: two relation hops from `pv_holder`, with its own flagged column. */
+const INNER: ServiceObject = {
+    name: 'pv_inner',
+    label: 'Inner',
+    fields: {
+        id: { name: 'id', label: 'ID', type: 'text' },
+        name: { name: 'name', label: 'Name', type: 'text' },
+        inner_secret: { name: 'inner_secret', label: 'Inner Secret', type: 'text', internal: true },
     },
 } as unknown as ServiceObject;
 
@@ -51,10 +63,11 @@ const HOLDER: ServiceObject = {
     },
 } as unknown as ServiceObject;
 
-const SCHEMAS: Record<string, unknown> = { pv_vault: VAULT, pv_holder: HOLDER };
+const SCHEMAS: Record<string, unknown> = { pv_vault: VAULT, pv_holder: HOLDER, pv_inner: INNER };
 const ROWS: Record<string, Record<string, unknown>[]> = {
     pv_vault: [{ id: 'v1', name: 'alpha', rank: 1, secret_hash: 'h1' }],
     pv_holder: [{ id: 'o1', name: 'owner', vault_id: 'v1' }],
+    pv_inner: [{ id: 'i1', name: 'inner', inner_secret: 's1' }],
 };
 
 function makeProtocol() {
@@ -162,4 +175,79 @@ describe('[#22646] CONTROL — an ordinary field of the same object is unchanged
         await p.findData({ object: 'pv_vault', query: { search: 'al', searchFields: 'name' } });
         expect(find).toHaveBeenCalledTimes(1);
     });
+});
+
+/**
+ * Rework round 1 — the positions the first pass did not walk, measured served
+ * on a real engine and SQL driver before this change (fixture objects only):
+ * a NESTED-RELATION condition evaluated on the related object, and an `expand`
+ * tree deeper than one level. Each is refused for a member AND an
+ * administrator: the door takes no caller carve-out, and the context is passed
+ * so a future carve-out would have to defeat these cases to land.
+ */
+const PERSONAS = {
+    member: { userId: 'u_member', roles: [] as string[] },
+    admin: { userId: 'u_admin', roles: ['admin'], isPlatformAdmin: true },
+} as const;
+
+describe('[#22646] relation conditions and every expand level are judged on their own object', () => {
+    const cases: Array<[string, string, Record<string, unknown>, string, string]> = [
+        ['relation filter (nested-relation form)', 'pv_holder', { where: { vault_id: { [F]: 'h1' } } }, 'pv_vault', F],
+        ['relation filter under $or', 'pv_holder', { where: { $or: [{ vault_id: { [F]: 'h1' } }, { name: '__none__' }] } }, 'pv_vault', F],
+        ['relation filter (OData filter param)', 'pv_holder', { filter: JSON.stringify({ vault_id: { [F]: 'h1' } }) }, 'pv_vault', F],
+        ['relation filter beside an aggregation', 'pv_holder', { where: { vault_id: { [F]: 'h1' } }, aggregations: [{ function: 'count', alias: 'n' }] }, 'pv_vault', F],
+        [
+            'expand depth 2: the grand target\'s filter',
+            'pv_holder',
+            { expand: { vault_id: { object: 'pv_vault', expand: { inner_id: { object: 'pv_inner', where: { inner_secret: 's1' } } } } } },
+            'pv_inner',
+            'inner_secret',
+        ],
+        [
+            'expand depth 2: the grand target\'s sort',
+            'pv_holder',
+            { expand: { vault_id: { object: 'pv_vault', expand: { inner_id: { object: 'pv_inner', orderBy: [{ field: 'inner_secret', order: 'asc' }] } } } } },
+            'pv_inner',
+            'inner_secret',
+        ],
+        [
+            'expand depth 1: a relation condition onto the grand target',
+            'pv_holder',
+            { expand: { vault_id: { object: 'pv_vault', where: { inner_id: { inner_secret: 's1' } } } } },
+            'pv_inner',
+            'inner_secret',
+        ],
+    ];
+    for (const [label, object, query, owner, field] of cases) {
+        for (const [persona, context] of Object.entries(PERSONAS)) {
+            it(`${label} — ${persona}: INVALID_FIELD / 400 on '${owner}.${field}', engine never asked`, async () => {
+                const { p, find, aggregate, count } = makeProtocol();
+                const err = await refusal(() => p.findData({ object, query, context }));
+                expect(err.code).toBe('INVALID_FIELD');
+                expect(err.status).toBe(400);
+                expect(err.object).toBe(owner);
+                expect(err.field).toBe(field);
+                expect(find).not.toHaveBeenCalled();
+                expect(aggregate).not.toHaveBeenCalled();
+                expect(count).not.toHaveBeenCalled();
+            });
+        }
+    }
+});
+
+describe('[#22646] CONTROL — ordinary fields through a relation and at depth are unchanged', () => {
+    const served: Array<[string, Record<string, unknown>]> = [
+        ['a relation condition on the related object\'s ordinary `name`', { where: { vault_id: { name: 'alpha' } } }],
+        ['an operator bag on the lookup itself (not a relation condition)', { where: { vault_id: { $eq: 'v1' } } }],
+        ['expand depth 2 with an ordinary filter', { expand: { vault_id: { object: 'pv_vault', expand: { inner_id: { object: 'pv_inner', where: { name: 'inner' } } } } } }],
+    ];
+    for (const [label, query] of served) {
+        for (const [persona, context] of Object.entries(PERSONAS)) {
+            it(`${label} — ${persona}: served, the engine is asked`, async () => {
+                const { p, find } = makeProtocol();
+                await p.findData({ object: 'pv_holder', query, context });
+                expect(find).toHaveBeenCalledTimes(1);
+            });
+        }
+    }
 });

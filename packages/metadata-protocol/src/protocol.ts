@@ -4438,6 +4438,55 @@ function headSegment(name: string): string {
 }
 
 /**
+ * [#22646] How deep the data door's `internal: true` walk follows nested
+ * relation conditions and `expand` levels — a backstop against a
+ * self-referential in-process value, well above anything the engine executes
+ * (one nested-relation hop; `expand` stops at its own depth cap).
+ */
+const INTERNAL_FIELD_WALK_DEPTH = 8;
+
+/**
+ * [#22646] The NESTED-RELATION conditions a filter holds — a key naming a
+ * reference field of the object (`REFERENCE_VALUE_TYPES`) whose value is a
+ * plain record carrying at least one non-`$` key, i.e. a condition on the
+ * related object rather than an operator bag — with each site's target object.
+ * Logical combinators (and any other `$` key) are walked as conditions, so a
+ * site under `$or` / `$not` is found. Shared by the door's internal-field
+ * refusal; the engine's own relation lowering is the authority on whether a
+ * site RUNS, this only finds what a filter would evaluate on the related object.
+ */
+function relationConditionSites(
+    fields: Record<string, any> | undefined,
+    root: unknown,
+): Array<{ field: string; target: string; condition: Record<string, unknown> }> {
+    const sites: Array<{ field: string; target: string; condition: Record<string, unknown> }> = [];
+    if (!fields || typeof fields !== 'object') return sites;
+    const seen = new WeakSet<object>();
+    const pending: unknown[] = [root];
+    while (pending.length > 0) {
+        const node = pending.pop();
+        if (node === null || typeof node !== 'object' || seen.has(node)) continue;
+        seen.add(node);
+        if (Array.isArray(node)) {
+            for (const member of node) pending.push(member);
+            continue;
+        }
+        for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+            if (key.startsWith('$')) {
+                pending.push(value);
+                continue;
+            }
+            const def = fields[key];
+            if (def == null || !REFERENCE_VALUE_TYPES.has(def.type) || !isPlainRecord(value)) continue;
+            if (!Object.keys(value).some((k) => !k.startsWith('$'))) continue;
+            const target = referenceTargetOf(def);
+            if (target) sites.push({ field: key, target, condition: value });
+        }
+    }
+    return sites;
+}
+
+/**
  * The walk {@link collectStoredMetadataFilterFields} runs over one filter
  * condition. A node is visited as a CONDITION (its non-`$` keys are columns)
  * or as a COMPARAND (the value under a column key, where only a `$field`
@@ -12448,55 +12497,99 @@ export class ObjectStackProtocolImplementation implements
      *  - `groupBy` and `aggregations[].field` — defence in depth; the engine's
      *    `rejectCredentialAggregation` refuses these for every caller with the
      *    same code, and this door answers first so the envelope is the door's.
-     *  - a one-level `expand` entry's own `where` / `orderBy`, judged against
-     *    the TARGET object's internal fields: the nested sub-read's row strip
-     *    already withholds the column, but a nested filter is a presence oracle
-     *    on the related record (the expanded object appears only when the guess
-     *    matches), so the evaluate positions are refused there too. Target
-     *    OBJECT exposure is a different axis, filed separately (#22661).
+     *  - a NESTED-RELATION condition inside any of those filters
+     *    (`{ <lookup>: { <field of the related object>: … } }`), judged against
+     *    the RELATED object's own internal fields: the engine lowers it by
+     *    evaluating the condition on the related object
+     *    (`ObjectQL.lowerRelationConditions`) and keeps the rows whose related
+     *    record matched, so a related `internal` field there is the same
+     *    confirmation oracle one hop away. Judged here, at the door, rather than
+     *    in the engine's relation-site walk, so the engine's privileged callers
+     *    keep the #7823 split (none of them reaches this door).
+     *  - every `expand` entry's own `where` / `orderBy`, at EVERY depth of the
+     *    expand tree, judged against that level's TARGET object: the nested
+     *    sub-read's row strip already withholds the column, but a nested filter
+     *    is a presence oracle on the related record (the expanded object appears
+     *    only when the guess matches), and a deeper level's sub-read is one more
+     *    `engine.find` that answers the same way. Target OBJECT exposure is a
+     *    different axis, filed separately (#22661).
+     *
+     * Not judged here because the ingress already refuses them, measured: a
+     * DOTTED sort or group-by path crossing a relation (the sort gate's
+     * `dotted` verdict, `INVALID_SORT`; the group-by gate's unknown-field
+     * verdict, `INVALID_FIELD`), and a dotted filter key (the engine's dotted
+     * door). A dotted sort inside an `expand` entry is admitted but orders a
+     * batch the expansion re-keys by id with no `limit`, so it changes no answer.
      */
     private assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
         const gate = this.resolveQueryFields(object);
-        if (gate) {
-            const internal = new Set(collectInternalWriteResponseFields(gate.schema));
-            if (internal.size > 0) {
-                // where + the `filter` alias a direct bag may still carry.
-                for (const [slot, where] of [['filter', options.where], ['filter', options.filter]] as const) {
-                    this.refuseInternalReads(object, where, internal, slot);
+        if (!gate) return;
+        const internal = new Set(collectInternalWriteResponseFields(gate.schema));
+        // where + the `filter` alias a direct bag may still carry, each with its
+        // nested-relation conditions.
+        this.refuseInternalInFilter(object, options.where, 'filter', 0);
+        this.refuseInternalInFilter(object, options.filter, 'filter', 0);
+        this.refuseInternalNames(object, this.orderByFieldNames(options.orderBy), internal, 'sort');
+        this.refuseInternalNames(object, this.groupByFieldNames(options.groupBy), internal, 'groupBy');
+        if (Array.isArray(options.aggregations)) {
+            options.aggregations.forEach((agg: any, i: number) => {
+                const field = agg?.field;
+                if (typeof field === 'string' && field !== '*') {
+                    this.refuseInternalNames(object, [field], internal, `aggregations[${i}].field`);
                 }
-                this.refuseInternalNames(object, this.orderByFieldNames(options.orderBy), internal, 'sort');
-                this.refuseInternalNames(object, this.groupByFieldNames(options.groupBy), internal, 'groupBy');
-                if (Array.isArray(options.aggregations)) {
-                    options.aggregations.forEach((agg: any, i: number) => {
-                        const field = agg?.field;
-                        if (typeof field === 'string' && field !== '*') {
-                            this.refuseInternalNames(object, [field], internal, `aggregations[${i}].field`);
-                        }
-                        this.refuseInternalReads(object, agg?.filter, internal, `aggregations[${i}].filter`);
-                    });
-                }
-            }
+                this.refuseInternalInFilter(object, agg?.filter, `aggregations[${i}].filter`, 0);
+            });
         }
-        // One-level expand: each entry's own evaluate positions, against the
-        // TARGET object's internal fields.
-        const expand = options.expand;
-        if (gate && expand && typeof expand === 'object' && !Array.isArray(expand)) {
-            for (const [rel, entry] of Object.entries(expand as Record<string, any>)) {
-                if (!entry || typeof entry !== 'object') continue;
-                const hasEvaluatePosition = entry.where !== undefined || entry.orderBy !== undefined;
-                if (!hasEvaluatePosition) continue;
-                const sourceField = gate.fields?.[rel];
-                const target = sourceField != null && REFERENCE_VALUE_TYPES.has(sourceField.type)
-                    ? referenceTargetOf(sourceField)
-                    : undefined;
-                if (!target) continue;
-                const targetGate = this.resolveQueryFields(target);
-                if (!targetGate) continue;
+        // The whole expand tree, every level against its own target.
+        this.refuseInternalInExpand(object, options.expand, 'expand', 0);
+    }
+
+    /**
+     * One filter's internal-field judgement: every column it reads on `object`
+     * ({@link collectFilterReads}), then each nested-relation condition it holds,
+     * recursively, on the related object. `param` names the position, extended
+     * by the relation field at each hop (`filter.owner_id`).
+     */
+    private refuseInternalInFilter(object: string, where: unknown, param: string, depth: number): void {
+        if (where == null || depth > INTERNAL_FIELD_WALK_DEPTH) return;
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const condition = isFilterAST(where) ? parseFilterAST(where) : where;
+        const internal = new Set(collectInternalWriteResponseFields(gate.schema));
+        if (internal.size > 0) {
+            const reads = new Set<string>();
+            collectFilterReads(condition, reads);
+            this.refuseInternalNames(object, [...reads], internal, param);
+        }
+        for (const site of relationConditionSites(gate.fields, condition)) {
+            this.refuseInternalInFilter(site.target, site.condition, `${param}.${site.field}`, depth + 1);
+        }
+    }
+
+    /**
+     * Every level of an `expand` tree: each entry's own `where` (with its
+     * nested-relation conditions) and `orderBy`, judged against that entry's
+     * target object, then the entry's own `expand` with the target as source.
+     */
+    private refuseInternalInExpand(source: string, expand: unknown, prefix: string, depth: number): void {
+        if (!isPlainRecord(expand) || depth > INTERNAL_FIELD_WALK_DEPTH) return;
+        const gate = this.resolveQueryFields(source);
+        if (!gate) return;
+        for (const [rel, entry] of Object.entries(expand)) {
+            if (!isPlainRecord(entry)) continue;
+            const sourceField = gate.fields?.[rel];
+            const target = sourceField != null && REFERENCE_VALUE_TYPES.has(sourceField.type)
+                ? referenceTargetOf(sourceField)
+                : undefined;
+            if (!target) continue;
+            const path = `${prefix}['${rel}']`;
+            this.refuseInternalInFilter(target, entry.where, `${path}.filter`, 0);
+            const targetGate = this.resolveQueryFields(target);
+            if (targetGate) {
                 const targetInternal = new Set(collectInternalWriteResponseFields(targetGate.schema));
-                if (targetInternal.size === 0) continue;
-                this.refuseInternalReads(target, entry.where, targetInternal, `expand['${rel}'].filter`);
-                this.refuseInternalNames(target, this.orderByFieldNames(entry.orderBy), targetInternal, `expand['${rel}'].sort`);
+                this.refuseInternalNames(target, this.orderByFieldNames(entry.orderBy), targetInternal, `${path}.sort`);
             }
+            this.refuseInternalInExpand(target, entry.expand, `${path}.expand`, depth + 1);
         }
     }
 
@@ -12516,14 +12609,6 @@ export class ObjectStackProtocolImplementation implements
             .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
             .filter((f): f is string => typeof f === 'string' && f.length > 0)
             .map((f) => f.split('.')[0] as string);
-    }
-
-    /** Refuse when any READ column of `where` (keys and `{ $field }` comparands) is internal. */
-    private refuseInternalReads(object: string, where: unknown, internal: ReadonlySet<string>, param: string): void {
-        if (where == null) return;
-        const reads = new Set<string>();
-        collectFilterReads(isFilterAST(where) ? parseFilterAST(where) : where, reads);
-        this.refuseInternalNames(object, [...reads], internal, param);
     }
 
     /** Refuse when any of `names` is an internal field of `object`. */
