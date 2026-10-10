@@ -555,6 +555,30 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'default, change nothing.',
     },
     {
+      key: 'ui/UserActionsConfig:editInline',
+      from: 'false',
+      to: 'true',
+      reason:
+        'A RULED behaviour change, not a correction: the maintainer ruled on 2026-10-10, for the '
+        + 'v18 line, 「乙 v18 把 spec 默认翻成 true,editInline: false 变成关法。」 — a list view is '
+        + 'editable in place by default, under the permission gate that already exists, and '
+        + '`userActions: { editInline: false }` is the opt-out. The one-vocabulary rule of '
+        + 'objectui#5144 (a boolean `inlineEdit` folds into `editInline`, an explicit `editInline` '
+        + 'wins, declared = enforced) stands; only the default\'s value moves. '
+        + 'What moves: a list view (or a page `interfaceConfig`) whose `userActions` block omits '
+        + '`editInline` now parses to `true` where it parsed to `false`, so the renderer offers the '
+        + 'inline-edit toggle to a user who may `update` the object — and to nobody else, because '
+        + 'the permission gate is untouched. A view with NO `userActions` block parses with none on '
+        + 'either side; the renderer reads an absent key as this default. The accept set does not '
+        + 'move: `editInline` is still a boolean, and every authored value parses exactly as before. '
+        + 'A document that SERIALISED an earlier parse (an `os compile` artifact) carries a written '
+        + '`false` and stays read-only in place: recompile it, or delete the key. '
+        + 'Who is affected: the author who relied on the documented default for a list that is '
+        + 'read-only by nature (a log, an audit trail, a history, a report roll-up). To keep that '
+        + 'list read-only in place, write it: `userActions: { editInline: false }`. To take the '
+        + 'platform default, change nothing. D3 entry: `list-view-edit-inline-default-on`.',
+    },
+    {
       key: 'data/Cube:public',
       from: 'false',
       to: 'true',
