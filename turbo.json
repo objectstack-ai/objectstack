@@ -39,9 +39,19 @@
       "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/content/**"]
     },
+    "@objectstack/spec#gen:migration-registry": {
+      "dependsOn": [],
+      "outputs": ["src/migrations/registry.ts"],
+      "inputs": [
+        "package.json",
+        "scripts/build-migration-registry.ts",
+        "src/migrations/registry.ts.template",
+        "src/migrations/entries/**"
+      ]
+    },
     "@objectstack/spec#build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "outputs": ["dist/**", "json-schema/**", "src/migrations/registry.ts", ".next/**", "!.next/cache/**"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/scripts/tsup-drop-sources-content.mjs",
@@ -140,8 +150,13 @@
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
       ]
     },
+    "@objectstack/spec#typecheck": {
+      "dependsOn": ["^build", "gen:migration-registry"],
+      "outputs": [],
+      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
+    },
     "@objectstack/spec#test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "gen:migration-registry"],
       "outputs": [],
       "env": ["OS_TEST_TIERS"],
       "inputs": [
@@ -634,7 +649,7 @@
         "dependsOn": ["^build"]
     },
     "@objectstack/spec#test:repo": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "gen:migration-registry"],
       "outputs": [],
       "inputs": [
         "$TURBO_DEFAULT$",

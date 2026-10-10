@@ -3,8 +3,9 @@
 // `build-migration-registry.ts` has TWO kinds of caller now, and its entry guard
 // is the only thing telling them apart:
 //
-//   - pnpm RUNS it (`gen:migration-registry`, `check:migration-registry`), and
-//     write mode rewrites `src/migrations/registry.ts`;
+//   - pnpm RUNS it (`gen:migration-registry`, on install, in `build`, before
+//     `typecheck` and `test`), and every run rewrites `src/migrations/registry.ts`
+//     from the template and the entries;
 //   - `build-schemas.ts` IMPORTS it, for `shardNameFor` — so the entry file each
 //     registration remedy names is the one name the generator accepts, read from
 //     the rule `entries/README.md` documents instead of restated beside it.
@@ -66,8 +67,9 @@ describe('build-migration-registry.ts — run, it speaks; import, it runs nothin
     );
     const r = tsx([probe]);
     expect(r.status, r.stderr).toBe(0);
-    // Write mode would have printed `✓ wrote src/migrations/registry.ts (…)`, and
-    // check mode `✓ … is current` — any line beyond the probe's own is the defect.
+    // A run would have printed its self-test line and then `✓ wrote
+    // src/migrations/registry.ts (…)` or `✓ … is current` — any line beyond the
+    // probe's own is the defect.
     expect(r.stdout).toBe('17.data__AggregationNode__distinct.ts\n');
     expect(r.stderr).toBe('');
   });

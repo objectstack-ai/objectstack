@@ -446,6 +446,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'I2d: the synthetic convention-rot controls run on a repo whose stock DOES': 4,
   'V3: the real repository is the case that matters -- this gate\'s own vocabulary': 10,
   'W1-W6 (#22485): the parser-rot witness is GENERATED at head, never read from a committed copy': 9,
+  'GR1-GR7 (#22554): the migration ledger is GENERATED at build, read from its template and entry files': 13,
   'Unit pins on the two pattern-shaped judgements': 29,
   'the floors: what the new vocabulary must refuse': 9,
   'the floors: labels that are NOT mentions, and mentions that ARE evidenced': 9,
@@ -467,7 +468,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 50;
+const SELF_TEST_BATTERY_FLOOR = 51;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -481,6 +482,24 @@ const REPO_ROOT = resolve(__dirname, '..');
 export const LEDGER_SOURCES = [
   'packages/spec/src/migrations/registry.ts',
   'packages/spec/src/conversions/registry.ts',
+];
+
+/**
+ * The two committed sources of `LEDGER_SOURCES[0]` since #22554, which took the
+ * migration registry out of git: it is GENERATED at build, whole, from the
+ * hand-written template and one file per entry under the three entry directories
+ * (the generator's `KINDS`, `packages/spec/scripts/build-migration-registry.ts`).
+ * A rev of that era tracks these and not the registry; every earlier rev tracks the
+ * registry and not the template. A merge base can sit in either era, so the era is
+ * read off the rev itself — see `migrationLedgerTextAt`.
+ */
+export const MIGRATION_LEDGER_TEMPLATE = 'packages/spec/src/migrations/registry.ts.template';
+/** What writes `LEDGER_SOURCES[0]` from those two in the generated era; the witness runs it first. */
+const MIGRATION_LEDGER_GENERATOR = 'packages/spec/scripts/build-migration-registry.ts';
+export const MIGRATION_LEDGER_ENTRY_DIRS = [
+  'packages/spec/src/migrations/entries/semantic',
+  'packages/spec/src/migrations/entries/retired-keys',
+  'packages/spec/src/migrations/entries/retired-defs',
 ];
 
 /**
@@ -2081,6 +2100,34 @@ export function generatedWitness({ cwd, head, toolRoot = REPO_ROOT }) {
     for (const rel of ['node_modules', join('packages', 'spec', 'node_modules')]) {
       if (existsSync(join(toolRoot, rel)) && !existsSync(join(tree, rel))) symlinkSync(join(toolRoot, rel), join(tree, rel));
     }
+    // The generated era (#22554): the archive carries the template and the entry
+    // files but no registry, exactly as a fresh checkout does, so the rev's OWN
+    // registry generator runs first -- the step `build` and `pnpm install` take. A
+    // template with no generator beside it is a red, never a witness of nothing.
+    if (existsSync(join(tree, MIGRATION_LEDGER_TEMPLATE))) {
+      const registryGenerator = join(tree, MIGRATION_LEDGER_GENERATOR);
+      if (!existsSync(registryGenerator)) {
+        return fail(
+          `${MIGRATION_LEDGER_TEMPLATE} is tracked at ${head} but ${MIGRATION_LEDGER_GENERATOR} is not, so the\n` +
+          '    migration registry the witness generator imports cannot be generated. If the generator moved,\n' +
+          '    update MIGRATION_LEDGER_GENERATOR in this script.',
+        );
+      }
+      const generated = spawnSync(process.execPath, [tsxCli, registryGenerator], {
+        cwd: join(tree, 'packages', 'spec'),
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      if (generated.status !== 0) {
+        const said = `${generated.stdout ?? ''}${generated.stderr ?? ''}${generated.error ? String(generated.error) : ''}`.trim();
+        return fail(
+          `${MIGRATION_LEDGER_GENERATOR} exited ${generated.status ?? 'without a status'} at ${head}, so the migration\n` +
+          '    registry the witness generator imports does not exist:\n' +
+          `    ${said.split('\n').slice(0, 15).join('\n    ')}`,
+        );
+      }
+    }
     const generator = join(tree, WITNESS_GENERATOR);
     const out = join(dir, 'spec-changes.json');
     const run = spawnSync(process.execPath, [tsxCli, generator, '--out', out], {
@@ -2223,13 +2270,44 @@ export function ledgerAt(rev, cwd) {
   const bySource = {};
   const missingSources = [];
   for (const path of LEDGER_SOURCES) {
-    const src = showOrNull(rev, path, cwd);
+    const src = path === LEDGER_SOURCES[0] ? migrationLedgerTextAt(rev, cwd) : showOrNull(rev, path, cwd);
     if (src === null) { missingSources.push(path); continue; }
     const found = extractIds(src);
     bySource[path] = found.length;
     for (const id of found) ids.add(id);
   }
   return { ids, bySource, missingSources };
+}
+
+/**
+ * The text of the migration ledger at a rev: what that rev's BUILD reads.
+ *
+ * In the generated era (#22554: the rev tracks `MIGRATION_LEDGER_TEMPLATE`) that is
+ * the template followed by every `.ts` entry file the generator concatenates into
+ * it — the generated registry's lines, in another order, which `extractIds` reads as
+ * a set. A non-`.ts` file there (the directory's README, whose examples spell
+ * id-shaped lines) is not an entry: the generator refuses it, so it is not read. A
+ * registry file a rev of this era still tracks is a stale copy, and the template
+ * wins over it. In the committed era the registry itself is the text. `null` when a
+ * rev has neither: a red in `assertInputs`, never an empty ledger.
+ *
+ * Exported for the self-test's GR battery.
+ *
+ * @returns {string | null}
+ */
+export function migrationLedgerTextAt(rev, cwd) {
+  const template = showOrNull(rev, MIGRATION_LEDGER_TEMPLATE, cwd);
+  if (template === null) return showOrNull(rev, LEDGER_SOURCES[0], cwd);
+  let listed;
+  try {
+    listed = git(['ls-tree', '-r', '--name-only', rev, '--', ...MIGRATION_LEDGER_ENTRY_DIRS], cwd);
+  } catch {
+    return null;
+  }
+  const entries = listed.split('\n').map((p) => p.trim()).filter((p) => p.endsWith('.ts')).sort();
+  const texts = showManyOrNull(rev, entries, cwd);
+  if (texts.size !== entries.length) return null;
+  return [template, ...entries.map((p) => texts.get(p))].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -2274,7 +2352,8 @@ export function assertInputs({ cwd, head, witness = generatedWitness }) {
   const { ids, bySource, missingSources } = ledgerAt(head, cwd);
   for (const path of missingSources) {
     problems.push(
-      `ADR-0087 ledger source not found at HEAD: ${path}\n` +
+      `ADR-0087 ledger source not found at HEAD: ${path}` +
+      (path === LEDGER_SOURCES[0] ? ` (nor its generated-era source, ${MIGRATION_LEDGER_TEMPLATE})` : '') + '\n' +
       '    fix: if the ledger moved, update LEDGER_SOURCES in this script. A missing ledger is a\n' +
       '    red, never a silent skip -- every `registered` claim would otherwise be unverifiable.',
     );
@@ -4322,7 +4401,9 @@ function ledgerTouchingCommits(path, head, cwd) {
   for (const sha of shas) {
     let names;
     try { names = git(['show', '--name-only', '--format=', sha], cwd); } catch { continue; }
-    if (LEDGER_SOURCES.some((src) => names.includes(src))) hits.push(sha);
+    // The generated era (#22554): a registration commit adds an entry file and
+    // touches no registry, so the ledger's two committed sources count too.
+    if ([...LEDGER_SOURCES, MIGRATION_LEDGER_TEMPLATE, ...MIGRATION_LEDGER_ENTRY_DIRS].some((src) => names.includes(src))) hits.push(sha);
   }
   return { available: true, shas: hits };
 }
@@ -6473,6 +6554,116 @@ function selfTest() {
       w6.json === null && /`tsx` is not installed/.test(w6.problem ?? '') && /pnpm install/.test(w6.problem ?? ''),
       `W6: a checkout with no tsx must answer a problem naming \`pnpm install\` -- got: ${JSON.stringify(w6)}`,
     );
+  }
+
+  // ---- GR1-GR7 (#22554): the migration ledger is GENERATED at build ---------
+  //
+  // A generated-era rev tracks `MIGRATION_LEDGER_TEMPLATE` and the entry files and
+  // NOT the registry, exactly as `main` does after #22554. These fixtures carry the
+  // REAL registry generator, copied from this repository, so the witness runs the
+  // step a fresh checkout's install and build run -- never a model of it.
+  battery('GR1-GR7 (#22554): the migration ledger is GENERATED at build, read from its template and entry files');
+  {
+    const realGenerator = readFileSync(join(REPO_ROOT, MIGRATION_LEDGER_GENERATOR), 'utf8');
+    const TEMPLATE = 'export const X = {\n  semantic: [\n    // <os-generated semantic:17>\n    // </os-generated semantic:17>\n  ],\n};\n';
+    const ENTRY = (id) => `export const entry = {\n  id: '${id}',\n  surface: 's',\n};\n`;
+    const entryPath = (id) => `${MIGRATION_LEDGER_ENTRY_DIRS[0]}/17.${id}.ts`;
+    // Every entry directory carries a README, the generator's one declared
+    // non-entry file: git keeps no empty directory, and the generator refuses a
+    // missing one. The semantic README spells an id-shaped example line (GR2).
+    const generatedEra = (entryIds) => ({
+      [MIGRATION_LEDGER_TEMPLATE]: TEMPLATE,
+      [MIGRATION_LEDGER_GENERATOR]: realGenerator,
+      [`${MIGRATION_LEDGER_ENTRY_DIRS[0]}/README.md`]: "An entry looks like this:\n\n  id: 'readme-example',\n",
+      [`${MIGRATION_LEDGER_ENTRY_DIRS[1]}/README.md`]: 'retired keys\n',
+      [`${MIGRATION_LEDGER_ENTRY_DIRS[2]}/README.md`]: 'retired defs\n',
+      ...Object.fromEntries(entryIds.map((id) => [entryPath(id), ENTRY(id)])),
+    });
+    const generatedRepo = (files) => {
+      const dir = mkdtempSync(join(tmpdir(), 'adr0087-generated-era-'));
+      cleanup.push(dir);
+      const w = (rel, text) => { mkdirSync(dirname(join(dir, rel)), { recursive: true }); writeFileSync(join(dir, rel), text); };
+      git(['init', '-q', '-b', 'main'], dir);
+      git(['config', 'user.email', 't@t'], dir);
+      git(['config', 'user.name', 't'], dir);
+      w(LEDGER_SOURCES[1], CONV(['a-conversion']));
+      w(WITNESS_GENERATOR, WITNESS_GEN());
+      w(ADR_0087, ADR_DOC());
+      w('packages/spec/package.json', JSON.stringify({ name: '@objectstack/spec', version: '1.0.0' }));
+      w('.changeset/stock-breaking.md', CS({ body: 'stock\n\n**BREAKING** something\n' }));
+      for (const [rel, text] of Object.entries(files)) w(rel, text);
+      git(['add', '-A'], dir);
+      git(['commit', '-qm', 'generated era'], dir);
+      return dir;
+    };
+
+    // GR1: the ledger of a generated-era rev is read from its sources, with the
+    // registry ABSENT from the tree -- asserted, so the green cannot be a fixture
+    // that quietly committed one.
+    const g1 = generatedRepo(generatedEra(['alpha', 'beta']));
+    assert(showOrNull('HEAD', LEDGER_SOURCES[0], g1) === null, 'GR1 control: the generated-era fixture must not track the registry');
+    const l1 = ledgerAt('HEAD', g1);
+    assert(l1.missingSources.length === 0, `GR1: a generated-era rev has a ledger -- got missing ${JSON.stringify(l1.missingSources)}`);
+    assert(l1.ids.has('alpha') && l1.ids.has('beta'), `GR1: both entry ids are read -- got ${JSON.stringify([...l1.ids])}`);
+    assert(l1.bySource[LEDGER_SOURCES[0]] === 2, `GR1: exactly the two entries, counted under the registry's name -- got ${JSON.stringify(l1.bySource)}`);
+
+    // GR2: a non-entry file in an entry directory is not an entry. The README's
+    // id-shaped example line is NOT an id, because the generator would not read it.
+    assert(!l1.ids.has('readme-example'), 'GR2: an id-shaped line in entries/**/README.md must not be read as a ledger id');
+
+    // GR3: the witness runs the rev's own registry generator first, so a fresh
+    // tree with no registry still projects -- and agrees with the parser.
+    let used = null;
+    const p3 = assertInputs({ cwd: g1, head: 'HEAD', witness: (o) => (used = generatedWitness(o)) });
+    assert(p3.length === 0, `GR3: a generated-era HEAD has every input -- got: ${p3.join('|')}`);
+    assert(
+      JSON.stringify(used?.json ? projectedMigrationIds(used.json) : null) === JSON.stringify(['alpha', 'beta']),
+      `GR3: the witness generated the registry and projected both entries -- got ${JSON.stringify(used)}`,
+    );
+
+    // GR4: a template with no generator beside it is red, naming what is missing.
+    const g4files = generatedEra(['alpha']);
+    delete g4files[MIGRATION_LEDGER_GENERATOR];
+    const p4 = assertInputs({ cwd: generatedRepo(g4files), head: 'HEAD' });
+    assert(
+      p4.some((p) => /no parser-rot witness/.test(p) && p.includes(`${MIGRATION_LEDGER_GENERATOR} is not`)),
+      `GR4: a generated-era rev with no registry generator must be RED -- got: ${p4.join('|')}`,
+    );
+
+    // GR5: a generation that refuses is red in the generator's own words -- here
+    // the filename/id correspondence it enforces.
+    const g5files = generatedEra(['alpha']);
+    g5files[`${MIGRATION_LEDGER_ENTRY_DIRS[0]}/17.misnamed.ts`] = ENTRY('gamma');
+    const p5 = assertInputs({ cwd: generatedRepo(g5files), head: 'HEAD' });
+    assert(
+      p5.some((p) => /no parser-rot witness/.test(p) && /exited 1/.test(p) && /filename does not match/.test(p)),
+      `GR5: a generator refusal must be RED, quoting it -- got: ${p5.join('|')}`,
+    );
+
+    // GR6: a rev with neither the registry nor its template has no ledger -- red,
+    // naming both, never an empty set.
+    const g6files = generatedEra(['alpha']);
+    delete g6files[MIGRATION_LEDGER_TEMPLATE];
+    const p6 = assertInputs({ cwd: generatedRepo(g6files), head: 'HEAD', witness: parserWitness });
+    assert(
+      p6.some((p) => p.includes(`ledger source not found at HEAD: ${LEDGER_SOURCES[0]}`) && p.includes(MIGRATION_LEDGER_TEMPLATE)),
+      `GR6: no registry and no template must be RED, naming both -- got: ${p6.join('|')}`,
+    );
+
+    // GR7: THE TRANSITION. The merge base tracks the registry (committed era) and
+    // HEAD replaces it with its sources (generated era) -- the shape of the PR that
+    // made the change, and of every branch forked before it. An entry carried
+    // across is NOT new; an entry added beside it is.
+    const transition = (claim) => run(mk({
+      baseIds: ['alpha'],
+      files: {
+        [LEDGER_SOURCES[0]]: null,
+        ...generatedEra(['alpha', 'beta']),
+        '.changeset/x.md': CS({ body: `**BREAKING** x\n\n<!-- adr-0087: registered ${claim} -->\n` }),
+      },
+    }));
+    green('GR7 transition: an entry added in the generated era is a new registration', transition('beta'));
+    red('GR7 transition: an entry carried over from the committed era is not new', transition('alpha'), [/none of those ids is NEW in this diff/]);
   }
 
   // ---- Unit pins on the two pattern-shaped judgements ----------------------
