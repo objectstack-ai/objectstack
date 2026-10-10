@@ -119,12 +119,12 @@ describe('os explain — schema catalog accuracy', () => {
   //     required `id`/`label` were absent;
   //   • `edges` is required — a graph with no edges was not expressible;
   //   • the value `'$currentUser'` was a `$`-prefixed sentinel NO resolver in
-  //     the repo recognises. The flow value dialect is brace-based, and the
-  //     acting user is `{$User.Id}` (template.ts `resolveToken`, whose
-  //     `$User.Id` branch returns `context.userId`). The neighbouring FILTER
-  //     dialect's `{current_user_id}` is a different door and does NOT carry
-  //     over: assignment/`fields` values go through plain `interpolate`, not
-  //     `interpolateFilter`.
+  //     the repo recognises. A `fields` value is a CEL value envelope, and the
+  //     acting user there is `current_user.id` — the flow CEL scope binds
+  //     `current_user` to the run's user, or `null` when the run has none, and
+  //     the `{$User.Id}` template token is refused in a value slot (#19939).
+  //     The neighbouring FILTER dialect's `{current_user_id}` is a different
+  //     door and does NOT carry over.
   //
   // Parsing the sample against the real schema is the guard that cannot itself
   // drift — it re-derives the truth from the spec on every run, which is what
@@ -161,8 +161,12 @@ describe('os explain — schema catalog accuracy', () => {
     );
   });
 
-  it('teaches the acting user as {$User.Id}, and no catalog example revives $currentUser (#14782)', () => {
-    expect(SCHEMAS.flow.example).toContain('{$User.Id}');
+  it('teaches the acting user as current_user.id, never {$User.Id}, and no catalog example revives $currentUser (#14782, #19939)', () => {
+    expect(SCHEMAS.flow.example).toContain("fields: { assigned_to: { dialect: 'cel', source: 'current_user.id' } }");
+    // The trigger runs without a user on a system write, so the example gates
+    // on one rather than clearing `assigned_to` there.
+    expect(SCHEMAS.flow.example).toContain("condition: 'current_user != null'");
+    expect(SCHEMAS.flow.example).not.toContain('{$User.');
     const entries = Object.entries(SCHEMAS) as Array<[string, { example: string }]>;
     for (const [key, info] of entries) {
       expect(info.example, `os explain ${key} example`).not.toContain('$currentUser');

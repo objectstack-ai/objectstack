@@ -2543,7 +2543,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         const refusal = textSlotTemplateRefusal('{{ $User.Id }}');
         expect(refusal).toBeDefined();
         expect(fnds[0].hint).toContain(refusal!);
-        expect(fnds[0].hint).toContain("assignments: { v: '{$User.Id}' }");
+        expect(fnds[0].hint).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
         expect(fnds[0].hint).not.toContain('{{ $User.Id }}');
       });
 

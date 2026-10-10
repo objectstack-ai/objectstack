@@ -22,9 +22,9 @@
  *     slot is a located `error` under the same rule id, led by
  *     `VALUE_SLOT_TEMPLATE_REFUSAL` and naming the token's CEL spelling — in
  *     every value slot and both legacy `assignment` shapes. It replaced the
- *     `warning` hint ruling D point 1 put there for 17.x. The two spellings
- *     CEL cannot write yet (date macros, `$User` paths) and non-value slots
- *     get nothing.
+ *     `warning` hint ruling D point 1 put there for 17.x. A `$User` path is
+ *     refused too, naming `current_user.id` (#19939 pass 2); the one spelling
+ *     CEL cannot write yet (the date macros) and non-value slots get nothing.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -108,12 +108,12 @@ describe('`fields.*` value slot — the malformed envelope is a located error at
     expect(splitBySeverity(findings).errors).toHaveLength(1);
   });
 
-  it.each(NODE_TYPES)('%s: a valid envelope, the two kept spellings and literals are clean', (nodeType) => {
+  it.each(NODE_TYPES)('%s: a valid envelope, the run user as `current_user`, the kept spelling and literals are clean', (nodeType) => {
     expect(validate(nodeType, crud(nodeType, {
       total: { dialect: 'cel', source: 'round(price * 100) / 100.0' },
       subject: { dialect: 'cel', source: "'Quote for ' + string(price)" },
       label: 'Quote',
-      owner: '{$User.Id}',
+      owner: { dialect: 'cel', source: 'current_user.id' },
       due: '{TODAY() + 7}',
       n: 3, ok: true, nothing: null,
       payload: { nested: { dialect: 'cel' } },   // a nested envelope is data
@@ -139,6 +139,8 @@ describe('the retired template dialect — a `{…}` token in a value slot is a 
     ['the canonical assignment map', 'assignment', { assignments: { total: '{floor(price)}' } }, 'config.assignments.total', "source: 'floor(price)'"],
     ['the legacy assignment array', 'assignment', { assignments: [{ variable: 'total', value: '{price}' }] }, 'config.assignments[0].value', "source: 'price'"],
     ['the legacy bare assignment config', 'assignment', { total: '{price}' }, 'config.total', "source: 'price'"],
+    ['the run user\'s id', 'update_record', crud('update_record', { subject: '{$User.Id}' }), 'config.fields.subject', "source: 'current_user != null ? current_user.id : null'"],
+    ['another run-user path', 'create_record', crud('create_record', { subject: '{$User.Email}' }), 'config.fields.subject', 'never resolved in any shipped run'],
   ];
 
   it.each(REFUSED)('%s — rule `expression-invalid`, severity `error`, located, with the CEL spelling', (_what, nodeType, config, at, spelling) => {
@@ -157,7 +159,6 @@ describe('the retired template dialect — a `{…}` token in a value slot is a 
   it.each([
     ['a date macro — CEL has no string form of a Timestamp yet', '{NOW()}'],
     ['a date macro with an offset', '{TODAY() + 7}'],
-    ['a `$User` path — the flow CEL scope binds no user yet', '{$User.Id}'],
     ['plain text', 'approved'],
   ])('says nothing for %s', (_why, value) => {
     for (const nodeType of NODE_TYPES) {

@@ -394,9 +394,10 @@ function celValueSlotSchema(description: string) {
  * C half of #11182 ruling D): a string anywhere in a literal that carries a
  * `{…}` token the interpolator would resolve is refused, with the token's CEL
  * spelling ({@link valueSlotTemplateRefusals} — every token measured lossy
- * under conversion, so none is rewritten, ADR-0087 D2). Two spellings CEL
- * cannot write yet keep their 17.x meaning until it can: the date macros
- * (`{NOW()}`, `{TODAY() + 7}`) and the run user (`{$User.Id}`).
+ * under conversion, so none is rewritten, ADR-0087 D2). The run user is the
+ * CEL scope's `current_user` (`{$User.Id}` is refused, naming
+ * `current_user.id`). One spelling CEL cannot write yet keeps its 17.x
+ * meaning until it can: the date macros (`{NOW()}`, `{TODAY() + 7}`).
  *
  * The slot-neutral contract. The CRUD `fields` map's values take it
  * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, #19938), and it is
@@ -408,7 +409,7 @@ function celValueSlotSchema(description: string) {
 export const FlowValueSlotSchema = celValueSlotSchema(
   'A value: a CEL value envelope `{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib '
   + 'such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is '
-  + 'refused (the template dialect is retired from value slots; the date macros and `$User` paths are kept for now)',
+  + 'refused (the template dialect is retired from value slots; the date macros are kept for now)',
 );
 
 export type FlowValueSlot = z.input<typeof FlowValueSlotSchema>;
@@ -1016,8 +1017,7 @@ export type MapConfigParsed = z.infer<typeof MapConfigSchema>;
 export const AssignmentValueSchema = celValueSlotSchema(
   'Value the variable takes: a CEL value envelope `{ dialect: \'cel\', source }` evaluated by the expression engine '
   + '(the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in '
-  + 'a string is refused (the template dialect is retired from value slots; the date macros and `$User` paths are '
-  + 'kept for now)',
+  + 'a string is refused (the template dialect is retired from value slots; the date macros are kept for now)',
 );
 
 export type AssignmentValue = z.input<typeof AssignmentValueSchema>;
