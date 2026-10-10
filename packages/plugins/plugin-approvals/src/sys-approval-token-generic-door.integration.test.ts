@@ -196,14 +196,16 @@ describe('the cross-object search, on a real engine with token rows present', ()
     expect(rig.links).toHaveLength(2);
   });
 
-  it('serves no token row to any caller — by the bound slot, by the request, scoped to the object or not', async () => {
+  it('serves no token row to any caller — by the bound slot, by the request, alone or swept with other objects', async () => {
     const rig = await boot();
     for (const ctx of [asUser(MEMBER), ADMIN]) {
       for (const q of [APPROVER, rig.requestId]) {
         const scoped = await rig.protocol.searchAll({ q, objects: [TOKEN], context: ctx });
         expect(scoped.hits, `${ctx.userId} ${q} scoped`).toEqual([]);
-        const all = await rig.protocol.searchAll({ q, context: ctx });
-        expect(all.hits.filter((h: any) => h.object === TOKEN), `${ctx.userId} ${q}`).toEqual([]);
+        // Swept beside other objects. (A sweep naming no object also searches
+        // the page store, which this engine-only rig does not provision.)
+        const swept = await rig.protocol.searchAll({ q, objects: [OBJECT, 'sys_approval_request', TOKEN], context: ctx });
+        expect(swept.hits.filter((h: any) => h.object === TOKEN), `${ctx.userId} ${q} swept`).toEqual([]);
       }
     }
   });
