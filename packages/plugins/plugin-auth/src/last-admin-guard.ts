@@ -39,28 +39,26 @@
  *     ADR-0091 validity window). The end state is identical to (2): everyone is
  *     still there, nobody can administer anything, and there is no recovery
  *     path from inside the product.
- *  4. **deleting, RENAMING — or DEACTIVATING — the `admin_full_access`
- *     `sys_permission_set` row** (#6084) — the one table the enumeration reads
- *     that is not itself an identity table. "Who is a platform admin" is
- *     resolved by NAME: the first step of `resolveAdminUserIds` looks the
- *     permission set up as `where: { name: 'admin_full_access' }` and only then
- *     reads the grants naming it ([ADR-0131] D4: the grant's `permission_set`
- *     column, no longer the row's id). Remove that row, call it something
- *     else, or (ADR-0049, since `active` became a resolution-time predicate)
- *     switch it off, and every grant, every `sys_user` row and every
- *     `sys_member` row survives untouched while nobody is a platform admin any
- *     more — one write, the whole GRANT-anchored platform-admin population.
- *     ([#11973] Since the #11663 re-anchor that is no longer the whole
- *     population: a CONFIG-anchored administrator — shape (5)'s subject —
- *     survives every write to this table, so where one stands these three
- *     refusals are priced away by the enumeration itself and the write is
- *     permitted; they still hold wherever the row remains the load-bearing
- *     anchor. See the re-pricing note in `resolveAdminUserIds`.) Unlike (3) this one
- *     is not driven by an IdP at all: it is written by a metadata delete, an
- *     `os meta` run, a package uninstall — or, for the deactivation spelling, by
- *     one click on a Setup row action that carries no visibility or condition
- *     guard — which is why it needs its own two hooks rather than a wider filter
- *     on the three tables above.
+ *  4. **switching the `admin_full_access` permission set OFF** (#6084, as
+ *     ADR-0131 D3 moves it) — the one standing input that is not itself an
+ *     identity table. "Who is a platform admin" is resolved by NAME: a grant's
+ *     `permission_set` names `admin_full_access` ([ADR-0131] D4), the set is
+ *     the security catalog's definition of that name, and whether it is in
+ *     effect is the activation ledger's answer (`sys_metadata_activation`,
+ *     ADR-0126 §4 regime C as ADR-0131 D6 amends it). One ledger write — the
+ *     set's row switched off, or another row moved onto that pair — leaves
+ *     every grant, every `sys_user` row and every `sys_member` row untouched
+ *     while nobody is a grant-anchored platform admin any more. ([#11973] A
+ *     CONFIG-anchored administrator — shape (5)'s subject — survives it, so
+ *     where one stands the write is permitted; it is refused wherever the
+ *     grant remains the load-bearing anchor. See the re-pricing note in
+ *     `resolveAdminUserIds`.) Unlike (3) it is not driven by an IdP at all,
+ *     which is why it has its own two hooks. The `sys_permission_set` row this
+ *     shape used to name is no longer read by the resolver, so writing it —
+ *     a delete, a rename, its `active` column — moves no administrator and is
+ *     not judged here; a set DEFINITION that goes away (an uninstalled
+ *     package) is not a write this guard can see, and is read instead as the
+ *     emptied state below.
  *  5. **moving a `sys_user` row off the DECLARED administrator list** (#11663
  *     L2) — the first shape that revokes nothing stored. Since the
  *     platform-admin re-anchor, `resolveAuthzContext` also derives
@@ -80,8 +78,9 @@
  * recovery path from inside the product once that happens.
  *
  * So the invariant is enforced at the WRITE, on the chokepoints every path goes
- * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member`,
- * `sys_user_permission_set` and `sys_permission_set` — rather than at any
+ * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member` and
+ * `sys_user_permission_set`, and `beforeInsert` / `beforeUpdate` on the
+ * activation ledger — rather than at any
  * individual endpoint.
  * HTTP-level guards protect only the endpoints they are attached to; these hold
  * for the admin ban / remove endpoints, `updateMemberRole`, the SCIM adapter
@@ -92,10 +91,10 @@
  * The row halves can answer by set arithmetic — "is every unbanned
  * administrator inside the doomed set of `sys_user` ids?". The standing halves
  * cannot: the write does not name users at all, it edits the evidence the
- * administrator set is DERIVED from. (#6084's two permission-set halves are
+ * administrator set is DERIVED from. (The two activation-ledger halves are
  * standing halves in exactly this sense, and reuse the same three steps — the
- * `sys_permission_set` row is a step further from the user than a grant is, not
- * a different kind of evidence.) So they answer the way the issue framed it —
+ * ledger row is a step further from the user than a grant is, not a different
+ * kind of evidence.) So they answer the way the issue framed it —
  * **enumerate, simulate, enumerate again**:
  *
  *  1. enumerate the administrators as the tables read now;
@@ -183,7 +182,7 @@
  *
  * Write shape (4) turns that exemption into an AMPLIFIER, which is the half of
  * #6084 that matters more than the fourth pair of hooks: an environment whose
- * `admin_full_access` row is gone reads as ZERO administrators, so the exemption
+ * `admin_full_access` set is switched off reads as ZERO administrators, so the exemption
  * fires and every OTHER path — ban, delete, downgrade, revoke — is waved through
  * as well. One write does not just lock the environment out, it disables the
  * whole guard on the way.
@@ -194,26 +193,23 @@
  *  - **a genuinely fresh environment** — no evidence anybody was ever a platform
  *    admin here. Permitted, exactly as before.
  *  - **an environment that was EMPTIED** — an unscoped, in-window
- *    `sys_user_permission_set` grant still points at a `sys_permission_set` row
- *    that no longer exists. Refused, loudly, naming the dangling grants.
- *  - **an environment whose break-glass set was switched OFF** (ADR-0049) — the
- *    `admin_full_access` row is present and named correctly, and unscoped,
- *    in-window grants still point at it, but `active` is false so it confers
- *    nothing. Refused too, with its own remedy: re-activate the row. This state
- *    became reachable the moment `active` became a resolution-time predicate,
- *    and it produces the identical emptiness while leaving no dangling grant to
- *    read. A write that RESTORES standing — re-activation itself — is exempt,
- *    measured through the same simulation, or the refusal would have no way out
- *    from inside the product.
+ *    `sys_user_permission_set` grant still names a permission set the security
+ *    catalog no longer holds (ADR-0131 D4). Refused, loudly, naming the
+ *    dangling grants.
+ *  - **an environment whose break-glass set was switched OFF** (ADR-0049,
+ *    ADR-0131 D3) — the `admin_full_access` definition is there, and unscoped,
+ *    in-window grants still name it, but the activation ledger says it is off
+ *    so it confers nothing. Refused too, with its own remedy: switch it back
+ *    on. It produces the identical emptiness while leaving no dangling grant
+ *    to read. A write that RESTORES standing — switching it back on — is
+ *    exempt, measured through the same simulation, or the refusal would have
+ *    no way out from inside the product.
  *
  * The evidence is chosen so the FRESH-INSTALL answer cannot change: a dangling
- * grant is unreachable on the happy path in either direction. Every writer
- * inserts the permission set first and reads its id back to write the grant —
- * `bootstrapPlatformAdmin` seeds the set rows in step 1 and only then promotes
- * the first user in step 2, returning `admin_permission_set_missing` rather than
- * granting when the set is absent — so no ordering of a fresh boot produces one.
- * It is produced by exactly one thing: DELETING a permission set that grants
- * already point at.
+ * grant is unreachable on the happy path. `admin_full_access` is a platform
+ * set shipped on `plugin-security`'s own manifest, so the catalog holds it
+ * before any grant names it. It is produced by a set definition going away
+ * while grants still name it.
  *
  * A RENAME leaves no dangling grant, so this predicate cannot see it: the row is
  * still there and every grant still resolves. That path is closed at the WRITE
@@ -283,8 +279,8 @@
  * policy with its own product decisions (what happens to an org whose only
  * owner leaves the company); it is deliberately not invented here.
  *
- * Scope in the other direction: this guard watches writes to the four tables
- * the administrator population is derived from, and stops there. It has no
+ * Scope in the other direction: this guard watches writes to the tables the
+ * administrator population is derived from, and stops there. It has no
  * opinion on what a permission set CONTAINS, and that is not a gap being left
  * open — it was measured. `resolveAuthzContext` sets `hasPlatformAdminGrant`
  * from `ps.name === 'admin_full_access'` alone and `derivePosture` returns
@@ -321,12 +317,12 @@ import {
 } from '@objectstack/spec/identity';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { SystemObjectName, SystemUserId } from '@objectstack/spec/system';
-import { PLATFORM_OWNER_EMAIL_ENV, resolveTenancyPosture } from '@objectstack/types';
+import { PLATFORM_OWNER_EMAIL_ENV, isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
 import {
   isGrantActive,
-  isRowActive,
   matchesConfiguredPlatformAdmin,
   resolvePlatformAdminEmails,
+  securityCatalogReaderOf,
 } from '@objectstack/core';
 
 import { isOrgAdminGrade } from './invitation-role-cap.js';
@@ -334,6 +330,9 @@ import { GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD, grantSetNameOf } from './gran
 
 /** `sys_user_permission_set` has no `SystemObjectName` member; it is spelled once, here. */
 const USER_PERMISSION_SET = 'sys_user_permission_set';
+
+/** [ADR-0131 D3, ADR-0126 §4] The activation ledger the resolver honours deactivation from. */
+export const METADATA_ACTIVATION = 'sys_metadata_activation';
 
 type LoggerLike = {
   info(msg: string): void;
@@ -386,8 +385,9 @@ const SYSTEM_READ: BaseEngineOptions = { context: { isSystem: true } };
  *
  * The first two take the administrator away with their `sys_user` row; the four
  * `standing` ops (#5978) leave the row untouched and take away what MAKES them
- * an administrator; the last two (#6084) take away the `sys_permission_set` row
- * that the platform-admin half of the enumeration resolves BY NAME.
+ * an administrator; the two activation ops (#6084, ADR-0131 D3) switch off the
+ * `admin_full_access` set the platform-admin half of the enumeration resolves
+ * BY NAME.
  */
 type GuardedOp =
   | 'ban'
@@ -396,8 +396,8 @@ type GuardedOp =
   | 'member-delete'
   | 'grant-update'
   | 'grant-delete'
-  | 'permission-set-update'
-  | 'permission-set-delete'
+  | 'activation-insert'
+  | 'activation-update'
   | 'user-standing-update';
 
 interface OpWords {
@@ -462,21 +462,21 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
     subject: 'permission-set grants',
     table: USER_PERMISSION_SET,
   },
-  'permission-set-update': {
-    noun: 'permission-set rename',
-    verb: 'rename',
-    gerund: 'renaming',
-    Verb: 'Rename',
-    subject: 'permission sets',
-    table: SystemObjectName.PERMISSION_SET,
+  'activation-insert': {
+    noun: 'activation-ledger write',
+    verb: 'switch off',
+    gerund: 'switching off',
+    Verb: 'Switch off',
+    subject: 'catalog items',
+    table: METADATA_ACTIVATION,
   },
-  'permission-set-delete': {
-    noun: 'permission-set removal',
-    verb: 'remove',
-    gerund: 'removing',
-    Verb: 'Remove',
-    subject: 'permission sets',
-    table: SystemObjectName.PERMISSION_SET,
+  'activation-update': {
+    noun: 'activation-ledger change',
+    verb: 'switch off',
+    gerund: 'switching off',
+    Verb: 'Switch off',
+    subject: 'catalog items',
+    table: METADATA_ACTIVATION,
   },
   // [#11663 L2] Deliberately generic wording: ONE payload can carry an address
   // change and an `email_verified` reset together, and the refusal has to read
@@ -498,17 +498,17 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
  * of this guard.
  *
  * The two identity tables are written by IdP integrations, so their refusals
- * point at the SCIM group mapping. `sys_permission_set` is not — nothing in
- * SCIM or better-auth writes it; a metadata delete, an `os meta` run or a
- * package uninstall does. Sending THAT operator to look at an IdP group would
- * send them into a system they may not even run.
+ * point at the SCIM group mapping. The activation ledger is not — nothing in
+ * SCIM or better-auth writes it; a disable action, an upgrade step or a script
+ * does. Sending THAT operator to look at an IdP group would send them into a
+ * system they may not even run.
  */
 function standingOrigin(table: string, noun: string): string {
-  if (table === SystemObjectName.PERMISSION_SET) {
+  if (table === METADATA_ACTIVATION) {
     return (
-      `If the ${noun} came from a metadata delete, an 'os meta' run or a package uninstall, ` +
-      `revoke the '${ADMIN_FULL_ACCESS}' grants first — the permission-set row every platform ` +
-      'admin is derived from is the last thing an environment gives up, not the first.'
+      `If the ${noun} came from a disable action, an upgrade step or a script, revoke the ` +
+      `'${ADMIN_FULL_ACCESS}' grants first — the switch every platform admin is derived from is ` +
+      'the last thing an environment gives up, not the first.'
     );
   }
   if (table === SystemObjectName.USER) {
@@ -555,46 +555,6 @@ function refuse(message: string, object: string = SystemObjectName.USER): Error 
   return err;
 }
 
-/**
- * [ADR-0131 D3, ADR-0126 §4] Refuse an activation-ledger write that would
- * switch the `admin_full_access` permission set off. A write that does not set
- * `active` false passes. An update that does not carry the row's type and name
- * reads them back by `id`. One whose row cannot be read is refused: the
- * failure mode is an installation-wide lockout.
- */
-export async function refuseLedgerSwitchingAdminOff(
-  engine: { find: (object: string, query: EngineQueryOptions, options?: BaseEngineOptions) => Promise<unknown> },
-  data: Record<string, unknown>,
-  id: unknown,
-): Promise<void> {
-  if (!(data.active === false || data.active === 0)) return;
-  let metadataType = data.metadata_type;
-  let name = data.name;
-  if (metadataType === undefined || name === undefined) {
-    const rows = id === undefined || id === null
-      ? []
-      : await engine.find(METADATA_ACTIVATION, { where: { id }, limit: 1 } as EngineQueryOptions, SYSTEM_READ);
-    const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
-    if (!row) {
-      throw refuse(
-        `Refusing this '${METADATA_ACTIVATION}' write: it switches a row off and the row it targets could `
-          + `not be read, so it may be the '${ADMIN_FULL_ACCESS}' permission set (${BREAK_GLASS_CITATION}).`,
-        METADATA_ACTIVATION,
-      );
-    }
-    metadataType ??= row.metadata_type;
-    name ??= row.name;
-  }
-  if (metadataType === 'permission' && name === ADMIN_FULL_ACCESS) {
-    throw refuse(
-      `Refusing this '${METADATA_ACTIVATION}' write: switching the '${ADMIN_FULL_ACCESS}' permission set off `
-        + 'un-makes every grant-derived platform administrator at once, with no identity table touched '
-        + `(${BREAK_GLASS_CITATION}).`,
-      METADATA_ACTIVATION,
-    );
-  }
-}
-
 /** Marker so the fail-closed wrapper re-throws a deliberate refusal unchanged. */
 function isRefusal(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === 'PERMISSION_DENIED';
@@ -620,15 +580,20 @@ function toId(value: unknown): string | undefined {
  */
 interface PendingStandingWrite {
   /**
-   * `sys_member`, `sys_user_permission_set`, `sys_permission_set` (#6084) or —
-   * since #11663 L2 — `sys_user`, whose `email` / `email_verified` pair is the
-   * config anchor's half of the derivation.
+   * `sys_member`, `sys_user_permission_set`, the activation ledger
+   * (ADR-0131 D3) or — since #11663 L2 — `sys_user`, whose `email` /
+   * `email_verified` pair is the config anchor's half of the derivation.
    */
   table: string;
   /** Ids of the rows this one write addresses (by-id, or the predicate's matches). */
   ids: Set<string>;
   /** The update payload, or `undefined` for a delete. */
   patch?: Record<string, unknown>;
+  /**
+   * [ADR-0131 D3] A row this write INSERTS — the activation ledger's only
+   * standing write that addresses no existing row (`ids` is then empty).
+   */
+  inserted?: Record<string, unknown>;
 }
 
 /**
@@ -721,73 +686,6 @@ export const GRANT_STANDING_KEYS = [
   'validUntil',
 ] as const;
 
-/**
- * [#6084] Same, for `sys_permission_set` — the two columns of that table the
- * platform-admin half of the enumeration reads:
- *
- *  - `name`, the column it looks the set up by. Renaming the row takes the
- *    standing away from everyone holding a grant to it, in one write.
- *  - `active` [ADR-0049]. This column USED to be inert, and this comment used
- *    to say so: `resolveAuthzContext` derived `platform_admin` from the name
- *    alone and read no flag. It now drops a DEACTIVATED set before any
- *    derivation, so `active: false` on `admin_full_access` un-makes every
- *    GRANT-anchored platform admin at once — the same end state as renaming or
- *    deleting the row, reached by a payload that touches neither. ⚠️ Not
- *    "every platform admin": since the #11663 re-anchor (L2) standing has a
- *    SECOND anchor this write cannot reach — a config-anchored administrator
- *    (a declared `OS_PLATFORM_OWNER_EMAIL` address on a VERIFIED `sys_user`
- *    row) is derived at `resolve-authz-context.ts` §6b-config without
- *    consulting the set row or its `active` flag at all, and carries the
- *    shipped `ADMIN_FULL_ACCESS_CAPABILITIES` envelope rather than the stored
- *    set's. That is deliberately NOT a reason to drop `active` from this
- *    list: the write can still empty the GRANT anchor, which on every
- *    deployment that has declared no administrator emails is the whole
- *    population. Listing it is an over-approximation in the SAFE direction —
- *    it can cost an enumeration on a write that turns out to change no count,
- *    never the reverse — and taking it out would be a behaviour change, not a
- *    comment fix. Enforcing the flag without
- *    listing it here would have left exactly one unguarded route to an
- *    installation-wide lockout: the action is offered on every row with no
- *    visibility or condition guard, the seeders deliberately never reconcile
- *    `active`, and re-activating requires the permission the click just took
- *    away.
- *
- * Everything else a permission-set write touches (`label`, `description`, the
- * four permission JSON blobs, provenance) is still invisible to "who is an
- * administrator" — `resolveAuthzContext` derives `platform_admin` from the NAME
- * of an ACTIVE set or, since the #11663 re-anchor (L2), from the
- * deployment-config anchor, and from the capabilities of neither (the config
- * arm's envelope is the shipped `ADMIN_FULL_ACCESS_CAPABILITIES` declaration,
- * not the stored row) — so those writes still cost this guard no reads at all.
- * Adding `active` does not walk that back: the projection is FACETS ONLY and
- * deliberately never re-flips a record's on/off switch
- * (`permission-set-projection.ts`, #4669), so every projection pass, every
- * `os meta resync` and every ordinary Setup edit still misses this list
- * entirely. What now pays for an enumeration is the write that actually
- * toggles the switch — which is the write this list exists to judge.
- *
- * [ADR-0131 D4] `organization_id`, because the resolver finds an unscoped
- * grant's `admin_full_access` on the ORGANIZATION-LESS row only: moving that
- * row into an organization un-makes every grant-anchored platform admin, the
- * same end state as renaming or deleting it, reached by a payload that touches
- * neither `name` nor `active`. Both spellings, as the grant list carries them.
- *
- * `id` is deliberately NOT here even though the enumeration reads it. On this
- * engine `data.id` on an update ADDRESSES the row (it is what
- * `resolveTargetIds` resolves the target from) rather than proposing a new
- * primary key, so a key rewrite is not expressible through this write path; the
- * two standing key lists above exclude `id` for the same reason.
- *
- * `sys_position` gets no analogous list because it has no route into this
- * enumeration to guard: platform-admin standing is read from UNSCOPED
- * `sys_user_permission_set` grants and from the deployment-config anchor (a
- * declared `OS_PLATFORM_OWNER_EMAIL` address on a VERIFIED `sys_user` row,
- * which `USER_STANDING_KEYS` below guards) — a position-bound
- * `admin_full_access` reaches neither, in the resolver or here — and
- * org-administrator standing is read from `sys_member.role`. Deactivating a
- * position cannot empty any of them.
- */
-export const PERMISSION_SET_STANDING_KEYS = ['name', 'active', 'organization_id', 'organizationId'] as const;
 
 /**
  * [#11663 L2] Same, for `sys_user` — the FIFTH write shape, and the first one
@@ -820,19 +718,28 @@ export const PERMISSION_SET_STANDING_KEYS = ['name', 'active', 'organization_id'
  */
 export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
 
-/** [ADR-0131 D3, ADR-0126 §4] The activation ledger the resolver honours deactivation from. */
-export const METADATA_ACTIVATION = 'sys_metadata_activation';
-
 /**
- * [ADR-0131 D3, ADR-0126 §4] Same, for the activation ledger. Since the
- * catalog switch the resolver reads a permission set's deactivation from the
- * ledger, not from the `sys_permission_set` row, so a ledger row switching
- * `admin_full_access` off un-makes every grant-derived platform administrator.
+ * [ADR-0131 D3, ADR-0126 §4] Same, for the activation ledger — the table the
+ * resolver reads a permission set's deactivation from. A `permission` row of
+ * `admin_full_access` whose `active` is false un-makes every grant-anchored
+ * platform administrator at once, with no identity table touched: the end
+ * state #6084 named for deleting the set, reached by a payload that deletes
+ * nothing. `metadata_type` and `name` are listed because a write can move a row
+ * ONTO that pair as well as switch the pair's own row; `active` because it is
+ * the switch.
  *
- * Judged by {@link refuseLedgerSwitchingAdminOff}: a write that would switch
- * it off is refused outright, with no enumeration. The ledger is engine-owned
- * (the data API reads it only) and no enable/disable door accepts the
- * `permission` type today, so the refusal binds the system-context writes alone.
+ * Judged by the same enumerate–simulate–enumerate as every standing half, so a
+ * switch-off is refused only when it would leave no administrator who can sign
+ * in (a config-anchored or organization administrator still standing permits
+ * it). A ledger DELETE is not judged: absence of a row means ACTIVE, so
+ * removing one can only restore standing.
+ *
+ * Two catalog tables get no list, because the resolver no longer reads them:
+ * `sys_permission_set` (the set's existence and body are its catalog
+ * definition, ADR-0131 D4) and `sys_position` (a position-bound
+ * `admin_full_access` never made a platform administrator, and organization
+ * standing is read from `sys_member.role`). Writing either row cannot move the
+ * administrator population, so neither is guarded.
  */
 export const ACTIVATION_LEDGER_STANDING_KEYS = ['metadata_type', 'name', 'active'] as const;
 
@@ -969,6 +876,69 @@ export function registerLastAdminGuard(
   };
 
   /**
+   * [ADR-0131 D3/D4] Whether the catalog bound to this engine holds an
+   * `admin_full_access` permission definition — the set's existence, read
+   * where the resolver reads it. Resolved at the write, never at
+   * registration: the security plugin binds the reader at its `start()`.
+   * A catalog read that fails throws (`AuthzStoreUnavailableError`) and the
+   * write is refused by {@link failClosed}.
+   */
+  const adminSetDefined = async (): Promise<boolean> => {
+    const catalog = securityCatalogReaderOf(engine);
+    return catalog ? (await catalog.resolve('permission', ADMIN_FULL_ACCESS)) !== undefined : false;
+  };
+
+  /** The permission names the catalog holds — what a grant can name and resolve to. */
+  const catalogSetNames = async (): Promise<Set<string>> => {
+    const catalog = securityCatalogReaderOf(engine);
+    return new Set(catalog ? (await catalog.list('permission')).map((entry) => entry.name) : []);
+  };
+
+  /**
+   * [ADR-0131 D3, ADR-0126 §4] The activation-ledger rows this guard reads,
+   * read as the resolver reads them: a composition that registers no ledger
+   * object holds no row (the read is not issued), and a ledger table never
+   * provisioned holds none either. Any other failed read throws, and the write
+   * is refused by {@link failClosed}.
+   */
+  const scanLedger = async (op: GuardedOp, query: EngineQueryOptions): Promise<Array<Record<string, unknown>>> => {
+    const registry = (engine as { registry?: { getObject?: (name: string) => unknown } }).registry;
+    if (typeof registry?.getObject === 'function' && !registry.getObject(METADATA_ACTIVATION)) return [];
+    try {
+      return await scan(op, METADATA_ACTIVATION, query);
+    } catch (err) {
+      if (isMissingTableError(err, METADATA_ACTIVATION)) return [];
+      throw err;
+    }
+  };
+
+  /**
+   * [ADR-0131 D3, ADR-0126 §4] Whether the activation ledger switches
+   * `admin_full_access` off once `pending` lands: a `permission` row of that
+   * name whose `active` reads false (a driver `0` included), the resolver's own
+   * reading. With a pending ledger write, the rows it addresses are read as
+   * well — an update can move a row ONTO that pair — and an inserted row is
+   * judged with them.
+   */
+  const readAdminSetSwitchedOff = async (op: GuardedOp, pending?: PendingStandingWrite): Promise<boolean> => {
+    const fields = ['id', 'metadata_type', 'name', 'active'];
+    const rows = await scanLedger(op, { where: { metadata_type: 'permission', name: ADMIN_FULL_ACCESS }, fields });
+    const ledgerWrite = pending?.table === METADATA_ACTIVATION ? pending : undefined;
+    if (ledgerWrite && ledgerWrite.ids.size > 0) {
+      const seen = new Set(rows.map((row) => toId(row.id)));
+      const missing = [...ledgerWrite.ids].filter((id) => !seen.has(id));
+      if (missing.length > 0) rows.push(...(await scanLedger(op, { where: { id: { $in: missing } }, fields })));
+    }
+    const after = rows.map((row) => applyPending(row, pending, METADATA_ACTIVATION));
+    if (ledgerWrite?.inserted) after.push(ledgerWrite.inserted);
+    return after.some((row) =>
+      row !== undefined
+      && row.metadata_type === 'permission'
+      && row.name === ADMIN_FULL_ACCESS
+      && (row.active === false || row.active === 0));
+  };
+
+  /**
    * Every user this environment recognises as an administrator.
    *
    * With `pending` (#5978) the SAME enumeration is replayed over the rows as
@@ -1009,60 +979,25 @@ export function registerLastAdminGuard(
     // It asks the ENVIRONMENT, never the engine, so it adds no read — the same
     // property §6b pins on its own side.
     //
-    // [#6084] The set row is simulated exactly like the grant rows below it: a
-    // pending write on `sys_permission_set` can DELETE this row (it drops out of
-    // `adminSetIds`, and with it every grant that pointed at it), RENAME it, or
-    // DEACTIVATE it, and each is RE-TESTED for the same reason the grant's
-    // `permission_set_id` is — the scan's own `where` only proved what the row
-    // was called BEFORE the write.
+    // [ADR-0131 D3/D4] The SAME two facts the resolver derives the grade from,
+    // read from the same two places: the set EXISTS when the security catalog
+    // bound to this engine holds a `permission` definition of that name
+    // (`securityCatalogReaderOf` — the reader `resolveUserAuthzGrants` reads
+    // set bodies through), and it is IN EFFECT unless the activation ledger
+    // switches it off ({@link readAdminSetSwitchedOff}). No `sys_permission_set`
+    // row is read: the resolver reads none, so a row cannot make or un-make an
+    // administrator, and the guard judges no write to it. An engine with no
+    // catalog bound resolves an empty catalog — no set grants — and is counted
+    // so here too.
     //
-    // [ADR-0049] `active` rides the projection because the flag is now read at
-    // resolution time: `fields` is a projection, so a column left out of this
-    // list would read as absent here and absent means ACTIVE — the guard would
-    // model an environment in which no set is ever deactivated and permit the
-    // one write that empties it.
-    //
-    // [ADR-0131 D4] A grant holds `admin_full_access` BY NAME — its
-    // `permission_set` column — so the grant half reads the grants NAMING the
-    // set, and the set rows only for whether the name is in effect: it is when
-    // at least one row bearing it survives the pending write still named so,
-    // and none of them is deactivated. With one row (the `single` catalog)
-    // that is exactly the row's own verdict; where a name has several rows
-    // (another organization's copy), one switched off is read as switching the
-    // name off — an under-count, the direction this guard may round in. A
-    // grant that names nothing is not counted at all: it holds no set by name,
-    // and `refuseIfEmptiedRatherThanFresh` reads it as evidence instead.
-    //
-    // [ADR-0131 D4] Only an ORGANIZATION-LESS row puts the name in effect: the
-    // resolver finds an unscoped grant's set on the organization-less row alone,
-    // never on an organization's copy, so a pending write that moves that row
-    // into an organization (`organization_id`) takes the standing away exactly
-    // as deleting it does. A copy switched off still reads as the name switched
-    // off — the under-count above, unchanged.
+    // A pending ledger write is simulated exactly like the grant rows below
+    // it, and re-tested for the same reason: the read's own `where` only proved
+    // what the ledger said BEFORE the write.
     const legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture());
-    const sets = legacyGrantAnchorRetired
-      ? []
-      : await scan(op, SystemObjectName.PERMISSION_SET, {
-        where: { name: ADMIN_FULL_ACCESS },
-        fields: ['id', 'name', 'active', 'organization_id'],
-      });
-    let adminSetNamed = false;
-    let adminSetSwitchedOff = false;
-    for (const rawSet of sets) {
-      const set = applyPending(rawSet, pending, SystemObjectName.PERMISSION_SET);
-      if (!set) continue; // removed outright by the pending write
-      if (set.name !== ADMIN_FULL_ACCESS) continue; // renamed away — the row survives, the meaning does not
-      // Deactivated — the row survives under its own name and grants nothing,
-      // judged by the SAME predicate `resolveAuthzContext` resolves with.
-      if (!isRowActive(set)) {
-        adminSetSwitchedOff = true;
-        continue;
-      }
-      // An organization's copy — no unscoped grant resolves to it.
-      if (set.organization_id ?? set.organizationId) continue;
-      adminSetNamed = true;
-    }
-    if (adminSetNamed && !adminSetSwitchedOff) {
+    const adminSetInEffect = !legacyGrantAnchorRetired
+      && (await adminSetDefined())
+      && !(await readAdminSetSwitchedOff(op, pending));
+    if (adminSetInEffect) {
       const links = await scan(op, USER_PERMISSION_SET, {
         where: { [GRANT_SET_NAME_FIELD]: ADMIN_FULL_ACCESS },
       });
@@ -1200,39 +1135,30 @@ export function registerLastAdminGuard(
    * that has just been emptied, and refuse in the second case.
    *
    * The evidence is a DANGLING platform-admin-shaped grant: an unscoped,
-   * in-window `sys_user_permission_set` row whose `permission_set_id` names a
-   * `sys_permission_set` row that is not there any more. Nobody writes such a
-   * row — every producer inserts the set first and reads its id back — so it
-   * can only be left behind by deleting a permission set that grants already
-   * pointed at, which is write shape (4) landing on `admin_full_access`. A
-   * fresh environment has no grants at all, or grants whose sets exist; either
-   * way this returns without refusing and the bootstrap window is untouched.
+   * in-window `sys_user_permission_set` row naming a permission set the
+   * security catalog does not hold, or naming none (ADR-0131 D4: a grant holds
+   * its set BY NAME, and the set is its catalog definition). On a fresh
+   * install every grant names a set the platform ships, so the fresh answer is
+   * unchanged; such a grant is left behind by a set definition that went away
+   * (an uninstalled package, a removed environment definition), or is an
+   * upgraded deployment's grant before the one-time backfill names it.
    *
-   * Deliberately an OVER-approximation of "the `admin_full_access` row was
-   * deleted": a dangling unscoped grant to some other set trips it too. The
+   * Deliberately an OVER-approximation of "the `admin_full_access` definition
+   * went away": a dangling unscoped grant to some other set trips it too. The
    * guard cannot tell the two apart (the name it would compare went away with
-   * the row), and refusing in an environment that has zero administrators AND a
-   * grant pointing into nowhere is the fail-closed direction.
+   * the definition), and refusing in an environment that has zero
+   * administrators AND a grant pointing into nowhere is the fail-closed
+   * direction.
    *
-   * [ADR-0049] DEACTIVATION is the second way to reach the same emptiness, and
-   * it leaves NO dangling grant to read — the row is still there, still named
-   * `admin_full_access`, and simply grants nothing. Left unhandled, enforcing
-   * the flag would turn this exemption into the amplifier the paragraph above
-   * exists to prevent: one deactivation empties the administrator population
-   * and every later ban, delete and downgrade sails through unguarded. So the
-   * deactivated row with unscoped, in-window grants still pointing at it is
-   * read as the SAME evidence, with its own remedy — re-activate it.
-   *
-   * [ADR-0131 D4] Read BY NAME, as the enumeration is: a dangling grant is one
-   * whose `permission_set` names a set no `sys_permission_set` row carries any
-   * more, and a grant that names NOTHING (`grantSetNameOf` is empty) is
-   * evidence too — the enumeration counts no such grant, so an environment
-   * whose administrators hold only such grants reads as empty, and the
-   * bootstrap window must not open on it. On a fresh install every grant names
-   * its set (the platform writes the name with the id), so the fresh answer is
-   * unchanged. Such a grant is an upgraded deployment's, before the one-time
-   * backfill names it at `kernel:bootstrapped`, or one the backfill could not
-   * name; refusing is the fail-closed reading of both.
+   * [ADR-0049, ADR-0131 D3] SWITCHING THE SET OFF is the second way to reach
+   * the same emptiness, and it leaves no dangling grant to read: the
+   * definition is still there and grants nothing while the activation ledger
+   * says it is off. Left unhandled, the bootstrap exemption would become the
+   * amplifier the paragraph above exists to prevent — one switch-off empties
+   * the administrator population and every later ban, delete and downgrade
+   * sails through unguarded. So a switched-off `admin_full_access` with
+   * unscoped, in-window grants still naming it is read as the SAME evidence,
+   * with its own remedy: switch it back on.
    */
   const refuseIfEmptiedRatherThanFresh = async (op: GuardedOp): Promise<void> => {
     // [#11663 L5] Both refusals below name ONE remedy — put the
@@ -1251,14 +1177,8 @@ export function registerLastAdminGuard(
         + `${PLATFORM_OWNER_EMAIL_ENV} (a verified account's address, comma-separated for several) `
         + 'instead; that is the only channel to platform admin standing under a wall.'
       : '';
-    const sets = await scan(op, SystemObjectName.PERMISSION_SET, { fields: ['id', 'name', 'active'] });
-    const known = new Set<string>();
-    let adminSetDeactivated = false;
-    for (const row of sets) {
-      if (typeof row.name !== 'string' || row.name === '') continue;
-      known.add(row.name);
-      if (row.name === ADMIN_FULL_ACCESS && !isRowActive(row)) adminSetDeactivated = true;
-    }
+    const known = await catalogSetNames();
+    const adminSetDeactivated = known.has(ADMIN_FULL_ACCESS) && (await readAdminSetSwitchedOff(op));
 
     // The deactivated-break-glass case, checked before the dangling one: it has
     // a precise diagnosis and a one-click remedy, so it must not be reported as
@@ -1275,17 +1195,18 @@ export function registerLastAdminGuard(
         const words = OP_WORDS[op];
         logger?.warn(
           `[LastAdminGuard] refused a ${words.noun} in an environment whose '${ADMIN_FULL_ACCESS}' ` +
-            `permission set is DEACTIVATED — ${stranded.length} unscoped grant(s) confer nothing`,
+            `permission set is switched OFF — ${stranded.length} unscoped grant(s) confer nothing`,
         );
         throw refuse(
           `Refusing this ${words.noun}: this environment recognises NO administrator because its ` +
-            `'${ADMIN_FULL_ACCESS}' '${SystemObjectName.PERMISSION_SET}' row is DEACTIVATED — ` +
+            `'${ADMIN_FULL_ACCESS}' permission set is switched OFF in '${METADATA_ACTIVATION}' — ` +
             `${stranded.length} unscoped, in-window '${USER_PERMISSION_SET}' grant(s) still point ` +
             'at it and confer nothing while it is off. That is not the bootstrap window, and ' +
             'reading the resulting emptiness as "no administrator to protect" would switch this ' +
-            `guard off for every other write too (${BREAK_GLASS_CITATION}). Re-activate the ` +
-            `'${ADMIN_FULL_ACCESS}' permission set (set 'active' back to true) — the grants naming ` +
-            'it are still there — before writing the identity tables again.' + walledRemedy,
+            `guard off for every other write too (${BREAK_GLASS_CITATION}). Switch the ` +
+            `'${ADMIN_FULL_ACCESS}' permission set back on (its '${METADATA_ACTIVATION}' row's ` +
+            "'active' back to true) — the grants naming it are still there — before writing the " +
+            'identity tables again.' + walledRemedy,
           words.table,
         );
       }
@@ -1326,9 +1247,9 @@ export function registerLastAdminGuard(
     throw refuse(
       `Refusing this ${words.noun}: this environment recognises NO administrator, and this is not ` +
         `the bootstrap window — ${dangling.length} unscoped, in-window '${USER_PERMISSION_SET}' ` +
-        `grant(s) still name a permission set that no '${SystemObjectName.PERMISSION_SET}' row ` +
-        `carries any more, or name none yet (${dangling.join(', ')}). That is the state a DELETED '${ADMIN_FULL_ACCESS}' ` +
-        'permission-set row leaves behind: it un-makes every platform admin at once, and ' +
+        'grant(s) still name a permission set the security catalog does not hold, ' +
+        `or name none yet (${dangling.join(', ')}). That is the state a REMOVED '${ADMIN_FULL_ACCESS}' ` +
+        'permission-set definition leaves behind: it un-makes every platform admin at once, and ' +
         'reading the resulting emptiness as "no administrator to protect" would switch this guard ' +
         `off for every other write too (${BREAK_GLASS_CITATION}). Restore the ` +
         `'${ADMIN_FULL_ACCESS}' permission set — the grants naming it are still there — before ` +
@@ -1516,8 +1437,20 @@ export function registerLastAdminGuard(
       | { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown; multi?: unknown } }
       | undefined,
     patch?: Record<string, unknown>,
+    inserted?: Record<string, unknown>,
   ): Promise<void> => {
     const words = OP_WORDS[op];
+    // [ADR-0131 D3] An insert addresses no existing row: its pending write is
+    // the row it adds, and no target set is resolved (an id-less, `where`-less
+    // resolution would read the whole table).
+    const targetIds = (): Promise<Set<string>> =>
+      inserted ? Promise.resolve(new Set<string>()) : resolveTargetIds(op, table, input?.id, input?.options, input?.data);
+    const pendingOf = (ids: Set<string>): PendingStandingWrite => ({
+      table,
+      ids,
+      ...(patch ? { patch } : {}),
+      ...(inserted ? { inserted } : {}),
+    });
     await failClosed(op, async () => {
       const before = await resolveAdminUserIds(op);
       // Same bootstrap exemption the row halves make, with the same #6084
@@ -1533,13 +1466,9 @@ export function registerLastAdminGuard(
         // not a special case for one column. Without it the refusal would be
         // unrecoverable from inside the product: the only fix is an update, and
         // every update would be refused.
-        const restoringIds = await resolveTargetIds(op, table, input?.id, input?.options, input?.data);
-        if (restoringIds.size > 0) {
-          const restored = await resolveAdminUserIds(op, {
-            table,
-            ids: restoringIds,
-            ...(patch ? { patch } : {}),
-          });
+        const restoringIds = await targetIds();
+        if (restoringIds.size > 0 || inserted) {
+          const restored = await resolveAdminUserIds(op, pendingOf(restoringIds));
           if (restored.size > 0) return;
         }
         await refuseIfEmptiedRatherThanFresh(op);
@@ -1554,10 +1483,10 @@ export function registerLastAdminGuard(
       // Which rows of the standing table this write addresses. For a predicate
       // write this resolves the whole matched set, so the simulation below is
       // exact for bulk writes rather than being refused wholesale.
-      const ids = await resolveTargetIds(op, table, input?.id, input?.options, input?.data);
-      if (ids.size === 0) return;
+      const ids = await targetIds();
+      if (ids.size === 0 && !inserted) return;
 
-      const after = await resolveAdminUserIds(op, { table, ids, ...(patch ? { patch } : {}) });
+      const after = await resolveAdminUserIds(op, pendingOf(ids));
       // A patch that re-homes standing onto a DIFFERENT user (a `user_id`
       // rewrite) can put someone in `after` who was not in `before`, so the
       // survivors' ban state is re-read rather than intersected with the
@@ -1677,32 +1606,6 @@ export function registerLastAdminGuard(
   };
 
   /**
-   * [#6084] The fourth table. `resolveAdminUserIds` resolves "who is a platform
-   * admin" by looking the permission set up BY NAME, so renaming that row takes
-   * the standing away from everyone holding a grant to it, in one write, with
-   * no identity table touched at all.
-   *
-   * Only a payload that touches `name` can move the enumeration
-   * (PERMISSION_SET_STANDING_KEYS), which is what keeps every projection pass,
-   * every `os meta resync` and every Setup edit — none of which write `name` —
-   * free of any read. The data door refuses renames on its own (ADR-0094), and
-   * that is not this guard's coverage: this one holds for the engine-level and
-   * system-context writes that never pass the data door.
-   */
-  const guardPermissionSetUpdate = async (rawCtx: unknown): Promise<void> => {
-    const ctx = ctxOf(rawCtx);
-    if (ctx.object !== SystemObjectName.PERMISSION_SET) return;
-    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
-    if (!touchesAny(data, PERMISSION_SET_STANDING_KEYS)) return;
-    await enforceStanding(
-      'permission-set-update',
-      SystemObjectName.PERMISSION_SET,
-      ctx.input,
-      data,
-    );
-  };
-
-  /**
    * [#11663 L2] The FIFTH write shape: an ordinary `sys_user` profile write
    * that moves the row off the deployment's declared administrator list
    * (`email`) or un-verifies it (`email_verified`).
@@ -1724,30 +1627,34 @@ export function registerLastAdminGuard(
   };
 
   /**
-   * [ADR-0131 D3, ADR-0126 §4] The ledger half: refuse a write that switches
-   * `admin_full_access` off ({@link ACTIVATION_LEDGER_STANDING_KEYS}).
+   * [ADR-0131 D3, ADR-0126 §4] The ledger half: a write that switches
+   * `admin_full_access` off — an update of its row, an update moving another
+   * row onto that pair, or an insert — un-makes every grant-anchored platform
+   * administrator, so it is judged like every other standing write and refused
+   * only when it would leave nobody who can sign in. A payload touching no
+   * standing key ({@link ACTIVATION_LEDGER_STANDING_KEYS}) costs no reads.
    */
-  const guardActivationLedgerWrite = async (rawCtx: unknown): Promise<void> => {
+  const guardActivationLedgerUpdate = async (rawCtx: unknown): Promise<void> => {
     const ctx = ctxOf(rawCtx);
     if (ctx.object !== METADATA_ACTIVATION) return;
     const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
     if (!touchesAny(data, ACTIVATION_LEDGER_STANDING_KEYS)) return;
-    await refuseLedgerSwitchingAdminOff(engine, data, ctx.input?.id);
+    await enforceStanding('activation-update', METADATA_ACTIVATION, ctx.input, data);
   };
 
-  const guardPermissionSetDelete = async (rawCtx: unknown): Promise<void> => {
+  const guardActivationLedgerInsert = async (rawCtx: unknown): Promise<void> => {
     const ctx = ctxOf(rawCtx);
-    if (ctx.object !== SystemObjectName.PERMISSION_SET) return;
-    // No payload to pre-filter on, and the same reasoning as the other delete
-    // halves: removing ANY permission-set row is judged, and the simulation
-    // answers "not `admin_full_access`, nothing changes" without a refusal for
-    // every row that is not the one the enumeration reads.
-    await enforceStanding('permission-set-delete', SystemObjectName.PERMISSION_SET, ctx.input);
+    if (ctx.object !== METADATA_ACTIVATION) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    // Only a row that is OFF can take standing away: absence means active, so
+    // an inserted row switched on changes nothing.
+    if (!(data.active === false || data.active === 0)) return;
+    await enforceStanding('activation-insert', METADATA_ACTIVATION, ctx.input, undefined, data);
   };
 
   // Priority 20: AFTER the ADR-0092 identity write guard's checks (10), before
   // default-priority hooks (100) spend work on a write this may refuse. The
-  // four standing hooks (#5978) and the two permission-set hooks (#6084) are
+  // four standing hooks (#5978) and the two activation-ledger hooks (#6084) are
   // registered in exactly the shape the two `sys_user` hooks established — same
   // event names, same priority, same `packageId`, only the `object` filter
   // differs — so the whole invariant binds and unbinds as one package.
@@ -1786,22 +1693,12 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
-  engine.registerHook('beforeUpdate', guardPermissionSetUpdate, {
-    object: SystemObjectName.PERMISSION_SET,
-    priority: 20,
-    packageId,
-  });
-  engine.registerHook('beforeDelete', guardPermissionSetDelete, {
-    object: SystemObjectName.PERMISSION_SET,
-    priority: 20,
-    packageId,
-  });
-  engine.registerHook('beforeInsert', guardActivationLedgerWrite, {
+  engine.registerHook('beforeInsert', guardActivationLedgerInsert, {
     object: METADATA_ACTIVATION,
     priority: 20,
     packageId,
   });
-  engine.registerHook('beforeUpdate', guardActivationLedgerWrite, {
+  engine.registerHook('beforeUpdate', guardActivationLedgerUpdate, {
     object: METADATA_ACTIVATION,
     priority: 20,
     packageId,
@@ -1810,8 +1707,7 @@ export function registerLastAdminGuard(
   logger?.info(
     '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete, and the ' +
       'email/email_verified pair the deployment-config anchor derives from), sys_member and ' +
-      'sys_user_permission_set (standing revocation), and sys_permission_set ' +
-      '(the admin_full_access row every platform admin is derived from), and sys_metadata_activation ' +
+      'sys_user_permission_set (standing revocation), and sys_metadata_activation ' +
       '(switching admin_full_access off) — ADR-0135 D5.2',
   );
 }
