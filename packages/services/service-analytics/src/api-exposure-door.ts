@@ -126,6 +126,23 @@ export type ObjectDeclarationProvider = (objectName: string) => ObjectDeclaratio
 const ANALYTICS_OPERATION = 'aggregate';
 
 /**
+ * [#22661] The operation a dimension LABEL's target is judged as: `get`, not
+ * {@link ANALYTICS_OPERATION}.
+ *
+ * A label turns an id the grid already holds into the display name of the
+ * record it names — the read `GET /data/{target}/{id}` performs, judged `get`
+ * on the data routes. It aggregates nothing over the target: the bridge's
+ * `group by (id, name)` is a per-record read dressed as an aggregate (one row
+ * per id, bounded to `id $in` the grouped values). A relationship-hop
+ * dimension (`<lookup>.<column>`) is the different read — it groups the base
+ * rows by a target column — and the query face judges it `aggregate` over
+ * `queryObjects`, unchanged. `get` is also the operation the data door's
+ * `$expand` asks of the same target, so a lookup renders its name, or its
+ * stored id, alike on both doors for every `apiMethods` shape.
+ */
+const LABEL_TARGET_OPERATION = 'get';
+
+/**
  * The data door's two exposure codes, the same pair the REST data routes and
  * the MCP data tools answer. Typed against the ledger so a misspelling fails
  * `tsc`.
@@ -322,11 +339,8 @@ export function assertDefinitionExposed(
  * faces above never ask about: the dataset's base object and its hops are
  * judged, the label target was not, so a dataset over an exposed object
  * rendered the display names of an object every data route refuses. Asked the
- * same decision, for the same `aggregate` operation: a label is the read a
- * relationship-hop dimension over the target's display field performs
- * (`<lookup>.<name>`), which this door already judges as `aggregate` over
- * `queryObjects`; judging the label as anything else would serve through one
- * spelling what the other is refused. It takes no caller.
+ * spec's one decision, for {@link LABEL_TARGET_OPERATION} (`get`, which says
+ * why), and it takes no caller.
  *
  * Withheld, not refused, and that is the precedent measured on this door: a
  * label the target's row scope hides, or whose scope cannot be resolved, is
@@ -350,7 +364,7 @@ export function servesLabelTarget(
     );
     return false;
   }
-  return apiExposureDenialReason(enable, ANALYTICS_OPERATION) === null;
+  return apiExposureDenialReason(enable, LABEL_TARGET_OPERATION) === null;
 }
 
 /**

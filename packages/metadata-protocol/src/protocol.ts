@@ -4455,7 +4455,10 @@ const INTERNAL_FIELD_WALK_DEPTH = 8;
  * is judged `get`. It never enumerates the target: the engine's sub-read is
  * bounded to `id $in` the source rows' own values, so a nested `where` can only
  * narrow records the caller could fetch by id. `list` would refuse an object
- * that serves exactly those records by id; it is not the read this is.
+ * that serves exactly those records by id; it is not the read this is. The
+ * dataset door's dimension-label pass asks the same operation of the same
+ * target (`@objectstack/service-analytics`), so a lookup renders its name, or
+ * its stored id, alike on both doors.
  */
 const EXPANSION_TARGET_OPERATION = 'get';
 
@@ -12658,7 +12661,8 @@ export class ObjectStackProtocolImplementation implements
                 const nested = this.servedExpand(target, entry.expand, depth + 1);
                 if (nested !== entry.expand) {
                     served ??= { ...expand };
-                    served[rel] = { ...entry, expand: nested };
+                    const { expand: _withheld, ...rest } = entry;
+                    served[rel] = Object.keys(nested).length > 0 ? { ...rest, expand: nested } : rest;
                 }
             }
         }
