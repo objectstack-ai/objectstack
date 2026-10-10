@@ -96,12 +96,25 @@ into the registry; the run of `//` comments immediately above `export const entr
 
 ## What this does not fix
 
-The regeneration lap. `spec-changes.json` and `docs/protocol-upgrade-guide.md` are
-projections of this registry and still have to be regenerated and committed when an
-entry lands. #6957's ruling kept them in version control on purpose — the review diff
-is worth the laps it costs — so a retirement card is not faster, only harder to lose.
+The `registry.ts` lap. An entry lands with its generated regions in `registry.ts`, so
+`gen:migration-registry` regenerates that one file and the pull request commits it;
+`check:migration-registry` is its gate. Nothing else is regenerated for an entry.
+`spec-changes.json` and the protocol upgrade guide are projections of this registry, but
+neither is committed any more (#22449 B′: the guide's copy left git at #22483,
+`spec-changes.json`'s at #22485). The publish lane generates both into the package
+before the tarball is packed, and the pull request generates both in memory
+(`check:spec-changes`, `check:upgrade-guide`) and renders their diff for the reviewer.
+⛔ Do not regenerate either for an entry: `gen:spec-changes` writes only the gitignored
+`packages/spec/spec-changes.json`, `gen:upgrade-guide` writes only the gitignored docs
+pages, and `docs/protocol-upgrade-guide.md` is a hand-written pointer stub that nothing
+generates. A retirement card is not faster for this file, only harder to lose.
 
-### What the merge queue does with those projections — measured (#8344)
+### What the merge queue did with those projections — measured (#8344), while they were committed
+
+History, kept for its `registry.ts` conclusion. This section measured the two
+projections while they were committed and routed `merge=os-regen`; since #22485
+they are neither, so there is nothing of theirs left to merge. What still holds is the
+residue paragraph below: every adjacent-id collision conflicts in `registry.ts`.
 
 `.gitattributes` routes both through `merge=os-regen`, and that driver is a **local**
 git facility: the GitHub merge queue rebuilds each PR server-side, where no custom

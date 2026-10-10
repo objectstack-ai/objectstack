@@ -231,9 +231,15 @@ import { INLINE_GRID_SORT_FIELD_LIST } from '../data/inline-grid-sort-fields';
 // — fell outside it and stayed undeclared. Commit 78f0be872 declared them on the same
 // #5611 rule (maintainer ruling 2026-08-08, direction A). The lesson for the
 // next divergence sweep: enumerate by the RENDERER'S read pattern, not by the
-// key list a previous ruling happened to quote. Retiring the flat family
-// wholesale in favour of `dataSource` is the standing alternative, deferred to
-// v18 as #11509 — not rejected.
+// key list a previous ruling happened to quote. Retiring the flat family in
+// favour of `dataSource` was the standing alternative, deferred to v18 as
+// #11509 and ruled there (A-narrow): in v18 the ELEMENT layer's flat binding
+// keys retire — `element:record_picker` `object` / `filter` / `sort` /
+// `limit`, `element:number` `object` / `filter`, `element:repeater` `object` /
+// `filter` / `sort` / `limit` — together with `object-grid.defaultFilters`,
+// and an element binds data through the node-level `dataSource` only. The
+// `object-*` blocks keep their native keys (`dataSource` is an overlay one gate
+// maps onto them), and the relationship-scoped blocks stay as declared.
 //
 // ── #5068: THE GATE IS WIRED — read the flip precisely ─────────────────────
 //
@@ -2686,39 +2692,105 @@ export const ElementTextPropsSchema = lazySchema(() => strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 
+/**
+ * The three elements whose flat data-binding keys retired in v18 (#11509,
+ * ruling A-narrow), and the keys each one carried — the source of the
+ * tombstones below. Module-private on purpose: exporting it would widen the
+ * published surface of a retirement that only narrows. The two readers that
+ * need the set — the `element-flat-data-binding-to-data-source` conversion and
+ * the component-props gate's missing-binding refusal (`@objectstack/lint`) —
+ * keep their own copy, and each copy is pinned against these tombstones by
+ * probing `ComponentPropsMap`, so none of the three can drift alone.
+ */
+const RETIRED_ELEMENT_FLAT_BINDING_KEYS = {
+  'element:record_picker': ['object', 'filter', 'sort', 'limit'],
+  'element:number': ['object', 'filter'],
+  'element:repeater': ['object', 'filter', 'sort', 'limit'],
+} as const satisfies Readonly<Record<string, readonly ('object' | 'filter' | 'sort' | 'limit')[]>>;
+
+/** An element whose query is the node-level `dataSource` binding only. */
+type RetiredFlatBindingElementType = keyof typeof RETIRED_ELEMENT_FLAT_BINDING_KEYS;
+
+/** What the value of each retired key is — it moves unchanged. */
+const ELEMENT_FLAT_BINDING_VALUE = {
+  object: 'an object name',
+  filter: 'a ViewFilterRule array',
+  sort: 'a `[{ field, order }]` array',
+  limit: 'a positive integer',
+} as const;
+
+/**
+ * One prescription per retired element-layer flat binding key. Generated from
+ * the element and the key rather than written ten times, so the ten strings
+ * differ only where the elements did: what the element read before, and what
+ * to do with a key the binding already sets — the record picker let the
+ * binding win, `element:number` AND-combined the two filters, and the repeater
+ * read the flat keys alone until objectui#11880 put the binding first (it
+ * keeps them as a fallback, so its prescription names no precedence).
+ */
+const elementFlatBindingRetired = (
+  type: RetiredFlatBindingElementType,
+  key: 'object' | 'filter' | 'sort' | 'limit',
+): string => {
+  const why = type === 'element:repeater'
+    ? 'it was a second door onto the list\'s query, which the list reads from the node-level '
+      + '`dataSource` binding first, keeping this key only as a fallback for metadata written before it'
+    : `it was a flat second spelling of the node-level \`dataSource.${key}\`, and the `
+      + `${type === 'element:number' ? 'element' : 'picker'} now reads its query from \`dataSource\` only, `
+      + 'so a value written here reaches no query';
+  const both = type === 'element:repeater'
+    ? 'where `dataSource` already sets it too, decide which of the two values the list should use and '
+      + 'keep that one on `dataSource`'
+    : type === 'element:number' && key === 'filter'
+      ? 'where `dataSource.filter` already has rules, append these to it, since the two always AND-combined'
+      : 'where `dataSource` already sets it, delete this one, since the binding\'s value always won';
+  return `\`${type}\` property \`${key}\` was removed in @objectstack/spec 17 (ADR-0087 D2) — `
+    + `${why}. Use \`dataSource.${key}\` on the component `
+    + 'node, a sibling of `type` rather than a key inside `properties`. Move the key; the value '
+    + `(${ELEMENT_FLAT_BINDING_VALUE[key]}) is unchanged, and ${both}. `
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+};
+
+/**
+ * The prescription for another spelling of a repeater query key (`objectName`,
+ * `where`, `top`, …): the key it meant is the binding's, one level up.
+ */
+const elementRepeaterBindingGuidance = (
+  spelling: string,
+  key: 'object' | 'filter' | 'sort' | 'limit',
+): string =>
+  `\`${spelling}\` is not a prop of \`element:repeater\` — the list's query is the node-level `
+  + `\`dataSource\` binding. Write it as \`dataSource.${key}\` on the component node, a sibling of `
+  + '`type` rather than a key inside `properties`.';
+
+/**
+ * `element:number` — one aggregate over one object's records.
+ *
+ * Its query is the node-level `dataSource` binding (`ElementDataSourceSchema`,
+ * page.zod.ts): `object`, an optional saved `view`, and `filter` rules, which
+ * AND with the view's. `sort` and `limit` mean nothing to an aggregate and are
+ * not read. A node with no `dataSource.object` names no object — the
+ * component-props gate (`@objectstack/lint`, `validate-component-props`)
+ * reports it, because the props schema below no longer can.
+ *
+ * REMOVED (#11509, v18, ruling A-narrow): the flat `object` / `filter`
+ * spellings of that binding. They were the same query read through a second
+ * door — `object` resolved `dataSource.object` first, while the flat `filter`
+ * AND-combined with the binding's (the OPPOSITE of the record picker's rule, a
+ * second dialect on one node) — and objectui reads `dataSource` only since
+ * objectui#11880. The protocol-18 conversion
+ * `element-flat-data-binding-to-data-source` moves both onto the binding.
+ */
 export const ElementNumberPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:number`',
   history: PROPS_HISTORY,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
-  object: z.string().describe('Source object'),
+  object: retiredKey(elementFlatBindingRetired('element:number', 'object')),
   field: z.string().optional().describe('Field to aggregate'),
   aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max'])
     .describe('Aggregation function'),
-  /**
-   * Filter rules narrowing the aggregate — the `ViewFilterRule` ARRAY form,
-   * `[{ field, operator, value }, ...]`, the one filter orthography every
-   * other `filter` input in this map already declares (`record:related_list`
-   * and its Add-affordance picker). Until the ui#6206 ruling (2026-08-25,
-   * Option B, verbatim 「同意」: one filter orthography platform-wide) this
-   * entry alone said `FilterConditionSchema`, the MongoDB-style record form —
-   * so the filter a list view stores and renders was refused by the KPI
-   * element beside it. Sequenced consumer-first (the 2026-08-25 Option-A
-   * ordering ruling): objectui#6828 made `ObjectStackAdapter.aggregate()`
-   * lower a rule array through the same `translateFilterArray` its `find()`
-   * path runs, and the pin carrying it (`d8ec8d6d`) was re-measured before
-   * this declaration moved — authored array → adapter lowering → filter AST →
-   * accepted at the analytics door (which still refuses a RAW rule-object
-   * array, by design). The record form is refused at `filter`; the migration
-   * prescription is the `element-number-filter-rule-array` semantic entry.
-   */
-  filter: z.array(ViewFilterRuleSchema, {
-    error: ruleArrayFilterError({
-      surface: 'this `element:number`',
-      migration: 'element-number-filter-rule-array',
-    }),
-  }).optional()
-    .describe('Filter rules narrowing the aggregate — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-number-filter-rule-array`'),
+  filter: retiredKey(elementFlatBindingRetired('element:number', 'filter')),
   format: z.enum(['number', 'currency', 'percent']).optional().describe('Number display format'),
   prefix: z.string().optional().describe('Prefix text (e.g. "$")'),
   suffix: z.string().optional().describe('Suffix text (e.g. "%")'),
@@ -2733,6 +2805,9 @@ export type ElementNumberProps = z.input<typeof ElementNumberPropsSchema>;
  * `ViewFilterRuleParsed` exists). So `element:number` leaves the type-alias
  * convention pin's isomorphic family (the Iso818 line deleted with this
  * alias), taking the `ObjectGridPropsParsed` route its comment prescribes.
+ * That `filter` retired in v18 (#11509, a tombstone now); the alias stays,
+ * because deleting a published type name is an export removal of its own,
+ * which that retirement does not make.
  */
 export type ElementNumberPropsParsed = z.infer<typeof ElementNumberPropsSchema>;
 
@@ -3107,13 +3182,29 @@ export const ElementFormPropsSchema = lazySchema(() => strictObject({
  * for its own `sort` / `limit`, deliberately: they are the SAME contract read
  * through a second spelling, so a divergent shape here would be a third
  * dialect rather than a shorthand.
+ *
+ * REMOVED in v18 (#11509, ruling A-narrow): all four flat shorthands —
+ * `object`, `filter`, `sort`, `limit` — direction B, landed for the element
+ * layer. Declaring `sort` / `limit` closed the trapdoor; retiring the four
+ * closes the second door itself: one node, one binding, one precedence (the
+ * binding's own — its `view` supplies the baseline, an explicit binding key
+ * overrides it, and its `filter` AND-combines with the view's). objectui reads
+ * the picker's query from `dataSource` only since objectui#11880, so a flat
+ * key would reach no query. The protocol-18 conversion
+ * `element-flat-data-binding-to-data-source` moves each flat key onto the
+ * binding where the binding lacks it, deletes it where the binding already
+ * set it (the binding always won), and leaves it for the author, as a
+ * reported TODO, beside a `dataSource.view` — whether the view's own key
+ * displaced it depends on the view, which no conversion reads. A picker with
+ * no `dataSource.object` names no object, and the component-props gate
+ * (`@objectstack/lint`) reports it.
  */
 export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:record_picker`',
   history: PROPS_HISTORY,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
-  object: z.string().describe('Object to pick records from'),
+  object: retiredKey(elementFlatBindingRetired('element:record_picker', 'object')),
   /**
    * Field rendered as each row's text. Defaults to `name`, which is what the
    * renderer falls back to (`props.labelField ?? 'name'`) — so this is
@@ -3125,65 +3216,17 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
   /** Control label rendered above the select. */
   label: I18nLabelSchema.optional().describe('Control label rendered above the select'),
   /**
-   * Filter rules narrowing which records the picker offers — the
-   * `ViewFilterRule` ARRAY form, `[{ field, operator, value }, ...]`, the one
-   * filter orthography the map's array-declared `filter` doors share
-   * (`record:related_list`, its nested Add-affordance picker, and — since
-   * #12039 Key 2 — `element:number`; and, since #15449, the four `filter`
-   * doors of the six-entry `object-*` family — `object-grid`,
-   * `object-metric`, `object-kanban` and `object-calendar` — each of which
-   * declares this same `z.array(ViewFilterRuleSchema)`, while that family's
-   * remaining two entries, `object-form` and `object-master-detail-form`,
-   * declare no `filter` key at all). Until #14406
-   * this entry alone still said `FilterConditionSchema`, the MongoDB-style
-   * record form: the last record-form `filter` in `ComponentPropsMap` after
-   * the ui#6206 ruling (2026-08-25, Option B, verbatim 「同意」: one filter
-   * orthography platform-wide).
-   *
-   * Sequenced measurement-first, as the `element:number` convergence had to
-   * be (the 2026-08-25 Option-A ordering ruling): the read path was measured
-   * at the objectui pin (`00d3f09c`) before this declaration moved. The
-   * renderer hands the value to `query.$filter` and calls `adapter.find()`
-   * (`components/src/renderers/basic/record-picker.tsx`);
-   * `ObjectStackAdapter.convertQueryParams` lowers an ARRAY `$filter` through
-   * `translateFilterArray` — `[{ field, operator, value }]` → filter AST
-   * tuples (`data-objectstack/src/index.ts`) — the same door every list view's
-   * stored rule array already takes, and the engine lowers the tuples before
-   * the driver (`objectql/src/engine-filter-array-lowering.test.ts`). Nothing
-   * on that path parses `properties` against the installed spec, so no
-   * refusal stands between an authored array and the query. The record form
-   * is refused at `filter`; the migration prescription is the
-   * `element-record-picker-filter-rule-array` semantic entry.
-   *
-   * The binding-level `dataSource.filter` this shorthand yields to
-   * (`ds.filter ?? props.filter`) is `ElementDataSourceSchema`'s key, not this
-   * entry's subject.
+   * REMOVED in v18 (#11509) with `object` above — the flat shorthands of
+   * `dataSource.filter` / `.sort` / `.limit`. The rule-array shape `filter`
+   * converged on (#14406, the `element-record-picker-filter-rule-array` entry
+   * this retirement absorbs) and the `sort` / `limit` declarations (commit
+   * 78f0be872) are history now: the binding carries the same shapes, and its
+   * `limit` falls back to the renderer's 50 when neither it nor its view caps
+   * the query.
    */
-  filter: z.array(ViewFilterRuleSchema, {
-    error: ruleArrayFilterError({
-      surface: 'this `element:record_picker`',
-      migration: 'element-record-picker-filter-rule-array',
-    }),
-  }).optional()
-    .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
-  /**
-   * Row order (commit 78f0be872). The flat shorthand for `dataSource.sort`, and the same
-   * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as
-   * `$orderby`. `dataSource.sort` wins when both are written
-   * (`ds.sort ?? props.sort`).
-   */
-  sort: z.array(SortItemSchema).optional()
-    .describe('Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set'),
-  /**
-   * Row cap (commit 78f0be872). The flat shorthand for `dataSource.limit`, same shape.
-   * `dataSource.limit` wins when both are written, and with neither the
-   * renderer queries `$top: 50` (`ds.limit ?? props.limit ?? 50`) — that 50 is
-   * the renderer's fallback, not a schema default, so it is documented here
-   * rather than declared: declaring it would materialize a `limit: 50` on every
-   * parsed picker and turn an unset key into an authored one.
-   */
-  limit: z.number().int().positive().optional()
-    .describe('Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50)'),
+  filter: retiredKey(elementFlatBindingRetired('element:record_picker', 'filter')),
+  sort: retiredKey(elementFlatBindingRetired('element:record_picker', 'sort')),
+  limit: retiredKey(elementFlatBindingRetired('element:record_picker', 'limit')),
   /**
    * REMOVED (#9198). ADR-0049 enforce-or-remove: a declarative hint with zero
    * readers — the live binding runs the other direction, resolved from the
@@ -3222,8 +3265,8 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
     '`element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 '
     + '(ADR-0049) — the picker renders a plain single-select with no search input, so no '
     + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
-    + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
-    + 'query path does apply. '
+    + 'the picker offers, use the component-level `dataSource.filter`, which the query path '
+    + 'does apply. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
@@ -3248,6 +3291,9 @@ export type ElementRecordPickerProps = z.input<typeof ElementRecordPickerPropsSc
  * is why `ViewFilterRuleParsed` exists). So `element:record_picker` leaves
  * the type-alias convention pin's isomorphic family (the Iso819 line deleted
  * with this alias), the route `element:number` took one entry earlier.
+ * That `filter` retired in v18 (#11509, a tombstone now); the alias stays,
+ * because deleting a published type name is an export removal of its own,
+ * which that retirement does not make.
  */
 export type ElementRecordPickerPropsParsed = z.infer<typeof ElementRecordPickerPropsSchema>;
 
@@ -4254,15 +4300,16 @@ export type ElementDefinitionListProps = z.input<typeof ElementDefinitionListPro
  * `divided` (`:284`), `titleField` (`:289-290`) and `fields` (`:218`,
  * `:292-294`).
  *
- * - `object` is REQUIRED, as `element:number`'s is. At this pin the renderer
+ * - `object` was REQUIRED, as `element:number`'s was. At this pin the renderer
  *   takes the node-level `dataSource.object` first and this key second
  *   (`:192-195`); with neither it never queries and shows its "No records"
  *   state (`:234-237`, `:279`) — indistinguishable from an object that really
  *   has no rows. The registration marks it required too, because this row
- *   does (`:320-326`). So a node that names its object only through
- *   `dataSource` renders at this pin while this row refuses it; the
- *   requirement can follow the renderer only by a schema change, which is
- *   #11509's (the v18 retirement of this element's flat query keys).
+ *   did (`:320-326`). So a node that names its object only through
+ *   `dataSource` rendered at this pin while this row refused it; the
+ *   requirement could follow the renderer only by a schema change, which is
+ *   #11509's (the v18 retirement of this element's flat query keys, below):
+ *   the requirement now sits on `dataSource.object`.
  * - `filter` / `sort` are the family's one orthography from birth —
  *   `ViewFilterRule[]` and `SortItem[]` — and both are delivered:
  *   `ObjectStackAdapter.find` lowers a `{ field, operator, value }` array
@@ -4295,21 +4342,43 @@ export type ElementDefinitionListProps = z.input<typeof ElementDefinitionListPro
  * supplies (`:196-199`). The registration is marked with
  * `elementDataSourceBlock` (`:311`), so objectui publishes the binding input
  * beside these keys.
+ *
+ * REMOVED in v18 (#11509, ruling A-narrow): `object`, `filter`, `sort` and
+ * `limit` — the query keys above. The binding is the one door the spec
+ * accepts: `object`, an optional saved `view`, `filter` (AND-combined with
+ * the view's), `sort`, `limit`. The four flat keys are tombstones. The
+ * renderer's fallback read of them, recorded above, is the console's
+ * tolerance for metadata written before this release, not a door this row
+ * keeps. The retirement also closes a trap: the component-props gate used
+ * to waive a missing flat `object` whenever `dataSource.object` was present,
+ * so before objectui#11880 a repeater bound through `dataSource` alone passed
+ * `os validate` and drew "No records". The gate now REQUIRES
+ * `dataSource.object` on this element instead (`@objectstack/lint`). The
+ * protocol-18 conversion `element-flat-data-binding-to-data-source` moves
+ * each flat key onto the binding. Where the binding already sets a key to a
+ * different value, or names a `view` — both of which the list read only from
+ * objectui#11880 on — it leaves the key for the author as a reported TODO.
  */
 export const ElementRepeaterPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:repeater`',
   history: elementListHistory('element:repeater'),
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
-  // The same four query keys the element data-source binding declares, with
-  // its spellings for them (`ElementDataSourceSchema`, page.zod.ts), plus the
-  // `object-*` family's `objectName`.
-  aliases: {
-    objectName: 'object', filters: 'filter', where: 'filter',
-    orderBy: 'sort', sortBy: 'sort', top: 'limit', pageSize: 'limit',
+  // The binding's own spellings for its query keys (`ElementDataSourceSchema`,
+  // page.zod.ts), plus the `object-*` family's `objectName`. Until v18 these
+  // were aliases of the flat keys; those keys are tombstones now, so each
+  // spelling points at the binding instead (an alias may only name a key the
+  // shape accepts — `alias-integrity.test.ts`).
+  guidance: {
+    objectName: elementRepeaterBindingGuidance('objectName', 'object'),
+    filters: elementRepeaterBindingGuidance('filters', 'filter'),
+    where: elementRepeaterBindingGuidance('where', 'filter'),
+    orderBy: elementRepeaterBindingGuidance('orderBy', 'sort'),
+    sortBy: elementRepeaterBindingGuidance('sortBy', 'sort'),
+    top: elementRepeaterBindingGuidance('top', 'limit'),
+    pageSize: elementRepeaterBindingGuidance('pageSize', 'limit'),
   },
 }, {
-  object: z.string()
-    .describe('Object whose records the list repeats over — required: without it the list never queries'),
+  object: retiredKey(elementFlatBindingRetired('element:repeater', 'object')),
   titleField: z.string().optional()
     .describe('Field shown first on each line, emphasized'),
   fields: z.array(z.union([
@@ -4326,12 +4395,9 @@ export const ElementRepeaterPropsSchema = lazySchema(() => strictObject({
     }),
   ])).optional()
     .describe('Fields shown after the title on each line, in order — a bare field name, or `{ field }`'),
-  filter: z.array(ViewFilterRuleSchema).optional()
-    .describe('Filter rules narrowing the records — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` in this map shares'),
-  sort: z.array(SortItemSchema).optional()
-    .describe('Sort order — `[{ field, order }]`'),
-  limit: z.number().int().positive().optional()
-    .describe('Maximum records fetched and shown'),
+  filter: retiredKey(elementFlatBindingRetired('element:repeater', 'filter')),
+  sort: retiredKey(elementFlatBindingRetired('element:repeater', 'sort')),
+  limit: retiredKey(elementFlatBindingRetired('element:repeater', 'limit')),
   emptyText: z.string().optional()
     .describe('Copy shown when the query returns no records (renderer default: "No records"). A literal string — localize through the translation bundle entry for this component id'),
   divided: z.boolean().optional()
@@ -4343,7 +4409,10 @@ export type ElementRepeaterProps = z.input<typeof ElementRepeaterPropsSchema>;
  * ADR-0122: the parsed state differs from the authored state on exactly one
  * key — `filter` carries `ViewFilterRuleSchema`, whose `operator` is
  * normalized on parse (why `ViewFilterRuleParsed` exists), the route
- * `element:number` and `element:record_picker` took.
+ * `element:number` and `element:record_picker` took. That `filter` retired in
+ * v18 (#11509, a tombstone now); the alias stays, because deleting a
+ * published type name is an export removal of its own, which that retirement
+ * does not make.
  */
 export type ElementRepeaterPropsParsed = z.infer<typeof ElementRepeaterPropsSchema>;
 
@@ -4491,8 +4560,8 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * `object-grid` (objectui `plugin-grid/src/ObjectGrid.tsx` @ `eb7f586b`).
  * Read points per key: `objectName` (throughout), `columns`/`fields` (:714-715),
  * `filter` (:739, lowered via `toFilterNode` to `$filter`), `defaultFilters`
- * (:922 — the LEGACY fallback read only when `filter` is absent; it is read,
- * so it stays declared — only the plural `filters` has zero read points),
+ * (:922 — the LEGACY fallback read only when `filter` is absent; RETIRED in
+ * v18, #11509, tombstoned below — the plural `filters` never had a read point),
  * `sort` (:741) / `defaultSort` (:943 — RETIRED #11805, tombstoned below;
  * objectui#5861 retires the read), `pagination`/`pageSize`/`showPagination`
  * (:567, :752, :2475-2480), `searchableFields`/`showSearch` (:959, :2484-2486),
@@ -4739,44 +4808,31 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   }).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   /**
-   * [#19514] The legacy base-filter fallback — the SAME value in the SAME role
-   * as `filter` above, so it carries the same declaration.
+   * REMOVED in v18 (#11509, ruling A-narrow, sub-question 1 — the shape
+   * `defaultSort`'s retirement took, below). The legacy base-filter fallback:
+   * the SAME value in the SAME role as `filter`, read only when `filter`
+   * lowered to nothing, so one intent had two spellings on one block. #19514
+   * narrowed it to the rule array ("narrowed, NOT retired — refusing the key
+   * outright needs its own ruling"); #11509 is that ruling, and the narrowing's
+   * D3 entry (`object-grid-default-filters-rule-array`, never released in a
+   * major) is absorbed into this retirement's.
    *
-   * Its own description has said "read only when `filter` is absent" since the
-   * key entered this map (#7751), which is a statement that the two keys hold
-   * one kind of value: objectui's `ObjectGrid` reads this one through the same
-   * lowering sink it reads `filter` through, so every refusal that sink can
-   * give is reachable from a document that passed the protocol. While `filter`
-   * was narrowed to the rule array and this stayed `z.unknown()`, the block had
-   * a declared door and an undeclared one onto the same seam — a bare string, a
-   * number, a MongoDB-style record and an ObjectQL AST tuple array all parsed
-   * here, and the author's receipt said nothing about what the grid would do
-   * with them. At the objectui `.objectui-sha` pin `87af769e9a`
-   * (`ObjectGrid.tsx` → `toFilterNode`) that depends on the shape: the record
-   * form and the tuple array are lowered and APPLIED as declared; a bare string
-   * or a number is DROPPED, so the grid sends no filter and lists its rows
-   * unfiltered; and a list of malformed rules is REFUSED — on the wire with
-   * 400 `INVALID_FILTER`, or by the client before any request for the value
-   * shapes it judges itself.
-   *
-   * ⛔ **Narrowed, NOT retired.** Refusing the key outright is the other arm this
-   * could have taken and it is a REMOVAL of an accepted shape, which needs its
-   * own ruling. The deprecation stated in the description stands
-   * exactly where it stood — prefer `filter` — and is unchanged by this.
-   *
-   * The `{ error }` map is `filter`'s, deliberately: an author who wrote the
-   * record form here needs the same conversion table, computed from their own
-   * keys, and a second hand-written sentence at this door is the drift
-   * `ruleArrayFilterError` exists to prevent. Its `surface` names which key was
-   * written, because the message's own subject is `filter`.
+   * The live mechanism is `filter`. The protocol-18 conversion
+   * `object-grid-default-filters-removed` carries the mechanical rewrite: when
+   * `filter` is empty (absent, `null`, `[]` or `{}`) the rules move into it;
+   * when `filter` has content the key is deleted, since the fallback was never
+   * read then. It runs before `page-component-filter-record-to-rule-array`, so
+   * a record-form value it moves is converted at `filter` like any other.
    */
-  defaultFilters: z.array(ViewFilterRuleSchema, {
-    error: ruleArrayFilterError({
-      surface: 'this `object-grid` (you wrote it on the `defaultFilters` fallback, which takes the same form)',
-      migration: 'object-grid-default-filters-rule-array',
-    }),
-  }).optional()
-    .describe('Legacy base-filter fallback, read only when `filter` is absent — the SAME ViewFilterRule array form `[{ field, operator, value }, ...]` as `filter`, lowered through the same sink. Prefer `filter`. The MongoDB-style record form, a bare string and an ObjectQL AST tuple array are refused — see migration `object-grid-default-filters-rule-array`'),
+  defaultFilters: retiredKey(
+    '`object-grid` property `defaultFilters` was removed in @objectstack/spec 17 (ADR-0087 D2) — '
+    + 'it was the legacy second spelling of `filter`: the same rules, read only when `filter` lowered to '
+    + 'nothing, so one intent had two spellings and a grid authoring both silently ignored this one. Use '
+    + '`filter`. Rename the key where `filter` is empty; the value (a ViewFilterRule array, '
+    + '`[{ field, operator, value }, ...]`) is unchanged. Where `filter` already has rules, delete this '
+    + 'key: the grid never read it there. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+  ),
   /**
    * Initial row order — the `SortItem` ARRAY form, `[{ field, order }, ...]`,
    * the one sort orthography every DECLARED `sort` door on this platform
@@ -8555,19 +8611,25 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  * uses above. The registration agrees: `plugin-tree/src/index.tsx` declares
  * `{ name: 'tree', type: 'object' }` and no flat input.
  *
- * `titleField` is in the set although no `tree` block key is spelled that way:
- * `ListView`'s flatten resolves `treeCfg.titleField` into `labelField` before
- * emitting (`ListView.tsx:3927`, `labelField: treeCfg.labelField ||
- * treeCfg.titleField || 'name'`), so the author's intent is always the block's
- * `labelField`, and the prescription below says so.
- *
- * ⚠️ The renderer's own half of that sentence is GONE, and it is a DELETED
- * read rather than a moved one: `getTreeConfig`'s `?? schema.titleField` rung
- * — the `:117` this record used to cite — was removed on objectui#8841
- * because it read the FLATTENED NODE and never the block, and the docblock at
+ * `titleField` is in the set although no `tree` block key is spelled that way,
+ * and at `20c6d351a` NOTHING reads it: both halves that once did are DELETED
+ * reads, not moved ones. The flatten half went on objectui#6152 round 14
+ * (objectui `3fd862510`): at `47b1f0bb7` the `case 'tree'` arm resolved
+ * `labelField: treeCfg.labelField || treeCfg.titleField || 'name'` (`:3927`);
+ * at `20c6d351a` it reads `labelField: treeCfg.labelField || 'name'`
+ * (`ListView.tsx:3985`) and emits no `titleField`. The renderer half went
+ * earlier: `getTreeConfig`'s `?? schema.titleField` rung — the `:117` this
+ * record used to cite — was removed on objectui#8841 because it read the
+ * FLATTENED NODE and never the block, and the docblock at
  * `ObjectTree.tsx:240-261` records the three measurements that retired it.
- * The flatten half above is what keeps the key in this set; ⛔ do not restore
- * the renderer half from this record's history.
+ * This paragraph is the correction the 2026-10-10 re-read above reported;
+ * ⛔ restore neither rung from this record's history.
+ *
+ * So `titleField` is in this set for its prescription, not for a read: an
+ * author who writes a flat `titleField` on an `object-tree` is naming the
+ * tree's label field, and the one key that does that is `tree.labelField`,
+ * which the prescription below says. Keeping or dropping `titleField` from
+ * the set is a schema decision this record does not make.
  */
 const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
   ...COMPONENT_LEVEL_GUIDANCE,
@@ -8578,8 +8640,8 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
     prescription:
       'Write this as a key of the `tree` config object instead — `tree: { parentField, labelField, fields, '
       + 'defaultExpandedDepth }`. The flat top-level spelling is the internal form `ObjectView`/`ListView` '
-      + 'produce when they flatten `options.tree`, not a second authoring spelling. A `titleField` is the '
-      + "block's `labelField`: it is only ever read as that key's last fallback.",
+      + 'produce when they flatten `options.tree`, not a second authoring spelling. A `titleField` names the '
+      + "tree's label field, which the `tree` block spells `labelField`: write `tree: { labelField }`.",
   },
 ];
 

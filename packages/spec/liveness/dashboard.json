@@ -272,6 +272,13 @@
       "status": "live",
       "note": "objectui: DashboardRenderer.tsx:279,988 — dashboard-level date-range filter (framework#2501). Supersedes the 2026-06 audit's DEAD finding."
     },
+    "requiredPermissions": {
+      "status": "planned",
+      "verifiedAt": "2026-10-10",
+      "authorWarn": true,
+      "authorHint": "Keep it, but know it hides nothing yet: no server reads `requiredPermissions` on a list view or a dashboard today, so the item is still served to every user who can read it. Do not rely on it to keep a view or a dashboard from an audience until the platform enforces it. For several audiences, declare one capability and grant it to each of their permission sets; there is no any-of form.",
+      "note": "PLANNED (#22611, the spec half of the ruling of record 6095014058, letter A): the audience gate, declared spec-first with the app / navigation-item / action shape and meaning: a list of capabilities, all required, no any-of form (letter B was not taken). CARRIER #22639 (the rest half, `Blocked-by: #22611`): the `/meta` read gate serves a gated dashboard only to a caller holding all of its capabilities, on the list read and the by-name read (packages/rest/src/meta-item-read-gate.ts). No reader in either repo when declared: framework origin/main 1b99388505 (every `requiredPermissions` read under packages/rest and packages/runtime is an app, navigation-item, action, object or field read) and objectui at the `.objectui-sha` pin 20c6d351ad74 (no read under plugin-list, plugin-view or plugin-dashboard; the navigation and record-block readers are other carriers). `authorWarn` reaches every `dashboards[]` item (a top-level row; no schema default materializes the key, so only an authored list warns). Flip to `live` citing the gate symbol, drop `authorWarn` / `authorHint`, and delete the describe's `[PLANNED — not enforced yet]` clause (packages/spec/src/ui/audience-required-permissions.ts) in that same edit."
+    },
     "aria": {
       "status": "dead",
       "verifiedAt": "2026-07-30",

@@ -1044,6 +1044,282 @@ const ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Row-level security and sharing rules (the two enforceability rules) ─────
+// Two security surfaces are compiled to a row filter rather than interpreted:
+// an RLS policy's `using` / `check` (`validate-rls-predicate-enforceability.ts`)
+// and a declared sharing rule's `condition`
+// (`validate-sharing-rule-enforceability.ts`). Both rules ask the runtime's own
+// compiler whether a predicate lowers, and both judge a lowered field-to-field
+// comparison by the declared field map, so the reasoning they share is written
+// ONCE below and every entry it explains references it. The rule files share
+// their verdict clauses the same way.
+
+/** How the runtime treats an RLS predicate it cannot compile — every id that drops a policy. */
+const RLS_UNCOMPILABLE_DROP =
+  '`RLSCompiler` compiles every RLS predicate to a row filter at request time and DROPS a policy whose ' +
+  'predicate it cannot compile. One WARN line — "has an uncompilable predicate … and was DROPPED (no ' +
+  'enforcement)" — is the only signal, and nothing else reports it at authoring time. The runtime fails ' +
+  'CLOSED, which is why such a policy is survivable; it reads as an authorization and behaves as a refusal.';
+
+/**
+ * What a dropped `using` does. The INSERT half: the ADR-0058 D4 write check
+ * takes its set from `writeCheckPolicies`, so when no applicable policy for the
+ * insert declares a `check`, every applicable policy's `using` is compiled as
+ * its check. Measured through the real `SecurityPlugin` on an `insert` and an
+ * `all` policy, for all three kinds of drop (an unlowerable shape, an
+ * unresolved `current_user.*`, an undeclared column): with nothing else
+ * compiling in that set, every single-record insert is refused (403); with
+ * another applicable policy's `using` compiling, that one alone decides; with a
+ * declared `check` beside it, the declared check alone decides.
+ */
+const RLS_DROPPED_USING =
+  'A dropped `using`: when it is the only applicable policy for that object and operation, `compileFilter` ' +
+  'returns the `RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause, so every select / ' +
+  'update / delete on the object matches ZERO rows and the object disappears for every holder of the ' +
+  'permission set. When other policies also apply, this one just vanishes from the OR and grants none of the ' +
+  'access it appears to. On an `insert` or `all` policy the same `using` is also the single-record INSERT check ' +
+  'whenever no applicable policy for the insert declares a `check` (ADR-0058 D4): when nothing else in that set ' +
+  'compiles, every single-record insert it governs fails with `PermissionDeniedError`; when another policy\'s ' +
+  '`using` compiles, that one alone decides the insert.';
+
+/**
+ * What a dropped `check` does. The write check OR-combines the declared checks
+ * of all the applicable policies for the operation, so a dropped `check` is a
+ * blanket refusal only when no other declared `check` in that set compiles
+ * (measured: beside a compiling declared `check`, that one alone decided;
+ * beside a USING-only sibling, every single-record insert was refused, because
+ * a USING-only sibling takes no part once any policy declares a `check`).
+ */
+const RLS_DROPPED_CHECK =
+  'A dropped `check`: on the ADR-0058 D4 write path it leaves the post-image `check` as the `RLS_DENY_FILTER` ' +
+  'sentinel, which no record can satisfy, so every single-record insert and by-id update the policy governs ' +
+  'fails with `PermissionDeniedError`: the policy reads as a write rule and behaves as a blanket refusal. That ' +
+  'holds when no other applicable policy for the operation declares a `check` that compiles; when one does, ' +
+  'that `check` alone decides and this one contributes nothing.';
+
+/** A comparison with a column that holds a list or an object — both rules' list-holding arm. */
+const LIST_HOLDING_COMPARISON =
+  'A column that holds a list or an object — one declared with a structured JSON type such as `json` or ' +
+  '`address`, or a multi-value field such as `multiselect`, `tags` or a lookup flagged `multiple: true` — is ' +
+  'not one comparable value, on either side of a field-to-field comparison, so the platform refuses the ' +
+  'comparison instead of evaluating it. The compiler accepts it, because it knows the predicate\'s text and not ' +
+  'the object\'s field types; the rule judges it by the declared type, as driver-sql does.';
+
+/** A comparison across comparison classes — both rules' cross-class arm. */
+const CROSS_CLASS_COMPARISON =
+  'Two columns are compared only within one comparison class — the class decides how their stored values ' +
+  'order and equal, and across classes SQL and the in-memory evaluator answer differently — and a file field ' +
+  'or a formula field has no class at all: no row filter can compare a file field with another column, and a ' +
+  'formula field has no stored column a row filter can read. So the platform defines no comparison between ' +
+  'such columns. The classification is the spec\'s (`crossFieldComparisonVerdict`), the one driver-sql applies.';
+
+const RLS_PREDICATE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
+  rule: 'rls-predicate-unparseable',
+  covers: 'why a predicate that does not parse is dropped',
+  paragraphs: [
+    'An RLS predicate is CEL (ADR-0058 D1). Before parsing, a legacy SQL bridge rewrites the historic subset ' +
+      'it covers — a bare `=` to `==` and `IN` to `in`, never inside a quoted literal — and everything else must ' +
+      'already be CEL: SQL `AND` / `OR` / `LIKE`, a subquery or a stray operator does not parse.',
+    RLS_UNCOMPILABLE_DROP,
+    RLS_DROPPED_USING,
+    RLS_DROPPED_CHECK,
+    'A predicate that is flawless CEL but too large for a platform parse bound is `rls-predicate-over-budget` ' +
+      'instead: the runtime refuses both the same way, and the fix differs.',
+  ],
+};
+
+const RLS_PREDICATE_OVER_BUDGET_EXPLANATION: RuleExplanation = {
+  rule: 'rls-predicate-over-budget',
+  covers: 'why an oversized predicate is dropped',
+  paragraphs: [
+    'The compiler parses a predicate under the platform\'s CEL bounds (`maxAstNodes` 256, `maxDepth` 32, ' +
+      '`maxListElements` 64 and the rest) and refuses one that overruns a bound exactly as it refuses a syntax ' +
+      'error — on purpose, because the runtime\'s only decision is whether to drop the policy. This rule tells ' +
+      'the two apart because the fix differs: there is no syntax or dialect error to correct, so the predicate ' +
+      'must get smaller. The finding names the bound and its value; its `path` locates the predicate.',
+    RLS_UNCOMPILABLE_DROP,
+    RLS_DROPPED_USING,
+    RLS_DROPPED_CHECK,
+  ],
+};
+
+const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
+  rule: 'rls-predicate-unenforceable',
+  covers: 'what a predicate the runtime cannot enforce does',
+  paragraphs: [
+    'An RLS predicate is compiled to a row filter (ADR-0056 D4), so only the pushdown subset lowers. A ' +
+      'function call (`size(…)`, `has(…)`), arithmetic, a ternary, a related-record path, a list literal under ' +
+      '`==` / `!=` or the bare `current_user` root used as a value is outside it, and the compiler refuses it. ' +
+      'The finding quotes the verdict half of the compiler\'s own refusal.',
+    RLS_UNCOMPILABLE_DROP,
+    // The two key lists are held equal to the rule's per-key probe types by the rule's test.
+    'A predicate can pass that shape check and still be refused for the TYPE of the value a `current_user` ' +
+      'reference holds on every request. `ExecutionContext` declares, and the kernel resolves, the membership ' +
+      'sets `accessible_org_ids`, `org_user_ids` and `positions` as LISTS and `email`, `id` and ' +
+      '`organization_id` as one value each, and `current_user` alone is the whole caller context object. A ' +
+      'list under `==` / `!=` or handed to a string method, one value on the right of `in`, or the whole ' +
+      'context object where one value or one set belongs is refused on EVERY request, so `RLSCompiler` drops ' +
+      'the policy on every request. The ' +
+      'shape check passes, so the "uncompilable predicate" WARN is never logged; the only signal is a ' +
+      'per-request "DENY (fail closed)" WARN, emitted only when nothing else applicable compiles. A refusal that ' +
+      'depends on WHICH caller asks — a constant comparison such as `current_user.email == \'ops@acme.com\'` — is ' +
+      'not reported: no single probe can stand for every request.',
+    'The same per-request drop, with the same signal, follows a lowered comparand the platform\'s shared filter ' +
+      'check refuses — a `null` list member or a `null` ordering bound, which no two backends agree on: ' +
+      '`RLSCompiler` runs that check on every compiled policy filter before any backend sees it.',
+    RLS_DROPPED_USING,
+    RLS_DROPPED_CHECK,
+    LIST_HOLDING_COMPARISON,
+    CROSS_CLASS_COMPARISON,
+    'Such a comparison is not dropped; it is refused where it runs. On a `using`, every read the policy scopes ' +
+      'is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses the comparison by the columns\' ' +
+      'declared types), and every by-id update or delete it scopes fails closed (`PERMISSION_DENIED` / 403). On ' +
+      'a `check` — and on the `using` of an `insert`, `update` or `all` policy whenever no applicable policy for ' +
+      'that operation declares a `check` (ADR-0058 D4), where the `using` is the write check — the in-process ' +
+      'write check refuses the comparison too (`INVALID_FILTER` / 400) and stores nothing: against a list-holding ' +
+      'column every single-record insert and by-id update whose record holds a list or an object there, across ' +
+      'two classes every insert or update it judges.',
+    'Last, the `using` of a `select` or `all` policy — the object\'s row-level READ SCOPE — is judged by the ' +
+      'engine\'s own filter admission, which reads what the object\'s fields ARE: a text operator aimed at a ' +
+      'number field, a date field compared with a value its storage cannot read, a filter on a formula field or ' +
+      'a `{placeholder}` string (judged with no caller, so it never resolves) is refused there. The finding ' +
+      'quotes the engine\'s verdict with its code and status. The analytics face hands the read scope to this ' +
+      'same admission before it runs a query, so every analytics query over the object that this policy scopes ' +
+      'is refused. Each clause earns one finding: the engine judges only a clause every earlier check left clean.',
+  ],
+};
+
+// This text was rewritten once, and why it was wrong is worth keeping: it said
+// the field half had TWO directions — fail-closed in the leading position
+// `extractTargetField` recognises, fail-OPEN everywhere else — and credited the
+// WRITE leg's fail-closed to that same safety net. The runtime now judges
+// column existence on the COMPILED predicate, inside `RLSCompiler.compileFilter`,
+// which the read layer and the ADR-0058 D4 write gate both pass through, so a
+// miss fails CLOSED everywhere, on both clauses; and `computeWriteCheckFilter`
+// never had an `extractTargetField` net — which is why a negated `check` miss
+// PERMITTED the write until the compiler-side guard landed.
+const RLS_PREDICATE_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'rls-predicate-unknown-field',
+  covers: 'what a policy naming a missing column does',
+  paragraphs: [
+    'The predicate lowers, but a column it names is not declared on the policy\'s object — most often what a ' +
+      'column RENAME leaves behind. `RLSCompiler` judges column existence on the COMPILED predicate, so the ' +
+      'position and the polarity it is written in make no difference: a leading `field ==`, a negation ' +
+      '(`field != x`, `!(field == x)`, `!(field in [...])`) and any arm after the first all lower to the same ' +
+      'tree and all DROP the policy at request time, with one WARN line as the only signal.',
+    RLS_DROPPED_USING,
+    'The object then disappears not because its readers were denied, but because the narrowing they were ' +
+      'granted names a column that is not there.',
+    RLS_DROPPED_CHECK,
+    'On a runtime older than that compiled-predicate guard a `check` miss failed OPEN rather than closed: the ' +
+      'write path had no field-existence check at all, so a negated miss was satisfied VACUOUSLY by the ' +
+      'post-image and PERMITTED exactly the writes the policy was written to refuse, on every driver. Fix the ' +
+      'name rather than relying on either behaviour.',
+  ],
+};
+
+const RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION: RuleExplanation = {
+  rule: 'rls-predicate-unknown-user-variable',
+  covers: 'which current_user values a predicate can read',
+  paragraphs: [
+    // Held equal to `RESERVED_RLS_MEMBERSHIP_KEYS` by the rule's test.
+    'The kernel-resolved `current_user` keys are exactly accessible_org_ids, email, id, org_user_ids, ' +
+      'organization_id, positions. The only other keys that can EVER appear are §7.3.1 membership sets, which ' +
+      'the runtime stages as ARRAYS and which are therefore usable only as `field in current_user.KEY`. A key ' +
+      'outside that list in a scalar position — compared with `==` / `!=` / `<` / `>` or handed to a string ' +
+      'method — can therefore never be supplied by any request.',
+    'The compiler answers `unresolved-variable` for it in EVERY position — including under `!` and in a ' +
+      'trailing `||` arm — so `RLSCompiler` DROPS the policy at request time, and one WARN line is the only ' +
+      'signal.',
+    RLS_DROPPED_USING,
+    'The object then disappears not because its readers were denied, but because the narrowing they were ' +
+      'granted resolves to nothing.',
+    RLS_DROPPED_CHECK,
+    'An unknown key in a membership position (`field in current_user.KEY`) is never reported: there it is ' +
+      'indistinguishable from a correct §7.3.1 reference an app stages.',
+  ],
+};
+
+/** What happens to a declared sharing rule whose `condition` does not lower — the two condition ids. */
+const SHARING_RULE_SKIPPED =
+  'A declared sharing rule\'s `condition` is compiled ONCE, at boot: `bootstrapDeclaredSharingRules` lowers it ' +
+  'to a static `criteria_json` filter with no variables bound. A condition that does not lower is not ' +
+  'degraded, partially applied or deferred — the rule is SKIPPED: it is never written to `sys_sharing_rule`, ' +
+  'no `sys_record_share` grant is ever materialised, and the only signal is one WARN line in the boot log. An ' +
+  'unlowerable condition is never seeded as a permissive match-all (ADR-0049), so the rule is declared and ' +
+  'grants nothing.';
+
+/** Why a grant on the rule's anchor object can be refused outright — the two anchor ids. */
+const SHARING_INERT_GRANT =
+  '`SharingRuleService.reconcile` hands each matched record to `SharingService.grant`, whose ' +
+  '`assertNotInertGrant` pre-flight (ADR-0111 D7) refuses, with SHARING_NOT_ENABLED, a grant no access gate ' +
+  'would ever consult. The refusal fails the rule\'s boot backfill and no `sys_record_share` row is ever ' +
+  'written. The boot WARN it leaves appears only for a rule whose criteria matched at least one record, so a ' +
+  'rule that matches nothing is just as dead and says nothing — which is why the anchor is judged here, on ' +
+  'the declaration.';
+
+const SHARING_RULE_UNLOWERABLE_CONDITION_EXPLANATION: RuleExplanation = {
+  rule: 'sharing-rule-unlowerable-condition',
+  covers: 'why a condition the runtime cannot evaluate grants nothing',
+  paragraphs: [
+    'A `condition` outside the pushdown subset — a function call such as `has(…)` (correct in an object ' +
+      'validation, which is interpreted, and wrong here, where the condition is compiled), arithmetic, a ' +
+      'ternary or a related-record path — does not lower. The finding quotes the compiler\'s own refusal.',
+    SHARING_RULE_SKIPPED,
+    LIST_HOLDING_COMPARISON,
+    CROSS_CLASS_COMPARISON,
+    'Such a comparison lowers, so the rule IS seeded into `sys_sharing_rule`, but every criteria query it runs ' +
+      'is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses the comparison by the ' +
+      'columns\' declared types), and `SharingRuleService` reads a refused query as matching no record. No ' +
+      '`sys_record_share` grant is ever materialised, at boot or on any later write, and the only signal is a ' +
+      'WARN line in the server log. The rule is declared and grants nothing.',
+    'A condition that does not parse is not reported here: the expression rule gates the same field with a ' +
+      'message written about syntax.',
+  ],
+};
+
+const SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION: RuleExplanation = {
+  rule: 'sharing-rule-runtime-variable-condition',
+  covers: 'why a sharing condition cannot read current_user',
+  paragraphs: [
+    'A criteria sharing rule is MATERIALISED: the seeder compiles one static `criteria_json` per rule and the ' +
+      'evaluator writes `sys_record_share` rows from it, so there is no "current user" at compile time and the ' +
+      'compiler refuses a `current_user.*` read.',
+    SHARING_RULE_SKIPPED,
+    'The fix is a different mechanism, not a different spelling, and which one depends on the anchor object\'s ' +
+      '`sharingModel`; the `fix:` line names both.',
+  ],
+};
+
+const SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION: RuleExplanation = {
+  rule: 'sharing-rule-object-not-shareable',
+  covers: 'why a rule on a public object grants nothing',
+  paragraphs: [
+    'Sharing only ever WIDENS an organization-wide default (OWD) baseline, and on the widest baseline there is ' +
+      'nothing left to widen. An object\'s effective sharing model is `public` when it declares ' +
+      '`sharingModel: \'public_read_write\'`, or when it declares none and is a system object (`isSystem: true` ' +
+      'or a `sys_` name), which ADR-0090 D1 resolves to public. A custom object with no `sharingModel` resolves ' +
+      'to private and is not reported.',
+    SHARING_INERT_GRANT,
+    'Here the refusal reads "\'OBJECT\' is not under record-sharing enforcement". Measured: `buildReadFilter` ' +
+      'returns `null` for such an object — NO record-level filter at all — so every principal already reads ' +
+      'every row, and the rule advertises a restriction that does not exist.',
+  ],
+};
+
+const SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION: RuleExplanation = {
+  rule: 'sharing-rule-object-controlled-by-parent',
+  covers: 'why a rule on a detail object grants nothing',
+  paragraphs: [
+    'A master-detail DETAIL (`sharingModel: \'controlled_by_parent\'`) has no record-level access of its own: ' +
+      'its visibility is DERIVED from its master (ADR-0055), so it holds no shares to widen.',
+    SHARING_INERT_GRANT,
+    'Here the refusal reads "\'OBJECT\' is controlled by its parent (master-detail); share the master record ' +
+      'instead", and the recipients the rule names get whatever the MASTER grants them — which may be nothing. ' +
+      'The grant is declared and does not exist.',
+  ],
+};
+
 /**
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
@@ -1100,6 +1376,15 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION.rule]: HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION,
   [HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
   [ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
+  [RLS_PREDICATE_UNPARSEABLE_EXPLANATION.rule]: RLS_PREDICATE_UNPARSEABLE_EXPLANATION,
+  [RLS_PREDICATE_OVER_BUDGET_EXPLANATION.rule]: RLS_PREDICATE_OVER_BUDGET_EXPLANATION,
+  [RLS_PREDICATE_UNENFORCEABLE_EXPLANATION.rule]: RLS_PREDICATE_UNENFORCEABLE_EXPLANATION,
+  [RLS_PREDICATE_UNKNOWN_FIELD_EXPLANATION.rule]: RLS_PREDICATE_UNKNOWN_FIELD_EXPLANATION,
+  [RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION.rule]: RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION,
+  [SHARING_RULE_UNLOWERABLE_CONDITION_EXPLANATION.rule]: SHARING_RULE_UNLOWERABLE_CONDITION_EXPLANATION,
+  [SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION.rule]: SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION,
+  [SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION.rule]: SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION,
+  [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

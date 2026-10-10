@@ -15,6 +15,7 @@ import {
   FileDownloadUrlResponseSchema,
   RawUploadResponseSchema,
   StorageApiContracts,
+  UploadScopeSchema,
 } from './storage.zod';
 
 describe('GetPresignedUrlRequestSchema', () => {
@@ -662,6 +663,54 @@ describe('RawUploadResponseSchema', () => {
   it('should reject a missing key', () => {
     expect(() => RawUploadResponseSchema.parse({ success: true, data: {} })).toThrow();
   });
+});
+
+// ==========================================
+// Upload Scope Vocabulary (#22470)
+// ==========================================
+
+// The one list the two upload requests, the `sys_file.scope` select and the
+// upload doors share. Literal on purpose: a member added or dropped is a
+// published contract change, and this pin is where it shows.
+const UPLOAD_SCOPES = ['user', 'tenant', 'private', 'temp', 'attachments'] as const;
+
+describe('UploadScopeSchema', () => {
+  it('declares exactly the upload scopes, in order', () => {
+    expect(UploadScopeSchema.options).toEqual([...UPLOAD_SCOPES]);
+  });
+
+  it('does not list the retired public scope', () => {
+    expect(UploadScopeSchema.safeParse('public').success).toBe(false);
+  });
+});
+
+describe('upload requests close scope to UploadScopeSchema', () => {
+  const REQUESTS = [
+    ['GetPresignedUrlRequestSchema', GetPresignedUrlRequestSchema, { filename: 'a.png', mimeType: 'image/png', size: 3 }],
+    ['InitiateChunkedUploadRequestSchema', InitiateChunkedUploadRequestSchema, { filename: 'a.bin', mimeType: 'application/octet-stream', totalSize: 3 }],
+  ] as const;
+
+  for (const [name, schema, base] of REQUESTS) {
+    it(`${name} accepts every upload scope`, () => {
+      for (const scope of UPLOAD_SCOPES) {
+        expect(schema.parse({ ...base, scope }).scope, scope).toBe(scope);
+      }
+    });
+
+    it(`${name} keeps the default user`, () => {
+      expect(schema.parse({ ...base }).scope).toBe('user');
+    });
+
+    it(`${name} refuses a scope outside the vocabulary at parse, on the scope key`, () => {
+      for (const scope of ['avatars', 'public', 'User', '']) {
+        const result = schema.safeParse({ ...base, scope });
+        expect(result.success, scope).toBe(false);
+        const issue = result.error!.issues[0];
+        expect(issue.path, scope).toEqual(['scope']);
+        expect(issue.code, scope).toBe('invalid_value');
+      }
+    });
+  }
 });
 
 // ==========================================
