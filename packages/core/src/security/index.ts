@@ -156,6 +156,10 @@ export {
   // [#20580] The session arm's membership check (#15409 ruling B), so the
   // permission explainer resolves the user it explains through the same one.
   vetOrganizationClaim,
+  // [ADR-0049, ADR-0131 D3, ADR-0126 §4] The one deactivation read of the
+  // security catalog — the `sys_metadata_activation` ledger, never a catalog
+  // row's `active` column — shared with the explainer and the security plugin.
+  readDisabledCatalogNames,
   resolveLocalizationContext,
   type ResolvedAuthzContext,
   type ResolveAuthzInput,

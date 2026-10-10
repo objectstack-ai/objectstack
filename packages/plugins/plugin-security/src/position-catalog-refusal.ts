@@ -1,64 +1,57 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `sys_user_position.position` must name a `sys_position` catalog row — the
- * write-path refusal for an assignment that names nothing.
+ * `sys_user_position.position` must name a position the security catalog
+ * holds — the write-path refusal for an assignment that names nothing.
  *
  * ## The hole
  *
- * `position` is declared `Field.text` and references `sys_position.name` by
- * convention only, while every sibling reference column on the same row
- * (`user_id`, `organization_id`, `business_unit_id`, `granted_by`,
- * `delegated_from`) is a `Field.lookup` the engine already refuses when it
- * names no row (`reference_not_found`, `assertReferencesResolve` in
- * `@objectstack/objectql`). So a value naming no catalog row was stored and
- * answered `201`, and then resolved to nothing: the runtime resolver joins
- * `sys_position` BY NAME, so the assignment granted no permission set, reached
- * no sharing rule and put nothing in `current_user.positions` that any reader
- * could act on. The holder signed in to an app that reads nothing, and no layer
- * said why. The measured spelling is the position's record ID written where its
- * NAME belongs — the neighbouring `user_id` is an id, and the analogous
+ * `position` is declared `Field.text` and references a position by NAME, while
+ * every sibling reference column on the same row (`user_id`, `organization_id`,
+ * `business_unit_id`, `granted_by`, `delegated_from`) is a `Field.lookup` the
+ * engine already refuses when it names no row (`reference_not_found`,
+ * `assertReferencesResolve` in `@objectstack/objectql`). So a value naming no
+ * position was stored and answered `201`, and then resolved to nothing: the
+ * assignment granted no permission set, reached no sharing rule and put
+ * nothing in `current_user.positions` that any reader could act on. The holder
+ * signed in to an app that reads nothing, and no layer said why. The measured
+ * spelling is the position's record ID written where its NAME belongs — the
+ * neighbouring `user_id` is an id, and the analogous
  * `sys_user_permission_set.permission_set_id` is genuinely id-typed, so the id
  * is what an author reaches for by analogy.
  *
- * ## The predicate — exactly "no catalog row carries this name"
+ * ## The predicate — exactly "the name resolves to no position"
  *
  * Ruled on the card that filed the hole (#16712, maintainer-confirmed),
  * verbatim: «⛔ The predicate is exactly "no catalog row carries this name" —
  * never "this assignment cannot take effect": ADR-0049 keeps a deactivated
- * position's assignment while it stops granting». So a DEACTIVATED position
- * (`active: false`) is still a catalog row, and an assignment naming it is
- * accepted — it stops granting, it is not refused.
+ * position's assignment while it stops granting». So a DEACTIVATED position is
+ * still a position, and an assignment naming it is accepted — it stops
+ * granting, it is not refused. (The switch is the activation ledger's, and
+ * this refusal does not read it.)
  *
- * ## Whose catalog — the writer's organization plus organization-less rows
+ * ## Whose catalog — the security catalog, one per deployment
  *
- * The ruling fixes the predicate; #20297 fixes the catalog it reads, by the
- * platform's standing tenancy rule rather than by a new one. Every catalog read
- * here runs under {@link catalogReadContext} — `{ ...context, isSystem: true }`,
- * the `sudo()`-shaped elevation of the engine's own lookup probe
- * (`assertReferencesResolve` in `@objectstack/objectql`, #19808), never a bare
- * `{ isSystem: true }`:
+ * [ADR-0131 D3/D4] The catalog is the environment registry: positions
+ * declared by a package, the platform's built-ins, and every position an
+ * environment author saved through the metadata door, read BY NAME through
+ * the reader the security plugin binds to its engine
+ * (`securityCatalogReaderOf`). It is the one source the authorization
+ * resolver grants a held position through, so this refusal accepts exactly
+ * the names an assignment can take effect under, and refuses exactly the
+ * names that resolve nowhere:
  *
- * - the elevation is about VISIBILITY: existence is a fact about the database,
- *   not about the writer's row-level reach, so RBAC, RLS and FLS are bypassed;
- * - it is never about TENANCY: the writer's context is spread first, so the
- *   engine forwards its `tenantId` to the driver, which reads the writer's
- *   organization plus organization-less rows (`organization_id IS NULL`).
+ * - a position declared only in the registry (no `sys_position` row) is
+ *   ACCEPTED — before the cutover the per-organization row table was the
+ *   catalog read here, and such an assignment was refused `400`;
+ * - a name only a `sys_position` row carries (an organization's Setup row
+ *   under a wall with no definition, a row whose definition was never saved)
+ *   is REFUSED: the resolver grants nothing through it (#15196 Q3 = A).
  *
- * So a name only ANOTHER organization's catalog carries is refused exactly like
- * a name no organization carries — the same envelope and the same message —
- * and the accept-or-refuse answer tells an organization admin nothing about any
- * other organization's catalog. The bare spelling read every organization,
- * which accepted such a name (it resolves nothing in the writer's organization)
- * and answered "some other organization has this position" apart from "no one
- * has it": the cross-tenant existence oracle the engine probe (#19808) and the
- * delegated-admin gate's position-name reads (#19819, #19860) were closed
- * against. Under a `single` posture the declared catalog is seeded with no
- * organization, so when the deployment holds one organization every writer
- * reads the whole catalog; a `single` deployment holding several (reported at
- * `error` at boot, #17010) gives each writer its active organization's
- * positions plus the organization-less ones. A writer whose context names no
- * organization reads every organization's rows, as the engine probe does.
+ * The catalog is environment-level and takes no organization (ADR-0131 D3),
+ * so every writer reads the same catalog and the verdict says nothing about
+ * any organization's own data — there is no per-organization catalog left to
+ * leak the existence of.
  *
  * ## Which writes it judges
  *
@@ -89,10 +82,11 @@
  *   write stores it with `201` (measured over SQLite: `123`, `true`, `{}`,
  *   `{ a: 1 }` and `['x']` all stored). So those are judged by their string
  *   form — a scalar by `String(value)`, an object or array by its JSON text —
- *   and refused like any name no catalog row carries. The stored text is the
- *   driver's, not that string form (SQLite stores `123` as `'123.0'`), so a
- *   non-string whose string form happens to equal a catalog name is accepted
- *   and resolves nothing: the engine's `text` leniency, outside this refusal;
+ *   and refused like any name that resolves to no position. The stored text is
+ *   the driver's, not that string form (SQLite stores `123` as `'123.0'`), so
+ *   a non-string whose string form happens to equal a position name is
+ *   accepted and resolves nothing: the engine's `text` leniency, outside this
+ *   refusal;
  * - an update the engine refuses on its own dispatch predicate.
  *
  * ## Where it runs
@@ -101,8 +95,7 @@
  * INSIDE it: the delegated-admin gate and the object CRUD check have both
  * passed before the catalog is consulted. A caller who may not write this
  * table is refused `403` on authority, identically whatever the value names,
- * and never sees the catalog verdict. The tenant boundary is the catalog
- * read's own (above), not this placement's.
+ * and never sees the catalog verdict.
  *
  * The placement is also what lets the by-id PRE-IMAGE read ({@link SYSTEM_CTX})
  * stay bare: that read happens only after the security middleware has admitted
@@ -120,22 +113,22 @@
  * code is the registered ADR-0112 `VALIDATION_FAILED` (built by
  * `validationFailure`, the shared constructor both HTTP doors map to 400), and
  * the field-level code is a member of the closed ADR-0114 catalog. The message
- * names the value, says the column takes the catalog NAME, and names the fix —
- * the name itself when the value is the record id of a position the writer's
- * catalog holds (read the same way as the check, so never another
- * organization's).
+ * names the value, says the column takes the position's NAME, and names the
+ * fix — the name itself when the value is the record id of a `sys_position`
+ * row the writer's organization holds and the catalog resolves that row's
+ * name (the id is a row fact, read under {@link catalogReadContext}, so never
+ * another organization's).
  *
  * ## Fails open
  *
- * A catalog that cannot be read (the object is not registered in this
- * composition, or the read throws) refuses nothing — an integrity check that
- * cannot run must not invent a rejection, the stance the engine's own lookup
- * probe takes. A failed read is reported at `warn`: the write proceeds, and the
- * operator is told the check did not run. A name the query layer would read as
- * a filter placeholder (`{…}`) is not a failed read: it is compared literally
- * (`catalogCarries`), so its verdict never falls open.
+ * A catalog that cannot be read (no reader is bound to this engine, or the
+ * read throws) refuses nothing — an integrity check that cannot run must not
+ * invent a rejection, the stance the engine's own lookup probe takes. A failed
+ * read is reported at `warn`: the write proceeds, and the operator is told the
+ * check did not run.
  */
 
+import { securityCatalogReaderOf } from '@objectstack/core';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import {
@@ -149,8 +142,10 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 
 /** The assignment object this refusal is registered on. */
 export const POSITION_ASSIGNMENT_OBJECT = 'sys_user_position';
-/** The catalog a `position` value must name a row of. */
+/** The row table the id-spelling hint reads a record id in — never the verdict. */
 export const POSITION_CATALOG_OBJECT = 'sys_position';
+/** The security catalog type a `position` value must name an item of. */
+const POSITION_CATALOG_TYPE = 'position';
 /** The column judged, on {@link POSITION_ASSIGNMENT_OBJECT}. */
 export const POSITION_FIELD = 'position';
 
@@ -158,18 +153,18 @@ export const POSITION_FIELD = 'position';
  * The by-id PRE-IMAGE read only (is the stored `position` being changed?) —
  * never a catalog read. Bare, because the security middleware has already
  * refused, identically, every row id the writer cannot update (see "Where it
- * runs"); every catalog read goes through {@link catalogReadContext}.
+ * runs"); the id-spelling hint's row read goes through {@link catalogReadContext}.
  */
 const SYSTEM_CTX = { isSystem: true } as const;
 
 /**
- * The context every `sys_position` read runs under: the writer's own context
- * with `isSystem` set — the engine lookup probe's `sudo()`-shaped spelling. The
- * spread carries the writer's `tenantId`, so the read sees the writer's
- * organization plus organization-less rows; a context naming no organization
- * reads every organization. ⛔ Never a bare `{ isSystem: true }` here: that
- * spans every organization and makes the refusal a cross-tenant existence
- * oracle (module note, "Whose catalog").
+ * The context the id-spelling hint's `sys_position` read runs under: the
+ * writer's own context with `isSystem` set — the engine lookup probe's
+ * `sudo()`-shaped spelling. The spread carries the writer's `tenantId`, so the
+ * read sees the writer's organization plus organization-less rows; a context
+ * naming no organization reads every organization. ⛔ Never a bare
+ * `{ isSystem: true }` here: that spans every organization, and a hint naming
+ * another organization's row would be a cross-tenant existence oracle.
  */
 function catalogReadContext(context: unknown): Record<string, unknown> {
   const own = context && typeof context === 'object' ? (context as Record<string, unknown>) : {};
@@ -342,41 +337,34 @@ export async function writtenPositionNames(ql: any, opCtx: any): Promise<string[
 }
 
 /**
- * The names among `names` that no `sys_position` row the WRITER's catalog
- * holds carries — the writer's organization plus organization-less rows, or
- * every organization for a context naming none ({@link catalogReadContext}) —
- * or `null` when the catalog could not be read and nothing may be concluded.
- * `context` is the writer's execution context, required so no caller can
- * silently fall back to an unscoped read.
- *
- * One bounded read per distinct name, never one `$in` read under a row limit:
- * a context naming no organization sees every organization's copy of a name,
- * so a limited `$in` page can fill with copies of one name and report the
- * others missing.
+ * The names among `names` the security catalog resolves to no position
+ * (ADR-0131 D3/D4) — or `null` when the catalog could not be read and nothing
+ * may be concluded: no reader is bound to this engine (a composition the
+ * security plugin did not start on), or the read did not answer. `context` is
+ * the writer's execution context; the catalog takes no organization, so it
+ * does not move the verdict.
  */
 export async function namesWithoutCatalogRow(
   deps: PositionCatalogRefusalDeps,
   names: readonly string[],
-  context: unknown,
+  _context: unknown,
 ): Promise<string[] | null> {
   const { ql, logger } = deps;
   if (names.length === 0) return [];
-  if (!ql || typeof ql.find !== 'function') return null;
-  // An unregistered catalog is a composition without one — nothing to judge
-  // against, the same silent stand-down the engine's own lookup probe takes.
-  if (typeof ql.getSchema === 'function' && !ql.getSchema(POSITION_CATALOG_OBJECT)) return null;
+  const catalog = securityCatalogReaderOf(ql);
+  // No catalog bound — nothing to judge against, the same silent stand-down
+  // the engine's own lookup probe takes for an unregistered target.
+  if (!catalog) return null;
 
-  const readCtx = catalogReadContext(context);
   const missing: string[] = [];
   for (const name of names) {
     let carried: boolean;
     try {
-      carried = await catalogCarries(ql, name, readCtx);
+      carried = (await catalog.resolve(POSITION_CATALOG_TYPE, name)) !== undefined;
     } catch (e) {
       logger?.warn?.(
-        `[security] the ${POSITION_CATALOG_OBJECT} catalog could not be read, so a ` +
-          `${POSITION_ASSIGNMENT_OBJECT} write was NOT checked for a position name that resolves ` +
-          `to no catalog row — it proceeds unchecked`,
+        `[security] the security catalog could not be read, so a ${POSITION_ASSIGNMENT_OBJECT} write was NOT ` +
+          'checked for a position name that resolves to no position — it proceeds unchecked',
         { object: POSITION_ASSIGNMENT_OBJECT, error: (e as Error)?.message ?? String(e) },
       );
       return null;
@@ -387,34 +375,12 @@ export async function namesWithoutCatalogRow(
 }
 
 /**
- * Does the catalog, read under `readCtx`, hold a row whose `name` is exactly
- * `name`? A name the query layer would read as a filter PLACEHOLDER (a
- * fully-wrapped `{…}`, recognised by the spec's `classifyFilterToken`, the
- * predicate `@objectstack/core`'s `resolveFilterTokens` applies to every `where`
- * comparand) cannot go in `where` as itself: an unknown token throws
- * `FILTER_TOKEN_UNKNOWN` and a known one is replaced by its value, so the read
- * would fail open or judge a different name. Such a name is compared here
- * instead, against the catalog names that share its first character.
- */
-async function catalogCarries(ql: any, name: string, readCtx: Record<string, unknown>): Promise<boolean> {
-  if (classifyFilterToken(name) === null) {
-    const rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { name }, limit: 1, context: readCtx });
-    return Array.isArray(rows) && rows.length > 0;
-  }
-  const rows = await ql.find(POSITION_CATALOG_OBJECT, {
-    where: { name: { $startsWith: name.charAt(0) } },
-    fields: ['name'],
-    context: readCtx,
-  });
-  return Array.isArray(rows) && rows.some((row: any) => row?.name === name);
-}
-
-/**
- * For each missing value that is the record ID of a position the writer's
- * catalog holds, that position's NAME — the exact fix. Read under the same
- * {@link catalogReadContext} as the check itself, so the hint can name only a
- * position the check could have accepted, never another organization's. A read
- * that fails yields no hint.
+ * For each missing value that is the record ID of a `sys_position` row the
+ * writer's organization holds, that row's NAME — the exact fix, offered only
+ * when the security catalog resolves that name, so the hint never names a
+ * position the check would refuse. The id is a row fact, read under
+ * {@link catalogReadContext} (never another organization's row). A read that
+ * fails yields no hint.
  */
 export async function idSpellingHints(
   deps: PositionCatalogRefusalDeps,
@@ -424,16 +390,18 @@ export async function idSpellingHints(
   const hints = new Map<string, string>();
   const { ql } = deps;
   if (!ql || typeof ql.find !== 'function') return hints;
+  const catalog = securityCatalogReaderOf(ql);
+  if (!catalog) return hints;
   const readCtx = catalogReadContext(context);
   for (const value of values) {
     // A placeholder-shaped value is never a record id, and in `where` it would
-    // be resolved as a filter token rather than compared (see catalogCarries).
+    // be resolved as a filter token rather than compared.
     if (classifyFilterToken(value) !== null) continue;
     try {
       const rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { id: value }, limit: 1, context: readCtx });
       const row = Array.isArray(rows) ? rows[0] : null;
       const name = row && typeof row.name === 'string' && row.name !== '' ? row.name : null;
-      if (!name) continue;
+      if (!name || !(await catalog.resolve(POSITION_CATALOG_TYPE, name))) continue;
       hints.set(value, name);
     } catch {
       // No hint — the refusal still stands and still names the column's contract.
@@ -447,14 +415,15 @@ export function positionNotInCatalogMessage(value: string, idOfPosition?: string
   if (idOfPosition) {
     return (
       `${POSITION_LABEL}: no position is named '${value}' — that is the record id of the position ` +
-      `'${idOfPosition}'. ${POSITION_ASSIGNMENT_OBJECT}.${POSITION_FIELD} takes the position's machine name ` +
-      `(${POSITION_CATALOG_OBJECT}.name), never its id: write '${idOfPosition}'.`
+      `'${idOfPosition}'. ${POSITION_ASSIGNMENT_OBJECT}.${POSITION_FIELD} takes the position's machine name, ` +
+      `never its id: write '${idOfPosition}'.`
     );
   }
   return (
     `${POSITION_LABEL}: no position is named '${value}'. ${POSITION_ASSIGNMENT_OBJECT}.${POSITION_FIELD} ` +
-    `takes the machine name of a position in the catalog (${POSITION_CATALOG_OBJECT}.name), never its record ` +
-    `id: write the name of an existing position, or create the position first.`
+    `takes the machine name of a position in the security catalog (a package's position, a built-in, or one ` +
+    `saved through the metadata door), never its record id: write the name of an existing position, or ` +
+    `declare the position first.`
   );
 }
 
