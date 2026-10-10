@@ -399,7 +399,7 @@ describe('[#22726] the engine listener and the evaluator\'s return value', () =>
     const events: unknown[] = [];
 
     await engine.update('adv_acct', { industry: null }, {
-      where: { industry: 'x' }, multi: true, onValidationAdvisory: (e) => { events.push(e); },
+      where: { industry: 'x' }, multi: true, onValidationAdvisory: (e: unknown) => { events.push(e); },
     } as never);
 
     expect(events).toEqual([ADVISED, ADVISED]);
