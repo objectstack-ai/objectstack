@@ -265,7 +265,7 @@ for some input, so the rewrite is yours to judge.
 
 | you wrote | write instead | what changes |
 |:---|:---|:---|
-| `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an **absent** variable or key where the template wrote nothing — guard one that may be absent: `has(record.owner) ? record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`) |
+| `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an **absent** variable or key where the template wrote nothing — guard one that may be absent a step at a time from `vars`, which holds only the variables the run has bound: `has(vars.record) && has(vars.record.owner) ? vars.record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`). A guard on the last key alone does not hold where the variable is absent: `has(source.id)` fails the run when `source` was never bound (an `isInput` variable the caller left out) |
 | `'{items.0}'` | `source: 'items[0]'` | an empty list fails the run |
 | `'{$error.message}'` | `source: 'vars["$error"].message'` | a `$`-named variable is read through `vars` |
 | `'{round(x * 100) / 100}'` | `source: 'round(x * 100) / 100.0'` | CEL divides two integers as integers: keep a decimal operand on every division |
@@ -273,11 +273,30 @@ for some input, so the rewrite is yours to judge.
 | braces meant literally, `'{"a": 1}'` | `source: "'{\"a\": 1}'"` | a CEL string literal |
 | `'{$User.Id}'` | `source: 'current_user.id'` | `current_user` is the run's user, and `null` in a run with none (a schedule, a record change made by a system write), where this read fails the run. In a flow that can run without a user, write `current_user != null ? current_user.id : null`: it writes `null` where the template wrote nothing, which on `update_record` clears a stored value the template left alone — or skip the node on `current_user != null` |
 | `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | read the user record by `current_user.id`: an `assignment` (`uid: { dialect: 'cel', source: 'current_user.id' }`), a `get_record` on `sys_user` with `filter: { id: '{uid}' }` and `outputVariable: 'me'`, then `source: 'me.email'` | these never resolved in any shipped run — they wrote nothing. `current_user` carries only what the run holds: `id`, `positions`, `organizationId`, `isPlatformAdmin` |
+| `'{TODAY()}'` | `source: 'isoDate(today())'` | none: `isoDate` writes the `YYYY-MM-DD` text the macro wrote, on the UTC calendar |
+| `'{TODAY() + 7}'`, `'{TODAY() - 3}'` | `source: 'isoDate(daysFromNow(7))'`, `source: 'isoDate(daysAgo(3))'` | none for a whole number of days. A fraction (`'{TODAY() - 1.5}'`) is not: the template truncated the day of the month plus the offset, `addDays(today(), -1.5)` truncates the offset, so going back they land a day apart on most days of a month, and `daysAgo(1.5)` is refused at build. Write the whole number of days you mean |
+| `'{NOW()}'` | `source: 'isoDatetime(now())'` | none: `isoDatetime` writes the `YYYY-MM-DDTHH:mm:ss.sssZ` text the macro wrote |
+| `'{NOW() + 2}'`, `'{NOW() - 1}'` | `source: 'isoDatetime(addDays(now(), 2))'`, `source: 'isoDatetime(addDays(now(), -1))'` | none — `addDays` keeps the time of day, where `daysFromNow` would land on midnight |
+| `'{TODAY() + days}'` | `source: 'isoDate(addDays(today(), days))'` | the template added 0 days, without a word, when `days` was absent or not a number; CEL fails the run on either. It also looked the offset up as one name, so `'{TODAY() + record.days}'` added 0 where CEL reads the path |
+| `'Due {TODAY()} by {$User.Id}'` | `source: "'Due ' + isoDate(today()) + ' by ' + current_user.id"` | a string mixing a date macro with another token is refused whole, each token spelled as above |
 
-One spelling **keeps** its meaning for now, because CEL cannot write it yet:
-the date macros (`'{NOW()}'`, `'{TODAY() + 7}'` — CEL's `now()` / `today()` are
-timestamps, not the ISO text the macros write, and there is no string form for
-one).
+No spelling is kept: a value slot reads no `{…}` token at all.
+
+**Where an envelope is data, the remedy names none there.** An envelope
+evaluates only as the top-level value of the `fields` map or the `assignments`
+map. Inside an object or list value, and in the two legacy `assignment` shapes
+(an `assignments: [{ variable, value }]` array, variables as the config's own
+keys), it is stored as the object it spells — so the refusal there names what
+does evaluate:
+
+- a string inside an object or list value: build the **whole value** as one
+  envelope, a CEL map or list literal — `payload: { note: 'for {name}' }` is
+  `payload: { dialect: 'cel', source: "{'note': 'for ' + name}" }`. CEL holds
+  every value of one map, and every element of one list, to one type, so where
+  they mix — a literal beside a computed value included — wrap each one in
+  `dyn(…)`: `"{'who': dyn(name), 'n': dyn(3)}"`;
+- a legacy `assignment` shape: move the node's assignments into the
+  `assignments` map, where the envelope evaluates.
 
 [#19939]: https://github.com/objectstack-ai/objectstack/issues/19939
 
@@ -327,7 +346,7 @@ check.
 | `'Deal won: {record.name}'` | `'Deal won: {{ record.name }}'` |
 | `'Failed: {$error.message}'` | `'Failed: {{ $error.message }}'` |
 | `'Total {amount * 2}'`, `'{round(x)}'` | compute it into a variable (`assignments: { v: { dialect: 'cel', source: 'amount * 2' } }`), then `'Total {{ v }}'` |
-| `'Due {TODAY() + 7}'` | compute it into a variable with an `assignment` node, whose value slot still reads that spelling (`assignments: { due: '{TODAY() + 7}' }`), then `'Due {{ due }}'` |
+| `'Due {TODAY() + 7}'` | compute its ISO text into a variable with an `assignment` node's CEL value envelope (`assignments: { due: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' } }`), then `'Due {{ due }}'` |
 | `'By {$User.Id}'` | compute the run user's id into a variable with an `assignment` node's CEL value envelope (`assignments: { by: { dialect: 'cel', source: 'current_user.id' } }`), then `'By {{ by }}'` — guarded as `current_user != null ? current_user.id : null` in a flow that can run without a user |
 
 [#22110]: https://github.com/objectstack-ai/objectstack/issues/22110
@@ -347,8 +366,8 @@ check.
       title: { dialect: 'cel', source: "'Follow up on ' + record.name" },
       assignee: { dialect: 'cel', source: 'has(record.owner) ? record.owner : null' },
       estimate: { dialect: 'cel', source: 'round(record.amount * 0.15 * 100.0) / 100.0' },
-      // a date macro — one of the two `{…}` spellings a value slot still reads
-      due_date: '{TODAY() + 7}',
+      // a date as its ISO text, on the UTC calendar — what `{TODAY() + 7}` wrote
+      due_date: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' },
       status: 'open',              // a literal
     },
   },
@@ -1994,15 +2013,14 @@ value envelope. **Text** slots — a `notify` title or message, a screen title o
 description, a refusing `end` node's message — are `{{ }}` templates (see
 [text slots](#text-slots-read-double-brace-holes)). Single braces remain only on the
 value-like positions that hand a resolved value over (`recipients`,
-`sourceId`, a `subflow` input, an `http` body, …) and in the date macros a value
-slot still reads.
+`sourceId`, a `subflow` input, an `http` body, …).
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
 | Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*`, `current_user` |
 | Edge `condition` | **CEL** (bare, no braces) | `record.status == 'open'` | same as above |
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, `vars.*` and `current_user` |
-| Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), `{$User.*}` included, except the date macros `{NOW()}` / `{TODAY() ± N}`, which still resolve until CEL can write them) |
+| Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), `{$User.*}` and the date macros `{NOW()}` / `{TODAY() ± N}` included: a date is `isoDate(today())` / `isoDatetime(now())` in an envelope) |
 | Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, `vars.*` and `current_user` — the whole CEL stdlib (`joinNonEmpty`, …) |
 | Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | **template** (`{{ }}` holes) | `'Deal won: {{ record.name }} ({{ record.amount \| currency }})'` | flow variables by name (`$`-named ones too: `{{ $error.message }}`) — a path and an optional formatter, never logic |
 
@@ -2010,9 +2028,9 @@ A value slot takes either form, chosen by shape: an object naming a `dialect`
 is a CEL envelope, everything else is a literal. The `{token}` template dialect
 it used to read is retired: `objectstack validate`, `registerFlow` and the
 executor refuse a `{…}` token in a value slot with its CEL spelling (see *The
-`{…}` template dialect is retired from value slots* above). The date macros are
-kept until CEL can write them: CEL's `now()` / `today()` are timestamps, not the
-strings the macros write.
+`{…}` template dialect is retired from value slots* above). A date macro is its
+CEL string form: `isoDate(today())` / `isoDatetime(now())` write the ISO text
+the macros wrote, where a bare `today()` / `now()` would write a timestamp.
 
 Every CEL expression in a flow — a condition or a value envelope — sees
 **`current_user`**, the run's user: `current_user.id`, `current_user.positions`,
@@ -2029,8 +2047,8 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
 
 1. **A computed value written as a string** — `due_date: 'TODAY() + 7'` or
    `amount: 'price * 2'` writes the literal text into the field. Compute it with
-   a CEL value envelope (`{ dialect: 'cel', source: 'price * 2' }`); the date
-   macros keep their braces for now: `'{TODAY() + 7}'`.
+   a CEL value envelope (`{ dialect: 'cel', source: 'price * 2' }`), a date as
+   its ISO text (`{ dialect: 'cel', source: 'isoDate(daysFromNow(7))' }`).
 2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Conditions
    fail loudly rather than silently, with an error that tells you to drop the
    braces.

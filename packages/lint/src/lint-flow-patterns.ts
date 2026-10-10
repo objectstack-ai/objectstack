@@ -162,7 +162,6 @@ import {
   flowNodeValueTemplateRefusals,
   textSlotTemplateRefusal,
   VALUE_SLOT_TEMPLATE_REFUSAL,
-  valueSlotTemplateRefusals,
 } from '@objectstack/spec/automation';
 import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
 // [#15429] The decision's `mode` contract, parsed here so `os validate` and
@@ -731,12 +730,28 @@ function textSlotBareDollarHint(outsideHoles: string): string {
 }
 
 /**
- * [#19939] The CEL spelling the spec's value-slot judge gives `token`, a
- * `{…}` token standing alone as a value — its refusal without the rule
- * sentence every refusal leads with, which the hint states once.
+ * Where a string sits in a value slot, for asking the spec's value-slot judge
+ * about other text at the same position: the node type, the config, and the
+ * key path to the string.
  */
-function valueSlotSpellingOf(token: string): string {
-  const message = valueSlotTemplateRefusals(token)[0]?.message ?? '';
+interface ValueSlotPosition {
+  readonly nodeType: string;
+  readonly config: unknown;
+  readonly path: readonly (string | number)[];
+}
+
+/**
+ * [#19939] The CEL spelling the spec's value-slot judge gives `text` put at
+ * `at` in place of the string there — its refusal without the rule sentence
+ * every refusal leads with, which the hint states once. Asked AT the position,
+ * never of the text standing alone: where an envelope is literal data (a string
+ * inside an object or list literal, a legacy `assignment` shape) the judge
+ * names the spelling that evaluates there, not an envelope at the position.
+ */
+function valueSlotSpellingAt(at: ValueSlotPosition, text: string): string {
+  const probed = valueSlotRefusalAt(at.nodeType, at.config, at.path);
+  const message = flowNodeValueTemplateRefusals(at.nodeType, withValueAt(at.config, at.path, text))
+    .find((refusal) => refusal.path === probed?.path && refusal.source === text)?.message ?? '';
   return message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)
     ? message.slice(VALUE_SLOT_TEMPLATE_REFUSAL.length).trimStart()
     : message;
@@ -759,7 +774,7 @@ function valueSlotSpellingOf(token: string): string {
  *  - any other `$` root names a variable the flow binds itself, which is
  *    written without the `$` (`$source.id` names `{source.id}`).
  */
-function valueSlotBareDollarHint(text: string): string {
+function valueSlotBareDollarHint(text: string, at: ValueSlotPosition): string {
   const parts = [
     'A value slot reads a CEL value envelope, `{ dialect: \'cel\', source: \'…\' }`: a string in it is the literal '
     + 'text it spells, so a bare `$` reference is stored as written.',
@@ -771,11 +786,34 @@ function valueSlotBareDollarHint(text: string): string {
     parts.push(
       ownVariable
         ? `\`${ref}\` names \`${root}\`, which is not one of the flow engine's own \`$\` variables, so it reads `
-          + `as the flow's own variable, written without the \`$\`: ${valueSlotSpellingOf(token)}`
-        : `\`${ref}\` reads as \`${token}\`: ${valueSlotSpellingOf(token)}`,
+          + `as the flow's own variable, written without the \`$\`: ${valueSlotSpellingAt(at, token)}`
+        : `\`${ref}\` reads as \`${token}\`: ${valueSlotSpellingAt(at, token)}`,
     );
   }
   return parts.join(' ');
+}
+
+/** Every `{{ path }}` hole in a string — what {@link valueSlotDoubleBraceHint} reads as the author's intent. */
+const DOUBLE_BRACE_HOLES = /\{\{\s*([\w$][\w$.\s]*?)\s*\}\}/g;
+
+/**
+ * [#19939] The hint for a `{{ }}` hole in a VALUE slot's string. A value slot
+ * reads the CEL value envelope and no template: the spec's value-slot judge
+ * refuses the string anyway, reading its outer braces as literal text (the
+ * template wrote `{` and `}` around the value). The author meant holes, so the
+ * hint names the envelope the judge writes for the string with each hole as
+ * the single-brace token it means — asked of the judge at the string's own
+ * position, never re-spelled, so the spelling evaluates where the string sits.
+ */
+function valueSlotDoubleBraceHint(text: string, at: ValueSlotPosition): string {
+  const meant = text.replace(DOUBLE_BRACE_HOLES, (_hole, path: string) => `{${path}}`);
+  return (
+    'A value slot reads a CEL value envelope, `{ dialect: \'cel\', source: \'…\' }`, and no template: a string in it '
+    + 'is the literal text it spells, and `{{ }}` is no hole — the value-slot refusal reads its outer braces as '
+    + `literal text. Written as the holes it means: ${valueSlotSpellingAt(at, meant)} Double-brace \`{{ }}\` is the `
+    + 'template dialect of the text slots only — a notify `title` / `message`, a screen `title` / `description`, '
+    + 'an `end` `message`.'
+  );
 }
 
 /** Config keys whose string values are CEL predicates, not interpolated templates. */
@@ -825,21 +863,26 @@ function withValueAt(node: unknown, path: readonly (string | number)[], value: u
   return { ...rec, [head as string]: withValueAt(rec[head as string], rest, value) };
 }
 
-/** A path token no author writes — what {@link valueSlotLabelAt} puts at a position to ask the judge about it. */
+/** A path token no author writes — what {@link valueSlotRefusalAt} puts at a position to ask the judge about it. */
 const VALUE_SLOT_PROBE = '{os_lint_value_slot_probe}';
 
 /**
- * [#19939] The label of the VALUE slot the string at `path` sits in (`create_record
- * field value`, `assignment value`), or `undefined` when it sits in none.
- * Asked of the spec's value-slot judge, never re-listed: the positions are
- * the ledger's `value` slots plus the two legacy `assignment` shapes its
- * executor still reads, normalised the way the executor normalises them, and
- * the judge refuses a path token put at `path` exactly when it judges that
- * position.
+ * [#19939] The judge's refusal of a probe token put at `path` — its `label`
+ * names the VALUE slot the string at `path` sits in (`create_record field
+ * value`, `assignment value`) and its `path` locates it the way the judge
+ * does — or `undefined` when it sits in none. Asked of the spec's value-slot
+ * judge, never re-listed: the positions are the ledger's `value` slots plus
+ * the two legacy `assignment` shapes its executor still reads, normalised the
+ * way the executor normalises them, and the judge refuses a path token put at
+ * `path` exactly when it judges that position.
  */
-function valueSlotLabelAt(nodeType: string, config: unknown, path: readonly (string | number)[]): string | undefined {
+function valueSlotRefusalAt(
+  nodeType: string,
+  config: unknown,
+  path: readonly (string | number)[],
+): { readonly label: string; readonly path: string } | undefined {
   const probed = withValueAt(config, path, VALUE_SLOT_PROBE);
-  return flowNodeValueTemplateRefusals(nodeType, probed).find((refusal) => refusal.source === VALUE_SLOT_PROBE)?.label;
+  return flowNodeValueTemplateRefusals(nodeType, probed).find((refusal) => refusal.source === VALUE_SLOT_PROBE);
 }
 
 /** Edge `label`, normalized (trimmed, lowercased) for branch matching. */
@@ -1881,28 +1924,34 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
         // double brace there is the spelling, and their own bare-`$` check
         // below prescribes the hole.
         // [#19939] Each string also carries its key path, so the bare-`$` hint
-        // can ask whether it sits in a value slot (see `valueSlotLabelAt`).
+        // can ask whether it sits in a value slot (see `valueSlotRefusalAt`).
         const templateConfig = withoutTextSlots(node.type, stripRegions(node.config, ownRegionKeys(node.type)));
         const strings: ConfigString[] = [];
         collectTemplateStrings(templateConfig, undefined, strings);
         for (const { value: str, path } of strings) {
+          // [#19939] In a value slot both hints name the CEL envelope the
+          // value-slot judge accepts, asked at the string's own position;
+          // everywhere else the single brace still resolves, and they name it.
+          const at: ValueSlotPosition = { nodeType: String(node.type), config: templateConfig, path };
+          const valueSlot = DOUBLE_BRACE.test(str) || BARE_DOLLAR_REF.test(str)
+            ? valueSlotRefusalAt(at.nodeType, at.config, at.path)?.label
+            : undefined;
           if (DOUBLE_BRACE.test(str)) {
             findings.push({
               where: nodeWhere,
-              message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — this flow node value uses SINGLE braces.`,
-              hint:
-                `Use \`{var}\` (e.g. \`{record.title}\`): this flow node value is a string template in which only ` +
-                `single-brace \`{…}\` tokens resolve and all other text is literal. Double-brace \`{{ }}\` is ` +
-                `the template dialect of the text slots only — a notify \`title\` / \`message\`, a screen ` +
-                `\`title\` / \`description\`, an \`end\` \`message\`.`,
+              message: valueSlot === undefined
+                ? `double-brace interpolation \`${str.trim().slice(0, 80)}\` — this flow node value uses SINGLE braces.`
+                : `double-brace interpolation \`${str.trim().slice(0, 80)}\` — the ${valueSlot} reads a CEL value envelope, not a template.`,
+              hint: valueSlot === undefined
+                ? `Use \`{var}\` (e.g. \`{record.title}\`): this flow node value is a string template in which only ` +
+                  `single-brace \`{…}\` tokens resolve and all other text is literal. Double-brace \`{{ }}\` is ` +
+                  `the template dialect of the text slots only — a notify \`title\` / \`message\`, a screen ` +
+                  `\`title\` / \`description\`, an \`end\` \`message\`.`
+                : valueSlotDoubleBraceHint(str, at),
               rule: FLOW_DOUBLE_BRACE_INTERP,
             });
           }
           if (BARE_DOLLAR_REF.test(str)) {
-            // [#19939] In a value slot the hint names the CEL envelope the
-            // value-slot judge accepts; everywhere else the single brace
-            // still resolves, and the hint names it.
-            const valueSlot = valueSlotLabelAt(String(node.type), templateConfig, path);
             findings.push({
               where: nodeWhere,
               message: valueSlot === undefined
@@ -1912,7 +1961,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
                 ? `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user) — a flow ` +
                   `node value is a string template in which only single-brace \`{…}\` tokens resolve and all ` +
                   `other text is literal.`
-                : valueSlotBareDollarHint(str),
+                : valueSlotBareDollarHint(str, at),
               rule: FLOW_BARE_DOLLAR_REF,
             });
           }

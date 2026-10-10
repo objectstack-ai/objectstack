@@ -191,12 +191,25 @@ a CEL value envelope, and text is a `{{ }}` template.**
 | Value slots — `create_record` / `update_record` `fields`, `assignment` values | CEL value envelope; a plain string is the literal text it spells | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'` |
 | Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
 
-A value slot refuses a `{…}` template token — `registerFlow()` and
-`objectstack validate` name its CEL spelling — except the date macros
-(`'{NOW()}'`, `'{TODAY()}'`, `'{TODAY() + 90}'`), which it still reads until CEL
-can write them: CEL's `now()` / `today()` are timestamps, not the text the
-macros write. Other value-like positions — a `filter`, `recipients`, an `http`
-payload, `subflow.input` — still read the single-brace dialect (`{record.id}`).
+A value slot refuses every `{…}` template token — `registerFlow()` and
+`objectstack validate` name its CEL spelling. A date macro is its CEL string
+form, on the UTC calendar:
+
+| You wrote | Write instead |
+|:---|:---|
+| `'{TODAY()}'` | `{ dialect: 'cel', source: 'isoDate(today())' }` |
+| `'{TODAY() + 90}'` | `{ dialect: 'cel', source: 'isoDate(daysFromNow(90))' }` |
+| `'{TODAY() - 3}'` | `{ dialect: 'cel', source: 'isoDate(daysAgo(3))' }` |
+| `'{NOW()}'` | `{ dialect: 'cel', source: 'isoDatetime(now())' }` |
+| `'{NOW() + 2}'` | `{ dialect: 'cel', source: 'isoDatetime(addDays(now(), 2))' }` — `daysFromNow` would land on midnight |
+| `'{TODAY() + days}'` | `{ dialect: 'cel', source: 'isoDate(addDays(today(), days))' }` — an absent `days`, or one that is not a number, now fails the run where the template silently added 0 |
+
+Inside an object or list value, and in the legacy `assignment` shapes, an
+envelope is data: build the whole value as one envelope (a CEL map or list
+literal, its mixed values wrapped in `dyn(…)`), or move the assignment into the
+`assignments` map. Other value-like positions — a `filter`, `recipients`, an
+`http` payload, `subflow.input` — still read the single-brace dialect
+(`{record.id}`).
 
 The run's user is **`current_user`** in every flow CEL expression: `id`,
 `positions`, `organizationId`, `isPlatformAdmin`, nothing more. In a run with no
@@ -211,8 +224,8 @@ user record by `current_user.id` with a `get_record` on `sys_user`.
 The two failure modes to memorize:
 
 1. **A plain string in a value slot** — `due_date: 'TODAY() + 7'` or
-   `owner: 'current_user.id'` writes that text into the field. Write a date
-   macro in braces (`'{TODAY() + 7}'`), anything else as a CEL envelope.
+   `owner: 'current_user.id'` writes that text into the field. Write it as a
+   CEL envelope: `{ dialect: 'cel', source: 'isoDate(daysFromNow(7))' }`.
 2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Since #4336
    conditions reject this loudly: `registerFlow()` / `objectstack validate`
    refuse the flow with a CEL error naming the reference. Before that they were
