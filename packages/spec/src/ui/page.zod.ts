@@ -745,6 +745,55 @@ export function checkPageRequiresKind(
 }
 
 /**
+ * The slot-pair check attached to {@link PageSchema}: a page that authors
+ * both `slots.details` and `slots.tabs` is refused at `slots.details`, naming
+ * the pair and the fix.
+ *
+ * The two slots are not independent, whatever the slot menu's layout
+ * suggests. On a slotted record page the `details` slot is the BODY of the
+ * Details tab, and that tab lives inside the synthesized `page:tabs` strip;
+ * the `tabs` slot replaces that whole strip. So a `details` authored beside a
+ * `tabs` has nowhere to render: the console's default-page synthesizer reads
+ * `tabs` and never reads `details` (its own doc states the precedence — "wins
+ * over `details` when both are provided"). Before this check the pair parsed,
+ * validated and saved, and the authored details body — its `sections`, its
+ * `hideFields` — silently never applied. The fix is the shape the platform's
+ * own `sys_user_detail` page uses: the `record:details` component as a child
+ * of a `tabs` item (the first one, by convention), and no `details` slot.
+ *
+ * Judged on the slot map whatever the page's `kind`: the pair is never a
+ * coherent declaration, and a page that is not slotted reads no slot at all.
+ * A slot is present when its value is not `undefined` — the synthesizer's own
+ * test — so an empty `details: []` beside `tabs` is refused like a full one.
+ *
+ * Exported for the reason {@link checkPageSourceCompleteness} is: a downstream
+ * mirror that derives its schema from `PageSchema.shape` drops every
+ * object-level check, and re-attaches this one with
+ * `.superRefine(checkPageSlotPair)`. `PageSchema` attaches this same binding —
+ * pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageSlotPair(
+  page: { slots?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const slots = page.slots;
+  if (slots === undefined || slots === null || typeof slots !== 'object') return;
+  const { details, tabs } = slots as { details?: unknown; tabs?: unknown };
+  if (details === undefined || tabs === undefined) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['slots', 'details'],
+    message:
+      '`slots.details` and `slots.tabs` are refused together: the `details` slot is the body of the '
+      + 'Details tab inside the synthesized `page:tabs` strip, and an authored `tabs` slot replaces that '
+      + 'whole strip, so the `details` beside it is never rendered. Move the `record:details` component '
+      + 'into the `tabs` items — as the `children` of the first item, e.g. '
+      + "`{ label: 'Details', children: [{ type: 'record:details', properties: { … } }] }` — and delete "
+      + '`slots.details`. To keep the synthesized tabs instead, delete `slots.tabs`.',
+  });
+}
+
+/**
  * Page Schema
  * Defines a composition of components for a specific context.
  * Supports both platform pages (Salesforce FlexiPage style: record, home, app, utility)
@@ -1285,6 +1334,15 @@ export const PageSchema = lazySchema(() => strictObject({
    * custom, call the corresponding `buildDefault*` sub-builder from the
    * renderer runtime (e.g. @object-ui/plugin-detail).
    *
+   * Precedence — `details` and `tabs` are NOT independent. `details`
+   * replaces the body of the Details tab, and that tab lives inside the
+   * synthesized `page:tabs` strip; `tabs` replaces the whole strip, so it
+   * wins and a `details` beside it is never rendered. A page authoring both
+   * is therefore refused ({@link checkPageSlotPair}): to replace the tabs
+   * AND the details body, put the `record:details` component in the `tabs`
+   * items (the first item's `children`, by convention) and author no
+   * `details` slot.
+   *
    * Only honored when `kind === 'slotted'`.
    */
   slots: strictObject({
@@ -1355,10 +1413,15 @@ export const PageSchema = lazySchema(() => strictObject({
   .superRefine(checkPageRequiresKind)
   // Ruling B′ on #8346 (#22158): a print page prints exactly the blocks it
   // authors. Attached by identifier for the same reason as the checks above.
-  .superRefine(checkPagePrintComposition));
-// PageSchema's cross-field rules are the three checks above: the
+  .superRefine(checkPagePrintComposition)
+  // #22568: `slots.details` beside `slots.tabs` never renders — the `tabs`
+  // slot replaces the strip the Details tab lives in. Attached by identifier
+  // for the same reason as the checks above.
+  .superRefine(checkPageSlotPair));
+// PageSchema's cross-field rules are the four checks above: the
 // ADR-0080/0081 source completeness check, the compiled-kind `requires`
-// check and the print-page composition check. It once also required
+// check, the print-page composition check and the `details` + `tabs` slot
+// pair check. It once also required
 // `recordReview`/`blankLayout` and `slots` (all removed — unrendered roadmap /
 // "required-but-unauthorable" Studio traps).
 
