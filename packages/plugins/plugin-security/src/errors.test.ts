@@ -42,6 +42,7 @@ const FLOOR = [
   'MaskedValueWriteError',
   'ExplainObjectNotFoundError',
   'PermissionSetNameConflictError',
+  'PositionNameConflictError',
 ];
 
 /**

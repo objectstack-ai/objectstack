@@ -410,6 +410,37 @@ export class PermissionSetNameConflictError extends Error {
   }
 }
 
+/**
+ * [ruling Q (a), ADR-0131 D3] A Setup create of a position, or a rename into a
+ * name, that the security catalog already holds a definition of under the
+ * `single` posture: a second holder of one position name per deployment →
+ * `409 UNIQUE_VIOLATION` (`position-write-through.ts`).
+ *
+ * The wire identity is the one this platform already answers for a second
+ * `sys_position` row of a name in ONE organization (the engine's unique index,
+ * reported as `409 UNIQUE_VIOLATION`), and the one
+ * {@link PermissionSetNameConflictError} answers for the sibling catalog — one
+ * condition, one envelope, whichever layer catches it. It stamps the same
+ * named constants, so it adds no second emitter spelling of the code.
+ */
+export class PositionNameConflictError extends Error {
+  readonly code = PERMISSION_SET_NAME_CONFLICT_CODE;
+  readonly status = PERMISSION_SET_NAME_CONFLICT_STATUS;
+  readonly statusCode = PERMISSION_SET_NAME_CONFLICT_STATUS;
+  /** The position name that is already held. */
+  readonly positionName: string;
+  constructor(positionName: string, holder?: string) {
+    super(
+      `[Security] a position named '${positionName}' already exists in this deployment`
+        + `${holder ? ` (declared by '${holder}')` : ''}: under the single tenancy posture a position name `
+        + 'is unique per deployment, and two holders of one name are never merged. Choose another name, '
+        + 'or edit the existing position.',
+    );
+    this.name = 'PositionNameConflictError';
+    this.positionName = positionName;
+  }
+}
+
 export function isPermissionDeniedError(e: unknown): e is PermissionDeniedError {
   if (!e || typeof e !== 'object') return false;
   const anyE = e as any;

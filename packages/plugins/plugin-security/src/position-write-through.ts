@@ -79,10 +79,9 @@
  * refused, and the row write is undone. Before this, the definition save that
  * follows overwrote the existing definition with this row's label and
  * description and dropped its `permissionSets`: two holders silently merged
- * into one. The refusal is the engine's own unique-violation envelope
- * (`DuplicateRecordError`, `409 UNIQUE_VIOLATION` over HTTP, on `name`) — the
- * answer a second row of the same name in one organization already gets — so
- * an author meets one dialect for "this name is taken". The read is the
+ * into one. The refusal is `409 UNIQUE_VIOLATION` (`PositionNameConflictError`)
+ * — the answer a second row of the same name in one organization already gets
+ * over HTTP — so an author meets one dialect for "this name is taken". The read is the
  * catalog the resolver grants through (`securityCatalogReaderOf`), asked
  * before any definition is saved; a catalog that cannot be read refuses (the
  * row goes and that failure is the answer), because accepting would merge
@@ -123,10 +122,10 @@
  */
 
 import { securityCatalogReaderOf } from '@objectstack/core';
-import { DuplicateRecordError } from '@objectstack/objectql';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { PositionSchema } from '@objectstack/spec/identity';
+import { PositionNameConflictError } from './errors.js';
 
 /** The catalog object this module is registered on. */
 export const POSITION_OBJECT = 'sys_position';
@@ -312,16 +311,7 @@ async function environmentHeldPositionNameRefusal(ql: any, name: unknown): Promi
   if (!catalog) return null;
   const held = await catalog.resolve(POSITION_METADATA_TYPE, name);
   if (!held) return null;
-  return new DuplicateRecordError(
-    POSITION_OBJECT,
-    new Error(
-      `position '${name}' already has a definition in this deployment's security catalog`
-        + `${held.packageId ? ` (declared by '${held.packageId}')` : ''}; under the single tenancy posture a `
-        + 'position name is unique per deployment, and two holders of one name are never merged. Choose '
-        + 'another name, or edit the existing position.',
-    ),
-    'name',
-  );
+  return new PositionNameConflictError(name, held.packageId);
 }
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));

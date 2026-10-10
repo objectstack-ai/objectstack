@@ -43,7 +43,7 @@ import {
   SysMetadataAuditObject,
 } from '@objectstack/metadata-core';
 import { createSecurityCatalogReader, resetPlatformAdminEmailMemo } from '@objectstack/core';
-import { resolveThrownHttpError } from '@objectstack/types';
+import { mapDataError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { DATA_MIGRATION_FLAG_OBJECT } from '@objectstack/spec/system';
 import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
@@ -625,14 +625,14 @@ describe('[C2 stage S10, ADR-0048 addendum N.2/N.3] one namespace — a create o
 
 describe('[ruling Q (a)] one holder per position name per deployment — a create or a rename into a name the environment catalog holds is refused', () => {
   /**
-   * The engine's duplicate envelope (`DuplicateRecordError`; the REST layer
-   * reports it as `409 UNIQUE_VIOLATION`) — the one a second row of a name in
-   * ONE organization already answers, pinned as the control below.
+   * The wire envelope the REST door answers (`mapDataError`) — the one a
+   * second row of a name in ONE organization already answers, pinned as the
+   * control below.
    */
-  const DUPLICATE = { code: 'DUPLICATE_RECORD', status: 409 };
+  const DUPLICATE = { code: 'UNIQUE_VIOLATION', status: 409 };
   const httpEnvelope = (e: unknown) => {
-    const r = resolveThrownHttpError(e);
-    return { code: r.code, status: r.status };
+    const r = mapDataError(e, 'sys_position');
+    return { code: (r.body as { code?: unknown }).code, status: r.status };
   };
   const OTHER_ORG = 'org_pw_other';
   /** An administrator of a SECOND organization of the same `single` deployment. */
