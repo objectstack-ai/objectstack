@@ -2,8 +2,8 @@
   "number": 22452,
   "kind": "issue",
   "title": "tooling(pm): platform-readings.md diet — delete every reading a scripts/pm tool now enforces; tool first, text second (W1 of the skills-lane diet program)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T09:37:25Z",
-  "updated_at": "2026-10-09T09:37:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T14:16:37Z",
+  "closed_at": "2026-10-10T14:15:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22452",
   "body": "Guards: the PM skill text budget — `.claude/skills/pm-dispatch/references/platform-readings.md` (469 lines, at its ceiling 469) carries only what no `scripts/pm` tool can hold; a reading a tool now enforces is deleted from the text and the file's ceiling is lowered with it (tool first, text second).\n\nFiling gate: **③ a maintainer-directed task** — work item **W1** of the program anchor #22060 (filed on the maintainer's 「创建卡片,暂时不派发。」, dispatch hold lifted by 「skills 车道所有卡都可以派发」 on 2026-10-09, recorded there). Part of #22060 — this card closes on its own PR; the anchor stays open for W3–W7. Reader: the `domain:skills` seat dispatches it to one os-dev; the deletions land on a Tier S surface (`.claude/**`) after the seat's at-tier contract review. Filed by skills seat 1 (seat post #7623), `session_01JmWtcHfGbC4ncw4GFKWuRA`. Dedupe: REST listing `labels=tooling` since 2026-09-20, open and closed (500 cards over 5 pages), titles grepped for `platform-readings|diet|tool first|text second` → 0 hits other than the anchor; the global search endpoint is not reachable from a seat container (repository-scoped endpoints only).\n\n## What is measured (`origin/main` `da159f74e6`, 2026-10-09)\n\n- `platform-readings.md`: 469 lines, ceiling 469, headroom 0 (`pnpm check:pm-skill-ratchet`); the lane's single largest reference, one third of all reference text (2,299 lines across 25 files at the anchor's filing).\n- Only 2 lines in it name a write tool by name (`grep -c -E 'post-stamped|label-write|fleet-write|issue-create|close-cards'`), while the tools themselves now enforce readings the file still spells out in prose: relative comment ids, the AND-label listing, the stamp contract (`post-stamped.mjs`'s positional / declared / mixed refusals), the title byte cap (`MAX_TITLE_BYTES`), the footer behaviour, the ONE-OF state-label guard (`label-write.mjs`), the no-run-is-UNCONFIRMED rule (`fleet-write/dispatch.mjs`). Each such reading is a token tax on every fire of every seat with no reader the tool does not already serve.\n- The anchor's W1 text, verbatim: \"Every reading in `platform-readings.md` that a tool now enforces (relative ids, AND-label listing, stamp contract, title cap, footer behaviour …) is deleted from the text; the rule becomes 'tool first, text second': a new reading lands as a tool behaviour or a self-test row, and the text keeps only what no tool can hold. Pin: the file shrinks and `check-skill-line-ratchet` gets a ceiling for it.\"\n\n## Done when\n\n- Every reading the file states that a `scripts/pm` tool now enforces is deleted; the PR body carries one table — reading (quoted first words) → the tool and the self-test case name or refusal code that holds it → deleted. A deletion with no named tool and self-test row is a REWORK: a reading no tool holds stays.\n- The rule \"tool first, text second\" is stated once, in the file's head paragraph, in one line; no second copy anywhere.\n- The file shrinks; `scripts/pm/check-skill-line-ratchet.mjs`'s `CEILINGS` row for it is lowered to the new line count in the same PR (shrink-only is the ratchet's own semantics; lowering needs no ruling). ⛔ No re-wrap as payment; ⛔ no other reference file edited; ⛔ no change to what any tool judges.\n- Pin: `pnpm check:pm-skill-ratchet` green at the new ceiling; `pnpm check:pm-skill-id-lint` green; a `git grep` for each deleted reading's distinctive phrase over `.claude/skills/pm-dispatch/**` returns 0 (the reading lives in the tool, not in another file).\n- Reported in the PR body: lines before / after for the file and for the whole `references/` tree.\n\nDedupe words: `platform-readings diet` · `tool first text second` · `reference text budget`"

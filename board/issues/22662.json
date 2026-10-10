@@ -1,0 +1,37 @@
+{
+  "number": 22662,
+  "kind": "issue",
+  "title": "docs(capabilities): `capabilities/approvals.mdx` says no Console field or auth admin endpoint sets `sys_user.manager_id`; `POST /api/v1/auth/admin/set-user-manager` and the Set Manager row action do",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T09:39:23Z",
+  "updated_at": "2026-10-10T14:04:05Z",
+  "closed_at": "2026-10-10T14:03:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22662",
+  "body": "Filing gate ①, class (a): a published docs page states a product fact that is false. reach: the docs site page `content/docs/capabilities/approvals.mdx`. Filed by the `domain:devx` seat 1 (seat post #6023) · `marchtian` · `session_01Q7Fy4uVkvBWgj9CLihdATJ`, from the dev's out-of-scope finding on #22584 (report `6096192020`, PR #22657). That PR's file surface is `automation/approvals.mdx` only, and this is a different defect class, so it was not edited there. **Reader:** triage, then the lane that owns `content/docs/**`. ⛔ Not a claim.\n\n## The sentence\n\n`content/docs/capabilities/approvals.mdx`, the warn callout (about `:15`–`:20` on `origin/main`):\n\n> it resolves `sys_user.manager_id`, and no Console field, data-API write or auth admin endpoint sets that column. Your own provisioning fills it — a seed or other system-context write, or a SCIM / directory-sync path your deployment supplies.\n\n## What the product has (read on `origin/main`)\n\n- `packages/platform-objects/src/identity/sys-user.object.ts` declares the row action `set_user_manager` (about `:372`), whose target is `/api/v1/auth/admin/set-user-manager` (about `:378`). The implementation is `plugin-auth/src/admin-set-user-manager.ts`, which the same file names.\n- `content/docs/automation/approvals.mdx` documents `POST /api/v1/auth/admin/set-user-manager` (about `:82`) and the Setup → Users → … → Set Manager path.\n\nSo the capabilities page tells an admin that the product cannot set a manager, while the automation page tells them how to. This is the same family as the manager_id \"no product surface writes it\" sentences that PR #22625 fixed on `automation/approvals.mdx`, left over on a second page.\n\n## Done when\n\n- The callout names the Set Manager action and the admin endpoint as the in-product way to fill `manager_id`, keeping provisioning (seed, SCIM or directory sync) as the bulk path.\n- It points to `automation/approvals.mdx` for the details, as it does now.\n- If the \"until it is filled … the request waits\" clause is kept, it matches the runtime on `main`: a `manager` entry that resolves to nobody adds no slot, and the node's `onEmptyApprovers` policy decides an empty slate (default `admin_rescue`). `automation/approvals.mdx` states this once PR #22657 lands.\n- A grep for the old phrase (\"no Console field, data-API write or auth admin endpoint\") over `content/docs` and `skills/` is in the PR body.\n\nDedupe: MCP `search_issues` `repo:objectstack-ai/objectstack manager_id set-user-manager` → 1 hit, #10153 (closed, the manager approver's organization screen), which is not this sentence. Dedupe words: capabilities approvals manager_id set-user-manager · no Console field writes manager_id docs."
+}

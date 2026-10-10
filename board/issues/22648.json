@@ -1,0 +1,30 @@
+{
+  "number": 22648,
+  "kind": "issue",
+  "title": "[PM seat] domain:cli · seat 2 — 🟢 marchtian · session_01HGa2XMKBRUqPrZFxQavBwH",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T08:42:27Z",
+  "updated_at": "2026-10-10T12:54:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22648",
+  "body": "**Sole authority for the `domain:cli` seat 2.** Single writer: only the sitting PM edits the body. Read side: **body + comments newer than the body's last edit**. Refreshed at round boundaries. Seat 1 is #6024; the two seats share one lane and one hot-file queue, and each claim declares its file surface.\n\n## 1. 当前 PM\n\n**🟢 `marchtian`** · session `session_01HGa2XMKBRUqPrZFxQavBwH` (a claude.ai cloud session) · seated 2026-10-10T08:42Z on the maintainer's `/pm-dispatch cli seat 2` in this session's chat.\n- **Posture:** `batch` 3 (the default). Seat 1's serial posture was a ruling to seat 1's session; it is not restated to this one, so it does not bind here.\n- **Opening read:** the round mutex was clear. No seat-2 post existed, and no `Claim:` carrying `domain:cli#2` exists on the lane's `pm:queue` / `pm:dispatched` cards or on its 40 most recently updated closed cards. The protocol was read at `origin/main` `d85615ddd9`: SKILL.md touch `6212cc6cf`, `references/` touch `6212cc6cf`, `lanes/cli.md` touch `f151ef2c9`, `os-dev.md` touch `d87dff67c`. `check-harness-current` is CURRENT.\n- **Seat Routine:** `trig_01QxSTKxcKLJGFWX2e8LYJt8`, hourly at :42, self-bound to this session (`own_followup`).\n\n**Lane ledger** (MCP `list_issues` with the single label `domain:cli`, `totalCount` 16 = returned 16, read at this seating):\n- **`pm:queue`:** #22618, #22580. Seat 1 left the queue to the next holder (`6095674066` on #6024).\n- **`pm:dispatched` (this seat's, round 1):** #22576 (claim `6095831532`), #22588 (claim `6095839999`), #22614 (claim `6095848783`).\n- **`pm:dispatched` (seat 1's, ⛔ not this seat's):** #22581 (PR #22644) and #22521 (PR #22612).\n- **`pm:blocked`:** #22639, #22599, #22579, #15213. **`pm:awaiting-maintainer`:** #20791. **`pm:on-hold`:** #20470. **`pm:epic`:** #15952, #15953. **Tracking:** #9559.\n- **Decision box:** none in the lane.\n\n## 2. 继承台账\n\n📌 **Job description:** [`references/lanes/cli.md`](https://github.com/objectstack-ai/objectstack/blob/main/.claude/skills/pm-dispatch/references/lanes/cli.md), read from `origin/main`. The lane's standing lessons live in seat 1's post (#6024 §2); this seat reads them there rather than copying them.\n- **Contract review:** a PR that reaches a contract face is ACCEPTed with `needs:contract-review` in the same act and waits on the director seat (#12708), as on seat 1, until this seat measures its own tier.\n- **Merges publish nothing by themselves:** a merge to `main` in this repo is not a release; the Version Packages PR is the maintainer's. Verification layer: the merge queue's required set.\n\n## 3. 热文件串行队\n\n**This seat's holds (declared on each claim):**\n- #22576: `packages/runtime/src/http-dispatcher.ts` (the `/approvals/act` domain, the membership-gate entry), `packages/adapters/hono/src/index.ts` (the catch-all's body handling).\n- #22588: `packages/runtime/src/dispatcher-plugin.ts` (the action routes), the pin over `packages/rest/src/rest-route-ledger.ts`, and `findData`'s pagination block in `packages/metadata-protocol/src/protocol.ts` (`domain:engine`'s; the cross-lane declaration follows the dev's measurement).\n- #22614: `packages/rest/src/meta-item-read-gate.ts` (`translateMetaDocument`); `rest-server.ts`'s `/meta` call site only on a declared need.\n\n**Queued behind a hold:** #22580 waits on PR #22644 (`schema-migrate.ts`, the composition its gate reads); note on the card.\n\n**Seat 1's live holds (declared on its claims; ⛔ this seat does not edit these until they merge):**\n- #22581 / PR #22644: `packages/cli/src/utils/schema-migrate.ts`, `commands/migrate/plan.ts`, `apply.ts`, `migrate-occupancy-gate.ts`, `schema-migration-plugins.ts`, `security-catalog-overlays.ts`, the `os migrate` section of `content/docs/deployment/cli.mdx`.\n- #22521 / PR #22612: `packages/runtime/src/app-plugin.ts`, `packages/cli/src/commands/serve.ts`, `collect-docs.ts`, and `domain:engine`'s `packages/metadata/src/plugin.ts`.\n\n**Other lanes' declared holds on this lane's packages** (from #6024's thread; re-read each PR before treating a file as held; PR #22643, #22617's, merged as `cc305a3cfc` and is pruned):\n- #15206 S5 / PR #22628 (`domain:engine` seat 2): `packages/rest/src/rest-server.ts` (the `/meta` reads), `packages/runtime/src/domains/packages.ts`, and the runtime and rest tests listed in `6095580545` on #6024.\n\n## 4. 说明\n\n- **In flight (devs):** #22576, #22588, #22614, each an in-process `os-dev` subagent dispatched 2026-10-10T08:58Z from this session (`mode:subagent`, `model: default (opus)`).\n- **Next slot:** #22618 (p2, test-only). Then #22580 once PR #22644 merges.\n- **PR subscriptions:** none yet.\n- **Contract review:** this seat is not at `CONTRACT_REVIEW_TIER`; a review owed by a PR here goes to an isolated at-tier subagent, and its availability is measured when one is owed, ⛔ never inferred.\n"
+}

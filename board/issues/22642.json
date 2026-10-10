@@ -2,8 +2,8 @@
   "number": 22642,
   "kind": "issue",
   "title": "automation: with no `record` variable bound, flow CEL `record` is the variables map itself, so `record.KEY` silently reads a variable named KEY",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,24 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "area:workflow",
+    "bug",
+    "domain:services",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T07:59:45Z",
-  "updated_at": "2026-10-10T08:00:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T12:07:12Z",
+  "closed_at": "2026-10-10T12:05:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22642",
   "body": "Filing gate: **① a product defect with `reach:`** (silent tolerance). Measured by the #19939 pass-3 dev (`os-dev-report` `6095185806`, `out_of_scope_findings` item 1) and escalated by PR #22635's contract review (`6095383752`, out-of-scope (1): \"needs its own card\"). Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`. ⛔ Not a claim. ⛔ Class and function level only. Triage sets the grade, the lane and the scope.\n\n## What happens\n\n- `AutomationEngine.celScope` (`packages/services/service-automation`) builds the flow CEL scope as `{ extra: { ...vars, vars, current_user }, record: vars }`.\n- The formula engine's `buildScope` binds its `record` argument. So when the flow binds no variable named `record`, CEL `record` IS the run's variables map.\n- Effect: `record.assignee` in a flow CEL expression reads a flow variable named `assignee` instead of failing as an unbound root. `has(record.assignee) ? record.assignee : null` over a run with an `assignee` variable `'u9'` answers `'u9'`.\n- **Reach:** measured through `evaluateValueEnvelope` at PR #22635's `0593be8782` (engine primitive). The executors call that primitive with `celScope`, and `registerFlow` + `execute` are public doors one call away, un-gated (read at PR #22635's head `3c97f71067` by its contract review). Not driven over a live server.\n- Not caused by PR #22635: its `has()` chain guard reads `vars.record` and does not trip this.\n\n## Why it is not a one-liner\n\n`record: vars` is also how bare variable names resolve in flow CEL today. The fix is a scope decision, for example: mount bare names through `extra` only, and bind `record` only when a `record` variable exists. Which one, and what a flow that reads `record.X` for a variable `X` gets (a refusal at registration, or a run fault), is triage's call.\n\n## Related\n\n- #22565 / PR #22609: refuses a flow CEL root the flow does not bind. Whether `record` counts as bound when no `record` variable exists is the same question from the lint side.\n- #22636: the runtime gate's per-write snapshot cannot see the entrances that hand a flow its record.\n\nDedupe: the newest 194 issue titles of objectstack (REST list, open and closed) grepped for celScope, record alias, variables map, bare variable, flow CEL record, record binding → #22636 only, which is a different defect. Dedupe words: flow CEL record is the variables map · celScope record vars alias · record.KEY reads a variable"

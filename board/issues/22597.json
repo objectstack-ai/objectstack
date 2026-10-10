@@ -2,8 +2,8 @@
   "number": 22597,
   "kind": "issue",
   "title": "pm-dispatch decision framework: every decision card and every director presentation states each option's development workload (maintainer-directed)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T03:40:19Z",
-  "updated_at": "2026-10-10T03:40:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T10:12:41Z",
+  "closed_at": "2026-10-10T10:02:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22597",
   "body": "Filing gate ③: a task the maintainer directed. In the triage seat's session (`session_01AavokzJ5DndAwitDXvKy4U`), 2026-10-10, the maintainer said, verbatim: 「以后总监决裁的时候还应该适当评估开发工作量。」 (\"From now on, when the director rules, the development workload should also be appropriately assessed.\") It was said while asking why ADR-0131's C2 (#15196) grew so large: 17 merged PRs, about +16k / −1.3k lines, with four stages still open. Filed by the triage seat (seat post #6015). ⛔ Not a claim.\n\n**Reader:** the `domain:skills` seat. These are governed files (`.claude/**`), so the change lands with the maintainer's approval (Tier H).\n\n## What is missing today\n\nThe decision framework weighs four axes: long-term soundness, real business pull, AI-error resistance, and no scope spread at the startup stage. It also asks for an \"options × real cost\" table. But \"cost\" is defined as what the customer feels, not what it takes to build:\n- `.claude/skills/pm-dispatch/references/decision-analysis.md:25`: \"选项 × 真实代价表:每选项一行,做什么 + 客户可感知的后果\".\n- `.claude/skills/pm-dispatch/references/lanes/director.md:23`: the presentation's three elements are \"问题、选项与代价\", from the business side.\n- `.claude/skills/pm-dispatch/SKILL.md`, the four-axis block (about `:240`–`:268`): no axis or row asks how much each option costs to build.\n\nSo a ruling can pick a letter without anyone stating that it means, for example, 15 stages across four lanes against one change in one lane.\n\n## The change\n\n1. **Each option in a decision card** states its development workload:\n   - the lanes it touches;\n   - the number of stages or PRs;\n   - a size from **measured precedent**, meaning comparable landed PRs, named. ⛔ Not a guess. If there is no precedent, it says so.\n   - It sits in the options × cost table as its own column.\n2. **The director's presentation** (`lanes/director.md`) carries the same column. The ruling record states the chosen option's workload.\n3. **How workload weighs (\"适当\"):** the skills seat proposes this, and the maintainer approves it in the governed PR. The proposal must say how it sits beside two existing rules:\n   - \"长远合理性权重恒 ≥50%\";\n   - \"②③④ 只调时序分期 ⛔ 不翻字母\".\n\n   For example: workload is always shown. A large gap (say ≥ 3×) between options whose long-term readings are close must be named in the recommendation. Whether workload may ever change the letter, rather than only the staging, is for the maintainer to approve.\n4. **The os-dev escalation copy** of the framework (`dispatch-runbook.md:205`–`:206`, `os-dev.md:354`) moves with it, so a dev's `needs_decision` analysis carries the same column.\n\n## Done when\n\nThe three files (and the dispatch copy) carry the workload column and the weighing rule. The next decision card filed after landing shows it.\n\nDedupe: MCP `search_issues` on this repo, `decision card workload estimate development effort director ruling options cost`: 0 hits."

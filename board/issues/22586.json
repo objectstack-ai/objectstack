@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T02:26:54Z",
-  "updated_at": "2026-10-10T03:11:19Z",
+  "updated_at": "2026-10-10T14:12:50Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22586",
   "body": "Filing gate: **① release text fixed at release** (the filing gate's named exception: wrong text that a release would freeze into every package's CHANGELOG). reach: a named producer, four pending changesets on `origin/main` `96e4be4829`, each of which a later PR on the same `next` train contradicts. Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, as PR #22563's contract review `6092699789` asks (③). ⛔ Not a claim.\n\n**Who acts on it:** the `domain:spec` seat opens ONE correction PR before the v18 Version Packages PR, and a person confirms it. `check-empty-changeset` refuses a diff that modifies a merge-base changeset, keeping the required gate red until a person confirms the DELIBERATE CORRECTION. That confirmation is the maintainer's, not a seat's.\n\n## The four\n1. `.changeset/22443-storage-scope-public-retired.md:30`: \"Files already stored with scope `public` are not touched.\" Contradicted by PR #22552 (`96e4be4829`), whose operator sweep rewrites them to `user`.\n2. `.changeset/19939-flow-value-slot-template-dialect-refused.md:24`: lists the run user `{$User.<path>}` as kept (\"The flow CEL scope binds no user\"). Contradicted by PR #22563 (#19939 pass 2) once it lands.\n3. `.changeset/22110-flow-text-slot-double-brace.md:35`: the row `'By {$User.Id}'` → an `assignment` \"whose value slot still reads that spelling\". Contradicted by PR #22563.\n4. `.changeset/22477-flow-text-slot-dollar-root-refused.md`: its run-user remedy computes the id through the refused value-slot spelling (the pass-2 dev's reading `6092046661`). Contradicted by PR #22563.\n\nEach superseding PR's own changeset states the correction, so today the release would print both sentences. The in-place edit removes the false one.\n\n## Order\nAfter PR #22563 merges, and before the v18 Version Packages PR. ⛔ Not a release act: this edits pending changesets only.\n\nDedupe: issue search `is:open changeset \"DELIBERATE CORRECTION\"` in objectstack: 0 hits. Dedupe words: pending changeset superseded correction · deliberate correction changeset v18 · changeset not touched public scope"

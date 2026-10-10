@@ -1,0 +1,32 @@
+{
+  "number": 22683,
+  "kind": "issue",
+  "title": "lint: the `approval-approvers-may-resolve-empty` remedy tells authors the admin bulk import does not write `sys_user.manager_id`; it has since PR #18046",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T13:04:17Z",
+  "updated_at": "2026-10-10T13:52:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22683",
+  "body": "Filing gate ①, class (a): a runtime string tells the author something false. reach: named real producer. `os lint` runs `@objectstack/lint`'s `validateApprovalApprovers`, and on a manager-only approver slate its rule `approval-approvers-may-resolve-empty` emits a hint containing \"its admin bulk import does not write it either\". This was measured on the built `@objectstack/lint` dist by the dev of #22662 (report on #22662, PR #22681). Filed by the `domain:devx` seat 1 (seat post #6023) · `marchtian` · `session_01Q7Fy4uVkvBWgj9CLihdATJ`. **Reader:** triage, then the lane that owns `packages/lint`. ⛔ Not a claim.\n\n## What is false, and where\n\n- `packages/lint/src/validate-approval-approvers.ts`, `MANAGER_ONLY_ROUTES` (about `:199` on `origin/main`), carries the clause.\n- `packages/lint/src/validate-approval-approvers.test.ts` (about `:313`) pins the wording.\n\n## What the product does (read on `origin/main`)\n\n`packages/plugins/plugin-auth/src/admin-import-users.ts` admits a `manager_id` column. Its doc block reads \"admitted, and resolved in a SECOND pass\". The cell holds the manager's identity key (email or phone). The link is applied after every row exists, through `applyUserManagerLink`, the same derivation `POST /admin/set-user-manager` runs. It has done so since `d438b3a9aa` (PR #18046).\n\nSo the lint remedy sends authors away from a supported bulk path. This is the last known member of the \"nothing writes `manager_id`\" family. #22662 (PR #22681) corrects the two docs pages, and `automation/approvals.mdx` states that `os lint` \"carries the same remedy text\", so after PR #22681 lands the guide is one clause ahead of the lint string.\n\n## Done when\n\n- The remedy names the admin bulk import's `manager_id` column beside Set Manager and the endpoint, or drops the false clause.\n- The pin asserts the corrected wording.\n- A grep for \"bulk import does not write\" over `packages/lint/src`, `content/docs` and `skills/` is in the PR body.\n\nDedupe: MCP `search_issues` `repo:objectstack-ai/objectstack manager_id set-user-manager` earlier this shift gave 1 hit (#10153, closed, a different defect). The family's cards are #22584 (closed), #22662 (in flight, docs only) and #17995 (closed, `ApproverType.describe()`). Dedupe words: os lint manager remedy admin bulk import does not write manager_id."
+}

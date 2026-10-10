@@ -2,8 +2,8 @@
   "number": 22527,
   "kind": "issue",
   "title": "plugin-audit: sys_activity.actor_avatar_url is declared but never written, so every activity row carries a null avatar even for a user with a profile image",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,22 @@
     "area:records",
     "bug",
     "domain:services",
-    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T19:37:12Z",
-  "updated_at": "2026-10-09T19:55:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T10:57:28Z",
+  "closed_at": "2026-10-10T10:56:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22527",
-  "body": "Blocked-by: #22510\n\nFiling gate: ① a product defect, class (b) (a declared column with no writer, at a spec → runtime → renderer seam), reach measured once through a public door. Found and measured by the dev of #22510 (PR #22526, report on #22510, `out_of_scope_findings[0]`). Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. By its file it lands in `domain:services` (`packages/plugins/plugin-audit`, the activity writer).\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created): `sys_activity actor_avatar_url never written activity avatar null record history avatar` → 1 hit, #22510 (the `actor_name` sibling, which PR #22526 fixes and which does not cover the avatar). None carries this.\n\n## The defect\n\n`sys_activity` declares `actor_avatar_url` (`packages/plugins/plugin-audit/src/objects/sys-activity.object.ts`, about `:155`). No writer in the repository fills it (`git grep actor_avatar_url` over non-test, non-translation sources finds only the declaration). objectui's renderers read it: `record-history.tsx` maps `user_avatar`, and `recordActivityFeed.ts` maps `actorAvatarUrl`.\n\n**Measured** on PR #22526's after-stack (`pnpm dev:crm --fresh`):\n- The admin's `sys_user.image` was set via `POST /api/v1/auth/update-user` and read back through `GET /api/v1/data/sys_user`.\n- The admin's next `crm_lead` edit row, read via `GET /api/v1/data/sys_activity`, carries `actor_avatar_url` null. All 39 rows on the stack are null.\n\n## Direction (for triage and the claimant)\n\nThis is the same family and the same writer as #22510. ADR-0049 (enforce-or-remove) applies: the column is a declared snapshot field that renderers read, so either the writer fills it at write time, from the same `sys_user` row PR #22526 already reads for the name, or the declaration is retired. A system write keeps it null (ADR-0118 D1: the system actor is `null`; display is the renderer's).\n\n**Serial:** behind PR #22526 (#22510), which edits the same writer (`audit-writers.ts`'s activity row and its per-user memo).\n\n## Tests\n\n- **Pin:** a user with `sys_user.image` set writes an activity row whose `actor_avatar_url` is that image.\n- **Controls:** a user with no image → null; a system write → null.\n- **Ablation:** dropping the stamp turns the pin red.\n"
+  "body": "Unblocked: #22510 closed (PR #22526, `d1d42ec57` on `main`), per triage's unlock scan `6095905468`.\n\nFiling gate: ① a product defect, class (b) (a declared column with no writer, at a spec → runtime → renderer seam), reach measured once through a public door. Found and measured by the dev of #22510 (PR #22526, report on #22510, `out_of_scope_findings[0]`). Filed by the `domain:services` seat 2 (`session_01WYYhVJ78u7PhwFViWo1EmQ`). ⛔ Not a claim.\n\n**Reader:** triage routes it. By its file it lands in `domain:services` (`packages/plugins/plugin-audit`, the activity writer).\n\n**Dedupe** (MCP `search_issues`, open and closed, run just before this card was created): `sys_activity actor_avatar_url never written activity avatar null record history avatar` → 1 hit, #22510 (the `actor_name` sibling, which PR #22526 fixes and which does not cover the avatar). None carries this.\n\n## The defect\n\n`sys_activity` declares `actor_avatar_url` (`packages/plugins/plugin-audit/src/objects/sys-activity.object.ts`, about `:155`). No writer in the repository fills it (`git grep actor_avatar_url` over non-test, non-translation sources finds only the declaration). objectui's renderers read it: `record-history.tsx` maps `user_avatar`, and `recordActivityFeed.ts` maps `actorAvatarUrl`.\n\n**Measured** on PR #22526's after-stack (`pnpm dev:crm --fresh`):\n- The admin's `sys_user.image` was set via `POST /api/v1/auth/update-user` and read back through `GET /api/v1/data/sys_user`.\n- The admin's next `crm_lead` edit row, read via `GET /api/v1/data/sys_activity`, carries `actor_avatar_url` null. All 39 rows on the stack are null.\n\n## Direction (for triage and the claimant)\n\nThis is the same family and the same writer as #22510. ADR-0049 (enforce-or-remove) applies: the column is a declared snapshot field that renderers read, so either the writer fills it at write time, from the same `sys_user` row PR #22526 already reads for the name, or the declaration is retired. A system write keeps it null (ADR-0118 D1: the system actor is `null`; display is the renderer's).\n\n**Serial:** behind PR #22526 (#22510), which edits the same writer (`audit-writers.ts`'s activity row and its per-user memo).\n\n## Tests\n\n- **Pin:** a user with `sys_user.image` set writes an activity row whose `actor_avatar_url` is that image.\n- **Controls:** a user with no image → null; a system write → null.\n- **Ablation:** dropping the stamp turns the pin red.\n"
 }

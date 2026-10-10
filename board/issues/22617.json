@@ -2,8 +2,8 @@
   "number": 22617,
   "kind": "issue",
   "title": "C7a (ADR-0131 D10, split from #15211): the migration inventory file, the read-only `os migrate --plan`, and the design of the ceremony's completion marker",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "domain:engine",
     "enhancement",
-    "pm:dispatched",
     "priority:p1",
     "target:v18"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T05:55:14Z",
-  "updated_at": "2026-10-10T08:23:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T08:44:38Z",
+  "closed_at": "2026-10-10T08:42:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22617",
   "body": "Part of #15211\n\nFiling gate ③: a task the maintainer directed. The maintainer accepted batch #310 item 2, verbatim: 「cloud 冻结在 v17 没问题，其他同意你的建议。」 (director record `6094175435` on #15211, 2026-10-10T05:22Z). C7 splits in two, and this first half starts now. Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the carrier the ruling names. ⛔ Not a claim.\n\n**Reader:** the `domain:engine` lane, with `domain:cli` for the command surface. The claim declares the `packages/cli` files under the cross-domain exception path.\n\n## Scope (C7a)\n\n1. **The inventory file.** It starts from the two #13564 censuses (59 platform objects, 28 example objects) plus the cloud supplement. Each object gets **one fate, with its citation**:\n   - (1) column drop;\n   - (2) mirror deletion;\n   - (3) attribution via a parent anchor;\n   - (4) report.\n\n   #14570 (`sys_business_unit_member`) and #15086 (the NULL-org business unit) are read in, and each gets its fate. Re-read #15211's pointers before writing: `6018712820`, `6020279837` (three categories ruled into the plan), `6051723395`, `6061638897`, `6068052798`, `6071418113` and `6081248392`.\n2. **`os migrate --plan`, read-only.** Per table it reports the fate, the row counts, the unattributable row ids, and which tables will receive `NOT NULL`. It is written to a file. **It refuses rather than reporting** a table it cannot enumerate.\n3. **The completion-marker design.** This is the schema marker the ceremony's last step writes, and the one the v18 boot refusal reads (ADR-0093 D5 shape, ⛔ no env escape hatch). This card designs it and records it. C7b builds the refusal.\n\n## Not in this card (C7b, which stays on #15211)\n\n`--apply` (fate order: attribution, then the verified id→name rewrite, then mirror deletion, then column drops; idempotent and resumable), the post-check, and the boot refusal. C7b stays blocked on the cutover (#15204, which now carries C2's remainder), C4 (#15205) and C5 (#15206).\n\n## Why it can start now\n\nNone of C7a depends on the data shape that C2–C5 produce. It is an inventory, a read-only plan and a design. So the critical path does not idle through the cutover window (`6094175435`).\n\n## Acceptance\n\n- The inventory names a fate and a citation for every object in both censuses and in the cloud supplement.\n- `--plan` against a fixture database carrying each fate prints the per-table plan.\n- `--plan` refuses a table it cannot enumerate, naming it.\n- The marker design is recorded on #15211 for C7b.\n\n⛔ **Stop and report:** any write. C7a never changes a row or a column.\n\nRefs: ADR-0131 D10 · ADR-0093 D5 · ADR-0120 D4 · #13564 · #14570 · #15086."

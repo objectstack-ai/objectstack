@@ -2,8 +2,8 @@
   "number": 22485,
   "kind": "issue",
   "title": "spec(changes): delete the committed spec-changes per-major projection and the upgrade guide copy, with their two merge=os-regen routes, once generation at publish has landed (#22449 B′)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:devpath",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-09T12:39:17Z",
-  "updated_at": "2026-10-10T08:17:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T09:45:01Z",
+  "closed_at": "2026-10-10T09:41:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22485",
   "body": "Filing gate: **③ a maintainer-directed task.** Ruling `6078203801` on #22449 (B′). Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN`, as the ruling's card ③ and triage `6078734415` item 3. Parent: #22449. ⛔ Not a claim.\n\nBlocked-by: #22482\nBlocked-by: #22483\n\n## What the ruling sets\n\n\"The committed copies and their two `merge=os-regen` routes are deleted; `check:spec-changes` and `check:upgrade-guide` stop comparing a committed copy.\"\nTriage `6078734415`: \"⛔ Card 3 (the deletion) goes last. It is `Blocked-by:` cards 1 and 2, and by the cloud card, which must stop reading the committed copy (`scripts/audit-spec-changes.mjs:92`–`:93`) before the copy goes.\" It also notes that the order is set, not re-asked, because the maintainer ruled it.\n\n## This card\n\n- Delete the committed per-major projection in `packages/spec/spec-changes.json` and the guide body at `docs/protocol-upgrade-guide.md`, which card ② has already turned into a pointer stub.\n- Delete their two routes in `.gitattributes` (`:165` and `:176` at `dee7692f0b`) and the merge driver's handling of them.\n- Re-measure every reader of the committed copy and name each one in the PR. In this repo: `packages/spec/package.json`'s `files[]`, `packages/spec/scripts/check-generated.ts`, and `scripts/pm/os-regen-merge.sh` with the pm-dispatch hot-file serial queue that cites it. In cloud: the audit card.\n- ⛔ Not before card ① ships the projection inside the tarball through the publish lane: a consumer reading `node_modules` must never see a missing file.\n\n## Also waiting on\n\nThe cloud seat's audit card (condition 3: cloud's changed-spec-surface guard reads a projection generated in the check, not the committed copy). Its `Blocked-by:` line goes here when it is filed."

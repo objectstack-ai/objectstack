@@ -1,0 +1,35 @@
+{
+  "number": 22676,
+  "kind": "issue",
+  "title": "pm tooling: a PR armed for auto-merge on a green, clean head is sometimes not added to the merge queue until it is armed again",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-10T11:36:30Z",
+  "updated_at": "2026-10-10T12:54:01Z",
+  "closed_at": "2026-10-10T11:56:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/22676",
+  "body": "Filing gate: **a platform-fact change for the PM references** (one of the three hand-over classes in `seat-lifecycle.md`: a platform fact → one line in the references fact table). Filed by `domain:spec` seat 1 (#6017) · `os-tesla` · session `session_01VZqqwTj2wsihZEbfT6yyYN` at stand-down. ⛔ Not a claim.\n\n## Measured, twice on 2026-10-10\n- **PR #22647:** one relay batch of `pr_ready` then `automerge_enable` (run 38043884682, success). Fifteen minutes later the PR was non-draft, `auto_merge` set, `mergeable_state: clean`, every check green, and there was no `added_to_merge_queue` event. One more `automerge_enable` (run 38044000882) added it within about a minute.\n- **PR #22421:** `os-zhuang` armed auto-merge at 2026-10-10 05:47 UTC while the PR waited on other work. After a later push went green and clean, the PR was again not queued until one `automerge_enable` (run 38041860259) added it, as `os-zhuang`.\n- Both times the timeline was the only reading that showed the gap. `auto_merge != null` read as armed throughout.\n\n## Asked\n- One line in the PM references (`landing-operations.md` or the platform-readings fact table): after arming, read the timeline for `added_to_merge_queue`; if it is absent on a green, clean head, arm once more.\n- Or have the relay's `automerge_enable` read back the queue event rather than the `auto_merge` field.\n- The `domain:skills` seat chooses.\n\nDedupe: open issue titles grepped for auto-merge, automerge, merge queue, enqueue → none on this. Dedupe words: auto-merge armed not enqueued · automerge_enable read-back queue event · merge queue missing added_to_merge_queue"
+}

@@ -13,18 +13,18 @@
   "labels": [
     "area:records",
     "domain:services",
-    "pm:blocked",
+    "pm:on-hold",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T02:00:31Z",
-  "updated_at": "2026-10-10T02:00:31Z",
+  "updated_at": "2026-10-10T10:56:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22573",
   "body": "Blocked-by: objectstack-ai/objectui#12078\n\nFiling gate ③: a task the maintainer directed. The maintainer ruled A on objectstack-ai/objectstack#22505 (record `6091550406`), amended: 「同意;sys_comment.reactions 可以退役;可以不用考虑历史数据迁移;」. The director judged the delegated point, **no read-only aggregate** (`6091621568`). Filed by the triage seat (seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the retirement half of #22566. That card keeps the additive half. ⛔ Not a claim.\n\n**Why a separate card:** retiring the column is a removal that the pinned console depends on. Today the console's chatter writes `sys_comment.reactions`. So the removal lands only after the chatter has moved, and only with the console pin that carries the move (AGENTS.md Post-Task Checklist step 4). If it rode #22566, the objectui card would wait on #22566 and #22566 would wait on the objectui card.\n\n**Reader:** the `domain:services` seat that holds `plugin-audit`.\n\n## Unlocks when\n\n- objectstack-ai/objectui#12078 is on objectui `main` (the chatter reads and writes reaction records), **and**\n- this repo's `.objectui-sha` carries that commit.\n\n## The change\n\n- `sys_comment.reactions` retires (`plugin-audit/src/objects/sys-comment.object.ts`, about `:125` on `main`). Nothing takes its place on the comment row: no stored aggregate, and no computed-on-read block (`6091621568`).\n- The retirement carries the retirement discipline's own records: a retired-keys or ADR-0087 D3 semantic entry, whichever the field's declaration shape requires. That is governance, not data migration.\n- **No migration of stored reactions.** The changeset says plainly that existing emoji reactions are gone after the upgrade.\n- **Measure first:** what the data door answers a write that still names the retired field. That is the pinned console's write before the pin moves, and any other client's. State it in the PR.\n\n## Pins\n\n- `sys_comment` declares no `reactions` field, and the retirement record names it.\n- The console at the bumped pin reacts through reaction records only."

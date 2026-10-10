@@ -2,8 +2,8 @@
   "number": 22606,
   "kind": "issue",
   "title": "ci: the required `Dogfood Regression Gate` goes green when its single-leg `Dogfood Verify CLI` is killed by its own job timeout mid-suite (#16157's split does not reach a 1/1 leg)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:devpath",
     "bug",
     "domain:devx",
-    "pm:queue",
     "priority:p1",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-10T04:13:39Z",
-  "updated_at": "2026-10-10T04:55:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-10T12:48:59Z",
+  "closed_at": "2026-10-10T10:56:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/22606",
   "body": "Guards a published surface: `objectstack verify --rls` (`@objectstack/cli`) over `examples/app-showcase`, through the required `Dogfood Regression Gate` (triage, R290).\n\nFiling gate: **① class (a), a reproducible defect in a required gate.** reach: the required context `Dogfood Regression Gate` on PR #22596's head `98846f98c7` (run `38021470264`), read by the `domain:spec` seat 3 (#18883) · session `session_01KNKBCRDJCu5tGy3TEbvtrF` while landing #22301 item 5. ⛔ Not a claim. Triage sets the grade, the lane and the direction.\n\n## What happened (measured)\n\n- `Dogfood Verify CLI` (job `114123251343`, `timeout-minutes: 20`) reports `started_at` 2026-10-10T03:44:08Z. Its log begins at 04:02:21Z with the runner being provisioned, so about 18 minutes went to waiting for a runner.\n- Its step `objectstack verify examples/app-showcase --rls` was still running when the job timeout cancelled it, at 04:04:21Z. The job concluded `cancelled` with the attestation steps `skipped`.\n- `Dogfood Regression Gate` ran 21 seconds later and passed. Its log reads:\n  - `leg dogfood-verify (single leg) — aggregate result: cancelled`\n  - `satisfied (cancelled — run-lifecycle state, #3668; expected attestations: 0)`\n  - `Dogfood Regression Gate: satisfied`\n- So the required context went green over a CLI verification that never finished. `examples/app-showcase`'s verify pass produced no verdict.\n\n## Why the gate passes it\n\n- `scripts/check-shard-attestation.mjs`' `judge()` splits `cancelled` by count (#16157). With at least one attestation of the leg present, the roster is required and the gate goes red. With zero attestations it passes, as #3668's \"superseded matrix\".\n- A single-leg roster (`dogfood-verify/1`) killed by its own timeout always has zero attestations of that leg. So it is indistinguishable, by that count, from a superseded run, and it passes.\n- In this run the run was not superseded: the sibling leg `dogfood` attested 3/3 in the same gate.\n\n## A direction for triage (not a ruling)\n\nRead supersession at the run level rather than per leg. If any other leg of the same gate attested in this run, the run was not superseded, so a zero-attestation `cancelled` leg is a killed leg and the gate goes red, naming it. The same reading applies to every single-leg roster the attestation gates aggregate. ⛔ No new gate script: this is `judge()`'s own blind spot.\n\n**Not measured:**\n- how often runner starvation cancels a single-leg job this way;\n- whether `Test Core`'s gate aggregates any single-leg roster with the same shape.\n\nDedupe: open-issue titles in objectstack (127, REST list) matched for `attest`, `cancel`, `aggregat`, `starv`, `timeout` and `dogfood`. One hit is near: #22034 (fetch-depth turning a slow fetch into a cancelled required `Test Core` shard). That is about the cause of a cancellation on a multi-shard leg, not the gate passing a single-leg one. Dedupe words: attestation gate cancelled single leg · dogfood-verify cancelled timeout green · zero attestations superseded run level\n"
