@@ -185,6 +185,45 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the CRUD `fields.*` value entries', () 
   });
 });
 
+/**
+ * #19939 (stage S1 of the rider positions) — the three maps a node hands to a
+ * CALLEE are `value` slots: `subflow.input.*`, `map.input.*` and
+ * `script.inputs.*`. Same shape rule as the other value maps: an
+ * envelope-shaped TOP-LEVEL value is an expression, every other value is a
+ * literal. `map.collection` keeps its `flow-template` entry.
+ */
+describe('FLOW_NODE_EXPRESSION_PATHS — the callee input maps (#19939)', () => {
+  const LIST_ENVELOPE = { dialect: 'cel', source: 'rows' };
+  const CALLEE_MAPS = [
+    ['subflow', 'input', 'subflow input value'],
+    ['map', 'input', 'map item input value'],
+    ['script', 'inputs', 'script input value'],
+  ] as const;
+
+  it.each(CALLEE_MAPS)('declares `%s.%s.*` as a `value` slot', (nodeType, key, label) => {
+    const entries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === nodeType && e.role === 'value');
+    expect(entries.map((e) => [e.path, e.label])).toEqual([[`${key}.*`, label]]);
+  });
+
+  it.each(CALLEE_MAPS)('%s: resolves the envelope value, and only it, at the author\'s key', (nodeType, key) => {
+    const found = resolveFlowNodeExpressions(nodeType, {
+      [key]: { rows: LIST_ENVELOPE, text: 'plain', n: 1, broken: { dialect: 'cel' }, nested: { e: LIST_ENVELOPE } },
+    }).filter((f) => f.entry.role === 'value');
+    expect(found.map((f) => f.path)).toEqual([`${key}.rows`, `${key}.broken`]);
+    expect(found[0]!.value).toBe(LIST_ENVELOPE);
+  });
+
+  it.each(CALLEE_MAPS)('%s: hands every authored value to the value-slot judge, strings included', (nodeType, key) => {
+    expect(resolveFlowNodeValueSlots(nodeType, { [key]: { a: '{x}', b: LIST_ENVELOPE, c: null } })
+      .map((f) => [f.path, f.value])).toEqual([[`${key}.a`, '{x}'], [`${key}.b`, LIST_ENVELOPE], [`${key}.c`, null]]);
+  });
+
+  it('`map.collection` stays a `flow-template` slot beside `map.input`', () => {
+    expect(resolveFlowNodeExpressions('map', { collection: '{rows}', input: { a: LIST_ENVELOPE } })
+      .map((f) => [f.path, f.entry.role])).toEqual([['collection', 'flow-template'], ['input.a', 'value']]);
+  });
+});
+
 describe('resolveFlowNodeValueSlots — every authored value of a `value` slot, strings included', () => {
   it('hands over every non-absent value of the CRUD `fields` map and the assignment map, by the ledger\'s own walk', () => {
     const envelope = { dialect: 'cel', source: 'price * 2' };
@@ -234,10 +273,12 @@ describe('isExpressionEnvelopeShaped — the recognizer a value slot discriminat
 describe('every entry older than the value role resolves byte-identically (the ratchet\'s fixtures, restated)', () => {
   const byKey = (e: FlowNodeExpressionPath) => `${e.nodeType}.${e.path} (${e.role})`;
 
-  it('the entries that existed before are still declared exactly as they were — the CRUD `fields.*` value slots added exactly two rows', () => {
-    // The census: five rows before #19938, seven after. The two new rows are
-    // the CRUD write map's `value` slots and sit at the end; every row above
-    // them is byte-identical to what it was.
+  it('the entries that existed before are still declared exactly as they were — each value-slot widening only appended rows', () => {
+    // The census: five rows before #19938, seven after, ten after #19939's
+    // callee maps. Each widening appended its `value` rows at the end — the
+    // CRUD write map's two, then `subflow.input`, `map.input` and
+    // `script.inputs` — and every row above them is byte-identical to what it
+    // was (`map.collection` keeps its `flow-template` row beside `map.input`).
     expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
       'screen.fields[].visibleWhen (predicate)',
       'decision.conditions[].expression (predicate)',
@@ -246,6 +287,9 @@ describe('every entry older than the value role resolves byte-identically (the r
       'assignment.assignments.* (value)',
       'create_record.fields.* (value)',
       'update_record.fields.* (value)',
+      'subflow.input.* (value)',
+      'map.input.* (value)',
+      'script.inputs.* (value)',
     ]);
   });
 

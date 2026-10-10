@@ -26,6 +26,9 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
+// [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
+// envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
+import { StandardErrorCode } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 import type { FileRefusedValue } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
@@ -12612,8 +12615,31 @@ export class ObjectQL implements IObjectQLEngine {
     if (raw != null && schema?.fields) {
       const requestedFields = (ast as any).searchFields
         ?? (typeof raw === 'object' ? raw?.fields : undefined);
+      // [#22646] A `search` never scans an `internal: true` column. The flag's
+      // promise ("the value is never returned on a generic data exit") is a
+      // withhold on the read path (the row strip) and a refusal everywhere the
+      // value would be revealed by evaluation; `$search` is such a position —
+      // a cross-field `$icontains` that confirms a guessed prefix of a withheld
+      // credential, matching the row only when the guess is right. The field is
+      // dropped from the set the expansion resolves over (a WITHHOLD, like the
+      // auto-default's `hidden`/credential-type exclusions one layer down), so
+      // the default set never scans it, for every verb that reaches here
+      // (`find` / `findOne` / `aggregate`, and `searchAll` through them). An
+      // EXPLICIT `$searchFields` naming one is refused loudly at the generic
+      // data door instead (`assertSearchFieldsAreSearchable`,
+      // `@objectstack/metadata-protocol`), the #4254 posture — an unhonoured
+      // narrowing must be a 400, not a silent widening. A direct engine caller
+      // naming one has it intersected away here, the engine's existing tolerant
+      // posture for an unknown requested search field.
+      const internalFields = collectInternalReadFields(schema);
+      const scanFields = internalFields.length === 0
+        ? (schema.fields as any)
+        : Object.fromEntries(
+            Object.entries(schema.fields as Record<string, unknown>)
+              .filter(([name]) => !internalFields.includes(name)),
+          );
       const searchFilter = expandSearchToFilter(raw, {
-        fields: schema.fields as any,
+        fields: scanFields,
         searchableFields: (schema as any).searchableFields,
         requestedFields,
         // [ADR-0079] `nameField` is the canonical primary-title pointer;
@@ -18718,6 +18744,16 @@ export class ObjectQL implements IObjectQLEngine {
    * Only the two output-bearing positions on `EngineAggregateOptions` carry
    * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
    * `groupBy[]` (a string, or a `{ field }` bucket object).
+   *
+   * The refusal carries the ADR-0112 envelope — `INVALID_FIELD` / 400, located
+   * at the object and the field(s) named. It used to be a bare `Error` with no
+   * `code` or `status`, so a 400-class author refusal reached the data door
+   * 500-shaped (`INTERNAL_ERROR`, an undeclared fault). The code matches the
+   * analytics door's own refusal of an `internal: true` member and the engine's
+   * structured-JSON group-by refusal: the verdict is about the NAME being a
+   * field that is never returned on a generic data exit, which `INVALID_FIELD`
+   * is the catalog member for. The envelope now binds the `secret` / `password`
+   * case too, which shared the bare `Error`.
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
     const schema = this._registry.getObject(object);
@@ -18740,13 +18776,23 @@ export class ObjectQL implements IObjectQLEngine {
 
     const hit = protectedFields.filter((f) => referenced.has(f));
     if (hit.length > 0) {
-      throw new Error(
+      const err = new Error(
         `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
           + 'secret/password fields are masked on read and `internal: true` fields are omitted '
           + 'outright, so the value never leaves the engine on the generic data path; aggregating '
           + 'them (group-by, min/max, array_agg, …) would surface it. '
           + 'Refusing (fail-closed) — see ADR-0100.',
-      );
+      ) as Error & { code?: string; status?: number; httpStatus?: number; field?: string; fields?: string[]; object?: string };
+      // ADR-0112 envelope, the same number under D5's two spellings — `status`
+      // for the HTTP doors, `httpStatus` for a consumer holding the thrown
+      // error (the CLI `--json` envelope).
+      err.code = StandardErrorCode.enum.INVALID_FIELD;
+      err.status = 400;
+      err.httpStatus = 400;
+      err.field = hit[0];
+      err.fields = hit;
+      err.object = object;
+      throw err;
     }
   }
 
