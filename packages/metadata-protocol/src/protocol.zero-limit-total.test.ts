@@ -56,13 +56,21 @@ const ROWS = [
     { id: 't4', name: 't4', stage: 'b' },
 ];
 
-/** Equality-only `where` — the implicit field filter `?stage=b` lowers to. */
+/**
+ * Equality-only `where` — the implicit field filter `?stage=b` lowers to.
+ * Anything else (a combinator, an operator object) is REFUSED rather than
+ * answered silently wrong.
+ */
 function matches(row: Record<string, unknown>, where: unknown): boolean {
     if (where == null) return true;
     if (typeof where !== 'object' || Array.isArray(where)) {
         throw new Error(`test double: unexpected where shape ${JSON.stringify(where)}`);
     }
-    return Object.entries(where as Record<string, unknown>).every(([k, v]) => row[k] === v);
+    return Object.entries(where as Record<string, unknown>).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`test double: combinator '${k}' is not implemented`);
+        if (v !== null && typeof v === 'object') throw new Error(`test double: operator on '${k}' is not implemented`);
+        return row[k] === v;
+    });
 }
 
 /**
