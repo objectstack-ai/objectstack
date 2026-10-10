@@ -19,8 +19,16 @@
  * (`./data-migration-plugins.ts`).
  * A project with neither a config nor a compiled artifact still diffs the data
  * stack alone — run `os build` first so its objects are visible.
+ *
+ * The boot's first input is the environment, and it is the one the serving
+ * commands read: the project's `.env*` files are loaded before anything
+ * resolves a database or a secret ({@link loadProjectEnvFiles}, #22581), and
+ * the stack reports which database it opened and who named it
+ * ({@link SchemaStack.dbSource}).
  */
+import path from 'node:path';
 import chalk from 'chalk';
+import dotenvFlow from 'dotenv-flow';
 import type {
   ManagedDriftEntry,
   DriftCategory,
@@ -29,6 +37,12 @@ import type {
 } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import {
+  doctorNodeEnv,
+  provenanceOf,
+  readDotenvFiles,
+  type DotenvReading,
+} from '../commands/doctor.js';
 import { describeDriverConnection } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
 import {
@@ -65,6 +79,13 @@ export interface SqlDriverLike {
 export interface SchemaStack {
   driver: SqlDriverLike | null;
   dbLabel: string;
+  /**
+   * [#22581] Who named the database {@link dbLabel} describes: `--database-url`,
+   * a variable from this process's environment, one from the project's `.env*`
+   * files, the config's declared datasource, or nobody (the default). `os
+   * migrate plan` / `apply` print it beside the database in both faces.
+   */
+  dbSource: DatabaseSource;
   managedTableCount: number;
   /** The booted kernel — `getService('objectql')` etc. for one-shot commands
    *  beyond schema migration (e.g. `os meta resync`, #2705). */
@@ -320,6 +341,143 @@ function describeDb(driver: SqlDriverLike | null): string {
   return describeDriverConnection(cfg) ?? String(cfg.client ?? 'unknown');
 }
 
+// ── The project's `.env*` files (#22581) ────────────────────────────
+
+/**
+ * One load of a project's `.env*` files: what they hold, with the file each
+ * variable came from, and this process's environment as it stood BEFORE the
+ * load — the environment "exported" is judged against.
+ */
+export interface ProjectEnvLoad {
+  readonly reading: DotenvReading;
+  readonly shellEnv: Readonly<NodeJS.ProcessEnv>;
+}
+
+/** Project root → its load, for this process. See {@link loadProjectEnvFiles}. */
+const projectEnvLoads = new Map<string, ProjectEnvLoad>();
+
+/**
+ * Load the project's `.env*` files into this process as `os serve`, `os start`
+ * and `os dev` do, before anything resolves a database or a secret (#22581).
+ *
+ * The serving commands load them first thing; a one-shot boot used to read
+ * `process.env` alone. So a project keeping `OS_DATABASE_URL` in `.env` served
+ * one database and migrated another, and an `OS_AUTH_SECRET` kept there left
+ * the auth family out of `os migrate plan`.
+ *
+ * ## The serving commands' load, not a second one
+ *
+ * `dotenvFlow.config({ node_env, silent: true })` is the call `serve` /
+ * `start` / `dev` make, with `os start`'s mode rule — `NODE_ENV === 'test' ?
+ * 'test' : NODE_ENV || 'production'`, which {@link doctorNodeEnv} spells
+ * (a one-shot command takes no `--dev`). dotenv-flow never overrides a
+ * variable this process already has, so an exported `OS_DATABASE_URL` keeps
+ * its precedence over `.env`, exactly as it does for `serve`. The file list and
+ * the per-variable origin are dotenv-flow's own (`readDotenvFiles`, the reader
+ * `os doctor` reports with), so the source this stack names is the file the
+ * load took the value from.
+ *
+ * ## Once per project root per process
+ *
+ * Called by the occupancy probe (`./migrate-occupancy-gate.ts`), which resolves
+ * the target BEFORE the boot, and by {@link bootSchemaStack}; the second call
+ * returns the first one's record. Not only for cost: after the load every
+ * `.env` variable is in `process.env`, so a second snapshot would report all
+ * of them as exported.
+ */
+export function loadProjectEnvFiles(projectRoot: string = process.cwd()): ProjectEnvLoad {
+  const root = path.resolve(projectRoot);
+  const prior = projectEnvLoads.get(root);
+  if (prior) return prior;
+  const nodeEnv = doctorNodeEnv();
+  const shellEnv = { ...process.env };
+  const reading = readDotenvFiles(root, nodeEnv);
+  dotenvFlow.config({ node_env: nodeEnv, path: root, silent: true });
+  const load: ProjectEnvLoad = { reading, shellEnv };
+  projectEnvLoads.set(root, load);
+  return load;
+}
+
+/**
+ * [#22581] Who named the database a one-shot boot opened — the `--json` face of
+ * `os migrate plan` / `apply` (`databaseSource`).
+ *
+ *  - `flag` — `--database-url`;
+ *  - `process-env` — a variable this process was started with;
+ *  - `env-file` — a variable from one of the project's `.env*` files, named by
+ *    its file name (dotenv-flow reads them from the project root only);
+ *  - `config-datasource` — the datasource the project config declares as its
+ *    default home;
+ *  - `default` — nobody: the project's default database file.
+ */
+export type DatabaseSource =
+  | { readonly kind: 'flag' }
+  | { readonly kind: 'process-env'; readonly variable: string }
+  | { readonly kind: 'env-file'; readonly variable: string; readonly file: string }
+  | { readonly kind: 'config-datasource'; readonly datasource: string }
+  | { readonly kind: 'default' };
+
+/**
+ * The variable the env rung of `resolveProjectDatabaseUrl` (`@objectstack/runtime`)
+ * read: `(OS_DATABASE_URL ?? DATABASE_URL)` when that is non-blank, else
+ * `TURSO_DATABASE_URL` — its own `??` order. `schema-migrate.database-source.test.ts`
+ * holds the two equal over every combination of the three.
+ */
+export function envRungVariable(env: Readonly<NodeJS.ProcessEnv>): string {
+  if ((env.OS_DATABASE_URL ?? env.DATABASE_URL)?.trim()) {
+    return env.OS_DATABASE_URL !== undefined ? 'OS_DATABASE_URL' : 'DATABASE_URL';
+  }
+  return 'TURSO_DATABASE_URL';
+}
+
+/**
+ * Name the source of the database the resolution answered, from the rung it
+ * answered on (`resolveStandaloneDatabase`'s `source`) and the env load.
+ */
+export function resolveDatabaseSource(
+  load: ProjectEnvLoad,
+  resolved: { readonly source: string; readonly datasourceName?: string },
+  explicitUrl: string | undefined,
+): DatabaseSource {
+  switch (resolved.source) {
+    case 'explicit':
+      // Every caller's `--database-url` declares `env: 'OS_DATABASE_URL'`, which
+      // oclif reads at parse time — before the load, so from the shell only.
+      return explicitUrl !== undefined && load.shellEnv.OS_DATABASE_URL === explicitUrl
+        ? { kind: 'process-env', variable: 'OS_DATABASE_URL' }
+        : { kind: 'flag' };
+    case 'env': {
+      const variable = envRungVariable(process.env);
+      const provenance = provenanceOf(load.reading, variable, load.shellEnv);
+      return provenance.source === 'file' && provenance.file
+        ? { kind: 'env-file', variable, file: path.basename(provenance.file) }
+        : { kind: 'process-env', variable };
+    }
+    case 'config-datasource':
+      return { kind: 'config-datasource', datasource: resolved.datasourceName ?? 'default' };
+    default:
+      // `unified-default`, and `legacy-file` — its compat read, which the boot
+      // announces itself.
+      return { kind: 'default' };
+  }
+}
+
+/** {@link DatabaseSource} as an operator reads it, beside the database. */
+export function describeDatabaseSource(source: DatabaseSource): string {
+  switch (source.kind) {
+    case 'flag':
+      return 'from --database-url';
+    case 'process-env':
+      return `${source.variable} from this process's environment`;
+    case 'env-file':
+      return `${source.variable} from ${source.file}`;
+    case 'config-datasource':
+      return `the project config's default datasource "${source.datasource}"`;
+    case 'default':
+      return 'the default: no --database-url, environment variable, .env file or config datasource names one';
+  }
+}
+
 /** Boot the schema stack. Caller MUST call `shutdown()` when done. */
 export async function bootSchemaStack(
   opts: {
@@ -487,11 +645,24 @@ export async function bootSchemaStack(
   // arrives too late to keep stdout a single JSON document (commit 2b641ddd4).
   const releaseStdout = opts.jsonOutput ? reserveStdoutForJson() : () => { /* stdout is the caller's */ };
 
-  const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
+  // [#22581] The environment the serving commands boot with, before the
+  // database, the auth secret or anything else is read from it.
+  const projectRoot = opts.projectRoot ?? process.cwd();
+  const envLoad = loadProjectEnvFiles(projectRoot);
+
+  const { createStandaloneStack, Runtime, resolveStandaloneDatabase } = await import('@objectstack/runtime');
   const defer = opts.deferSchemaDdl === true;
 
+  // [#22581] Who named the database: the resolution `createStandaloneStack`
+  // makes below (and the occupancy probe made before it), from the same inputs.
+  const dbSource = resolveDatabaseSource(
+    envLoad,
+    resolveStandaloneDatabase({ projectRoot, ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}) }),
+    opts.databaseUrl || undefined,
+  );
+
   const stack = await createStandaloneStack({
-    projectRoot: opts.projectRoot ?? process.cwd(),
+    projectRoot,
     ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}),
     // [#21391] No seed loader on a one-shot CLI boot — unconditional, and NOT
     // keyed on `deferSchemaDdl`, for the reason `runPlatformMigrations` below
@@ -557,7 +728,7 @@ export async function bootSchemaStack(
   const composition = opts.composeHostStack === true
     ? await buildSchemaMigrationPlugins({
         basePlugins: stack.plugins,
-        cwd: opts.projectRoot ?? process.cwd(),
+        cwd: projectRoot,
         // The same answer the standalone stack got above: never on this boot.
         skipSeedData: true,
         // [#22371] The compiled artifact's `requires`, as `serve`'s merge lays
@@ -633,6 +804,7 @@ export async function bootSchemaStack(
   return {
     driver,
     dbLabel: describeDb(driver),
+    dbSource,
     managedTableCount,
     kernel,
     pendingSchemaWork,

@@ -100,8 +100,10 @@ function jsonRow(row: SecurityCatalogOverlayRow, outcome?: SecurityCatalogOverla
  * (`stackBootPlugins`) and makes the boot a development one for the auth
  * secret's fallback (`isDevelopmentBoot`). Pass the flags the deployment boots
  * with. They move the composition only: this boot stays a one-shot boot (no
- * dev schema self-heal, `NODE_ENV` untouched, no `.env*` file loaded), so the
- * environment is the operator's to export as the deployment's.
+ * dev schema self-heal, `NODE_ENV` untouched, and the project's `.env*` files
+ * picked by `NODE_ENV` as `os start` picks them — `--dev` does not switch them
+ * to `os dev`'s, #22581), so the rest of the environment is the operator's to
+ * set as the deployment's.
  *
  * ## The family's conventions
  *
