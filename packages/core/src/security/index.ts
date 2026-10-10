@@ -236,7 +236,8 @@ export { isRowActive, type ActivatableRow } from './row-active.js';
 // ADR-0131 D2–D4 — the ONE by-name read of the security catalog (positions,
 // permission sets, capabilities) over the engine registry and the metadata
 // service. It says a definition EXISTS under a name, never that it is in
-// effect: the row `active` flag above stays the authority for that.
+// effect: the activation ledger is the authority for that
+// (`readDisabledCatalogNames`, exported with the resolver below).
 export {
   createSecurityCatalogReader,
   bindSecurityCatalogReader,
