@@ -2797,7 +2797,8 @@ export class SchemaRegistry {
     // ADR-0010 §3.7 — translate the author-facing `protection` block
     // into the private `_lock` envelope and stamp package provenance
     // on the schema before it lands in the contributor list. Mirrors
-    // registerItem() so object schemas surface lock fields on GET.
+    // registerItem() so object schemas surface lock fields on GET — including
+    // its note on the `_packageVersion` a manifest-holding caller stamps first.
     applyProtection(schema as any, { packageId });
 
     // Add new contributor
@@ -4194,8 +4195,14 @@ export class SchemaRegistry {
 
     // ADR-0010 §3.7 — translate the author-facing `protection` block
     // into the private `_lock` envelope and stamp package provenance.
-    // Centralised with the artifact loader path in metadata/plugin.ts
-    // so both load paths produce identical lock state.
+    // This call knows the package id only. A caller that holds the package's
+    // manifest makes the artifact loader's own call first,
+    // `applyProtection(item, { packageId, packageVersion })` (metadata/plugin.ts;
+    // `ObjectQL.registerApp`, the engine's residual-object registration), and
+    // `applyProtection` stamps a key only while it is unset and strips the
+    // block it translated — so this call leaves that item's envelope as the
+    // caller stamped it, and both load paths produce the same lock state and
+    // package envelope. Every other caller gets the id alone.
     applyProtection(item as any, { packageId });
 
     // A picklist's own values must not repeat any value its extensions

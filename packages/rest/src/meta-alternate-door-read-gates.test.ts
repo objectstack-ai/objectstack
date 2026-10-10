@@ -68,6 +68,16 @@
  *  - **`/references`** is declared exempt: it serves the identities of OTHER
  *    items that point at this one, never a member of this item's document.
  *
+ * [#22639] And for three more under the list view and dashboard audience gate
+ * (ruling 6095014058, letter A — `requiredPermissions`, all required, through
+ * the app arm's one predicate): ONE list view and a dashboard the caller does
+ * not hold are refused whole (`403 PERMISSION_DENIED`, the app's whole
+ * refusal) on every door, author or not; a view container is served minus the
+ * list views withheld, its author exempt on the stored-version doors as an
+ * app's is; and an object's own `listViews` are pruned for every caller
+ * ADR-0106 D4 does not exempt, on every door. Each is a subject below, with a
+ * control: a view that names no capability is served to all.
+ *
  * The dashboard widget gate (ADR-0057 D10) is NOT a per-caller gate — it asks
  * which optional services this deployment registered, and answers every caller
  * alike. The rendered single-document doors keep it (they answer what the plain
@@ -150,13 +160,55 @@ const INVOICE_OBJECT = {
 };
 const LEADS_VIEW = { name: 'all_leads', label: 'All leads', object: 'lead', columns: ['name'] };
 
+// [#22639] The list view and dashboard audience gate (ruling 6095014058,
+// letter A): `requiredPermissions`, a list of capabilities, all required.
+// The reader holds `LEGAL_CAP`; the non-reader and the author do not.
+const LEGAL_CAP = 'clm_legal_workbench.view';
+/** ONE view — a view item, its list body (and so its key) under `config`. */
+const LEGAL_QUEUE_VIEW = {
+    name: 'clm_contract.legal_queue',
+    object: 'clm_contract',
+    viewKind: 'list',
+    label: 'Legal intake queue',
+    config: { type: 'grid', columns: ['matter_ref'], requiredPermissions: [LEGAL_CAP] },
+};
+/** A view CONTAINER: one named list view gated, the default `list` and `mine` not. */
+const CONTRACT_VIEWS = {
+    name: 'clm_contract',
+    object: 'clm_contract',
+    list: { type: 'grid', columns: ['name'] },
+    listViews: {
+        mine: { type: 'grid', columns: ['name'], label: 'My contracts' },
+        legal_review: { type: 'grid', columns: ['name'], label: 'Legal review queue', requiredPermissions: [LEGAL_CAP] },
+    },
+};
+const LEGAL_DASHBOARD = {
+    name: 'legal_board',
+    label: 'Legal board',
+    requiredPermissions: [LEGAL_CAP],
+    widgets: [{ id: 'w_open_matters', type: 'metric', label: 'Open matters' }],
+};
+/** An object's OWN list views, served inside `/meta/object` (the scope note 6096254862, item 1). */
+const CONTRACT_OBJECT = {
+    name: 'clm_contract',
+    label: 'Contract',
+    fields: { amount: { type: 'number', label: 'Amount' } },
+    listViews: {
+        mine: { type: 'grid', columns: ['amount'], label: 'My contracts' },
+        legal_desk: { type: 'grid', columns: ['amount'], label: 'Legal desk', requiredPermissions: [LEGAL_CAP] },
+    },
+};
+/** A type no per-caller gate judges. */
+const LEAD_FLOW = { name: 'lead_intake', label: 'Lead intake' };
+
 const STORE: Record<string, any[]> = {
     book: [ADMIN_GUIDE, HELP_CENTER],
     doc: DOCS,
     app: [CRM_APP, PAYROLL_APP, LAUNCHPAD_APP],
-    dashboard: [OPS_DASHBOARD],
-    object: [INVOICE_OBJECT],
-    view: [LEADS_VIEW],
+    dashboard: [OPS_DASHBOARD, LEGAL_DASHBOARD],
+    object: [INVOICE_OBJECT, CONTRACT_OBJECT],
+    view: [LEADS_VIEW, LEGAL_QUEUE_VIEW, CONTRACT_VIEWS],
+    flow: [LEAD_FLOW],
 };
 
 /**
@@ -192,7 +244,7 @@ interface Caller {
 }
 const CALLERS: Record<'reader' | 'non-reader' | 'author' | 'anonymous', Caller> = {
     reader: {
-        ctx: { userId: 'u_reader', systemPermissions: ['finance.access', 'payroll.access', 'studio.access'] },
+        ctx: { userId: 'u_reader', systemPermissions: ['finance.access', 'payroll.access', 'studio.access', LEGAL_CAP] },
         holdings: ['crm_admin'],
         readableFields: ['amount', 'secret_margin'],
         savesApps: false,
@@ -410,16 +462,24 @@ const DOORS: Record<string, Door> = {
  * exemption to exactly the author's partial `app` cells of exactly these
  * four doors: widening it to another door, to a rendered door, to a
  * non-author, or to a whole refusal fails them rather than passing silently.
+ *
+ * [#22639] …and a view CONTAINER, the one other document the gate prunes by
+ * ENTRY (its `list` / `listViews`, under the list view audience gate of ruling
+ * 6095014058): Studio's designer saves back the container it loaded, exactly as
+ * it saves back an app. ONE list view and a dashboard are refused WHOLE (the
+ * app's whole refusal), so the exemption lifts neither — and an object's own
+ * list views follow ADR-0106 D4 on every door instead (the plain read's
+ * `object` row: whoever may write a schema reads it whole).
  */
 const AUTHOR_EXEMPTION = Object.freeze({
     ruling: '5856774816',
     /** [#20290] The draft read's carrier decision, under the same ruling. */
     draftCarrier: '5859504238',
-    type: 'app',
+    types: Object.freeze(['app', 'view']),
     doors: Object.freeze(['?layers=true', '/layers', '/diff', '?state=draft']),
 });
 const authorExempt = (type: string, doorName: string, callerName: CallerName): boolean =>
-    type === AUTHOR_EXEMPTION.type && AUTHOR_EXEMPTION.doors.includes(doorName)
+    AUTHOR_EXEMPTION.types.includes(type) && AUTHOR_EXEMPTION.doors.includes(doorName)
     && CALLERS[callerName].savesApps;
 
 // ── The subjects, and what the plain read answers each caller ────────────────
@@ -496,16 +556,45 @@ const SUBJECTS: Subject[] = [
         // ADR-0106 D4: whoever may write a schema reads it whole.
         plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'masked' }, author: { kind: 'whole' }, anonymous: ANON },
     },
-    // Control: a type the plain read gates for nobody.
+    // [#22639] The list view audience gate. Control: a view with no
+    // `requiredPermissions` is served to every caller — no key, no gate.
     {
         type: 'view', name: 'all_leads', secrets: [],
         plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'whole' }, author: { kind: 'whole' }, anonymous: ANON },
+    },
+    // ONE view: the holder is served it, everyone else refused it whole — the
+    // app's whole refusal, to an author as to anyone.
+    {
+        type: 'view', name: 'clm_contract.legal_queue', secrets: ['matter_ref'],
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, author: { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
+    },
+    // A view container: the gated named list view pruned, the rest served.
+    {
+        type: 'view', name: 'clm_contract', secrets: ['legal_review', 'Legal review queue'],
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'pruned' }, author: { kind: 'pruned' }, anonymous: ANON },
+    },
+    // A dashboard: refused whole to a caller who does not hold it.
+    {
+        type: 'dashboard', name: 'legal_board', secrets: ['w_open_matters'],
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, author: { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
+    },
+    // An object's own list views: pruned for a caller ADR-0106 D4 does not
+    // exempt; whoever may write the schema reads it whole.
+    {
+        type: 'object', name: 'clm_contract', secrets: ['legal_desk', 'Legal desk'],
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'pruned' }, author: { kind: 'whole' }, anonymous: ANON },
     },
 ];
 
 /** The document the plain read served (its envelope's `item`). */
 const plainItem = (res: any) => res.body?.item;
 const navIds = (doc: any): string[] => (doc?.navigation ?? []).map((e: any) => e.id);
+/** [#22639] A view container's or an object's list views, by key (`list` for a container's default). */
+const listViewIds = (doc: any): string[] =>
+    [...(doc?.list ? ['list'] : []), ...Object.keys(doc?.listViews ?? {})];
+/** The entries a `pruned` answer withholds, per type, and the diff key that carries them. */
+const prunedIds = (type: string, doc: any): string[] => (type === 'app' ? navIds(doc) : listViewIds(doc));
+const prunedKey = (type: string): string => (type === 'app' ? 'navigation' : 'listViews');
 const widgetIds = (doc: any): string[] => (doc?.widgets ?? []).map((w: any) => w.id);
 const fieldNames = (doc: any): string[] => Object.keys(doc?.fields ?? {}).sort();
 
@@ -541,7 +630,7 @@ describe('[#20156] the plain read answers what the census declares', () => {
                 }
                 expect(res.statusCode).toBe(200);
                 const item = plainItem(res);
-                if (want.kind === 'pruned') expect(navIds(item)).not.toEqual(navIds(stored));
+                if (want.kind === 'pruned') expect(prunedIds(subject.type, item)).not.toEqual(prunedIds(subject.type, stored));
                 if (want.kind === 'masked') expect(fieldNames(item)).not.toEqual(fieldNames(stored));
                 if (want.kind === 'deployment-pruned') expect(widgetIds(item)).toEqual(['w_open_cases']);
                 if (want.kind === 'whole') for (const s of subject.secrets) expect(text(res)).toContain(s);
@@ -565,7 +654,9 @@ describe(`[#20156 · #20290] ruling ${AUTHOR_EXEMPTION.ruling} — the author ex
     it('it names exactly /layers, ?layers=true, /diff and ?state=draft — every stored-version door, and no other', () => {
         expect(AUTHOR_EXEMPTION.ruling).toBe('5856774816');
         expect(AUTHOR_EXEMPTION.draftCarrier).toBe('5859504238');
-        expect(AUTHOR_EXEMPTION.type).toBe('app');
+        // [#22639] The two types the gate prunes by entry: an app's navigation,
+        // a view container's list views.
+        expect([...AUTHOR_EXEMPTION.types].sort()).toEqual(['app', 'view']);
         // Literal, not derived from `DOORS`: a door is exempted by a deliberate
         // edit here, never by inheriting a kind.
         expect([...AUTHOR_EXEMPTION.doors].sort()).toEqual(['/diff', '/layers', '?layers=true', '?state=draft']);
@@ -575,7 +666,7 @@ describe(`[#20156 · #20290] ruling ${AUTHOR_EXEMPTION.ruling} — the author ex
         expect(storedDoors.sort()).toEqual([...AUTHOR_EXEMPTION.doors].sort());
     });
 
-    it('the cells whose answer it changes are exactly the author\'s partial app cells — no whole refusal, no other caller, no rendered door', () => {
+    it('the cells whose answer it changes are exactly the author\'s partial app and [#22639] view-container cells — no whole refusal, no other caller, no rendered door', () => {
         const changed: string[] = [];
         const stillRefused: string[] = [];
         for (const doorName of Object.keys(DOORS)) {
@@ -591,38 +682,49 @@ describe(`[#20156 · #20290] ruling ${AUTHOR_EXEMPTION.ruling} — the author ex
         }
         expect(changed.sort()).toEqual([
             '/diff app/crm × author',
+            '/diff view/clm_contract × author',
             '/layers app/crm × author',
+            '/layers view/clm_contract × author',
             '?layers=true app/crm × author',
+            '?layers=true view/clm_contract × author',
             '?state=draft app/crm × author',
+            '?state=draft view/clm_contract × author',
         ]);
         // The whole refusals it does NOT lift — each is held to the plain
         // read's refusal by its census row below.
         expect(stillRefused.sort()).toEqual([
             '/diff app/launchpad × author',
             '/diff app/payroll × author',
+            '/diff view/clm_contract.legal_queue × author',
             '/layers app/launchpad × author',
             '/layers app/payroll × author',
+            '/layers view/clm_contract.legal_queue × author',
             '?layers=true app/launchpad × author',
             '?layers=true app/payroll × author',
+            '?layers=true view/clm_contract.legal_queue × author',
             '?state=draft app/launchpad × author',
             '?state=draft app/payroll × author',
+            '?state=draft view/clm_contract.legal_queue × author',
         ]);
     });
 
-    it('its predicate is the save door\'s answer: `savesApps` is exactly who `PUT /meta/app/crm` admits', async () => {
-        for (const callerName of Object.keys(CALLERS) as CallerName[]) {
-            const { rest, protocol } = setup(callerName);
-            const res = await save(rest, 'app', 'crm', clone(CRM_APP));
-            if (CALLERS[callerName].savesApps) {
-                expect(res.statusCode, callerName).toBe(200);
-                expect(protocol.saveMetaItem, callerName).toHaveBeenCalledTimes(1);
-            } else {
-                expect(envelope(res), callerName).toEqual(
-                    CALLERS[callerName].ctx
-                        ? { status: 403, code: 'FORBIDDEN' }
-                        : { status: 401, code: 'UNAUTHENTICATED' },
-                );
-                expect(protocol.saveMetaItem, callerName).not.toHaveBeenCalled();
+    it('its predicate is the save door\'s answer: `savesApps` is exactly who `PUT /meta/app/crm` — and [#22639] `PUT /meta/view/clm_contract` — admits', async () => {
+        for (const [type, name, item] of [['app', 'crm', CRM_APP], ['view', 'clm_contract', CONTRACT_VIEWS]] as const) {
+            for (const callerName of Object.keys(CALLERS) as CallerName[]) {
+                const { rest, protocol } = setup(callerName);
+                const res = await save(rest, type, name, clone(item));
+                const cell = `${type} × ${callerName}`;
+                if (CALLERS[callerName].savesApps) {
+                    expect(res.statusCode, cell).toBe(200);
+                    expect(protocol.saveMetaItem, cell).toHaveBeenCalledTimes(1);
+                } else {
+                    expect(envelope(res), cell).toEqual(
+                        CALLERS[callerName].ctx
+                            ? { status: 403, code: 'FORBIDDEN' }
+                            : { status: 401, code: 'UNAUTHENTICATED' },
+                    );
+                    expect(protocol.saveMetaItem, cell).not.toHaveBeenCalled();
+                }
             }
         }
     });
@@ -732,6 +834,10 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                             if (subject.type === 'app') expect(navIds(served)).toEqual(navIds(expected));
                             if (subject.type === 'dashboard') expect(widgetIds(served)).toEqual(widgetIds(expected));
                             if (subject.type === 'object') expect(fieldNames(served)).toEqual(fieldNames(expected));
+                            // [#22639] The list views withheld from this caller.
+                            if (subject.type === 'view' || subject.type === 'object') {
+                                expect(listViewIds(served)).toEqual(listViewIds(expected));
+                            }
                             if (want.kind === 'whole') for (const s of subject.secrets) expect(text(res)).toContain(s);
                             else for (const s of subject.secrets) expect(text(res)).not.toContain(s);
                             return;
@@ -745,14 +851,19 @@ describe(`[#20156] every alternate door answers what the plain read answers, or 
                             // layer, and on both sides of a diff, whose entries
                             // are kept and whose VALUES are the pruned ones.
                             for (const s of subject.secrets) expect(text(res)).not.toContain(s);
-                            const expected = navIds(plainItem(plain));
+                            // [#22639] An app's navigation, or a view
+                            // container's / an object's list views.
+                            const expected = prunedIds(subject.type, plainItem(plain));
+                            const key = prunedKey(subject.type);
                             if (door.serves === 'diff') {
                                 const raw = await protocol.diffMetaItem.mock.results.at(-1)?.value;
                                 expect(bucketPaths(res.body)).toEqual(bucketPaths(raw));
-                                const navigation = res.body?.added?.find((e: any) => e.path === 'navigation')?.value;
-                                expect(navIds({ navigation })).toEqual(expected);
+                                const value = res.body?.added?.find((e: any) => e.path === key)?.value;
+                                expect(prunedIds(subject.type, { [key]: value })).toEqual(
+                                    prunedIds(subject.type, { [key]: plainItem(plain)?.[key] }),
+                                );
                             } else {
-                                for (const version of servedVersions(door, res)) expect(navIds(version)).toEqual(expected);
+                                for (const version of servedVersions(door, res)) expect(prunedIds(subject.type, version)).toEqual(expected);
                             }
                             return;
                         }
@@ -907,10 +1018,12 @@ describe('[#20156] edges', () => {
     });
 
     it('a type no per-caller gate judges costs its event and diff doors no extra read', async () => {
+        // [#22639] Re-subjected from `view`, which the list view audience gate
+        // now judges per caller, to `flow`, which no gate judges.
         const { rest, protocol } = setup('reader');
         for (const suffix of ['/history', '/audit', '/diff']) {
             protocol.getMetaItem.mockClear();
-            const res = await drive(rest, suffix, 'view', 'all_leads');
+            const res = await drive(rest, suffix, 'flow', 'lead_intake');
             expect(res.statusCode, suffix).toBe(200);
             expect(protocol.getMetaItem, suffix).not.toHaveBeenCalled();
         }

@@ -185,6 +185,8 @@ describe('buildSchemaMigrationPlugins', () => {
     expect(out.notes).toEqual([]);
     expect(out.hostConfigPath).toBeNull();
     expect(out.hostConfigLoaded).toBe(false);
+    // [#22580] …and it says so: there is no deployment here to mirror.
+    expect(out.servedBoot).toEqual({ mirrored: false, reason: 'nothing-to-compose' });
   });
 
   it('composes the platform floor once an artifact app is present, and not twice', async () => {
@@ -468,7 +470,7 @@ describe('describeUnloadableHostConfig (#12953)', () => {
   function composition(over: Partial<SchemaMigrationComposition>): SchemaMigrationComposition {
     return {
       plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
-      notes: [], coverage: null, ...over,
+      servedBoot: { mirrored: false, reason: 'nothing-to-compose' }, notes: [], coverage: null, ...over,
     };
   }
 
@@ -537,7 +539,7 @@ describe('describeUnloadableHostConfig — the no-DDL notice (#13118)', () => {
   function composition(over: Partial<SchemaMigrationComposition>): SchemaMigrationComposition {
     return {
       plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
-      notes: [], coverage: null, ...over,
+      servedBoot: { mirrored: false, reason: 'nothing-to-compose' }, notes: [], coverage: null, ...over,
     };
   }
 
@@ -917,6 +919,36 @@ describe('servedPlatform (#22506)', () => {
       'com.objectstack.platform-objects',
     ]);
   }, 60_000);
+
+  /**
+   * [#22580] The composition records, where it decides it, whether its set
+   * mirrors the served boot — the fact `os migrate plan`'s unmanaged-tables
+   * sweep gates on. Every shape a project can be in, each answer its own.
+   */
+  it('[#22580] records whether the set mirrors the served boot — per project shape, never from hostConfigLoaded', async () => {
+    // A compiled artifact and NO config: `hostConfigLoaded` is false, and the
+    // set IS the served boot's once the served platform is composed.
+    const artifactApp = { type: 'app', name: 'plugin.app.demo' };
+    const artifact = await buildSchemaMigrationPlugins({ basePlugins: [artifactApp], cwd: tempProject(), servedPlatform: {} });
+    expect(artifact.hostConfigLoaded).toBe(false);
+    expect(artifact.servedBoot).toEqual({ mirrored: true });
+
+    const config = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP), servedPlatform: {} });
+    expect(config.servedBoot).toEqual({ mirrored: true });
+
+    // The controls: each set that does NOT mirror the served boot, with its reason.
+    const stackOnly = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP) });
+    expect(stackOnly.servedBoot).toEqual({ mirrored: false, reason: 'stack-only' });
+
+    const unloadable = await buildSchemaMigrationPlugins({
+      basePlugins: [], cwd: project("throw new Error('fixture: os22580 unloadable');\n"), servedPlatform: {},
+    });
+    expect(unloadable.hostConfigLoaded).toBe(false);
+    expect(unloadable.servedBoot).toEqual({ mirrored: false, reason: 'config-unloadable' });
+
+    const nothing = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: tempProject(), servedPlatform: {} });
+    expect(nothing.servedBoot).toEqual({ mirrored: false, reason: 'nothing-to-compose' });
+  }, 120_000);
 });
 
 describe('composeProviderForDeclarations (#22506)', () => {

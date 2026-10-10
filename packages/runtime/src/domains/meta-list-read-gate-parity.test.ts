@@ -104,13 +104,41 @@ const INVOICE_OBJECT = {
 };
 const LEADS_VIEW = { name: 'all_leads', label: 'All leads', object: 'lead', columns: ['name'] };
 
+// [#22639] The list view and dashboard audience gate (ruling 6095014058,
+// letter A): `requiredPermissions`, all required. The holder holds `LEGAL_CAP`.
+const LEGAL_CAP = 'clm_legal_workbench.view';
+const LEGAL_QUEUE_VIEW = {
+    name: 'clm_contract.legal_queue', object: 'clm_contract', viewKind: 'list',
+    config: { type: 'grid', columns: ['matter_ref'], requiredPermissions: [LEGAL_CAP] },
+};
+const CONTRACT_VIEWS = {
+    name: 'clm_contract', object: 'clm_contract',
+    list: { type: 'grid', columns: ['name'] },
+    listViews: {
+        mine: { type: 'grid', columns: ['name'] },
+        legal_review: { type: 'grid', columns: ['matter_ref'], requiredPermissions: [LEGAL_CAP] },
+    },
+};
+const LEGAL_BOARD = { name: 'legal_board', label: 'Legal board', requiredPermissions: [LEGAL_CAP], widgets: [{ id: 'w_open_matters', type: 'metric' }] };
+const CONTRACT_OBJECT = {
+    name: 'clm_contract', label: 'Contract',
+    fields: { amount: { type: 'number', label: 'Amount' } },
+    listViews: {
+        mine: { type: 'grid', columns: ['amount'] },
+        legal_desk: { type: 'grid', columns: ['amount'], requiredPermissions: [LEGAL_CAP] },
+    },
+};
+/** A type no per-caller gate judges. */
+const LEAD_FLOW = { name: 'lead_intake', label: 'Lead intake' };
+
 const STORE: Record<string, any[]> = {
     book: [ADMIN_GUIDE, HELP_CENTER],
     doc: DOCS,
     app: [CRM_APP, PAYROLL_APP, LAUNCHPAD_APP],
-    dashboard: [OPS_DASHBOARD],
-    object: [INVOICE_OBJECT],
-    view: [LEADS_VIEW],
+    dashboard: [OPS_DASHBOARD, LEGAL_BOARD],
+    object: [INVOICE_OBJECT, CONTRACT_OBJECT],
+    view: [LEADS_VIEW, LEGAL_QUEUE_VIEW, CONTRACT_VIEWS],
+    flow: [LEAD_FLOW],
 };
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -125,7 +153,7 @@ interface Caller {
 }
 const CALLERS: Record<'holder' | 'non-holder' | 'anonymous', Caller> = {
     holder: {
-        ctx: { userId: 'u_holder', isSystem: false, systemPermissions: ['finance.access', 'payroll.access', 'studio.access'] },
+        ctx: { userId: 'u_holder', isSystem: false, systemPermissions: ['finance.access', 'payroll.access', 'studio.access', LEGAL_CAP] },
         holdings: ['crm_admin'],
         readableFields: ['amount', 'secret_margin'],
     },
@@ -244,6 +272,8 @@ const shape = (items: any[] | undefined) => (items ?? []).map((i: any) => ({
     nav: Array.isArray(i?.navigation) ? i.navigation.map((e: any) => e.id) : undefined,
     widgets: Array.isArray(i?.widgets) ? i.widgets.map((w: any) => w.id) : undefined,
     fields: i?.fields ? Object.keys(i.fields).sort() : undefined,
+    // [#22639] A view container's or an object's list views, by key.
+    listViews: i?.listViews ? [...(i.list ? ['list'] : []), ...Object.keys(i.listViews)] : undefined,
     body: i && typeof i === 'object' && 'content' in i,
 }));
 
@@ -269,12 +299,20 @@ const ROWS: Row[] = [
     { type: 'docs', query: { include: 'content' }, secrets: [DOC_SECRET, 'crm_admin_runbook'], nonHolder: ['crm_intro'] },
     { type: 'books', secrets: [BOOK_SECRET, 'admin_guide'], nonHolder: ['help_center'] },
     { type: 'apps', secrets: ['nav_finance_ledger', 'nav_admin_runbook', 'payroll', 'launchpad'], nonHolder: ['crm'] },
-    { type: 'dashboard', secrets: ['w_org_kpi'], nonHolder: ['ops'] },
+    { type: 'dashboard', secrets: ['w_org_kpi', 'legal_board', 'w_open_matters'], nonHolder: ['ops'] },
     // The ADR-0106 object mask — the dispatcher's protocol exit already ran it.
-    { type: 'object', secrets: ['secret_margin'], nonHolder: ['invoice'] },
-    { type: 'objects', secrets: ['secret_margin'], nonHolder: ['invoice'] },
-    // Control: an ungated type.
-    { type: 'view', secrets: [], nonHolder: ['all_leads'] },
+    { type: 'object', secrets: ['secret_margin', 'legal_desk'], nonHolder: ['invoice', 'clm_contract'] },
+    { type: 'objects', secrets: ['secret_margin', 'legal_desk'], nonHolder: ['invoice', 'clm_contract'] },
+    // [#22639] The list view and dashboard audience gate: the view the
+    // non-holder does not hold left out, the container pruned of its gated
+    // entry; the gated dashboard left out; an object's own list views pruned.
+    // `all_leads` names no capability — no key, served to all.
+    { type: 'view', secrets: ['clm_contract.legal_queue', 'legal_review', 'matter_ref'], nonHolder: ['all_leads', 'clm_contract'] },
+    { type: 'views', secrets: ['clm_contract.legal_queue', 'legal_review', 'matter_ref'], nonHolder: ['all_leads', 'clm_contract'] },
+    { type: 'dashboards', secrets: ['legal_board', 'w_open_matters'], nonHolder: ['ops'] },
+    // Control: an ungated type (re-subjected from `view`, which [#22639] the
+    // list view audience gate now judges).
+    { type: 'flow', secrets: [], nonHolder: ['lead_intake'] },
 ];
 
 const label = (row: Row): string =>
@@ -392,8 +430,11 @@ describe('[#20237] the fallback exits are gated too — the protocol exit is not
         const objects = await bootDispatcher('non-holder', { protocol: protocolDouble(['object']), extra: { metadata } })
             .list('object');
         expect(metadata.list).toHaveBeenCalledWith('object');
-        expect(shape(objects.items).map((o) => o.fields)).toEqual([['amount']]);
+        expect(shape(objects.items).map((o) => o.fields)).toEqual([['amount'], ['amount']]);
         expect(text(objects)).not.toContain('secret_margin');
+        // [#22639] …and an object's own list views pruned on this exit too.
+        expect(shape(objects.items).map((o) => o.listViews)).toEqual([undefined, ['mine']]);
+        expect(text(objects)).not.toContain('legal_desk');
     });
 
     it('the ObjectQL registry exit: the object list is masked for the non-holder', async () => {
@@ -408,8 +449,31 @@ describe('[#20237] the fallback exits are gated too — the protocol exit is not
         });
         const res = await list('object');
         expect(registry.listItems).toHaveBeenCalledWith('object', undefined);
-        expect(shape(res.items).map((o) => o.fields)).toEqual([['amount']]);
+        expect(shape(res.items).map((o) => o.fields)).toEqual([['amount'], ['amount']]);
         expect(text(res)).not.toContain('secret_margin');
+        // [#22639] …and an object's own list views pruned on this exit too.
+        expect(shape(res.items).map((o) => o.listViews)).toEqual([undefined, ['mine']]);
+        expect(text(res)).not.toContain('legal_desk');
+    });
+
+    it('[#22639] the legacy one-segment object exit (`/meta/<objectName>`): an object\'s own list views are pruned for the non-holder there too', async () => {
+        // The only shape that reaches it: a protocol with no type catalogue
+        // (the unknown-segment refusal fails open) and no list for the segment.
+        const registry = {
+            getAllObjects: vi.fn(() => []),
+            listItems: vi.fn(() => []),
+            getObject: vi.fn((name: string) => clone(STORE.object.find((o: any) => o.name === name))),
+        };
+        const protocol = { getMetaItems: vi.fn(async () => undefined) };
+        const read = async (who: CallerName) =>
+            bootDispatcher(who, { protocol, extra: { objectql: { registry } } }).list('clm_contract');
+        const member = await read('non-holder');
+        expect(member.status).toBe(200);
+        expect(registry.getObject).toHaveBeenCalledWith('clm_contract');
+        expect(Object.keys(member.body?.data?.listViews ?? {})).toEqual(['mine']);
+        expect(text(member)).not.toContain('legal_desk');
+        const holder = await read('holder');
+        expect(Object.keys(holder.body?.data?.listViews ?? {})).toEqual(['mine', 'legal_desk']);
     });
 
     it('control: the holder is served every fallback list whole', async () => {
