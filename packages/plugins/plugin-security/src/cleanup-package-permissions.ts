@@ -30,7 +30,7 @@
 import {
   createSeedWriteRefusals,
   type SeedWriteRefusals,
-} from './per-organization-catalog.js';
+} from './write-refusals.js';
 
 const SYSTEM_CTX = { isSystem: true };
 

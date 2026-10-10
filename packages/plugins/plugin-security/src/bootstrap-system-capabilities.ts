@@ -217,7 +217,7 @@ import {
   logSeedDurabilityFailure,
   type SeedLogger,
   type SeedWriteRefusals,
-} from './per-organization-catalog.js';
+} from './write-refusals.js';
 
 const SYSTEM_CTX = { isSystem: true };
 

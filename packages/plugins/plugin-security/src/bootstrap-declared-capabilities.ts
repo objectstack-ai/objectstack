@@ -83,7 +83,7 @@ import {
   createSeedWriteRefusals,
   reportSeedWriteRefusals,
   type SeedWriteRefusals,
-} from './per-organization-catalog.js';
+} from './write-refusals.js';
 import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
 import { readDeclared } from './bootstrap-declared-permissions.js';
 // [#18023] THE owner-comparison predicate, REUSED rather than re-derived. It

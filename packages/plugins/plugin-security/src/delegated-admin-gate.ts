@@ -44,7 +44,7 @@ import {
   resolveOwnOrganizationRow,
   rowOrganizationId,
   seedCtx as organizationScopedCtx,
-} from './per-organization-catalog.js';
+} from './organization-scope.js';
 import { GRANT_SET_ID_FIELD, grantSetNameOf, readGrantSetRows } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -1115,7 +1115,7 @@ export class DelegatedAdminGate {
    *    organization-less rows, and a driver with no tenant scoping at all
    *    returns every organization's. Under a walled posture an
    *    organization-less business unit is invalid state
-   *    (`per-organization-catalog.ts`), so neither class may answer a
+   *    (`organization-scope.ts`), so neither class may answer a
    *    delegation boundary.
    *
    * Fail closed on both axes: a name that resolves to no row of the caller's
