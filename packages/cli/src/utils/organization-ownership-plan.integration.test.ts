@@ -206,7 +206,7 @@ describe('ADR-0131 D10 preflight — it refuses a table it cannot enumerate, nam
   it('a platform table carrying the column that the inventory gives no fate', async () => {
     db.exec('CREATE TABLE sys_mystery (id TEXT PRIMARY KEY, organization_id TEXT)');
     const r = await refusal(plan('isolated'));
-    expect(r).toMatchObject({ code: 'PLAN_REFUSED', reason: 'uninventoried-platform-table', table: 'sys_mystery' });
+    expect(r).toMatchObject({ reason: 'uninventoried-platform-table', table: 'sys_mystery' });
   });
 
   it('a table whose read fails', async () => {

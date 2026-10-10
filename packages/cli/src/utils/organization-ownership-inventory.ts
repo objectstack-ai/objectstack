@@ -159,7 +159,7 @@ export interface InventoryEntry {
 
 // ── Citations, spelled once ───────────────────────────────────────────────────
 
-const CENSUS_1 = '#13564 census 5479883784 (2026-08-31, at 00d8f6541b)';
+const CENSUS_1 = 'census record 5479883784 (2026-08-31, at 00d8f6541b)';
 const CENSUS_MAIN = 'scripts/platform-object-tenancy-census.json';
 const BETTER_AUTH_NO_COLUMN =
   `${CENSUS_1} and ${CENSUS_MAIN}: managedBy 'better-auth' — better-auth owns the columns and no organization_id is ` +
@@ -167,15 +167,15 @@ const BETTER_AUTH_NO_COLUMN =
 const D7 = 'ADR-0131 D7 (deployment-level state has no organization column)';
 const D7_PLUMBING = `${D7}: operational plumbing whose rows no writer attributes`;
 const METADATA_FAMILY =
-  `${D7}, D6; #15206 S6 moved here by triage 6068052798: declared field removed, systemFields.tenant: false, ` +
+  `${D7}, D6; triage record 6068052798 (the metadata family's schema change): declared field removed, systemFields.tenant: false, ` +
   'one column-retired ADR-0087 entry per object';
-const C7_FATE_3 = 'ADR-0131 §8 C7, first named fate-3 members (the #14096 census, ruled 2026-09-04)';
+const C7_FATE_3 = 'ADR-0131 §8 C7, first named fate-3 members (ruled 2026-09-04)';
 const D3_ORG_ROWS = 'ADR-0131 D3: an organization\'s own rows carry the authoring organization, NOT NULL';
 const D3_CATALOG = 'ADR-0131 D3/D13: the catalog object retires; definitions live in the registry';
 const D10_SINGLE = 'ADR-0131 D10 fate 3: under single, the Default Organization; otherwise reported';
 const CLOUD =
   'cloud-provided (CLOUD_PROVIDED_OBJECT_NAMES, @objectstack/spec/system); the 2026-09-03 cloud-side supplement is ' +
-  'not readable here. Cloud stays on v17 (ruling 6094175435 on #15211): no v18 ceremony runs against a cloud ' +
+  'not readable here. Cloud stays on v17 (ruling record 6094175435): no v18 ceremony runs against a cloud ' +
   'database, so the row is listed, never given a guessed fate; C10 assigns it when cloud moves';
 const EXAMPLE =
   `${CENSUS_1}: non-platform object, column auto-injected, presumptive accidental (no citable writer fact); ` +
@@ -271,7 +271,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     object: 'sys_platform_setting',
     census: PMAIN,
     fate: 'column-drop',
-    citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the settings global rung's tenant-less holder (C6, pointer 6051723395)`,
+    citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the settings global rung's tenant-less holder (C6, record 6051723395)`,
   },
   {
     object: 'sys_metadata',
@@ -282,9 +282,9 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       {
         id: 'organization-presentational-promotion',
         label:
-          'organization-scoped rows of the five presentational types — promoted to environment rows (#22011 A), ' +
-          'public-form withdrawals carried fail-closed (#22008 A), public-form view overlays among them (6081248392)',
-        citation: 'ruling pointers 6020279837 (#22011 A, #22008 A) and 6081248392 on #15211',
+          'organization-scoped rows of the five presentational types — promoted to environment rows (ruling record 6020163868, A), ' +
+          'public-form withdrawals carried fail-closed (ruling record 6020151485, A), public-form view overlays among them (record 6081248392)',
+        citation: 'ruling pointer 6020279837 (records 6020163868 and 6020151485, both A) and pointer 6081248392',
         where: [
           { column: 'organization_id', isNull: false },
           { column: 'type', in: ['view', 'dashboard', 'report', 'translation', 'email_template'] },
@@ -293,7 +293,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       {
         id: 'organization-presentational-conflicts',
         label: 'one presentational (type, name) held by more than one organization — the conflict list, chosen per row by the operator',
-        citation: 'ruling pointer 6020279837 on #15211 (one conflict list covers all three categories)',
+        citation: 'ruling pointer 6020279837 (one conflict list covers all three categories)',
         where: [
           { column: 'organization_id', isNull: false },
           { column: 'type', in: ['view', 'dashboard', 'report', 'translation', 'email_template'] },
@@ -303,7 +303,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       {
         id: 'organization-scoped-other-types',
         label: 'organization-scoped rows of a non-overridable type — reported, never promoted',
-        citation: 'ADR-0131 D6 (the per-organization overlay axis retires); #15206 stage-0 report 6067752061',
+        citation: 'ADR-0131 D6 (the per-organization overlay axis retires); stage-0 report 6067752061',
         where: [
           { column: 'organization_id', isNull: false },
           { column: 'type', notIn: ['view', 'dashboard', 'report', 'translation', 'email_template'] },
@@ -312,7 +312,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       {
         id: 'environment-overlay-duplicates',
         label: 'active overlays sharing (type, name, package) once the organization leaves the key — reported, never dropped',
-        citation: 'triage pointer 6071418113 on #15211 (the overlay index pre-flight joins the re-key stage)',
+        citation: 'triage pointer 6071418113 (the overlay index pre-flight joins the re-key stage)',
         where: [{ column: 'state', equals: 'active' }],
         conflictBy: { groupBy: ['type', 'name', 'package_id'] },
       },
@@ -366,11 +366,11 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     census: P1,
     fate: 'mirror-deletion',
     citation:
-      'ADR-0131 §6 Q1 ruled C (#22005, record 6020178017): customer-edited templates are promoted to environment ' +
+      'ADR-0131 §6 Q1 ruled C (ruling record 6020178017): customer-edited templates are promoted to environment ' +
       'Studio templates, after which the customized rows are mirrors; seeded templates are mirrors (D10 fate 2); ' +
       'the table retires under D13',
     categories: [
-      { id: 'template-promotion', label: 'customized: true rows — promoted to environment templates before deletion (#22005 C)', citation: 'ruling pointer 6020279837 on #15211', where: [{ column: 'customized', equals: true }] },
+      { id: 'template-promotion', label: 'customized: true rows — promoted to environment templates before deletion (ruling record 6020178017, C)', citation: 'ruling pointer 6020279837', where: [{ column: 'customized', equals: true }] },
       { id: 'organization-stamped', label: 'organization-stamped rows — promoted with the customized population', citation: 'ADR-0131 §6 Q1 (C)', where: [{ column: 'organization_id', isNull: false }] },
     ],
   },
@@ -386,13 +386,13 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     object: 'sys_saved_report',
     census: P1_ONLY,
     fate: 'report',
-    citation: `${CENSUS_1}; removed from the tree by #20125 (re-verification 6018712820). A physical table left by an older release is listed, its NULL rows reported`,
+    citation: `${CENSUS_1}; removed from the tree since (re-verification record 6018712820). A physical table left by an older release is listed, its NULL rows reported`,
   },
   {
     object: 'sys_report_schedule',
     census: P1_ONLY,
     fate: 'report',
-    citation: `${CENSUS_1}; removed from the tree by #20125 (re-verification 6018712820). A physical table left by an older release is listed, its NULL rows reported`,
+    citation: `${CENSUS_1}; removed from the tree since (re-verification record 6018712820). A physical table left by an older release is listed, its NULL rows reported`,
   },
 
   // ── Platform: attribution through a parent anchor (fate 3) ──
@@ -449,8 +449,8 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_activity', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; the activity's record carries the organization (rotation-sharded storage)`, anchors: [subject('object_name', 'record_id')] },
   { object: 'sys_comment', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; a reply's parent comment carries the organization`, anchors: [parent('parent_id', 'sys_comment')] },
   { object: 'sys_comment_reaction', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the reaction's comment carries the organization`, anchors: [parent('comment_id', 'sys_comment')] },
-  { object: 'sys_email', census: P1, fate: 'attribution', citation: `${D7}: sys_email is stamped at its producers (#11741); the related record carries the organization`, anchors: [subject('related_object', 'related_id')] },
-  { object: 'sys_http_delivery', census: P1, fate: 'attribution', citation: `${D7}: #13565 stamps a delivery from its webhook's organization`, anchors: [parent('ref_id', 'sys_webhook')] },
+  { object: 'sys_email', census: P1, fate: 'attribution', citation: `${D7}: sys_email is stamped at its producers; the related record carries the organization`, anchors: [subject('related_object', 'related_id')] },
+  { object: 'sys_http_delivery', census: P1, fate: 'attribution', citation: `${D7}: a delivery is stamped from its webhook's organization`, anchors: [parent('ref_id', 'sys_webhook')] },
   {
     object: 'sys_webhook',
     census: P1,
@@ -480,15 +480,16 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     census: P1,
     fate: 'attribution',
     citation:
-      'ADR-0131 D3: a seeded sys_business_unit is the organization\'s business unit (D9 derives the owner); #15086 ' +
-      `(the NULL-org-seeded unit, read in); the parent unit carries the organization; ${D10_SINGLE}`,
+      'ADR-0131 D3: a seeded sys_business_unit is the organization\'s business unit (D9 derives the owner); the ' +
+      'NULL-organization seeded unit an organization-stamped sharing rule cannot reach is read in (pointer 5536478573); ' +
+      `the parent unit carries the organization; ${D10_SINGLE}`,
     anchors: [parent('parent_business_unit_id', 'sys_business_unit')],
   },
   {
     object: 'sys_business_unit_member',
     census: P1,
     fate: 'attribution',
-    citation: '#14570 (read in; stage-0 report 6067123924): C7 owns the existing rows, natural fate the parent anchor (5536484221) — the membership\'s business unit carries the organization',
+    citation: 'the organization-less membership rows are read in (stage-0 report 6067123924): the ceremony owns the existing rows, natural fate the parent anchor (pointer 5536484221) — the membership\'s business unit carries the organization',
     anchors: [parent('business_unit_id', 'sys_business_unit')],
   },
   { object: 'sys_user_position', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS} (assignments are organization rows); the business unit carries the organization`, anchors: [parent('business_unit_id', 'sys_business_unit')] },
@@ -504,13 +505,13 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     object: 'sys_setting',
     census: P1,
     fate: 'attribution',
-    citation: `tenant and user rows written before #22261 carry NULL (pointer 6061638897 on #15211); ${D10_SINGLE}; never hidden before attribution`,
+    citation: `tenant and user rows written before the settings service stamped them carry NULL (pointer 6061638897); ${D10_SINGLE}; never hidden before attribution`,
     anchors: [],
     departures: [
       {
         id: 'global-rung-move',
         label: 'scope = global rows — moved to sys_platform_setting (value_enc copied verbatim, one row per key)',
-        citation: 'pointer 6051723395 on #15211 (C6 item 3, PR #22166); ADR-0131 D7',
+        citation: 'pointer 6051723395 (C6 item 3); ADR-0131 D7',
         as: 'moved',
         where: [{ column: 'scope', equals: 'global' }],
       },
@@ -519,7 +520,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_setting_audit', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_secret', census: P1, fate: 'attribution', citation: `re-verification 6018712820: sys_secret is tenant-attributed by one producer (moved here from C6); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
-  { object: 'sys_flow_credential', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added by #21377); ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_flow_credential', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_import_job', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_user_preference', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
 

@@ -68,7 +68,6 @@ export type PlanRefusalReason =
 
 /** The plan could not enumerate a table. Nothing is written when this is thrown. */
 export class OrganizationOwnershipPlanRefusal extends Error {
-  readonly code = 'PLAN_REFUSED';
   constructor(
     readonly reason: PlanRefusalReason,
     message: string,

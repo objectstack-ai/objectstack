@@ -65,8 +65,11 @@ const CENSUS_2026_08_31_EXAMPLES = [
   'showcase_task', 'showcase_team', 'todo_task',
 ] as const;
 
-/** #14570 and #15086, read in: each population's table has its own fate. */
-const READ_IN = { sys_business_unit_member: '#14570', sys_business_unit: '#15086' } as const;
+/**
+ * #14570 and #15086, read in: each population's table has its own fate, citing
+ * the record that read it in (a runtime string carries no tracker number).
+ */
+const READ_IN = { sys_business_unit_member: '6067123924', sys_business_unit: '5536478573' } as const;
 
 const unlisted = (names: readonly string[]): string[] => names.filter((name) => inventoryEntryFor(name) === undefined);
 
@@ -96,10 +99,10 @@ describe('ADR-0131 D10 inventory — every censused object has one fate and a ci
   });
 
   it('#14570 and #15086 are read in, each with its own fate and citation', () => {
-    for (const [object, card] of Object.entries(READ_IN)) {
+    for (const [object, record] of Object.entries(READ_IN)) {
       const entry = inventoryEntryFor(object);
       expect(entry?.fate, object).toBe('attribution');
-      expect(entry?.citation, object).toContain(card);
+      expect(entry?.citation, object).toContain(record);
     }
   });
 
