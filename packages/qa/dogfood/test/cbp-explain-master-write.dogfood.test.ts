@@ -40,6 +40,16 @@
 // classification is total, so a verb added to the explain vocabulary without a
 // door parity row fails it.
 //
+// ## A transfer is judged by the update policies its door is judged by
+//
+// The third block is not about the master. A transfer's door is the `PATCH`
+// that writes `owner_id`, an update, so an app-authored UPDATE row-level
+// policy decides it, on any object. explain used to compose a transfer's
+// row-level security for the raw verb, which the RLS compiler reads as a read,
+// so it reported "No business RLS policy applies" and `visible: true` beside a
+// 403. The block pins one `public_read_write` board row the policy excludes
+// and one it admits, each beside the transfer door's answer.
+//
 // ## Why the boot is org-bound
 //
 // The ownership floor binds `org_member` principals. An org-less boot measures
@@ -75,10 +85,33 @@ const contractStewardSet: PermissionSet = PermissionSetSchema.parse({
   },
 });
 
-/** The fixture's own security composition, plus the steward's grant. */
+/**
+ * The board steward's grant: edit and transfer on the `public_read_write`
+ * board, and one app-authored UPDATE row-level policy that admits only the
+ * board named `open`. Nothing narrows a read, so the closed board is readable
+ * and only a write-class composition can tell the two rows apart.
+ */
+const boardStewardSet: PermissionSet = PermissionSetSchema.parse({
+  name: 'cpe_board_steward',
+  label: 'explain parity fixture — edits and transfers only the open board',
+  objects: {
+    cpg_board: { allowRead: true, allowCreate: true, allowEdit: true, allowTransfer: true },
+  },
+  rowLevelSecurity: [
+    { name: 'cpe_board_updates_open_only', object: 'cpg_board', operation: 'update', using: "name == 'open'" },
+  ],
+});
+
+/** The fixture's own security composition, plus the stewards' grants. */
 function cpeSecurity(): SecurityPlugin {
   return new SecurityPlugin({
-    defaultPermissionSets: [...securityDefaultPermissionSets, cpgBaselineSet, cpgFilesAndThreadsSet, contractStewardSet],
+    defaultPermissionSets: [
+      ...securityDefaultPermissionSets,
+      cpgBaselineSet,
+      cpgFilesAndThreadsSet,
+      contractStewardSet,
+      boardStewardSet,
+    ],
     fallbackPermissionSet: cpgBaselineSet.name,
   });
 }
@@ -334,5 +367,80 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
         }
       });
     }
+  });
+
+  describe('transfer is judged by the update policy its door is judged by (public_read_write board)', () => {
+    let boardStewardTok: string;
+    /** A board the update policy excludes (`closed`), and one it admits (`open`). */
+    let closedBoardId: string;
+    let openBoardId: string;
+
+    /** explain as the REST route answers it, with the `rls` layer beside the record verdict. */
+    const explainRls = async (token: string, operation: ExplainOperation, recordId: string) => {
+      const res = await stack.apiAs(token, 'POST', '/security/explain', { object: 'cpg_board', operation, recordId });
+      const text = await res.text();
+      expect(res.status, `explain ${operation} cpg_board/${recordId}: ${text}`).toBe(200);
+      const decision = JSON.parse(text) as any;
+      const rls = (decision.layers ?? []).find((l: any) => l.layer === 'rls');
+      return { record: decision.record, rls: rls?.record as { outcome?: string; detail?: string } | undefined };
+    };
+
+    /** The transfer door: the PATCH that writes `owner_id`. */
+    const transferDoor = async (token: string, id: string) =>
+      answer(await stack.apiAs(token, 'PATCH', `/data/cpg_board/${id}`, { owner_id: adminId }));
+
+    const createBoard = async (name: string): Promise<string> => {
+      const res = await stack.apiAs(adminTok, 'POST', '/data/cpg_board', { name });
+      expect(res.status, `board '${name}' create`).toBeLessThan(300);
+      const board = (await res.json()) as any;
+      return String(board.id ?? board.record?.id ?? board.data?.id);
+    };
+
+    beforeAll(async () => {
+      boardStewardTok = await stack.signUp('cpe-board-steward@verify.test');
+      const boardStewardId = await uid('cpe-board-steward@verify.test');
+      const set = await ql.findOne('sys_permission_set', { where: { name: boardStewardSet.name }, context: SYS });
+      expect(set?.id, 'board steward permission set seeded').toBeTruthy();
+      await ql.insert('sys_user_permission_set', { user_id: boardStewardId, permission_set_id: set.id }, { context: { ...SYS } });
+      await assertArmed([
+        principalArmed({
+          stack,
+          token: boardStewardTok,
+          who: 'the board steward (edit and transfer on the board; an update policy admits only the open board)',
+          positions: ['org_member'],
+          permissions: [boardStewardSet.name],
+          control:
+            "the app-authored update policy `cpe_board_updates_open_only` (name == 'open'), which the transfer door " +
+            'meets as the update it is',
+          disarmedBy:
+            OWNERSHIP_FLOOR_DISARM +
+            ' And without the board steward grant the update policy is not in play and every transfer below is ' +
+            'refused at the object gate, before any record-level gate answers.',
+        }),
+      ]);
+      closedBoardId = await createBoard('closed');
+      openBoardId = await createBoard('open');
+    });
+
+    it('a board the update policy excludes: explain transfer refuses on rls, beside the transfer door\'s 403', async () => {
+      const transfer = await explainRls(boardStewardTok, 'transfer', closedBoardId);
+      const update = await explainRls(boardStewardTok, 'update', closedBoardId);
+      const door = await transferDoor(boardStewardTok, closedBoardId);
+      expect(door.status, `transfer door on the closed board: ${door.body}`).toBe(403);
+      expect(door.code).toBe('PERMISSION_DENIED');
+
+      expect(transfer.record, 'explain transfer').toEqual({ recordId: closedBoardId, visible: false, decidedBy: 'rls' });
+      expect(transfer.rls?.outcome, 'explain transfer, the record\'s business RLS').toBe('excluded');
+      expect(transfer.record, 'explain transfer answers what explain update answers').toEqual(update.record);
+    });
+
+    it('control: a board the update policy admits: explain transfer admits, beside the transfer door\'s 200', async () => {
+      const transfer = await explainRls(boardStewardTok, 'transfer', openBoardId);
+      const door = await transferDoor(boardStewardTok, openBoardId);
+      expect(door.status, `transfer door on the open board: ${door.body}`).toBe(200);
+
+      expect(transfer.record, 'explain transfer').toMatchObject({ recordId: openBoardId, visible: true });
+      expect(transfer.rls?.outcome, 'explain transfer, the record\'s business RLS').toBe('admitted');
+    });
   });
 });
