@@ -30,12 +30,17 @@ export const entry: SemanticMigration = {
     + 'and the build door, which judged a flow expression\'s syntax only, passed it. The run-user spellings are '
     + 'the reachable case: formulas, row-level security and the client bind the run\'s user under user, ctx.user '
     + 'and os.user as well, and flow CEL does not, because a top-level user would collide with a variable or a '
-    + 'lookup field of that name. objectstack validate and the runtime publish gate now refuse such a root, naming '
-    + 'current_user for the user spellings and the in-scope names for any other. A flow whose run can bind a name '
-    + 'the reader cannot see is not judged: one with a script or connector_action node, a wait, subflow or map node '
-    + 'a resume can fold a bag into, a screen with no field list, a plugin node type, or a trigger object the stack '
-    + 'does not declare. No D2 conversion exists: none of these roots ever evaluated in a flow, so there is no '
-    + 'behaviour to carry over, and a run without a user needs a guard only the author can choose.',
+    + 'lookup field of that name. objectstack validate now refuses such a root, naming current_user for the user '
+    + 'spellings and the in-scope names for any other. A flow whose run can bind a name the reader cannot see is not '
+    + 'judged: one with a script or connector_action node, a wait, subflow or map node a resume can fold a bag into, '
+    + 'a screen with no field list, or a plugin node type; and one an entrance the stack declares hands a record '
+    + 'whose keys are not in hand: a record trigger or time-relative sweep on an object the stack does not declare, '
+    + 'an api trigger (the inbound hook hands the request body in as the record), a flow action on an undeclared '
+    + 'object, a map node whose itemObject is undeclared or absent, or a subflow or map parent that is itself such a '
+    + 'flow. The runtime publish gate does not give this verdict yet: it judges a flow write without the stack\'s '
+    + 'actions and other flows, so it cannot see those entrances. No D2 conversion exists: none of these roots ever '
+    + 'evaluated in a flow, so there is no behaviour to carry over, and a run without a user needs a guard only the '
+    + 'author can choose.',
   acceptanceCriteria:
     'Run objectstack validate: it reports each refused root as expression-invalid at the flow, the node or edge and '
     + 'the slot, naming the root and its remedy. Replace each run-user spelling with current_user, guarded where the '
