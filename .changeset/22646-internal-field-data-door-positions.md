@@ -3,7 +3,7 @@
 '@objectstack/metadata-protocol': minor
 ---
 
-fix(objectql,metadata-protocol)!: the data door honours a field's `internal: true` in its filter, sort, group-by, aggregate, per-aggregation-filter, `$search` and one-level `$expand` positions, not only the row (#22646)
+fix(objectql,metadata-protocol)!: the data door honours a field's `internal: true` in its filter (related-object conditions included), sort, group-by, aggregate, per-aggregation-filter, `$search` and `$expand` positions at every depth, not only the row (#22646)
 
 Clause-②: no (narrowing)
 
@@ -20,11 +20,12 @@ A field declared `internal: true` is withheld from every generic exit (#21197): 
 - A **group-by** of, or an **aggregate operand** over, such a field was refused by the engine, but as an undeclared `500 INTERNAL_ERROR` (a bare `Error` with no `code` or `status`), not a declared refusal.
 - A **per-aggregation filter** (`aggregations[].filter`) naming it, and a **filter beside an aggregation**, were admitted — the same oracle at a second filter position.
 - A **`$search`** whose resolved set included such a field (a non-hidden `internal` text column enters the auto-default) scanned it — a cross-field substring match that confirms a guessed prefix.
-- A one-level **`$expand`**'s own `where` / `orderBy` on the TARGET object's `internal` field was admitted into the expansion sub-read — the expanded record's presence is an oracle on the related row.
+- A **nested-relation condition** (a condition on a lookup's related object) naming the related object's `internal` field was evaluated on that object — the parent row came back only when the related value matched, the same oracle one hop away.
+- An **`$expand`** entry's own `where` / `orderBy` on its TARGET object's `internal` field was admitted into the expansion sub-read, at the first level and at every deeper level — the expanded record's presence is an oracle on the related row.
 
 **TO.** Each evaluate position is refused `400 INVALID_FIELD`, a declared ADR-0112 envelope naming the object and the field, before the engine is asked:
 
-- Filter, sort, group-by, aggregate operand, per-aggregation filter and a one-level expand's own filter/sort are refused at the generic data door (`@objectstack/metadata-protocol`), after the field-existence gates, in the shape and envelope of the stored-metadata body/hash family one axis over.
+- Filter, sort, group-by, aggregate operand and per-aggregation filter are refused at the generic data door (`@objectstack/metadata-protocol`), after the field-existence gates, in the shape and envelope of the stored-metadata body/hash family one axis over. A nested-relation condition inside any filter is judged against the RELATED object's own `internal` fields, and every level of an `$expand` tree has its own filter / sort judged against that level's target object; the refusal names the object that declares the field.
 - The engine's `aggregate()` refusal (`rejectCredentialAggregation`) now carries the `INVALID_FIELD` / 400 envelope instead of the bare `Error`, so the group-by and aggregate-operand positions answer a declared `400` rather than a `500` — and the `secret` / `password` case that shared that bare `Error` is upgraded with it.
 - A `$search` never scans an `internal: true` column: the field is dropped from the set the engine's search expansion resolves over (a withhold, like the auto-default's `hidden` / credential-type exclusions), and an explicit `$searchFields` naming one is refused `400 INVALID_FIELD` at the door rather than silently widened back to the default set.
 
