@@ -131,6 +131,10 @@ When `title` is omitted, the header keeps the title its author wrote, and
 title restates the page's `label`. So a page whose header title matches its
 nav label needs only `label`, while a header whose title says something else,
 such as a dynamic `'{name}'`, keeps it until the bundle supplies a `title`.
+One exception: on a page of `type: 'record'` bound to an `object`, a header
+that authors no title and keeps its record chrome (`recordChrome` not
+`false`) derives its heading from the record, so `label` does not fill it and
+the record's own name shows in every locale.
 Every root-level `page:header` (a region's entry or a `slots.<slot>` entry)
 is resolved by this one rule.
 </Callout>
