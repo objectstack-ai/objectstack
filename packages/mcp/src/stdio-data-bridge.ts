@@ -81,7 +81,7 @@
  * remains of the divergence above is genuinely not security.
  */
 
-import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
+import { omitInternalFieldsFromWriteResponse, relationConditionSites } from '@objectstack/core';
 import {
   resolveEffectiveApiMethods,
   isApiOperationAllowed,
@@ -271,12 +271,18 @@ function exposureError(
  *    legacy/test doubles. Reading only the nested shape here would let a flat
  *    definition be gated on HTTP and ungated on stdio — the very divergence
  *    this function closes, re-opened one shape down.
+ *
+ * [#22777] `condition` is set when `object` is not addressed but is the TARGET
+ * of a nested-relation condition at that filter position
+ * ({@link enforceRelationTargetExposure}); the refusal then names the position
+ * and the way out, as the data door's does for the same condition.
  */
 export async function enforceApiExposure(
   metadataService: IMetadataService,
   object: string,
   action: string,
   context: ExecutionContext,
+  condition?: string,
 ): Promise<void> {
   if (context?.isSystem) return;
 
@@ -291,10 +297,14 @@ export async function enforceApiExposure(
   const enable = (
     def.enable && typeof def.enable === 'object' ? def.enable : def
   ) as unknown as EnableLike;
+  const consequence = condition === undefined
+    ? ''
+    : `, so the condition on it at '${condition}' was not evaluated and the query was not run. `
+      + 'Filter on the lookup\'s stored id instead, or remove the condition.';
 
   if (enable.apiEnabled === false) {
     throw exposureError(
-      `Object '${object}' is not exposed via the API`,
+      `Object '${object}' is not exposed via the API${consequence}`,
       OBJECT_API_DISABLED,
       404,
     );
@@ -307,11 +317,42 @@ export async function enforceApiExposure(
   if (isApiOperationAllowed(eff, operation)) return;
 
   throw exposureError(
-    `API operation '${operation}' is not allowed on object '${object}'`,
+    `API operation '${operation}' is not allowed on object '${object}'${consequence}`,
     OBJECT_API_METHOD_NOT_ALLOWED,
     405,
     effectiveOperationsArray(eff),
   );
+}
+
+/**
+ * [#22777] A NESTED-RELATION condition in the caller's filter is evaluated on
+ * its TARGET object: the engine lowers it by reading the target as the caller
+ * (`ObjectQL.lowerRelationConditions`) and keeps the rows whose related record
+ * matched. So each condition's target is asked {@link enforceApiExposure}'s
+ * decision for {@link GATED_ACTIONS}`.query` — `list`, because a condition is a
+ * predicate over the whole target, the read the target's own filtered query
+ * performs — and an unserved target REFUSES the call: dropping the condition
+ * would widen the result. The data door asks the same of the same sites
+ * (`refuseUnservedRelationTarget`), found by the one walk both doors import
+ * (`relationConditionSites`). One hop, as the engine serves one: a relation
+ * beneath a condition is refused by the engine before anything is read.
+ */
+async function enforceRelationTargetExposure(
+  metadataService: IMetadataService,
+  object: string,
+  where: unknown,
+  context: ExecutionContext,
+): Promise<void> {
+  if (where == null) return;
+  let def: ObjectDef | null | undefined;
+  try {
+    def = (await metadataService.getObject(object)) as ObjectDef | null | undefined;
+  } catch {
+    def = undefined; // no field map, no site: the gate above falls open the same way
+  }
+  for (const site of relationConditionSites(def?.fields, where)) {
+    await enforceApiExposure(metadataService, site.target, GATED_ACTIONS.query, context, `where.${site.field}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -683,6 +724,8 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     async query(object, opts) {
       const context = await resolvePrincipal();
       await enforceApiExposure(metadataService, object, GATED_ACTIONS.query, context);
+      // [#22777] …and each nested-relation condition's target, before the engine reads it.
+      await enforceRelationTargetExposure(metadataService, object, opts?.where, context);
       // [#21207] After the exposure gate, before the engine: a filter or sort
       // on a stored metadata body is refused rather than evaluated.
       const bodyRefusal = storedMetadataBodyRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
@@ -790,6 +833,8 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // `list` must not leak row statistics through GROUP BY either. The
       // derivation lives in the spec helpers, so that holds here for free.
       await enforceApiExposure(metadataService, object, GATED_ACTIONS.aggregate, context);
+      // [#22777] …and each nested-relation condition's target, as `query` asks it.
+      await enforceRelationTargetExposure(metadataService, object, opts?.where, context);
       // [#21207] A grouping, filter or aggregate member on a stored metadata
       // body computes over the stored bytes, so it is refused, not run.
       const bodyRefusal = storedMetadataBodyRefusal(object, {
