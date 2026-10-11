@@ -1779,12 +1779,32 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // the per-project kernel is swapped in before the gates read either.
             // The literal `_activation` segment collides with no REST-mounted
             // `/security` route (machine names cannot begin with `_`).
+            //
+            // [ADR-0126 §7.1] Beside it, `POST /security/permission-sets/:name/clone`
+            // — the permission-set clone door (`domains/permission-set-clone.ts`),
+            // mounted here for the same reason: its arm lives in the dispatcher's
+            // `/security` domain. The REST server mounts nothing under
+            // `/security/permission-sets`.
             const registerSecurityActivationRoutes = (base: string) => {
                 server!.post(`${base}/security/_activation/:type/:name`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch(
                             'POST',
                             `/security/_activation/${req.params.type}/${req.params.name}`,
+                            req.body,
+                            req.query,
+                            { request: req },
+                        );
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+                server!.post(`${base}/security/permission-sets/:name/clone`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(
+                            'POST',
+                            `/security/permission-sets/${encodeURIComponent(req.params.name)}/clone`,
                             req.body,
                             req.query,
                             { request: req },

@@ -63,7 +63,9 @@
  *
  * - `NATIVE_SCOPING_UNDER_SINGLE` (explain's side): under `single` the engine
  *   still scopes a tenant object's read to the context's organization, which
- *   explain's tenant layer does not report.
+ *   explain's tenant layer does not report. Its `readFilter` row measures it;
+ *   its record row joined the invariant once the record story was gated on the
+ *   asker's own read (#22792), which that scoping answers.
  * - `CLAIM_KEPT_UNDER_A_WALL` (enforcement's side): with `org-scoping` and no
  *   `tenancy` service, admission reads no posture and never drops a removed
  *   member's organization claim, while this plugin walls Layer 0 at
@@ -335,7 +337,15 @@ const SAME_CLASS = 'record.status != record.title';
 
 const ALPHA = 'org_alpha';
 const BETA = 'org_beta';
-/** An `org_alpha` member holding `manage_users` there: the caller who explains. */
+/**
+ * An `org_alpha` member holding `manage_users` there: the caller who explains.
+ * It also reads what the explained users read ({@link READER_SET}): whether an
+ * explanation may disclose a record is decided by the ASKER's read, and an
+ * administrator explaining another user whose own read of the record is
+ * refused is told what an id no row carries (ruling C of #22851). Holding the
+ * reader set, this asker is told the explained user's own record story, which
+ * is what every record cell below holds against enforcement.
+ */
 const USER_ADMIN = 'usr_alpha_admin';
 /** A current `org_alpha` member. */
 const USER_MEMBER = 'usr_alpha_member';
@@ -424,6 +434,7 @@ async function bootPrincipal(source: PostureSource) {
       id: `ups_${user}_${set}_${n}`, user_id: user, permission_set_id: set, permission_set: name, organization_id: ALPHA,
     }, SYS);
   await grant(USER_ADMIN, `ps_user_admin_${n}`, 'qa_user_admin');
+  await grant(USER_ADMIN, `ps_reader_${n}`, READER_SET);
   for (const u of [USER_MEMBER, USER_REMOVED]) {
     await grant(u, `ps_reader_${n}`, READER_SET);
     await grant(u, `ps_alpha_notes_${n}`, ALPHA_ONLY_SET);
@@ -810,8 +821,11 @@ function principalRows(
  * Under `single` there is no tenant wall, yet the engine still scopes a tenant
  * object's read to the context's organization (driver-native tenant scoping,
  * any posture). Explain's tenant layer contributes nothing under `single`, so
- * it reports the other organization's row readable. Explain's side; a finding
- * of this card, not fixed here.
+ * its `readFilter` reports the other organization's rows as served. Explain's
+ * side; a finding of this card, not fixed here. [#22792] The record verdict no
+ * longer carries it: whether an explanation may say a record exists is the
+ * asker's own by-id read, which that same native scoping answers, so the other
+ * organization's row is answered as an id no row carries.
  */
 const NATIVE_SCOPING_UNDER_SINGLE =
   'under `single`, the engine scopes the read to the context organization; explain reports the other organization\'s row';
@@ -897,8 +911,11 @@ const TABLE: Row[] = [
     removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
     member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
   }, {
-    removed: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE, 'record:l_beta': NATIVE_SCOPING_UNDER_SINGLE },
-    member: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE, 'record:l_beta': NATIVE_SCOPING_UNDER_SINGLE },
+    // [#22792] `record:l_beta` joined the invariant: the asker's own read is
+    // scoped to the context organization the same way, so the record verdict
+    // is the missing record's, as the explained user's read answers.
+    removed: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE },
+    member: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE },
   }),
   // The posture-source asymmetry: the member's rows hold; the removed member's are enforcement's finding.
   ...principalRows('#20604 A4', { orgScopingOnly: true }, '`org-scoping` with no `tenancy` service', {

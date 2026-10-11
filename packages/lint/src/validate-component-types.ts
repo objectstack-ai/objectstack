@@ -140,6 +140,32 @@ export function retiredTypeHead(prescription: string): string {
   return stop > 0 ? prescription.slice(0, stop) : prescription.replace(/\.$/, '');
 }
 
+/**
+ * [#22161] A retired type's REMEDY, cut from its prescription for the `fix:`
+ * line: the sentence that says what to do — every entry has one that opens
+ * "delete the …" (`Delete the \`element:form\` component and use the
+ * object-bound \`object-form\` block instead`) — up to its end, and up to its
+ * first ` — ` as well when the whole sentence would run past 200 characters.
+ * Like {@link retiredTypeHead} it cuts and never rewrites (the first letter is
+ * capitalised, nothing else), so the `fix:` line is a piece of
+ * `RETIRED_PAGE_COMPONENT_TYPES`' own text and no second copy of the guidance
+ * exists. It replaces a hint that said "Apply the prescription above" after
+ * the verdict had been cut to the prescription's head. An entry with no such
+ * sentence gets the one remedy every retirement shares.
+ */
+export function retiredTypeRemedy(prescription: string): string {
+  const at = prescription.search(/\bdelete the /i);
+  if (at < 0) return 'Delete the component node: the type is retired and the parse refuses it by name';
+  let remedy = prescription.slice(at);
+  const stop = remedy.indexOf('. ');
+  remedy = stop >= 0 ? remedy.slice(0, stop) : remedy.replace(/\.$/, '');
+  if (remedy.length > 200) {
+    const dash = remedy.indexOf(' — ');
+    if (dash > 0) remedy = remedy.slice(0, dash);
+  }
+  return remedy.charAt(0).toUpperCase() + remedy.slice(1);
+}
+
 export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
   const findings: ComponentTypeFinding[] = [];
   if (!isRec(stack)) return findings;
@@ -165,10 +191,9 @@ export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
           where: `page "${pageName}" · ${type}`,
           path: `${path}.type`,
           message: `${retiredTypeHead(prescription)}, so the parse refuses this node by name (\`os validate\` prints the prescription)`,
-          hint:
-            `Apply the prescription above: \`${type}\` is a retired component type, refused by ` +
-            'name at the parse door (`PageComponentSchema.type`), so this page cannot validate or ' +
-            'publish while the node is present.',
+          // [#22161] The remedy itself, cut from the same entry ("above" pointed
+          // at the prescription the verdict no longer quotes).
+          hint: retiredTypeRemedy(prescription),
         });
         continue;
       }
@@ -189,11 +214,12 @@ export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
           `\`${type}\` is not a declared type of the reserved \`${type.slice(0, type.indexOf(':'))}:\` ` +
           'namespace, so the page draws a placeholder in its place.' +
           (suggestion ? ` ${suggestion}` : ''),
+        // [#22161] One line; why a custom component needs its own namespace is
+        // the explanation's.
         hint: suggestions.length
           ? `Rename \`${type}\` → \`${suggestions[0]}\`.`
-          : `Use a declared component type from the standard vocabulary, or — for a custom component ` +
-            `registered by your own plugin — give it its own namespace (e.g. \`my-plugin:${type.slice(type.indexOf(':') + 1)}\`) ` +
-            'so it cannot be mistaken for platform vocabulary.',
+          : `Use a declared component type, or — for a custom component registered by your own plugin — ` +
+            `give it its own namespace (e.g. \`my-plugin:${type.slice(type.indexOf(':') + 1)}\`)`,
       });
     }
   }

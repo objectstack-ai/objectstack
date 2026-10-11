@@ -99,9 +99,12 @@
  *    where the sharing layer imposes nothing on reads, and structurally the
  *    WRONG one on `private`, where the sharing layer has already withheld the
  *    row and an AND term can only withhold more (an RLS "widener" there lints
- *    clean and grants nothing). The hint carries that split rather than the
- *    unqualified "use RLS" it shipped with, and the tests pin the `private`
- *    half so it cannot regress to advice that cannot work.
+ *    clean and grants nothing). The id's `os explain` entry carries that split
+ *    rather than the unqualified "use RLS" the hint shipped with; the one-line
+ *    hint names the route that holds on every model (keep the record's own
+ *    properties, name the audience in `sharedWith`) and recommends no RLS at
+ *    all, and the tests pin both, so neither can regress to advice that
+ *    cannot work.
  *  - `parse-error` → deliberately NOT reported here. CEL syntax is
  *    `validateStackExpressions`' surface and it already gates this same field
  *    (`stack.sharingRules[].condition`). Reporting it twice, in two
@@ -183,7 +186,6 @@ import { compileCelToFilter } from '@objectstack/formula';
 import { referenceCarrierOf } from '@objectstack/spec/data';
 import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
 import {
-  CROSS_CLASS_REMEDY,
   crossClassComparisons,
   crossClassVerdict,
   listHoldingComparisons,
@@ -250,10 +252,28 @@ function toCompilerInput(condition: unknown): string | { source?: string } | nul
   return null;
 }
 
-const PUSHDOWN_SUBSET =
-  'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, ' +
-  'and the string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column `record.<field>` ' +
-  'paths (ADR-0058 D2).';
+/*
+ * [#22161] The `fix:` lines. Each finding's `hint` is one remedy sentence of
+ * at most 200 characters; the subset it rewrites into, the comparison classes
+ * with the types each holds, and which mechanism replaces a `current_user`
+ * read on which sharing model are each id's `os explain` entry
+ * (`rule-explanations.ts`), held to their sources by this file's test.
+ */
+
+/** Rewrite into the lowerable subset — the compiler's `unsupported` arm. */
+const LOWERABLE_REWRITE =
+  'Rewrite `condition` inside the lowerable subset: comparisons, `in`, `&&` `||` `!`, null tests and string ' +
+  'methods over single-column `record.<field>` paths; write `has(record.x)` as `record.x != null`';
+
+/**
+ * Keep the record's own properties, name the audience — the `unresolved-variable`
+ * arm. ⛔ It names no RLS: an RLS policy is the remedy on a `public_read` /
+ * `public_read_write` anchor only, and grants nothing on `private` (this file's
+ * header), so the model-qualified split is the explanation's, never this line's.
+ */
+const RUNTIME_VARIABLE_REMEDY =
+  "Keep only the record's own properties in `condition` (e.g. `record.stage == 'closed_won'`) and name the " +
+  "audience in `sharedWith`; what replaces `current_user` depends on the object's sharingModel";
 
 /*
  * [#22161] The verdict clauses. Every finding of the four ids prints one
@@ -291,10 +311,8 @@ function listHoldingFinding(
     path: at.path,
     message: `condition ${listHoldingVerdict(comparisons)}, ${CRITERIA_QUERY_REFUSED}`,
     hint:
-      'A field compared with a `json` or `multiple` field has no row-filter form: a row filter compares one ' +
-      'value with one value, and cannot test membership in a list another column holds. Compare with a ' +
-      "single-valued column, or with a literal — \"one of these values\" is `record.status in ['open', " +
-      "'pending']` — or keep the value the rule keys on in a single-valued field and compare with that.",
+      "Compare with a single-valued column or a literal (`record.status in ['open', 'pending']`), or keep the " +
+      'value the rule keys on in a single-valued field and compare with that',
   };
 }
 
@@ -321,8 +339,8 @@ function crossClassFinding(
     path: at.path,
     message: `condition ${crossClassVerdict(comparisons)}, ${CRITERIA_QUERY_REFUSED}`,
     hint:
-      `${CROSS_CLASS_REMEDY} To keep the rule without a second column, compare with a literal — "one of these ` +
-      "values\" is `record.status in ['open', 'pending']` — or test a file field with `!= null`.",
+      'Compare a field only with a field of its comparison class, or with a literal; if both columns do hold ' +
+      'comparable values, one is declared with the wrong type: fix the declaration',
   };
 }
 
@@ -597,8 +615,10 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
     if (result.reason === 'parse-error') return;
 
     if (result.reason === 'unresolved-variable') {
-      // The record-relative-recipient gap the hint's last sentence describes is
-      // tracked at #14103. The id lives HERE and not in the string: a runtime
+      // The record-relative-recipient gap the explanation's last paragraph
+      // describes (it was the hint's last sentence until the hint became one
+      // line, #22161) is tracked at #14103. The id lives HERE and not in the
+      // string: a runtime
       // message reaches authors and generated surfaces, and none of them can
       // resolve `#NNNN` (`check:doc-authoring`, maintainer ruling 2026-08-12).
       // The reader who CAN resolve it is reading this source.
@@ -608,33 +628,7 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
         where,
         path,
         message: `condition reads a runtime variable (${result.detail}), ${NEVER_SEEDED}`,
-        hint:
-          'A criteria sharing rule is MATERIALISED: the seeder compiles ONE static `criteria_json` per ' +
-          'rule and the evaluator writes `sys_record_share` rows from it, so there is no "current user" ' +
-          'for the condition to read. WHICH mechanism replaces it depends on the anchor object\'s ' +
-          '`sharingModel`, because the security layers are AND-composed (`getReadFilter` = RLS AND ' +
-          'controlled-by-parent AND sharing) and an AND term can only REMOVE rows — it can never add ' +
-          'one back. On `public_read` / `public_read_write` the sharing layer imposes nothing on reads ' +
-          '(`buildReadFilter` constrains `private` only), so an RLS policy on a permission set ' +
-          '(`rowLevelSecurity[].using`, where `current_user.*` IS resolved) is the right mechanism: it ' +
-          'NARROWS an open baseline, the direction AND can express. On `private` — including a CUSTOM ' +
-          'object that declares no `sharingModel`, which resolves to `private` (ADR-0090 D1) — that ' +
-          'same policy CANNOT work: the sharing layer has already withheld the row, and AND-ing an RLS ' +
-          'predicate onto it can only withhold more, so the policy lints clean, passes every gate and ' +
-          'grants nothing. The two doors that widen a `private` object for a non-admin principal both ' +
-          'key on WHO OWNS the row or on an explicit share row, never on a property of the record: the ' +
-          'ADR-0057 D1 depth scopes (`readScope` / `writeScope` on the object permission — `own` | ' +
-          '`own_and_reports` | `unit` | `unit_and_below` | `org`), which widen the owner-match to ' +
-          '`owner_id IN (…)`; and a `sys_record_share` row, which on this path only a criteria sharing ' +
-          'rule writes — i.e. THIS rule. So keep this rule for the part of the predicate that is a ' +
-          'property of the RECORD (e.g. `record.stage == \'closed_won\'`) and name the audience ' +
-          'through `sharedWith`. If the audience is genuinely record-relative ("the owner\'s manager", ' +
-          '"this record\'s approver"), no mechanism expresses it today — `sharedWith` recipients ' +
-          'resolve tenant-wide, so reaching for `position` shares every matched row with EVERY holder ' +
-          'of that position (the skip-level, the manager two teams over): an over-broad grant, not the ' +
-          'narrower one you meant. That is a known gap in the platform, not something a different ' +
-          'spelling of this rule can close — leave the grant unauthored rather than widening it, and ' +
-          'ask for record-relative sharing recipients.',
+        hint: RUNTIME_VARIABLE_REMEDY,
       });
       return;
     }
@@ -645,13 +639,7 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
       where,
       path,
       message: `condition is not lowerable (${refusalVerdict(result.detail)}), ${NEVER_SEEDED}`,
-      hint:
-        'Rewrite the predicate inside the lowerable subset. ' + PUSHDOWN_SUBSET + ' Two traps in ' +
-        'particular: (1) `has(record.x)` is correct in an object VALIDATION rule, which is INTERPRETED, ' +
-        'and wrong here, where the condition is COMPILED — write the null test as `record.x != null`; ' +
-        '(2) a related-record path (`record.account.region`) is a join, which the compiler refuses by ' +
-        'design (ADR-0055) — denormalise the value onto this object (a formula/rollup field) and test ' +
-        'that column, or share the related object instead.',
+      hint: LOWERABLE_REWRITE,
     });
   });
 

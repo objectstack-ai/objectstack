@@ -48,11 +48,13 @@
  * not raise. `import-runner-sandbox-refusal-row.test.ts` §4 is the driver-text
  * control #22718's ablation B pinned, and it is not edited here.
  *
- * The sample object name in a rendered message is deliberately NOT the
- * import's object. `mapDataError`'s unknown-object heuristic answers `404
- * OBJECT_NOT_FOUND` for a text that names the requested object and contains
- * `not`, which a capability denial on that object does. That is a door
- * defect outside this card; the row does not copy a 4xx sentence.
+ * [#22868] The sample object name in a rendered message IS the import's
+ * object. Two sites name it — the `ctx.api.object(…)` capability gate and the
+ * missing-method arm — and `mapDataError`'s unknown-object heuristic answered
+ * those `404 OBJECT_NOT_FOUND` (a quoted requested-object name plus `not`)
+ * until the door asked `isSandboxOwnFault` first. So §1 holds each site that
+ * names the requested object to the door's `500`, and §3 holds the controls
+ * that keep the heuristic's other answers where they were.
  */
 
 import { readFileSync } from 'node:fs';
@@ -68,10 +70,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const RUNNER = resolve(HERE, '../../../runtime/src/sandbox/quickjs-runner.ts');
 const SOURCE = ts.createSourceFile(RUNNER, readFileSync(RUNNER, 'utf8'), ts.ScriptTarget.Latest, true);
 
+const OBJECT = 'mz_locked';
+
 /**
  * One sample per interpolation the runner's fault messages use. A message
  * naming an expression not listed here is unrenderable, and §1's census says
- * which. `objectName` is not the import's object (see the header).
+ * which. `objectName` is the import's object (see the header).
  */
 const SAMPLES: Readonly<Record<string, string>> = {
   'args.origin.kind': 'hook',
@@ -82,7 +86,7 @@ const SAMPLES: Readonly<Record<string, string>> = {
   wallCeiling: '30000',
   pumps: '3',
   'formatErr(msg)': 'SyntaxError: unexpected token',
-  objectName: 'mz_other',
+  objectName: OBJECT,
   method: 'find',
   required: 'api.read',
   fieldName: 'owner',
@@ -219,6 +223,11 @@ const census = (() => {
 
 const PRODUCER_NAME = producerName();
 
+/** [#22868] The fault sites whose rendered message quotes the requested object. */
+function namingTheObject(): Site[] {
+  return census.faults.filter((s) => s.message.includes(`'${OBJECT}'`));
+}
+
 /** The producer's own fault: its declared `name`, and no `innerMessage`. */
 function ownFault(message: string): Error {
   const err = new Error(message);
@@ -227,8 +236,6 @@ function ownFault(message: string): Error {
 }
 
 type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
-
-const OBJECT = 'mz_locked';
 
 const baseOpts = {
   objectName: OBJECT,
@@ -280,6 +287,11 @@ describe('[#22741] §1 — every fault the runner raises itself reads the door\'
     }
     // §2's population: the constructions that set `innerMessage` (crash and refusal sites).
     expect(census.crashes.length).toBeGreaterThanOrEqual(4);
+    // [#22868] The sites that name the requested object: the `ctx.api.object(…)`
+    // capability gate and the missing-method arm, each held to `500` below.
+    const named = namingTheObject();
+    expect(named.filter((s) => /^capability '/.test(s.message)).length, 'capability denial').toBeGreaterThanOrEqual(1);
+    expect(named.filter((s) => /not implemented$/.test(s.message)).length, 'missing ctx.api method').toBeGreaterThanOrEqual(1);
   });
 
   it.each(census.faults.map((s) => [s.label, s.message] as const))('%s', async (_label, message) => {
@@ -329,6 +341,28 @@ describe('[#22741] §3 — controls: what the predicate must NOT change', () => 
     expect(isSandboxOwnFault(err())).toBe(false);
     expect(mapDataError(err(), OBJECT).status).toBe(500);
     expect((await rowFor(err)).error).toBe(sanitizeRowError(budget()));
+  });
+
+  it.each([
+    ['SQLite', `SQLITE_ERROR: no such table: ${OBJECT}`],
+    ['Postgres', `relation "${OBJECT}" does not exist`],
+  ])('CONTROL [#22868] — a real %s unknown-object text on the requested object still answers 404', (_driver, text) => {
+    const door = mapDataError(new Error(text), OBJECT);
+    expect(door.status).toBe(404);
+    expect(door.body.code).toBe('OBJECT_NOT_FOUND');
+  });
+
+  it('CONTROL [#22868] — the same object-naming texts, thrown by anything but the sandbox, keep the heuristic\'s 404', () => {
+    // The door asks the producer's identity, never the words: no second rule.
+    const named = namingTheObject();
+    expect(named.length).toBeGreaterThanOrEqual(2);
+    for (const { label, message } of named) {
+      const err = new Error(message);
+      expect(isSandboxOwnFault(err), label).toBe(false);
+      const door = mapDataError(err, OBJECT);
+      expect(door.status, label).toBe(404);
+      expect(door.body.code, label).toBe('OBJECT_NOT_FOUND');
+    }
   });
 
   it('CONTROL — a code-defined hook\'s native TypeError keeps its text, as the filing says', async () => {
