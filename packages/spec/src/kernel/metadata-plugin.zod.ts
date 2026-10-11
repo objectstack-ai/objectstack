@@ -169,7 +169,8 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // `declared ≠ enforced` that #5271 closed for `api`. `PLURAL_TO_SINGULAR`
   // has mapped `capabilities` → `capability` since #5870, `AppPlugin`
   // registers stack-declared capabilities under that exact name, and
-  // `bootstrapDeclaredCapabilities` reads them back — but the kind was absent
+  // the declared-capability seeder (since retired, ADR-0131 D3) read them back —
+  // but the kind was absent
   // from this enum, from `BUILTIN_METADATA_TYPE_SCHEMAS` and from
   // `DEFAULT_METADATA_TYPE_REGISTRY`, so it resolved no schema and
   // `PUT /api/v1/meta/capability/:name` stored ANY JSON on an authorization
@@ -1134,9 +1135,9 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   //
   // The package-declaration channel is untouched: `AppPlugin` registers stack
   // `capabilities[]` through `registerInMemory`, and the filesystem loader
-  // globs `filePatterns` — neither goes through `saveMetaItem`, so
-  // `bootstrapDeclaredCapabilities` still seeds `sys_capability` exactly as
-  // before. `OS_METADATA_WRITABLE=capability` remains the ONE documented
+  // globs `filePatterns` — neither goes through `saveMetaItem`, so a package's
+  // declarations still reach the registry, their one home (ADR-0131 D3).
+  // `OS_METADATA_WRITABLE=capability` remains the ONE documented
   // operator escape hatch (ADR-0005), and behind it the write is now judged by
   // `CapabilityDeclarationSchema` (422) instead of being stored unvalidated.
   //
