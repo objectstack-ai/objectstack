@@ -204,8 +204,6 @@ async function resolverByPrincipal(posture: Posture): Promise<Record<string, unk
   );
   // System-written grants: the member's deactivated set, the agent's windowed
   // and expired agent grants (the platform bucket's organization-less rows).
-  const setId = async (name: string) =>
-    String(((await engine.find('sys_permission_set', { where: { name, organization_id: null }, context: SYS })) as any[])[0]?.id);
   await engine.insert('sys_user_permission_set', [
     { id: 'ups_member_legacy', user_id: 'usr_member', permission_set: 'legacy_reports', organization_id: ORG },
     {

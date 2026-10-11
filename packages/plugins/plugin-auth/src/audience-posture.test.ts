@@ -117,7 +117,7 @@ const PASSWORD = 'S3cure!Passw0rd-4785';
 /**
  * [ADR-0131 D3/D4] The sets the fixture's `sys_permission_set` rows name are
  * catalog definitions too — the admission asks the catalog whether a set
- * grants, and the grant is written with the row's id.
+ * grants, and the grant names it (ADR-0131 D4).
  */
 const bindRowCatalog = (engine: any) =>
   bindTestSecurityCatalog(engine, () => catalogFromTables({ sys_permission_set: engine.tables.get('sys_permission_set') }));
@@ -744,7 +744,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     await vi.waitFor(() => {
       const grants = engine.tables.get('sys_user_permission_set') ?? [];
       expect(grants.length).toBe(1);
-      expect(grants[0].permission_set_id).toBe('ps_portal_user');
+      expect(grants[0].permission_set).toBe('portal_user');
       const created = (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'user+tag@acme.com');
       expect(grants[0].user_id).toBe(created?.id);
     });
@@ -756,24 +756,25 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect((engine.tables.get('sys_user') ?? []).some((u: any) => u.email === 'user@mail.acme.com')).toBe(false);
   });
 
-  it('[ADR-0131 D4] the self-registration grant writes both columns, and they agree', async () => {
+  it('[ADR-0131 D4] the self-registration grant names its set alone — with ZERO sys_permission_set rows', async () => {
     // The fake engine stores exactly the payload the writer sends — no platform
-    // hook stands behind it here — so this pins the writer's own payload.
+    // hook stands behind it here — so this pins the writer's own payload. No
+    // set row is seeded: the set is the catalog's (ADR-0131 D3), and the grant
+    // names it (D4).
     const engine = createMemoryEngine();
     seedExistingUser(engine);
-    seedPermissionSet(engine, 'portal_user');
     const manager = makeManager(engine, {
       audience: { posture: 'open', selfRegistrationPermissionSet: 'portal_user' },
     });
+    bindTestSecurityCatalog(engine, { permissions: [{ name: 'portal_user' }] });
     const admitted = await signUp(manager, 'joiner@anywhere.com');
     expect(admitted.status).toBeLessThan(300);
     await vi.waitFor(() => {
       const grants = engine.tables.get('sys_user_permission_set') ?? [];
       expect(grants.length).toBe(1);
-      expect(grants[0].permission_set_id).toBe('ps_portal_user');
       expect(grants[0].permission_set).toBe('portal_user');
-      const setRow = (engine.tables.get('sys_permission_set') ?? []).find((r: any) => r.id === grants[0].permission_set_id);
-      expect(setRow?.name).toBe(grants[0].permission_set);
+      expect(grants[0].permission_set_id).toBeUndefined();
+      expect(engine.tables.get('sys_permission_set') ?? []).toEqual([]);
     });
   });
 
