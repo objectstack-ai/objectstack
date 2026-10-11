@@ -48,7 +48,10 @@ const REFUSED = [
 ] as const;
 
 function makeBridge() {
-  const engine = { find: vi.fn(async () => [{ id: 's1' }]), aggregate: vi.fn(async () => [{ n: 1 }]) };
+  const engine = {
+    find: vi.fn(async (_object: string, _query?: { where?: unknown }) => [{ id: 's1' }]),
+    aggregate: vi.fn(async (_object: string, _query?: { where?: unknown }) => [{ n: 1 }]),
+  };
   const metadataService = { getObject: vi.fn(async (name: string) => DEFS[name]) };
   const bridge = createStdioDataBridge({
     engine: engine as unknown as IDataEngine,
@@ -98,9 +101,7 @@ describe('[#22777] the stdio bridge refuses a condition on a target the decision
       ]) {
         const { bridge, engine } = makeBridge();
         await run(bridge, where);
-        const call = (verb === 'query' ? engine.find.mock.calls[0]?.[1] : engine.aggregate.mock.calls[0]?.[1]) as
-          | { where?: unknown }
-          | undefined;
+        const call = (verb === 'query' ? engine.find : engine.aggregate).mock.calls[0]?.[1];
         expect(call?.where, JSON.stringify(where)).toBe(where);
       }
     });
