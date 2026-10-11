@@ -97,11 +97,13 @@ export interface MetadataActivationRow {
     name: string;
     /**
      * The package that ships the artifact — ABSENT when no package does: a
-     * position or permission set the environment authored, which the security
-     * catalog's activation door switches as well as a packaged one. Absent is
-     * the only package-less spelling: the store writes no value for it and
-     * refuses `''` ({@link ObjectStoreMetadataActivationStore.setActive}), so
-     * no reader can take an environment item for a package named `''`.
+     * position, permission set or action the environment authored, which the
+     * security catalog's and the action's activation doors switch as well as a
+     * packaged one. Absent is the only package-less spelling: the store writes
+     * no value for it and refuses `''`
+     * ({@link ObjectStoreMetadataActivationStore.setActive}), and so does the
+     * in-memory double, so no reader can take an environment item for a
+     * package named `''`.
      */
     packageId?: string;
     /** Is the artifact armed for this installation. */
@@ -135,10 +137,34 @@ export interface MetadataActivationStoreEngine {
 }
 
 /**
+ * Refuse the empty string as a row's package, before anything is read or
+ * written — the ONE refusal both stores apply, so the in-memory double can
+ * never accept a row the durable store refuses.
+ *
+ * `''` is the placeholder a caller reaches for with `?? ''`, and a stored `''`
+ * would be one more spelling of "no package" beside the absent one — exactly
+ * the ambiguity {@link MetadataActivationRow.packageId} rules out.
+ *
+ * @param subject how the refusal names the row's artifact (`flow 'x'`, `'x'`).
+ */
+function refuseEmptyPackageId(row: MetadataActivationRow, subject: string): void {
+    if (row.packageId !== '') return;
+    throw new TypeError(
+        `Activation row for ${subject} names the empty string as its package. ` +
+        `Omit packageId for an item no package ships; an empty package id is not a package.`,
+    );
+}
+
+/**
  * In-memory {@link MetadataActivationStore} — process-lifetime only, for tests
  * and for hosts with no durable plane. What it lacks versus the ObjectStore
  * implementation is DURABILITY, which is exactly the property ADR-0126 §6
  * wall 3 asks for; it is not a sanctioned production off-switch.
+ *
+ * It refuses exactly the rows the durable store refuses (an empty package id,
+ * {@link refuseEmptyPackageId}): it is the flow and action stores' test
+ * double, and a double more lenient than what it stands for lets a test pass
+ * a write the real ledger refuses.
  *
  * No discriminator: an in-memory map is per-instance, so there is no shared
  * table for a neighbouring type's rows to be in.
@@ -151,6 +177,7 @@ export class InMemoryMetadataActivationStore implements MetadataActivationStore 
     }
 
     async setActive(row: MetadataActivationRow): Promise<void> {
+        refuseEmptyPackageId(row, `'${row.name}'`);
         this.rows.set(row.name, { ...row });
     }
 }
@@ -228,18 +255,10 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      *
      * `packageId` absent writes NO package (`null`), the ledger's spelling for
      * an item no package ships. An empty string is refused before anything is
-     * read or written: it is the placeholder a caller reaches for with
-     * `?? ''`, and a stored `''` would be one more spelling of "no package"
-     * beside the absent one — exactly the ambiguity the field's contract
-     * rules out.
+     * read or written ({@link refuseEmptyPackageId}).
      */
     async setActive(row: MetadataActivationRow): Promise<void> {
-        if (row.packageId === '') {
-            throw new TypeError(
-                `Activation row for ${this.metadataType} '${row.name}' names the empty string as its package. ` +
-                `Omit packageId for an item no package ships; an empty package id is not a package.`,
-            );
-        }
+        refuseEmptyPackageId(row, `${this.metadataType} '${row.name}'`);
         const packageId = row.packageId ?? null;
         const existing = await this.engine.find(METADATA_ACTIVATION_TABLE, {
             where: { metadata_type: this.metadataType, name: row.name },
