@@ -55,7 +55,11 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * `sys_comment_reaction` rows of the comments on screen (`comment_id` `$in`
  * their ids) and groups them by emoji. Reactions stored in the column are not
  * converted into records; the D3 record is the semantic entry
- * `sys-comment-reactions-column-retired`.
+ * `sys-comment-reactions-column-retired`. An existing database keeps the
+ * physical column and its values (schema sync is additive): the boot drift
+ * report names it orphaned, the data door neither returns nor accepts it
+ * (`400 INVALID_FIELD` on a write that names it), and
+ * `os migrate apply --allow-destructive` drops it.
  *
  * @namespace sys
  */

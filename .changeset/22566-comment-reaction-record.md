@@ -14,4 +14,4 @@ Clause-②: yes (widening)
 - **Reading reactions for a feed.** Read the reactions of the comments on screen in one request, `comment_id` `$in` those ids, and group the rows by comment and emoji. Nothing is stored or computed on the comment row.
 - **Granting it.** The object's create, read and delete bits come from a permission set, as `sys_comment`'s do. The `everyone`-bound baseline (`member_default`) grants nothing on it.
 - **`@objectstack/spec`: the platform object registry lists it.** `PLATFORM_OBJECTS_BY_PACKAGE['plugin-audit']` now includes `sys_comment_reaction`, and so do `PLATFORM_PROVIDED_OBJECT_NAMES` and `isPlatformProvidedObjectName`. A stack that references the object is no longer reported as naming an unknown platform object. This is the only change in the package.
-- **`sys_comment.reactions` is unchanged in this release.** The column is still declared and still written by clients that write it. It is retired separately, and reactions stored in it are not converted into records.
+- **`sys_comment.reactions` is retired by a separate change on this line**, which carries its own entry. Reactions stored in that column are not converted into records.
