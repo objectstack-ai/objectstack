@@ -1290,9 +1290,146 @@ export function publishedSourceOwners(path, manifestOf) {
   return owners;
 }
 
+// ── LEG 3: a repo file a package's build COPIES into what it packs (#15204) ─
+//
+// Legs 1 and 2 both read a path UNDER the package. `@objectstack/console` has
+// neither: its tracked files are a manifest, a README, a CHANGELOG and a
+// `.gitignore`, and everything it publishes is `dist/`, which
+// `scripts/build-console.sh` writes. One file in that `dist` comes from THIS
+// repository rather than from the objectui build — the repo-root
+// `sdui.manifest.json`, copied byte for byte to `dist/sdui.manifest.json`, and
+// read at runtime by `@objectstack/cli` (the JSX gate of `os validate` /
+// `compile` / `lint`, and the html-page save gate `serve` registers). So a PR
+// that widens what those gates accept moves exactly that one file, grades
+// `@objectstack/console` `minor`, declares `Clause-②: yes (widening)` — and
+// before this leg the axis saw no package at all, and told the author to grade
+// `minor` a package that did not grow (PR #22812, CI job 114433350057).
+//
+// ⛔ The mapping is READ from the build script at the head under judgement, not
+// written here. What this file names is WHICH script carries copies into a
+// packed output — one path — and never which files it copies: the day the
+// console build ships a second tracked file, this leg sees it with no edit
+// here, and the day it stops copying the manifest, the leg stops claiming it.
+// `scripts/sdui-manifest.record.json` is measured OUT for that reason rather
+// than by choice: the build reads it for a warning line and does not copy it,
+// so it is not part of the shipped artefact.
+//
+// ⚠️ Residual, stated rather than implied: the reader understands the plain
+// shell the script is written in — `NAME="value"` assignments, `$NAME` /
+// `${NAME}` expansion, and `cp [flags] SRC DEST` — and nothing else. A copy
+// whose source does not resolve to one fixed repo path (the objectui build's
+// own `dist`, under a cache dir named by the pin) is not a tracked file and is
+// skipped. A script that is THERE but yields no copy at all is reported in
+// `unreadable` rather than read as "copies nothing", and the self-test drives
+// this repository's real `build-console.sh` so a respelling of the copy reds in
+// lint instead of silently retiring the leg.
+//
+// ⚠️ And what it does NOT add: `.objectui-sha`. The pin decides which objectui
+// tree the console `dist` is BUILT from, but the build does not copy it, and a
+// pin bump that moves an accept set moves the manifest too — which is the
+// reading this leg makes.
+export const PACKED_COPY_BUILD_SCRIPTS = Object.freeze(['scripts/build-console.sh']);
+
+// The value a build script assigns to the variable that names the repository
+// root: its own directory's parent, which is the repo root because every script
+// in `PACKED_COPY_BUILD_SCRIPTS` lives in `scripts/`. Read, not named, so the
+// variable's NAME is the script's business.
+const SCRIPT_PARENT_DIR_VALUE = /^\$\(cd "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)\/\.\." && pwd\)$/;
+const REPO_ROOT_MARK = 'repo-root::';
+
+/**
+ * Every copy a build script makes from a FIXED repo path into the repo, as
+ * repo-relative `{ source, destination }` pairs, in script order.
+ *
+ * Assignments are evaluated in order, so a variable reassigned later is read at
+ * the value it has on the `cp` line. A source or destination that keeps an
+ * unexpanded `$` — a command substitution, a parameter operator such as
+ * `${PINNED_SHA:0:12}`, a variable never assigned — is not one fixed path, and
+ * the copy is skipped rather than guessed at.
+ *
+ * @param {string} text a shell script's content
+ * @returns {{ source: string, destination: string }[]}
+ */
+export function packedCopiesIn(text) {
+  const vars = new Map();
+  const unquote = (word) => (word.length >= 2 && word.startsWith('"') && word.endsWith('"') ? word.slice(1, -1) : word);
+  const expand = (value) =>
+    value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, a, b) => (vars.has(a ?? b) ? vars.get(a ?? b) : whole));
+  const repoPath = (word) => {
+    const value = expand(unquote(word));
+    if (!value.startsWith(`${REPO_ROOT_MARK}/`) || value.includes('$')) return null;
+    const rel = value.slice(REPO_ROOT_MARK.length + 1).replace(/\/+/g, '/').replace(/\/+$/, '');
+    return rel === '' || rel.split('/').includes('..') ? null : rel;
+  };
+  const copies = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    const assignment = /^([A-Za-z_][A-Za-z0-9_]*)="(.*)"$/.exec(line);
+    if (assignment) {
+      const [, name, value] = assignment;
+      vars.set(name, SCRIPT_PARENT_DIR_VALUE.test(value) ? REPO_ROOT_MARK : expand(value));
+      continue;
+    }
+    const copy = /^cp(?:\s+-[A-Za-z]+)*\s+("[^"]*"|[^\s"]+)\s+("[^"]*"|[^\s"]+)$/.exec(line);
+    if (!copy) continue;
+    const source = repoPath(copy[1]);
+    const destination = repoPath(copy[2]);
+    if (source !== null && destination !== null) copies.push({ source, destination });
+  }
+  return copies;
+}
+
+/**
+ * Whether a manifest's `files` packs this package-relative path. An absent
+ * `files` packs everything, which is npm's rule; an entry covers the path
+ * itself and everything under it. Glob entries are not expanded — a reader, not
+ * a packer — so a path only a glob would cover reads as not packed.
+ *
+ * @param {object} manifest a parsed package.json
+ * @param {string} rel a package-relative path
+ */
+function filesPack(manifest, rel) {
+  const files = /** @type {{ files?: unknown }} */ (manifest).files;
+  if (!Array.isArray(files)) return true;
+  return files.some((entry) => {
+    if (typeof entry !== 'string') return false;
+    const e = entry.replace(/\/+/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/+$/, '');
+    return e !== '' && (rel === e || rel.startsWith(`${e}/`));
+  });
+}
+
+/**
+ * The package directory a copy's DESTINATION is published by — the NEAREST
+ * ancestor under `packages/` with a manifest — or none.
+ *
+ * Nearest rather than shallowest, unlike leg 1, because the question is which
+ * manifest's `files` decides whether the copied file ships, and that is the
+ * nearest one. `false` (a manifest that is there and will not parse) is
+ * returned as a candidate that cannot be named, so the caller reports it as
+ * unreadable (#4690). A destination its package does not pack ships nothing,
+ * and owns nothing.
+ *
+ * @param {string} destination a repo-relative path
+ * @param {(dir: string) => object | false | null} manifestOf
+ * @returns {string | null}
+ */
+export function packedCopyOwner(destination, manifestOf) {
+  const segments = destination.split('/');
+  if (segments[0] !== 'packages') return null;
+  for (let i = segments.length - 1; i >= 2; i -= 1) {
+    const dir = segments.slice(0, i).join('/');
+    const manifest = manifestOf(dir);
+    if (manifest === null) continue;
+    if (manifest === false) return dir;
+    return filesPack(manifest, segments.slice(i).join('/')) ? dir : null;
+  }
+  return null;
+}
+
 /**
  * The workspace package names whose PUBLISHED surface this diff moves — its
- * `src/**` or a `bin` target it packs — read from the HEAD tree rather than
+ * `src/**`, a `bin` target it packs, or a repo file its build copies into what
+ * it packs (leg 3, above) — read from the HEAD tree rather than
  * from the working directory, because the self-test and the acceptance run both
  * drive commits that are not checked out.
  *
@@ -1358,7 +1495,27 @@ export function packagesTouched({ cwd, from, head }) {
 
   const packages = new Set();
   const unreadable = new Set();
+
+  // LEG 3 (#15204): the copies each build script makes into the repo, read
+  // from THIS head. A script that is absent copies nothing; one that is there
+  // and yields no copy is a reading this leg could not make, and is reported.
+  const copiedTo = new Map();
+  for (const script of PACKED_COPY_BUILD_SCRIPTS) {
+    const text = showOrNull(head, script, cwd);
+    if (text === null) continue;
+    const copies = packedCopiesIn(text);
+    if (copies.length === 0) unreadable.add(script);
+    for (const { source, destination } of copies) copiedTo.set(source, [...(copiedTo.get(source) ?? []), destination]);
+  }
+
   for (const line of out.split('\n')) {
+    for (const destination of copiedTo.get(line.trim()) ?? []) {
+      const dir = packedCopyOwner(destination, manifestOf);
+      if (dir === null) continue;
+      const name = nameFor(dir);
+      if (name) packages.add(name);
+      else unreadable.add(dir);
+    }
     const owners = publishedSourceOwners(line.trim(), manifestOf);
     if (owners.length === 0) continue;
     const owner = owners.find((dir) => nameFor(dir) !== null);
@@ -1794,7 +1951,7 @@ export function renderLevel(result) {
       stdout.push(
         'ℹ️ LEVEL AXIS: NOT MEASURED, and it could not have changed this verdict — no clause-② declaration was ' +
           'readable for this PR, AND there is nothing here a `yes` would have refused: either no changeset grades ' +
-          '`patch` a package whose `packages/**/src/**` this PR moves, or one of the packages it moves is already ' +
+          '`patch` a package whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, or one of the packages it moves is already ' +
           'graded `minor` or above and carries the level for the PR (#16361). ' +
           '`yes` and `no` reach the same answer on this diff, so this exit 0 is a decided one rather than an unread one (#16776).',
         ...readings,
@@ -1804,7 +1961,7 @@ export function renderLevel(result) {
 
     case 'not-measured-material':
       stderr.push('⛔ LEVEL AXIS: NOT MEASURED, and it is the one reading this PR needed.\n');
-      stderr.push('   The packages this PR moves `packages/**/src/**` of, and the level each is graded:');
+      stderr.push('   The packages whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, and the level each is graded:');
       stderr.push(...patchLines(result.offenders));
       stderr.push('   ⇒ none of them is graded `minor` or above, so a `yes` here would REFUSE (#16361).\n');
       stderr.push(
@@ -1816,7 +1973,7 @@ export function renderLevel(result) {
           'conclusion for a reading that passed and a reading that never happened, on every surface that reads\n' +
           'conclusions rather than step logs (#16776, and #4690: a reading that cannot fail is indistinguishable from\n' +
           'one that passed). Where the declaration could not have mattered this gate still exits 0 and says so — it is\n' +
-          'refusing HERE because every package this diff moves under `packages/**/src/**` is graded `patch`, which is\n' +
+          'refusing HERE because every package whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this diff moves is graded `patch`, which is\n' +
           'exactly the shape a `yes` refuses (#16361).\n' +
           '\n' +
           'DECLARE IT. One line, at the START of a line in the PR BODY (a `- `, `> ` or `**` prefix is read too):\n' +
@@ -1841,7 +1998,7 @@ export function renderLevel(result) {
         errorAnnotation({
           title: 'Check Changeset (level axis): no readable `Clause-②:` declaration, and it is the reading this PR needed',
           message:
-            `Every package this diff moves under \`packages/**/src/**\` is graded \`patch\` (${offenderList(result.offenders)}), ` +
+            `Every package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) this diff moves is graded \`patch\` (${offenderList(result.offenders)}), ` +
             'which is exactly the shape a `yes` refuses (#16361) — so the declaration that was not readable is what ' +
             `decides this verdict.\n${readingsBlock}\n` +
             'DECLARE IT: one line in the PR BODY, bare and at the START of a line of its own — `Clause-②: no` (this PR ' +
@@ -1859,7 +2016,7 @@ export function renderLevel(result) {
 
     case 'clean':
       stdout.push(
-        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and no package whose \`packages/**/src/**\` it moves is graded \`patch\`.`,
+        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and no package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) it moves is graded \`patch\`.`,
         ...readings,
         ...unreadableNote,
       );
@@ -1872,7 +2029,7 @@ export function renderLevel(result) {
     // mode the filing card is about, one layer along.
     case 'discharged':
       stdout.push(
-        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and it grades a package whose \`packages/**/src/**\` ` +
+        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and it grades a package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) ` +
           `it moves at \`minor\` or above — the declared ${declaredAct} is accounted for:`,
         ...raisedLines(result.raised),
         '',
@@ -1891,10 +2048,10 @@ export function renderLevel(result) {
 
     case 'enforce':
       stderr.push(
-        `⛔ This PR declares clause-② ${declaredValue}, and it grades NO package whose \`packages/**/src/**\` it moves\n` +
+        `⛔ This PR declares clause-② ${declaredValue}, and it grades NO package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) it moves\n` +
           '   at `minor` or above.\n',
       );
-      stderr.push('   The packages this PR moves `packages/**/src/**` of, and the level each is graded:');
+      stderr.push('   The packages whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, and the level each is graded:');
       stderr.push(...patchLines(result.offenders));
       stderr.push('   ⇒ none of them is graded `minor` or above.\n');
       stderr.push(
@@ -2374,6 +2531,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The GRAIN: a PR-scoped declaration judged at PR scope (#16361)': 25,
   'THE DEPTH: a nested package is a candidate the axis can refuse (#16713)': 21,
   'THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)': 37,
+  'THE COPY: a repo file a package build copies into what it packs (#15204)': 23,
   '#18263: the refusal says its reason, and says it where the API can read it': 35,
   '#19008: the level headline is the parsed declaration, not a literal': 30,
   'The protocol lockstep evidence, in BOTH directions (ruling 6056808625)': 39,
@@ -2383,8 +2541,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // zeroing it, so the roster's own size is pinned too. Lowered 20 → 19 when the
 // carrier-axis battery left with the gate label it read (ruling record
 // 5770886272 on #19061): the ordinary direction, one battery, one row. Raised
-// 19 → 20 with the protocol lockstep battery (ruling record 6056808625).
-const SELF_TEST_BATTERY_FLOOR = 20;
+// 19 → 20 with the protocol lockstep battery (ruling record 6056808625). Raised
+// 20 → 21 with the copy-leg battery (#15204).
+const SELF_TEST_BATTERY_FLOOR = 21;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4065,6 +4224,171 @@ function selfTest() {
       assert(
         bareTouched.packages.length === 0 && bareTouched.unreadable.length === 0,
         `nonsense control: an ABSENT manifest declares no \`bin\`, so nothing under it is a candidate and no residual is owed — got ${JSON.stringify(bareTouched)}`,
+      );
+    }
+
+    // ── THE COPY: a repo file a package's build copies into what it packs (#15204)
+    //
+    // `@objectstack/console` has no `src/**` and no `bin`; the one tracked file
+    // its `dist` ships is the repo-root `sdui.manifest.json`, copied there by
+    // `scripts/build-console.sh`. PR #22812 moved only that file (and spec
+    // citations), graded the console `minor` under a true `Clause-②: yes
+    // (widening)`, and was refused because no leg named the console.
+    battery('THE COPY: a repo file a package build copies into what it packs (#15204)');
+    {
+      const CONSOLE = '@objectstack/console';
+      const SPEC = '@objectstack/spec';
+      const yesWidening = { value: 'yes', arm: 'widening', payload: true, readings: ['declaration line: `Clause-②: yes (widening)`'] };
+      const declaredNo = { value: 'no', arm: null, payload: true, readings: ['declaration line: `Clause-②: no`'] };
+      const ROOT_LINE = 'FRAMEWORK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"';
+      const BUILD = [
+        '#!/usr/bin/env bash',
+        ROOT_LINE,
+        'PINNED_SHA="$(cat "${FRAMEWORK_ROOT}/.objectui-sha")"',
+        'BUILD_ROOT="${FRAMEWORK_ROOT}/.cache/objectui-${PINNED_SHA:0:12}"',
+        'TARGET="${FRAMEWORK_ROOT}/packages/console/dist"',
+        'CONSOLE_DIST="${BUILD_ROOT}/apps/console/dist"',
+        'cp -R "$CONSOLE_DIST" "$TARGET"',
+        'MANIFEST_SRC="${FRAMEWORK_ROOT}/sdui.manifest.json"',
+        'MANIFEST_RECORD="${FRAMEWORK_ROOT}/scripts/sdui-manifest.record.json"',
+        'cp "$MANIFEST_SRC" "${TARGET}/sdui.manifest.json"',
+        '',
+      ].join('\n');
+      const pairs = (text) => JSON.stringify(packedCopiesIn(text));
+      const MANIFEST_PAIR = '[{"source":"sdui.manifest.json","destination":"packages/console/dist/sdui.manifest.json"}]';
+
+      // ── The reader ────────────────────────────────────────────────────────
+      assert(pairs(BUILD) === MANIFEST_PAIR, `the copy of a fixed repo file into a package dir is read, and ONLY it — got ${pairs(BUILD)}`);
+      assert(
+        !pairs(BUILD).includes('record'),
+        'control: a variable the script ASSIGNS but never copies (the manifest record, read for a warning line) is not a shipped file',
+      );
+      assert(
+        pairs(BUILD.replace(ROOT_LINE, 'FRAMEWORK_ROOT="/somewhere"')) === '[]',
+        'control: with no variable holding the script\'s own parent dir there is no repo root to resolve against, so nothing is claimed',
+      );
+      assert(
+        pairs(`${ROOT_LINE}\nT="\${FRAMEWORK_ROOT}/packages/a/dist"\nS="\${FRAMEWORK_ROOT}/x.json"\nS="\${FRAMEWORK_ROOT}/y.json"\ncp "$S" "$T/x.json"\n`) ===
+          '[{"source":"y.json","destination":"packages/a/dist/x.json"}]',
+        'assignments are evaluated in ORDER — a reassigned variable is read at the value it has on the `cp` line',
+      );
+      assert(
+        pairs(`${ROOT_LINE}\ncp "\${UNSET}/x.json" "\${FRAMEWORK_ROOT}/packages/a/dist/x.json"\n`) === '[]',
+        'control: a source that keeps an unexpanded `$` is not one fixed path and is skipped rather than guessed at',
+      );
+
+      // ⭐ THE PIN on the real script. The leg reads `build-console.sh`, so the
+      // day it stops copying the manifest (or respells the copy so the reader
+      // cannot see it) this row reds in lint instead of the leg retiring quietly.
+      const realBuild = readFileSync(resolve(REPO_ROOT, PACKED_COPY_BUILD_SCRIPTS[0]), 'utf8');
+      const realPairs = packedCopiesIn(realBuild);
+      assert(
+        realPairs.some((p) => p.source === 'sdui.manifest.json' && p.destination === 'packages/console/dist/sdui.manifest.json'),
+        `this repository's ${PACKED_COPY_BUILD_SCRIPTS[0]} copies the repo-root sdui.manifest.json into packages/console/dist/ as read by this leg — got ${JSON.stringify(realPairs)}`,
+      );
+      assert(
+        !realPairs.some((p) => p.source === 'scripts/sdui-manifest.record.json'),
+        `measured, not chosen: the real build does not ship the manifest record — got ${JSON.stringify(realPairs)}`,
+      );
+
+      // ── The owner of a destination ────────────────────────────────────────
+      const consoleManifest = (files) => (dir) => (dir === 'packages/console' ? { name: CONSOLE, version: '0.0.0', files } : null);
+      assert(packedCopyOwner('packages/console/dist/sdui.manifest.json', consoleManifest(['dist', 'README.md'])) === 'packages/console', 'a destination under a packed `files` entry names its package');
+      assert(packedCopyOwner('packages/console/dist/sdui.manifest.json', consoleManifest(undefined)) === 'packages/console', 'an absent `files` packs everything — npm\'s rule');
+      assert(packedCopyOwner('packages/console/dist/sdui.manifest.json', consoleManifest(['README.md'])) === null, 'control: a destination its package does not pack ships nothing, and owns nothing');
+      assert(packedCopyOwner('packages/console/dist/sdui.manifest.json', (dir) => (dir === 'packages/console' ? false : null)) === 'packages/console', '#4690: an unparseable manifest is a candidate that cannot be named, never "no owner"');
+      assert(packedCopyOwner('dist/sdui.manifest.json', () => ({ name: 'x' })) === null, 'control: a destination outside `packages/` is no workspace package');
+
+      // ── End to end, on real temp git repositories ─────────────────────────
+      const consoleJson = JSON.stringify({ name: CONSOLE, version: '0.0.0', files: ['dist', 'README.md', 'CHANGELOG.md'] });
+      const specJson = JSON.stringify({ name: SPEC, version: '0.0.0', files: ['dist'] });
+      const changeset = (entries) => `---\n${entries.map(([p, b]) => `"${p}": ${b}`).join('\n')}\n---\n\nbody\n`;
+      const copyRepo = ({ head, build = BUILD }) =>
+        makeRepo(
+          {
+            'scripts/build-console.sh': build,
+            'packages/console/package.json': consoleJson,
+            'packages/spec/package.json': specJson,
+            'packages/spec/src/ui/x.ts': '/** cites objectui@aaaa */\nexport const x = 1;\n',
+            'sdui.manifest.json': '{"components":["a","b"]}\n',
+            'scripts/sdui-manifest.record.json': '{"objectuiSha":"aaaa"}\n',
+          },
+          head,
+        );
+      const levelOf = ({ dir, base }, declaration) => {
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        const result = judgeLevel({ levels: scanned.levels, touched, declaration });
+        return { touched, result, exitCode: renderLevel(result).exitCode };
+      };
+      const PR22812 = {
+        'sdui.manifest.json': '{"components":["a","b","c"]}\n',
+        'scripts/sdui-manifest.record.json': '{"objectuiSha":"bbbb"}\n',
+        'packages/spec/src/ui/x.ts': '/** cites objectui@bbbb */\nexport const x = 1;\n',
+        '.changeset/console-bbbb.md': changeset([[CONSOLE, 'minor']]),
+        '.changeset/citations-bbbb.md': changeset([[SPEC, 'patch']]),
+      };
+
+      // THE CARD: #22812's shape is DISCHARGED by the console `minor`.
+      const card = levelOf(copyRepo({ head: PR22812 }), yesWidening);
+      assert(card.touched.packages.join() === `${CONSOLE},${SPEC}` && card.touched.unreadable.length === 0, `THE CARD: the manifest move names ${CONSOLE} beside the spec — got ${JSON.stringify(card.touched)}`);
+      assert(card.result.verdict === 'discharged' && card.exitCode === 0, `THE CARD: console \`minor\` + spec \`patch\` + \`Clause-②: yes (widening)\` is discharged, exit 0 — got ${card.result.verdict} / ${card.exitCode}`);
+      assert(card.result.raised.some((r) => r.pkg === CONSOLE && r.bump === 'minor'), 'and it is the CONSOLE line that discharges it, not anything else');
+
+      // FIRING control: the same diff with the build script gone is the
+      // pre-leg reading — refused. So the green above is this leg, not a lane
+      // that moved.
+      const noLeg = levelOf(copyRepo({ head: { ...PR22812, 'scripts/build-console.sh': null } }), yesWidening);
+      assert(
+        !noLeg.touched.packages.includes(CONSOLE) && noLeg.result.verdict === 'enforce' && noLeg.exitCode === 1,
+        `FIRING control: without the copy to read, the console is unseen and the same PR is refused, exactly as CI job 114433350057 was — got ${JSON.stringify(noLeg.touched)} / ${noLeg.result.verdict}`,
+      );
+
+      // The manifest moved with NO console changeset at `minor` stays red —
+      // both when the console is graded `patch` and when it is not graded.
+      const consolePatch = levelOf(copyRepo({ head: { ...PR22812, '.changeset/console-bbbb.md': changeset([[CONSOLE, 'patch']]) } }), yesWidening);
+      assert(
+        consolePatch.result.verdict === 'enforce' && consolePatch.exitCode === 1 && consolePatch.result.offenders.some((o) => o.packages.includes(CONSOLE)),
+        `the manifest moved with the console graded \`patch\` under \`yes\` is REFUSED, naming the console — got ${consolePatch.result.verdict}`,
+      );
+      const manifestOnly = { 'sdui.manifest.json': PR22812['sdui.manifest.json'], '.changeset/console-bbbb.md': changeset([[CONSOLE, 'patch']]) };
+      const onlyPatch = levelOf(copyRepo({ head: manifestOnly }), yesWidening);
+      assert(
+        onlyPatch.touched.packages.join() === CONSOLE && onlyPatch.result.verdict === 'enforce' && onlyPatch.exitCode === 1,
+        `a manifest-only diff with the console at \`patch\` is refused on the console alone — got ${JSON.stringify(onlyPatch.touched)} / ${onlyPatch.result.verdict}`,
+      );
+      const ungraded = levelOf(copyRepo({ head: Object.fromEntries(Object.entries(PR22812).filter(([path]) => path !== '.changeset/console-bbbb.md')) }), yesWidening);
+      assert(
+        ungraded.result.verdict === 'enforce' && ungraded.exitCode === 1,
+        `the manifest moved with no console changeset at all (spec \`patch\` only) stays red — got ${ungraded.result.verdict}`,
+      );
+
+      // `Clause-②: no` is unaffected: the axis stands down whatever it sees.
+      const no = levelOf(copyRepo({ head: { ...PR22812, '.changeset/console-bbbb.md': changeset([[CONSOLE, 'patch']]) } }), declaredNo);
+      assert(no.result.verdict === 'not-declared' && no.exitCode === 0, `the manifest moved under \`Clause-②: no\` is unaffected — got ${no.result.verdict} / ${no.exitCode}`);
+
+      // The record moves with every regeneration but ships nothing.
+      const recordOnly = levelOf(
+        copyRepo({ head: { 'scripts/sdui-manifest.record.json': '{"objectuiSha":"bbbb"}\n', '.changeset/console-bbbb.md': changeset([[CONSOLE, 'patch']]) } }),
+        yesWidening,
+      );
+      assert(
+        recordOnly.touched.packages.length === 0 && recordOnly.touched.unreadable.length === 0 && recordOnly.result.verdict === 'clean',
+        `control: the record alone moves no published file — got ${JSON.stringify(recordOnly.touched)} / ${recordOnly.result.verdict}`,
+      );
+
+      // #4690 on this leg: a build script that is THERE but yields no copy is
+      // a reading not made, reported beside the verdict rather than read as
+      // "copies nothing"; and an unparseable destination manifest is unreadable.
+      const blind = levelOf(copyRepo({ head: manifestOnly, build: '#!/usr/bin/env bash\ninstall -m 644 sdui.manifest.json packages/console/dist/\n' }), yesWidening);
+      assert(
+        blind.touched.unreadable.includes('scripts/build-console.sh') && renderLevel(blind.result).stdout.join('\n').includes('scripts/build-console.sh'),
+        `a build script the reader yields no copy from is REPORTED and printed, never silent — got ${JSON.stringify(blind.touched)}`,
+      );
+      const broken = levelOf(copyRepo({ head: { ...manifestOnly, 'packages/console/package.json': '{ "name": \n' } }), yesWidening);
+      assert(
+        broken.touched.unreadable.includes('packages/console') && !broken.touched.packages.includes(CONSOLE),
+        `an unparseable console manifest lands the copy in \`unreadable\`, never in neither set — got ${JSON.stringify(broken.touched)}`,
       );
     }
 

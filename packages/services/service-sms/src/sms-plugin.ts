@@ -5,7 +5,7 @@ import type { ISmsTransport } from '@objectstack/spec/contracts';
 import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { SmsService, LogSmsTransport, maskPhoneNumber, normalizeSmsRecipient } from './sms-service.js';
 import { SmsDailyQuota } from './sms-daily-quota.js';
-import { makeSmsTransport, type SmsProviderTag } from './transports/index.js';
+import { makeSmsTransport, smsProviderOptionsFrom, type SmsProviderTag } from './transports/index.js';
 
 /**
  * Plugin configuration. Mirrors EmailServicePluginOptions: a directly
@@ -23,51 +23,30 @@ export interface SmsServicePluginOptions {
   retries?: number;
 }
 
-/** Translate an `sms` settings-namespace snapshot into transport inputs. */
+/**
+ * Translate an `sms` settings-namespace snapshot into transport inputs. The
+ * setting-key → transport-option mapping is `SMS_PROVIDER_SETTING_KEYS`, the
+ * table `resolveSmsCapabilityArg` reads the same `OS_SMS_*` variables through.
+ */
 function providerFromSettings(values: Record<string, unknown>): {
   provider: SmsProviderTag;
   options: Record<string, unknown>;
   missing?: string;
 } {
   const provider = String(values.provider ?? 'log') as SmsProviderTag;
-  const str = (k: string): string | undefined => {
-    const v = values[k];
-    return typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined;
-  };
   if (provider === 'aliyun') {
-    const accessKeyId = str('aliyun_access_key_id');
-    const accessKeySecret = str('aliyun_access_key_secret');
-    const signName = str('aliyun_sign_name');
-    if (!accessKeyId || !accessKeySecret || !signName) {
+    const options = smsProviderOptionsFrom(provider, (key) => values[key]);
+    if (!options.accessKeyId || !options.accessKeySecret || !options.signName) {
       return { provider, options: {}, missing: 'aliyun_access_key_id / aliyun_access_key_secret / aliyun_sign_name' };
     }
-    return {
-      provider,
-      options: {
-        accessKeyId,
-        accessKeySecret,
-        signName,
-        ...(str('aliyun_template_code') ? { defaultTemplateCode: str('aliyun_template_code') } : {}),
-      },
-    };
+    return { provider, options };
   }
   if (provider === 'twilio') {
-    const accountSid = str('twilio_account_sid');
-    const authToken = str('twilio_auth_token');
-    const from = str('twilio_from_number');
-    const messagingServiceSid = str('twilio_messaging_service_sid');
-    if (!accountSid || !authToken || (!from && !messagingServiceSid)) {
+    const options = smsProviderOptionsFrom(provider, (key) => values[key]);
+    if (!options.accountSid || !options.authToken || (!options.from && !options.messagingServiceSid)) {
       return { provider, options: {}, missing: 'twilio_account_sid / twilio_auth_token / twilio_from_number (or messaging service SID)' };
     }
-    return {
-      provider,
-      options: {
-        accountSid,
-        authToken,
-        ...(from ? { from } : {}),
-        ...(messagingServiceSid ? { messagingServiceSid } : {}),
-      },
-    };
+    return { provider, options };
   }
   return { provider: 'log', options: {} };
 }
@@ -314,6 +293,20 @@ export class SmsServicePlugin implements Plugin {
    * Translate the `sms` settings snapshot into a transport and hot-swap it
    * on the running SmsService. Incomplete credentials keep the previous
    * transport (with a warning) so a half-saved form can't break delivery.
+   *
+   * Which provider: one the namespace NAMES — an operator's save, or an
+   * `OS_SMS_PROVIDER` env lock — wins, as it always has. The manifest default
+   * names nothing (`source: 'default'` is not a decision anyone made, the
+   * criterion the `log` branch below states), so then the deployment's
+   * configured provider — this plugin's constructor `provider` — stands, and
+   * the namespace is read for that provider's credentials (`OS_SMS_TWILIO_*`
+   * env locks included). Before this, a configured `twilio` / `aliyun` whose
+   * credentials lived only in the namespace never got a delivering transport.
+   * Its credentials from the namespace overlay the constructor's
+   * `providerOptions` key by key, so a constructor-only option (a test
+   * `baseUrl`, an `endpoint`) survives the rebuild. When the namespace holds
+   * no complete set, a transport the constructor's own credentials built at
+   * init stays, silently; with none, the warning below says so.
    */
   private applySmsSettings(
     values: Record<string, unknown>,
@@ -321,8 +314,13 @@ export class SmsServicePlugin implements Plugin {
     ctx: PluginContext,
   ): void {
     if (!this.service) return;
-    const resolved = providerFromSettings(values);
+    const named = (sources.provider ?? 'default') !== 'default';
+    const configuredProvider = !named && this.options.provider !== undefined && this.options.provider !== 'log'
+      ? this.options.provider
+      : undefined;
+    const resolved = providerFromSettings(configuredProvider ? { ...values, provider: configuredProvider } : values);
     if (resolved.missing) {
+      if (configuredProvider && this.service.isConfigured()) return;
       ctx.logger.warn(
         `SmsServicePlugin: provider='${resolved.provider}' selected but ${resolved.missing} is empty — transport NOT rebuilt.`,
       );
@@ -348,7 +346,8 @@ export class SmsServicePlugin implements Plugin {
       return;
     }
     try {
-      const transport = makeSmsTransport({ provider: resolved.provider, options: resolved.options, logger: ctx.logger });
+      const options = configuredProvider ? { ...this.options.providerOptions, ...resolved.options } : resolved.options;
+      const transport = makeSmsTransport({ provider: resolved.provider, options, logger: ctx.logger });
       this.service.setTransport(transport, true);
       ctx.logger.info(`SmsServicePlugin: transport rebuilt from settings (provider=${resolved.provider}).`);
     } catch (err: any) {

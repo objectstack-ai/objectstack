@@ -440,6 +440,12 @@ describe('describeTemplateColumns', () => {
     }
   });
 
+  it('[#22785] a user field without reference names sys_user by its label, as Field.user does', () => {
+    const schema = { fields: { owner: { name: 'owner', type: 'user', label: 'Owner' } } };
+    const [owner] = describeTemplateColumns(schema, ['owner'], { locale: 'en', referenceLabels: new Map([['sys_user', 'User']]) });
+    expect(owner.howToFill).toContain('The name of a User record');
+  });
+
   it('a name in ?fields= that is no field of the object is described as such', () => {
     const [unknown] = describeTemplateColumns(KITCHEN_SINK, ['nope'], { locale: 'en' });
     expect(unknown).toMatchObject({ header: 'nope', type: '', howToFill: 'Not a field of this object.' });

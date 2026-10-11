@@ -136,6 +136,7 @@ function fakeStack(opts: FakeOpts): VerifyStack {
     automation: undefined as never,
     seed: undefined as never,
     rows: undefined as never,
+    observeWrites: undefined as never,
     metadata: undefined as never,
     tenancy: undefined as never,
   };

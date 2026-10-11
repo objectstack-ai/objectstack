@@ -127,11 +127,11 @@ export function validateViewContainers(stack: Record<string, unknown>): ViewCont
         rule: VIEW_CONTAINER_SHAPE,
         where: `views${key}${label}`,
         path: `views${key}`,
+        // [#22161] One verdict sentence; the container-only contract and
+        // the doors that hold it are `os explain view-container-shape`.
         message:
-          'A ViewItem record is not a view container: the stack `views:` collection carries '
-          + 'containers only — `viewKind` belongs to a single VIEW, not to the container. The '
-          + 'registration loop refuses this entry too: the stack schema, this rule and the loop hold '
-          + '`views:` to one container-only contract.',
+          'A ViewItem record (`viewKind`) is not a view container: `views:` carries containers only, '
+          + 'so the stack schema, this rule and the registration loop all refuse it.',
         hint: 'Wrap it in a defineView container: defineView({ list: { type, data, columns, ... }, '
           + 'listViews: { ... } }) — or author the standalone view through the metadata door '
           + '(Studio / `PUT /api/v1/meta/view`). Machine-assembled manifests carry it under '
@@ -154,10 +154,14 @@ export function validateViewContainers(stack: Record<string, unknown>): ViewCont
       rule: VIEW_CONTAINER_SHAPE,
       where: `views${key}${label}`,
       path: `views${key}`,
+      // [#22161] One verdict sentence per arm. The flat arm used to say
+      // `ViewSchema` strips the keys to an EMPTY container; measured false
+      // since `ViewSchema` went `.strict()` (this module's header), and the
+      // registration loop refuses the shape (`isViewContainerShaped`). Which
+      // door says what is `os explain view-container-shape`.
       message: looksFlat
-        ? 'Flat list-view object is not a view container: `ViewSchema` strips its keys, '
-          + 'so it parses to an EMPTY container — zero views register and the Console '
-          + 'renders no view for it.'
+        ? 'Flat list-view object is not a view container: its single-view keys sit where the '
+          + 'container slots belong, so the stack schema and the registration loop refuse it.'
         : 'View container defines no views — all of `list` / `form` / `listViews` / '
           + '`formViews` are absent or empty, so nothing registers.',
       hint: 'Wrap every view in a defineView container: defineView({ list: { type, data, '

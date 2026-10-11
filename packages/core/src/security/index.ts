@@ -51,8 +51,17 @@ export {
 // The outbound HTTP signature scheme (`X-Objectstack-Signature`) — one
 // definition shared by the messaging outbox and the flow `http` node's inline
 // arm, which cannot import each other; `@objectstack/service-messaging`
-// re-exports both names unchanged.
-export { HTTP_SIGNATURE_HEADER, signHttpBody } from './http-signature.js';
+// re-exports both names unchanged. Its timestamped form and the receiver's
+// verifier for both forms live beside it (`@objectstack/trigger-api`'s
+// inbound hook verifies through `verifyHttpSignature`).
+export {
+  HTTP_SIGNATURE_HEADER,
+  HTTP_SIGNATURE_TOLERANCE_SECONDS,
+  signHttpBody,
+  signHttpBodyAt,
+  verifyHttpSignature,
+  type HttpSignatureVerdict,
+} from './http-signature.js';
 
 // [#12699 / ADR-0131 D7] The ONE fail-closed reader of the mounted `org-scoping`
 // service's per-deployment keys — shared by the engine's schema registry

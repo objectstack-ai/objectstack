@@ -1,7 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
+import {
+  validateActionNameRefs as validateActionNameRefsUnrecorded,
+  ACTION_NAME_UNDEFINED,
+} from './validate-action-name-refs.js';
+import { ACTION_LOCATIONS } from '@objectstack/spec/ui';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain action-name-undefined`. Every direct call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — every firing variant this suite
+// exercises, not a chosen few. Run the whole file: those cases read what the
+// cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateActionNameRefs: typeof validateActionNameRefsUnrecorded = (...args) => {
+  const findings = validateActionNameRefsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 const withActions = () => ({
   objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
@@ -651,5 +669,138 @@ describe('validateActionNameRefs — floor', () => {
       ],
     });
     expect(findings).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — action-name-undefined', () => {
+  /** A related list on `crm_account`'s record page, listing `crm_contact` rows. */
+  const relatedListStack = (actions: unknown[]) => ({
+    objects: [
+      { name: 'crm_account', fields: { name: { type: 'text' } }, actions: [{ name: 'crm_merge', type: 'script' }] },
+      {
+        name: 'crm_contact',
+        fields: { name: { type: 'text' } },
+        actions: [
+          { name: 'crm_log_call', type: 'script', locations: ['record_related'] },
+          { name: 'crm_pin', type: 'script', locations: ['record_header', 'record_more', 'record_section', 'list_item_x'] },
+          { name: 'crm_score', type: 'script' },
+        ],
+      },
+    ],
+    pages: [{
+      name: 'account_record',
+      object: 'crm_account',
+      regions: [{ name: 'main', components: [{ type: 'record:related_list', properties: { objectName: 'crm_contact', actions } }] }],
+    }],
+  });
+
+  it('reads as one sentence per arm', () => {
+    const findings = validateActionNameRefs({
+      ...relatedListStack(['crm_merge', 'crm_lgo_call', 'crm_score', 'crm_pin']),
+      views: [{ name: 'crm_contact', list: { type: 'grid', bulkActions: ['mass_delete'] } }],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'Bulk-action menu names action "mass_delete", which no action in this stack defines, so the button does '
+        + 'nothing when clicked.',
+      'Related-list actions names action "crm_merge", not an action of related object "crm_contact" (defined '
+        + 'only on object "crm_account"), so the list draws no button for it.',
+      'Related-list actions names action "crm_lgo_call", not an action of related object "crm_contact" (defined '
+        + 'nowhere in this stack), so the list draws no button for it. Did you mean "crm_log_call"?',
+      'Related-list actions names action "crm_score" of "crm_contact", which declares no `locations`, so the list '
+        + 'draws no button for it.',
+      'Related-list actions names action "crm_pin" of "crm_contact", which is placed at no location a related '
+        + 'list draws, so the list draws no button for it.',
+    ]);
+  });
+
+  it('the alert and header arms name what the author will see', () => {
+    const findings = validateActionNameRefs({
+      objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+      pages: [{
+        name: 'lead_record',
+        object: 'crm_lead',
+        regions: [{
+          name: 'main',
+          components: [
+            { type: 'record:alert', properties: { title: 'T', action: { actionName: 'crm_nudge' } } },
+            { type: 'page:header', properties: { actions: ['crm_nudge'] } },
+          ],
+        }],
+      }],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'Alert call-to-action names action "crm_nudge", which no action in this stack defines, so the banner '
+        + 'renders without its call-to-action button.',
+      'Page-header actions names action "crm_nudge", which no action in this stack defines, so the header '
+        + 'draws no button for it.',
+    ]);
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const entry = explainRule(ACTION_NAME_UNDEFINED);
+    expect(entry, 'no `os explain action-name-undefined` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      '`rowActions`, `bulkActions`',
+      '`execution: \'aggregate\'`',
+      '`record:quick_actions`',
+      '`record:alert`',
+      '`page:header`',
+      '`record:related_list`',
+      '`actionDef.actionName`',
+      '`runAction`',
+      'no built-in action names',
+      'browser-console warning',
+      'another installed package',
+      'never the page\'s object or a global action',
+      'naming it in `actions` is not a placement',
+      'refusal notice above the list',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('the locations the explanation says a related list draws are the ones the rule accepts', () => {
+    // The explanation module imports nothing, so its location list is held to
+    // the rule by running the rule over every location the spec declares.
+    const text = explainRule(ACTION_NAME_UNDEFINED)!.paragraphs.join('\n');
+    const drawn = ACTION_LOCATIONS.filter((location) => validateActionNameRefsUnrecorded({
+      objects: [{ name: 'crm_contact', fields: {}, actions: [{ name: 'act', type: 'script', locations: [location] }] }],
+      pages: [{
+        name: 'p',
+        object: 'crm_account',
+        regions: [{ name: 'main', components: [{ type: 'record:related_list', properties: { objectName: 'crm_contact', actions: ['act'] } }] }],
+      }],
+    }).length === 0);
+    expect(drawn.length).toBeGreaterThan(0);
+    for (const location of ACTION_LOCATIONS) {
+      expect(text.includes(`\`${location}\``), location).toBe(drawn.includes(location));
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === ACTION_NAME_UNDEFINED);
+    // The coverage control first: every surface fired, and all three
+    // related-list arms (defined elsewhere, defined nowhere, placed nowhere).
+    for (const surface of [
+      'Bulk-action menu',
+      'Row-action menu',
+      'Aggregate bulk action',
+      'Quick-actions bar',
+      'Alert call-to-action',
+      'Page-header actions',
+      'Navigation action item',
+      'Navigation deep-link auto-run',
+    ]) {
+      expect(converted.some((f) => f.message.startsWith(`${surface} names action "`)), surface).toBe(true);
+    }
+    expect(converted.some((f) => f.message.includes('(defined only on object'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('(defined nowhere in this stack)'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('which declares no `locations`'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('placed at no location a related list draws'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

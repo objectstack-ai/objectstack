@@ -5,6 +5,7 @@
 // for every test file in the package (packages/cli/vitest.config.ts's header
 // records the incident that taught that).
 import { defineConfig } from 'vitest/config';
+import path from 'node:path';
 
 export default defineConfig({
   test: {
@@ -15,5 +16,26 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+  },
+  resolve: {
+    // ARRAY form with an ANCHORED `find`, deliberately. The object form matches
+    // by PREFIX, so a bare key whose replacement is a FILE also swallows that
+    // package's subpaths and resolves them to `.../index.ts/<subpath>` —
+    // ENOTDIR at run time, in a config that reads as correct.
+    // `scripts/check-test-source-alias.mjs` is the authority on the rule.
+    alias: [
+      // `api-trigger.ts` verifies every inbound post through
+      // @objectstack/core's `verifyHttpSignature`, the one definition of the
+      // signature scheme. Without this entry the specifier resolves through
+      // core's `exports` to its `dist/`, so the signature pins here would be a
+      // verdict on another package's BUILD STATE rather than on the source in
+      // this checkout — and the dangerous direction is the quiet one: an
+      // unbuilt change to the verifier leaves these pins green against stale
+      // bytes.
+      {
+        find: /^@objectstack\/core$/,
+        replacement: path.resolve(__dirname, '../../core/src/index.ts'),
+      },
+    ],
   },
 });

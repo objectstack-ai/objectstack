@@ -2066,6 +2066,200 @@ describe('ApprovalService — admin override (#3424)', () => {
   });
 });
 
+// ── #22725: the `unstaffed` arm of the inbox read ────────────────────────────
+//
+// An `onEmptyApprovers: 'admin_rescue'` request opens on a slate that names no
+// person, so it was in nobody's queue: `approverId` matches a slot against the
+// addresses a caller names, and an override actor's addresses never equal an
+// unstaffed `position:<p>` literal. Only the unfiltered list showed it. The
+// `unstaffed` member is the arm that returns it to the callers who may decide
+// it. It is ORed with `approverId`, and both `listRequests` and
+// `countRequests` answer it.
+//
+// Every case reads BOTH faces (the list and its count), because the console's
+// paged inbox shows the one and the bell shows the other.
+describe('ApprovalService — the unstaffed arm (#22725)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-01-15T10:00:00Z').getTime();
+
+  const PLATFORM_ADMIN = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+  const TENANT_ADMIN = { userId: 'owner', tenantId: 't1', positions: [], permissions: ['organization_admin'] } as any;
+  const OTHER_TENANT_ADMIN = { userId: 'owner2', tenantId: 't2', positions: [], permissions: ['organization_admin'] } as any;
+  const MEMBER = { userId: 'nobody', tenantId: 't1', positions: [], permissions: [] } as any;
+  const APPROVER = { userId: 'u9', tenantId: 't1', positions: [], permissions: [] } as any;
+
+  /** A node routed to a position nobody holds: the `position:sales_manager` literal. */
+  const stuck = (recordId: string) => ({
+    object: 'opportunity', recordId, runId: `run_${recordId}`, nodeId: 'approve_step',
+    flowName: 'deal_approval',
+    config: { approvers: [{ type: 'position' as const, value: 'sales_manager' }], behavior: 'first_response' as const, lockRecord: true },
+    record: { id: recordId, amount: 100 },
+  });
+  /** An expression that resolves to nobody: `admin_rescue` opens on an EMPTY slate. */
+  const empty = (recordId: string) => ({
+    ...stuck(recordId),
+    config: { approvers: [{ type: 'expression' as const, value: 'vars.picked' }], behavior: 'first_response' as const, lockRecord: true },
+    variables: { picked: [] },
+  });
+  /** A staffed node: a concrete user on the slate. */
+  const staffed = (recordId: string, user = 'u9') => ({
+    ...openInput([user]), recordId, runId: `run_${recordId}`, record: { id: recordId, amount: 100 },
+  });
+
+  const ids = (rows: Array<{ id: string }>) => rows.map(r => r.id).sort();
+  /** Both faces of one filter, as one reader: the list's ids and the count. */
+  const read = async (filter: Record<string, unknown>, ctx: any) => {
+    const rows = await svc.listRequests(filter as any, ctx);
+    const total = await svc.countRequests(filter as any, ctx);
+    return { ids: ids(rows), total, rows };
+  };
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(baseTime + (n++) * 1000) } });
+  });
+
+  it('an admin_rescue request appears for an override actor, on both faces', async () => {
+    const onLiteral = await svc.openNodeRequest(stuck('opp_literal'), CTX) as any;
+    const onNothing = await svc.openNodeRequest(empty('opp_empty'), CTX) as any;
+    expect(onLiteral.pending_approvers).toEqual(['position:sales_manager']);
+    expect(onNothing.pending_approvers).toEqual([]);
+    const control = await svc.openNodeRequest(staffed('opp_staffed'), CTX) as any;
+
+    for (const admin of [TENANT_ADMIN, PLATFORM_ADMIN]) {
+      const got = await read({ status: 'pending', unstaffed: true }, admin);
+      expect(got.ids).toEqual([onLiteral.id, onNothing.id].sort());
+      expect(got.total).toBe(2);
+      expect(got.ids).not.toContain(control.id);
+      // Every row the arm adds is one the caller may override.
+      for (const row of got.rows) {
+        expect(row.viewer).toMatchObject({ can_act: false, can_override: true });
+      }
+    }
+  });
+
+  it('it does not appear for a member: the flag adds nothing and refuses nothing', async () => {
+    await svc.openNodeRequest(stuck('opp_literal'), CTX);
+    await svc.openNodeRequest(empty('opp_empty'), CTX);
+    const mine = await svc.openNodeRequest(staffed('opp_mine', 'nobody'), CTX) as any;
+
+    const slateScans = () => engine._finds.filter(f => f.object === 'sys_approval_request'
+      && Array.isArray(f.options?.fields) && f.options.fields.includes('pending_approvers')).length;
+    const before = slateScans();
+    expect(await read({ status: 'pending', unstaffed: true }, MEMBER)).toMatchObject({ ids: [], total: 0 });
+    // A caller who may override nothing is answered without the arm's scan.
+    expect(slateScans()).toBe(before);
+    // Beside the member's own identities, the arm leaves their queue exactly as
+    // `approverId` alone answers it.
+    const withFlag = await read({ status: 'pending', approverId: ['nobody'], unstaffed: true }, MEMBER);
+    const without = await read({ status: 'pending', approverId: ['nobody'] }, MEMBER);
+    expect(withFlag.ids).toEqual([mine.id]);
+    expect(withFlag.total).toBe(1);
+    expect(without.ids).toEqual(withFlag.ids);
+    expect(without.total).toBe(withFlag.total);
+  });
+
+  it('CONTROL: a staffed request\'s queue is unchanged', async () => {
+    await svc.openNodeRequest(stuck('opp_literal'), CTX);
+    const control = await svc.openNodeRequest(staffed('opp_staffed'), CTX) as any;
+
+    // Its approver's queue reads the same with and without the arm.
+    for (const filter of [
+      { status: 'pending', approverId: ['u9'] },
+      { status: 'pending', approverId: ['u9'], unstaffed: true },
+    ]) {
+      expect(await read(filter, APPROVER)).toMatchObject({ ids: [control.id], total: 1 });
+    }
+    // And an override actor's rescue arm never claims it.
+    const rescue = await read({ status: 'pending', unstaffed: true }, TENANT_ADMIN);
+    expect(rescue.ids).not.toContain(control.id);
+    // Without the arm, the override actor's "My Pending" is what it was.
+    expect(await read({ status: 'pending', approverId: ['owner'] }, TENANT_ADMIN)).toMatchObject({ ids: [], total: 0 });
+  });
+
+  it('with approverId the arms are ORed: one read answers "my pending, rescues included"', async () => {
+    const stuckReq = await svc.openNodeRequest(stuck('opp_literal'), CTX) as any;
+    const adminOwn = await svc.openNodeRequest(staffed('opp_admin_own', 'owner'), CTX) as any;
+    await svc.openNodeRequest(staffed('opp_other'), CTX);
+
+    const both = await read({ status: 'pending', approverId: ['owner'], unstaffed: true }, TENANT_ADMIN);
+    expect(both.ids).toEqual([stuckReq.id, adminOwn.id].sort());
+    expect(both.total).toBe(2);
+    // The paged window covers the union too: two pages of one.
+    const page1 = await svc.listRequests({ status: 'pending', approverId: ['owner'], unstaffed: true, limit: 1, offset: 0 }, TENANT_ADMIN);
+    const page2 = await svc.listRequests({ status: 'pending', approverId: ['owner'], unstaffed: true, limit: 1, offset: 1 }, TENANT_ADMIN);
+    expect(ids([...page1, ...page2])).toEqual(both.ids);
+  });
+
+  it('`unstaffed: false` is the same as absent', async () => {
+    await svc.openNodeRequest(stuck('opp_literal'), CTX);
+    await svc.openNodeRequest(staffed('opp_staffed'), CTX);
+    const absent = await read({ status: 'pending' }, TENANT_ADMIN);
+    const off = await read({ status: 'pending', unstaffed: false }, TENANT_ADMIN);
+    expect(off.ids).toEqual(absent.ids);
+    expect(off.total).toBe(absent.total);
+    expect(absent.total).toBe(2);
+  });
+
+  it('a tenant admin\'s rescue queue stops at their organization; a platform admin\'s crosses it', async () => {
+    const t1Stuck = await svc.openNodeRequest(stuck('opp_literal'), CTX) as any; // organization t1
+
+    expect(await read({ status: 'pending', unstaffed: true }, OTHER_TENANT_ADMIN)).toMatchObject({ ids: [], total: 0 });
+    const crossing = { ...PLATFORM_ADMIN, tenantId: 't2' };
+    expect(await read({ status: 'pending', unstaffed: true }, crossing)).toMatchObject({ ids: [], total: 0 });
+    // The platform admin's own read is walled by its context organization the
+    // way every list read is (`buildRequestWhere`); with no organization on
+    // the context, the arm reaches every organization's rescue queue.
+    const unscoped = { userId: 'root', positions: [], permissions: ['admin_full_access'] } as any;
+    expect(await read({ status: 'pending', unstaffed: true }, unscoped)).toMatchObject({ ids: [t1Stuck.id], total: 1 });
+  });
+
+  it('per row, the arm returns only what the caller may override: an org-less tenant admin reaches org-less rescues only', async () => {
+    const t1Stuck = await svc.openNodeRequest(stuck('opp_literal'), CTX) as any; // organization t1
+    const globalStuck = await svc.openNodeRequest(stuck('opp_global'), SYS) as any; // no organization
+    expect(engine._tables['sys_approval_request'].find(r => r.id === globalStuck.id)?.organization_id ?? null).toBeNull();
+
+    // No organization on the context: the list read is unwalled, and the
+    // visibility read lets this caller see every row. Only the per-row
+    // override test keeps the t1 request, which this caller may NOT
+    // override, out of the arm.
+    const orgLessTenantAdmin = { userId: 'owner', positions: [], permissions: ['organization_admin'] } as any;
+    const got = await read({ status: 'pending', unstaffed: true }, orgLessTenantAdmin);
+    expect(got).toMatchObject({ ids: [globalStuck.id], total: 1 });
+    expect(got.ids).not.toContain(t1Stuck.id);
+    expect(got.rows[0].viewer).toMatchObject({ can_override: true });
+  });
+
+  it('reads the slate as it stands: a slate left holding only literals joins the arm', async () => {
+    const mixed = await svc.openNodeRequest({
+      ...stuck('opp_mixed'),
+      config: {
+        approvers: [{ type: 'user' as const, value: 'u9' }, { type: 'position' as const, value: 'sales_manager' }],
+        behavior: 'unanimous' as const,
+        lockRecord: true,
+      },
+    }, CTX) as any;
+    expect(mixed.pending_approvers).toEqual(['u9', 'position:sales_manager']);
+    expect((await read({ status: 'pending', unstaffed: true }, TENANT_ADMIN)).ids).toEqual([]);
+
+    // u9 approves; the unanimous tally keeps the request open on the literal alone.
+    await svc.decideNode(mixed.id, { decision: 'approve', actorId: 'u9' }, APPROVER);
+    const after = await svc.getRequest(mixed.id, TENANT_ADMIN);
+    expect(after?.status).toBe('pending');
+    expect(after?.pending_approvers).toEqual(['position:sales_manager']);
+    expect(await read({ status: 'pending', unstaffed: true }, TENANT_ADMIN)).toMatchObject({ ids: [mixed.id], total: 1 });
+  });
+
+  it('a finalized rescue leaves the arm', async () => {
+    const req = await svc.openNodeRequest(stuck('opp_literal'), CTX) as any;
+    await svc.decide(req.id, { decision: 'approve', actorId: 'owner' }, TENANT_ADMIN);
+    expect(await read({ unstaffed: true }, TENANT_ADMIN)).toMatchObject({ ids: [], total: 0 });
+  });
+});
+
 // ── approval_comment: the declared reply against the route it posts to ──────
 //
 // `sys_approval_request` declares the thread reply as the action

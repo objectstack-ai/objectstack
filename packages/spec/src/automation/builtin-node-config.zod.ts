@@ -102,9 +102,12 @@ import { valueSlotTemplateRefusals } from './flow-value-slot-template';
 // the single-brace tokens they still carry, composed into the screen and end
 // contracts below rather than re-spelled here.
 import { textSlotTemplateRefusal } from './flow-text-slot-template';
-// [#22502] The `$` names are the flow engine's at the binding keys too — the
-// one rule, composed into every `outputVariable` below rather than re-spelled.
-import { flowBoundVariableNameSchema } from './flow-bound-variable-name';
+// [#22502, #22572] The `$` names are the flow engine's at the binding keys too
+// — the one rule, composed into every key below that binds a variable by name
+// (`outputVariable`, a screen's `idVariable` and field `name`, `map`'s
+// `iteratorVariable` / `indexVariable`, an `assignment` target) rather than
+// re-spelled.
+import { flowAssignmentTargets, flowBoundVariableNameRefusal, flowBoundVariableNameSchema } from './flow-bound-variable-name';
 // The one key a screen field's option is addressed by as text — the option
 // collision refusal below reads it, as `translateFlow` and the extractor do.
 import { flowScreenFieldOptionKey } from './flow-screen-option-key';
@@ -696,8 +699,13 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
     object: 'reference',
   },
 }, {
-  /** Field name — an item with an empty name is dropped. */
-  name: z.string().describe('Field name (the flow variable the value binds to)'),
+  /**
+   * Field name — an item with an empty name is dropped. The submitted value
+   * binds to a flow variable of this name, so it is never a `$` name: those
+   * are the engine's, and the resume carrying one is refused (#22572).
+   */
+  name: flowBoundVariableNameSchema('screenFieldName')
+    .describe('Field name (the flow variable the value binds to) — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),
   /** Display label. */
   label: z.string().optional().describe('Display label'),
   /** Input type (text, number, select, …). */
@@ -858,9 +866,9 @@ export const ScreenConfigSchema = lazySchema(() => strictObject({
   /** Object-form screen: render this object's full create/edit form instead. */
   objectName: z.string().optional()
     .describe("Render this object's full create/edit form instead of a flat field list"),
-  /** Object form only: variable bound to the saved record's id. */
-  idVariable: z.string().optional()
-    .describe("Object form only: variable bound to the saved record's id"),
+  /** Object form only: variable bound to the saved record's id — never a `$` name: those are the engine's (#22572). */
+  idVariable: flowBoundVariableNameSchema('idVariable').optional()
+    .describe("Object form only: variable bound to the saved record's id — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
   /**
    * Object form only: create or edit.
    *
@@ -1055,10 +1063,12 @@ export const MapConfigSchema = lazySchema(() => strictObject({
     .describe('Template/variable resolving to the array to process (an inline array is accepted)'),
   /** The per-item subflow (execute-time required). */
   flowName: z.string().describe('Subflow run for each item — it may pause (e.g. an approval)'),
-  /** Variable the current item is bound to inside each item's scope. */
-  iteratorVariable: z.string().default('item').describe('Variable holding the current item'),
-  /** Optional variable the zero-based index is bound to. */
-  indexVariable: z.string().optional().describe('Optional variable holding the current index'),
+  /** Variable the current item is bound to inside each item's scope — never a `$` name: those are the engine's (#22572). */
+  iteratorVariable: flowBoundVariableNameSchema('iteratorVariable').default('item')
+    .describe('Variable holding the current item — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),
+  /** Optional variable the zero-based index is bound to — never a `$` name (#22572). */
+  indexVariable: flowBoundVariableNameSchema('indexVariable').optional()
+    .describe('Optional variable holding the current index — a name without a leading `$` (the `$` names are the flow engine\'s own)'),
   /** When items are records, the object they belong to (exposes each item as the child's record). */
   itemObject: z.string().optional()
     .describe("When items are records, the object they belong to (exposes each item as the child's record)"),
@@ -1159,22 +1169,42 @@ export const ASSIGNMENT_ARRAY_FORM_PRESCRIPTION =
  * refused here instead; `assignments` one level down keeps its own guard,
  * because the two are different parsers at different depths and neither
  * covers the other.
+ *
+ * Its targets are bindings, so none is a `$` name (#22572): those are the flow
+ * engine's, and `assignments: { $record: … }` would overwrite the trigger
+ * record for the rest of the run. The canonical map's KEY schema is the rule
+ * (`flowBoundVariableNameSchema`), so the published JSON Schema states it as
+ * `propertyNames.pattern`. A bare config's top-level keys are refused by the
+ * same rule in the `superRefine` below — a `.catchall()` sees values, never
+ * keys, so no key schema reaches them, and that one site is a declared
+ * dropped refinement. A FLOW is judged at its own door, which reads every shape
+ * the executor binds, the legacy array included (`FlowSchema`'s `assignment`
+ * arm, {@link flowAssignmentTargets}): this contract is applied by no door.
  */
 export const AssignmentConfigSchema = lazySchema(() => refuseCatchallProtoKey(z.object({
   /** Variable name → value; the canonical authoring surface. */
   assignments: refuseRecordProtoKey(
-    z.record(z.string().min(1), AssignmentValueSchema, {
+    z.record(flowBoundVariableNameSchema('assignmentTarget').min(1), AssignmentValueSchema, {
       // The array form is a TYPE error on this slot; the message is the
       // prescription, carried on the record's own `invalid_type` issue because
       // an object-level refinement never runs once a property has failed its
       // type (Zod aborts the object) — measured, not assumed.
-      error: (issue) => (Array.isArray(issue.input) ? ASSIGNMENT_ARRAY_FORM_PRESCRIPTION : undefined),
+      //
+      // [#22572] A refused KEY arrives as the record's own `invalid_key`
+      // issue, whose default message ("Invalid key in record") drops the key
+      // schema's sentence into a nested list; lift that sentence — the `$`
+      // rule's remedy — onto the issue the author reads.
+      error: (issue) => {
+        if (issue.code === 'invalid_key') return (issue as { issues?: ReadonlyArray<{ message?: string }> }).issues?.[0]?.message;
+        return Array.isArray(issue.input) ? ASSIGNMENT_ARRAY_FORM_PRESCRIPTION : undefined;
+      },
     }),
     // [objectstack#18847] `__proto__` ONLY. This slot's key type carries no
-    // grammar (`z.string().min(1)`), so `constructor` and `prototype` are
-    // legal flow-variable names today and are left legal — only `__proto__`
-    // is structurally unreachable by any key schema (see
-    // `refuseRecordProtoKey`'s docblock), so it alone is refused here.
+    // grammar beyond the `$` rule (`flowBoundVariableNameSchema(…).min(1)`),
+    // so `constructor` and `prototype` are legal flow-variable names today and
+    // are left legal — only `__proto__` is structurally unreachable by any key
+    // schema (see `refuseRecordProtoKey`'s docblock), so it alone is refused
+    // here.
     'assignments',
   ).optional()
     .describe('Variables to set: each key is a variable name, each value a CEL value envelope or a literal'),
@@ -1184,7 +1214,19 @@ export const AssignmentConfigSchema = lazySchema(() => refuseCatchallProtoKey(z.
   // literal (an envelope-shaped object included — nothing evaluates it here),
   // and one still spelling the retired `{…}` template dialect is refused like
   // in the map, so the bare shape is no way around the retirement.
-  .catchall(LEGACY_ASSIGNMENT_VALUE),
+  .catchall(LEGACY_ASSIGNMENT_VALUE)
+  // [#22572] …and each such KEY is a binding, judged by the `$` rule the map's
+  // key schema is: the bare shape is no way around it either. The executor
+  // binds top-level keys only when there is no `assignments` map or array, so
+  // those are the keys judged here; the map's keys and the array form are the
+  // `assignments` slot's own.
+  .superRefine((config, ctx) => {
+    for (const target of flowAssignmentTargets(config)) {
+      if (target.path[0] === 'assignments' && target.path.length > 1) continue;
+      const message = flowBoundVariableNameRefusal('assignmentTarget', target.name);
+      if (message !== undefined) ctx.addIssue({ code: 'custom', path: [...target.path], message });
+    }
+  }),
   // [#19151] `__proto__` ONLY, and for the same structural reason
   // the `assignments` slot above refuses it: `handleCatchall`'s
   // `if (key === "__proto__") continue;` runs above `_catchall.run`, so no

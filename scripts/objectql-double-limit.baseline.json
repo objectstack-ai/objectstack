@@ -615,9 +615,6 @@
     "packages/plugins/plugin-security/src/permission-set-drift.test.ts": {
       "unjudged": 1
     },
-    "packages/plugins/plugin-security/src/permission-set-overlay-discard.test.ts": {
-      "unjudged": 1
-    },
     "packages/plugins/plugin-security/src/permission-set-projection.test.ts": {
       "unjudged": 1
     },

@@ -23,6 +23,15 @@
 // record's write gate), naming the leg or the reason; a rejection fails the
 // request, so it is reported fail-closed; an outcome outside the vocabulary
 // refuses too.
+//
+// A READ of such a record meets a master leg as well: the read door scopes the
+// find by the master ids the principal can read. The write check does not
+// answer a read, so explain asks the read door's own by-id read
+// (`recordAbsentToCaller`) where every leg it models admits the record, and
+// takes its answer. The last block pins that half: a record the door withholds
+// is not visible on the `sharing` layer, a record the door returns leaves the
+// report exactly as before, and a rejection is reported fail-closed. The REST
+// answer beside the REST read door is pinned in the same dogfood suite.
 import { describe, it, expect, vi } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { ExplainOperationSchema, type ExplainDecision, type ExplainOperation } from '@objectstack/spec/security';
@@ -39,7 +48,9 @@ const CBP_SCHEMA = { name: OBJECT, sharingModel: 'controlled_by_parent' };
 
 const EDITOR = PermissionSetSchema.parse({
   name: 'cbx_editor',
-  objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true } },
+  objects: {
+    [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true, allowExport: true },
+  },
 });
 
 /** The principal being EXPLAINED. Kept as one object so a cell can assert the check received this very context. */
@@ -47,6 +58,7 @@ const EXPLAINED = { userId: 'u_member', tenantId: 'org1', positions: ['org_membe
 const RECORD = { id: 'r1', organization_id: 'org1', owner_id: 'u_somebody' };
 
 type Master = ExplainEngineDeps['checkControlledByParentWrite'];
+type ReadDoor = ExplainEngineDeps['recordAbsentToCaller'];
 
 function deps(opts: {
   schema?: Record<string, unknown>;
@@ -54,6 +66,8 @@ function deps(opts: {
   canEdit?: boolean;
   record?: Record<string, unknown> | null;
   layer1?: Record<string, unknown> | null;
+  /** The read door's own by-id read: does it withhold the record from the explained principal? */
+  readDoor?: ReadDoor;
 } = {}): ExplainEngineDeps {
   return {
     ql: { getSchema: () => opts.schema ?? CBP_SCHEMA },
@@ -77,6 +91,7 @@ function deps(opts: {
     canEditRecord: async () => opts.canEdit ?? true,
     canDeleteRecord: async () => opts.canEdit ?? true,
     ...(opts.master ? { checkControlledByParentWrite: opts.master } : {}),
+    ...(opts.readDoor ? { recordAbsentToCaller: opts.readDoor } : {}),
   };
 }
 
@@ -100,17 +115,23 @@ const explainAs = (d: ExplainEngineDeps, operation: ExplainOperation, recordId: 
  *    are retired until the lifecycle batch returns them). The check is still
  *    asked, so the report stays the door's on the day the verb is grantable,
  *    and the object-level CRUD layer decides first.
- *  - `not_asked`: a read (the check guards writes), and `create`, whose master
- *    comes from the request body an explanation does not carry.
+ *  - `read_door_asked`: a read, and an export, which streams the same find.
+ *    The check guards writes and is not asked; the read door's master leg is,
+ *    through the read door's own by-id read (the last block below).
+ *  - `not_asked`: `create`, whose master comes from the request body an
+ *    explanation does not carry.
  */
-const VERB_CLASS: Record<ExplainOperation, 'master_checked' | 'master_checked_object_gate_first' | 'not_asked'> = {
+const VERB_CLASS: Record<
+  ExplainOperation,
+  'master_checked' | 'master_checked_object_gate_first' | 'read_door_asked' | 'not_asked'
+> = {
   update: 'master_checked',
   delete: 'master_checked',
   transfer: 'master_checked',
   restore: 'master_checked_object_gate_first',
   purge: 'master_checked_object_gate_first',
-  read: 'not_asked',
-  export: 'not_asked',
+  read: 'read_door_asked',
+  export: 'read_door_asked',
   create: 'not_asked',
 };
 const MASTER_CHECKED = (Object.keys(VERB_CLASS) as ExplainOperation[]).filter((v) => VERB_CLASS[v] === 'master_checked');
@@ -243,7 +264,9 @@ describe('[ADR-0055] which verbs ask the check, and for whom', () => {
     });
   }
 
-  for (const verb of (Object.keys(VERB_CLASS) as ExplainOperation[]).filter((v) => VERB_CLASS[v] === 'not_asked')) {
+  for (const verb of (Object.keys(VERB_CLASS) as ExplainOperation[]).filter(
+    (v) => VERB_CLASS[v] === 'not_asked' || VERB_CLASS[v] === 'read_door_asked',
+  )) {
     it(`a record-grained ${verb} does not ask it`, async () => {
       const master = answering({ outcome: 'deny', leg: 'object_permission' });
       await explainAs(deps({ master }), verb);
@@ -260,5 +283,85 @@ describe('[ADR-0055] which verbs ask the check, and for whom', () => {
       expect(missing.record, verb).toEqual({ recordId: 'r_missing', visible: false });
     }
     expect(master).not.toHaveBeenCalled();
+  });
+});
+
+const READ_DOOR_ASKED = (Object.keys(VERB_CLASS) as ExplainOperation[]).filter((v) => VERB_CLASS[v] === 'read_door_asked');
+
+/** The read door's answer: `true` withholds the record from the explained principal, `false` returns it. */
+const readDoorAnswering = (absent: boolean): ReadDoor => vi.fn(async () => absent);
+
+describe('[ADR-0055] a read of a controlled_by_parent record takes the read door\'s answer on the master leg', () => {
+  for (const verb of READ_DOOR_ASKED) {
+    it(`${verb}: a record the read door withholds is not visible, decided by the sharing layer`, async () => {
+      const d = await explainAs(deps({ readDoor: readDoorAnswering(true) }), verb);
+      expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
+      expect(sharingRecordOf(d)?.outcome).toBe('excluded');
+    });
+
+    it(`${verb}: a record the read door returns: byte-identical to the report without the question`, async () => {
+      const without = await explainAs(deps(), verb);
+      const withDoor = await explainAs(deps({ readDoor: readDoorAnswering(false) }), verb);
+      expect(withDoor).toEqual(without);
+      expect(withDoor.record).toMatchObject({ recordId: 'r1', visible: true });
+    });
+
+    it(`${verb}: a rejection fails the find, so it is reported fail-closed with no predicate`, async () => {
+      const fault = Object.assign(new Error('datasource unavailable'), { code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503 });
+      const readDoor: ReadDoor = vi.fn(async () => { throw fault; });
+      const d = await explainAs(deps({ readDoor }), verb);
+      expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
+      const sharing = sharingRecordOf(d);
+      expect(sharing?.outcome).toBe('not_evaluated');
+      expect(sharing?.rowFilter).toBeUndefined();
+      expect(sharing?.matchesRecord).toBeUndefined();
+    });
+
+    it(`${verb}: asked once, for that record, with the EXPLAINED context, and the write check is not asked`, async () => {
+      const readDoor = readDoorAnswering(false);
+      const master = answering({ outcome: 'deny', leg: 'object_permission' });
+      await explainAs(deps({ readDoor, master }), verb);
+      expect(readDoor).toHaveBeenCalledTimes(1);
+      expect(readDoor).toHaveBeenCalledWith(OBJECT, 'r1', EXPLAINED);
+      expect((readDoor as ReturnType<typeof vi.fn>).mock.calls[0][2]).toBe(EXPLAINED);
+      expect(master).not.toHaveBeenCalled();
+    });
+
+    it(`${verb}: a leg this report models that withholds the record decides, and the read door is not asked`, async () => {
+      const readDoor = readDoorAnswering(true);
+      const byRls = await explainAs(deps({ readDoor, layer1: { id: 'not_this_record' } }), verb);
+      expect(byRls.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'rls' });
+      const byTenant = await explainAs(deps({ readDoor, record: { ...RECORD, organization_id: 'org2' } }), verb);
+      expect(byTenant.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'tenant_isolation' });
+      expect(readDoor).not.toHaveBeenCalled();
+    });
+
+    for (const [label, schema] of [
+      ['public_read_write', { name: OBJECT, sharingModel: 'public_read_write' }],
+      ['private', { name: OBJECT, sharingModel: 'private' }],
+    ] as const) {
+      it(`${verb}: not asked on a ${label} object, which derives nothing from a master: the report is unchanged`, async () => {
+        const readDoor = readDoorAnswering(true);
+        const without = await explainAs(deps({ schema }), verb);
+        const withDoor = await explainAs(deps({ schema, readDoor }), verb);
+        expect(withDoor).toEqual(without);
+        expect(readDoor).not.toHaveBeenCalled();
+      });
+    }
+
+    it(`${verb}: an object-level request, and a record that does not exist, are not asked about`, async () => {
+      const readDoor = readDoorAnswering(true);
+      const objectLevel = await explainAs(deps({ readDoor }), verb, null);
+      expect(objectLevel.record).toBeUndefined();
+      const missing = await explainAs(deps({ readDoor, record: null }), verb, 'r_missing');
+      expect(missing.record).toEqual({ recordId: 'r_missing', visible: false });
+      expect(readDoor).not.toHaveBeenCalled();
+    });
+  }
+
+  it('a create, which addresses no stored record, is not asked about', async () => {
+    const readDoor = readDoorAnswering(true);
+    await explainAs(deps({ readDoor }), 'create');
+    expect(readDoor).not.toHaveBeenCalled();
   });
 });

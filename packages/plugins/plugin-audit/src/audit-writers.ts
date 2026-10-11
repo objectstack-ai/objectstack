@@ -76,8 +76,14 @@ import {
 // the day a driver is added -- the same argument the imports above make.
 import { isMissingTableError } from '@objectstack/types';
 // [#21081] The name the activity row declares its text provenance under, owned
-// by the read side that redacts by it.
-import { ACTIVITY_TEXT_SOURCES_KEY, type ActivityTextSources } from './activity-field-redaction.js';
+// by the read side that redacts by it. [#22771] Likewise the `metadata.kind`
+// slot (ADR-0052 §5) and the kind a fired milestone stamps there.
+import {
+  ACTIVITY_KIND_KEY,
+  ACTIVITY_MILESTONE_KIND,
+  ACTIVITY_TEXT_SOURCES_KEY,
+  type ActivityTextSources,
+} from './activity-field-redaction.js';
 import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
 
 /**
@@ -744,19 +750,30 @@ function milestoneTokenRe(): RegExp {
  * object — including the overwhelming majority where no milestone fires at all.
  * That is the shape #6656 / PR #6977's ruling was obtained to remove from this
  * file, so the plan is built from what actually matched, or not at all.
+ *
+ * [#22771] `watched` is every field a declared milestone watches, computed only
+ * once one fired: it is what the row's `metadata.kind` is derived from. "A
+ * milestone fired" is a fact about every milestone the loop below asks (the
+ * first match wins), so a reader not served one of their fields must not be
+ * served the kind — see `activity-field-redaction.ts`.
  */
 function matchMilestone(
   objectDef: any,
   before: Record<string, any> | null,
   after: Record<string, any> | null,
-): { template: string; type?: string } | null {
+): { template: string; type?: string; watched: string[] } | null {
   const milestones =
     objectDef && Array.isArray(objectDef.activityMilestones) ? objectDef.activityMilestones : null;
   if (!milestones || !after || !before) return null;
+  const asked = (m: any): boolean => !!m && typeof m.field === 'string' && typeof m.summary === 'string';
   for (const m of milestones) {
-    if (!m || typeof m.field !== 'string' || typeof m.summary !== 'string') continue;
+    if (!asked(m)) continue;
     if (after[m.field] === m.value && before[m.field] !== m.value) {
-      return { template: m.summary, type: typeof m.type === 'string' ? m.type : undefined };
+      return {
+        template: m.summary,
+        type: typeof m.type === 'string' ? m.type : undefined,
+        watched: [...new Set<string>(milestones.filter(asked).map((w: any) => w.field))],
+      };
     }
   }
   return null;
@@ -1893,6 +1910,10 @@ export function installAuditWriters(
     // label, and every summary that interpolates it, carry the label field.
     const labelSources: string[] = labelField ? [labelField] : [];
     let summarySources: string[] = labelSources;
+    // [#22771] The row's domain kind (ADR-0052 §5: `metadata.kind`, never a new
+    // `type`), with the parent fields it was derived from. Set only when a
+    // milestone fires; every other row carries no kind.
+    let kind: { value: string; sources: string[] } | undefined;
     // Summaries are user-facing (the record Discussion feed and Setup
     // dashboards render them verbatim), so name the object by its display
     // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo"), and
@@ -1949,6 +1970,10 @@ export function installAuditWriters(
         summary = rendered.text;
         summarySources = rendered.fields;
         if (milestone.type) activityType = milestone.type;
+        // [#22771] `type` stays what the declaration names; the row says it is
+        // a milestone in `metadata.kind`, so a "Case resolved" milestone of
+        // `type: 'completed'` is not read as a finished task.
+        kind = { value: ACTIVITY_MILESTONE_KIND, sources: milestone.watched };
       } else {
         // [#7230] The read plan is built from the SAME masked views the summary
         // renders, and only reached once a milestone has declined — a write
@@ -1975,7 +2000,11 @@ export function installAuditWriters(
         }
       }
     }
-    const textSources: ActivityTextSources = { summary: summarySources, record_label: labelSources };
+    const textSources: ActivityTextSources = {
+      summary: summarySources,
+      record_label: labelSources,
+      ...(kind ? { kind: kind.sources } : {}),
+    };
 
     // `enable.activities` is an opt-OUT capability (#2707): absent block/flag
     // = mirror on (spec default `true`), explicit `false` = this object's CRUD
@@ -2010,7 +2039,14 @@ export function installAuditWriters(
       record_label: label,
       // [#21081] The change, plus the declaration of where the text columns
       // came from. The read side strips the declaration before serving.
-      metadata: safeStringify({ old: oldValue, new: newValue, [ACTIVITY_TEXT_SOURCES_KEY]: textSources }),
+      // [#22771] A fired milestone's kind rides beside them, judged on read
+      // against the fields the declaration names for it.
+      metadata: safeStringify({
+        old: oldValue,
+        new: newValue,
+        ...(kind ? { [ACTIVITY_KIND_KEY]: kind.value } : {}),
+        [ACTIVITY_TEXT_SOURCES_KEY]: textSources,
+      }),
     };
     // Same rationale as auditRow: stamp the tenant column so RLS matches the
     // recipient's organization on read — but only when the (auto-injected)

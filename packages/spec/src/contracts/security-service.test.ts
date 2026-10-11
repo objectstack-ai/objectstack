@@ -563,41 +563,6 @@ describe('Security Service Contract', () => {
     expect(seen[0]).toEqual({ object: 'deal', operation: 'update', userId: 'u2', recordId: 'r1' });
   });
 
-  it('discardPermissionSetOverlay is OPTIONAL — absence is typed, and the caller answers it as not implemented', async () => {
-    // A security service without the operator action still satisfies the
-    // contract, and a caller cannot reach the action without handling the
-    // absent case first.
-    const withoutIt: ISecurityService = makeService();
-    expect(typeof withoutIt.discardPermissionSetOverlay).toBe('undefined');
-
-    // The unguarded call does not compile. Never invoked: its only job is to
-    // make the COMPILER prove the point.
-    const mustNotCompileWithoutAGuard = () =>
-      // @ts-expect-error possibly undefined — a caller must feature-detect first
-      withoutIt.discardPermissionSetOverlay({ userId: 'admin' }, 'ps_1');
-    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
-
-    // The shape the REST route writes: an absent method is a 501, never a
-    // pretended success.
-    const route = async (svc: ISecurityService) =>
-      typeof svc.discardPermissionSetOverlay === 'function'
-        ? { status: 200, data: await svc.discardPermissionSetOverlay({ userId: 'admin' }, 'ps_1') }
-        : { status: 501, data: undefined };
-    await expect(route(withoutIt)).resolves.toEqual({ status: 501, data: undefined });
-
-    const withIt = makeService({
-      discardPermissionSetOverlay: async (_context, id) => ({
-        permissionSet: { id, name: 'sales_user' },
-        healedObjectGrantCount: 3,
-        overlaysDiscarded: 1,
-      }),
-    });
-    await expect(route(withIt)).resolves.toEqual({
-      status: 200,
-      data: { permissionSet: { id: 'ps_1', name: 'sales_user' }, healedObjectGrantCount: 3, overlaysDiscarded: 1 },
-    });
-  });
-
   it('contributeOwnershipFloorAlternates is OPTIONAL — absence is typed, and an alternate names exactly one floor limb', () => {
     // A security service without the seam still satisfies the contract.
     // Absence leaves the floor in force, which is the fail-closed direction:

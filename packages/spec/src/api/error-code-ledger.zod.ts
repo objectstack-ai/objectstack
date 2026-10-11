@@ -618,6 +618,13 @@ export const ERROR_CODE_LEDGER = {
     'NOT_ATTEMPTED',              // data-batch row never ran — an earlier row's failure stopped the batch, to roll back (atomic, #4793) or because continueOnError was unset (#7539)
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
+    // [#22737] The data door's two exposure codes, stamped by `findData`'s
+    // nested-relation walk (`refuseUnservedRelationTarget`) when a condition's
+    // related object does not serve `list`: 404 for `apiEnabled: false`, 405
+    // with `allowed` for a whitelist. Served on the list and query routes.
+    // `@objectstack/rest` keeps its own rows for the addressed object.
+    'OBJECT_API_DISABLED',
+    'OBJECT_API_METHOD_NOT_ALLOWED',
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
     'OBJECT_PACKAGE_DISABLED',    // [#7557] object is registered but its owning package is disabled — data plane refuses rather than serving rows
     // [#8846] the query body's convenience `object` key names a different
@@ -1187,19 +1194,6 @@ export const ERROR_CODE_LEDGER = {
     // per this file's header a code emitted by several packages is listed
     // once per emitting package — provenance, not identity — so the union,
     // its casing and every other package's rows are unchanged.
-    //
-    // `PermissionSetOverlayStateError` (`permission-set-overlay-discard.ts`),
-    // 409: `discardPermissionSetOverlay` found no active overlay to discard.
-    // Served by `@objectstack/rest`'s `POST …/security/permission-sets/:id/
-    // discard-overlay` route, whose `handleError` reads the thrown `code`
-    // ahead of its `INTERNAL` default.
-    'INVALID_STATE',
-    // `PermissionSetNotFoundError` (`permission-set-overlay-discard.ts`),
-    // 404: the addressed `sys_permission_set` row does not exist. Same route
-    // and door as the row above. A waived synonym of `RESOURCE_NOT_FOUND`
-    // (`STANDARD_SYNONYM_WAIVERS` admits it per code, not per package — this
-    // row widens that waiver's emitter list, never the waiver table).
-    'NOT_FOUND',
     // `PackagedPermissionSetLockedError` and
     // `PackagedPermissionSetProvenanceUnknownError`
     // (`packaged-permission-set-lock.ts`), 403: a data-path write targets a
@@ -1697,10 +1691,8 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
   {
     code: 'NOT_FOUND',
     shadows: 'RESOURCE_NOT_FOUND',
-    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing; ' +
-      'plugin-security lists the same pre-existing wire value under its own provenance row ' +
-      '(its permission-set overlay-discard 404). Wire value kept; consolidation deferred until ' +
-      'it has a measured victim.',
+    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing. ' +
+      'Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {
     code: 'UNAUTHORIZED',

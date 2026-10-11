@@ -266,8 +266,6 @@ describe('ErrorCode (standard ∪ registered)', () => {
     // class field (`readonly code = '…'`) — the spelling the provenance gate
     // declares itself blind to, so this suite is what holds the rows.
     const stamps: Record<string, keyof typeof ERROR_CODE_LEDGER> = {
-      INVALID_STATE: '@objectstack/rest',          // PermissionSetOverlayStateError, 409
-      NOT_FOUND: '@objectstack/rest',              // PermissionSetNotFoundError, 404
       NOT_OVERRIDABLE: '@objectstack/metadata-protocol', // PackagedPermissionSet{Locked,ProvenanceUnknown}Error, 403
     };
     for (const [code, firstOwner] of Object.entries(stamps)) {

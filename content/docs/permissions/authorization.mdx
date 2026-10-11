@@ -416,7 +416,14 @@ The ledger row is written through
 grant off, `true` back on). The caller needs `manage_metadata`; under a `group`
 or `isolated` tenancy posture the caller must also be the platform operator,
 because the row reaches every organization (ADR-0126 §5). The name must resolve
-in the security catalog, or the route answers `404`. It is the same authority
+in the security catalog, or the route answers `404`. That covers a position or
+permission set the environment authored through the metadata door as well as
+one a package ships: the ledger row records the package when there is one and
+leaves `package_id` empty when there is none, and the resolver honours both
+alike, because it keys the row by type and name. A write the ledger refuses
+answers with the status its code means: a record validation failure is `400`
+`VALIDATION_FAILED`, a hook's refusal keeps its own pair, and a store failure
+is `503` `SERVICE_UNAVAILABLE`. It is the same authority
 as the flow and action activation switches. The two audience anchors,
 `everyone` and `guest`, are refused with `400` in either direction: one row
 would switch the authenticated or anonymous baseline off for every principal.

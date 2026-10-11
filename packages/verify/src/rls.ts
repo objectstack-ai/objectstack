@@ -79,6 +79,7 @@
 // never be read as N× the reach.
 
 
+import { securityCatalogReaderOf } from '@objectstack/core';
 import { SecurityPlugin, securityDefaultPermissionSets, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec/identity';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -299,9 +300,9 @@ export interface RlsProbePersona {
   token: string;
   email: string;
   userId: string;
-  /** Name of the minted `sys_permission_set` row. */
+  /** Name of the registered probe set the grant holds. */
   permissionSet: string;
-  /** Objects the minted set grants read+edit on. */
+  /** Objects the probe set grants read+edit on. */
   grantedObjects: number;
 }
 
@@ -375,12 +376,12 @@ export function rlsProbePermissionSet(config: any): PermissionSet {
  * above.
  *
  * The probe set must be REGISTERED at boot, not written as a bare
- * `sys_permission_set` row: `PermissionEvaluator.resolvePermissionSets` resolves
- * a name from metadata first, the bootstrap list second, and the DB row only as
- * a last resort — and that last-resort loader hydrates `objects` / `fields` /
- * `systemPermissions` / `tabPermissions` but NOT `rowLevelSecurity`. A row-only
- * probe set would therefore grant the object bits and silently drop the
- * narrowing, which is the one thing that makes the persona a probe at all.
+ * `sys_permission_set` row: [ADR-0131 D3/D4] a set's definition comes from the
+ * registry alone — `PermissionEvaluator.resolvePermissionSets` reads metadata,
+ * then the bootstrap list, then the security catalog, and none of the three
+ * reads a `sys_permission_set` row. A row-only probe set would resolve nowhere
+ * and grant nothing, narrowing included, which is the one thing that makes the
+ * persona a probe at all.
  *
  * `appSecurityPluginOptions(config)` is carried through verbatim so the app's
  * declared default profile still resolves exactly as it does under `bootStack`'s
@@ -401,15 +402,20 @@ export function rlsProbeSecurity(config: any): SecurityPlugin {
  * select, nothing else).
  *
  * Requires the stack to have been booted with {@link rlsProbeSecurity}, which is
- * what puts the set's `rowLevelSecurity` on the resolution path. This function
- * only writes the two RBAC link rows, and it writes them through the kernel's
- * ObjectQL engine under a system context, the same way `bootstrapPlatformAdmin`
- * seeds them: the persona is test SETUP, not the surface under test, so routing
- * it through the data door would make the proof depend on whether this
- * deployment happens to let an admin POST `sys_permission_set` — a second thing
- * that can fail for reasons unrelated to RLS.
+ * what REGISTERS the set (ADR-0131 D3: the registry is a permission set's one
+ * home) and so puts its `rowLevelSecurity` on the resolution path. This function
+ * mints no permission set: it asks the security catalog — the read the
+ * authorization resolver itself uses — whether the probe set is registered, and
+ * writes one RBAC row, the grant, naming that set. It writes through the
+ * kernel's ObjectQL engine under a system context, the same way
+ * `bootstrapPlatformAdmin` seeds grants: the persona is test SETUP, not the
+ * surface under test, so routing it through the data door would make the proof
+ * depend on whether this deployment happens to let an admin POST a grant — a
+ * second thing that can fail for reasons unrelated to RLS.
  *
- * Throws when the stack has no ObjectQL engine or the user cannot be resolved.
+ * Throws when the stack has no ObjectQL engine, the user cannot be resolved, the
+ * catalog does not serve the probe set, or the boot left no catalog row whose id
+ * the grant's still-required `permission_set_id` column can take.
  * Callers must NOT swallow that into a weaker persona silently: run degraded and
  * say so (`RlsProbeDescriptor.degraded`), or fail.
  */
@@ -441,35 +447,37 @@ export async function provisionRlsProbePersona(
 
   const probeSet = rlsProbePermissionSet(config);
 
-  // The grant is keyed by ROW ID, and `resolveUserAuthzGrants` reads the row
-  // only to learn its NAME — the definition then resolves from the registered
-  // bootstrap list (`rlsProbeSecurity`), which is the copy that carries the
-  // narrowing. Find-or-create so it works whether or not this boot already
-  // seeded the registered set into the table.
-  const existing = rowsOf(
+  // [ADR-0131 D3/D4] The probe set's one home is the registry: `rlsProbeSecurity`
+  // registers it at boot, and the authorization resolver takes its definition —
+  // narrowing included — from the security catalog by the grant's NAME. Ask
+  // that same catalog, so a stack booted without the probe set fails here,
+  // loudly, instead of granting a name that resolves to nothing.
+  const catalog = securityCatalogReaderOf(ql);
+  const registered = catalog ? await catalog.resolve('permission', RLS_PROBE_PERMISSION_SET) : undefined;
+  if (!registered) {
+    throw new Error(
+      `verify: cannot provision the RLS probe persona — the security catalog does not serve the ` +
+        `'${RLS_PROBE_PERMISSION_SET}' permission set. Boot the stack with \`rlsProbeSecurity(config)\`, ` +
+        'which registers it; a grant naming an unregistered set confers nothing.',
+    );
+  }
+
+  // `sys_user_permission_set.permission_set_id` is still a required column, and
+  // the platform derives the grant's name from it and refuses a disagreement.
+  // The boot seeds a catalog row for every set the security plugin registers
+  // (`bootstrapPlatformAdmin`), the probe set included, so its id is READ here —
+  // never minted: no resolver reads that row, and a row this function wrote
+  // would be one more copy of a definition whose home is the registry.
+  const seeded = rowsOf(
     await ql.find('sys_permission_set', { where: { name: RLS_PROBE_PERMISSION_SET }, limit: 1 }, sysCtx),
   );
-  let permissionSetId = existing[0]?.id;
+  const permissionSetId = seeded[0]?.id;
   if (!permissionSetId) {
-    permissionSetId = genId('ps');
-    await ql.insert(
-      'sys_permission_set',
-      {
-        id: permissionSetId,
-        name: RLS_PROBE_PERMISSION_SET,
-        label: probeSet.label,
-        description:
-          'Ephemeral persona minted by `objectstack verify --rls`: object-level read+edit on every ' +
-          'declared object plus an owner-scoped SELECT narrowing, so a by-id refusal is attributable ' +
-          'to the record gate rather than the object gate.',
-        object_permissions: JSON.stringify(probeSet.objects ?? {}),
-        field_permissions: '{}',
-        system_permissions: '[]',
-        row_level_security: JSON.stringify(probeSet.rowLevelSecurity ?? []),
-        tab_permissions: '{}',
-        active: true,
-      },
-      sysCtx,
+    throw new Error(
+      `verify: cannot provision the RLS probe persona — the boot seeded no sys_permission_set row ` +
+        `named '${RLS_PROBE_PERMISSION_SET}', so the grant has no id for its required ` +
+        'permission_set_id column. The security plugin seeds one for every registered set at ' +
+        "kernel:ready; read its '[security] platform bootstrap' log lines for why it did not.",
     );
   }
   await ql.insert(
@@ -478,7 +486,7 @@ export async function provisionRlsProbePersona(
       id: genId('ups'),
       user_id: userId,
       permission_set_id: permissionSetId,
-      // [ADR-0131 D4] Both columns, agreeing: found or created under exactly
+      // [ADR-0131 D4] Both columns, agreeing: the row was found under exactly
       // this name just above.
       permission_set: RLS_PROBE_PERMISSION_SET,
       organization_id: null,

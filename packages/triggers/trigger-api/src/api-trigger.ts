@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
+import { HTTP_SIGNATURE_TOLERANCE_SECONDS, verifyHttpSignature } from '@objectstack/core';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 
 /**
@@ -76,6 +77,12 @@ interface ArmedHook {
     secret: HookSecret;
     queue: string;
     callback: (ctx: AutomationContext) => Promise<void>;
+    /**
+     * Whether this arming has already logged that it accepted a body-only
+     * signature. The deprecation line is said once per armed hook, never once
+     * per post, so a sender that keeps posting cannot flood the log with it.
+     */
+    bodyOnlyDeprecationLogged: boolean;
 }
 
 /** The trimmed, non-blank string `value` holds, else `undefined`. */
@@ -92,14 +99,25 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * GitHub/Stripe-style HMAC verification: the sender computes
- * `sha256=<hex hmac of the raw body>` with the shared per-flow secret and
- * sends it as `x-objectstack-signature`.
+ * GitHub/Stripe-style HMAC verification of `x-objectstack-signature` against
+ * the shared per-flow secret, through `@objectstack/core`'s
+ * `verifyHttpSignature` — the one definition of the scheme every ObjectStack
+ * sender signs with, so this receiver holds no copy of the signed material.
+ * Two forms verify:
+ *
+ *  - `t=<unix seconds>,v1=<hex>`, the HMAC of `<t>.<raw body>`: the timestamp
+ *    is signed, and a `t` more than `HTTP_SIGNATURE_TOLERANCE_SECONDS` (five
+ *    minutes) from this clock is refused, so a captured post stops verifying.
+ *  - `sha256=<hex>`, the HMAC of the raw body alone. Still accepted, so no
+ *    existing sender breaks, and deprecated: it signs no time, so a captured
+ *    post verifies forever. {@link ApiTrigger.handleRequest} logs it once per
+ *    armed hook.
+ *
+ * A value that claims the timestamped form is judged by it alone, and every
+ * refusal is the same `false`.
  */
 export function verifySignature(secret: string, rawBody: string, header: string | undefined): boolean {
-    if (!header) return false;
-    const expected = 'sha256=' + createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
-    return safeEqual(expected, header.trim());
+    return verifyHttpSignature(rawBody, secret, header).valid;
 }
 
 /**
@@ -113,7 +131,8 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  *
  *   POST /api/v1/automation/hooks/:flowName/:hookId
  *     → 404 unknown flow / wrong hookId
- *     → 401 missing/bad HMAC signature
+ *     → 401 missing/bad HMAC signature (a timestamped one outside its
+ *           window included — see {@link verifySignature})
  *     → 400 non-JSON body
  *     → 202 { accepted, messageId } — queued; a consumer executes the flow
  *
@@ -173,7 +192,9 @@ export class ApiTrigger implements FlowTrigger {
         const queue = `${QUEUE_PREFIX}:${binding.flowName}`;
 
         const secret: HookSecret = resolve ? { kind: 'resolved', resolve } : { kind: 'literal', secret: literal! };
-        const hook: ArmedHook = { flowName: binding.flowName, hookId, secret, queue, callback };
+        const hook: ArmedHook = {
+            flowName: binding.flowName, hookId, secret, queue, callback, bodyOnlyDeprecationLogged: false,
+        };
         this.hooks.set(binding.flowName, hook);
 
         const q = this.getQueue();
@@ -244,8 +265,20 @@ export class ApiTrigger implements FlowTrigger {
                 body: { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The hook secret is unavailable.' } },
             };
         }
-        if (!verifySignature(secret, input.rawBody, input.signatureHeader)) {
+        const verdict = verifyHttpSignature(input.rawBody, secret, input.signatureHeader);
+        if (!verdict.valid) {
             return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
+        }
+        if (verdict.scheme === 'body-only' && !hook.bodyOnlyDeprecationLogged) {
+            hook.bodyOnlyDeprecationLogged = true;
+            this.logger.warn(
+                `[trigger-api] flow '${hook.flowName}' hook '${hook.hookId}' accepted a post signed with the deprecated ` +
+                    `body-only x-objectstack-signature (sha256=<hex HMAC-SHA256 of the raw body>). It signs no time, so a ` +
+                    `captured post can be replayed and still verify. Sign with the timestamped form instead: ` +
+                    `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">, refused once t is more than ` +
+                    `${HTTP_SIGNATURE_TOLERANCE_SECONDS}s from this server's clock (@objectstack/core signHttpBodyAt). ` +
+                    `Logged once per armed hook.`,
+            );
         }
 
         let payload: Record<string, unknown>;

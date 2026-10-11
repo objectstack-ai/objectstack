@@ -584,9 +584,10 @@ export function apiAccessDenialFromEnable(
  *
  * Measured from the handler's own reads, not from the card or the docs: the
  * five filters (`object`, `recordId`, `status`, `approverId`, `submitterId`),
- * the free-text `q`, the paging pair (`limit`, `offset`), and the snake_case
- * alias spellings the handler honours for the three camelCase filters. A name
- * outside this set is refused with a located `400` instead of being dropped.
+ * the `unstaffed` arm (#22725), the free-text `q`, the paging pair (`limit`,
+ * `offset`), and the snake_case alias spellings the handler honours for the
+ * three camelCase filters. A name outside this set is refused with a located
+ * `400` instead of being dropped.
  *
  * Exported so the pin tests assert against THIS array rather than a
  * hand-copied second list that can drift away from what the route accepts.
@@ -596,6 +597,7 @@ export const APPROVAL_REQUEST_LIST_PARAMS: readonly string[] = [
     'recordId', 'record_id',
     'status',
     'approverId', 'approver_id',
+    'unstaffed',
     'submitterId', 'submitter_id',
     'q',
     'limit', 'offset',
@@ -806,6 +808,45 @@ function readDeclaredQueryNumber(
         `Invalid \`${param}\` query parameter: ${fields[0]?.message ?? 'not a readable number'}`,
         fields,
     );
+}
+
+/**
+ * [#22725] Read ONE boolean query parameter on a door whose request has no
+ * declared schema: `true` or `false`, and nothing else.
+ *
+ * The bare form `q.x === 'true'` is the defect this refuses to write. It does
+ * not fail; it reads every other spelling as `false`. `?unstaffed=1` or
+ * `?unstaffed=TRUE` would then answer `200` without the arm the caller asked
+ * for, and that answer is shaped exactly like "there is nothing to rescue".
+ * So a third spelling is refused, never guessed. This is the rule
+ * `@objectstack/runtime`'s `parseBooleanParam` applies on the notifications
+ * inbox's `?read=`; this package cannot import it (runtime depends on rest).
+ * The accepted set and the field code are the same.
+ *
+ * Absent is `undefined`. A present-but-empty `?x=` is refused: no answer was
+ * ever given for it, so there is none to preserve (contrast the per-door
+ * judgement in {@link readDeclaredQueryNumber}). A real boolean, which an
+ * in-process delegation can hand over, is itself.
+ *
+ * THROWN as `validationFailure`, never written here, so the door's
+ * `handleRouteError` answers `400 VALIDATION_FAILED` with `fields[0]`
+ * `{ field: <param>, code: 'invalid_boolean' }`. That is the envelope its
+ * `limit` / `offset` refusals answer. Call it AFTER
+ * `refuseRepeatedQueryParams` has run for `param`.
+ */
+function readDeclaredQueryBoolean(
+    queryParams: Record<string, unknown> | undefined,
+    param: string,
+): boolean | undefined {
+    const raw = queryParams?.[param];
+    if (raw === undefined || raw === null) return undefined;
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    const received = typeof raw === 'string'
+        ? JSON.stringify(raw.length > 40 ? `${raw.slice(0, 40)}…` : raw)
+        : 'a structured value';
+    const message = `Invalid \`${param}\` query parameter: expected \`true\` or \`false\`, received ${received}`;
+    throw validationFailure(message, [{ field: param, code: 'invalid_boolean', message }]);
 }
 
 /**
@@ -12312,8 +12353,8 @@ export class RestServer {
             // [#22719] A refusal the typed arm cannot read is asked of the
             // `/data` door's own classification before the 500 below relays
             // `.message`. A sandboxed hook's refusal carries no `statusCode`
-            // (the sandbox lifts `status` only), so `confirm`, `dismiss` and
-            // `discard-overlay` answered `500` with the QuickJS debug wrapper
+            // (the sandbox lifts `status` only), so `confirm` and `dismiss`
+            // answered `500` with the QuickJS debug wrapper
             // where every conforming write door answers the hook's own
             // sentence; a refusal declaring `status` + `code` is answered at
             // its own status too. The typed arm above is untouched, and the
@@ -12407,45 +12448,6 @@ export class RestServer {
             },
             metadata: { summary: 'Dismiss a suggested audience binding', tags: ['security'] },
         });
-
-        /**
-         * [field report — rc→GA declared≠enforced surfacing] The sanctioned,
-         * audited operator action: discard a stale `sys_metadata` overlay
-         * shadowing a package-declared `sys_permission_set` (the
-         * `overlay_shadow` diagnostic on the record — see
-         * `permission-set-drift.ts`). Bound to `sys_permission_set`'s
-         * "Discard Overlay" Setup action (`{id}` route param, same
-         * convention as `/data/sys_permission_set/{id}`). Refuses (403) on a
-         * set that is not currently package-declared — see
-         * `permission-set-overlay-discard.ts`'s eligibility note — and 409s
-         * when there is no active overlay to discard.
-         *
-         *   POST {basePath}/security/permission-sets/:id/discard-overlay
-         */
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/security/permission-sets/:id/discard-overlay`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc || typeof svc.discardPermissionSetOverlay !== 'function') return respond501(res);
-                    const result = await svc.discardPermissionSetOverlay(context ?? {}, String(req.params.id));
-                    res.json({ data: result });
-                // 'INTERNAL' (registered, generic — ADR-0112) is the default here
-                // deliberately, not a bespoke `..._FAILED` code: this route's typed
-                // errors (`PermissionSetNotFoundError` 404, `PermissionSetOverlayStateError`
-                // 409, `PermissionDeniedError` 403) already carry their own registered
-                // `code`, which `handleError`'s `status !== 500` arm reads ahead of this
-                // default — this string is reached only by a genuinely unexpected fault,
-                // and a NEW route-specific code for that arm is a `packages/spec` ledger
-                // entry this change deliberately does not make.
-                } catch (err: any) { handleError(err, res, 'INTERNAL'); }
-            },
-            metadata: { summary: 'Discard a stale environment overlay shadowing a package-declared permission set (ADR-0094)', tags: ['security'] },
-        });
     }
 
     /**
@@ -12456,7 +12458,7 @@ export class RestServer {
      * are no process-authoring or submit routes anymore.
      *
      * Routes (all under {basePath}/approvals):
-     *   GET    /requests                        — list (filters: status, object, recordId, approverId, submitterId)
+     *   GET    /requests                        — list (filters: status, object, recordId, approverId, unstaffed, submitterId)
      *   GET    /requests/:id                    — get request
      *   POST   /requests/:id/approve            — record an approve decision (resumes the flow)
      *   POST   /requests/:id/reject             — record a reject decision (resumes the flow)
@@ -12609,7 +12611,7 @@ export class RestServer {
                     // PURPOSE. Everything else here narrows the list to one
                     // value and is declared single-valued.
                     if (refuseRepeatedQueryParams(req, res, [
-                        'object', 'recordId', 'record_id', 'status',
+                        'object', 'recordId', 'record_id', 'status', 'unstaffed',
                         'submitterId', 'submitter_id', 'q', 'limit', 'offset',
                     ])) return;
                     const q = req.query ?? {};
@@ -12638,11 +12640,18 @@ export class RestServer {
                     // door cannot read is the caller's `400`.
                     let limit: number | undefined;
                     let offset: number | undefined;
+                    // [#22725] The `unstaffed` arm: the pending requests whose
+                    // slate names no person, for a caller who may override
+                    // them, ORed with `approverId` by the service
+                    // (the contract's member docblock). Read `true` / `false`
+                    // only: a guessed `false` would be a 200 without the arm.
+                    let unstaffed: boolean | undefined;
                     try {
                         limit = readDeclaredQueryNumber(q, 'limit',
                             UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
                         offset = readDeclaredQueryNumber(q, 'offset',
                             UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
+                        unstaffed = readDeclaredQueryBoolean(q, 'unstaffed');
                     } catch (refusal: any) {
                         handleRouteError(res, refusal);
                         return;
@@ -12652,6 +12661,7 @@ export class RestServer {
                         recordId: q.recordId ?? q.record_id,
                         status: q.status,
                         approverId: approverIds.length ? approverIds : undefined,
+                        unstaffed,
                         submitterId: q.submitterId ?? q.submitter_id,
                         q: typeof q.q === 'string' ? q.q : undefined,
                         limit,

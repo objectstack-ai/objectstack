@@ -13,9 +13,17 @@ transport for the EmailServicePlugin. Provider is a `provider` tag
 + provider-specific settings; concrete `IEmailTransport`
 implementations live in `@objectstack/plugin-email/transports/*`.
 
-Resolution order in `serve.ts`:
-  1. `config.email.*` from objectstack.config.ts
-  2. `OS_EMAIL_*` environment variables (override per setting)
+Resolution order in `resolveEmailCapabilityArg` (`@objectstack/plugin-email`,
+the one reader; `objectstack serve` and `bootStack` both construct the email
+provider through it):
+  1. `config.email.*` from objectstack.config.ts — the NON-SECRET members
+     only. A config file is compiled into the published artifact, so the
+     stack definition carries `StackEmailConfigSchema`: every member
+     below except `apiKey`, with `options` narrowed to host / port / secure /
+     user / messageStream. `apiKey` and the SMTP `options.password` are
+     refused there by name; they are environment-only.
+  2. `OS_EMAIL_*` environment variables (override per setting) — the only
+     carrier of `OS_EMAIL_API_KEY` and `OS_EMAIL_SMTP_PASSWORD`
   3. Default → provider='log' (LogTransport, no real send)
 
 `appName` is the one key whose env layer is not `OS_EMAIL_*` — it is
@@ -32,7 +40,9 @@ defaultTemplateContext), both times with the spec on the lagging side.
 SMTP delivery is built in (ADR-0012): select it with provider='smtp'
 and supply the connection through `options` (host / port / secure /
 user / password) or the matching OS_EMAIL_SMTP_HOST / _PORT /
-_SECURE / _USER / _PASSWORD environment variables.
+_SECURE / _USER / _PASSWORD environment variables. From a config file the
+password always arrives through OS_EMAIL_SMTP_PASSWORD, which the reader
+layers over the host / port / secure / user the file carries.
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/email-config.zod.ts`
@@ -41,8 +51,8 @@ _SECURE / _USER / _PASSWORD environment variables.
 ## TypeScript Usage
 
 ```typescript
-import { EmailAddressConfigSchema, EmailProviderSchema, EmailServiceConfigSchema } from '@objectstack/spec/system';
-import type { EmailAddressConfig, EmailProvider, EmailServiceConfig } from '@objectstack/spec/system';
+import { EmailAddressConfigSchema, EmailProviderSchema, EmailServiceConfigSchema, StackEmailConfigSchema, StackEmailProviderOptionsSchema } from '@objectstack/spec/system';
+import type { EmailAddressConfig, EmailProvider, EmailServiceConfig, StackEmailConfig, StackEmailProviderOptions } from '@objectstack/spec/system';
 
 // Validate data
 const result = EmailAddressConfigSchema.parse(data);
@@ -96,6 +106,56 @@ const result = EmailAddressConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Display name (e.g. "Acme CRM") |
 | **address** | `string` | ✅ | RFC-5322 address |
+
+
+---
+
+## StackEmailConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'log' \| 'resend' \| 'postmark' \| 'smtp'>` | optional (default: `"log"`) | Transport to deliver through (OS_EMAIL_PROVIDER env). Default log — boots, sends nothing |
+| **defaultFrom** | `{ name?: string; address: string }` | optional |  |
+| **retries** | `integer` | optional | Retry attempts on transport throw |
+| **persist** | `boolean` | optional | Persist to sys_email (default true) |
+| **queueDelivery** | `boolean` | optional | Deliver through the durable sys_job_queue instead of inline (or OS_EMAIL_QUEUE_ENABLED env). Default false. Reuses `retries` as the queue attempt budget; requires a queue service and sys_email persistence, else the boot fails |
+| **appName** | `string` | optional | Product name templates interpolate as the appName variable — OS_APP_NAME env wins, then this, then defaultTemplateContext.appName, then the top-level config appName, then "ObjectStack". Also seeds the placeholder no-reply sender when no defaultFrom is configured |
+| **defaultTemplateContext** | `Record<string, any>` | optional | Free-form render context merged into every sendTemplate() call, under the per-call data. Passed through unchanged except appName, which is resolved by its own chain — OS_APP_NAME and the appName key both override the value written here |
+| **options** | `{ host?: string; port?: integer; secure?: boolean; user?: string; … }` | optional | Provider-specific extras, non-secret members only. smtp: host / port / secure / user, mirroring OS_EMAIL_SMTP_HOST / _PORT / _SECURE / _USER (the password is OS_EMAIL_SMTP_PASSWORD only). postmark: messageStream |
+
+### Nested Shape: `StackEmailConfig.defaultFrom`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Display name (e.g. "Acme CRM") |
+| **address** | `string` | ✅ | RFC-5322 address |
+
+### Nested Shape: `StackEmailConfig.options`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **host** | `string` | optional | SMTP server hostname (OS_EMAIL_SMTP_HOST env wins). Required for provider smtp unless the env supplies it |
+| **port** | `integer` | optional | SMTP port (OS_EMAIL_SMTP_PORT env wins). Default 587; 465 selects implicit TLS |
+| **secure** | `boolean` | optional | Require TLS (OS_EMAIL_SMTP_SECURE env wins). Default true |
+| **user** | `string` | optional | SMTP AUTH username (OS_EMAIL_SMTP_USER env wins). Its password is environment-only: OS_EMAIL_SMTP_PASSWORD |
+| **messageStream** | `string` | optional | Postmark message stream. Default outbound |
+
+
+---
+
+## StackEmailProviderOptions
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **host** | `string` | optional | SMTP server hostname (OS_EMAIL_SMTP_HOST env wins). Required for provider smtp unless the env supplies it |
+| **port** | `integer` | optional | SMTP port (OS_EMAIL_SMTP_PORT env wins). Default 587; 465 selects implicit TLS |
+| **secure** | `boolean` | optional | Require TLS (OS_EMAIL_SMTP_SECURE env wins). Default true |
+| **user** | `string` | optional | SMTP AUTH username (OS_EMAIL_SMTP_USER env wins). Its password is environment-only: OS_EMAIL_SMTP_PASSWORD |
+| **messageStream** | `string` | optional | Postmark message stream. Default outbound |
 
 
 ---
