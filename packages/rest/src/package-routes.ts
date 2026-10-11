@@ -211,10 +211,12 @@ async function refusePackageRequest(
  * answered `500 INTERNAL_ERROR` with the QuickJS wrapper around the native
  * error text (the business read declines a crash, so the raw message stood),
  * and a refusal that DECLARED `503` answered at its status with its sentence.
- * {@link sandboxFaultAnswer} is the doors' answer for exactly those two, so it
+ * {@link sandboxFaultAnswer} is the doors' answer for those two, so it
  * is asked first and re-dressed whole, the way the nested families re-dress
  * it. The original error is logged first, the one place its words now reach.
- * Every other throw is answered below exactly as before.
+ * [#22885] It answers the sandbox's own fault too (a denied capability, a
+ * budget), which reached the raw message below until then. Every other throw
+ * is answered below exactly as before.
  */
 function sendThrownError(res: any, error: unknown): void {
   const fault = sandboxFaultAnswer(error);

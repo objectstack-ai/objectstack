@@ -48,12 +48,20 @@
  * holds each to the doors' answer: their status and code, their withheld
  * sentence, and no trace of the native text or the wrapper. §2 stays the
  * control: a refusal keeps its sentence on the same rows.
+ *
+ * [#22885] …and with the sandbox's OWN fault, one shape per kind the runner
+ * raises itself (`isSandboxOwnFault`), held to the same answer. Measured
+ * before the repair: twenty-three of these rows relayed the runner's text at
+ * their own terminal, while the crash and declared-5xx shapes, the CONTROL,
+ * already read the doors' answer on every row and are unchanged by it.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, type MockInstance } from 'vitest';
 import { RestServer } from './rest-server.js';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
+import { sandboxFaultAnswer } from './error-response.js';
+import { isSandboxOwnFault } from '@objectstack/types';
 
 const SENTENCE = 'Locked rows cannot be changed here.';
 const WRAPPER = `hook 'mz_guard' threw: Error: ${SENTENCE}`;
@@ -563,26 +571,80 @@ describe('[#22719] §5 the repaired rows: a fault keeps its own terminal, a refu
 // ─── [#22764] the fault side: every driven row answers as the doors do ──────
 
 /**
- * The two sandbox shapes the doors answer as FAULTS, the status and code they
- * answer each with, and the text that must not reach the caller: the native
- * error a crash carries, and the prose a declared 5xx withholds.
+ * [#22885] The sandbox's OWN fault: a `SandboxError` the runner raised itself,
+ * not one a body threw. Its producer (`runtime/src/sandbox/quickjs-runner.ts`)
+ * names the class `'SandboxError'` and leaves `innerMessage` unset for "the
+ * sandbox's own internal errors (capability denials, timeouts, marshalling
+ * failures)", so `isSandboxOwnFault` (`@objectstack/types`) answers `true` and
+ * the doors answer it as a fault (#22868).
+ *
+ * Built from that constructor, as {@link sandboxRefusal} is, because this
+ * package does not depend on `@objectstack/runtime` and no factory exports the
+ * runner's raise sites: their census lives inside `@objectstack/core`'s
+ * `import-runner-sandbox-fault-row.test.ts`. One shape per kind that census
+ * names, each message rendered from its raise site's template.
  */
-const SANDBOX_FAULTS = [
+function sandboxOwnFault(message: string): () => Error {
+    return () => {
+        const err = new Error(message);
+        err.name = 'SandboxError';
+        return err;
+    };
+}
+
+const OWN_FAULT = { status: 500, code: 'INTERNAL_ERROR' } as const;
+
+/**
+ * The sandbox shapes the doors answer as FAULTS, the status and code they
+ * answer each with, and the text that must not reach the caller: the native
+ * error a crash carries, and the prose a declared 5xx withholds. [#22885] The
+ * CONTROL for {@link SANDBOX_OWN_FAULTS}: unchanged by that card.
+ */
+const SANDBOX_FAULT_CONTROLS = [
     ['a body that CRASHED', sandboxCrash, { status: 500, code: 'INTERNAL_ERROR' }, /TypeError|boom/],
     ['a refusal that declared a 5xx', sandboxDeclared5xx, { status: 503, code: 'SERVICE_UNAVAILABLE' }, /ledger/],
 ] as const;
+
+/** [#22885] The runner's own faults, one per kind, and the diagnostic text each must not relay. */
+const SANDBOX_OWN_FAULTS = [
+    ['the sandbox\'s own fault: CPU budget',
+        sandboxOwnFault("hook 'mz_guard' exceeded CPU budget of 50ms (after 3 pump iterations)"), OWN_FAULT, /budget/],
+    ['the sandbox\'s own fault: wall-clock ceiling',
+        sandboxOwnFault("hook 'mz_guard' exceeded wall-clock ceiling of 30000ms while awaiting host calls (after 3 pump iterations)"),
+        OWN_FAULT, /ceiling/],
+    ['the sandbox\'s own fault: a capability denial naming the object',
+        sandboxOwnFault(`capability 'api.read' not granted to hook 'mz_guard' (called ctx.api.object('${OBJECT}').find)`),
+        OWN_FAULT, /capability|granted/],
+    ['the sandbox\'s own fault: ctx.api unavailable',
+        sandboxOwnFault("ctx.api unavailable in hook 'mz_guard'"), OWN_FAULT, /unavailable/],
+    ['the sandbox\'s own fault: an install failure',
+        sandboxOwnFault('failed to install ctx.api.transaction: SyntaxError: unexpected token'), OWN_FAULT, /install|SyntaxError/],
+    ['the sandbox\'s own fault: a marshal failure',
+        sandboxOwnFault('failed to marshal host value: SyntaxError: unexpected token'), OWN_FAULT, /marshal|SyntaxError/],
+    ['the sandbox\'s own fault: a nested transaction refusal',
+        sandboxOwnFault('nested ctx.api.transaction is not supported'), OWN_FAULT, /transaction|supported/],
+    ['the sandbox\'s own fault: a missing ctx.api method naming the object',
+        sandboxOwnFault(`ctx.api.object('${OBJECT}').find not implemented`), OWN_FAULT, /implemented|ctx\.api/],
+    ['the sandbox\'s own fault: a nested body\'s crash relayed one VM hop up',
+        sandboxOwnFault("hook 'mz_inner' threw: TypeError: boom"), OWN_FAULT, /TypeError|boom/],
+] as const;
+
+const SANDBOX_FAULTS = [...SANDBOX_FAULT_CONTROLS, ...SANDBOX_OWN_FAULTS] as const;
+const OWN_FAULT_SHAPES: ReadonlySet<unknown> = new Set(SANDBOX_OWN_FAULTS);
 
 /**
  * Driven rows that answer a sandboxed fault at their OWN terminal rather than
  * the doors' status and code, with the reason. Closed. The words are withheld
  * on both all the same, and §6 still holds them to the doors' sentence.
+ * [#22885] The own-fault shapes take the same exception: the family's sentence
+ * is `sandboxFaultAnswer`'s, its status and code its own, as for a crash.
  */
 const OWN_FAULT_TERMINAL: ReadonlyMap<string, { status: number; code: string; reason: string }> = new Map([
     ['POST /api/v1/data/:object/:id/shares', {
         status: 500, code: 'SHARE_GRANT_FAILED',
-        reason: "the record-share family withholds a sandbox's words at its own 500 (`sharingFaultMessage`) and "
-            + 'folds a declared 5xx into that terminal by a recorded choice (#11683, #12693); neither is a '
-            + 'leak, and its status and code are a decision this card does not take',
+        reason: "the record-share family withholds a sandbox's words at its own 500 (`sharingFaultMessage`, which "
+            + "reads `sandboxFaultAnswer`'s sentence) and folds a declared 5xx into that terminal by a recorded "
+            + 'choice (#11683, #12693); neither is a leak, and its status and code are a decision this card does not take',
     }],
     ['DELETE /api/v1/data/:object/:id/shares/:shareId', {
         status: 500, code: 'SHARE_REVOKE_FAILED',
@@ -591,6 +653,20 @@ const OWN_FAULT_TERMINAL: ReadonlyMap<string, { status: number; code: string; re
 ]);
 
 describe('[#22764] §6 every driven write row answers a sandboxed fault as the doors do, its words withheld', () => {
+    // [#22885] §6 observes the REST fault log: a withheld own fault's words must
+    // still reach the operator. 'info' is the SHIPPED default, declared here
+    // as `scripts/check-rest-log-spy-declared.mjs` requires; the spy swallows
+    // the output.
+    let faultLog: MockInstance<typeof console.error>;
+    beforeAll(() => {
+        vi.stubEnv('OS_REST_LOG', 'info');
+        faultLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+    afterAll(() => {
+        faultLog.mockRestore();
+        vi.unstubAllEnvs();
+    });
+
     it('the reference: the `/data` door answers each shape at the pinned status and code', async () => {
         for (const [label, error, doors, leak] of SANDBOX_FAULTS) {
             const res = await drive(boot(error), 'POST /api/v1/data/:object', { name: 'x' });
@@ -600,15 +676,26 @@ describe('[#22764] §6 every driven write row answers a sandboxed fault as the d
         }
     }, 60_000);
 
+    it('[#22885] the own-fault shapes are the shared predicate\'s, read off the producer and never its words', () => {
+        for (const [label, error] of SANDBOX_OWN_FAULTS) {
+            expect(isSandboxOwnFault(error()), label).toBe(true);
+            // CONTROL: the same words thrown by anything else are not the answer's.
+            expect(sandboxFaultAnswer(new Error(error().message)), label).toBeUndefined();
+        }
+        for (const [label, error] of SANDBOX_FAULT_CONTROLS) expect(isSandboxOwnFault(error()), label).toBe(false);
+    });
+
     it('every row naming its own terminal is a driven row', () => {
         for (const route of OWN_FAULT_TERMINAL.keys()) expect(Object.keys(ANSWERS_THE_SENTENCE), route).toContain(route);
     });
 
     for (const [route, driver] of Object.entries(ANSWERS_THE_SENTENCE)) {
-        for (const [label, error, doors, leak] of SANDBOX_FAULTS) {
+        for (const shape of SANDBOX_FAULTS) {
+            const [label, error, doors, leak] = shape;
             it(`${route}: ${label}`, async () => {
                 const door = await drive(boot(error), 'POST /api/v1/data/:object', { name: 'x' });
                 const b = boot(error, driver.protocol?.(error));
+                faultLog.mockClear();
                 const res = await drive(b, route, driver.body ?? {});
                 // Read first: the async job's worker writes after the `201`.
                 const answer = driver.answer ? await driver.answer(res, b) : sentenceOf(res.body);
@@ -624,6 +711,12 @@ describe('[#22764] §6 every driven write row answers a sandboxed fault as the d
                 const expected = OWN_FAULT_TERMINAL.get(route) ?? doors;
                 expect(res.statusCode).toBe(expected.status);
                 expect(codeOf(res.body)).toBe(expected.code);
+                if (!OWN_FAULT_SHAPES.has(shape)) return;
+                // [#22885] The whole error, not a summary of it, reaches the log.
+                const runnerText = error().message;
+                const logged = faultLog.mock.calls.some((args) => args.some((arg) =>
+                    arg instanceof Error && arg.name === 'SandboxError' && arg.message === runnerText));
+                expect(logged, 'the runner\'s error reaches the server log').toBe(true);
             }, 60_000);
         }
     }

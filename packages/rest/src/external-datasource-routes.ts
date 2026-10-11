@@ -418,6 +418,8 @@ export function registerExternalDatasourceRoutes(
    * longer reads its words. Before, both reached this family's `400`: a crash
    * as the caller's mistake, with the QuickJS wrapper around the native error
    * text, and a declared `503` as a client error carrying its sentence.
+   * [#22885] The sandbox's own fault (a denied capability, a budget) is that
+   * answer's too, and reached this `400` with the runner's text until then.
    *
    * ⛔ Every other throw keeps this family's own `400` and code, a declared 4xx
    * included: a sandboxed refusal declaring one, and the metadata door's

@@ -11,8 +11,9 @@
  * is a test double, because the real one is a separate card (#22774), but its
  * verifier is not: it reads the raw body off the `Request` it is handed and
  * checks the `x-objectstack-signature` with `verifyHttpSignature`, the very
- * function `ApiTrigger.handleRequest` verifies with (`@objectstack/core`), and
- * answers every post that does not verify with the trigger's one refusal. So a
+ * function `ApiTrigger.handleRequest` verifies with (`@objectstack/core`),
+ * accepts the timestamped form only, as that door does, and answers every
+ * post that does not verify with the trigger's one refusal. So a
  * domain that handed it anything but the transport's own unread request, or a
  * re-serialised body, would be caught by the verifier, not by an assertion
  * about plumbing.
@@ -43,7 +44,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { isAuthGateAllowlisted, matchInboundHookRoute, signHttpBody, verifyHttpSignature } from '@objectstack/core';
+import { isAuthGateAllowlisted, matchInboundHookRoute, signHttpBodyAt, verifyHttpSignature } from '@objectstack/core';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, KernelResolver } from '../http-dispatcher.js';
 import { createDispatcherPlugin } from '../dispatcher-plugin.js';
@@ -61,11 +62,15 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 const REFUSAL = { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } };
 
+/** The timestamped signature form, the one the inbound door accepts, signed now. */
+const sign = (body: string, secret: string) => signHttpBodyAt(body, secret, Math.floor(Date.now() / 1000));
+
 /**
  * A `handleInboundHook` member with the trigger's verifier inside it: the hook
  * armed for each flow, the raw body read once off the request, the signature
- * checked by core's `verifyHttpSignature`, one refusal for every post that does
- * not verify, `202` for one that does. It records every call.
+ * checked by core's `verifyHttpSignature` and accepted in the timestamped form
+ * only, one refusal for every post that does not verify, `202` for one that
+ * does. It records every call.
  */
 function verifierMember(armed: Record<string, { hookId: string; secret: string }> = { [FLOW]: { hookId: HOOK, secret: SECRET } }) {
     const calls: Array<{ request: Request; hook: { flowName: string; hookId: string }; body: string }> = [];
@@ -77,7 +82,7 @@ function verifierMember(armed: Record<string, { hookId: string; secret: string }
         const verdict = arm && arm.hookId === hook.hookId
             ? verifyHttpSignature(body, arm.secret, request.headers.get('x-objectstack-signature') ?? undefined)
             : { valid: false as const };
-        if (!verdict.valid) return json(401, REFUSAL);
+        if (!verdict.valid || verdict.scheme !== 'v1') return json(401, REFUSAL);
         accepted.push(body);
         return json(202, { accepted: true, messageId: `msg_${accepted.length}` });
     });
@@ -112,7 +117,7 @@ const authAs = (user?: { id: string; authGate?: { code: string; message: string 
 const ctx = (request: Request): HttpProtocolContext => ({ request });
 function post(path = ROUTE, opts: { body?: string; signature?: string | null; method?: string } = {}) {
     const body = opts.body ?? BODY;
-    const signature = opts.signature === undefined ? signHttpBody(body, SECRET) : opts.signature;
+    const signature = opts.signature === undefined ? sign(body, SECRET) : opts.signature;
     return new Request(`${ORIGIN}/api/v1${path}`, {
         method: opts.method ?? 'POST',
         headers: { ...JSON_HEADERS, ...(signature !== null ? { 'x-objectstack-signature': signature } : {}) },
@@ -151,8 +156,8 @@ describe('[#22773] the inbound hook reaches the verifier on a kernel with no htt
         const member = verifierMember();
         const { dispatcher } = makeDispatcher({ 'trigger-api': { handleInboundHook: member.handleInboundHook } });
         const cases: Array<[string, Request, string]> = [
-            ['wrong secret', post(ROUTE, { signature: signHttpBody(BODY, 'not-the-secret') }), ROUTE],
-            ['body changed after signing', post(ROUTE, { body: `${BODY} `, signature: signHttpBody(BODY, SECRET) }), ROUTE],
+            ['wrong secret', post(ROUTE, { signature: sign(BODY, 'not-the-secret') }), ROUTE],
+            ['body changed after signing', post(ROUTE, { body: `${BODY} `, signature: sign(BODY, SECRET) }), ROUTE],
             ['unsigned', post(ROUTE, { signature: null }), ROUTE],
             ['malformed signature', post(ROUTE, { signature: 'sha256=zz' }), ROUTE],
             ['unknown flow', post('/automation/hooks/no_such_flow/default'), '/automation/hooks/no_such_flow/default'],
@@ -177,7 +182,7 @@ describe('[#22773] the inbound hook reaches the verifier on a kernel with no htt
 
         const signed = await dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(post()));
         expect((signed.result as Response).status).toBe(202);
-        const forged = await dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(post(ROUTE, { signature: signHttpBody(BODY, 'session-is-no-credential') })));
+        const forged = await dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(post(ROUTE, { signature: sign(BODY, 'session-is-no-credential') })));
         expect((forged.result as Response).status).toBe(401);
         expect(member.handleInboundHook).toHaveBeenCalledTimes(2);
     });
