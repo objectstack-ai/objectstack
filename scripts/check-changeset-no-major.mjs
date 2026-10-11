@@ -1290,9 +1290,146 @@ export function publishedSourceOwners(path, manifestOf) {
   return owners;
 }
 
+// ── LEG 3: a repo file a package's build COPIES into what it packs (#15204) ─
+//
+// Legs 1 and 2 both read a path UNDER the package. `@objectstack/console` has
+// neither: its tracked files are a manifest, a README, a CHANGELOG and a
+// `.gitignore`, and everything it publishes is `dist/`, which
+// `scripts/build-console.sh` writes. One file in that `dist` comes from THIS
+// repository rather than from the objectui build — the repo-root
+// `sdui.manifest.json`, copied byte for byte to `dist/sdui.manifest.json`, and
+// read at runtime by `@objectstack/cli` (the JSX gate of `os validate` /
+// `compile` / `lint`, and the html-page save gate `serve` registers). So a PR
+// that widens what those gates accept moves exactly that one file, grades
+// `@objectstack/console` `minor`, declares `Clause-②: yes (widening)` — and
+// before this leg the axis saw no package at all, and told the author to grade
+// `minor` a package that did not grow (PR #22812, CI job 114433350057).
+//
+// ⛔ The mapping is READ from the build script at the head under judgement, not
+// written here. What this file names is WHICH script carries copies into a
+// packed output — one path — and never which files it copies: the day the
+// console build ships a second tracked file, this leg sees it with no edit
+// here, and the day it stops copying the manifest, the leg stops claiming it.
+// `scripts/sdui-manifest.record.json` is measured OUT for that reason rather
+// than by choice: the build reads it for a warning line and does not copy it,
+// so it is not part of the shipped artefact.
+//
+// ⚠️ Residual, stated rather than implied: the reader understands the plain
+// shell the script is written in — `NAME="value"` assignments, `$NAME` /
+// `${NAME}` expansion, and `cp [flags] SRC DEST` — and nothing else. A copy
+// whose source does not resolve to one fixed repo path (the objectui build's
+// own `dist`, under a cache dir named by the pin) is not a tracked file and is
+// skipped. A script that is THERE but yields no copy at all is reported in
+// `unreadable` rather than read as "copies nothing", and the self-test drives
+// this repository's real `build-console.sh` so a respelling of the copy reds in
+// lint instead of silently retiring the leg.
+//
+// ⚠️ And what it does NOT add: `.objectui-sha`. The pin decides which objectui
+// tree the console `dist` is BUILT from, but the build does not copy it, and a
+// pin bump that moves an accept set moves the manifest too — which is the
+// reading this leg makes.
+export const PACKED_COPY_BUILD_SCRIPTS = Object.freeze(['scripts/build-console.sh']);
+
+// The value a build script assigns to the variable that names the repository
+// root: its own directory's parent, which is the repo root because every script
+// in `PACKED_COPY_BUILD_SCRIPTS` lives in `scripts/`. Read, not named, so the
+// variable's NAME is the script's business.
+const SCRIPT_PARENT_DIR_VALUE = /^\$\(cd "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)\/\.\." && pwd\)$/;
+const REPO_ROOT_MARK = 'repo-root::';
+
+/**
+ * Every copy a build script makes from a FIXED repo path into the repo, as
+ * repo-relative `{ source, destination }` pairs, in script order.
+ *
+ * Assignments are evaluated in order, so a variable reassigned later is read at
+ * the value it has on the `cp` line. A source or destination that keeps an
+ * unexpanded `$` — a command substitution, a parameter operator such as
+ * `${PINNED_SHA:0:12}`, a variable never assigned — is not one fixed path, and
+ * the copy is skipped rather than guessed at.
+ *
+ * @param {string} text a shell script's content
+ * @returns {{ source: string, destination: string }[]}
+ */
+export function packedCopiesIn(text) {
+  const vars = new Map();
+  const unquote = (word) => (word.length >= 2 && word.startsWith('"') && word.endsWith('"') ? word.slice(1, -1) : word);
+  const expand = (value) =>
+    value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, a, b) => (vars.has(a ?? b) ? vars.get(a ?? b) : whole));
+  const repoPath = (word) => {
+    const value = expand(unquote(word));
+    if (!value.startsWith(`${REPO_ROOT_MARK}/`) || value.includes('$')) return null;
+    const rel = value.slice(REPO_ROOT_MARK.length + 1).replace(/\/+/g, '/').replace(/\/+$/, '');
+    return rel === '' || rel.split('/').includes('..') ? null : rel;
+  };
+  const copies = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    const assignment = /^([A-Za-z_][A-Za-z0-9_]*)="(.*)"$/.exec(line);
+    if (assignment) {
+      const [, name, value] = assignment;
+      vars.set(name, SCRIPT_PARENT_DIR_VALUE.test(value) ? REPO_ROOT_MARK : expand(value));
+      continue;
+    }
+    const copy = /^cp(?:\s+-[A-Za-z]+)*\s+("[^"]*"|[^\s"]+)\s+("[^"]*"|[^\s"]+)$/.exec(line);
+    if (!copy) continue;
+    const source = repoPath(copy[1]);
+    const destination = repoPath(copy[2]);
+    if (source !== null && destination !== null) copies.push({ source, destination });
+  }
+  return copies;
+}
+
+/**
+ * Whether a manifest's `files` packs this package-relative path. An absent
+ * `files` packs everything, which is npm's rule; an entry covers the path
+ * itself and everything under it. Glob entries are not expanded — a reader, not
+ * a packer — so a path only a glob would cover reads as not packed.
+ *
+ * @param {object} manifest a parsed package.json
+ * @param {string} rel a package-relative path
+ */
+function filesPack(manifest, rel) {
+  const files = /** @type {{ files?: unknown }} */ (manifest).files;
+  if (!Array.isArray(files)) return true;
+  return files.some((entry) => {
+    if (typeof entry !== 'string') return false;
+    const e = entry.replace(/\/+/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/+$/, '');
+    return e !== '' && (rel === e || rel.startsWith(`${e}/`));
+  });
+}
+
+/**
+ * The package directory a copy's DESTINATION is published by — the NEAREST
+ * ancestor under `packages/` with a manifest — or none.
+ *
+ * Nearest rather than shallowest, unlike leg 1, because the question is which
+ * manifest's `files` decides whether the copied file ships, and that is the
+ * nearest one. `false` (a manifest that is there and will not parse) is
+ * returned as a candidate that cannot be named, so the caller reports it as
+ * unreadable (#4690). A destination its package does not pack ships nothing,
+ * and owns nothing.
+ *
+ * @param {string} destination a repo-relative path
+ * @param {(dir: string) => object | false | null} manifestOf
+ * @returns {string | null}
+ */
+export function packedCopyOwner(destination, manifestOf) {
+  const segments = destination.split('/');
+  if (segments[0] !== 'packages') return null;
+  for (let i = segments.length - 1; i >= 2; i -= 1) {
+    const dir = segments.slice(0, i).join('/');
+    const manifest = manifestOf(dir);
+    if (manifest === null) continue;
+    if (manifest === false) return dir;
+    return filesPack(manifest, segments.slice(i).join('/')) ? dir : null;
+  }
+  return null;
+}
+
 /**
  * The workspace package names whose PUBLISHED surface this diff moves — its
- * `src/**` or a `bin` target it packs — read from the HEAD tree rather than
+ * `src/**`, a `bin` target it packs, or a repo file its build copies into what
+ * it packs (leg 3, above) — read from the HEAD tree rather than
  * from the working directory, because the self-test and the acceptance run both
  * drive commits that are not checked out.
  *
@@ -1358,7 +1495,27 @@ export function packagesTouched({ cwd, from, head }) {
 
   const packages = new Set();
   const unreadable = new Set();
+
+  // LEG 3 (#15204): the copies each build script makes into the repo, read
+  // from THIS head. A script that is absent copies nothing; one that is there
+  // and yields no copy is a reading this leg could not make, and is reported.
+  const copiedTo = new Map();
+  for (const script of PACKED_COPY_BUILD_SCRIPTS) {
+    const text = showOrNull(head, script, cwd);
+    if (text === null) continue;
+    const copies = packedCopiesIn(text);
+    if (copies.length === 0) unreadable.add(script);
+    for (const { source, destination } of copies) copiedTo.set(source, [...(copiedTo.get(source) ?? []), destination]);
+  }
+
   for (const line of out.split('\n')) {
+    for (const destination of copiedTo.get(line.trim()) ?? []) {
+      const dir = packedCopyOwner(destination, manifestOf);
+      if (dir === null) continue;
+      const name = nameFor(dir);
+      if (name) packages.add(name);
+      else unreadable.add(dir);
+    }
     const owners = publishedSourceOwners(line.trim(), manifestOf);
     if (owners.length === 0) continue;
     const owner = owners.find((dir) => nameFor(dir) !== null);
