@@ -898,8 +898,9 @@ async function bootClaimed(
   // relative `artifact` resolves against (#22301).
   const hostRoot = opts.hostRoot ?? process.cwd();
   // [#22301] The app this boot mounts: the configuration itself, or the
-  // artifact built from it (see BootOptions.artifact). Read before anything is
-  // set up, so a refused artifact leaves no environment change behind.
+  // artifact built from it (see BootOptions.artifact). Read before the posture
+  // is requested and the kernel is built, so a refused artifact leaves nothing
+  // to undo.
   const appBundle: unknown =
     opts.artifact === undefined ? config : await loadCompiledArtifact(opts.artifact, config, hostRoot);
 
