@@ -225,6 +225,9 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
 
   it('a member sees nothing and is told nothing; a platform admin and another organization\'s admin are not on the slate', async () => {
     const row = await open('outsiders', UNSTAFFED);
+    // The scene first: the slate IS the administrators', so the absences
+    // below are not read off a slate that names no one at all.
+    expect([...row.pending_approvers].sort()).toEqual(['u_admin', 'u_owner']);
     expect(row.pending_approvers).not.toContain('u_member');
     expect(row.pending_approvers).not.toContain('u_root');
     expect(row.pending_approvers).not.toContain('u_other_owner');
