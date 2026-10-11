@@ -22,9 +22,10 @@
  * config against its schema before running (`service-automation`'s
  * `parse-config.ts`), so type and `required` violations refuse the node as a
  * guard (not routable via `fault` edges). `notify` parses the RAW stored
- * config — its slots are string-typed or template-typed, so templates pass
- * (`{{ }}` holes in its two text slots, `{token}` in the rest) and the
- * post-rendering guards still own "resolved to nothing". `http` parses the
+ * config — its text slots carry `{{ }}` holes and its value slots a CEL value
+ * envelope or a literal (#19939), so both pass, a `{token}` in either is
+ * refused, and the post-evaluation guards still own "resolved to nothing".
+ * `http` parses the
  * INTERPOLATED config, because that is the shape
  * its executor reads — a `{token}` in a typed slot (`timeoutMs`, `durable`)
  * resolves to its real type first.
@@ -63,6 +64,15 @@ import { strictObject } from '../shared/strict-object';
 // built with — never re-exported, so the notify sentences add no public surface.
 import { templateExpressionInput, type TypedExpressionRefusals } from '../shared/typed-expression-input';
 import { textSlotTemplateRefusal } from './flow-text-slot-template';
+// [#19939] The notify value slots take the one value-slot contract and its one
+// judge — composed here, never re-spelled.
+import {
+  AssignmentExpressionValueSchema,
+  FlowValueSlotSchema,
+  VALUE_ENVELOPE_REFUSAL,
+} from './builtin-node-config.zod';
+import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
+import { valueSlotTemplateRefusals } from './flow-value-slot-template';
 
 /**
  * What a rejected key on these contracts silently did before #4001 批 9.
@@ -183,6 +193,167 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
   );
 }
 
+// ─── notify value slots (#19939) ─────────────────────────────────────
+//
+// A notify node's computed values — `recipients`, the `templateData` and
+// `payload` maps, `sourceObject`, `sourceId` and `actorId` — are VALUE slots
+// (#19939, the C half of #11182 ruling D; ADR-0032 Decision 2, a computed
+// value is whole-field CEL): a CEL value envelope the executor evaluates in the
+// run's scope, or a literal written as it is. A single-brace `{…}` token of the
+// retired template dialect is refused by the one value-slot judge
+// (`valueSlotTemplateRefusals`), naming its CEL spelling. The two maps take
+// `FlowValueSlotSchema` per key, like a screen's `defaults`; the three single
+// values and `recipients` take the unions below, whose literal arm is
+// narrower (a string, a list of strings), like `screen.recordId`'s, so the
+// published JSON Schema and the inferred types keep it. Each union is built
+// eagerly, like `FlowValueSlotSchema`: `.meta()` registers by identity, and its
+// `xExpression: 'value'` marker is what the expression ledger's reconciliation
+// ratchet reads (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`).
+
+/** The `{…}` token refusals of `text`, a literal string at `at` inside a notify value slot. */
+function addTokenRefusals(ctx: z.RefinementCtx, text: string, at: readonly (string | number)[]): void {
+  for (const refusal of valueSlotTemplateRefusals(text)) {
+    ctx.addIssue({ code: 'custom', path: [...at, ...refusal.path], message: refusal.message });
+  }
+}
+
+/** A malformed CEL value envelope's refusal — {@link VALUE_ENVELOPE_REFUSAL}, then each issue, located. */
+function envelopeRefusal(value: unknown, at: string): string {
+  const result = AssignmentExpressionValueSchema.safeParse(value);
+  const details = result.success
+    ? []
+    : result.error.issues.map((i) => {
+      const where = [at, ...i.path.map(String)].filter((segment) => segment !== '').join('.');
+      return `${where ? `\`${where}\`: ` : ''}${i.message}`;
+    });
+  return [VALUE_ENVELOPE_REFUSAL, ...details].join(' ');
+}
+
+/** How a value that is not authorable in a notify value slot is named in its refusal. */
+function notifyValuePhrase(value: unknown): string {
+  if (value === null) return '`null`';
+  if (Array.isArray(value)) return 'a list';
+  if (typeof value === 'object') return 'an object';
+  return `a ${typeof value}`;
+}
+
+/**
+ * What `recipients` holds — the sentence every refusal of a value there that is
+ * neither a recipient, a list of them nor a CEL value envelope leads with.
+ */
+const NOTIFY_RECIPIENTS_RULE =
+  '`recipients` is who the notification goes to: a recipient — a user id, or an audience selector such as '
+  + '`team:ID` — written as a string; a list of them, each a string or a CEL value envelope; or one CEL value '
+  + 'envelope, `{ dialect: \'cel\', source: \'…\' }`, that evaluates to a recipient or a list of them.';
+
+/** Why a `recipients` value the union refuses is refused — naming the list entry that is not one. */
+function notifyRecipientsRefusal(input: unknown): string {
+  if (Array.isArray(input)) {
+    const index = input.findIndex((entry) => typeof entry !== 'string'
+      && !(isExpressionEnvelopeShaped(entry) && AssignmentExpressionValueSchema.safeParse(entry).success));
+    const entry = input[index];
+    if (isExpressionEnvelopeShaped(entry)) return envelopeRefusal(entry, `[${index}]`);
+    return `${NOTIFY_RECIPIENTS_RULE} The entry at \`[${index}]\` is ${notifyValuePhrase(entry)}: a list entry is a `
+      + 'recipient string or an envelope.';
+  }
+  if (isExpressionEnvelopeShaped(input)) return envelopeRefusal(input, '');
+  return `${NOTIFY_RECIPIENTS_RULE} This one is ${notifyValuePhrase(input)}.`;
+}
+
+/**
+ * `notify.recipients` — who the notification goes to, a `value` slot that holds
+ * one value OR a list of them (#19939; the ledger's `eachElement`):
+ *
+ *  - a **string** is one recipient as written — a user id, or an audience
+ *    selector the messaging service resolves (`team:ID`, an email address);
+ *  - a **list** holds one entry per recipient, each a string as written or a
+ *    CEL value envelope evaluated per run — an entry that evaluates to a list
+ *    (a multi-user field, a list variable) adds EACH of its recipients, so a
+ *    list is never handed on as one joined recipient;
+ *  - a **CEL value envelope** ({@link AssignmentExpressionValueSchema}) is
+ *    evaluated per run to a recipient or a list of them.
+ *
+ * An envelope that evaluates to `null` or a blank string adds no recipient,
+ * as a token that resolved to nothing did, and the executor's guard still
+ * fails a node left with none, naming the sources that evaluated to nothing
+ * (framework#3582); anything else that is not a string, or a list of them,
+ * fails the node, naming what it evaluated to. A `{…}` token in a string is
+ * refused by the one value-slot judge, with the envelope that replaces it.
+ */
+const NotifyRecipientsSlotSchema = z.union([
+  z.string(),
+  z.array(z.union([z.string(), AssignmentExpressionValueSchema])),
+  AssignmentExpressionValueSchema,
+], {
+  error: (issue) => notifyRecipientsRefusal((issue as { input?: unknown }).input),
+})
+  .superRefine((value, ctx) => {
+    if (typeof value === 'string') addTokenRefusals(ctx, value, []);
+    else if (Array.isArray(value)) {
+      value.forEach((entry, index) => {
+        if (typeof entry === 'string') addTokenRefusals(ctx, entry, [index]);
+      });
+    }
+  })
+  .meta({
+    description:
+      'Who the notification goes to: a recipient (a user id, or an audience selector such as `team:ID`) as a '
+      + 'string; a list of them, each a string or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per '
+      + 'run (an entry that evaluates to a list adds each of its recipients); or one envelope evaluating to a '
+      + 'recipient or a list — a `{…}` template token is refused',
+    xExpression: 'value',
+  });
+
+/**
+ * A notify value slot holding ONE string — `sourceObject`, `sourceId`,
+ * `actorId` (#19939): the string as written, or a CEL value envelope the
+ * executor evaluates per run to a string. An envelope that evaluates to `null`
+ * or a blank string leaves the key unset, as a token that resolved to nothing
+ * did; anything else that is not a string fails the node, naming what it
+ * evaluated to. A `{…}` token in the string is refused by the one value-slot
+ * judge.
+ */
+function notifyStringSlotSchema(key: string, what: string, example: string, description: string) {
+  const rule =
+    `\`${key}\` is ${what}: write it as a string, or compute it with a CEL value envelope that evaluates to one, `
+    + `\`{ dialect: 'cel', source: '${example}' }\`.`;
+  return z.union([z.string(), AssignmentExpressionValueSchema], {
+    error: (issue) => {
+      const input = (issue as { input?: unknown }).input;
+      if (isExpressionEnvelopeShaped(input)) return envelopeRefusal(input, '');
+      return `${rule} This one is ${notifyValuePhrase(input)}.`;
+    },
+  })
+    .superRefine((value, ctx) => {
+      if (typeof value === 'string') addTokenRefusals(ctx, value, []);
+    })
+    .meta({ description, xExpression: 'value' });
+}
+
+const NotifySourceObjectSlotSchema = notifyStringSlotSchema(
+  'sourceObject',
+  'the name of the object the notification links to',
+  'targetObject',
+  'Object name of the record the notification links to — a string, or a CEL value envelope `{ dialect: \'cel\', '
+    + 'source }` evaluated per run to one; a `{…}` template token is refused',
+);
+
+const NotifySourceIdSlotSchema = notifyStringSlotSchema(
+  'sourceId',
+  'the id of the record the notification links to',
+  'record.id',
+  'Id of the record the notification links to — a string, or a CEL value envelope `{ dialect: \'cel\', source }` '
+    + 'evaluated per run to one; a `{…}` template token is refused',
+);
+
+const NotifyActorIdSlotSchema = notifyStringSlotSchema(
+  'actorId',
+  'the id of the user who caused the event',
+  'current_user.id',
+  'User id that caused the event — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per '
+    + 'run to one; a `{…}` template token is refused',
+);
+
 // ─── notify ──────────────────────────────────────────────────────────
 
 /**
@@ -226,18 +397,21 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
  *    runtime precedence would silently ignore one of them, so the ambiguous
  *    combination is unrepresentable instead — the same posture as
  *    `objectNavTargetExclusivity` (`ui/app.zod.ts`).
- *  - `title` and `message` render through the formula template engine, so
- *    `{{ record.x }}` holes are legal in them (below). `recipients`,
- *    `actionUrl` and `payload` pass through the flow's `interpolate()`, so
- *    `{record.x}` templates are legal in them. So do
- *    `templateData` VALUES (they are per-run render inputs). `channels`,
- *    `topic`, `severity` and `template` are read RAW — a `{token}` in those is
- *    forwarded verbatim, never resolved (channel ids are static routing,
- *    `severity` is a closed vocabulary, and `template` is a static metadata
- *    cross-reference, not per-record data). Re-measured against
- *    `notify-node.ts` for #7086: the previous wording ("every string-ish value
- *    except `channels`") was stale for `topic` and `severity`, and it is what
- *    makes closing the `severity` gate below safe.
+ *  - `title`, `message` and (since #19939) `actionUrl` are TEXT slots: they
+ *    render through the formula template engine, so `{{ record.x }}` holes are
+ *    legal in them (below). `recipients`, `sourceObject`, `sourceId`,
+ *    `actorId` and the VALUES of `templateData` and `payload` are VALUE slots
+ *    (#19939): a CEL value envelope the executor evaluates per run, or a
+ *    literal written as it is — until #19939 each passed through the flow's
+ *    single-brace `interpolate()`, and a `{record.x}` token in one is refused
+ *    now, naming its CEL spelling. `channels`, `topic`, `severity` and
+ *    `template` are read RAW — a `{token}` in those is forwarded verbatim,
+ *    never resolved (channel ids are static routing, `severity` is a closed
+ *    vocabulary, and `template` is a static metadata cross-reference, not
+ *    per-record data). Re-measured against `notify-node.ts` for #7086: the
+ *    previous wording ("every string-ish value except `channels`") was stale
+ *    for `topic` and `severity`, and it is what makes closing the `severity`
+ *    gate below safe.
  *  - `title` and `message` are TEMPLATE slots, taking the same input as every
  *    other `template` slot in the dialect table (`shared/expression.zod.ts`):
  *    a bare string, or a `{ dialect: 'template', source }` envelope — what the
@@ -270,9 +444,17 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   history: IO_NODE_CONFIG_HISTORY,
   guidance: NOTIFY_KEY_GUIDANCE,
 }, {
-  /** Who gets the notification — user id(s) / audience selector(s). */
-  recipients: z.union([z.string(), z.array(z.string())])
-    .describe('Recipient user id(s) / audience selector(s); `{token}` templates resolve per run'),
+  /**
+   * Who gets the notification — a `value` slot holding one value or a list of
+   * them (#19939, {@link NotifyRecipientsSlotSchema}).
+   */
+  recipients: NotifyRecipientsSlotSchema
+    .describe(
+      'Who the notification goes to: a recipient (a user id, or an audience selector such as `team:ID`) as a '
+      + 'string; a list of them, each a string or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per '
+      + 'run — an entry that evaluates to a list adds each of its recipients, and one that evaluates to null adds '
+      + 'none; or one envelope evaluating to a recipient or a list. A `{…}` template token is refused.',
+    ),
   /**
    * Inline notification title — the NON-localizable content path, and a
    * template slot (see the docblock above). Required unless `template` is set
@@ -307,12 +489,13 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   template: z.string().optional()
     .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` against sys_email_template at delivery time and renders subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient\'s own `sys_user.locale` when set, else the deployment default locale — so recipients whose personal languages differ receive different rows of the same bundle. The node\'s `payload.locale` is not consulted. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
   /**
-   * Render context for the referenced template's `{{var}}` holes. Values are
-   * interpolated per run (`{record.x}` resolves), so flow state can feed the
-   * template. Only meaningful with `template` — refused without it.
+   * Render context for the referenced template's `{{var}}` holes — a `value`
+   * slot per key (#19939, {@link FlowValueSlotSchema}): a CEL value envelope
+   * evaluated per run, so flow state can feed the template, or a literal. Only
+   * meaningful with `template` — refused without it.
    */
-  templateData: z.record(z.string(), z.unknown()).optional()
-    .describe('Render context for the referenced template\'s `{{var}}` placeholders; values interpolate `{token}` templates per run. Only valid together with `template`.'),
+  templateData: z.record(z.string(), FlowValueSlotSchema).optional()
+    .describe('Render context for the referenced template\'s `{{var}}` placeholders — each value a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run, or a literal written as it is; a `{…}` template token is refused. Only valid together with `template`.'),
   /** Channels to fan out to (default: inbox). Read raw — no template interpolation. */
   channels: z.union([z.string(), z.array(z.string())]).optional()
     .describe('Channels to fan out to (default: inbox)'),
@@ -337,20 +520,34 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
    */
   severity: z.enum(['info', 'warning', 'critical']).optional()
     .describe('Severity forwarded to the messaging service'),
-  /** Click-through target object — only effective together with `sourceId` (#2675). */
-  sourceObject: z.string().optional()
-    .describe('Object name of the record the notification links to (writes sys_notification.source_object). Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
-  /** Click-through target record id — only effective together with `sourceObject`. */
-  sourceId: z.string().optional()
-    .describe('Record id the notification links to (writes sys_notification.source_id). Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
-  /** User id that caused the event. */
-  actorId: z.string().optional().describe('User id that caused the event (writes sys_notification.actor_id)'),
-  /** Explicit click-through URL; overrides the sourceObject/sourceId link. */
+  /**
+   * Click-through target object — only effective together with `sourceId`
+   * (#2675). A `value` slot (#19939, {@link NotifySourceObjectSlotSchema}).
+   */
+  sourceObject: NotifySourceObjectSlotSchema.optional()
+    .describe('Object name of the record the notification links to (writes sys_notification.source_object) — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to one; a `{…}` template token is refused. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
+  /**
+   * Click-through target record id — only effective together with
+   * `sourceObject`. A `value` slot (#19939, {@link NotifySourceIdSlotSchema}).
+   */
+  sourceId: NotifySourceIdSlotSchema.optional()
+    .describe('Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to one (`record.id`); a `{…}` template token is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
+  /** User id that caused the event. A `value` slot (#19939, {@link NotifyActorIdSlotSchema}). */
+  actorId: NotifyActorIdSlotSchema.optional()
+    .describe('User id that caused the event (writes sys_notification.actor_id) — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to one (`current_user.id`); a `{…}` template token is refused'),
+  /**
+   * Explicit click-through URL; overrides the sourceObject/sourceId link. A
+   * TEXT slot (#19939): rendered per run with `{{ }}` holes, like `title`; a
+   * single-brace `{token}` is refused by the `superRefine` below.
+   */
   actionUrl: z.string().optional()
-    .describe('Explicit click-through URL; overrides the link synthesized from sourceObject/sourceId'),
-  /** Extra template inputs merged into the notification payload. */
-  payload: z.record(z.string(), z.unknown()).optional()
-    .describe('Extra template inputs merged into the notification payload'),
+    .describe('Explicit click-through URL, rendered per run with `{{ }}` holes like `title` (`/crm_case/{{ record.id }}`); a single-brace `{token}` is refused. Overrides the link synthesized from sourceObject/sourceId.'),
+  /**
+   * Extra values merged into the notification payload — a `value` slot per key
+   * (#19939, {@link FlowValueSlotSchema}).
+   */
+  payload: z.record(z.string(), FlowValueSlotSchema).optional()
+    .describe('Extra values merged into the notification payload — each a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run, or a literal written as it is; a `{…}` template token is refused'),
 }).superRefine((cfg, ctx) => {
   // #9205 — correct-by-construction (the `objectNavTargetExclusivity`
   // posture, ui/app.zod.ts): `template` combined with inline `title`/`message`
@@ -417,6 +614,14 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
     }
     const refusal = textSlotTemplateRefusal(value.source);
     if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: [key], message: refusal });
+  }
+  // [#19939] `actionUrl` is a text slot too — a link with `{{ }}` holes
+  // (`/crm_case/{{ record.id }}`), rendered by the same engine; a single-brace
+  // token left from the 17.x dialect would go out as a literal link, so it is
+  // refused by the same judge, in the same words.
+  if (typeof cfg.actionUrl === 'string') {
+    const refusal = textSlotTemplateRefusal(cfg.actionUrl);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['actionUrl'], message: refusal });
   }
 }));
 

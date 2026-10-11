@@ -337,6 +337,15 @@ function startsWithLedgerSlot(segments: readonly string[], path: ReadonlyArray<P
  * variable's bare name included, in the contract's words — as it refused
  * `42` before. Every other value slot's literal arm refuses nothing but a
  * token, so their verdicts do not move.
+ *
+ * A slot that holds one value or a list of them (`notify.recipients`, the
+ * ledger's `eachElement`, #19939) is judged per element when it holds a list:
+ * an issue at or inside an element is the envelope pass's where that element is
+ * an envelope. An issue at the list itself is the contract's union refusing it
+ * whole — and a list whose every element is a string or envelope-shaped can be
+ * refused only for a malformed envelope (the envelope pass's, at the element)
+ * or a token (the judge's), so it is skipped too; a list holding any other
+ * element (`42`, `null`, a nested list) stays this arm's, its only judge.
  */
 function atOrInsideJudgedLedgerSlot(
   nodeType: string,
@@ -347,7 +356,14 @@ function atOrInsideJudgedLedgerSlot(
     if (entry.nodeType !== nodeType || !LEDGER_JUDGED_ROLES.has(entry.role)) return false;
     const segments = ledgerSlotSegments(entry.path);
     if (!startsWithLedgerSlot(segments, path)) return false;
-    return entry.role !== 'value' || isExpressionEnvelopeShaped(authoredAt(authored, path.slice(0, segments.length)));
+    if (entry.role !== 'value') return true;
+    const slotValue = authoredAt(authored, path.slice(0, segments.length));
+    if (entry.eachElement && Array.isArray(slotValue)) {
+      const at = path[segments.length];
+      if (typeof at === 'number') return isExpressionEnvelopeShaped(slotValue[at]);
+      return slotValue.every((element) => typeof element === 'string' || isExpressionEnvelopeShaped(element));
+    }
+    return isExpressionEnvelopeShaped(slotValue);
   });
 }
 
