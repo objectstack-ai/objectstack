@@ -21,7 +21,7 @@
  * (`./filter.zod.ts`), and its brand is a symbol-keyed property, which no JSON
  * document can carry. A request's `where` holding `{ "$in": { "object": "x" } }`
  * is a plain object in a list slot, and the comparand-shape door
- * (`./filter-comparand-shape.ts#assertListComparandShapes`) refuses it as a
+ * (`packages/spec/src/data/filter-comparand-shape.ts#assertListComparandShapes`) refuses it as a
  * non-list comparand (`INVALID_FILTER` / 400). That refusal existed before this
  * leaf did, and it stays THE refusal: nothing new is refused at ingress.
  *
