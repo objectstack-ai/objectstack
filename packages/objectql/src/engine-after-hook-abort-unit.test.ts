@@ -33,7 +33,10 @@ function makeDriver(name: string, opts: { transactional?: boolean; failParentUpd
     rowsOf: (o: string) => Array.from(storeFor(o).values()),
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async syncSchema() {},
-    async find(o: string, ast: any) { return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)); },
+    async find(o: string, ast: any) {
+      const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+    },
     async findOne(o: string, ast: any) { return (await this.find(o, ast))[0] ?? null; },
     async create(o: string, data: Record<string, unknown>) {
       const row = { ...data, id: (data.id as string) ?? `${o}_${++n}` };
