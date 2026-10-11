@@ -11,7 +11,8 @@
  * The data routes judge the ADDRESSED object. A read that follows a lookup
  * reaches an object nobody addressed: the data door's `$expand` served the row
  * fields of a target every data route refuses, and the dataset door's label
- * passes rendered its display names. Both now ask the target (behaviour-pinned
+ * passes rendered its display names. Both now ask the target, as does the data
+ * door's nested-relation filter condition (#22737; each behaviour-pinned
  * in their own packages and on a real stack in `@objectstack/dogfood`). This
  * file is the ENUMERATION: it names the census of such reads, holds each
  * decided one to the decision, and goes red when a new one appears without
@@ -79,7 +80,7 @@ type Classification =
       /** The read, in words. */
       read: string;
       /** The operation the target is judged as. */
-      operation: 'get';
+      operation: 'get' | 'list';
       /** The function that asks the decision, and the file it lives in. */
       decision: { file: string; fn: string };
       /** Where the read takes its answer from that function: a call site that must exist. */
@@ -133,12 +134,12 @@ const CALLERS: Record<string, Classification> = {
     pin: 'packages/services/service-analytics/src/__tests__/dimension-label-exposure.test.ts',
   },
   'packages/objectql/src/relation-filter-lowering.ts': {
-    kind: 'open',
-    read: "the data door's nested-relation filter condition (`ObjectQL.lowerRelationConditions` reads the related object to lower it)",
-    measured: 'evaluated for an unexposed target, for an administrator and a member: the source row comes back only when the related value matches',
-    carrier:
-      'a filter cannot be withheld, so its answer is a refusal in the data door\'s exposure codes, which needs a ' +
-      'provenance row for the door and touches a filter position; carried by a follow-up of #22661',
+    kind: 'decided',
+    read: "the data door's nested-relation filter condition (`ObjectQL.lowerRelationConditions` reads the related object to lower it), refused rather than withheld",
+    operation: 'list',
+    decision: { file: 'packages/metadata-protocol/src/protocol.ts', fn: 'refuseUnservedRelationTarget' },
+    wiring: { file: 'packages/metadata-protocol/src/protocol.ts', call: 'this.refuseUnservedRelationTarget(' },
+    pin: 'packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts',
   },
   'packages/plugins/plugin-approvals/src/approval-service.ts': {
     kind: 'open',
@@ -280,7 +281,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
       const decided = Object.values(CALLERS).filter(
         (c): c is Extract<Classification, { kind: 'decided' }> => c.kind === 'decided',
       );
-      expect(decided.map((d) => d.decision.fn).sort()).toEqual(['servesExpansionTarget', 'servesLabelTarget']);
+      expect(decided.map((d) => d.decision.fn).sort()).toEqual(['refuseUnservedRelationTarget', 'servesExpansionTarget', 'servesLabelTarget']);
 
       for (const d of decided) {
         const body = functionBody(d.decision.file, d.decision.fn);

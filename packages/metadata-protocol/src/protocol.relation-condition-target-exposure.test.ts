@@ -62,7 +62,7 @@ function makeProtocol() {
 /** Each refused target, the door's answer, and the effective set a 405 names. */
 const REFUSED = {
     hidden: { status: 404, code: 'OBJECT_API_DISABLED', allowed: undefined },
-    closed: { status: 405, code: 'OBJECT_API_METHOD_NOT_ALLOWED', allowed: ['create'] },
+    closed: { status: 405, code: 'OBJECT_API_METHOD_NOT_ALLOWED', allowed: ['create', 'import'] },
     denyall: { status: 405, code: 'OBJECT_API_METHOD_NOT_ALLOWED', allowed: [] },
     getonly: { status: 405, code: 'OBJECT_API_METHOD_NOT_ALLOWED', allowed: ['get'] },
 } as const;

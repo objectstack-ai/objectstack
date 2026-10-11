@@ -17,6 +17,10 @@
 // - The dataset door's two dimension-label passes. A target the decision does
 //   not serve for `get` is not read: the stored id renders, and an `order` on
 //   the dimension sorts by it.
+// - [#22737] A nested-relation filter condition, on the list and the query
+//   route. It is a query OF the target, judged `list`, and a filter cannot be
+//   withheld: a target the decision does not serve is REFUSED (404 / 405), as a
+//   related object the member may not read already is (403, the precedent).
 //
 // ## Armed before anything is believed
 //
@@ -191,6 +195,40 @@ describe('[#22661] a second-object read serves only a target whose declared expo
         }
       });
 
+      // [#22737] A nested-relation filter condition is a query OF the target,
+      // judged `list`: a target that does not serve it is refused in the data
+      // door's exposure answer on the list and the query route, matched or not.
+      const conditionAnswers = async (rel: Rel, value: string) => {
+        const filter = { [rel]: { name: value } };
+        return [
+          await stack.apiAs(token[persona], 'GET', `/data/sox_source?$filter=${encodeURIComponent(JSON.stringify(filter))}`),
+          await stack.apiAs(token[persona], 'POST', '/data/sox_source/query', { where: filter }),
+        ];
+      };
+      const REFUSED_CONDITION = { hidden: [404, 'OBJECT_API_DISABLED'], closed: [405, 'OBJECT_API_METHOD_NOT_ALLOWED'], getonly: [405, 'OBJECT_API_METHOD_NOT_ALLOWED'] } as const;
+
+      it('nested-relation condition: a target that does not serve list is refused, matched or not', async () => {
+        for (const [rel, [status, code]] of Object.entries(REFUSED_CONDITION) as Array<[Rel, readonly [number, string]]>) {
+          for (const value of [MARK[rel], 'no-such-name']) {
+            for (const res of await conditionAnswers(rel, value)) {
+              const body: any = await res.json();
+              expect({ status: res.status, code: body?.error?.code }, rel).toEqual({ status, code });
+            }
+          }
+        }
+      });
+
+      it('CONTROL nested-relation condition: a target that serves list is evaluated', async () => {
+        for (const rel of ['listonly', 'open'] as const) {
+          for (const [value, rows] of [[MARK[rel], 2], ['no-such-name', 0]] as const) {
+            for (const res of await conditionAnswers(rel, value)) {
+              expect(res.status, rel).toBe(200);
+              expect(rowsOf(await res.json()).length, rel).toBe(rows);
+            }
+          }
+        }
+      });
+
       it('dataset sort-key pass: an order on a withheld dimension sorts by the stored id', async () => {
         // By the withheld names this would read soxh_2 (A-…) first.
         expect((await datasetRows('hidden', { hidden: 'asc' })).map((r) => r.hidden)).toEqual(['soxh_1', 'soxh_2']);
@@ -203,5 +241,10 @@ describe('[#22661] a second-object read serves only a target whose declared expo
     expect(res.status, await res.clone().text()).toBe(200);
     const body: any = await res.json();
     expect((body.record ?? body).private).toBe(ids.private);
+  });
+
+  it('PRECEDENT — a nested-relation condition on a related object the member may not read is refused, unchanged', async () => {
+    const res = await stack.apiAs(token.member, 'POST', '/data/sox_source/query', { where: { private: { name: MARK.private } } });
+    expect(res.status, await res.clone().text()).toBe(403);
   });
 });
