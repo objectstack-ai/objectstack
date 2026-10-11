@@ -8714,9 +8714,8 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<boolean | null> {
     const master = this.resolveObjectName(target);
     if (!this._registry.getObject(master)) return null;
-    const key = String(id);
-    const readable = await this.masterDetailHeadersCallerReads(master, new Set([key]), context);
-    if (!readable.has(key)) return false;
+    const readable = await this.masterDetailHeadersCallerReads(master, [id], context);
+    if (!readable.has(String(id))) return false;
     return this.referenceExists(target, id, context);
   }
 
@@ -8742,19 +8741,24 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private async masterDetailHeadersCallerReads(
     master: string,
-    ids: ReadonlySet<string>,
+    ids: ReadonlyArray<unknown>,
     context: ExecutionContext | undefined,
   ): Promise<ReadonlySet<string>> {
-    if (context?.isSystem || ids.size === 0) return ids;
+    const asked = new Map<string, unknown>();
+    for (const id of ids) if (id != null) asked.set(String(id), id);
+    if (context?.isSystem || asked.size === 0) return new Set(asked.keys());
+    // One id is asked by equality, the predicate shape the elevated probe
+    // already sends; a batch by `$in`, as read 2 of the batch reads it.
+    const values = [...asked.values()];
     try {
       const rows = await this.find(master, {
-        where: { id: { $in: [...ids] } },
+        where: { id: values.length === 1 ? values[0] : { $in: values } },
         fields: ['id'],
         context,
       } as EngineQueryOptions) as Array<Record<string, unknown>>;
       const served = new Set<string>();
       for (const row of Array.isArray(rows) ? rows : []) {
-        if (row?.id != null && ids.has(String(row.id))) served.add(String(row.id));
+        if (row?.id != null && asked.has(String(row.id))) served.add(String(row.id));
       }
       return served;
     } catch (err) {
@@ -8946,7 +8950,7 @@ export class ObjectQL implements IObjectQLEngine {
     if (parentId == null) return null;
     // [#22519] 1. The caller's read door: a header it does not return binds as
     // a missing header binds.
-    const readable = await this.masterDetailHeadersCallerReads(rel.master, new Set([String(parentId)]), context);
+    const readable = await this.masterDetailHeadersCallerReads(rel.master, [parentId], context);
     if (!readable.has(String(parentId))) return null;
     // 2. The write's own elevated, tenant-kept read, for a header read 1 returned.
     try {
@@ -9006,7 +9010,7 @@ export class ObjectQL implements IObjectQLEngine {
     }
     if (ids.size === 0) return unbound;
     // [#22519] 1. The caller's read door, once for the batch.
-    const readable = await this.masterDetailHeadersCallerReads(rel.master, ids, context);
+    const readable = await this.masterDetailHeadersCallerReads(rel.master, [...ids], context);
     if (readable.size === 0) return unbound;
     const byId = new Map<string, Record<string, unknown>>();
     try {

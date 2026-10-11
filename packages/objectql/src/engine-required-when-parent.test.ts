@@ -342,7 +342,9 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
     const reads: Array<{ object: string; ids: unknown; elevated: boolean }> = [];
     const original = (engine as any).find.bind(engine);
     (engine as any).find = async (name: string, q: any, o?: any) => {
-      reads.push({ object: name, ids: q?.where?.id?.$in, elevated: q?.context?.isSystem === true });
+      const id = q?.where?.id;
+      const ids = Array.isArray(id?.$in) ? id.$in : id === undefined ? undefined : [id];
+      reads.push({ object: name, ids, elevated: q?.context?.isSystem === true });
       return original(name, q, o);
     };
     const headerReads = () => reads.filter((r) => r.object === 'showcase_invoice');
