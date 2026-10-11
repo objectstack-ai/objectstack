@@ -119,6 +119,7 @@ import {
   CreateRecordConfigSchema,
   FlowValueSlotSchema,
   MapConfigSchema,
+  ScreenConfigSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
 
@@ -649,31 +650,36 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
 /**
  * Node types that DO publish a descriptor `configSchema` and still declare an
  * expression slot through a spec Zod, because the descriptor cannot carry the
- * marker (#14149; the CRUD pair since #19938; `map` since #19939).
+ * marker (#14149; the CRUD pair since #19938; `map` and `screen` since #19939).
  *
  * Each of these descriptors declares its map as `additionalProperties: true`
  * — `assignment`'s `assignments`, `create_record` / `update_record`'s
- * `fields`, `map`'s `input` — and that openness IS the descriptor's contract,
- * pinned by the form↔Zod ledger, so there is no descriptor property to mark.
- * The value contract lives on the spec Zod's map value
- * (`.meta({ xExpression: 'value' })` — `AssignmentValueSchema` and
+ * `fields`, `map`'s `input`, `screen`'s `defaults` — and that openness IS the
+ * descriptor's contract, pinned by the form↔Zod ledger, so there is no
+ * descriptor property to mark. The value contract lives on the spec Zod's map
+ * value (`.meta({ xExpression: 'value' })` — `AssignmentValueSchema` and
  * `FlowValueSlotSchema`, `builtin-node-config.zod.ts`), and the expression
  * ledger's reconciliation ratchet reads it from the JSON projection below,
  * walking the map's `additionalProperties` as the `*` segment the ledger paths
- * `assignments.*`, `fields.*` and `input.*` spell. `map`'s other expression
- * slot, `collection`, keeps arriving through its descriptor (`xExpression:
- * 'template'`): `MapConfigSchema` carries no marker there, so the two channels
- * never declare one slot twice. Kept apart from
- * {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} on purpose: that map means "publishes
- * no descriptor", its other readers (`metadata-protocol`'s reference-site
- * attribution) walk it for that reason, and none of these four is a member of
- * that class.
+ * `assignments.*`, `fields.*`, `input.*` and `defaults.*` spell. `screen`'s
+ * other two value slots, a field's `defaultValue` and `recordId`, are single
+ * values its descriptor offers as unmarked inputs (the Studio form renders
+ * them as it always did), so their markers ride `ScreenConfigSchema` too.
+ * `map`'s other expression slot, `collection`, keeps arriving through its
+ * descriptor (`xExpression: 'template'`), and so does `screen`'s
+ * `fields[].visibleWhen` (`xExpression: 'expression'`): the spec Zod carries no
+ * marker there, so the two channels never declare one slot twice. Kept apart
+ * from {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} on purpose: that map means
+ * "publishes no descriptor", its other readers (`metadata-protocol`'s
+ * reference-site attribution) walk it for that reason, and none of these five
+ * is a member of that class.
  */
 export const LEDGER_DECLARED_NODE_CONFIG_SCHEMAS = {
   assignment: AssignmentConfigSchema,
   create_record: CreateRecordConfigSchema,
   update_record: UpdateRecordConfigSchema,
   map: MapConfigSchema,
+  screen: ScreenConfigSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 /** Node types whose expression slots reach the ledger through {@link LEDGER_DECLARED_NODE_CONFIG_SCHEMAS}. */

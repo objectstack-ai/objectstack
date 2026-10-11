@@ -18,9 +18,9 @@
 # traps, so the fix is a fixed order, executed mechanically:
 #
 #   1. git merge origin/main               (⛔ never rebase / force-push)
-#   2. take main's side of every os-regen path THE BRANCH HAS NOT EDITED
-#      since the merge base — worktree only, never the index (both halves of
-#      that sentence are load-bearing; see the two sections below)
+#   2. take main's side of every os-regen path BOTH sides moved since the merge
+#      base — never one the branch alone edited, never a MIXED one — worktree
+#      only, never the index (each clause is load-bearing; see the sections below)
 #   3. COMMIT THE MERGE FIRST, then assert the hand-off tree is committed
 #   4. regenerate the whole chain, then run the generated-artifact gates and
 #      assert every sibling PR's entries — and the previous PR's IMPLEMENTATION
@@ -190,6 +190,22 @@
 # that tree state is precisely what the refusal fires on. A record whose branch
 # tip is not an ancestor of HEAD is STALE (reset, rebased, or another run's) and
 # is refused with its contents printed, ⛔ never used.
+#
+# ## Step 2 never takes a side of a MIXED path (#22829)
+#
+# "Both sides moved it, so the driver dropped one" holds for a WHOLE row, not a MIXED one (a
+# generated half plus hand-written rows, a `mixed:` field on its REGEN_ARTIFACTS row): the
+# driver defers a mixed path only when that loses nothing a regeneration restores, and
+# otherwise text-merges or conflicts, so taking main's side there is a pure revert. MEASURED
+# on a rerun (recorded base e84aeb36ce, pre-merge tip 68ba543e, main b7cd1af9df): the driver
+# text-merged `content/docs/permissions/system-context.mdx` cleanly (merge 64e53f1d held both
+# sides' rows), it was not conflicted, and step 2's `git restore --source=b7cd1af9df` dropped
+# the branch's rows 11b/23b, exit 0, every gate green. The base was right; the rule was
+# wrong, on a first run too. ⇒ KEEP a mixed path's merged bytes. Which are mixed is read off
+# the driver table at the PRE-MERGE TIP (the copy the driver ran), unreadable ⇒ refused; the
+# self-test holds `OS_REGEN_CLASSES` to it. Same step, same loss: the set main moved was read
+# off the LIVE `origin/main`, so after main advanced a rerun restored the recorded tip's (the
+# base's) bytes over a branch-only edit. Both readings use the pinned `$main_side` now.
 #
 # ## Step 2 writes the WORKTREE, never the INDEX — and step 4 reads the index
 #
@@ -437,6 +453,71 @@ branch stacked on another feature branch is OUT OF SCOPE: this script would merg
 artifacts. AGENTS.md Multi-agent discipline §2 rules that form out and prescribes a
 TRUNK branch instead — land the trunk onto `main` and run this script there.
 EOF
+}
+
+# --- every routed pattern, classified (#22829) ----------------------------------
+#
+# The one reader of .gitattributes' routed patterns, so step 2 and the classification pin
+# cannot disagree about the list (its grammar is measured above its call in `mode_run`).
+read_regen_patterns() {
+  awk '
+    /^[ \t]*#/ { next }
+    /(^|[ \t])merge=os-regen([ \t]|$)/ { print $1 }
+  ' "$1"
+}
+
+# One row per routed pattern, `<pattern> <class>` — the decision routing a pattern demands.
+# Step 2 reads the driver's `mixed:` field instead; the self-test holds this table equal to
+# .gitattributes and to that field both ways, and pins a rerun fixture on every mixed row.
+#   whole  its generator renders the ENTIRE file — nothing on disk survives into it;
+#   mixed  a generated half plus hand-written rows no regeneration restores.
+# Measured at the generators (2026-10-11): `gen:system-context-census` alone edits in place.
+OS_REGEN_CLASSES='
+packages/spec/liveness/state-counts/**                       whole
+packages/spec/authorable-surface/**                          whole
+packages/spec/authorable-surface.base.json                   whole
+packages/spec/authorable-defaults/**                         whole
+packages/spec/json-schema.manifest/**                        whole
+packages/spec/api-surface/**                                 whole
+packages/spec/src/meta-spelling/meta-url-data.generated.ts   whole
+packages/spec/export-origins/**                              whole
+packages/spec/declaration-map/**                             whole
+packages/spec/api-surface-signatures.json                    whole
+docs/audits/2026-07-unknown-key-strictness-ledger.counts/**  whole
+content/docs/references/**                                   whole
+content/docs/permissions/system-context.mdx                  mixed
+skills/*/references/_index.md                                whole
+skills/objectstack-ui/references/react-blocks.md             whole
+scripts/platform-object-tenancy-census.json                  whole
+'
+
+# The `mixed:` rows of the driver table in module $1. Failure is the caller's to report —
+# an empty list would send a MIXED path back to "take main's side".
+read_mixed_patterns() {
+  node --input-type=module -e '
+const { pathToFileURL } = await import("node:url");
+const mod = await import(pathToFileURL(process.argv[1]).href);
+if (!Array.isArray(mod.REGEN_ARTIFACTS)) throw new Error("REGEN_ARTIFACTS is not an array");
+for (const e of mod.REGEN_ARTIFACTS) if (e.mixed) process.stdout.write(e.path + "\n");
+' "$1" 2>/dev/null
+}
+
+# Every way the table above disagrees with .gitattributes ($1) or with the driver's mixed
+# rows ($2, newline-delimited), one `<problem> <pattern>` line each; empty = in agreement.
+os_regen_class_problems() {
+  { echo '@routed'; read_regen_patterns "$1"; echo '@driver'; printf '%s\n' "$2"
+    echo '@table'; printf '%s\n' "$OS_REGEN_CLASSES"; } | awk '
+    /^@/ { s = $0; next }
+    NF == 0 { next }
+    s == "@routed" { R[$1] = 1 }
+    s == "@driver" { D[$1] = 1 }
+    s == "@table" { C[$1] = $2; if ($2 != "whole" && $2 != "mixed") print "bad-class " $1 }
+    END {
+      for (p in R) if (!(p in C)) print "unclassified " p
+      for (p in C) { if (!(p in R)) print "stale " p
+                     if ((C[p] == "mixed") != (p in D)) print "mixed-mismatch " p }
+      for (p in D) if (!(p in C)) print "mixed-mismatch " p
+    }' | sort
 }
 
 # --- the generated-but-deliberately-unrouted ledger ---------------------------
@@ -743,6 +824,7 @@ rr_refuse_advanced() {
   echo "    git diff --name-only $rr_rec_base $rr_rec_main_tip -- <the merge=os-regen patterns>" >&2
   echo "    git diff --name-only $rr_rec_base $rr_rec_branch_tip -- <the same patterns>" >&2
   echo "    git restore --source=$rr_rec_main_tip -- <every path in BOTH lists>   # tree only" >&2
+  echo "    # ⛔ minus every MIXED path (a \`mixed:\` row in scripts/regen-artifacts.mjs): keep its bytes" >&2
   exit 1
 }
 
@@ -764,6 +846,7 @@ rr_refuse_orphan() {
     echo "    git diff --name-only \"\$base\" $rr_head2 -- <the os-regen patterns, printed above>   # main moved these" >&2
     echo "    git diff --name-only \"\$base\" $rr_head1 -- <the same patterns>                      # the branch moved these" >&2
     echo "    git restore --source=$rr_head2 -- <every path in BOTH lists>   # tree only, ⛔ never --staged" >&2
+    echo "    # ⛔ minus every MIXED path (a \`mixed:\` row in scripts/regen-artifacts.mjs): keep its bytes" >&2
     echo "  then commit that as its own commit and continue with step 4." >&2
   else
     echo "  HEAD is not a merge commit, so this script cannot read the two sides off it either." >&2
@@ -950,10 +1033,7 @@ mode_run() {
   regen_line=''
   while IFS= read -r regen_line; do
     if [[ -n "$regen_line" ]]; then regen_paths+=("$regen_line"); fi
-  done < <(awk '
-    /^[ \t]*#/ { next }
-    /(^|[ \t])merge=os-regen([ \t]|$)/ { print $1 }
-  ' .gitattributes)
+  done < <(read_regen_patterns .gitattributes)
   if [ "${#regen_paths[@]}" -eq 0 ]; then
     echo "✗ no merge=os-regen entries found in .gitattributes — refusing to guess" >&2
     exit 1
@@ -961,7 +1041,8 @@ mode_run() {
   echo "→ os-regen paths (from .gitattributes, ${#regen_paths[@]} patterns):"
   printf '    %s\n' "${regen_paths[@]}"
 
-  # Which side moved which generated file, read against the pre-merge tip. Two
+  # Which side moved which generated file, read against the pre-merge tip and the PINNED
+  # main side (⛔ never the live `origin/main`, which a rerun's own fetch moved). Two
   # `git diff`s for the whole set — a per-file loop over the hot directory globs
   # would spawn a process per shard. Kept as newline-delimited STRINGS with a
   # leading and trailing newline, so membership is a `case` glob and costs no
@@ -973,7 +1054,37 @@ mode_run() {
   while IFS= read -r edited_line; do
     if [[ -n "$edited_line" ]]; then branch_edited+=("$edited_line"); fi
   done < <(git diff --name-only "$merge_base" "$branch_tip" -- "${regen_paths[@]}")
-  main_edited="$NL$(git diff --name-only "$merge_base" origin/main -- "${regen_paths[@]}")$NL"
+  main_edited="$NL$(git diff --name-only "$merge_base" "$main_side" -- "${regen_paths[@]}")$NL"
+
+  # MIXED paths both sides moved: the driver dropped no side, so step 2 takes none. Read off
+  # the driver table as the driver RAN it (the pre-merge tip's); ⛔ unreadable is no answer.
+  mixed_edited="$NL$NL"
+  both_moved=no
+  for edited in ${branch_edited[@]+"${branch_edited[@]}"}; do
+    case "$main_edited" in *"$NL$edited$NL"*) both_moved=yes ;; esac
+  done
+  if [ "$both_moved" = yes ]; then
+    mx_dir="$(mktemp -d "${TMPDIR:-/tmp}/os-regen-merge-mixed.XXXXXX")"
+    mx_rows=''
+    if git show "$branch_tip:scripts/regen-artifacts.mjs" >"$mx_dir/table.mjs" 2>/dev/null &&
+      mx_rows="$(read_mixed_patterns "$mx_dir/table.mjs")"; then
+      rm -rf "$mx_dir"
+    else
+      rm -rf "$mx_dir"
+      echo "✗ could not read which generated paths are MIXED — the \`mixed:\` rows of" >&2
+      echo "  scripts/regen-artifacts.mjs at $(git rev-parse --short "$branch_tip") — so refusing step 2: taking" >&2
+      echo "  main's side of a MIXED path reverts the branch's hand-written rows. ⛔ Not guessed." >&2
+      exit 1
+    fi
+    mixed_patterns=()
+    while IFS= read -r edited_line; do
+      if [[ -n "$edited_line" ]]; then mixed_patterns+=("$edited_line"); fi
+    done <<<"$mx_rows"
+    # ⛔ Never an empty pathspec: `git diff --` with none reads as EVERY path.
+    if [ "${#mixed_patterns[@]}" -gt 0 ]; then
+      mixed_edited="$NL$(git diff --name-only "$merge_base" "$branch_tip" -- "${mixed_patterns[@]}")$NL"
+    fi
+  fi
 
   if [ "$rr_mode" != rerun ]; then
     # Written BEFORE step 1 so a conflict exit LEAVES IT BEHIND: the rerun those
@@ -1173,6 +1284,16 @@ mode_run() {
               echo "       a side only where the DRIVER chose one for you without saying so, so"
               echo "       ⛔ taking main's side here would revert the resolution this script asked"
               echo "       you for. Step 4 regenerates it as usual."
+              continue
+              ;;
+          esac
+          case "$mixed_edited" in
+            *"$NL$edited$NL"*)
+              excludes+=(":(exclude)$edited")
+              echo "   ⚠ KEEPING the merged bytes of $edited (MIXED: a generated half plus hand-written rows)"
+              echo "     — the driver never drops a side of a MIXED path: it defers only when that loses"
+              echo "       nothing a regeneration restores, and otherwise text-merges or conflicts."
+              echo "       ⛔ Taking main's side here reverts the branch's rows. Step 4 regenerates it."
               continue
               ;;
           esac
@@ -1470,11 +1591,12 @@ ATTRS
 # case a hostage to a disposition somebody legitimately changes. The real
 # ledger's own shape is pinned separately, in case 9d.
 #
-# $1 is the entry list, as JS array elements.
+# $1 is the entry list, as JS array elements; $2, if given, the REGEN_ARTIFACTS rows.
 st_write_ndm_ledger() {
   mkdir -p scripts
   {
     printf '// fixture ledger — the shape scripts/regen-artifacts.mjs exports.\n'
+    printf 'export const REGEN_ARTIFACTS = Object.freeze([\n%s\n]);\n' "${2:-}"
     printf 'export const NOT_DRIVER_MANAGED = Object.freeze([\n'
     printf '%s\n' "$1"
     printf ']);\n'
@@ -1669,6 +1791,64 @@ st_resolve_and_commit() {
     fi
   done < <(git diff --name-only --diff-filter=U)
   git commit -q --no-edit
+}
+
+# A MIXED file: hand-written rows around a generated census line, spaced so that edits to
+# different rows text-merge cleanly. $1 path, $2 the branch's row, $3 main's row, $4 the count.
+st_mixed_file() {
+  printf '| 11b | hand-written row: %s |\n\n\n\n| census | %s sites |\n\n\n\n| 14 | hand-written row: %s |\n' \
+    "$2" "$4" "$3" > "$1"
+}
+
+# The #22829 fixture for MIXED pattern $2, in $1: the branch hand-edits a row main never
+# touches, main edits its own rows (so the driver TEXT-MERGES, its limb when deferring is not
+# lossless), a plain file conflicts, and the branch alone edits a routed file. Cwd: the clone.
+st_fixture_mixed_rerun() {
+  fx="$1"
+  st_mxp="$(printf '%s' "$2" | sed 's#[*][*]*#x#g')"
+  rm -rf "$fx"
+  mkdir -p "$fx"
+  printf 'case "$4" in gen/*) exit 0 ;; esac\ngit merge-file "$2" "$1" "$3"\n' > "$fx/driver.sh"
+  git init -q --bare -b main "$fx/origin.git"
+  git clone -q "$fx/origin.git" "$fx/work" 2>/dev/null
+  cd "$fx/work"
+  git config user.email selftest@example.invalid
+  git config user.name os-regen-merge-selftest
+  git config commit.gpgsign false
+  git config merge.os-regen.driver "bash $fx/driver.sh %O %A %B %P"
+  mkdir -p gen src "$(dirname "$st_mxp")"
+  printf '%s merge=os-regen\ngen/** merge=os-regen\n' "$2" > .gitattributes
+  st_write_ndm_ledger '' "  { path: '$2', gen: 'gen:fixture-mixed', mixed: 'line-anchors' },"
+  st_mixed_file "$st_mxp" original original 123
+  printf 'branchonly v0\n' > gen/branchonly.txt
+  printf 'source v1\n' > src/app.txt
+  git add -A && git commit -qm seed && git push -q origin main
+  git checkout -q -b feature
+  st_mixed_file "$st_mxp" BRANCH original 123
+  printf 'branchonly v1-BRANCH\n' > gen/branchonly.txt
+  printf 'source v2 (branch)\n' > src/app.txt
+  git add -A && git commit -qm 'feature: hand-edit one row of the MIXED file'
+  st_main_commits "$fx" 'main: its own rows of the MIXED file, and a conflict' \
+    "st_mixed_file '$st_mxp' original MAIN 122 && printf 'source v2 (main)\n' > src/app.txt"
+}
+
+# Commit shell text $3 on `main` in fixture $1's clone, message $2, and push it.
+st_main_commits() {
+  git worktree add -q "$1/mainwt" main
+  (cd "$1/mainwt" && eval "$3" && git add -A && git commit -qm "$2" && git push -q origin main)
+  git worktree remove "$1/mainwt"
+  git fetch -q origin main
+}
+
+# The card's sequence with script $1 on fixture $2 (MIXED pattern $3): run 1 stops on the
+# conflict, the resolution is committed, main ADVANCES, and the rerun sets $out and $rc.
+st_mixed_rerun_drive() {
+  st_fixture_mixed_rerun "$2" "$3" >/dev/null 2>&1
+  bash "$1" >/dev/null 2>&1 || true
+  st_resolve_and_commit
+  st_main_commits "$2" 'main: advance past the recorded merge' \
+    "printf 'branchonly v2-MAIN-LATER\n' > gen/branchonly.txt" >/dev/null 2>&1
+  out="$(bash "$1" 2>&1)" && rc=0 || rc=$?
 }
 
 mode_self_test() {
@@ -2226,6 +2406,75 @@ mode_self_test() {
   mut_out="$(bash "$mutated_reentry" 2>&1)" && mut_rc=0 || mut_rc=$?
   st_case 'mutated: run 3 re-enters the rerun, exits 0, takes main s side back, and step 3 COMMITS the revert — FLOWX gone' \
     "$mut_rc/$(printf '%s' "$mut_out" | grep -c '^→ RERUN:' || true)/$(printf '%s' "$mut_out" | grep -c 'TAKING main.s side of gen/deferred.txt' || true)/$(git show HEAD:gen/deferred.txt | grep -c FLOWX || true)" '0/1/1/0'
+  cd "$here"
+
+  # --- 12. EVERY routed pattern CLASSIFIED (#22829), against the REAL .gitattributes and the
+  #         REAL driver table (9c's discipline); three firing controls keep '' from a constant.
+  st_repo="$(cd "$(dirname "$SELF")/../.." && pwd)"
+  st_drv="$(read_mixed_patterns "$st_repo/scripts/regen-artifacts.mjs")" || st_drv='DRIVER-TABLE-UNREADABLE'
+  st_problems="$(os_regen_class_problems "$st_repo/.gitattributes" "$st_drv")"
+  st_case 'every merge=os-regen pattern is classified, and the table agrees with the driver s mixed rows' \
+    "$st_problems" ''
+  if [ -n "$st_problems" ]; then
+    echo '        Classify each in OS_REGEN_CLASSES: whole = its generator renders the ENTIRE file;'
+    echo '        mixed = a generated half plus hand-written rows, which ALSO needs `mixed:` on its'
+    echo '        REGEN_ARTIFACTS row (scripts/regen-artifacts.mjs), or the driver drops a side whole.'
+  fi
+  st_whole="$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "whole" { print $1; exit }')"
+  { cat "$st_repo/.gitattributes"; printf 'docs/new-generated/** merge=os-regen\n'; } > "$tmp/attrs-new"
+  awk -v p="$st_whole" '$1 != p' "$st_repo/.gitattributes" > "$tmp/attrs-stale"
+  st_case 'control: a new route reds unclassified, a dropped one stale, a driver without mixed rows mismatched' \
+    "$(os_regen_class_problems "$tmp/attrs-new" "$st_drv" | tr '\n' ';')|$(os_regen_class_problems "$tmp/attrs-stale" "$st_drv" | tr '\n' ';')|$(os_regen_class_problems "$st_repo/.gitattributes" '' | tr '\n' ';')" \
+    "unclassified docs/new-generated/**;|stale $st_whole;|$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed" { print "mixed-mismatch " $1 }' | sort | tr '\n' ';')"
+
+  # --- 13. THE CARD, once per MIXED row: a branch-edited hand row main never touched, a
+  #         conflict elsewhere, the merge committed, the rerun — and main advanced meanwhile.
+  st_mixed_runs=0
+  while IFS= read -r st_mx <&3; do
+    st_mixed_runs=$((st_mixed_runs + 1))
+    st_mixed_rerun_drive "$SELF" "$tmp/n$st_mixed_runs" "$st_mx"
+    st_case "$st_mx: the fixture file is routed by the table s own pattern" \
+      "$(git check-attr merge -- "$st_mxp")" "$st_mxp: merge: os-regen"
+    st_case "$st_mx: the rerun exits 0 and KEEPS the merged bytes, taking no side" \
+      "$rc/$(printf '%s' "$out" | grep -c "KEEPING the merged bytes of $st_mxp" || true)/$(printf '%s' "$out" | grep -c "TAKING main.s side of $st_mxp" || true)" '0/1/0'
+    st_case "$st_mx: the branch's hand row survives in HEAD, beside main's own two edits" \
+      "$(git show "HEAD:$st_mxp" | grep -cE 'row: BRANCH|row: MAIN|122 sites' || true)" 3
+    st_case "$st_mx: main advanced past the record, and the branch-only path keeps the branch bytes" \
+      "$(printf '%s' "$out" | grep -c 'origin/main has ADVANCED' || true)/$(git show HEAD:gen/branchonly.txt)" '1/branchonly v1-BRANCH'
+    cd "$here"
+  done 3< <(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed" { print $1 }')
+  st_case 'the table names at least one MIXED pattern, and every one ran its fixture' \
+    "$([ "$st_mixed_runs" -gt 0 ] && echo "$st_mixed_runs")" \
+    "$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed"' | grep -c . || true)"
+
+  # --- 13a. THE DISCRIMINATING MUTATIONS for 13: each fix's ONE line put back, and exactly
+  #          its own half of the card comes back. Same perl/\Q..\E replacement 6b–11b use.
+  st_mx="$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed" { print $1; exit }')"
+  for st_mut in \
+    'mixed|          case "$mixed_edited" in|          case "" in|0/1/0/branchonly v1-BRANCH' \
+    'ref|"$merge_base" "$main_side" -- "${regen_paths[@]}")$NL"|"$merge_base" origin/main -- "${regen_paths[@]}")$NL"|0/0/1/branchonly v0'; do
+    IFS='|' read -r st_n st_a st_b st_want <<<"$st_mut"
+    MUT_ANCHOR="$st_a" MUT_INSERT="$st_b" perl -0777 -pe 's/\Q$ENV{MUT_ANCHOR}\E/$ENV{MUT_INSERT}/' "$SELF" > "$tmp/mut-$st_n.sh"
+    st_case "$st_n: the anchor has ONE site, the mutation took, and the result parses" \
+      "$(sed -n '1,/^# --- self-test/p' "$SELF" | grep -cF -- "$st_a" || true)/$(diff -q "$SELF" "$tmp/mut-$st_n.sh" >/dev/null 2>&1; echo $?)/$(bash -n "$tmp/mut-$st_n.sh" >/dev/null 2>&1; echo $?)" '1/1/0'
+    st_mixed_rerun_drive "$tmp/mut-$st_n.sh" "$tmp/n-$st_n" "$st_mx"
+    st_case "mutated ($st_n): exit 0, TAKING the MIXED path / its branch row in HEAD / the branch-only path" \
+      "$rc/$(printf '%s' "$out" | grep -c "TAKING main.s side of $st_mxp" || true)/$(git show "HEAD:$st_mxp" | grep -c 'row: BRANCH' || true)/$(git show HEAD:gen/branchonly.txt)" "$st_want"
+    cd "$here"
+  done
+  st_fixture_mixed_rerun "$tmp/n-first" "$st_mx" >/dev/null 2>&1
+  git show origin/main:src/app.txt > src/app.txt && git commit -qam 'no conflict this time'
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'a FIRST run, no conflict anywhere: the MIXED path keeps the branch row too' \
+    "$rc/$(printf '%s' "$out" | grep -c "KEEPING the merged bytes of $st_mxp" || true)/$(git show "HEAD:$st_mxp" | grep -c 'row: BRANCH' || true)" '0/1/1'
+  cd "$here"
+
+  # --- 13b. Which paths are MIXED is a question step 2 REFUSES to guess: no table, no merge.
+  st_fixture "$tmp/o" >/dev/null 2>&1
+  git rm -q scripts/regen-artifacts.mjs && git commit -qm 'drop the driver table'
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'an unreadable driver table refuses step 2, before step 1 merges anything' \
+    "$rc/$(printf '%s' "$out" | grep -c 'refusing step 2' || true)/$(git merge-base --is-ancestor origin/main HEAD && echo merged || echo unmerged)" '1/1/unmerged'
   cd "$here"
 
   if [ "$st_fail" -ne 0 ]; then

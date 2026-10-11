@@ -352,6 +352,29 @@ describe('§3 the boot report names both populations, per type, with their remed
         const { warns } = await boot({ sys_metadata: [metaRow('view', 'env_grid', null, { label: 'env' })] });
         expect(warns.filter((w) => w.includes('_unserved]'))).toEqual([]);
     });
+
+    it('[#15206] a row under a datasource name the host defines in code is left to the datasource restore\'s warning; a package-declared one is still listed', async () => {
+        const warns: string[] = [];
+        vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => { warns.push(a.map(String).join(' ')); });
+        const { protocol } = harness({
+            sys_metadata: [
+                metaRow('datasource', 'host_ds', null, { label: 'stored' }),
+                metaRow('datasource', 'pkg_ds', null, { label: 'stored' }),
+            ],
+        });
+        protocol.getServicesRegistry = () => new Map([['code-datasource-names', new Set(['host_ds'])]]);
+        protocol.engine.registry.getAllPackages = () => [{ manifest: { datasources: [{ name: 'pkg_ds' }] } }];
+        // Both rows are still declined at read; only the boot line's membership moves.
+        expect(protocol.declinesStoredRow('datasource', 'host_ds')).toBe(true);
+        expect(protocol.declinesStoredRow('datasource', 'pkg_ds')).toBe(true);
+
+        await protocol.loadMetaFromDb();
+
+        const sealed = warns.filter((w) => w.includes('[metadata_sealed_overlay_unserved]'));
+        expect(sealed).toHaveLength(1);
+        expect(sealed[0]).toContain('datasource×1 (pkg_ds)');
+        expect(sealed[0]).not.toContain('host_ds');
+    });
 });
 
 describe('§4 [triage ruling Q3 A] the anonymous form doors\' legacy layer is the one read left that reaches a legacy organization', () => {

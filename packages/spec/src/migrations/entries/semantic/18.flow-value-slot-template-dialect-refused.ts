@@ -9,7 +9,10 @@ import type { SemanticMigration } from '../../types.js';
 // the run's user or null. So are the date macros, with their CEL string form
 // (isoDate / isoDatetime): no single-brace spelling is kept. The surface widens
 // to the maps a node hands to a callee (subflow and map input, script inputs),
-// where a guarded form's null is supplied and wins over a child's default.
+// where a guarded form's null is supplied and wins over a child's default, and
+// to a screen's three positions that hand a value to the client (an object
+// form's defaults, a field's defaultValue, an object form's recordId), each
+// evaluated before the screen goes on the wire.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -18,7 +21,8 @@ export const entry: SemanticMigration = {
     'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
     + 'legacy bare config), of create_record and update_record nodes (the fields map), and of the nodes that hand '
     + 'a map to a callee: a subflow node and a map node (the input map, evaluated per item on a map node) and a '
-    + 'script node (the inputs map) — a string value, or a '
+    + 'script node (the inputs map), and of a screen node (an object form\'s defaults map and its recordId, and '
+    + 'each field\'s defaultValue) — a string value, or a '
     + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
     + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included',
   replacement:
@@ -43,7 +47,14 @@ export const entry: SemanticMigration = {
     + 'child flow\'s input variable of that name: a guarded form\'s null is a supplied value that wins over the '
     + 'child variable\'s defaultValue, so to keep the default for an absent value write the default in the guard\'s '
     + 'null branch (has(vars.x) ? vars.x : \'the default\'), and leave the key out only where the value is never '
-    + 'meant to be supplied; a script function is handed null where the template handed undefined',
+    + 'meant to be supplied; a script function is handed null where the template handed undefined. On a screen, '
+    + 'each envelope is evaluated in the run\'s scope before the screen goes on the wire, so the client receives '
+    + 'the value — a record as a map, a list as a list — never the envelope. A guarded form\'s null is served as '
+    + 'null where the template served nothing: in an object form\'s defaults the form keeps it as a value and '
+    + 'opens the field blank over the object field\'s declared defaultValue, so write that default in the guard\'s '
+    + 'null branch to keep it, and a field\'s defaultValue seeds the field with null. recordId stays a string when '
+    + 'written as one, and an envelope there must evaluate to the record\'s id, a non-blank string: anything else, '
+    + 'null included, fails the run at the screen, so route around a screen whose record may be absent',
   reason:
     'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
     + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -61,7 +72,10 @@ export const entry: SemanticMigration = {
     + 'addDays truncates the offset itself and daysFromNow and daysAgo refuse a fraction at build. Where the map '
     + 'is handed to a callee, a whole token that resolved to nothing handed the callee nothing, and the child flow '
     + 'then seeded the input variable from its defaultValue; under CEL that value either fails the run or, guarded, '
-    + 'is null, which the child takes as supplied, so the default no longer applies unless the guard writes it. A '
+    + 'is null, which the child takes as supplied, so the default no longer applies unless the guard writes it. '
+    + 'On a screen, a whole token that resolved to nothing served nothing: an object form then seeded the field '
+    + 'from the object field\'s defaultValue, and a recordId that resolved to nothing served an edit form with no '
+    + 'record, which opened with nothing read and could not save. A '
     + 'flow carrying '
     + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
     + 'carrying one is skipped at boot with a warn naming it.',
@@ -75,6 +89,10 @@ export const entry: SemanticMigration = {
     + 'a system write can make): there, guard current_user.id, or skip the node with a start condition or a '
     + 'decision on current_user != null where an update_record must leave the stored value alone. For a date '
     + 'macro with a variable offset, check the variable is always set to a number where the flow runs; write a '
-    + 'fractional offset as the whole number of days meant. Re-run the flow paths that write those fields and '
-    + 'compare the stored values with the ones the template wrote.',
+    + 'fractional offset as the whole number of days meant. In a subflow or map input where the child\'s '
+    + 'defaultValue should apply to an absent value, write that default in the guard\'s null branch, or leave the '
+    + 'key out; in an object form\'s defaults, likewise write the object field\'s default in the guard. For a '
+    + 'screen\'s recordId, find the paths where the record can be absent and route them around the screen. Re-run '
+    + 'the flow paths that write those fields and serve those screens, and compare the stored and served values '
+    + 'with the ones the template wrote.',
 };

@@ -224,6 +224,57 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the callee input maps (#19939)', () => 
   });
 });
 
+/**
+ * #19939 (stage S2) — a `screen`'s three positions that hand a value to the
+ * client are `value` slots: an object form's `defaults.*`, a field's
+ * `defaultValue` (under the `fields[]` repeater) and an object form's
+ * `recordId` (a single value). `fields[].visibleWhen` keeps its `predicate`
+ * entry beside them.
+ */
+describe('FLOW_NODE_EXPRESSION_PATHS — a screen\'s value slots (#19939)', () => {
+  const ENVELOPE = { dialect: 'cel', source: 'rec' };
+
+  it('declares `defaults.*`, `fields[].defaultValue` and `recordId` as `value` slots, after `visibleWhen`', () => {
+    expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === 'screen').map((e) => [e.path, e.role, e.label])).toEqual([
+      ['fields[].visibleWhen', 'predicate', 'screen field visibleWhen'],
+      ['defaults.*', 'value', 'screen form default'],
+      ['fields[].defaultValue', 'value', 'screen field default value'],
+      ['recordId', 'value', 'screen record id'],
+    ]);
+  });
+
+  it('resolves the envelope values, and only them, at each position', () => {
+    const found = resolveFlowNodeExpressions('screen', {
+      recordId: { dialect: 'cel', source: 'record.id' },
+      defaults: { parent: ENVELOPE, stage: 'new', nested: { e: ENVELOPE } },
+      fields: [
+        { name: 'a', defaultValue: ENVELOPE, visibleWhen: 'x == 1' },
+        { name: 'b', defaultValue: 'plain' },
+        { name: 'c', defaultValue: { dialect: 'cel' } },
+      ],
+    });
+    expect(found.map((f) => [f.path, f.entry.role])).toEqual([
+      ['fields[0].visibleWhen', 'predicate'],
+      ['defaults.parent', 'value'],
+      ['fields[0].defaultValue', 'value'],
+      ['fields[2].defaultValue', 'value'],
+      ['recordId', 'value'],
+    ]);
+  });
+
+  it('hands every authored value to the value-slot judge, strings included — an absent one skipped', () => {
+    expect(resolveFlowNodeValueSlots('screen', {
+      recordId: '{record.id}',
+      defaults: { a: '{x}', b: ENVELOPE, c: null },
+      fields: [{ name: 'k', defaultValue: '{y}' }, { name: 'none' }],
+    }).map((f) => [f.path, f.value])).toEqual([
+      ['defaults.a', '{x}'], ['defaults.b', ENVELOPE], ['defaults.c', null],
+      ['fields[0].defaultValue', '{y}'],
+      ['recordId', '{record.id}'],
+    ]);
+  });
+});
+
 describe('resolveFlowNodeValueSlots — every authored value of a `value` slot, strings included', () => {
   it('hands over every non-absent value of the CRUD `fields` map and the assignment map, by the ledger\'s own walk', () => {
     const envelope = { dialect: 'cel', source: 'price * 2' };
@@ -275,10 +326,13 @@ describe('every entry older than the value role resolves byte-identically (the r
 
   it('the entries that existed before are still declared exactly as they were — each value-slot widening only appended rows', () => {
     // The census: five rows before #19938, seven after, ten after #19939's
-    // callee maps. Each widening appended its `value` rows at the end — the
-    // CRUD write map's two, then `subflow.input`, `map.input` and
-    // `script.inputs` — and every row above them is byte-identical to what it
-    // was (`map.collection` keeps its `flow-template` row beside `map.input`).
+    // callee maps, thirteen after its screen trio. Each widening appended its
+    // `value` rows at the end — the CRUD write map's two, then `subflow.input`,
+    // `map.input` and `script.inputs`, then the screen's `defaults.*`,
+    // `fields[].defaultValue` and `recordId` — and every row above them is
+    // byte-identical to what it was (`map.collection` keeps its
+    // `flow-template` row beside `map.input`, `screen.fields[].visibleWhen` its
+    // `predicate` row beside the screen's value rows).
     expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
       'screen.fields[].visibleWhen (predicate)',
       'decision.conditions[].expression (predicate)',
@@ -290,6 +344,9 @@ describe('every entry older than the value role resolves byte-identically (the r
       'subflow.input.* (value)',
       'map.input.* (value)',
       'script.inputs.* (value)',
+      'screen.defaults.* (value)',
+      'screen.fields[].defaultValue (value)',
+      'screen.recordId (value)',
     ]);
   });
 

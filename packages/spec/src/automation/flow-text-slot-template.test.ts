@@ -277,9 +277,23 @@ describe('ScreenConfigSchema — its two text slots compose the judge', () => {
     }
   });
 
-  it('keeps the single-brace dialect on the value-like keys — a `recordId` names a record, not text', () => {
-    expect(ScreenConfigSchema.safeParse({ objectName: 'account', mode: 'edit', recordId: '{account_id}', defaults: { name: '{lead.company}' } }).success)
-      .toBe(true);
+  // RE-JUDGED IN PLACE (#19939, stage S2), not deleted. This pinned that the
+  // value-like keys kept the single brace. They are VALUE slots now: a `{token}`
+  // there is refused — by the value-slot judge, never by this text-slot one,
+  // because a `recordId` names a record and a prefill is a value, not text.
+  it('refuses the single brace on the value-like keys with the VALUE-slot remedy — a `recordId` names a record, not text', () => {
+    const refused = ScreenConfigSchema.safeParse({ objectName: 'account', mode: 'edit', recordId: '{account_id}', defaults: { name: '{lead.company}' } });
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues.map((i) => i.path.join('.'))).toEqual(['recordId', 'defaults.name']);
+    for (const issue of refused.error!.issues) {
+      expect(issue.message).toContain(valueSlotTemplateRefusals(issue.path[0] === 'recordId' ? '{account_id}' : '{lead.company}')[0]!.message);
+      expect(issue.message).not.toContain('{{');
+    }
+    expect(ScreenConfigSchema.safeParse({
+      objectName: 'account', mode: 'edit',
+      recordId: { dialect: 'cel', source: 'account_id' },
+      defaults: { name: { dialect: 'cel', source: 'lead.company' } },
+    }).success).toBe(true);
   });
 });
 
