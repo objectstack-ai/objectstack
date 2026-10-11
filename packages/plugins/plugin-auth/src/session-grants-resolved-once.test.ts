@@ -266,14 +266,15 @@ describe('the real customSession hook and resolveAuthzContext resolve the caller
     expect(grantOnlyReads(twice.reads).length).toBe(2 * grantOnlyReads(once.reads).length);
   });
 
-  it('the request saves exactly one resolution\'s reads — eight for a caller in an organization', async () => {
+  it('the request saves exactly one resolution\'s reads — six for a caller in an organization', async () => {
     const a = await arrangeWarm();
     const once = await resolveRequest(a, a.bearers.member);
     const twice = await resolveRequestWithoutMemo(a, a.bearers.member);
     // sys_user, sys_member (own), sys_user_position, sys_member (peers),
-    // sys_user_permission_set, sys_position, sys_position_permission_set,
-    // sys_permission_set.
-    expect(twice.reads.length - once.reads.length).toBe(8);
+    // sys_user_permission_set, sys_metadata_activation. [ADR-0131 D3/D4] The
+    // positions, their sets and the set bodies are read from the catalog
+    // in-process; the one ledger read answers which are switched off.
+    expect(twice.reads.length - once.reads.length).toBe(6);
   });
 
   it('organization owner and platform operator: same envelope, one resolution', async () => {

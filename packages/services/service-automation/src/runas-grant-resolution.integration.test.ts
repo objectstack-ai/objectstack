@@ -19,6 +19,7 @@ import { LiteKernel } from '@objectstack/core';
 import { AutomationServicePlugin } from './plugin.js';
 import { AutomationEngine } from './engine.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 /**
  * A fake ObjectQL engine that both serves the authz tables (for grant
@@ -42,6 +43,8 @@ function fakeObjectQl(tables: Record<string, any[]>) {
     async update(object: string, _f: any, opts: any) { crud.push({ op: 'update', obj: object, ctx: opts?.context }); return { ok: true }; },
     async delete(object: string, opts: any) { crud.push({ op: 'delete', obj: object, ctx: opts?.context }); return { ok: true }; },
   };
+  // [ADR-0131 D3/D4] The security catalog the resolver reads, as the rows convert to it.
+  bindCatalogFromTables(engine, tables);
   return { engine, crud };
 }
 

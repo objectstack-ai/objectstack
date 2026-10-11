@@ -423,7 +423,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fileAccessDelegate: {
         label: "文件访问委托服务",
-        helpText: "授权下载该对象媒体字段所属文件的内核服务；有了它就不再以“调用方能否读取宿主记录”来判断。适用于访问权由某个服务裁决的对象。失败即拒绝。"
+        helpText: "授权下载该对象媒体字段所属文件的内核服务，并决定无权读取 sys_file 的读者在读取该对象记录时能否看到这些文件的名称、大小和类型（每次此类读取，对每条所属记录询问一次）；有了它就不再以“调用方能否读取宿主记录”来判断。适用于访问权由某个服务裁决的对象。失败即拒绝。"
       },
       lifecycle: {
         label: "数据生命周期",
@@ -2364,6 +2364,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "描述"
+      },
+      permissionSets: {
+        label: "权限集",
+        helpText: "该岗位分配的权限集，按名称填写（snake_case）。"
       },
       delegatable: {
         label: "可自助委派",

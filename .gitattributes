@@ -64,11 +64,10 @@
 # The migrations registry is the interesting one since #7297: its three append
 # tables now come from `packages/spec/src/migrations/entries/` (one file per
 # entry, the `.changeset/*.md` shape), so the conflict two retirement cards used
-# to have is gone at the SOURCE — different entries are different files. The
-# file stays out of this list anyway, because it is now MIXED: a driver that
-# deferred it whole would resolve its still-hand-written prose by regenerating,
-# which loses an edit rather than a merge. `check:migration-registry` is what
-# guards the generated half instead.
+# to have is gone at the SOURCE — different entries are different files. Since
+# #22554 the registry itself is git-ignored and generated whole at install and
+# build, so git never merges it; its hand-written prose lives in
+# `registry.ts.template`, which is plain source and text-merges like any other.
 #
 # The strictness ledger's COUNTS file joined at #5107 — the ledger's numbers were
 # the repo's hottest conflict surface and merged in the one way that hides: two

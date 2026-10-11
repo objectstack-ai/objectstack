@@ -31,6 +31,7 @@ const result = PositionSchema.parse(data);
 | **name** | `string` | ✅ | Position name, unique per organization (lowercase snake_case) |
 | **label** | `string` | ✅ | Display label (e.g. VP of Sales) |
 | **description** | `string` | optional |  |
+| **permissionSets** | `string[]` | optional | ADR-0131 D3/D4: the permission sets this position distributes, by name (resolved in the environment catalog). |
 | **delegatable** | `boolean` | optional (default: `false`) | ADR-0091 D3: holders may self-service delegate this position, time-boxed (default false). |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this position. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |

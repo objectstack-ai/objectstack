@@ -557,11 +557,21 @@ export type FileReferenceIdValue = z.input<typeof FileReferenceIdValueSchema>;
  * the bare id back — the same value an id with no committed file row, or a
  * storage outage, produces — so a refused file and an absent one were one
  * answer on the wire. This shape is the refusal said in-band: the id the
- * record holds, and `metadataRefused: true`. Nothing else is served, because
- * nothing else was read: no `name`, `size` or `mimeType`, and no `url` — the
- * download door judges its own access (by the record that owns the file, not
- * by `sys_file` read), so a consumer derives the stable `/files/:fileId`
- * endpoint from the id exactly as it does for a bare id.
+ * record holds, and `metadataRefused: true`.
+ *
+ * That refusal is not the last word on a file the record OWNS. When a file's
+ * `ref_object` / `ref_id` name the record being read, the engine reads its row
+ * under the system context and puts the record to the download door's
+ * field-owned verdict — the owner object's `fileAccessDelegate` where it
+ * declares one, otherwise the caller's read of that record. A file the verdict
+ * allows is served as a `sys_file` reader sees it ({@link FileValueSchema}).
+ * So, for a refused reader, this marker means the record does not own the file
+ * (an id copied in from another record, an attachment-only or unclaimed file,
+ * an id with no row), or the verdict refused the owning record, or it could not
+ * be asked. Nothing else is served: no `name`, `size` or `mimeType`, and no
+ * `url` — the download door judges its own access (by the record that owns the
+ * file, not by `sys_file` read), so a consumer derives the stable
+ * `/files/:fileId` endpoint from the id exactly as it does for a bare id.
  *
  * Read-only by construction: the STORED form is
  * {@link FileReferenceIdValueSchema} alone, so this object is never a value a
@@ -579,7 +589,8 @@ export const FileRefusedValueSchema = lazySchema(() => strictObject(
   {
     id: FileReferenceIdValueSchema.describe('The sys_file id the record holds'),
     metadataRefused: z.literal(true).describe(
-      'The reader was refused the file\'s metadata (no read on sys_file): name, size and type are '
+      'The reader was refused the file\'s metadata (no read on sys_file, and the record being read '
+      + 'does not own the file or its download verdict did not allow it): name, size and type are '
       + 'withheld. Distinct from an empty field, which holds no file at all.',
     ),
   },

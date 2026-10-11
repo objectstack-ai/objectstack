@@ -771,9 +771,9 @@ const CURRENT_MAJOR = Number.parseInt(SPEC_VERSION, 10);
 // list are GENERATED into src/migrations/registry.ts from one file per entry
 // under src/migrations/entries/. So every remedy in this file that asks for a
 // registration — or for one to be undone — names the entry FILE and the
-// generator command, never the table: an entry typed between the generated
-// markers is reverted by the next `gen:migration-registry` run and failed by
-// `check:migration-registry` before that. The file name comes from the
+// generator command, never the table: registry.ts is generated whole and
+// git-ignored (#22554), so an entry typed into it is never committed and the
+// next `gen:migration-registry` run overwrites it. The file name comes from the
 // generator's own `shardNameFor`, the one naming rule entries/README.md
 // documents, so a gate never prints a name the generator would refuse.
 
@@ -1193,8 +1193,8 @@ if (surfaceDoc) {
         `\n      — with a \`//\` comment above the \`export\` saying why the key was retired (it\n` +
         `      lands above the entry in the table), then run\n` +
         `      \`${MIGRATION_REGISTRY_COMMAND}\`. ⛔ Never type an entry into the\n` +
-        `      generated table by hand: the next run reverts it, and check:migration-registry\n` +
-        `      fails it first. Nothing is inferred here: a leaf name matched against unrelated\n` +
+        `      generated table by hand: the registry is generated whole and never committed,\n` +
+        `      so the edit is lost. Nothing is inferred here: a leaf name matched against unrelated\n` +
         `      conversion surfaces is what let tombstones register themselves by coincidence\n` +
         `      (#4659).\n\n` +
         `   2. Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
@@ -2716,8 +2716,8 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
       `      ${MIGRATION_ENTRIES_README}; these names are the generator's own) —\n\n` +
       renderNewEntryFiles('retired-def', unregistered) +
       `\n      — then run \`${MIGRATION_REGISTRY_COMMAND}\`. ⛔ Never type an\n` +
-      `      entry into the generated table by hand: the next run reverts it, and\n` +
-      `      check:migration-registry fails it first.\n\n` +
+      `      entry into the generated table by hand: the registry is generated whole and\n` +
+      `      never committed, so the edit is lost.\n\n` +
       `   2. Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
       `      chain step referencing it) plus a \`major\` changeset, so the removal reaches\n` +
       `      spec-changes.json, the upgrade guide and \`os migrate meta\` — the table is the\n` +

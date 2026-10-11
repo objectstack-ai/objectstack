@@ -88,6 +88,7 @@ import {
 } from '@objectstack/spec/api-assembled';
 import { InstalledPackageSchema } from '@objectstack/spec/kernel';
 import { HttpDispatcher, type HttpDispatcherResult } from '../http-dispatcher.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
 const PREFIX = '/api/v1';
 
@@ -168,13 +169,13 @@ function dispatcher(manifests: any[], protocol?: unknown): HttpDispatcher {
     (registry as any).logLevel = 'silent';
     for (const m of manifests) registry.installPackage(m as any);
 
-    const ql = {
+    const ql = bindCatalogFromTables({
         registry,
         find: async (object: string, q: any = {}) => {
             const rows = (TABLES[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
             return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
         },
-    };
+    }, TABLES);
     const auth = { api: { getSession: async () => ({ user: { id: 'u_admin' }, session: { activeOrganizationId: ORG } }) } };
     const services: Record<string, unknown> = { objectql: ql, auth, ...(protocol ? { protocol } : {}) };
     return new HttpDispatcher({

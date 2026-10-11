@@ -235,6 +235,8 @@ export { isRowActive, type ActivatableRow } from './row-active.js';
 // effect: the row `active` flag above stays the authority for that.
 export {
   createSecurityCatalogReader,
+  bindSecurityCatalogReader,
+  securityCatalogReaderOf,
   type SecurityCatalogType,
   type SecurityCatalogSourceName,
   type SecurityCatalogRegistry,
@@ -243,6 +245,23 @@ export {
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
 } from './security-catalog.js';
+
+// ADR-0131 D3/D4/D10 — the junction rows turned into the `permissionSets` each
+// position definition carries. Applied by the upgrade ceremony (`os migrate`),
+// never at boot.
+export {
+  convertPositionBindingRows,
+  convertDeactivatedCatalogRows,
+  type ActivatableCatalogRow,
+  type CatalogLedgerRow,
+  type CatalogDeactivationConversion,
+  type CatalogRowForConversion,
+  type PositionBindingRow,
+  type PositionBindingConversionInput,
+  type PositionBindingFate,
+  type DanglingPositionBinding,
+  type PositionBindingConversion,
+} from './position-binding-conversion.js';
 
 // [commit f8eb73601] The measured read surface of the administrator derivation — the
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.

@@ -29,6 +29,9 @@ import Database from 'better-sqlite3';
  *  - after a development boot, the plan names the sibling, lists no
  *    lifecycle-classed object for the primary, and examines both databases'
  *    objects; `apply` creates nothing, and neither database moves;
+ *  - [#22580] its unmanaged-tables sweep reads the sibling's catalog too: a
+ *    retired lifecycle-classed object strands its table there, and a sweep of
+ *    the primary alone answered `read` without ever looking;
  *  - the CONTROL: a deployment with no sibling (`OS_TELEMETRY_DB=0`) plans as
  *    it always did — no sibling named, nothing pending;
  *  - a plan with the sibling on over a deployment that has none yet plans the
@@ -159,6 +162,11 @@ describe('os migrate plan / apply plan each object against the database it lives
     const siblingTables = tables(f.sibling);
     expect(siblingTables).toEqual(expect.arrayContaining(['sys_audit_log', 'sys_metadata_audit']));
     expect(primaryTables.filter((t) => siblingTables.includes(t)), 'one table in both databases').toEqual([]);
+    // [#22580] What a retired lifecycle-classed object leaves behind: its table,
+    // in the sibling, declared by nothing.
+    const retired = 'sys_os22580_retired_event';
+    const db = new Database(f.sibling);
+    try { db.exec(`CREATE TABLE ${retired} (id TEXT PRIMARY KEY)`); } finally { db.close(); }
     const before = { primary: state(f.primary), sibling: state(f.sibling) };
 
     const plan = command(f, ['plan', '--json']);
@@ -170,6 +178,10 @@ describe('os migrate plan / apply plan each object against the database it lives
     expect(plan.payload.composition?.coverage?.unexaminedObjects).toBe(0);
     // Both databases' objects examined: their tables, less the raw-DDL one.
     expect(plan.payload.managedTables).toBe(primaryTables.length - NOT_AN_OBJECT.length + siblingTables.length);
+    // [#22580] Both databases' catalogs swept: the sibling's stranded table is
+    // reported beside the primary's raw-DDL one.
+    expect(plan.payload.unmanagedTables?.status, JSON.stringify(plan.payload.unmanagedTables)).toBe('read');
+    expect(plan.payload.unmanagedTables.tables.map((t: any) => t.table)).toEqual([...NOT_AN_OBJECT, retired].sort());
     // A plan writes nothing, to either database.
     expect({ primary: state(f.primary), sibling: state(f.sibling) }).toEqual(before);
 

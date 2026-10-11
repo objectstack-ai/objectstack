@@ -174,7 +174,8 @@ export interface SchemaStack {
   /**
    * What the host composition added, and anything it could not (#12938) — the
    * host config it composed, whether that config actually loaded, the platform
-   * floor it added. `notes` is always `[]` unless the boot asked for
+   * floor it added, and whether the set mirrors what `os serve` registers
+   * (`servedBoot`, #22580). `notes` is always `[]` unless the boot asked for
    * `composeHostStack`, and `[]` even then when there was nothing to compose,
    * so a project with neither a config nor a compiled artifact renders
    * byte-identically to before this existed.
@@ -863,6 +864,8 @@ export async function bootSchemaStack(
       })
     : {
         plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
+        // [#22580] The data stack alone: this boot was not asked for the deployment's set.
+        servedBoot: { mirrored: false, reason: 'not-composed' },
         notes: [], coverage: null,
       } satisfies SchemaMigrationComposition;
   for (const plugin of composition.plugins) {

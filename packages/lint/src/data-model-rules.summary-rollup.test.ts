@@ -28,9 +28,22 @@ import {
   isAggregateCompatibleWithFieldType,
 } from '@objectstack/spec/data';
 
-import { lintDataModel } from './data-model-rules.js';
+import { lintDataModel as lintDataModelUnrecorded, ROLLUP_NON_NUMERIC_AGGREGAND } from './data-model-rules.js';
+import { explainRule } from './rule-explanations.js';
 
 const RULE = 'rollup/non-numeric-aggregand';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to carry
+// is the id's `os explain` entry. Every call below records what it fired, and
+// the last cases in this file hold each recorded verdict of the id to one line
+// of at most 200 characters — every child type this suite refuses, not a
+// chosen few. Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const lintDataModel: typeof lintDataModelUnrecorded = (...args) => {
+  const issues = lintDataModelUnrecorded(...args);
+  fired.push(...issues);
+  return issues;
+};
 
 /** A parent rolling up `fn(child.<field>)`, and a child declaring that field as `childType`. */
 const model = (childType: string | undefined, fn = 'max', overrides: Record<string, unknown> = {}) => [
@@ -182,5 +195,45 @@ describe('rollup/non-numeric-aggregand — stays silent where it cannot resolve,
     const objects = model('datetime') as any[];
     objects[0].fields.rolled_up.type = 'number';
     expect(findings(objects)).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — rollup/non-numeric-aggregand', () => {
+  it('the published constant spells the id the findings carry', () => {
+    expect(ROLLUP_NON_NUMERIC_AGGREGAND).toBe(RULE);
+  });
+
+  it('reads as one sentence: the roll-up, the child type, and why the answer does not fit', () => {
+    const [issue] = findings(model('datetime'));
+    expect(issue!.message).toBe(
+      'summary field "invoice.rolled_up" rolls up max(invoice_line.shipped_at), a datetime field: max ' +
+        "answers in the child field's own type, but a summary field stores a finite number",
+    );
+  });
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === RULE);
+    // The coverage control first: the id fired, over more than one child type.
+    expect(new Set(converted.map((f) => f.message)).size).toBeGreaterThan(1);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(RULE);
+    expect(entry, 'no `os explain rollup/non-numeric-aggregand` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      '`NUMERIC_VALUE_TYPES`',
+      'the CHILD field\'s own type',
+      'the boolean ones',
+      'analytics aggregate table',
+      '`count` reads no value',
+      'does not resolve in this stack',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
   });
 });

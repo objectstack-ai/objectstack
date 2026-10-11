@@ -38,8 +38,9 @@ import Database from 'better-sqlite3';
  *  - the boot's tables, a rotation shard read as its object, number exactly
  *    the plan's examined objects plus `sys_packages` (boot ⊆ plan, app tables
  *    included) — with `pending` empty, equal counts are equal sets;
- *  - where the unmanaged-tables sweep runs (a project with a host config), it
- *    names nothing but `sys_packages`.
+ *  - the unmanaged-tables sweep RUNS on every shape — the composition says it
+ *    mirrors the served boot, the compiled-artifact project with no config
+ *    included (#22580) — and names nothing but `sys_packages`.
  *
  * `sys_packages` is the one table outside the object set, by construction:
  * `PackageServicePlugin.start()` creates it with raw DDL (`package-table.ts`),
@@ -141,12 +142,13 @@ function expectParity(r: Reading): void {
   const rawDdl = r.tables.filter((t) => NOT_AN_OBJECT.includes(t));
   expect(rawDdl).toEqual(NOT_AN_OBJECT);
   expect(r.tables.length).toBe(r.plan.managedTables + rawDdl.length);
-  // … and platform tables by name, where the unmanaged sweep runs (it reports
-  // itself `unreadable` on a project with no host config).
-  if (r.plan.unmanagedTables?.status === 'read') {
-    const unmanaged = (r.plan.unmanagedTables.tables ?? []).map((t: any) => (typeof t === 'string' ? t : t.table ?? t.name));
-    expect(unmanaged.filter((t: string) => !NOT_AN_OBJECT.includes(t))).toEqual([]);
-  }
+  // … and platform tables by name: [#22580] the unmanaged sweep runs on every
+  // shape, because the composition records that it mirrors the served boot —
+  // the compiled artifact with no config included, which it used to withhold
+  // with a reason that no longer held.
+  expect(r.plan.unmanagedTables?.status, JSON.stringify(r.plan.unmanagedTables)).toBe('read');
+  const unmanaged = (r.plan.unmanagedTables.tables ?? []).map((t: any) => t.table);
+  expect(unmanaged).toEqual(NOT_AN_OBJECT);
 }
 
 describe('os migrate plan examines exactly what os serve registers, per app shape (#22506)', () => {

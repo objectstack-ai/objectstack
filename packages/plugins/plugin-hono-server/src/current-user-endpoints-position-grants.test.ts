@@ -38,6 +38,7 @@
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { registerCurrentUserEndpoints } from './current-user-endpoints';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit';
 
 const ME_PERMISSIONS = '/api/v1/auth/me/permissions';
 const ME_APPS = '/api/v1/me/apps';
@@ -71,14 +72,14 @@ function matches(row: Row, where: Row | undefined): boolean {
  * engine.
  */
 function makeQl(tables: Record<string, Row[]>) {
-    return {
+    return bindCatalogFromTables({
         find: async (object: string, opts: any, _ctx?: any) => {
             const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
             return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
         },
         registry: { getAllApps: () => tables.__apps ?? [], getAllObjects: () => [] },
         getSchema: () => undefined,
-    };
+    }, tables);
 }
 
 /** A permission set as `sys_permission_set` stores it (JSON columns as text). */

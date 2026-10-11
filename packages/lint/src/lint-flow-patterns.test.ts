@@ -2779,12 +2779,16 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
     // read as the token it means, asked at the string's position; elsewhere the
     // single brace still resolves and the hint is unchanged.
     describe('a double brace in a value slot', () => {
+      // [#22677] The prescriptions read `record.title`, so the flow is handed a
+      // record (a record trigger on a declared `task`): with no entrance the
+      // build door refuses `record` itself, whatever the slot's spelling.
       function valueFlow(type: string, config: Record<string, unknown>) {
         return {
+          objects: [{ name: 'task', fields: { title: { type: 'text' }, subject: { type: 'text' } } }],
           flows: [{
-            name: 'stamp_title', label: 'Stamp title', type: 'autolaunched',
+            name: 'stamp_title', label: 'Stamp title', type: 'record_change',
             nodes: [
-              { id: 'start', type: 'start', label: 'Start' },
+              { id: 'start', type: 'start', label: 'Start', config: { objectName: 'task', triggerType: 'record-after-update' } },
               { id: 'write', type, label: 'Write', config },
               { id: 'done', type: 'end', label: 'Done' },
             ],

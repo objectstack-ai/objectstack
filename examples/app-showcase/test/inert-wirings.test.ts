@@ -680,12 +680,18 @@ describe('sharing rules target an object under record-sharing enforcement (#9237
     sharingModel?: string;
   }>;
   const sets = ((stack as { permissions?: unknown[] }).permissions ?? []) as AuthoredSet[];
+  const positions = ((stack as { positions?: unknown[] }).positions ?? []) as Array<{
+    name: string;
+    permissionSets?: string[];
+  }>;
 
-  /** The permission sets a holder of `position` effectively carries. */
+  /**
+   * The permission sets a holder of `position` effectively carries: the ones
+   * its definition names (`permissionSets`, ADR-0131 D3/D4 — what the
+   * authorization resolver reads).
+   */
   function setsHeldBy(position: string): AuthoredSet[] {
-    const held = new Set(
-      POSITION_PERMISSION_SET_BINDINGS.filter(([p]) => p === position).map(([, s]) => s),
-    );
+    const held = new Set(positions.find((p) => p.name === position)?.permissionSets ?? []);
     // Every authenticated member also holds the `everyone` baseline (the
     // `isDefault` set, ADR-0090 D5) IN ADDITION to their explicit grants.
     return sets.filter((s) => held.has(s.name) || s.isDefault === true);
@@ -693,6 +699,16 @@ describe('sharing rules target an object under record-sharing enforcement (#9237
 
   it('the stack declares sharing rules (guard is not vacuous)', () => {
     expect(rules.length).toBeGreaterThan(0);
+  });
+
+  // [ADR-0131 D3/D4] The junction binder still writes the same bindings for the
+  // readers that have not moved off `sys_position_permission_set`; until it is
+  // deleted the two must name the same pairs, or those readers judge a
+  // position by bindings the resolver does not grant.
+  it('the junction binder writes exactly the bindings the position definitions declare', () => {
+    const declared = positions.flatMap((p) => (p.permissionSets ?? []).map((s) => `${p.name} -> ${s}`)).sort();
+    expect(declared.length).toBeGreaterThan(0);
+    expect(POSITION_PERMISSION_SET_BINDINGS.map(([p, s]) => `${p} -> ${s}`).sort()).toEqual(declared);
   });
 
   it('no rule is anchored on an object whose OWD leaves nothing to widen', () => {

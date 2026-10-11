@@ -11,11 +11,12 @@ Clause-②: no (narrowing)
 
 **BREAKING**: an accept-set narrowing on a published authoring surface (`objectstack validate`'s `expression-invalid` rule).
 
-**Why.** Flow CEL evaluates in one scope per run: the flow's variables spread to top level, the trigger record's fields flattened beside them, and `record`, `previous`, `vars` and `current_user` bound by the engine. Formulas, row-level security and the client also bind the run's user as `user`, `ctx.user` and `os.user`; flow CEL does not, because a top-level `user` would collide with a variable or a lookup field of that name. So an author who wrote the alias by habit shipped a flow that faulted at its first evaluation, and nothing warned.
+**Why.** Flow CEL evaluates in one scope per run: the flow's variables spread to top level, the trigger record's fields flattened beside them, `record` bound to the record the run was handed (where an entrance hands it one), and `previous`, `vars` and `current_user` bound by the engine. Formulas, row-level security and the client also bind the run's user as `user`, `ctx.user` and `os.user`; flow CEL does not, because a top-level `user` would collide with a variable or a lookup field of that name. So an author who wrote the alias by habit shipped a flow that faulted at its first evaluation, and nothing warned.
 
 **What is refused.** At every flow CEL site the build door reads — a node's `config.condition` (the start node's trigger gate included), an edge `condition`, a `decision` branch `expression`, a screen field `visibleWhen`, and the CEL value envelopes of an `assignment` and of a `create_record` / `update_record` `fields` map — a root that is none of:
 
-- the engine's roots: `record`, `previous`, `vars`, `current_user`;
+- the engine's roots: `previous`, `vars`, `current_user`;
+- `record`, where an entrance the stack declares hands the flow a record — a record trigger (a `record-*` `triggerType`), a time-relative sweep, the inbound hook, a `type: 'flow'` action, a `map` node with an `itemObject`, or a `subflow` / `map` parent handed one — or where the flow binds a variable named `record`;
 - a name the flow binds: a declared variable, an `outputVariable`, an `iteratorVariable` (a `loop`'s default `item` included), an `indexVariable`, an `errorVariable`, an `assignment` target, a node id, a screen field's `name`;
 - a field (or a registry-injected column) of any object the stack declares — the run flattens whichever record its entrance hands it (an object-less flow action hands only the row `id`).
 
@@ -45,7 +46,7 @@ A `$` name has no CEL spelling (`$runId == "x"` does not parse), so the `$` root
 
 **The one-line fix: write `current_user` for the run user, and bind or correct every other root the refusal names.**
 
-**Who is affected, measured.** The last published spec line, 17.x, judged a flow expression's syntax only, so it accepts every refused source. Measured with the judge over every flow CEL site: the example apps (`app-crm`, `app-todo`, `app-multi-package`, `app-showcase`: 35 flows, 45 sites), `packages/platform-objects` (no flows) and `objectstack-ai/hotcrm` at `f0afcbda07` (32 flows, 65 sites) — 0 refusals; every root those flows read is an engine root, a binding of the flow's own or a field of its trigger object. One flow of the 67 is left unjudged by an entrance (`showcase_inbound_task_webhook`, an `api` trigger). Deployed metadata and other repositories were not measured.
+**Who is affected, measured.** The last published spec line, 17.x, judged a flow expression's syntax only, so it accepts every refused source. Measured with the judge over every flow CEL site: the example apps (`app-crm`, `app-todo`, `app-multi-package`, `app-showcase`: 35 flows, 45 sites), `packages/platform-objects` (no flows) and `objectstack-ai/hotcrm` at `f0afcbda07` (32 flows, 65 sites) — 0 refusals; every root those flows read is an engine root, `record` on a flow an entrance hands a record, a binding of the flow's own or a field of its trigger object. One flow of the 67 is left unjudged by an entrance (`showcase_inbound_task_webhook`, an `api` trigger). Deployed metadata and other repositories were not measured.
 
 ### The kit
 

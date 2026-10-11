@@ -20,6 +20,12 @@
       "evidence": "rendered on the sys_position record detail in Setup's generic object views",
       "note": "display."
     },
+    "permissionSets": {
+      "status": "live",
+      "verifiedAt": "2026-10-10",
+      "evidence": "packages/core/src/security/resolve-authz-context.ts#positionSetNamesOf",
+      "note": "ADR-0131 D3/D4: the position -> permission-set binding. resolveUserAuthzGrants (section 6a) reads each held position's catalog definition and grants the sets its permissionSets names, by name; the sys_position_permission_set junction is no longer read. Pinned by resolve-authz-context.grant-set-by-name.test.ts and the batch-equivalence golden."
+    },
     "delegatable": {
       "status": "live",
       "verifiedAt": "2026-07-30",

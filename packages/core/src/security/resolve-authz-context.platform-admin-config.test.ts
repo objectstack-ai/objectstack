@@ -44,6 +44,7 @@ import {
   resolveAuthzContext,
   resolveUserAuthzGrants,
 } from './resolve-authz-context.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
 /**
@@ -105,14 +106,14 @@ function makeQl(tables: Record<string, Array<Record<string, unknown>>>) {
       if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
-  return {
+  return bindCatalogFromTables({
     calls,
     async find(object: string, opts: any) {
       calls.push({ object, where: structuredClone(opts?.where ?? null) });
       const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
       return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },
-  };
+  }, tables);
 }
 
 /** A `sys_user`-only fixture: no grant rows anywhere, so standing can only be config-derived. */

@@ -2342,8 +2342,9 @@ const ObjectSchemaBase = strictObject(
   lifecycle: LifecycleSchema.optional().describe('Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService.'),
 
   /**
-   * Who answers "may this caller download a file owned by this object's media
-   * fields?" (ADR-0104 D3 wave 2).
+   * Who answers "may this caller read a file owned by this object's media
+   * fields?" (ADR-0104 D3 wave 2) — its bytes at the download door, and its
+   * metadata in a record read by a reader who may not read `sys_file`.
    *
    * By default the storage service asks the question directly — can the caller
    * READ the owning row? That is right for ordinary business objects, where
@@ -2356,12 +2357,27 @@ const ObjectSchemaBase = strictObject(
    *
    * Naming a kernel service here delegates the question to it. The service
    * must implement `authorizeFileRead(recordId, context) => boolean` (see
-   * `IFileAccessDelegate`). Fails CLOSED: a declared service that is missing
-   * or does not implement the method denies the download rather than falling
-   * back to the raw read.
+   * `IFileAccessDelegate`). Its verdict is asked on two paths:
+   *
+   *  - **Download.** The download door asks it for the record that owns the
+   *    file (the file's `ref_object` / `ref_id`), unless the caller uploaded
+   *    the file.
+   *  - **Record read.** When a reader's own `sys_file` read is refused, the
+   *    engine asks it once per record in the result that owns a file the
+   *    result holds, on every such read. A file the verdict allows is served
+   *    as a `sys_file` reader sees it (`name`, `size`, `mimeType`, `url`); a
+   *    file it refuses keeps the refused marker `{ id, metadataRefused: true }`
+   *    (`FileRefusedValueSchema`). A reader who may read `sys_file` never
+   *    reaches the delegate on this path.
+   *
+   * Fails CLOSED on both paths: a declared service that is missing, does not
+   * implement the method, or throws denies the download and keeps the refused
+   * marker, rather than falling back to the raw read.
    */
   fileAccessDelegate: z.string().optional().describe(
     'Kernel service that authorizes downloads of files owned by this object\'s media fields, '
+    + 'and decides whether a reader who may not read sys_file sees their name, size and type '
+    + 'in a record read of this object (asked once per owning record on each such read), '
     + 'instead of testing whether the caller can read the owning row. For objects whose access '
     + 'is mediated by a service (e.g. sys_approval_action → approvals). Fails closed.',
   ),

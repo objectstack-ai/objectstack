@@ -407,15 +407,30 @@ export interface IStorageService {
  * The approvals service already knows who may see a request's history, so it
  * answers instead.
  *
+ * One verdict answers two questions about a file owned by a record of that
+ * object (the file's `ref_object` / `ref_id`):
+ *
+ *  - **Download.** May this caller download the file? The download door asks
+ *    for the owning record, unless the caller uploaded the file.
+ *  - **Metadata in a record read.** When a reader's own `sys_file` read is
+ *    refused, may they see the file's name, size and type where a record read
+ *    of that object returns it? Asked once per owning record on every such
+ *    read, so an implementation runs on reads, not only on downloads. A denial
+ *    leaves the field as the refused marker `{ id, metadataRefused: true }`.
+ *
  * Implementations should apply the SAME rule that governs reading the record
  * through their own API — not a looser one. The delegate widens who can reach
- * the bytes, so a permissive implementation is a data leak.
+ * the bytes and the file's metadata, so a permissive implementation is a data
+ * leak of both.
  */
 export interface IFileAccessDelegate {
     /**
-     * May this caller download a file owned by `recordId` on the delegating
-     * object? Return `false` (never throw) to deny; a throw is treated as a
-     * denial too, since authorization must fail closed.
+     * May this caller read the files owned by `recordId` on the delegating
+     * object — download them, and, when the caller's own `sys_file` read is
+     * refused, see their name, size and type in a record read? Called by the
+     * download door, and once per owning record on each such record read, with
+     * the caller's execution context. Return `false` (never throw) to deny; a
+     * throw is treated as a denial too, since authorization must fail closed.
      */
     authorizeFileRead(recordId: string, context: unknown): Promise<boolean>;
 }
