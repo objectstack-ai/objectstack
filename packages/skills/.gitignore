@@ -1,0 +1,4 @@
+# The publish tree: `skills/**` of the repository root, copied in by
+# `scripts/sync-catalog.mjs` (the package's `build`). Never committed — the
+# repository root's `skills/**` is the one source of truth.
+dist/
