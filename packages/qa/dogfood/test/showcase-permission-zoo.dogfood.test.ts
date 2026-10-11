@@ -151,7 +151,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     expect(pos?.id && ps?.id, 'contributor position + set rows').toBeTruthy();
     const bind = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: pos.id,
-      permission_set: ps.name,
+      permission_set_id: ps.id,
     });
     expect(bind.status, 'tenant admin binds set to position').toBeLessThan(300);
 
@@ -193,7 +193,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_manager' }, context: SYS });
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_position_permission_set', {
       position_id: pos.id,
-      permission_set: ps.name,
+      permission_set_id: ps.id,
     });
     expect(r.status, 'binding writes need manageBindings').not.toBeLessThan(300);
   });
@@ -205,7 +205,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     const auditor = await ql.findOne('sys_permission_set', { where: { name: 'showcase_auditor' }, context: SYS });
     const r = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: everyone.id,
-      permission_set: auditor.name,
+      permission_set_id: auditor.id,
     });
     expect(r.status, 'viewAllRecords on the everyone anchor is lint-tier blocked at runtime').not.toBeLessThan(300);
   });
@@ -216,7 +216,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_guest_portal' }, context: SYS });
     const r = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: guest.id,
-      permission_set: ps.name,
+      permission_set_id: ps.id,
     });
     expect(r.status, 'read-only + create-intake set passes the guest tier').toBeLessThan(300);
   });

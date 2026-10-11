@@ -170,7 +170,7 @@ describe('the data door (a non-system writer)', () => {
     const [row] = await grantsOf(h, 'u_1');
     expect(row).toMatchObject({ permission_set: 'qa_alpha' });
     expect(row.permission_set_id ?? null).toBeNull();
-    expect(await h.engine.find('sys_permission_set', { context: SYS } as any)).toEqual([]);
+    expect(await h.engine.find('sys_permission_set', { context: SYS })).toEqual([]);
   });
 
   it('NEGATIVE — a name the catalog does not hold is refused 400 VALIDATION_FAILED, reference_not_found at permission_set; nothing is stored', async () => {

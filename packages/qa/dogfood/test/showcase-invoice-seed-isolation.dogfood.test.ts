@@ -79,7 +79,6 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
   let ql: any;
   const token = new Map<string, string>();
   const userId = new Map<string, string>();
-  let setId: string;
 
   const invoice = async (name: string) => {
     const inv = await ql.findOne('showcase_invoice', { where: { name }, context: SYS });
@@ -99,7 +98,6 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
 
     const set = await ql.findOne('sys_permission_set', { where: { name: SET }, context: SYS });
     expect(set?.id, `the app's ${SET} set is seeded by the security bootstrap`).toBeTruthy();
-    setId = set.id;
     // [ADR-0131 D2/D3] The position → set edge is the app's own declaration —
     // `contributor` names `showcase_contributor` in its `permissionSets` — and
     // the resolver reads it there. No `sys_position` row and no junction row
@@ -111,7 +109,7 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
       expect(uid, `persona ${p.email} provisioned`).toBeTruthy();
       userId.set(p.email, uid);
       if (p.route === 'direct') {
-        await ql.insert('sys_user_permission_set', { user_id: uid, permission_set_id: setId }, { context: SYS });
+        await ql.insert('sys_user_permission_set', { user_id: uid, permission_set: SET }, { context: SYS });
       } else {
         await ql.insert('sys_user_position', { user_id: uid, position: POSITION }, { context: SYS });
       }
@@ -139,7 +137,7 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
       const direct = (await ql.find('sys_user_permission_set', { where: { user_id: uid }, context: SYS })) ?? [];
       const positions = (await ql.find('sys_user_position', { where: { user_id: uid }, context: SYS })) ?? [];
       if (p.route === 'direct') {
-        expect(direct.map((r: any) => r.permission_set_id), `${p.email}: one direct grant, the set`).toEqual([setId]);
+        expect(direct.map((r: any) => r.permission_set), `${p.email}: one direct grant, the set`).toEqual([SET]);
         expect(positions, `${p.email}: holds no position row`).toHaveLength(0);
       } else {
         expect(direct, `${p.email}: holds no direct set row`).toHaveLength(0);

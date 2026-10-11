@@ -94,8 +94,8 @@ describe('[ADR-0131 D4] the grant writers in plugin-security write the set by na
     expectNamedOnly(grants[0], 'admin_full_access');
 
     // The holder is read by name: with every catalog row gone it still answers.
-    await engine.delete('sys_permission_set', { where: {}, multi: true, context: SYS } as any);
-    expect(await engine.find('sys_permission_set', { context: SYS } as any)).toEqual([]);
+    await engine.delete('sys_permission_set', { where: {}, multi: true, context: SYS });
+    expect(await engine.find('sys_permission_set', { context: SYS })).toEqual([]);
     expect(await findExistingPlatformAdmin(engine, defaultPermissionSets)).toBe('usr_first');
   });
 
@@ -118,7 +118,7 @@ describe('[ADR-0131 D4] the grant writers in plugin-security write the set by na
       const grants = await grantsOf(engine, 'u_owner');
       expect(grants).toHaveLength(1);
       expectNamedOnly(grants[0], setName);
-      expect(await engine.find('sys_permission_set', { context: SYS } as any)).toEqual([]);
+      expect(await engine.find('sys_permission_set', { context: SYS })).toEqual([]);
     });
   }
 });
