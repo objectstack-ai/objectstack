@@ -612,11 +612,10 @@ export async function syncAudienceBindingSuggestions(
 
   // [#12981] ONE refusal log for the whole pass, reported once at the end.
   const refusals = createSeedWriteRefusals();
-  const ctx = { context: scopedSystemCtx(organizationId) };
   const now = () => new Date().toISOString();
   const update = async (data: Record<string, unknown>, counter: 'confirmedObserved' | 'reopened') => {
     try {
-      await ql.update(SUGGESTION_OBJECT, data, ctx);
+      await ql.update(SUGGESTION_OBJECT, data, { context: scopedSystemCtx(organizationId) });
       out[counter] += 1;
     } catch (e) {
       refusals.record(SUGGESTION_OBJECT, e);
@@ -647,7 +646,7 @@ export async function syncAudienceBindingSuggestions(
           status: observed ? 'confirmed' : 'pending',
           deployment_decision: false,
           ...(observed ? { resolved_at: now() } : {}),
-        }, ctx);
+        }, { context: scopedSystemCtx(organizationId) });
         out.created += 1;
       } catch (e) {
         // [#12981] The benign unique-index race with a concurrent sync is
@@ -674,7 +673,7 @@ export async function syncAudienceBindingSuggestions(
     if (row.status !== 'pending') continue;
     if (declaredKeys.has(suggestionKey(row.package_id, row.permission_set_name, row.anchor))) continue;
     try {
-      await ql.delete(SUGGESTION_OBJECT, { where: { id: row.id }, ...ctx });
+      await ql.delete(SUGGESTION_OBJECT, { where: { id: row.id }, context: scopedSystemCtx(organizationId) });
       out.pruned += 1;
     } catch (e) {
       refusals.record(SUGGESTION_OBJECT, e);
