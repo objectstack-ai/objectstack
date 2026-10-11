@@ -164,6 +164,7 @@
     "IStorageService (interface)",
     "ITeamGraphService (interface)",
     "ITriggerApiService (interface)",
+    "IWebhookService (interface)",
     "ImportObjectOpts (interface)",
     "ImportObjectResult (interface)",
     "InboxListResult (interface)",

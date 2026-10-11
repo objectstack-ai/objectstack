@@ -164,6 +164,7 @@
     "IStorageService": "src/contracts/storage-service.ts#IStorageService (interface)",
     "ITeamGraphService": "src/contracts/sharing-service.ts#ITeamGraphService (interface)",
     "ITriggerApiService": "src/contracts/trigger-api-service.ts#ITriggerApiService (interface)",
+    "IWebhookService": "src/contracts/webhook-service.ts#IWebhookService (interface)",
     "ImportObjectOpts": "src/contracts/external-datasource-service.ts#ImportObjectOpts (interface)",
     "ImportObjectResult": "src/contracts/external-datasource-service.ts#ImportObjectResult (interface)",
     "InboxListResult": "src/contracts/notification-service.ts#InboxListResult (interface)",
