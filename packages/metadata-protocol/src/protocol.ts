@@ -3426,8 +3426,10 @@ function specValidationFindings(
             // as `<path>: <message>`, then a `(+N more)` tail. Read by
             // `duplicatePackage`'s `failed[].error`, `migrateStoredMetadata`'s
             // `rows[].reason`, `importUnmanagedPackage`'s rolled-back refusal
-            // (`'package-unmanaged-import'`), and the two out-of-package log
-            // faces — none of which carry `issues[]`.
+            // (`'package-unmanaged-import'`, whose one door relays no
+            // `issues[]` — see `MetadataWriteFace`), and the two
+            // out-of-package log faces — none of which carry `issues[]` to
+            // their caller.
             return issues.slice(0, 3)
                 .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
                 .join('; ')
@@ -5038,10 +5040,18 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * ⚠️ [ADR-0131 D6] `'package-unmanaged-import'` is stated by
  * {@link ObjectStackProtocolImplementation.importUnmanagedPackage}, the
  * `unmanaged` install mode's copy-once import, for every item it writes. Its
- * refusal is relayed by that verb's own thrown error, which carries the
- * item's message and nothing structured beside it, so it too keeps the
- * full-prose default on the 422. Its 409 clause is its own: the import accepts
- * no `force`, and it writes only names no environment row held when it began.
+ * refusal is relayed by that verb's own thrown error. The thrown value does
+ * forward the save door's `issues` (the rollback keeps the cause's code,
+ * status and issues), but the one door that calls the verb —
+ * `POST /api/v1/marketplace/install-local` with `installMode: 'unmanaged'`
+ * (`@objectstack/cloud-connection`) — answers with the message, the code and
+ * `details` only, so no `issues[]` reaches its caller beside the message and
+ * the message is the sole carrier of the findings: it keeps the full-prose
+ * default on the 422, the polarity `'external-import'` keeps for the same
+ * reason. A door that starts relaying `issues` moves this face into
+ * {@link specValidationFindings}' trimming case in the same change. Its 409
+ * clause is its own: the import accepts no `force`, and it writes only names
+ * no environment row held when it began.
  */
 type MetadataWriteFace =
     | 'package-duplicate'

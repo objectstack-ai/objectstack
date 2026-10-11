@@ -2,7 +2,14 @@
 
 import { z } from 'zod';
 
-import { ManifestSchema } from './kernel/manifest.zod';
+import { ManifestSchema, resolveInstallModes } from './kernel/manifest.zod';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from './kernel/metadata-plugin.zod';
+import {
+  UNMANAGED_INSTALL_KEY_DISPOSITIONS,
+  UNMANAGED_INSTALL_REFUSING_DISPOSITIONS,
+  unmanagedInstallValueCarries,
+} from './kernel/unmanaged-install';
+import { PLURAL_TO_SINGULAR } from './meta-spelling/manifest-collection-spelling';
 import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
@@ -1938,6 +1945,79 @@ function validateSingleApp(config: ObjectStackDefinition): string[] {
 }
 
 /**
+ * [ADR-0131 D6] The types the metadata-type registry declares
+ * runtime-uncreatable (`allowRuntimeCreate: false`) — the flag the save door
+ * reads, so an unmanaged install's one write path cannot create an item of
+ * any of them. Derived, never listed.
+ */
+const RUNTIME_UNCREATABLE_TYPES: ReadonlySet<string> = new Set(
+  DEFAULT_METADATA_TYPE_REGISTRY.filter((entry) => !entry.allowRuntimeCreate).map((entry) => entry.type),
+);
+
+/**
+ * [ADR-0131 D6] A package that PERMITS the `unmanaged` install mode must be
+ * copyable — the authoring half of "a declared mode is enforced" (the stage-0
+ * ACCEPT's Q5 on the D6 execution card).
+ *
+ * An unmanaged install copies every metadata item into the environment ledger
+ * through the one save door, or copies nothing. So a package that declares
+ * `installModes` with `'unmanaged'` while it carries what that door cannot
+ * write is refused HERE, naming each key, instead of passing `os validate` and
+ * being refused at the install door:
+ *
+ *  - a non-empty collection whose metadata type the registry declares
+ *    runtime-uncreatable ({@link RUNTIME_UNCREATABLE_TYPES});
+ *  - a key the shared classification refuses
+ *    (`UNMANAGED_INSTALL_KEY_DISPOSITIONS`: code, an extension of another
+ *    package's items, an artifact envelope), on the stack or on its manifest.
+ *
+ * The classification is the one the install door's import planner reads
+ * (`kernel/unmanaged-install.ts`), so the two refusals cannot disagree. ⛔ No
+ * partial copy and no `OS_METADATA_WRITABLE` hatch: the remedy is to stop
+ * permitting `unmanaged`, or to move what cannot be copied out of the package.
+ *
+ * Mirrors {@link validateSingleApp}: one finding per key; `defineStack`
+ * aggregates and throws.
+ */
+function validateUnmanagedInstallMode(config: ObjectStackDefinition): string[] {
+  if (!resolveInstallModes(config.manifest).includes('unmanaged')) return [];
+  const findings: string[] = [];
+  const judge = (value: unknown, key: string, where: string): void => {
+    if (!unmanagedInstallValueCarries(value)) return;
+    const type = PLURAL_TO_SINGULAR[key];
+    if (type !== undefined) {
+      if (RUNTIME_UNCREATABLE_TYPES.has(type)) {
+        const count = Array.isArray(value) ? value.length : Object.keys(value as object).length;
+        findings.push(
+          `\`${where}\` carries ${count} '${type}' item(s), and the metadata-type registry declares '${type}' `
+          + 'runtime-uncreatable, so an unmanaged install cannot copy them into the environment.',
+        );
+      }
+      return;
+    }
+    const disposition = UNMANAGED_INSTALL_KEY_DISPOSITIONS[key];
+    if (disposition === undefined || !UNMANAGED_INSTALL_REFUSING_DISPOSITIONS.has(disposition)) return;
+    findings.push(
+      disposition === 'code'
+        ? `\`${where}\` is code, which has no metadata form an unmanaged install can copy into the environment.`
+        : disposition === 'uncopyable'
+          ? `\`${where}\` extends items another package owns, and an unmanaged install has no environment row for that.`
+          : `\`${where}\` describes an artifact of several packages, and an unmanaged install copies one package.`,
+    );
+  };
+  for (const [key, value] of Object.entries(config)) {
+    // `manifest` is the package's own manifest here, judged key by key below —
+    // never the nested-manifest envelope the classification names for a body.
+    if (key === 'manifest') continue;
+    judge(value, key, key);
+  }
+  for (const [key, value] of Object.entries(config.manifest ?? {})) {
+    judge(value, key, `manifest.${key}`);
+  }
+  return findings;
+}
+
+/**
  * Platform-provided object names (`sys_` / `cloud_` / `ai_` prefixes — the
  * same classification the seed loader applies). These objects are contributed
  * by the runtime, never by the stack, so cross-reference checks must not
@@ -2475,6 +2555,23 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
 
   constructor(message: string, issues: readonly string[]) {
     super('StackTriggerCapabilityRequiredError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0131 D6 · ADR-0112] A package permits the `unmanaged` install mode
+ * while it carries what an unmanaged install cannot copy —
+ * {@link validateUnmanagedInstallMode}. Spelled in this family's `STACK_*`
+ * vocabulary, one code per raise site; its install-time counterpart is
+ * `UNMANAGED_INSTALL_UNCOPYABLE` (`importUnmanagedPackage`,
+ * `@objectstack/metadata-protocol`), which judges the same body with the same
+ * key classification (`kernel/unmanaged-install.ts`).
+ */
+class StackUnmanagedInstallUncopyableError extends StackRefusalError {
+  readonly code = 'STACK_UNMANAGED_INSTALL_UNCOPYABLE';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackUnmanagedInstallUncopyableError', message, issues);
   }
 }
 
@@ -4094,6 +4191,16 @@ function buildDefinedStack(
     const header = `defineStack trigger capability validation failed (${triggerErrors.length} issue${triggerErrors.length === 1 ? '' : 's'}):`;
     const lines = triggerErrors.map((e) => `  ✗ ${e}`);
     throw new StackTriggerCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, triggerErrors);
+  }
+
+  const unmanagedErrors = validateUnmanagedInstallMode(data);
+  if (unmanagedErrors.length > 0) {
+    const header = `defineStack unmanaged install-mode validation failed (${unmanagedErrors.length} issue${unmanagedErrors.length === 1 ? '' : 's'}):`;
+    const lines = unmanagedErrors.map((e) => `  ✗ ${e}`);
+    const hint = '\n\n`manifest.installModes` permits \'unmanaged\', which copies every item of this package into the '
+      + 'environment ledger or copies nothing (ADR-0131 D6). Remove \'unmanaged\' from `manifest.installModes`, or move '
+      + 'what cannot be copied out of this package.';
+    throw new StackUnmanagedInstallUncopyableError(`${header}\n\n${lines.join('\n')}${hint}`, unmanagedErrors);
   }
 
   // Post-parse and advisory only: this call has no effect on what is
