@@ -1,11 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 // ADR-0090 D5/D9 — suggested audience bindings: the queryable install-time
-// suggestion surface and the tenant-admin confirm/dismiss flow.
+// suggestion surface and the deployment-level accept/dismiss flow (#22801 → A).
 
 import { describe, it, expect } from 'vitest';
+import { bindSecurityCatalogReader, createSecurityCatalogReader } from '@objectstack/core';
 import {
   syncAudienceBindingSuggestions,
-  reapOrganizationLessSuggestions,
+  reconcileAudienceBindingSuggestions,
+  readAcceptedEveryoneSets,
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
@@ -13,38 +15,57 @@ import {
   SuggestionStateError,
   type SuggestionDeps,
 } from './suggested-audience-bindings';
+import { declareEveryoneBaseline } from './builtin-positions';
 
-/** In-memory ObjectQL stub (same shape as audience-anchors.test.ts) with an
- *  installed-package registry and insert-call recording so tests can assert
- *  WHICH context a write carried. */
+const SECURITY_PACKAGE = 'com.objectstack.plugin-security';
+const BASELINE = ['member_default'];
+const DEFAULT_ORG = 'org_default';
+
+/** In-memory ObjectQL stub with an engine registry the security catalog reads.
+ *  An enabled package's `manifest.permissions` objects are served as catalog
+ *  items under its id (a registered package); the `everyone` anchor is
+ *  declared with the baseline. A tenant-scoped find on the record sees that
+ *  organization's rows and the organization-less ones (ADR-0120 D3), and an
+ *  insert stamps the context's organization — as the real driver does. */
 function makeQl(packages: any[] = [], declaredCapabilities: any[] = []) {
   const tables: Record<string, any[]> = {
-    sys_position: [{ id: 'pos_everyone', name: 'everyone' }, { id: 'pos_guest', name: 'guest' }],
-    sys_permission_set: [],
-    sys_position_permission_set: [],
+    sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }, { id: 'org_other', slug: 'other' }],
     sys_audience_binding_suggestion: [],
   };
-  const insertCalls: Array<{ object: string; data: any; opts: any }> = [];
-  return {
-    tables,
-    insertCalls,
-    registry: {
-      getAllPackages: () => packages,
-      // [#18535] The ADR-0066 D1 capability declarations, served off the SAME
-      // registry door the seeder reads them by (`readDeclared`) — so a pin
-      // written here exercises the shipped read, not a transcription of it.
-      listItems: (type: string) => (type === 'capability' ? declaredCapabilities : []),
+  const positions = new Map<string, any>();
+  const registry: any = {
+    getAllPackages: () => packages,
+    listItems: (type: string) => {
+      if (type === 'capability') return declaredCapabilities;
+      if (type === 'position') return [...positions.values()];
+      if (type !== 'permission') return [];
+      return registry.getAllPackages()
+        .filter((pkg: any) => pkg?.enabled !== false && Array.isArray(pkg?.manifest?.permissions))
+        .flatMap((pkg: any) => pkg.manifest.permissions
+          .filter((ps: any) => ps && typeof ps === 'object' && ps.name)
+          .map((ps: any) => (pkg.manifest.id ? { ...ps, _packageId: pkg.manifest.id } : { ...ps })));
     },
+    getItem: (type: string, name: string) => registry.listItems(type).find((i: any) => i.name === name),
+    isPackageDisabled: () => false,
+    registerItem: (type: string, item: any, _key: string, packageId?: string) => {
+      if (type === 'position') positions.set(item.name, { ...item, _packageId: packageId });
+    },
+  };
+  const ql: any = {
+    tables,
+    registry,
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
+      const tenant = opts?.context?.tenantId;
       return (tables[object] ?? []).filter((r) =>
-        Object.entries(where).every(([k, v]) => (r as any)[k] === v),
+        (!tenant || object !== 'sys_audience_binding_suggestion' || r.organization_id === tenant || r.organization_id == null)
+        && Object.entries(where).every(([k, v]) => (r as any)[k] === v),
       );
     },
     async insert(object: string, data: any, opts?: any) {
-      insertCalls.push({ object, data, opts });
-      (tables[object] ??= []).push(data);
-      return data;
+      const row = { ...data, organization_id: opts?.context?.tenantId ?? null };
+      (tables[object] ??= []).push(row);
+      return row;
     },
     async update(object: string, data: any) {
       const t = tables[object] ?? [];
@@ -59,7 +80,20 @@ function makeQl(packages: any[] = [], declaredCapabilities: any[] = []) {
       if (i >= 0) t.splice(i, 1);
       return true;
     },
-  } as any;
+  };
+  bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry, metadata: { get: () => undefined, list: () => [] } }));
+  declareEveryoneBaseline(registry, SECURITY_PACKAGE, BASELINE);
+  return ql;
+}
+
+/** What the `everyone` definition names now — the binding the resolver reads. */
+function everyoneSets(ql: any): string[] {
+  return ql.registry.getItem('position', 'everyone')?.permissionSets ?? [];
+}
+
+/** Put `set` on the `everyone` definition beside the baseline (the app's own default). */
+function declareInBaseline(ql: any, set: string) {
+  declareEveryoneBaseline(ql.registry, SECURITY_PACKAGE, [...BASELINE, set]);
 }
 
 const CRM_PACKAGE = {
@@ -73,27 +107,40 @@ const CRM_PACKAGE = {
   },
 };
 
-const ADMIN_SET = { name: 'admin_full', objects: { '*': { modifyAllRecords: true } } } as any;
-const MEMBER_SET = { name: 'member', objects: { crm_account: { allowRead: true } } } as any;
-
-function makeDeps(ql: any, resolvedSets: any[] = [ADMIN_SET]): SuggestionDeps {
-  return { ql, resolveSets: async () => resolvedSets };
+/** The security plugin's re-derivation, as it composes it: baseline + accepted. */
+function makeDeps(ql: any, posture?: 'single' | 'group' | 'isolated'): SuggestionDeps {
+  return {
+    ql,
+    posture: () => posture,
+    rederiveEveryone: async () => {
+      const { accepted } = await readAcceptedEveryoneSets(ql);
+      declareEveryoneBaseline(ql.registry, SECURITY_PACKAGE, [...new Set([...BASELINE, ...accepted])]);
+    },
+  };
 }
 
-const ADMIN_CTX = { userId: 'usr_admin' };
+/** A `manage_metadata` holder (the platform administrator under `single`). */
+const ADMIN_CTX = { userId: 'usr_admin', tenantId: DEFAULT_ORG, systemPermissions: ['manage_metadata'] };
+/** A tenant administrator: full object grants, no `manage_metadata` (#22621 → A). */
+const TENANT_ADMIN_CTX = { userId: 'usr_org_admin', tenantId: 'org_other', systemPermissions: ['manage_users'] };
+/** The platform operator under a wall — the ADR-0095 rung, not a position name. */
+const OPERATOR_CTX = { ...ADMIN_CTX, posture: 'PLATFORM_ADMIN' };
 
-describe('syncAudienceBindingSuggestions (ADR-0090 D5/D9)', () => {
-  it('creates a pending suggestion for an installed package isDefault set', async () => {
+const rows = (ql: any) => ql.tables.sys_audience_binding_suggestion;
+
+describe('syncAudienceBindingSuggestions (ADR-0090 D5/D9, deployment-level)', () => {
+  it('creates ONE pending row, owned by the Default Organization, for a catalog-served isDefault set', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     const out = await syncAudienceBindingSuggestions(ql);
     expect(out.created).toBe(1);
-    const rows = ql.tables.sys_audience_binding_suggestion;
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
+    expect(rows(ql)).toHaveLength(1);
+    expect(rows(ql)[0]).toMatchObject({
       package_id: 'com.example.crm',
       permission_set_name: 'crm_readonly',
       anchor: 'everyone',
       status: 'pending',
+      deployment_decision: false,
+      organization_id: DEFAULT_ORG,
     });
   });
 
@@ -101,113 +148,28 @@ describe('syncAudienceBindingSuggestions (ADR-0090 D5/D9)', () => {
     const ql = makeQl([CRM_PACKAGE]);
     await syncAudienceBindingSuggestions(ql);
     const out2 = await syncAudienceBindingSuggestions(ql);
-    expect(out2.created).toBe(0);
-    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
+    expect(out2).toMatchObject({ created: 0, confirmedObserved: 0, pruned: 0, reopened: 0 });
+    expect(rows(ql)).toHaveLength(1);
   });
 
-  // [#7677] The boot baseline auto-bind (security-plugin) runs BEFORE the first
-  // sync, so on stock every app-declared `isDefault` set is already bound by the
-  // time this reconciler first sees it. Skipping those left the whole surface
-  // empty on stock — the declaration was only ever surfaced after an admin
-  // deleted the binding by hand. It is now recorded in the state it is actually
-  // in: confirmed (observed), never pending — a bound declaration is not
-  // awaiting a decision.
-  it('records an already-bound set as confirmed/observed (the boot baseline) rather than skipping it', async () => {
+  // [#7677] The served app's own `isDefault` set is on the `everyone`
+  // definition from boot, so it is surfaced as confirmed (observed) — never
+  // offered as a prompt. "Reconciliation reads the definition": no binding row.
+  it('records a set the everyone DEFINITION already names as confirmed/observed', async () => {
     const ql = makeQl([CRM_PACKAGE]);
-    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
-    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
-
+    declareInBaseline(ql, 'crm_readonly');
     const out = await syncAudienceBindingSuggestions(ql);
-
     expect(out.created).toBe(1);
-    const rows = ql.tables.sys_audience_binding_suggestion;
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      package_id: 'com.example.crm',
-      permission_set_name: 'crm_readonly',
-      anchor: 'everyone',
-      status: 'confirmed',
-    });
-    // Observed, NOT resolved through the prompt — the object schema defines an
-    // empty `resolved_by` on a confirmed row as exactly that.
-    expect(rows[0].resolved_by).toBeUndefined();
-    expect(rows[0].resolved_at).toBeTruthy();
-  });
+    expect(rows(ql)[0]).toMatchObject({ status: 'confirmed', deployment_decision: false });
+    expect(rows(ql)[0].resolved_by).toBeUndefined();
+    expect(rows(ql)[0].resolved_at).toBeTruthy();
 
-  it('is idempotent for an already-bound set — a second sync creates nothing and does not duplicate', async () => {
-    const ql = makeQl([CRM_PACKAGE]);
-    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
-    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
-    await syncAudienceBindingSuggestions(ql);
-
-    const out2 = await syncAudienceBindingSuggestions(ql);
-
-    expect(out2.created).toBe(0);
-    expect(out2.confirmedObserved).toBe(0);
-    expect(out2.pruned).toBe(0);
-    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
-    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('confirmed');
-  });
-
-  it('surfaces the stock isDefault declaration through the list endpoint (#7677)', async () => {
-    // Stock: the app's isDefault set exists AND the boot auto-bind already
-    // bound it to `everyone`. The list must not be empty.
-    const ql = makeQl([CRM_PACKAGE]);
-    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
-    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
-    const deps = makeDeps(ql);
-
-    const { suggestions, synced } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-
-    expect(synced.created).toBe(1);
-    expect(suggestions).toHaveLength(1);
-    expect(suggestions[0]).toMatchObject({
-      permission_set_name: 'crm_readonly',
-      anchor: 'everyone',
-      status: 'confirmed',
-    });
-
-    // Second call: nothing created, no duplicate row.
-    const again = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-    expect(again.synced.created).toBe(0);
-    expect(again.suggestions).toHaveLength(1);
-
-    // The console panel lists `status=pending` as the actionable prompt set —
-    // a satisfied declaration must not appear there (never nag).
-    const prompts = await listAudienceBindingSuggestions(deps, ADMIN_CTX, { status: 'pending' });
-    expect(prompts.suggestions).toHaveLength(0);
-  });
-
-  it('still creates a PENDING row when the declaration is unbound (the discriminating step)', async () => {
-    // The card's discriminator: with no binding row, the declaration surfaces
-    // as an actionable PENDING suggestion, and it is confirmable end to end.
-    const ql = makeQl([CRM_PACKAGE]);
-    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
-    const deps = makeDeps(ql);
-
-    const { suggestions, synced } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-    expect(synced.created).toBe(1);
-    expect(suggestions[0].status).toBe('pending');
-
-    // …and the pending→confirmed (observed) transition still fires when the
-    // binding is observed again.
-    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
-    const out = await syncAudienceBindingSuggestions(ql);
-    expect(out.confirmedObserved).toBe(1);
-    expect(out.created).toBe(0);
-    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
-    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('confirmed');
-  });
-
-  it('marks a pending suggestion confirmed when the binding appears out-of-band', async () => {
-    const ql = makeQl([CRM_PACKAGE]);
-    await syncAudienceBindingSuggestions(ql);
-    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
-    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
-    const out = await syncAudienceBindingSuggestions(ql);
-    expect(out.confirmedObserved).toBe(1);
-    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('confirmed');
-    expect(ql.tables.sys_audience_binding_suggestion[0].resolved_by).toBeUndefined();
+    // …and a pending row turns observed once the definition names the set.
+    const ql2 = makeQl([CRM_PACKAGE]);
+    await syncAudienceBindingSuggestions(ql2);
+    declareInBaseline(ql2, 'crm_readonly');
+    expect((await syncAudienceBindingSuggestions(ql2)).confirmedObserved).toBe(1);
+    expect(rows(ql2)[0].status).toBe('confirmed');
   });
 
   it('prunes a pending suggestion once its declaration is gone (uninstall)', async () => {
@@ -216,20 +178,17 @@ describe('syncAudienceBindingSuggestions (ADR-0090 D5/D9)', () => {
     ql.registry.getAllPackages = () => [];
     const out = await syncAudienceBindingSuggestions(ql);
     expect(out.pruned).toBe(1);
-    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(0);
+    expect(rows(ql)).toHaveLength(0);
   });
 
   it('keeps a dismissed suggestion as history (never pruned, never re-created)', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     await syncAudienceBindingSuggestions(ql);
-    const deps = makeDeps(ql);
-    const row = ql.tables.sys_audience_binding_suggestion[0];
-    await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, row.id);
+    await dismissAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, rows(ql)[0].id);
     const out = await syncAudienceBindingSuggestions(ql);
-    expect(out.created).toBe(0);
-    expect(out.pruned).toBe(0);
-    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
-    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('dismissed');
+    expect(out).toMatchObject({ created: 0, pruned: 0, reopened: 0 });
+    expect(rows(ql)).toHaveLength(1);
+    expect(rows(ql)[0].status).toBe('dismissed');
   });
 
   it('ignores non-isDefault sets and unowned declarations', async () => {
@@ -240,6 +199,81 @@ describe('syncAudienceBindingSuggestions (ADR-0090 D5/D9)', () => {
     const out = await syncAudienceBindingSuggestions(ql);
     expect(out.created).toBe(0);
   });
+
+  // ⛔ A tenant administrator's earlier per-organization confirm is never
+  // promoted into a deployment-wide grant: it is re-opened for a
+  // `manage_metadata` holder, and the derivation reads nothing from it.
+  it('RE-OPENS a decision recorded before the acceptance was deployment-level — never promotes it', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    rows(ql).push({
+      id: 'sug_legacy', package_id: 'com.example.crm', permission_set_name: 'crm_readonly',
+      anchor: 'everyone', status: 'confirmed', resolved_by: 'usr_org_admin', organization_id: DEFAULT_ORG,
+    });
+    expect((await readAcceptedEveryoneSets(ql)).accepted).toEqual([]);
+
+    const out = await syncAudienceBindingSuggestions(ql);
+
+    expect(out.reopened).toBe(1);
+    expect(rows(ql)[0]).toMatchObject({ status: 'pending', resolved_by: null, resolved_at: null });
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+  });
+
+  it('does not read a row another organization owns — it is reported, not deleted', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    rows(ql).push({
+      id: 'sug_other', package_id: 'com.example.crm', permission_set_name: 'crm_readonly',
+      anchor: 'everyone', status: 'confirmed', resolved_by: 'usr_org_admin', organization_id: 'org_other',
+    });
+    const warns: Array<{ msg: string; meta?: any }> = [];
+
+    const out = await reconcileAudienceBindingSuggestions(ql, { warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); } });
+
+    expect(out).toMatchObject({ created: 1, unread: 1 });
+    expect(rows(ql).find((r: any) => r.id === 'sug_other')).toMatchObject({ status: 'confirmed' });
+    expect(rows(ql).find((r: any) => r.organization_id === DEFAULT_ORG)).toMatchObject({ status: 'pending' });
+    expect(warns).toHaveLength(1);
+    expect(warns[0].msg).toContain('grant nothing now');
+    expect(warns[0].meta).toMatchObject({ unread: 1, organizations: ['org_other'] });
+  });
+
+  it('refuses loudly when something is declared and no Default Organization can own the record', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    ql.tables.sys_organization = [{ id: 'org_a', slug: 'a' }, { id: 'org_b', slug: 'b' }];
+    await expect(syncAudienceBindingSuggestions(ql)).rejects.toMatchObject({ code: 'SUGGESTION_STATE', statusCode: 409 });
+    // Nothing declared ⇒ nothing to own: a clean zero.
+    const empty = makeQl([]);
+    empty.tables.sys_organization = [];
+    await expect(syncAudienceBindingSuggestions(empty)).resolves.toMatchObject({ created: 0 });
+  });
+});
+
+describe('the deployment authority (#22621 → A)', () => {
+  it('refuses a tenant administrator, an unauthenticated caller, and a non-operator under a wall', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    await expect(listAudienceBindingSuggestions(makeDeps(ql), TENANT_ADMIN_CTX))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    await expect(listAudienceBindingSuggestions(makeDeps(ql), {}))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    await expect(listAudienceBindingSuggestions(makeDeps(ql, 'isolated'), ADMIN_CTX))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    // Refused before anything is read or written.
+    expect(rows(ql)).toHaveLength(0);
+    // The controls: the holder under `single`, the operator under a wall.
+    await expect(listAudienceBindingSuggestions(makeDeps(ql), ADMIN_CTX)).resolves.toBeTruthy();
+    await expect(listAudienceBindingSuggestions(makeDeps(ql, 'isolated'), OPERATOR_CTX)).resolves.toBeTruthy();
+  });
+
+  it('refuses a tenant administrator\'s confirm and dismiss before touching anything', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    await syncAudienceBindingSuggestions(ql);
+    const id = rows(ql)[0].id;
+    await expect(confirmAudienceBindingSuggestion(makeDeps(ql), TENANT_ADMIN_CTX, id))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    await expect(dismissAudienceBindingSuggestion(makeDeps(ql), TENANT_ADMIN_CTX, id))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(rows(ql)[0].status).toBe('pending');
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+  });
 });
 
 describe('listAudienceBindingSuggestions', () => {
@@ -249,60 +283,38 @@ describe('listAudienceBindingSuggestions', () => {
     const { suggestions, synced } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, { status: 'pending' });
     expect(synced.created).toBe(1);
     expect(suggestions).toHaveLength(1);
-    const none = await listAudienceBindingSuggestions(deps, ADMIN_CTX, { packageId: 'other.pkg' });
+    const none = await listAudienceBindingSuggestions(deps, ADMIN_CTX, { packageId: 'com.other' });
     expect(none.suggestions).toHaveLength(0);
-  });
-
-  it('denies a non-tenant-admin caller', async () => {
-    const ql = makeQl([CRM_PACKAGE]);
-    const deps = makeDeps(ql, [MEMBER_SET]);
-    await expect(listAudienceBindingSuggestions(deps, { userId: 'usr_member' })).rejects.toThrow(/tenant-level administrator/);
-  });
-
-  it('denies an unauthenticated caller', async () => {
-    const ql = makeQl([CRM_PACKAGE]);
-    const deps = makeDeps(ql);
-    await expect(listAudienceBindingSuggestions(deps, {})).rejects.toThrow(/authenticated/);
   });
 });
 
-describe('confirmAudienceBindingSuggestion', () => {
-  it('materializes the set if needed and creates the binding WITH the caller context', async () => {
-    const ql = makeQl([CRM_PACKAGE]);
-    const deps = makeDeps(ql);
-    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, { status: 'pending' });
-    const { suggestion, bindingCreated } = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
-
-    expect(bindingCreated).toBe(true);
-    expect(suggestion.status).toBe('confirmed');
-    expect(suggestion.resolved_by).toBe('usr_admin');
-    expect(suggestion.resolved_at).toBeTruthy();
-
-    // set was materialized through the provenance-checked upsert
-    const setRow = ql.tables.sys_permission_set.find((r: any) => r.name === 'crm_readonly');
-    expect(setRow).toMatchObject({ package_id: 'com.example.crm', managed_by: 'package' });
-
-    // the binding row exists and the insert carried the CALLER context — the
-    // "admin confirms" write must run under the anchor + delegated-admin
-    // gates, never isSystem
-    const bindingInsert = ql.insertCalls.find((c: any) => c.object === 'sys_position_permission_set');
-    expect(bindingInsert.data.position_id).toBe('pos_everyone');
-    expect(bindingInsert.opts?.context).toBe(ADMIN_CTX);
-    expect(bindingInsert.opts?.context?.isSystem).toBeUndefined();
-  });
-
-  it('is a recorded no-op when the binding already exists', async () => {
+describe('confirmAudienceBindingSuggestion — the acceptance takes effect', () => {
+  it('records the decision and re-derives everyone with the set (anti-vacuity: it was absent before)', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
-    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
-    const { bindingCreated, suggestion } = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
-    expect(bindingCreated).toBe(false);
-    expect(suggestion.status).toBe('confirmed');
+    expect(everyoneSets(ql)).not.toContain('crm_readonly');
+
+    const { suggestion, bindingCreated } = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+
+    expect(bindingCreated).toBe(true);
+    expect(suggestion).toMatchObject({ status: 'confirmed', deployment_decision: true, resolved_by: 'usr_admin' });
+    expect(everyoneSets(ql)).toEqual([...BASELINE, 'crm_readonly']);
+    // The definition is still the security plugin's own declaration.
+    expect(ql.registry.getItem('position', 'everyone')._packageId).toBe(SECURITY_PACKAGE);
   });
 
-  it('refuses a suggested set carrying anchor-forbidden bits (early gate)', async () => {
+  it('answers bindingCreated: false when the baseline already names the set', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    const deps = makeDeps(ql);
+    await syncAudienceBindingSuggestions(ql);
+    declareEveryoneBaseline(ql.registry, SECURITY_PACKAGE, [...BASELINE, 'crm_readonly']);
+    deps.rederiveEveryone = async () => declareInBaseline(ql, 'crm_readonly');
+    const { bindingCreated } = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, rows(ql)[0].id);
+    expect(bindingCreated).toBe(false);
+  });
+
+  it('refuses a set carrying anchor-forbidden bits — 403, nothing recorded (ADR-0090 D7)', async () => {
     const pkg = {
       enabled: true,
       manifest: {
@@ -313,22 +325,18 @@ describe('confirmAudienceBindingSuggestion', () => {
     const ql = makeQl([pkg]);
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
-      .rejects.toThrow(/cannot be bound to the 'everyone' audience anchor/);
-    expect(ql.tables.sys_position_permission_set).toHaveLength(0);
-    // still pending — the admin can retry after the package fixes the set
-    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('pending');
+    const refusal = confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+    await expect(refusal).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    await expect(refusal).rejects.toThrow(/cannot be given to the 'everyone' audience anchor/);
+    expect(rows(ql)[0]).toMatchObject({ status: 'pending', deployment_decision: false });
+    expect(everyoneSets(ql)).toEqual(BASELINE);
   });
 
   // ── [#18535] ADR-0090 D5: 「平台系统权限;带 package provenance 的应用声明
-  // capability 令牌不计」 ─────────────────────────────────────────────────
-  //
-  // The confirm path's early gate is the FRIENDLY RENDITION of the engine
-  // middleware that re-enforces the same predicate on the insert below it, so
-  // it must ask the identical question: it now passes the stack's declared
-  // capabilities as `AnchorBindingContext.declaredCapabilities`. Three cases,
-  // because "the declared token binds" alone is equally satisfied by a gate
-  // that stopped judging `systemPermissions` at all.
+  // capability 令牌不计」 — the definition-side gate passes the stack's
+  // declared capabilities, as the derivation does. Three cases, because "the
+  // declared token is accepted" alone is equally satisfied by a gate that
+  // stopped judging `systemPermissions` at all.
   const tokenPackage = (token: string) => ({
     enabled: true,
     manifest: {
@@ -344,77 +352,92 @@ describe('confirmAudienceBindingSuggestion', () => {
     },
   });
 
-  it('binds an isDefault set whose systemPermissions token THIS stack declares', async () => {
+  it('accepts an isDefault set whose systemPermissions token THIS stack declares', async () => {
     const ql = makeQl([tokenPackage('crm.export_pipeline')], [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-
-    const { bindingCreated, suggestion } = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
-
+    const { bindingCreated } = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
     expect(bindingCreated).toBe(true);
-    expect(suggestion.status).toBe('confirmed');
-    // The row itself, not just the return flag: the anchor really carries it.
-    const binding = ql.tables.sys_position_permission_set.find((r: any) => r.position_id === 'pos_everyone');
-    expect(binding).toBeTruthy();
-    // …and the set that got bound is the one carrying the token — a pin that
-    // would still pass if the token had been dropped on the way in is no pin.
-    const setRow = ql.tables.sys_permission_set.find((r: any) => r.id === binding.permission_set_id);
-    expect(JSON.parse(setRow.system_permissions)).toEqual(['crm.export_pipeline']);
+    expect(everyoneSets(ql)).toContain('crm_member_default');
   });
 
   it('still refuses an UNDECLARED systemPermissions token — the control for the case above', async () => {
-    // A real declaration list naming a DIFFERENT capability: membership is what
-    // excuses a token, never the presence of declarations on the stack.
     const ql = makeQl([tokenPackage('crm.settle_ledger')], [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-
     await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
-      .rejects.toThrow(/cannot be bound to the 'everyone' audience anchor/);
-    expect(ql.tables.sys_position_permission_set).toHaveLength(0);
-    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('pending');
+      .rejects.toThrow(/cannot be given to the 'everyone' audience anchor/);
+    expect(everyoneSets(ql)).toEqual(BASELINE);
   });
 
   it('still refuses a PLATFORM capability even when the stack declares a capability of that name', async () => {
-    // The platform floor, inside the predicate: declaring `manage_users` must
-    // not launder it past the anchor gate.
     const ql = makeQl([tokenPackage('manage_users')], [{ name: 'manage_users', label: 'Not Yours' }]);
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-
     await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
-      .rejects.toThrow(/cannot be bound to the 'everyone' audience anchor/);
-    expect(ql.tables.sys_position_permission_set).toHaveLength(0);
+      .rejects.toThrow(/cannot be given to the 'everyone' audience anchor/);
+    expect(everyoneSets(ql)).toEqual(BASELINE);
   });
 
-  it('refuses when the set name is owned by a different package (ADR-0086 D4)', async () => {
+  it('refuses when the catalog serves the set under a different package (ADR-0086 D4)', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-    ql.tables.sys_permission_set.push({ id: 'ps_x', name: 'crm_readonly', package_id: 'com.other' });
+    ql.registry.getAllPackages = () => [{ ...CRM_PACKAGE, manifest: { ...CRM_PACKAGE.manifest, id: 'com.other' } }];
     await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
-      .rejects.toThrow(SuggestionStateError);
+      .rejects.toBeInstanceOf(SuggestionStateError);
   });
 
-  it('404s on an unknown id and 409s on a non-pending row', async () => {
+  // A `guest` row would record a grant that never takes effect: the guest
+  // anchor's sets are not derived from acceptances (声明即强制).
+  it('refuses a guest-anchor row loudly rather than record a grant it does not deliver', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    rows(ql).push({
+      id: 'sug_guest', package_id: 'com.example.crm', permission_set_name: 'crm_readonly',
+      anchor: 'guest', status: 'pending', organization_id: DEFAULT_ORG,
+    });
+    await expect(confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 'sug_guest'))
+      .rejects.toMatchObject({ code: 'SUGGESTION_STATE', statusCode: 409 });
+    expect(rows(ql)[0].status).toBe('pending');
+  });
+
+  it('404s on an unknown id or another organization\'s row, and 409s on a non-pending row', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     const deps = makeDeps(ql);
-    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, 'nope')).rejects.toThrow(SuggestionNotFoundError);
+    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, 'nope')).rejects.toBeInstanceOf(SuggestionNotFoundError);
+    rows(ql).push({ id: 'sug_other', package_id: 'com.example.crm', permission_set_name: 'crm_readonly', anchor: 'everyone', status: 'pending', organization_id: 'org_other' });
+    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, 'sug_other')).rejects.toBeInstanceOf(SuggestionNotFoundError);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-    await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
-    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
-      .rejects.toThrow(/already dismissed/);
+    await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id)).rejects.toBeInstanceOf(SuggestionStateError);
+  });
+});
+
+describe('the derivation reads the definition as it stands', () => {
+  it('withholds an accepted set whose published body now carries a forbidden bit — with its reason', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+    CRM_PACKAGE.manifest.permissions[0].objects = { crm_account: { allowRead: true, viewAllRecords: true } } as any;
+    try {
+      const derived = await readAcceptedEveryoneSets(ql);
+      expect(derived.accepted).toEqual([]);
+      expect(derived.withheld).toEqual([expect.objectContaining({ set: 'crm_readonly', forbidden: true })]);
+    } finally {
+      CRM_PACKAGE.manifest.permissions[0].objects = { crm_account: { allowRead: true } };
+    }
   });
 
-  it('denies a non-tenant-admin caller before touching anything', async () => {
+  it('withholds an accepted set the catalog no longer serves (uninstalled package)', async () => {
     const ql = makeQl([CRM_PACKAGE]);
-    await listAudienceBindingSuggestions(makeDeps(ql), ADMIN_CTX, {});
-    const memberDeps = makeDeps(ql, [MEMBER_SET]);
-    const row = ql.tables.sys_audience_binding_suggestion[0];
-    await expect(confirmAudienceBindingSuggestion(memberDeps, { userId: 'usr_member' }, row.id))
-      .rejects.toThrow(/tenant-level administrator/);
-    expect(ql.tables.sys_position_permission_set).toHaveLength(0);
-    expect(row.status).toBe('pending');
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+    ql.registry.getAllPackages = () => [];
+    const derived = await readAcceptedEveryoneSets(ql);
+    expect(derived.accepted).toEqual([]);
+    expect(derived.withheld).toEqual([expect.objectContaining({ set: 'crm_readonly', forbidden: false })]);
   });
 });
 
@@ -424,26 +447,41 @@ describe('dismissAudienceBindingSuggestion', () => {
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
     const { suggestion } = await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
-    expect(suggestion.status).toBe('dismissed');
-    expect(suggestion.resolved_by).toBe('usr_admin');
-    // no binding was ever written
-    expect(ql.tables.sys_position_permission_set).toHaveLength(0);
+    expect(suggestion).toMatchObject({ status: 'dismissed', deployment_decision: true, resolved_by: 'usr_admin' });
+    expect(everyoneSets(ql)).toEqual(BASELINE);
   });
 
-  it('409s on an already-resolved row', async () => {
+  it('REVOKES an accepted suggestion — everyone is re-derived without the set', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
-    await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
-    await expect(dismissAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
-      .rejects.toThrow(SuggestionStateError);
+    await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+    expect(everyoneSets(ql)).toContain('crm_readonly');
+
+    const { suggestion } = await dismissAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+
+    expect(suggestion.status).toBe('dismissed');
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+  });
+
+  it('409s on an observed row (the baseline is not this surface\'s) and on a dismissed one', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    declareInBaseline(ql, 'crm_readonly');
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    await expect(dismissAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id)).rejects.toBeInstanceOf(SuggestionStateError);
+
+    const ql2 = makeQl([CRM_PACKAGE]);
+    const deps2 = makeDeps(ql2);
+    const listed = await listAudienceBindingSuggestions(deps2, ADMIN_CTX, {});
+    await dismissAudienceBindingSuggestion(deps2, ADMIN_CTX, listed.suggestions[0].id);
+    await expect(dismissAudienceBindingSuggestion(deps2, ADMIN_CTX, listed.suggestions[0].id)).rejects.toBeInstanceOf(SuggestionStateError);
   });
 });
 
 /**
- * [#12981] The four `catch {}` sites in this module — three in
- * `syncAudienceBindingSuggestions` (confirm-observed UPDATE, create INSERT,
- * prune DELETE) and one in `reapOrganizationLessSuggestions`.
+ * [#12981] The write sites in `syncAudienceBindingSuggestions` — the
+ * observed/re-open UPDATE, the create INSERT and the prune DELETE.
  *
  * The pass is CONVERGENT, so its all-zero outcome is the normal steady-state
  * boot. That is exactly what made a wholly refused pass invisible: it returned
@@ -461,7 +499,7 @@ describe('[#12981] a refused suggestion write is distinguishable from a settled 
     const infos: Array<{ msg: string; meta?: any }> = [];
     const warns: Array<{ msg: string; meta?: any }> = [];
 
-    const out = await syncAudienceBindingSuggestions(ql, undefined, {
+    const out = await syncAudienceBindingSuggestions(ql, {
       info: (msg: string, meta?: any) => { infos.push({ msg, meta }); },
       warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); },
     });
@@ -483,7 +521,7 @@ describe('[#12981] a refused suggestion write is distinguishable from a settled 
     ql.insert = async () => { throw race(); };
     const warns: string[] = [];
 
-    const out = await syncAudienceBindingSuggestions(ql, undefined, {
+    const out = await syncAudienceBindingSuggestions(ql, {
       warn: (m: string) => { warns.push(m); },
     });
 
@@ -495,20 +533,17 @@ describe('[#12981] a refused suggestion write is distinguishable from a settled 
     expect(warns).toEqual([]);
   });
 
-  it('counts a refused CONFIRM of an already-bound suggestion', async () => {
+  it('counts a refused OBSERVATION of a set the everyone definition already names', async () => {
     const ql = makeQl([CRM_PACKAGE]);
-    // A pending row whose binding already exists ⇒ the confirm-observed UPDATE.
-    ql.tables.sys_permission_set.push({ id: 'ps_ro', name: 'crm_readonly' });
-    ql.tables.sys_position_permission_set.push({
-      id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_ro',
-    });
+    // A pending row whose set the definition names ⇒ the confirm-observed UPDATE.
+    declareInBaseline(ql, 'crm_readonly');
     ql.tables.sys_audience_binding_suggestion.push({
       id: 'sug_1', package_id: 'com.example.crm', permission_set_name: 'crm_readonly',
-      anchor: 'everyone', status: 'pending',
+      anchor: 'everyone', status: 'pending', organization_id: DEFAULT_ORG,
     });
     ql.update = async () => { throw outage(); };
 
-    const out = await syncAudienceBindingSuggestions(ql, undefined, { warn: () => {} });
+    const out = await syncAudienceBindingSuggestions(ql, { warn: () => {} });
     expect(out.confirmedObserved).toBe(0);
     expect(out.refused).toBe(1);
     // The row is still pending — the console goes on nagging for a decision
@@ -520,44 +555,21 @@ describe('[#12981] a refused suggestion write is distinguishable from a settled 
     const ql = makeQl([]); // nothing declared ⇒ the pending row below is pruned
     ql.tables.sys_audience_binding_suggestion.push({
       id: 'sug_gone', package_id: 'com.gone.pkg', permission_set_name: 'gone',
-      anchor: 'everyone', status: 'pending',
+      anchor: 'everyone', status: 'pending', organization_id: DEFAULT_ORG,
     });
     ql.delete = async () => { throw outage(); };
 
-    const out = await syncAudienceBindingSuggestions(ql, undefined, { warn: () => {} });
+    const out = await syncAudienceBindingSuggestions(ql, { warn: () => {} });
     expect(out.pruned).toBe(0);
     expect(out.refused).toBe(1);
     expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
-  });
-
-  it('reports a refused REAP, naming what the surviving rows do to every tenant', async () => {
-    const ql = makeQl([]);
-    ql.tables.sys_audience_binding_suggestion.push({
-      id: 'sug_orphan', package_id: 'com.example.crm', permission_set_name: 'crm_readonly',
-      anchor: 'everyone', status: 'confirmed', organization_id: null,
-    });
-    ql.delete = async () => { throw outage(); };
-    const warns: Array<{ msg: string; meta?: any }> = [];
-
-    const reaped = await reapOrganizationLessSuggestions(ql, {
-      warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); },
-    });
-
-    // ⛔ The return type stays `number` — it is exported. The report is the
-    // channel, and before the repair there was none: `reaped === 0` alone is
-    // also what "nothing to reap" returns.
-    expect(reaped).toBe(0);
-    expect(warns).toHaveLength(1);
-    expect(warns[0].msg).toContain('REFUSED');
-    expect(warns[0].msg).toContain('readable by EVERY tenant');
-    expect(warns[0].meta).toMatchObject({ refused: 1 });
   });
 
   it('adds no steady-state noise — a settled pass reports no refusal', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     await syncAudienceBindingSuggestions(ql);
     const warns: string[] = [];
-    const out = await syncAudienceBindingSuggestions(ql, undefined, {
+    const out = await syncAudienceBindingSuggestions(ql, {
       warn: (m: string) => { warns.push(m); },
     });
     expect(out.refused).toBe(0);
@@ -568,10 +580,9 @@ describe('[#12981] a refused suggestion write is distinguishable from a settled 
 // ────────────────────────────────────────────────────────────────────────
 // #18031 — `permissions` carries two incompatible readings in ONE registry
 // slot: the ADR-0025 §3.2 capability GRANT at the authoring stage, and the
-// ADR-0090 permission-SET collection at the assembled stage. Source 2 reads
-// the assembled one. Handed the authoring one it used to return nothing and
-// say nothing — the structured arm fell out of `Array.isArray`, and every
-// member of the legacy `string[]` arm fell out of `consider`'s first line.
+// ADR-0090 permission-SET collection at the assembled stage. The catalog
+// serves the assembled one. A package record carrying the authoring one used
+// to produce nothing and say nothing.
 // AGENTS.md "Route & surface ownership" §3: absence must be loud.
 // ────────────────────────────────────────────────────────────────────────
 describe('manifest `permissions` in the ADR-0025 reading is reported, never dropped silently (#18031)', () => {
@@ -601,7 +612,7 @@ describe('manifest `permissions` in the ADR-0025 reading is reported, never drop
     const ql = makeQl([STRUCTURED_PACKAGE]);
     const { warns, logger } = capture();
 
-    const out = await syncAudienceBindingSuggestions(ql, undefined, logger);
+    const out = await syncAudienceBindingSuggestions(ql, logger);
 
     // The declaration really did produce nothing — the silence, not the
     // outcome, is what this card repairs.
@@ -622,7 +633,7 @@ describe('manifest `permissions` in the ADR-0025 reading is reported, never drop
     const ql = makeQl([LEGACY_PACKAGE]);
     const { warns, logger } = capture();
 
-    const out = await syncAudienceBindingSuggestions(ql, undefined, logger);
+    const out = await syncAudienceBindingSuggestions(ql, logger);
 
     expect(out.created).toBe(0);
     expect(warns).toHaveLength(1);
@@ -644,7 +655,7 @@ describe('manifest `permissions` in the ADR-0025 reading is reported, never drop
     }]);
     const { warns, logger } = capture();
 
-    const out = await syncAudienceBindingSuggestions(ql, undefined, logger);
+    const out = await syncAudienceBindingSuggestions(ql, logger);
 
     expect(out.created).toBe(1);
     expect(warns).toHaveLength(1);
@@ -657,16 +668,16 @@ describe('manifest `permissions` in the ADR-0025 reading is reported, never drop
     const ql = makeQl([STRUCTURED_PACKAGE]);
     const { warns, logger } = capture();
 
-    await syncAudienceBindingSuggestions(ql, undefined, logger);
-    await syncAudienceBindingSuggestions(ql, undefined, logger);
-    await syncAudienceBindingSuggestions(ql, undefined, logger);
+    await syncAudienceBindingSuggestions(ql, logger);
+    await syncAudienceBindingSuggestions(ql, logger);
+    await syncAudienceBindingSuggestions(ql, logger);
 
     expect(warns).toHaveLength(1);
 
     // A DIFFERENT engine is a different ledger — the dedupe is per kernel, not
     // per process, so a second tenant kernel is still told.
     const other = makeQl([STRUCTURED_PACKAGE]);
-    await syncAudienceBindingSuggestions(other, undefined, logger);
+    await syncAudienceBindingSuggestions(other, logger);
     expect(warns).toHaveLength(2);
   });
 
@@ -674,7 +685,7 @@ describe('manifest `permissions` in the ADR-0025 reading is reported, never drop
     const ql = makeQl([CRM_PACKAGE]);
     const { warns, logger } = capture();
 
-    const out = await syncAudienceBindingSuggestions(ql, undefined, logger);
+    const out = await syncAudienceBindingSuggestions(ql, logger);
 
     expect(out.created).toBe(1);
     expect(warns).toEqual([]);

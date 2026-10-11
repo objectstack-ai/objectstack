@@ -73,6 +73,7 @@ import {
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
+  readAcceptedEveryoneSets,
   type SuggestionDeps,
   type SuggestionListFilter,
 } from './suggested-audience-bindings.js';
@@ -1727,27 +1728,14 @@ export class SecurityPlugin implements Plugin {
     }
     // [ADR-0090 D5, ADR-0131 D3/D4] `everyone` declares the deployment's
     // baseline in its `permissionSets` — the binding the authorization resolver
-    // reads, in place of the junction rows the boot used to write. At
-    // `kernel:ready`, where that binding ran, because the high-privilege check
-    // reads the stack's declared capabilities (#18535) and they are all in by
-    // then; the check and its report are the binding's own.
+    // reads, in place of the junction rows the boot used to write — plus every
+    // package default a `manage_metadata` holder accepted (#22801 → A). At
+    // `kernel:ready`, because the high-privilege check reads the stack's
+    // declared capabilities (#18535) and they are all in by then; derived again
+    // on every accept, revoke, uninstall and package publish
+    // (`declareEveryone`).
     if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('kernel:ready', async () => {
-        try {
-          const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
-          const everyoneSets = this.baselinePermissionSets.filter((name) => {
-            const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
-            const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
-            if (offending) {
-              ctx.logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set: name, offending });
-            }
-            return !offending;
-          });
-          if (everyoneSets.length > 0) declareEveryoneBaseline(builtinRegistry, SECURITY_PLUGIN_ID, everyoneSets);
-        } catch (e) {
-          ctx.logger.warn('[security] everyone-anchor baseline declaration failed (non-fatal)', { error: (e as Error).message });
-        }
-      });
+      (ctx as any).hook('kernel:ready', () => this.declareEveryone(ctx.logger));
     }
 
     // [ADR-0131 D3/D4] Bind the security catalog read to this engine: every
@@ -2021,12 +2009,13 @@ export class SecurityPlugin implements Plugin {
     // a degraded start never exposes a half-initialised resolver.
     try {
       // [ADR-0090 D5/D9] Suggested audience bindings — shared deps for the
-      // list/confirm/dismiss surface (same set resolution as the middleware
-      // and the delegated-admin gate, so admin-ness can never drift).
+      // list/accept/dismiss surface: the posture the deployment authority is
+      // judged under, and the re-derivation an accept or a revoke runs.
       const suggestionDeps: SuggestionDeps = {
         ql,
         metadata,
-        resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
+        posture: () => this.tenancyPosture,
+        rederiveEveryone: () => this.declareEveryone(ctx.logger),
         logger: ctx.logger,
       };
       // Typed against the published contract so the registered surface cannot
@@ -2250,9 +2239,9 @@ export class SecurityPlugin implements Plugin {
           // report can never offer another organization's units.
           return this.delegatedAdminGate.describeDelegableScope(sets, callerContext);
         },
-        // [ADR-0090 D5/D9] Install-time suggestion surface: packages suggest
-        // audience-anchor bindings; a tenant admin confirms (the binding is
-        // written under the anchor + delegated-admin gates) or dismisses.
+        // [ADR-0090 D5/D9] Install-time suggestion surface: packages suggest a
+        // set for `everyone`; a `manage_metadata` holder accepts it once for
+        // the deployment (the `everyone` definition is re-derived) or dismisses.
         listAudienceBindingSuggestions: (callerContext?: any, filter?: SuggestionListFilter) =>
           listAudienceBindingSuggestions(suggestionDeps, callerContext, filter),
         confirmAudienceBindingSuggestion: (callerContext: any, id: string) =>
@@ -4563,20 +4552,16 @@ export class SecurityPlugin implements Plugin {
                 const applied = r.seeded + r.updated + r.unchanged;
                 // [ADR-0090 D5] A published set carrying the install-time
                 // suggestion flag surfaces (or retires) its pending
-                // suggestion row right away — same convergent sync as boot.
-                //
-                // [#8617] Scoped to the PUBLISHING organization when the draft
-                // carried one: the publish is that tenant's act, and the
-                // suggestion row it produces is that tenant's prompt. A
-                // package-door publish with no org scope is installation-wide,
-                // so it reconciles every organization — the same sweep as boot.
+                // suggestion row right away — same convergent sync as boot —
+                // and `everyone` is derived again, so an accepted set whose new
+                // body fails the derivation stops granting at once.
                 if (applied > 0 && (args.body as { isDefault?: boolean } | null)?.isDefault !== undefined) {
                   try {
-                    await reconcileAudienceBindingSuggestions(ql, this.metadata, ctx.logger, {
-                      posture: this.tenancyPosture,
-                      organizationId: args.organizationId ?? undefined,
-                    });
-                  } catch { /* non-fatal */ }
+                    await reconcileAudienceBindingSuggestions(ql, ctx.logger);
+                  } catch (e) {
+                    ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
+                  }
+                  await this.declareEveryone(ctx.logger);
                 }
                 // A publish that materialized nothing did NOT go live — report it
                 // as a failure with the reason so the package-door UI never shows
@@ -4608,6 +4593,9 @@ export class SecurityPlugin implements Plugin {
               'security.package-permissions',
               async (args: { packageId: string }) => {
                 const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger);
+                // [#22801 → A] The package's acceptance rows are gone with it;
+                // `everyone` is derived again without its sets.
+                await this.declareEveryone(ctx.logger);
                 return {
                   success: true,
                   removed: r.sets + r.positionBindings + r.userGrants + r.suggestions,
@@ -4695,23 +4683,12 @@ export class SecurityPlugin implements Plugin {
           ctx.logger.warn('[security] permission publish-materializer registration failed', { error: (e as Error).message });
         }
         // [ADR-0090 D5/D9] Reconcile the suggested-audience-binding surface:
-        // every declared `isDefault: true` set that is not already bound to
-        // its anchor becomes a PENDING suggestion row awaiting admin
-        // confirmation — never auto-bound. Runs after the anchors are seeded
-        // and after the baseline binding above, so the app's own fallback set
-        // (already bound) never nags.
-        //
-        // [#8617] ONE PASS PER ORGANIZATION under a walled posture. The rows
-        // are per-tenant by construction (ADR-0090 D5/D9: resolved when a
-        // TENANT admin confirms), so a single tenant-less pass wrote one
-        // organization-less row that every tenant read — and the first admin
-        // to answer answered for all of them, while the binding their confirm
-        // created existed only in their own organization. `single` posture is
-        // unchanged: exactly one organization-less pass.
+        // every declared `isDefault: true` set the `everyone` definition does
+        // not already name becomes a PENDING suggestion row awaiting a
+        // `manage_metadata` holder's decision — never auto-bound. ONE
+        // deployment-level pass, owned by the Default Organization (#22801 → A).
         try {
-          await reconcileAudienceBindingSuggestions(ql, this.metadata, ctx.logger, {
-            posture: this.tenancyPosture,
-          });
+          await reconcileAudienceBindingSuggestions(ql, ctx.logger);
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
         }
@@ -5064,6 +5041,58 @@ export class SecurityPlugin implements Plugin {
       if (typeof c === 'string' && c !== '') return c;
     }
     return undefined;
+  }
+
+  /**
+   * [ADR-0090 D5/D7, ADR-0131 D3, #22801 → A] Declare the `everyone` anchor's
+   * definition: the deployment's baseline (minus any set with high-privilege
+   * bits) plus every package default a `manage_metadata` holder accepted, as
+   * the derivation reads them (`readAcceptedEveryoneSets`). This plugin is the
+   * definition's only declarer, and no caller writes it: an acceptance changes
+   * the derivation's input, and this re-declares the result.
+   *
+   * Never silent. A withheld acceptance is reported with its reason — at
+   * `error` when the set now carries a bit the anchor forbids, since the record
+   * then says "accepted" while nothing is granted — and a derivation that
+   * could not read the record keeps the baseline alone and says so at `error`.
+   * The grants caches retire on the metadata epoch, as for any declaration.
+   */
+  private async declareEveryone(logger: PluginContext['logger']): Promise<void> {
+    const ql = this.ql;
+    try {
+      const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
+      const sets = this.baselinePermissionSets.filter((name) => {
+        const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
+        const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
+        if (offending) {
+          logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set: name, offending });
+        }
+        return !offending;
+      });
+      try {
+        const derived = await readAcceptedEveryoneSets(ql, this.metadata);
+        for (const name of derived.accepted) if (!sets.includes(name)) sets.push(name);
+        for (const w of derived.withheld) {
+          const line =
+            `[security] the everyone anchor does not carry the accepted set '${w.set}' (package '${w.packageId}'): ` +
+            `${w.reason}. Its acceptance stays recorded and grants nothing until the set is served again as ` +
+            'accepted; a manage_metadata holder can revoke it in Setup.';
+          if (w.forbidden) logger.error(line, undefined, { set: w.set, package: w.packageId });
+          else logger.warn(line, { set: w.set, package: w.packageId });
+        }
+      } catch (e) {
+        logger.error(
+          '[security] the accepted package defaults for the everyone anchor could NOT be read — every signed-in ' +
+            'member holds the baseline alone until the next derivation (boot, accept, revoke, uninstall or package ' +
+            'publish) reads them. Remedy: restore read access to sys_audience_binding_suggestion and restart.',
+          e as Error,
+        );
+      }
+      if (sets.length > 0) declareEveryoneBaseline((ql as { registry?: unknown })?.registry, SECURITY_PLUGIN_ID, sets);
+      this.epoch.bump('metadata');
+    } catch (e) {
+      logger.warn('[security] everyone-anchor declaration failed (non-fatal)', { error: (e as Error).message });
+    }
   }
 
   async destroy(): Promise<void> {
