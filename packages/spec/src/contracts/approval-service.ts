@@ -903,10 +903,14 @@ export interface IApprovalService {
        */
       q?: string;
       /**
-       * Page window. Honoured as an engine-level window when the filter is
-       * fully pushable; an `approverId` / status-array filter still
-       * post-filters in memory (bounded personal queues), where the window
-       * is applied after filtering.
+       * Page window, applied by the engine for every filter; a status array
+       * pushes down as `$in`. The two "who acts next" arms (`approverId`,
+       * `unstaffed`) first resolve to a bounded set of request ids: the
+       * approver index for `approverId`, the pending-request scan for
+       * `unstaffed`, each within the implementation's id window
+       * (`APPROVER_INDEX_CAP`, 10,000 in `@objectstack/plugin-approvals`,
+       * which warns when a probe reaches it). The window then applies
+       * engine-side to the rows in that set.
        */
       limit?: number;
       offset?: number;
