@@ -476,7 +476,7 @@ describe('importUnmanagedPackage — the verb', () => {
         const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: crmBody() }));
         expect(resolveThrownHttpError(err).code).toBe('RESOURCE_CONFLICT');
         expect(err.details.collisions).toEqual([
-            { type: 'view', name: 'crm_lead_open', heldBy: "shipped by the managed package 'com.example.other'" },
+            { type: 'view', name: 'crm_lead_open', heldBy: 'shipped by a managed package' },
         ]);
         expect(packages.size).toBe(0);
     });
@@ -498,6 +498,18 @@ describe('importUnmanagedPackage — the verb', () => {
         }));
         expect(resolveThrownHttpError(err).code).toBe('RESOURCE_CONFLICT');
         expect(writes).toEqual([]);
+    });
+
+    it('refuses a package built for another protocol major before the base exists (ADR-0087 D1)', async () => {
+        const { protocol, writes, packages } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: crmBody({ engines: { protocol: '^1' } }),
+        }));
+        const envelope = resolveThrownHttpError(err);
+        expect(envelope.status).toBe(422);
+        expect(envelope.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+        expect(writes).toEqual([]);
+        expect(packages.size).toBe(0);
     });
 
     it('refuses a request key its published declaration does not declare — 400, nothing written', async () => {

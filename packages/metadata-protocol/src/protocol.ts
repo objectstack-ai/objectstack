@@ -24620,13 +24620,13 @@ export class ObjectStackProtocolImplementation implements
         } catch (error) {
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
+        // The managed side asks the save door's own predicate and nothing else:
+        // it answers whether a package ships the name, not which one, and a
+        // second spelling of the registry lookup to name it would be the
+        // drift the predicate exists to prevent.
         for (const [key, slot] of wanted) {
             if (found.has(key) || !this.isArtifactBacked(slot.type, slot.name)) continue;
-            const owner = (this.lookupArtifactItem(slot.type, slot.name) as { _packageId?: unknown } | undefined)?._packageId;
-            found.set(key, {
-                ...slot,
-                heldBy: typeof owner === 'string' ? `shipped by the managed package '${owner}'` : 'shipped by a managed package',
-            });
+            found.set(key, { ...slot, heldBy: 'shipped by a managed package' });
         }
         return [...found.values()];
     }
