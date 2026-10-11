@@ -100,7 +100,7 @@ const POSITIONS = [
 ] as const;
 
 describe('1. a `{token}` at a screen\'s value slots is refused at every door', () => {
-  it.each(POSITIONS)('%s: `registerFlow` refuses it at `config.%s`, naming the envelope and what the client is served', (_what, configOf, at) => {
+  it.each(POSITIONS)('%s: `registerFlow` refuses it at its path, naming the envelope and what the client is served', (_what, configOf, at) => {
     let message = '';
     try {
       makeEngine().registerFlow('refused', screenFlow('refused', configOf('{account_id}')));
