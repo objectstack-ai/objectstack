@@ -49,6 +49,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { WebhookOutboxPlugin } from '@objectstack/plugin-webhooks';
 import { MemoryHttpOutbox, MessagingService } from '@objectstack/service-messaging';
@@ -89,7 +90,10 @@ class FixturePlugin implements Plugin {
         ctx.registerService('objectql', {
             registry: { listItems: () => [], getObject: () => undefined },
             async find() { return []; },
-            async findOne(_object: string, opts?: any) { return subscriptions.get(opts?.where?.id) ?? null; },
+            async findOne(object: string, opts?: any) {
+                assertEngineFindOnePredicate(object, opts);
+                return subscriptions.get(opts?.where?.id) ?? null;
+            },
             registerHook() { /* provenance stamp + headers gate + cleartext gate */ },
             unregisterHooksByPackage() { return 0; },
         });
