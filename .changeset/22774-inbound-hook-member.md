@@ -1,0 +1,13 @@
+---
+'@objectstack/trigger-api': minor
+---
+
+feat(trigger-api): the `trigger-api` service serves the inbound hook from a web-standard `Request` (`ITriggerApiService.handleInboundHook`), and the self-hosted route is found under `http.server` too (#22774)
+
+Clause-②: yes
+
+- **What is new.** Wherever `ApiTriggerPlugin` installs its `api` trigger, it now registers the `trigger-api` service and implements its optional `ITriggerApiService.handleInboundHook(request, hook)` member. That member is the inbound hook, `POST /api/v1/automation/hooks/:flowName/:hookId`, taking a `Request` and returning a `Response`, with no raw app, no Hono context and no `http.server`. A hosted tenant kernel owns no socket, so this is how the door reaches it. Its one caller is the runtime HTTP dispatcher's exact `POST /automation/hooks/:flowName/:hookId` domain, which lands separately. The flow name and the hook id come from `hook`, the route the caller matched, and are never parsed again from the URL. The body is read once, from the request itself, and verified as the sender's own bytes.
+- **One door, two faces.** The member and the self-hosted route run the same code: the same hook match, the same per-hook secret, read at that moment, the same constant-time verification of `x-objectstack-signature` (the timestamped form and the deprecated body-only form alike), done before anything is enqueued, and the same answer for every outcome. For the same request they answer the same status, the same `Content-Type: application/json` and the same bytes: `401 INVALID_SIGNATURE` for every post that does not verify, `503 SERVICE_UNAVAILABLE` when the hook's secret cannot be read or no queue service is registered, `400 INVALID_REQUEST` for a body that is not a JSON object, `503 ENQUEUE_FAILED`, or `202` with `{ accepted: true, messageId }`.
+- **No trigger, no service.** Where the automation service is absent, no trigger is installed, so the `trigger-api` slot stays empty (as no route is mounted). The member's caller then answers its typed absence. The boot `warn` line says so.
+- **The route is found under `http.server` too.** The plugin reads `http.server` first, then the deprecated `http-server` alias. A host that registers its server only as `http.server` (the runtime's `config.server` path) now gets the self-hosted route. One that registers a single server under both names still gets it once. Where the two names hold two servers, the route goes on the `http.server` one.
+- **The self-hosted route is otherwise unchanged.** Where it was mounted before, it answers the same status, headers and bytes for the same request, and the path is never mounted twice.
