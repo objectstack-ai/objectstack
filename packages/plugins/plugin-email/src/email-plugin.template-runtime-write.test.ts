@@ -17,6 +17,7 @@
 // `sys_email_template` row is read or written.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { EmailTemplateDefinitionSchema } from '@objectstack/spec/system';
 import { EmailServicePlugin } from './email-plugin.js';
 import { BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID } from './template-loader.js';
@@ -32,7 +33,8 @@ type AnyRecord = Record<string, any>;
 /**
  * The slice of ObjectQL the plugin touches, recording every call by object,
  * so "no `sys_email_template` read or write" is an assertion on calls rather
- * than on an empty table.
+ * than on an empty table. `update` routes through `assertEngineUpdateDispatch`
+ * so this double cannot accept a dispatch shape the real engine would refuse.
  */
 function fakeEngine(seed: AnyRecord[] = []) {
   const rows: AnyRecord[] = seed.map((r) => ({ ...r }));
@@ -42,10 +44,12 @@ function fakeEngine(seed: AnyRecord[] = []) {
     calls,
     registry: { listItems: (_type: string): AnyRecord[] => [] },
     async find(object: string) { calls.push({ verb: 'find', object }); return []; },
-    async findOne(object: string) { calls.push({ verb: 'findOne', object }); return null; },
     async insert(object: string, row: AnyRecord) { calls.push({ verb: 'insert', object }); return { id: row.id }; },
-    async update(object: string) { calls.push({ verb: 'update', object }); return { affected: 0 }; },
-    async delete(object: string) { calls.push({ verb: 'delete', object }); return { affected: 0 }; },
+    async update(object: string, data: AnyRecord, options?: AnyRecord) {
+      assertEngineUpdateDispatch(data, options);
+      calls.push({ verb: 'update', object });
+      return { affected: 0 };
+    },
     registerHook() { /* organization door */ },
     unregisterHooksByPackage() { return 0; },
   };

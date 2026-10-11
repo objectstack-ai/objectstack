@@ -29,6 +29,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { EmailServicePlugin } from './email-plugin.js';
@@ -37,13 +38,21 @@ import { EMAIL_TEMPLATE_DOOR_PACKAGE } from './email-template-door.js';
 type AnyRecord = Record<string, any>;
 type Hook = { event: string; handler: (ctx: AnyRecord) => unknown; packageId?: string };
 
-/** The slice of ObjectQL the organization door binds to: its hook table. */
+/**
+ * The slice of ObjectQL the organization door binds to: its hook table, plus
+ * an `update` that routes through `assertEngineUpdateDispatch` so this double
+ * cannot accept a dispatch shape the real engine would refuse.
+ */
 function fakeEngine() {
     const hooks: Hook[] = [];
     return {
         hooks,
         registry: { listItems: () => [] },
         async find() { return []; },
+        async update(_object: string, data: AnyRecord, options?: AnyRecord) {
+            assertEngineUpdateDispatch(data, options);
+            return { affected: 0 };
+        },
         registerHook(event: string, handler: Hook['handler'], options?: AnyRecord) {
             hooks.push({ event, handler, packageId: options?.packageId });
         },
