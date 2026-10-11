@@ -275,6 +275,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
+import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
@@ -401,9 +402,10 @@ export interface AdmittedValueShapeViolationTally {
  * in, and an in-engine audit hook depends on landing inside it.
  *
  * Four ordinary paths open such a unit around the dispatch:
- *   - the write door itself, when the object has a blocking metadata-bound
- *     `after*` hook whose `onError` is `abort` — so that abort rolls the row
- *     back as `HookSchema.onError` says (#22782, `opensAfterAbortUnit`);
+ *   - the write door itself, when the object has a metadata-bound `after*`
+ *     hook that can abort — blocking with `onError` `abort`, or carrying a
+ *     `condition` — so that abort rolls the row back as `HookSchema.onError`
+ *     says (#22782, #22856, `opensAfterAbortUnit`);
  *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
  *     dependent's own `afterDelete` fires inside the wrap the parent opened,
  *     and the parent's row removal can still refuse afterwards (#7413). The
@@ -4697,9 +4699,13 @@ export class ObjectQL implements IObjectQLEngine {
    * dispatch can ABORT and no unit is open, so the abort rolls back what
    * `HookSchema.onError` says: the row and every `ctx.api` write the chain made. "Can abort"
    * is a metadata-bound hook (`meta` — the only entries with a declared
-   * `onError`) on `event` for `object`, blocking (not `async`), `onError`
-   * `abort` (the default), automations not skipped. Hook count and order are
-   * untouched (#7413); only the boundary around them moves.
+   * `onError`) on `event` for `object`, automations not skipped, that either
+   * is blocking (not `async`) with `onError` `abort` (the default), or carries
+   * a `condition` (#22856): a condition that cannot be evaluated aborts the
+   * operation whatever `onError` says, and before an `async` hook detaches
+   * (#4775, `HookConditionError`), so it is read by the wrapper's own
+   * {@link declaredHookCondition}. Hook count and order are untouched (#7413);
+   * only the boundary around them moves.
    *
    * No unit — the pre-#22782 path — when one is open (ambient or threaded: the
    * caller's unit decides; a threaded handle whose unit has closed is not open,
@@ -4714,7 +4720,8 @@ export class ObjectQL implements IObjectQLEngine {
     if ((threaded !== undefined && !this.isClosedUnitHandle(threaded)) || this.txStore.getStore()?.transaction !== undefined) return false;
     if ((context as { skipAutomations?: unknown } | undefined)?.skipAutomations) return false;
     const aborting = (this.hooks.get(event) ?? []).some((entry) =>
-      entry.meta && !entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort' && hookMatchesObject(entry, object));
+      entry.meta && hookMatchesObject(entry, object)
+      && ((!entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort') || declaredHookCondition(entry.meta) !== undefined));
     if (!aborting) return false;
     const defaultDriver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     try {

@@ -184,9 +184,11 @@ describe('#22856 — an after* hook carrying a condition rolls its write back wh
   /** A key `case` does not declare: unevaluable on every event. */
   const undeclared = 'record.stauts == "x"';
   const refusal = (p: Promise<unknown>) => p.then(() => null, (e) => e);
+  /** `noteWriter` as a `log` hook: an `abort` one would open the unit by itself. */
+  const loggedNoteWriter = hook('note_writer', ['afterInsert'], (ctx) => ctx.api.object('note').insert({ name: 'from-hook' }), { priority: 10, onError: 'log' });
 
   it('onError: \'log\' with a condition that cannot be evaluated: refused, the row and the chain\'s ctx.api write absent', async () => {
-    const { engine, driver } = await makeEngine([noteWriter, hook('watch', ['afterInsert'], () => {}, { priority: 20, onError: 'log', condition: unbindable })]);
+    const { engine, driver } = await makeEngine([loggedNoteWriter, hook('watch', ['afterInsert'], () => {}, { priority: 20, onError: 'log', condition: unbindable })]);
     const err = await refusal(engine.insert('case', { name: 'c1' }));
     expect(err).toBeInstanceOf(HookConditionError);
     expect(err).toMatchObject({ hook: 'watch', event: 'afterInsert', reason: 'unevaluable' });
@@ -218,7 +220,7 @@ describe('#22856 — an after* hook carrying a condition rolls its write back wh
     await engine.insert('case', { name: 'c2' }); // FALSE: skipped
     expect(driver.rowsOf('case')).toMatchObject([{ name: 'c1' }, { name: 'c2' }]);
     expect(errors).toEqual(['[hook] handler failed (onError=log; suppressing)']);
-    expect([driver.begun.length, driver.rolledBack.length]).toEqual([2, 0]);
+    expect(driver.rolledBack).toHaveLength(0);
   });
 
   it('CONTROL an abort hook with that condition: refused, the row absent — as #22782 leaves it', async () => {
