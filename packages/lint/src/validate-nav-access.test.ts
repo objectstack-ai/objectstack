@@ -268,16 +268,6 @@ describe('validateNavAccess — gating keys are not read (#16065)', () => {
 });
 
 describe('[#22161] one-line verdicts — nav-object-ungranted', () => {
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    const converted = fired.filter((f) => f.rule === NAV_OBJECT_UNGRANTED);
-    // The coverage control first: the id fired, at the top level and nested.
-    expect(converted.length).toBeGreaterThan(0);
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence', () => {
     const findings = validateNavAccess({
       objects,
@@ -323,6 +313,16 @@ describe('[#22161] one-line verdicts — nav-object-ungranted', () => {
         apps: navApp([objectNav('nav_forecast', 'crm_forecast')]),
         permissions: [{ name: 'p', label: 'P', objects: { crm_forecast: { [bit]: true } } }],
       }), bit).toEqual([]);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === NAV_OBJECT_UNGRANTED);
+    // The coverage control first: the id fired, at the top level and nested.
+    expect(converted.length).toBeGreaterThan(0);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
   });
 });

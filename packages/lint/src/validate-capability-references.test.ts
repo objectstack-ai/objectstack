@@ -189,16 +189,6 @@ describe('validateCapabilityReferences (ADR-0066 ⑨)', () => {
 });
 
 describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    const converted = fired.filter((f) => f.rule === CAPABILITY_REFERENCE_UNKNOWN);
-    // The coverage control first: the id fired, at more than one position.
-    expect(converted.length).toBeGreaterThan(1);
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence', () => {
     const findings = validateCapabilityReferences({
       objects: [{ name: 'sys_license', requiredPermissions: ['mange_users'] }],
@@ -246,5 +236,15 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
     expect(validateCapabilityReferencesUnrecorded({
       objects: [{ name: 'inv_invoice', requiredPermissions: ['manage_platform_settings'] }],
     }), 'built-in').toEqual([]);
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === CAPABILITY_REFERENCE_UNKNOWN);
+    // The coverage control first: the id fired, at more than one position.
+    expect(converted.length).toBeGreaterThan(1);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

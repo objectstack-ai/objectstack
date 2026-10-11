@@ -694,32 +694,6 @@ describe('[#22161] one-line verdicts — action-name-undefined', () => {
     }],
   });
 
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    const converted = fired.filter((f) => f.rule === ACTION_NAME_UNDEFINED);
-    // The coverage control first: every surface fired, and all three
-    // related-list arms (defined elsewhere, defined nowhere, placed nowhere).
-    for (const surface of [
-      'Bulk-action menu',
-      'Row-action menu',
-      'Aggregate bulk action',
-      'Quick-actions bar',
-      'Alert call-to-action',
-      'Page-header actions',
-      'Navigation action item',
-      'Navigation deep-link auto-run',
-    ]) {
-      expect(converted.some((f) => f.message.startsWith(`${surface} names action "`)), surface).toBe(true);
-    }
-    expect(converted.some((f) => f.message.includes('(defined only on object'))).toBe(true);
-    expect(converted.some((f) => f.message.includes('(defined nowhere in this stack)'))).toBe(true);
-    expect(converted.some((f) => f.message.includes('which declares no `locations`'))).toBe(true);
-    expect(converted.some((f) => f.message.includes('include none a related list draws'))).toBe(true);
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence per arm', () => {
     const findings = validateActionNameRefs({
       ...relatedListStack(['crm_merge', 'crm_lgo_call', 'crm_score', 'crm_pin']),
@@ -734,9 +708,8 @@ describe('[#22161] one-line verdicts — action-name-undefined', () => {
         + 'nowhere in this stack), so the list draws no button for it. Did you mean "crm_log_call"?',
       'Related-list actions names action "crm_score" of "crm_contact", which declares no `locations`, so the list '
         + 'draws no button for it.',
-      'Related-list actions names action "crm_pin" of "crm_contact", whose `locations` (record_header, '
-        + 'record_more, record_section (and 1 more)) include none a related list draws, so the list draws no '
-        + 'button for it.',
+      'Related-list actions names action "crm_pin" of "crm_contact", which is placed at no location a related '
+        + 'list draws, so the list draws no button for it.',
     ]);
   });
 
@@ -802,6 +775,32 @@ describe('[#22161] one-line verdicts — action-name-undefined', () => {
     expect(drawn.length).toBeGreaterThan(0);
     for (const location of ACTION_LOCATIONS) {
       expect(text.includes(`\`${location}\``), location).toBe(drawn.includes(location));
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === ACTION_NAME_UNDEFINED);
+    // The coverage control first: every surface fired, and all three
+    // related-list arms (defined elsewhere, defined nowhere, placed nowhere).
+    for (const surface of [
+      'Bulk-action menu',
+      'Row-action menu',
+      'Aggregate bulk action',
+      'Quick-actions bar',
+      'Alert call-to-action',
+      'Page-header actions',
+      'Navigation action item',
+      'Navigation deep-link auto-run',
+    ]) {
+      expect(converted.some((f) => f.message.startsWith(`${surface} names action "`)), surface).toBe(true);
+    }
+    expect(converted.some((f) => f.message.includes('(defined only on object'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('(defined nowhere in this stack)'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('which declares no `locations`'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('placed at no location a related list draws'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
   });
 });

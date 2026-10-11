@@ -247,19 +247,6 @@ describe('validateMappingTargetFields', () => {
 });
 
 describe('[#22161] one-line verdicts — mapping-target-field-unknown', () => {
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    const converted = fired.filter((f) => f.rule === MAPPING_TARGET_FIELD_UNKNOWN);
-    // The coverage control first: every arm fired — a name that is no field,
-    // an undeclared part, a dotted target on a scalar field and on a reference
-    // field, and a part colliding with the whole field.
-    const arms = ['names no field of', 'names no part of', 'has no parts (only', 'cannot traverse', 'mapped both whole'];
-    for (const arm of arms) expect(converted.some((f) => f.message.includes(arm)), arm).toBe(true);
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence per arm', () => {
     const findings = validateMappingTargetFields({
       objects: [{ ...contact, fields: { ...contact.fields, account: { type: 'lookup', reference: 'crm_account' } } }],
@@ -308,5 +295,18 @@ describe('[#22161] one-line verdicts — mapping-target-field-unknown', () => {
       objects: [contact],
       mappings: [mapping(['id', 'owner_id', 'organization_id'].map((target) => ({ source: target, target })))],
     })).toEqual([]);
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === MAPPING_TARGET_FIELD_UNKNOWN);
+    // The coverage control first: every arm fired — a name that is no field,
+    // an undeclared part, a dotted target on a scalar field and on a reference
+    // field, and a part colliding with the whole field.
+    const arms = ['names no field of', 'names no part of', 'has no parts (only', 'cannot traverse', 'mapped both whole'];
+    for (const arm of arms) expect(converted.some((f) => f.message.includes(arm)), arm).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

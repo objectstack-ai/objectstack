@@ -198,8 +198,7 @@ function actionOwners(stack: AnyRec, name: string): string[] {
 
 /**
  * At most three entries of a list, then `(and N more)` — so a verdict that
- * names where an id is defined, or what an action declares, stays one line
- * however long the list grows.
+ * names where an id is defined stays one line however many places define it.
  */
 function atMostThree(items: readonly string[], separator: string): string {
   const shown = items.slice(0, 3).join(separator);
@@ -423,8 +422,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
           `Related-list actions names action "${id}" of "${child}", ` +
           (declared === undefined
             ? 'which declares no `locations`'
-            : `whose \`locations\` (${declared.length > 0 ? atMostThree(declared, ', ') : 'empty'}) include none ` +
-              'a related list draws') +
+            : 'which is placed at no location a related list draws') +
           ', so the list draws no button for it.',
         hint:
           `Add one of ${RELATED_LIST_PLACEMENTS} to the \`locations\` of "${id}" on "${child}", ` +

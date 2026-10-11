@@ -92,17 +92,6 @@ describe('validateNavObjectServability', () => {
 });
 
 describe('[#22161] one-line verdicts — nav-object-unservable', () => {
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    const converted = fired.filter((f) => f.rule === NAV_OBJECT_UNSERVABLE);
-    // The coverage control first: both arms fired.
-    expect(converted.some((f) => f.message.includes('is false'))).toBe(true);
-    expect(converted.some((f) => f.message.includes('lacks `list`'))).toBe(true);
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence per arm', () => {
     const findings = validateNavObjectServability(
       stackWith({ navigation: [objectNav('nav_tokens', 'crm_secret_token'), objectNav('nav_audit', 'crm_audit_row')] }),
@@ -138,5 +127,16 @@ describe('[#22161] one-line verdicts — nav-object-unservable', () => {
     const shared = (rule: string) => explainRule(rule)!.paragraphs.find((p) => p.includes('independent conditions'));
     expect(shared(NAV_OBJECT_UNSERVABLE)).toBeDefined();
     expect(shared(NAV_OBJECT_UNSERVABLE)).toBe(shared(NAV_OBJECT_UNGRANTED));
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === NAV_OBJECT_UNSERVABLE);
+    // The coverage control first: both arms fired.
+    expect(converted.some((f) => f.message.includes('is false'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('lacks `list`'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

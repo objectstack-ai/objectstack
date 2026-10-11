@@ -842,30 +842,6 @@ describe('[#22161] one-line verdicts — object-reference-unregistered-platform'
     apps: [{ name: 'a', navigation: [{ id: 'n', type: 'object', objectName: name, requiresObject: name }] }],
   });
 
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    validateObjectReferences(everySite('sys_approval_process'));
-    const converted = fired.filter((f) => f.rule === OBJECT_REFERENCE_UNREGISTERED_PLATFORM);
-    // The coverage control first: every site fired (the case just above, run
-    // through the recorder like every case in this file).
-    for (const subject of [
-      'lookup target',
-      'master_detail target',
-      'view container object',
-      'record-picker target',
-      'field-backed param object',
-      'filter options source',
-      'dataset base object',
-      'capability gate object',
-      'navigation target',
-    ]) {
-      expect(converted.some((f) => f.message.startsWith(`${subject} "`)), subject).toBe(true);
-    }
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence, with the nearest platform name when one is close', () => {
     const findings = validateObjectReferencesUnrecorded({
       ...baseStack(),
@@ -896,5 +872,29 @@ describe('[#22161] one-line verdicts — object-reference-unregistered-platform'
     }
     // The prefixes it names are the ones the ladder reads.
     expect(text).toContain(PLATFORM_OBJECT_PREFIXES.map((p) => `\`${p}\``).join(', '));
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    validateObjectReferences(everySite('sys_approval_process'));
+    const converted = fired.filter((f) => f.rule === OBJECT_REFERENCE_UNREGISTERED_PLATFORM);
+    // The coverage control first: every site fired (the case just above, run
+    // through the recorder like every case in this file).
+    for (const subject of [
+      'lookup target',
+      'master_detail target',
+      'view container object',
+      'record-picker target',
+      'field-backed param object',
+      'filter options source',
+      'dataset base object',
+      'capability gate object',
+      'navigation target',
+    ]) {
+      expect(converted.some((f) => f.message.startsWith(`${subject} "`)), subject).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

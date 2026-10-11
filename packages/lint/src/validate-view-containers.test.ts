@@ -139,18 +139,6 @@ describe('[#22161] one-line verdicts — view-container-shape', () => {
   const viewItem = { name: 'task.pipeline', object: 'task', viewKind: 'list', config: { type: 'kanban', columns: ['title'] } };
   const flat = { name: 'all_tasks', type: 'grid', data: { provider: 'object', object: 'task' }, columns: ['title'] };
 
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    const converted = fired.filter((f) => f.rule === VIEW_CONTAINER_SHAPE);
-    // The coverage control first: all four arms fired.
-    for (const arm of ['A ViewItem record', '`viewItems` is', 'Flat list-view object', 'View container defines no views']) {
-      expect(converted.some((f) => f.message.startsWith(arm)), arm).toBe(true);
-    }
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence per arm', () => {
     const findings = validateViewContainers({ views: [viewItem, flat, { listViews: {} }] });
     expect(findings.map((f) => f.message)).toEqual([
@@ -191,6 +179,18 @@ describe('[#22161] one-line verdicts — view-container-shape', () => {
       '`PUT /api/v1/meta/view`',
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === VIEW_CONTAINER_SHAPE);
+    // The coverage control first: all four arms fired.
+    for (const arm of ['A ViewItem record', '`viewItems` is', 'Flat list-view object', 'View container defines no views']) {
+      expect(converted.some((f) => f.message.startsWith(arm)), arm).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
   });
 });

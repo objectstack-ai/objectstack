@@ -158,21 +158,6 @@ describe('robustness', () => {
 });
 
 describe('[#22161] one-line verdicts — nav-target-unresolved', () => {
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    const converted = fired.filter((f) => f.rule === NAV_TARGET_UNRESOLVED);
-    // The coverage control first: all three target types fired, with and
-    // without the empty-collection clause.
-    for (const noun of ['page', 'report', 'dashboard']) {
-      expect(converted.some((f) => f.message.startsWith(`Navigation targets ${noun} `)), noun).toBe(true);
-    }
-    expect(converted.some((f) => f.message.includes('at all'))).toBe(true);
-    expect(converted.some((f) => !f.message.includes('at all'))).toBe(true);
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence per arm', () => {
     const empty = validateNavTargetRefs(app([{ id: 'n1', type: 'dashboard', dashboardName: 'nope' }]));
     const declared = validateNavTargetRefs({
@@ -217,6 +202,21 @@ describe('[#22161] one-line verdicts — nav-target-unresolved', () => {
       for (const named of [type, prop, collection]) expect(text, named).toContain(`\`${named}\``);
       expect(validateNavTargetRefsUnrecorded(app([{ id: 'x', type, [prop]: 'nope' }])), type)
         .toHaveLength(1);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === NAV_TARGET_UNRESOLVED);
+    // The coverage control first: all three target types fired, with and
+    // without the empty-collection clause.
+    for (const noun of ['page', 'report', 'dashboard']) {
+      expect(converted.some((f) => f.message.startsWith(`Navigation targets ${noun} `)), noun).toBe(true);
+    }
+    expect(converted.some((f) => f.message.includes('at all'))).toBe(true);
+    expect(converted.some((f) => !f.message.includes('at all'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
   });
 });

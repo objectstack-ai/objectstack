@@ -685,27 +685,6 @@ describe('validateObjectFieldRefs — the runtime publish door judges the new po
 });
 
 describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    const converted = fired.filter((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
-    // The coverage control first: every position fired, each by its path.
-    for (const position of [
-      '.highlightFields[',
-      '.compactLayout[',
-      '.publicSharing.redactFields[',
-      '.indexes[',
-      '.relatedListColumns[',
-      '.lookupColumns[',
-      '.lookupFilters[',
-      '.dependsOn[',
-    ]) {
-      expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
-    }
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as the shared field-path sentence, a dotted path\'s hop verdicts included', () => {
     const findings = validateObjectFieldRefs({
       objects: [
@@ -755,6 +734,27 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       '`searchable-field-unknown`',
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
+    // The coverage control first: every position fired, each by its path.
+    for (const position of [
+      '.highlightFields[',
+      '.compactLayout[',
+      '.publicSharing.redactFields[',
+      '.indexes[',
+      '.relatedListColumns[',
+      '.lookupColumns[',
+      '.lookupFilters[',
+      '.dependsOn[',
+    ]) {
+      expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
   });
 });

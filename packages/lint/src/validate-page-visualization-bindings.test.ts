@@ -510,34 +510,6 @@ describe('suite wiring', () => {
 });
 
 describe('[#22161] one-line verdicts — page/visualization-without-binding', () => {
-  it('every verdict the cases above fired is one line of at most 200 characters', () => {
-    // Every visualization with a deriver, leading and not, on the dateless
-    // object, recorded like every case above.
-    const VIZ = OBJECTUI_DERIVATION_PREDICATES.map((p) => p.visualization);
-    validatePageVisualizationBindings({
-      objects: [DATELESS],
-      pages: [
-        ...VIZ.map((viz) => listPage(`note_${viz}`, { source: 'crm_note', appearance: { allowedVisualizations: [viz] } })),
-        listPage('note_every', { source: 'crm_note', appearance: { allowedVisualizations: ['grid', ...VIZ] } }),
-      ],
-    });
-    const converted = fired.filter((f) => f.rule === PAGE_VISUALIZATION_WITHOUT_BINDING);
-    // The coverage control first: both severities, both remedy arms, and
-    // every visualization with a deriver.
-    expect(converted.some((f) => f.severity === 'error')).toBe(true);
-    expect(converted.some((f) => f.severity === 'warning')).toBe(true);
-    expect(converted.some((f) => f.message.includes('no `sourceView` supplies it'))).toBe(true);
-    expect(converted.some((f) => f.message.includes('has no `kanban:` block'))).toBe(true);
-    for (const viz of VIZ) {
-      expect(converted.some((f) => f.message.startsWith(`'${viz}' leads `)), viz).toBe(true);
-      expect(converted.some((f) => f.message.startsWith(`'${viz}' is in `)), viz).toBe(true);
-    }
-    for (const f of converted) {
-      expect(f.message, f.rule).not.toContain('\n');
-      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
-    }
-  });
-
   it('reads as one sentence per arm', () => {
     const findings = validatePageVisualizationBindings({
       objects: [DATELESS],
@@ -590,5 +562,33 @@ describe('[#22161] one-line verdicts — page/visualization-without-binding', ()
     }
     expect(text).toContain('two distinct date / datetime / time fields, a start and an end');
     expect(text).toContain('a view\'s `calendar:` block also binds the timeline');
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    // Every visualization with a deriver, leading and not, on the dateless
+    // object, recorded like every case above.
+    const VIZ = OBJECTUI_DERIVATION_PREDICATES.map((p) => p.visualization);
+    validatePageVisualizationBindings({
+      objects: [DATELESS],
+      pages: [
+        ...VIZ.map((viz) => listPage(`note_${viz}`, { source: 'crm_note', appearance: { allowedVisualizations: [viz] } })),
+        listPage('note_every', { source: 'crm_note', appearance: { allowedVisualizations: ['grid', ...VIZ] } }),
+      ],
+    });
+    const converted = fired.filter((f) => f.rule === PAGE_VISUALIZATION_WITHOUT_BINDING);
+    // The coverage control first: both severities, both remedy arms, and
+    // every visualization with a deriver.
+    expect(converted.some((f) => f.severity === 'error')).toBe(true);
+    expect(converted.some((f) => f.severity === 'warning')).toBe(true);
+    expect(converted.some((f) => f.message.includes('no `sourceView` supplies it'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('has no `kanban:` block'))).toBe(true);
+    for (const viz of VIZ) {
+      expect(converted.some((f) => f.message.startsWith(`'${viz}' leads `)), viz).toBe(true);
+      expect(converted.some((f) => f.message.startsWith(`'${viz}' is in `)), viz).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });
