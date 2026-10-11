@@ -14,10 +14,11 @@
 
 import { securityCatalogReaderOf } from '@objectstack/core';
 
-export async function catalogPermissionSet(
-  ql: unknown,
-  name: string,
-): Promise<Readonly<Record<string, unknown>> | undefined> {
+/**
+ * Typed `any`, as the `ql.findOne` it replaces at every call site was: a fixture
+ * asserts the definition exists and then reads its fields.
+ */
+export async function catalogPermissionSet(ql: unknown, name: string): Promise<any> {
   const reader = securityCatalogReaderOf(ql);
   if (!reader) throw new Error('no security catalog is bound to this engine — is the SecurityPlugin booted?');
   return (await reader.resolve('permission', name))?.definition;
