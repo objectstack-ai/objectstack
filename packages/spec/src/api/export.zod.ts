@@ -365,10 +365,11 @@ export const ImportRowResultSchema = lazySchema(() => z.object({
   code: z.string().optional().describe('Error code (failed rows)'),
   error: z.string().optional().describe('Human-readable error message (failed rows)'),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(
-    'Findings this deployment ADMITS rather than rejects (ADR-0104 value shapes under a warn-first posture), '
-    + 'in the same `{ field, code, message }` shape the validate verdict carries. Set only on a dry-run row the '
-    + 'verdict accepted: the row is `ok` because the write would store it and log the same complaint. A '
-    + 'committed row never carries it, since the write path has no channel to report admitted findings on.',
+    'Findings this deployment ADMITS rather than rejects, copied verbatim from the validate verdict\'s row '
+    + '`warnings`: ADR-0104 value shapes under a warn-first posture, then the hits of advisory validation rules '
+    + '(`severity: \'warning\'` or `\'info\'`, each naming its `rule` and `severity`). Set only on a dry-run row '
+    + 'the verdict accepted: the row is `ok` because the write would store it. A committed row does not carry '
+    + 'it: the import does not copy a write answer\'s `warnings` onto the row.',
   ),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per '

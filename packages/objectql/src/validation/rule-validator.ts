@@ -234,6 +234,7 @@ import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTravers
 import type { EvalPermissions, RelationshipTraversalAnalysis } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, referenceTargetOf, resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import type { ValidationAdvisoryEvent } from '@objectstack/spec/data';
 import { recordAdvisoryHit } from '@objectstack/core';
 // [#8215] The canonical spelling of the primary-key column — the sanctioned use
 // of this registry ("what is the canonical spelling of the column that plays
@@ -3244,20 +3245,33 @@ function writesOnlyInjectedSystemColumns(
  *
  * Throws `ValidationError` (the same envelope `validateRecord` uses, so REST
  * surfaces a single `400 VALIDATION_FAILED`) when one or more `error`-severity
- * rules are violated. Returns void otherwise.
+ * rules are violated. Otherwise returns this evaluation's ADVISORY hits (#22726)
+ * — every `warning` / `info` rule whose verdict was "violated", in evaluation
+ * order, as `ValidationAdvisoryEvent`s — or `[]` when there is none.
+ *
+ * Returning the hits changes nothing about how they are reported here: each is
+ * still offered to the #13889 seed / boot aggregation and, when no scope takes
+ * it, logged per write, exactly as before. The return value is the write
+ * answer's channel — the engine hands it to its caller's
+ * `onValidationAdvisory` listener (see {@link emitValidationAdvisories}) and
+ * the validate-only preview appends it to the row's `warnings`. A rule that
+ * could not be EVALUATED (`constraint.reason: 'unevaluable'`) is not a hit: it
+ * has no verdict, and its text ("could not be evaluated … write rejected") is a
+ * fault report for the operator, false for a write an advisory never blocks —
+ * so it stays in the log only.
  */
 export function evaluateValidationRules(
   objectSchema: { validations?: unknown[]; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   mode: Mode,
   opts: EvaluateRulesOptions = {},
-): void {
-  if (!data) return;
+): ValidationAdvisoryEvent[] {
+  if (!data) return [];
   const rules = objectSchema?.validations;
   const hasRules = Array.isArray(rules) && rules.length > 0;
   const fields = objectSchema?.fields;
   const hasFieldRules = fieldsNeedPrior(fields);
-  if (!hasRules && !hasFieldRules) return;
+  if (!hasRules && !hasFieldRules) return [];
 
   const priorRecord = opts.previous ?? undefined;
   // Is the record's persisted state actually in hand? On insert there is
@@ -3289,6 +3303,8 @@ export function evaluateValidationRules(
   const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages, related: opts.related };
 
   const errors: FieldValidationError[] = [];
+  // [#22726] The advisory hits this evaluation returns — see the doc above.
+  const advisories: ValidationAdvisoryEvent[] = [];
 
   // Field-level conditional rules (B2): a field whose `requiredWhen`
   // predicate is TRUE over the merged record must have a value — enforced
@@ -3421,6 +3437,9 @@ export function evaluateValidationRules(
     if (!violation) continue;
 
     const severity = rule.severity ?? 'error';
+    if (severity !== 'error' && violation.constraint?.reason !== 'unevaluable') {
+      advisories.push(advisoryEvent(rule, severity, violation));
+    }
     if (severity === 'error') {
       errors.push(violation);
     } else if (
@@ -3446,6 +3465,55 @@ export function evaluateValidationRules(
   }
 
   if (errors.length > 0) throw new ValidationError(errors);
+  return advisories;
+}
+
+/**
+ * [#22726] One advisory hit as the event the write reports it through. Every
+ * member is copied from the evaluation's own verdict — the violation the rule
+ * produced and the rule's declared `name` / `severity` — so the event says
+ * exactly what the per-write log line says, in its parts.
+ */
+function advisoryEvent(
+  rule: BaseRule,
+  severity: 'warning' | 'info',
+  violation: FieldValidationError,
+): ValidationAdvisoryEvent {
+  return {
+    rule: String(rule.name ?? '(unnamed)'),
+    severity,
+    field: violation.field,
+    code: violation.code,
+    message: violation.message,
+  };
+}
+
+/**
+ * [#22726] Hand one evaluation's advisory hits to a write's
+ * `onValidationAdvisory` listener (`WriteObservabilityOptions`), one call per
+ * hit. The engine wraps each `evaluateValidationRules` call on its write paths
+ * in this, with the options of THAT write — which is what keeps a nested
+ * write's hits out of the outer write's answer: a hook's own write carries its
+ * own options.
+ *
+ * No listener ⇒ nothing happens (the hits were already logged or aggregated by
+ * the evaluator). A listener that throws never breaks the write: it is logged
+ * and ignored, as `onFieldsDropped` is.
+ */
+export function emitValidationAdvisories(
+  listener: ((event: ValidationAdvisoryEvent) => void) | undefined,
+  advisories: readonly ValidationAdvisoryEvent[],
+  logger?: EvaluateRulesOptions['logger'],
+  object?: string,
+): void {
+  if (typeof listener !== 'function') return;
+  for (const event of advisories) {
+    try {
+      listener(event);
+    } catch (err) {
+      logger?.warn?.('onValidationAdvisory listener threw — ignored', { object, rule: event.rule, error: err });
+    }
+  }
 }
 
 /**

@@ -990,6 +990,11 @@
     "data/TursoConfig:syncUrl",
     "data/TursoConfig:timeout [RETIRED]",
     "data/TursoConfig:timeoutMs",
-    "data/TursoConfig:url"
+    "data/TursoConfig:url",
+    "data/ValidationAdvisoryEvent:code",
+    "data/ValidationAdvisoryEvent:field",
+    "data/ValidationAdvisoryEvent:message",
+    "data/ValidationAdvisoryEvent:rule",
+    "data/ValidationAdvisoryEvent:severity"
   ]
 }

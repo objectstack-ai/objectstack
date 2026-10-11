@@ -321,6 +321,8 @@
     "TursoTransportModeSchema": "data/TursoTransportMode",
     "UniqueScope": "data/UniqueScope",
     "UniqueScopeSchema": "data/UniqueScope",
+    "ValidationAdvisoryEvent": "data/ValidationAdvisoryEvent",
+    "ValidationAdvisoryEventSchema": "data/ValidationAdvisoryEvent",
     "ValidationRule": "data/ValidationRule",
     "ValidationRuleSchema": "data/ValidationRule"
   },
