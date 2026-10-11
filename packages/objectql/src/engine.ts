@@ -4702,14 +4702,16 @@ export class ObjectQL implements IObjectQLEngine {
    * untouched (#7413); only the boundary around them moves.
    *
    * No unit — the pre-#22782 path — when one is open (ambient or threaded: the
-   * caller's unit decides), when `object` is off the default driver
+   * caller's unit decides; a threaded handle whose unit has closed is not open,
+   * #22855 `isClosedUnitHandle`), when `object` is off the default driver
    * (`transaction()` covers that one alone and would refuse the write), or when
    * that driver has no transactions (ADR-0119 D1; asking would only warn).
    * `SummaryRecomputeError` means "the records WERE written": it is rethrown
    * after the commit, never through the rollback.
    */
   private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
-    if (context?.transaction !== undefined || this.txStore.getStore()?.transaction !== undefined) return false;
+    const threaded = context?.transaction;
+    if ((threaded !== undefined && !this.isClosedUnitHandle(threaded)) || this.txStore.getStore()?.transaction !== undefined) return false;
     if ((context as { skipAutomations?: unknown } | undefined)?.skipAutomations) return false;
     const aborting = (this.hooks.get(event) ?? []).some((entry) =>
       entry.meta && !entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort' && hookMatchesObject(entry, object));
@@ -19571,8 +19573,9 @@ export class ObjectQL implements IObjectQLEngine {
    * query already complete"). Emptying the entry ends the ambient way;
    * {@link openedUnits} ends the explicit one, because
    * {@link buildDriverOptions} treats a closed unit's handle as absent. The
-   * work then runs unenrolled, on its own connection. (`opensAfterAbortUnit`
-   * still reads the raw context handle, so such a write opens no door unit.)
+   * work then runs unenrolled, on its own connection, as outside any unit:
+   * `opensAfterAbortUnit` reads the handle the same way, so such a write opens
+   * the door's own unit when its hooks call for one.
    *
    * A primitive handle cannot key {@link openedUnits}, so it keeps only the
    * ambient half.
