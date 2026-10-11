@@ -215,9 +215,16 @@ describe('the permission-set clone door — refusals', () => {
         await refusal({}, PACKAGED.name, { name: PACKAGED.name, label: 'X' }, 409, 'RESOURCE_CONFLICT');
     });
 
-    it('a name failing the metadata name rule is 400', async () => {
-        await refusal({}, PACKAGED.name, { name: 'My Copy', label: 'X' }, 400, 'VALIDATION_FAILED');
+    it('a name failing the metadata name rule is 400, and the message states the rule the schema enforces', async () => {
+        const res = await refusal({}, PACKAGED.name, { name: 'My Copy', label: 'X' }, 400, 'VALIDATION_FAILED');
         await refusal({}, PACKAGED.name, { name: '9copy', label: 'X' }, 400, 'VALIDATION_FAILED');
+        // `SnakeCaseIdentifierSchema` is `^[a-z][a-z0-9_]*$`: a leading
+        // underscore is refused, so the message must not offer one.
+        await refusal({}, PACKAGED.name, { name: '_copy', label: 'X' }, 400, 'VALIDATION_FAILED');
+        const message = String((res as any).response.body.error.message);
+        expect(message).toContain('start with a lowercase letter');
+        expect(message).not.toContain('underscore)');
+        expect(message).not.toMatch(/letter or underscore/);
     });
 
     it('the body is closed and both keys are required — 400', async () => {

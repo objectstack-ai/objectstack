@@ -183,7 +183,7 @@ function readCloneBody(body: unknown): { name: string; label: string } {
     const nameRule = SnakeCaseIdentifierSchema.safeParse(name);
     if (!nameRule.success) {
         throw validationFailure(
-            `'${name}' is not a valid permission-set name — use lowercase snake_case (letters, digits and underscores, starting with a letter or underscore).`,
+            `'${name}' is not a valid permission-set name — use lowercase snake_case: start with a lowercase letter, then lowercase letters, digits and underscores, at least 2 characters (e.g. 'sales_rep_copy').`,
             [{ field: 'name', code: 'invalid_string', message: nameRule.error.issues[0]?.message ?? 'not snake_case' }],
         );
     }
@@ -315,10 +315,14 @@ export async function handlePermissionSetCloneWrite(
         // environment-wide, as every `/meta` write does. `parentVersion: null`
         // is `If-None-Match: *` — save only where no row exists — so a row
         // written under the target name after the catalog read is refused, not
-        // overwritten. The save asks the one authoring rule every
-        // definition-write door asks (`tenantAuthoredWriteRefusal`): the copy
-        // carries no package envelope (the drop above), so it is admitted —
-        // and would be refused, loudly, if a provenance key ever rode across.
+        // overwritten.
+        //
+        // ⚠️ The save is NOT what keeps the source's provenance off the copy.
+        // Its authoring rule (`tenantAuthoredWriteRefusal`) judges `flow`
+        // writes only and answers null for `permission`, and its provenance
+        // strip removes stamps silently. The guarantee is the drop above —
+        // {@link PERMISSION_SET_CLONE_DROPPED_KEYS} — and the unit pin that
+        // asserts every dropped key absent from the saved item.
         await protocol.saveMetaItem({
             type: PERMISSION_METADATA_TYPE,
             name: target.name,
