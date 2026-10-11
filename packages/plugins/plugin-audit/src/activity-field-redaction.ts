@@ -48,6 +48,15 @@
  *    is kept. Dropped, not masked, for the precedent's reasons: the contract
  *    publishes WHICH fields are masked, not the masked value, and dropping
  *    discloses strictly less.
+ *  - `metadata.kind` ({@link ACTIVITY_KIND_KEY}, ADR-0052 §5): on a row the
+ *    mirror wrote, the kind is DERIVED from parent fields, so it is judged like
+ *    a text. The mirror stamps `'milestone'` when a declared `activityMilestones`
+ *    entry fired, which is the fact that a watched field entered its declared
+ *    value; the declaration names the watched fields, and a reader not served
+ *    one of them is served the row without the kind. A reader served them keeps
+ *    it: it is a classification, and every key of it is one the reader may
+ *    read anyway. A kind on a row someone else wrote is the author's, served as
+ *    written, like its text.
  *  - The declaration itself is bookkeeping and is never served to a reader: it
  *    names fields, and which field names a reader may see is the metadata
  *    plane's question, not this one's.
@@ -142,10 +151,30 @@ const SYSTEM_CTX = { isSystem: true } as const;
  */
 export const ACTIVITY_TEXT_SOURCES_KEY = 'text_sources';
 
+/**
+ * [#22771] The `metadata` key a row's DOMAIN kind rides in. ADR-0052 §5: "`type`
+ * stays domain-NEUTRAL … Domain kind rides in `metadata.kind`." So a fired
+ * milestone keeps the `type` its declaration names (`completed`, or `updated`
+ * when it names none) and says what it is here, which is how a reader tells a
+ * "Case resolved" milestone from a finished task. Written by `audit-writers.ts`,
+ * judged here: one name, imported by both halves.
+ */
+export const ACTIVITY_KIND_KEY = 'kind';
+
+/** [#22771] The kind the CRUD mirror stamps on a row a declared `activityMilestones` entry fired (ADR-0052 §5b.2). */
+export const ACTIVITY_MILESTONE_KIND = 'milestone';
+
 /** The declaration's shape. */
 export interface ActivityTextSources {
   summary: string[];
   record_label: string[];
+  /**
+   * [#22771] The parent fields `metadata.kind` was derived from, present only
+   * beside a kind the mirror stamped. For a milestone it is every field a
+   * declared milestone watches, not only the one that fired: the kind says
+   * that SOME milestone fired, which is a fact about all of them.
+   */
+  kind?: string[];
 }
 
 /** The text columns a declaration covers. */
@@ -195,6 +224,20 @@ function textProvenance(metadata: Record<string, unknown> | null): Record<TextCo
     (metadata.old === null || isRecord(metadata.old)) &&
     (metadata.new === null || isRecord(metadata.new));
   return earlierMirrorShape ? { summary: 'unknown', record_label: 'unknown' } : null;
+}
+
+/**
+ * [#22771] Where a row's `metadata.kind` came from, read the way
+ * {@link textProvenance} reads its text:
+ *  - a field list — the mirror's declaration;
+ *  - `'unknown'` — a mirror row whose declaration names no list for it;
+ *  - `null` — no kind, or a row the mirror did not write: served as written.
+ */
+function kindProvenance(metadata: Record<string, unknown> | null): string[] | 'unknown' | null {
+  if (!metadata || !(ACTIVITY_KIND_KEY in metadata) || !(ACTIVITY_TEXT_SOURCES_KEY in metadata)) return null;
+  const declared = metadata[ACTIVITY_TEXT_SOURCES_KEY];
+  const list = isRecord(declared) ? declared[ACTIVITY_KIND_KEY] : undefined;
+  return Array.isArray(list) && list.every((f) => typeof f === 'string') ? (list as string[]) : 'unknown';
 }
 
 /** Drop every value-bearing column — the fail-closed answer for one row. */
@@ -355,12 +398,20 @@ export async function redactActivityRows(
 
     const metadata = 'metadata' in row ? parseMetadata(row.metadata) : null;
     const provenance = textProvenance(metadata);
+    const kindSources = kindProvenance(metadata);
+    /** Whether a value composed from `sources` is served to this reader. */
+    const servedWhole = async (sources: string[] | 'unknown') =>
+      sources === 'unknown' ? !(await restrictedOn(object, servedSet)) : sources.every((f) => servedSet.has(f));
 
     if (metadata) {
       let changed = false;
       for (const side of ['old', 'new'] as const) {
         const snapshot = metadata[side];
         if (isRecord(snapshot) && dropUnservedKeys(snapshot, servedSet)) changed = true;
+      }
+      if (kindSources !== null && !(await servedWhole(kindSources))) {
+        delete metadata[ACTIVITY_KIND_KEY];
+        changed = true;
       }
       if (ACTIVITY_TEXT_SOURCES_KEY in metadata) {
         delete metadata[ACTIVITY_TEXT_SOURCES_KEY];
@@ -372,12 +423,7 @@ export async function redactActivityRows(
     if (!provenance) continue;
     for (const col of TEXT_COLUMNS) {
       if (!(col in row)) continue;
-      const sources = provenance[col];
-      const servedWhole =
-        sources === 'unknown'
-          ? !(await restrictedOn(object, servedSet))
-          : sources.every((f) => servedSet.has(f));
-      if (!servedWhole) delete row[col];
+      if (!(await servedWhole(provenance[col]))) delete row[col];
     }
   }
 }

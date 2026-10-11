@@ -1844,6 +1844,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`flow-approval-node-config-contract-refused`.',
   },
   {
+    id: 'flow-binding-name-dollar-refused',
+    order: 93,
+    text:
+      'And every other binding does too, closing the family: a `loop` or `map` `iteratorVariable` and '
+      + '`indexVariable`, an object-form `screen`\'s `idVariable`, a `screen` field\'s `name`, a declared flow '
+      + 'variable\'s `name`, and an `assignment` node\'s targets in each shape its executor reads refuse a name '
+      + 'that starts with `$`, by the same rule and with the same remedy. A binding over an engine name replaced '
+      + 'it for the rest of the run (`iteratorVariable: \'$record\'`), a declared `$record` was overwritten at '
+      + 'run start, and a `screen` binding a `$` name could never be submitted, its resume refused. Every '
+      + 'binding key, `outputVariable` and `errorVariable` included, now judges the first non-blank character, '
+      + 'since two executors trim a name before they bind it (`idVariable: \' $id\'` named `$id` on its screen). Each key '
+      + 'states the rule as a `pattern` (the `assignments` map as `propertyNames`), and the flow parse, '
+      + '`registerFlow` and `objectstack validate` refuse such a name where it was written. No D2 conversion '
+      + 'exists, for the same reason. Its D3 record is the semantic entry `flow-binding-name-dollar-refused`.',
+  },
+  {
     id: 'flow-binding-variable-dollar-name-refused',
     order: 92,
     text:

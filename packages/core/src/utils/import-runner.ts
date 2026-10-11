@@ -4,9 +4,9 @@ import { randomUUID } from 'node:crypto';
 import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
-import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import { canServeApiOperation, type DroppedFieldsEvent, type EnableLike } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
+import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
 import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin } from '@objectstack/types';
 
@@ -207,6 +207,15 @@ export interface ImportProtocolLike {
    * Such a dry run reports coercion + create/update/skip resolution only.
    */
   validateData?(args: ImportProtocolRequest<ValidateDataRequest>): Promise<ValidateDataResponse>;
+  /**
+   * [#22739] The object-declaration read, the one the door's import template
+   * and the connector pull already make. The reference resolution reads a
+   * lookup TARGET's `enable` block through it ({@link servesReferenceTarget}).
+   * A protocol without it (plugin-auth's identity import, whose reads run
+   * under the system identity) has no declaration to judge, and none is
+   * fabricated for it.
+   */
+  getMetaItem?(request: GetMetaItemRequest): Promise<unknown>;
 }
 
 export interface RunImportOptions {
@@ -551,6 +560,39 @@ function responseDrops(res: unknown): readonly DroppedFieldsEvent[] | undefined 
   return (res as { droppedFields?: DroppedFieldsEvent[] } | null | undefined)?.droppedFields;
 }
 
+/**
+ * [#22739] The operation a reference cell's TARGET object is judged as, by the
+ * spec's one exposure decision: `list`. Matching a cell is a predicate read
+ * over the target (`findData` with `where: { <field>: <cell> }`), the runtime
+ * `find` the spec maps to `list` (`DATA_ACTION_TO_API_OPERATION`), and the read
+ * `GET /data/{target}?<field>=<cell>` performs. `get` would serve a name match
+ * on an object that refuses exactly that read.
+ */
+const REFERENCE_TARGET_OPERATION = 'list';
+
+/**
+ * [#22739] May the reference resolution read `target` to match a cell?
+ *
+ * The import door judges the ADDRESSED object; matching a lookup cell reads a
+ * SECOND object nobody addressed, so a match stored the target's id and a miss
+ * answered `reference_not_found`, even for a target every data route refuses:
+ * a presence oracle. Asked of the target's own `enable` block, it takes no
+ * caller. A refused target answers as a target the caller cannot read, which
+ * is measured: every cell, matching or not, `reference_not_found`, and nothing
+ * is read. A declaration that cannot be read withholds too (fail-closed).
+ */
+async function servesReferenceTarget(p: ImportProtocolLike, target: string): Promise<boolean> {
+  if (typeof p.getMetaItem !== 'function') return true;
+  let enable: EnableLike | null | undefined;
+  try {
+    const found = (await p.getMetaItem({ type: 'object', name: target })) as { item?: { enable?: EnableLike | null } } | undefined;
+    enable = found?.item?.enable;
+  } catch {
+    return false;
+  }
+  return canServeApiOperation(enable, REFERENCE_TARGET_OPERATION);
+}
+
 /** Upper bound on rows in one createManyData batch (framework#2678 suggests 100-500). */
 const MAX_CREATE_BATCH_SIZE = 200;
 
@@ -620,9 +662,14 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   });
 
   // Reference resolver: name/email/id → referenced record id. Cached per
-  // (object, display) so a name repeated across rows costs one query.
+  // (object, display) so a name repeated across rows costs one query. The
+  // target's exposure is asked first, once per target per import (#22739).
   const refCache = new Map<string, RefMatch>();
+  const servedTargets = new Map<string, Promise<boolean>>();
   const resolveRef: RefResolver = async (referenceObject, display, meta) => {
+    let served = servedTargets.get(referenceObject);
+    if (!served) servedTargets.set(referenceObject, served = servesReferenceTarget(p, referenceObject));
+    if (!(await served)) return {};
     const cacheKey = `${referenceObject}::${display}`;
     const cached = refCache.get(cacheKey);
     if (cached) return cached;

@@ -27,6 +27,10 @@ import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { EndConfigSchema } from './builtin-node-config.zod';
+// [#22572] The `$` names are the flow engine's at every binding door — the one
+// rule, composed into a declared variable's `name` and judging an `assignment`
+// node's targets below rather than re-spelled.
+import { flowAssignmentTargets, flowBoundVariableNameRefusal, flowBoundVariableNameSchema } from './flow-bound-variable-name';
 import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from './approval.zod';
 export const FlowNodeAction = z.enum([
   'start',              // Trigger
@@ -224,7 +228,12 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
       'mis-declared input/output contract shipped without a diagnostic.',
   },
   {
-  name: z.string().describe('Variable name').meta({ title: 'Name' }),
+  // [#22572] A declared variable is a binding: never a `$` name, which is the
+  // engine's — a declared `$record` is overwritten when the engine seeds its own
+  // variables at run start, and a text slot refuses to read any other.
+  name: flowBoundVariableNameSchema('variableName')
+    .describe('Variable name — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`')
+    .meta({ title: 'Name' }),
   type: z.string().describe('Data type (text, number, boolean, object, list)').meta({ title: 'Type' }),
   isInput: z.boolean().default(false).describe('Is input parameter').meta({ title: 'Input' }),
   isOutput: z.boolean().default(false).describe('Is output parameter').meta({ title: 'Output' }),
@@ -1515,6 +1524,26 @@ export const FlowSchema = lazySchema(() => strictObject(
           path: [...graph.path, 'nodes', index, 'config', ...ledgerPathSegments(refusal.path)],
           message: refusal.message,
         });
+      }
+    });
+  }
+
+  // An `assignment` node's targets are bindings (#22572), and the `$` names are
+  // the flow engine's at every binding door — `assignments: { $record: … }`
+  // would overwrite the trigger record for the rest of the run. No executor
+  // contract parses an `assignment` config (its executor reads three
+  // read-compatible shapes), so `flowNodeConfigRefusals` cannot reach them:
+  // this arm reads the names the executor binds, in every shape
+  // (`flowAssignmentTargets`), and refuses each `$` name with the one rule's
+  // own sentence, anchored where the author wrote it — a region body's node
+  // included, through `collectFlowGraphs`.
+  for (const graph of collectFlowGraphs(flow)) {
+    graph.nodes.forEach((node, index) => {
+      if ((node as { type?: unknown } | null)?.type !== 'assignment') return;
+      for (const target of flowAssignmentTargets((node as { config?: unknown }).config)) {
+        const message = flowBoundVariableNameRefusal('assignmentTarget', target.name);
+        if (message === undefined) continue;
+        ctx.addIssue({ code: 'custom', path: [...graph.path, 'nodes', index, 'config', ...target.path], message });
       }
     });
   }

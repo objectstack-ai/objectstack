@@ -253,11 +253,67 @@ describe('#7527 §2 — every parameter the route really reads still works', () 
     it('every name in the closed set is accepted — none of them is refused', async () => {
         // Asserts against the exported array rather than a hand-copied list, so
         // the pin cannot drift away from what the route actually declares.
+        // `unstaffed` (#22725) reads `true` / `false` only, so it is sent one of
+        // its own values; `'1'` is its refusal case in §4.
+        const SAMPLE: Readonly<Record<string, string>> = { unstaffed: 'true' };
         for (const name of APPROVAL_REQUEST_LIST_PARAMS) {
             const { drive } = boot();
-            const answer = await drive({ [name]: '1' });
+            const answer = await drive({ [name]: SAMPLE[name] ?? '1' });
             expect(answer.status, `"${name}" is declared supported but was refused`).toBe(200);
         }
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. #22725 — `unstaffed`, the rescue arm, is a DECLARED parameter
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('#22725 §4 — `unstaffed` is declared, read as a boolean, and refused otherwise', () => {
+    it.each([
+        ['true', true],
+        ['false', false],
+    ])('?unstaffed=%s reaches listRequests AND countRequests as %s', async (raw, value) => {
+        const { drive, approvals } = boot();
+        const answer = await drive({ status: 'pending', approverId: 'u_42', unstaffed: raw, limit: '10' });
+        expect(answer.status).toBe(200);
+        expect(answer.body?.total).toBe(2);
+        // The arm rides beside `approverId` on the SAME filter: the service ORs
+        // them, so the door must hand over both, unchanged.
+        const expected = expect.objectContaining({ approverId: ['u_42'], unstaffed: value, status: 'pending' });
+        expect(approvals.listRequests).toHaveBeenCalledWith(expected, expect.anything());
+        expect(approvals.countRequests).toHaveBeenCalledWith(expected, expect.anything());
+    });
+
+    it('absent, the service is handed no arm at all', async () => {
+        const { drive, approvals } = boot();
+        const answer = await drive({ approverId: 'u_42' });
+        expect(answer.status).toBe(200);
+        expect(approvals.listRequests.mock.calls[0][0].unstaffed).toBeUndefined();
+    });
+
+    it.each(['1', 'TRUE', 'yes', ''])('?unstaffed=%j is refused 400 invalid_boolean, and the service never runs', async (raw) => {
+        const { drive, approvals } = boot();
+        const answer = await drive({ approverId: 'u_42', unstaffed: raw });
+        expect(
+            answer.status,
+            `expected a 400 refusal for unstaffed=${JSON.stringify(raw)}, got ${answer.status} `
+            + `with body ${JSON.stringify(answer.body)}`,
+        ).toBe(400);
+        expect(answer.body?.code).toBe('VALIDATION_FAILED');
+        expect(answer.body?.fields?.[0]).toMatchObject({ field: 'unstaffed', code: 'invalid_boolean' });
+        // A guessed `false` would have answered 200 without the arm the caller
+        // asked for: the defect this refusal exists to stop.
+        expect(approvals.listRequests).not.toHaveBeenCalled();
+        expect(approvals.countRequests).not.toHaveBeenCalled();
+    });
+
+    it('a repeated ?unstaffed= is refused by the multiplicity gate, before any read', async () => {
+        const { drive, approvals } = boot();
+        const answer = await drive({ unstaffed: ['true', 'false'] });
+        expect(answer.status).toBe(400);
+        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(String(answer.body?.error?.message)).toContain('unstaffed');
+        expect(approvals.listRequests).not.toHaveBeenCalled();
     });
 });
 

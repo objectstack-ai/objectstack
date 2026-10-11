@@ -86,8 +86,9 @@ import { strictObject } from '../shared/strict-object';
 import { FlowNodeSchema, FlowEdgeSchema } from './flow.zod';
 import type { FlowNodeParsed, FlowEdgeParsed } from './flow.zod';
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
-// [#22502] The `$` names are the flow engine's at the binding keys too — the
-// one rule, composed into `try_catch`'s `errorVariable` below.
+// [#22502, #22572] The `$` names are the flow engine's at the binding keys
+// too — the one rule, composed into `loop`'s `iteratorVariable` /
+// `indexVariable` and `try_catch`'s `errorVariable` below.
 import { ENGINE_ERROR_VARIABLE, flowBoundVariableNameSchema } from './flow-bound-variable-name';
 
 /**
@@ -216,10 +217,12 @@ export const LoopConfigSchema = lazySchema(() => strictObject(
       description: 'Template/variable resolving to the array to iterate (an inline array is accepted)',
       xExpression: 'template',
     }),
-    /** Variable name the current item is bound to inside the body. */
-    iteratorVariable: z.string().min(1).default('item').describe('Loop variable holding the current item'),
-    /** Optional variable name the zero-based index is bound to inside the body. */
-    indexVariable: z.string().optional().describe('Optional loop variable holding the current index'),
+    /** Variable name the current item is bound to inside the body — never a `$` name: those are the engine's (#22572). */
+    iteratorVariable: flowBoundVariableNameSchema('iteratorVariable').min(1).default('item')
+      .describe('Loop variable holding the current item — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),
+    /** Optional variable name the zero-based index is bound to inside the body — never a `$` name (#22572). */
+    indexVariable: flowBoundVariableNameSchema('indexVariable').optional()
+      .describe('Optional loop variable holding the current index — a name without a leading `$` (the `$` names are the flow engine\'s own)'),
     /**
      * Maximum iterations to run — a guard against runaway collections. Clamped to
      * {@link LOOP_MAX_ITERATIONS_CEILING}; a collection longer than this fails the
