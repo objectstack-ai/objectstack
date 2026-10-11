@@ -240,7 +240,13 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
       installedFrom: { packageId: CRM, version: '4.0.0' },
     });
     expect(install.body.data.copiedCount).toBe(copied.length);
-    expect(copied.length).toBeGreaterThan(0);
+    // Every kind the CRM ships, and a `defineView` CONTAINER — copied under the
+    // object it binds, its expansion judged and saved by the save door.
+    expect(new Set(copied.map((i) => i.type))).toEqual(new Set(expect.arrayContaining([
+      'object', 'view', 'app', 'page', 'dashboard', 'dataset', 'action', 'hook', 'flow', 'position', 'permission',
+      'datasource', 'translation',
+    ])));
+    expect(copied).toContainEqual({ type: 'view', name: 'crm_lead' });
     // The CRM declares seed data, which an unmanaged install does not load — and says so.
     expect(install.body.data.seeded?.mode).toBe('skipped');
   });
