@@ -54,7 +54,8 @@
  * classified below, and its run protocol carries the declaration reader the
  * import already holds, so `servesReferenceTarget` asks each target the
  * decision for `list` there too (#22800), held by its own package's pin
- * (`admin-import-users-reference-exposure.test.ts`) rather than by a row here.
+ * (`plugin-auth/src/admin-import-users.test.ts`, its `[#22800]` block) rather
+ * than by a row here.
  *
  * The scan surface and its prefilter follow `row-serving-door-exposure.pin.test.ts`
  * in this directory: git's authored-file list, never a directory crawl, and `.ts`
