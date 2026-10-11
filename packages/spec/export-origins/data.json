@@ -250,6 +250,7 @@
     "EngineAggregateOptionsParsed": "src/data/data-engine.zod.ts#EngineAggregateOptionsParsed (type)",
     "EngineAggregateOptionsSchema": "src/data/data-engine.zod.ts#EngineAggregateOptionsSchema (const)",
     "EngineCountOptions": "src/data/data-engine.zod.ts#EngineCountOptions (type)",
+    "EngineCountOptionsParsed": "src/data/data-engine.zod.ts#EngineCountOptionsParsed (type)",
     "EngineCountOptionsSchema": "src/data/data-engine.zod.ts#EngineCountOptionsSchema (const)",
     "EngineDeleteOptions": "src/data/data-engine.zod.ts#EngineDeleteOptions (type)",
     "EngineDeleteOptionsSchema": "src/data/data-engine.zod.ts#EngineDeleteOptionsSchema (const)",

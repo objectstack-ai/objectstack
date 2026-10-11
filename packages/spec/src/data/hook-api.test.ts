@@ -134,11 +134,11 @@ describe('HookApi — the published hook ctx.api face', () => {
   });
 
   describe('count is not find narrowed by habit', () => {
-    it('takes `where` and refuses everything else', () => {
-      const ok: HookCountQuery = { where: { status: 'active' } };
+    it('takes `where` and the search pair, and refuses everything else', () => {
+      const ok: HookCountQuery = { where: { status: 'active' }, search: 'acme', searchFields: ['name'] };
       const withLimit: HookCountQuery = {
         // @ts-expect-error `count` honours no pagination — `ENGINE_COUNT_OPTION_KEYS`
-        // is `{ context, where }` and the engine rejects anything else.
+        // is `{ context, where, search, searchFields }` and the engine rejects anything else.
         limit: 5,
       };
       const withPassthrough: HookCountQuery = {
@@ -210,7 +210,7 @@ describe('HookApi — the published hook ctx.api face', () => {
       {
         name: 'HookCountQuery / EngineCountOptionsSchema',
         schema: EngineCountOptionsSchema,
-        kept: ['where'],
+        kept: ['where', 'search', 'searchFields'],
         omitted: ['context'],
       },
       {

@@ -287,14 +287,16 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             expect(result.hasMore).toBe(false);
         });
 
-        it('skips count for search queries and estimates hasMore from a full page', async () => {
-            // engine.count() can't reproduce a $search, so we must not call it; a
-            // full page (length === limit) implies there may be more.
+        it('counts a search query under the same search, and reports that total (#22790)', async () => {
+            // The engine expands `search` through the one expander `find` uses,
+            // so the total is a count, never a page-local estimate.
             mockEngine.find.mockResolvedValue(Array.from({ length: 10 }, (_, i) => ({ id: `r${i}` })));
+            mockEngine.count.mockResolvedValue(75);
 
             const result = await protocol.findData({ object: 'task', query: { $top: 10, $search: 'foo' } });
 
-            expect(mockEngine.count).not.toHaveBeenCalled();
+            expect(mockEngine.count).toHaveBeenCalledWith('task', expect.objectContaining({ search: 'foo' }));
+            expect(result.total).toBe(75);
             expect(result.hasMore).toBe(true);
         });
     });
