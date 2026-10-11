@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { extractHookBody } from '../src/utils/extract-hook-body.js';
+import { extractHookBody, HookBodyExtractionError } from '../src/utils/extract-hook-body.js';
+import { lowerCallables } from '../src/utils/lower-callables.js';
 
 describe('extractHookBody', () => {
   it('extracts a block-body arrow', () => {
@@ -408,6 +409,123 @@ describe('extractHookBody', () => {
     const ext = extractHookBody(fn, 'hook audit');
     expect(ext.capabilities).toContain('api.write');
     expect(ext.source).toMatch(/object\((['"])audit_log\1\)\.insert/);
+  });
+});
+
+// ── `ctx.dispatch.scope` and `ctx.submitted` are not body members (#22810) ──
+//
+// Same family as `sudo()` / `create()`, on the context itself: the spec
+// declares the body face WITHOUT them (`HookContextSchema.dispatch` carries
+// `{ mode, index }` "and not `scope`"; `submitted` is "NOT marshalled into the
+// sandboxed `body` face"), so a lowered body TypeErrors on a `scope` write and
+// reads `undefined` for `submitted` — while the in-process handler works. These
+// pin the build-time half: the kind, the origin and the named member, never the
+// remedy prose.
+describe('extractHookBody refuses the context members the body face does not carry (#22810)', () => {
+  const refusal = (fn: (...a: any[]) => unknown, label: string): HookBodyExtractionError => {
+    try {
+      extractHookBody(fn as (...a: unknown[]) => unknown, label);
+    } catch (err) {
+      if (err instanceof HookBodyExtractionError) return err;
+      throw err;
+    }
+    throw new Error(`expected ${label} to be refused, but it lowered`);
+  };
+
+  it('refuses a body writing `ctx.dispatch.scope`', () => {
+    const err = refusal(async (ctx: any) => {
+      ctx.dispatch.scope.stashed = ctx.input.name;
+    }, "hook 'stash'");
+    expect(err.kind).toBe('forbidden-token');
+    expect(err.originLabel).toBe("hook 'stash'");
+    expect(err.message).toContain('`ctx.dispatch.scope`');
+  });
+
+  it('refuses the aliased marker too — `const d = ctx.dispatch; d.scope`', () => {
+    const err = refusal(async (ctx: any) => {
+      const d = ctx.dispatch;
+      d.scope.stashed = ctx.input.name;
+    }, "hook 'stash alias'");
+    expect(err.kind).toBe('forbidden-token');
+    expect(err.message).toContain('`ctx.dispatch.scope`');
+  });
+
+  it('refuses a body reading `ctx.submitted`', () => {
+    const err = refusal(async (ctx: any) => {
+      if (ctx.submitted?.name) ctx.input.note = 'renamed';
+    }, "hook 'guard'");
+    expect(err.kind).toBe('forbidden-token');
+    expect(err.originLabel).toBe("hook 'guard'");
+    expect(err.message).toContain('`ctx.submitted`');
+  });
+
+  it('refuses `submitted` destructured off the context', () => {
+    const err = refusal(async (ctx: any) => {
+      const { input, submitted } = ctx;
+      input.note = String(submitted);
+    }, "hook 'guard destructured'");
+    expect(err.kind).toBe('forbidden-token');
+    expect(err.message).toContain('`ctx.submitted`');
+  });
+
+  // CONTROL: the two members the body face DOES carry still lower — the
+  // pattern is about `scope`, not about naming `dispatch`.
+  it('still lowers `ctx.dispatch.mode` and `ctx.dispatch.index`', () => {
+    const ext = extractHookBody(async (ctx: any) => {
+      if (ctx.dispatch?.mode === 'per-row' && ctx.dispatch.index === 0) ctx.input.note = 'first';
+    }, "hook 'batch_once'");
+    expect(ext.source).toContain('dispatch?.mode');
+    expect(ext.source).toContain('dispatch.index');
+  });
+
+  // CONTROL: `scope` and `submitted` are also ordinary FIELD names (platform
+  // objects declare `scope`). A field read through a record image the body
+  // does receive is working code, and stays lowerable even beside `dispatch`.
+  it('still lowers a field named `scope` or `submitted` read through ctx.input / ctx.previous', () => {
+    const ext = extractHookBody(async (ctx: any) => {
+      if (ctx.dispatch?.mode === 'record') {
+        ctx.input.note = String(ctx.input.scope ?? ctx.previous?.scope) + String(ctx.previous?.submitted);
+      }
+    }, "hook 'fields'");
+    expect(ext.source).toContain('input.scope');
+    expect(ext.source).toContain('previous?.submitted');
+  });
+});
+
+// CONTROL: the same handler in-process is unchanged. A refusal costs the BUILD
+// the body, never the handler: `lowerCallables` records the refusal, registers
+// the very function for the `.mjs` bundle, and emits a handler ref, so the
+// handler still runs where `dispatch.scope` is real.
+describe('lowerCallables keeps a refused `scope` handler as the in-process callable (#22810)', () => {
+  it('records the refusal, emits no body, and bundles the original function', () => {
+    const handler = async (ctx: any) => {
+      ctx.dispatch.scope.stashed = ctx.input.name;
+      ctx.input.note = 'stashed';
+    };
+    const lowering = lowerCallables({
+      hooks: [{ name: 'stash', object: 'note', events: ['beforeInsert'], handler }],
+    });
+    const hook = (lowering.lowered.hooks as Array<Record<string, unknown>>)[0];
+    expect(hook.body).toBeUndefined();
+    expect(hook.handler).toBe('stash');
+    expect(lowering.functions.stash).toBe(handler);
+    expect(lowering.bodyExtractionWarnings.map((w) => [w.origin, w.kind])).toEqual([
+      ["hook 'stash'", 'forbidden-token'],
+    ]);
+  });
+
+  it('and that callable still stashes on a host-shaped context', async () => {
+    const handler = async (ctx: any) => {
+      ctx.dispatch.scope.stashed = ctx.input.name;
+      ctx.input.note = 'stashed';
+    };
+    const lowering = lowerCallables({
+      hooks: [{ name: 'stash', object: 'note', events: ['beforeInsert'], handler }],
+    });
+    const ctx = { input: { name: 'alpha' } as Record<string, unknown>, dispatch: { mode: 'record', index: 0, scope: {} as Record<string, unknown> } };
+    await lowering.functions.stash(ctx);
+    expect(ctx.dispatch.scope.stashed).toBe('alpha');
+    expect(ctx.input.note).toBe('stashed');
   });
 });
 
