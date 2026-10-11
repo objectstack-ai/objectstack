@@ -366,27 +366,27 @@ describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () =>
     });
 
     it('a grant naming an allowlisted set may be revoked by the delegate — whatever its id says', async () => {
-      storedGrant({ permission_set: 'finance_admin', permission_set: 'sales_user' });
+      storedGrant({ permission_set_id: 'ps_fin', permission_set: 'sales_user' });
       await expect(remove()).resolves.toBeUndefined();
     });
 
     it('a grant naming a set outside the allowlist is refused — whatever its id says', async () => {
-      storedGrant({ permission_set: 'sales_user', permission_set: 'finance_admin' });
+      storedGrant({ permission_set_id: 'ps_sales', permission_set: 'finance_admin' });
       await expect(remove()).rejects.toThrow(/'finance_admin' is not in the scope's allowlist/);
     });
 
     it('a grant that names NO set is refused: the delegate cannot be shown to hold authority over it', async () => {
-      storedGrant({ permission_set: 'sales_user', permission_set: null });
+      storedGrant({ permission_set_id: 'ps_sales', permission_set: null });
       await expect(remove()).rejects.toThrow(/names no permission set/);
     });
 
     it('a grant naming a set the security catalog does not hold is refused', async () => {
-      storedGrant({ permission_set: 'sales_user', permission_set: 'sales_user_retired' });
+      storedGrant({ permission_set_id: 'ps_sales', permission_set: 'sales_user_retired' });
       await expect(remove()).rejects.toThrow(/is not in the security catalog/);
     });
 
     it('an update keeping the set is judged by the stored name; one re-pointing the id by the new id', async () => {
-      storedGrant({ permission_set: 'sales_user', permission_set: 'sales_user' });
+      storedGrant({ permission_set_id: 'ps_sales', permission_set: 'sales_user' });
       await expect(h.gate.assert({
         object: 'sys_user_permission_set', operation: 'update',
         data: { id: 'g1', reason: 'renewed' }, context: h.ctxOf('delegate'),
