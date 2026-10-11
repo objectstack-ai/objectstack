@@ -15,7 +15,7 @@ Clause-②: yes (narrowing)
 
 A `user` field's target is fixed by its type: the spec's arbiter `referenceTargetOf` gives `{ type: 'user' }` the target `sys_user` whether or not `reference` is written (`Field.user()` writes it; hand-written JSON, a form or an AI author may not), and the data door's `$expand` already reads it that way. `buildFieldMetaMap`, the field map behind the import, export and import-template doors, counted a field as a reference only when it carried a `reference` string, so those doors disagreed with the arbiter for such a field. It now asks the arbiter both whether a field is a reference and what its target is.
 
-**FROM → TO, door by door.** Measured on a real boot, as an administrator and as a member, on a fixture object holding a `user` field written without `reference` beside a `Field.user` one; the connector pull through its executor over a stub protocol.
+**Door by door, before and after.** Measured on a real boot, as an administrator and as a member, on a fixture object holding a `user` field written without `reference` beside a `Field.user` one; the connector pull through its executor over a stub protocol.
 
 - **Import: `POST /api/v1/data/:object/import`, `POST /api/v1/data/:object/import/jobs`, and a mapping's `connectorSource` pull (same runner).**
   - FROM: a cell holding a user's email or name was written as the field's id, so the row failed `reference_not_found` ("no sys_user record has id …") and nothing was stored.
