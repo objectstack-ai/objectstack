@@ -423,7 +423,7 @@ describe('[#22519] an unreadable master-detail header answers what a nonexistent
         else apply(ctx.result);
       });
       // Precondition: the read door serves Alice her header, its state column restricted.
-      const served = await engine.findOne(HEADER, { where: { id: 'h_mine_locked' }, context: ALICE } as any);
+      const served = await engine.findOne(HEADER, { where: { id: 'h_mine_locked' }, context: ALICE });
       expect(served).toMatchObject({ id: 'h_mine_locked' });
       expect(served?.status).not.toBe('locked');
       const err = await refusalOf(() => engine.insert(REQ_LINE, { invoice: 'h_mine_locked', quantity: 1 }, { context: ALICE } as any));
