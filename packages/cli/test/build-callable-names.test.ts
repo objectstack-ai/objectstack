@@ -27,7 +27,9 @@
  *   - a `functions` key equal to a hook's name (or an action's
  *     `<owner>_<action>` ref) shipped as `kc_same__2`, a bare string, while the
  *     hook's ref `kc_same` resolved to the `functions` entry's code;
- *   - an action's ref never resolved, collision or not (the CONTROL below).
+ *   - an action's ref never resolved, collision or not (the CONTROL below);
+ *   - a `functions` map exported by name, which `loadConfig` merges onto the
+ *     stack, shipped as bare strings: the template read the default export only.
  *
  * ## The pin
  *
@@ -277,10 +279,17 @@ afterAll(() => {
 });
 
 /** Build `stack` in a fresh project dir, then load the artifact through the runtime's own loader. */
-async function buildAndLoad(label: string, stack: string): Promise<{ artifact: Artifact; loaded: Artifact }> {
+async function buildAndLoad(
+  label: string,
+  stack: string,
+  namedExports = '',
+): Promise<{ artifact: Artifact; loaded: Artifact }> {
   const dir = join(root, label);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'objectstack.config.ts'), `${HEAD}\nexport default defineStack(${stack.trim()}, { strict: false });\n`);
+  writeFileSync(
+    join(dir, 'objectstack.config.ts'),
+    `${HEAD}\n${namedExports}\nexport default defineStack(${stack.trim()}, { strict: false });\n`,
+  );
   linkSpec(dir);
   const run = await runCli(['build'], dir);
   expect(run.code, run.out).toBe(0);
@@ -352,6 +361,19 @@ describe('objectstack build: each authored `functions` name ships under itself a
     // Neither resolved before the fix: the module never carried an action's callable.
     expect(await answer(loaded, 'kc_doc_go')).toBe('action:kc');
     expect(await answer(loaded, 'global_go')).toBe('other:kc');
+  }, SPAWN_TIMEOUT_MS);
+
+  it('a `functions` map exported by name beside the default export answers its own code', async () => {
+    // `loadConfig` merges a named export the default export lacks onto the
+    // stack, so the lowering registers it; the module used to read the default
+    // export alone and shipped `kc_named` as a bare string (measured on 2e11d9006c).
+    const { artifact, loaded } = await buildAndLoad(
+      'named-export',
+      '{ manifest, objects: [doc()] }',
+      'export const functions = { kc_named: entryFn };',
+    );
+    expect(artifact.functions).toEqual({ kc_named: 'kc_named' });
+    expect(await answer(loaded, 'kc_named')).toBe('function:kc');
   }, SPAWN_TIMEOUT_MS);
 });
 
