@@ -371,9 +371,10 @@ export async function isWithheldMilestone(
 
 /**
  * [#21388, #22786] The ONE withheld-row judgement the pre-scan makes: a row
- * that speaks only about fields this reader is not served. Either an update
- * whose every recorded change is withheld ({@link isWithheldOnlyUpdate}), or a
- * fired milestone whose watched fields are not all served
+ * whose very presence speaks about a field this reader is not served, which
+ * narrowing its columns cannot take back. Either an update whose every
+ * recorded change is withheld ({@link isWithheldOnlyUpdate}), or a fired
+ * milestone whose watched fields are not all served
  * ({@link isWithheldMilestone}). Exported for direct testing.
  */
 export async function isWithheldRow(

@@ -230,11 +230,10 @@ describe('[#22771] a fired milestone is served with metadata.kind, judged like t
   // ── [#22786] the row, for a reader not served a watched field ───────────
 
   it('a reader withheld a watched field is served neither milestone row', async () => {
-    // Each change has a key this reader may read, so the key-by-key narrowing
-    // alone would have served both rows. They are withheld as rows instead:
-    // the row speaks about the watched fields beyond the kind (its `type` and
-    // its summary), and the untyped one is withheld too, though its own field
-    // is served: the kind is a fact about every watched field.
+    // Each change also has a key this reader may read; the rows are withheld
+    // as rows all the same, by the declared watched fields. The untyped one
+    // too, though its own field is served: the kind is a fact about every
+    // watched field.
     const ids = (await read(WATCH_WITHHELD)).map((r) => r.id);
     expect(ids).not.toContain(rowIds.typedMilestone);
     expect(ids).not.toContain(rowIds.untypedMilestone);
