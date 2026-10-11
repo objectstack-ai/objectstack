@@ -25,10 +25,9 @@
 // The real `SecurityPlugin` over a real `ObjectQL` and SQL driver
 // (better-sqlite3, in memory), the platform's grant tables, and one
 // `public_read_write` board. The explained member reads only the board named
-// `open`, through an app-authored READ row-level policy; nothing narrows the
-// member's writes. So the member's update, delete or transfer of the hidden
-// board is stopped by the read alone, and the write-operation story by itself
-// would admit it: the read's decider is the only right one.
+// `open`, through an app-authored READ row-level policy. So the member's
+// update, delete or transfer of the hidden board stops at the read: the door
+// answers what a nonexistent id answers before any write gate runs.
 //
 // Askers: the member itself; a `manage_users` administrator who reads every
 // board; a `manage_users` administrator held to the member's read policy; a
@@ -38,7 +37,8 @@
 //
 // The last block asks the engine directly over a deps bag, for the facts the
 // served rig cannot isolate: which contexts the read question is asked with,
-// and how often.
+// how often, and that a write's decider is its principal's READ even where
+// the write's own composition would admit the row.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
@@ -173,11 +173,13 @@ beforeAll(async () => {
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   // The D12 boundary: this delegate's adminScope covers the member, and nobody
-  // else's does. Answered by a stub, as the file header says.
-  (plugin as unknown as { delegatedAdminGate: unknown }).delegatedAdminGate = {
-    scopesCoverUser: async (_sets: unknown, target: string, caller: { userId?: string }) =>
-      caller?.userId === DELEGATE.userId && target === MEMBER,
-  };
+  // else's does. Answered by a stub on the real gate's boundary question, as
+  // the file header says; the gate's write-path checks stay its own.
+  const gate = (plugin as unknown as { delegatedAdminGate: { scopesCoverUser: (...a: any[]) => Promise<boolean> } })
+    .delegatedAdminGate;
+  vi.spyOn(gate, 'scopesCoverUser').mockImplementation(
+    async (_sets: unknown, target: string, caller: { userId?: string }) => caller?.userId === DELEGATE.userId && target === MEMBER,
+  );
 });
 
 afterAll(async () => {
@@ -304,7 +306,7 @@ describe('controls', () => {
     it(`${verb}: a row every asker reads gets one answer, whoever asks, and its record story is the stored row's`, async () => {
       const bySystem = await explain(SYSTEM, verb, OPEN);
       expect(bySystem.record).toMatchObject({ recordId: OPEN, visible: true });
-      expect(layerRecord(bySystem, 'rls')?.outcome).toBe(verb === 'read' || verb === 'export' ? 'admitted' : 'not_evaluated');
+      expect(layerRecord(bySystem, 'rls')).toMatchObject({ outcome: 'admitted', matchesRecord: true });
       for (const asker of [ADMIN, BLIND_ADMIN, DELEGATE]) expect(await explain(asker, verb, OPEN)).toEqual(bySystem);
       const self = await explain(SELF, verb, OPEN);
       expect(self.record).toEqual(bySystem.record);
@@ -317,7 +319,7 @@ describe('the read question, engine level: who it is asked of, and how often', (
   const OBJECT = 'qa_ag_engine';
   const SET = PermissionSetSchema.parse({
     name: 'qa_ag_engine_writer',
-    objects: { [OBJECT]: { allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true } },
+    objects: { [OBJECT]: { allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true, allowExport: true } },
   });
   const EXPLAINED = { userId: 'usr_ag_explained', positions: [] as string[], permissions: [] as string[] };
   const ASKER = { userId: 'usr_ag_asker', positions: [] as string[], permissions: [] as string[] };
@@ -371,6 +373,26 @@ describe('the read question, engine level: who it is asked of, and how often', (
       const d = await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER);
       expect(d.record, verb).toMatchObject({ recordId: STORED.id, visible: false });
       expect(question.mock.calls.map((c) => c[2]), verb).toEqual([ASKER, EXPLAINED]);
+    }
+  });
+
+  it('a write the principal cannot read is decided by the principal\'s READ, where the write\'s own composition admits the row', async () => {
+    // Business RLS that narrows the read and not the write: a row the write
+    // composition alone admits, and the read excludes.
+    const readOnlyRls = (question: ExplainEngineDeps['recordAbsentToCaller']): ExplainEngineDeps => ({
+      ...deps(question),
+      computeLayeredRlsFilter: async (_s, _o, op) => ({ layer0: null, layer1: op === 'find' ? { name: 'open' } : null }),
+    });
+    for (const verb of WRITE_VERBS) {
+      const input = { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id };
+      const writeAlone = await explainAccessForAsker(readOnlyRls(door()), input, ASKER);
+      expect(writeAlone.record, `${verb}, a principal who reads the row`).toMatchObject({ visible: true });
+      const unreadable = await explainAccessForAsker(readOnlyRls(door(EXPLAINED)), input, ASKER);
+      expect(unreadable.record, `${verb}, a principal who cannot read the row`).toEqual({ recordId: STORED.id, visible: false, decidedBy: 'rls' });
+      const rls = layerRecord(unreadable, 'rls');
+      expect(rls?.outcome, verb).toBe('excluded');
+      expect(rls?.rowFilter, verb).toEqual({ name: 'open' });
+      expect(rls?.detail, verb).toMatch(/^The principal cannot read this record, so its by-id \w+ answers 404 RECORD_NOT_FOUND/);
     }
   });
 

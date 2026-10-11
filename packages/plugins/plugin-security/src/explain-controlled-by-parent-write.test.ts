@@ -403,3 +403,36 @@ describe('[ADR-0055] a read of a controlled_by_parent record takes the read door
     expect(askedOf(readDoor)).not.toContain(EXPLAINED);
   });
 });
+
+describe('[#22792] a by-id write of a record the principal cannot read, explained to an asker who reads it', () => {
+  /** Every HTTP status, with its code, that any layer's prose names. */
+  const statusesNamed = (d: ExplainDecision): string[] => {
+    const prose = d.layers.flatMap((l) => [l.detail, l.record?.detail ?? '']).join('\n');
+    return [...new Set([...prose.matchAll(/\b([1-5]\d\d) ([A-Z][A-Z_]+)\b/g)].map((m) => `${m[1]} ${m[2]}`))];
+  };
+
+  for (const verb of MASTER_CHECKED) {
+    it(`${verb}: decided by the principal's READ on the master leg; the write check is never reached, and no layer names its 403`, async () => {
+      const master = answering({ outcome: 'deny', leg: 'record_sharing' });
+      const readDoor = readDoorAnswering(true);
+      const d = await explainToAsker(deps({ master, readDoor }), verb);
+      expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
+      const sharing = sharingRecordOf(d);
+      expect(sharing?.outcome).toBe('excluded');
+      expect(sharing?.detail).toContain(`The principal cannot read this record, so its by-id ${verb} answers 404 RECORD_NOT_FOUND`);
+      expect(sharing?.detail).toContain('the read door, asked by this principal, does not return the record');
+      expect(statusesNamed(d)).toEqual(['404 RECORD_NOT_FOUND']);
+      // The door asks the read question (step 2.7) before the master check (step 2.8).
+      expect(master).not.toHaveBeenCalled();
+    });
+
+    it(`${verb}: control, a record the principal reads keeps the write check's refusal and its 403`, async () => {
+      const master = answering({ outcome: 'deny', leg: 'record_sharing' });
+      const d = await explainToAsker(deps({ master, readDoor: readDoorAnswering(false) }), verb);
+      expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
+      expect(sharingRecordOf(d)?.detail).toContain(`refuses this ${verb} on its 'record_sharing' leg`);
+      expect(statusesNamed(d)).toEqual(['403 PERMISSION_DENIED']);
+      expect(master).toHaveBeenCalledTimes(1);
+    });
+  }
+});
