@@ -49,16 +49,20 @@ export interface BodyExtractionWarning {
 }
 
 /**
- * One lowered callable that ships with no metadata `body`, the unit
- * `objectstack build --strict-body` counts and lists. It is either the
- * extractor's refusal for a hook or action, verbatim, or the row for a
- * top-level `functions` entry, which has no `body` slot to lower into.
+ * One registered callable that no slot lowered into a metadata `body`, the
+ * unit `objectstack build --strict-body` counts and lists. The row is the
+ * extractor's refusal, verbatim, when extraction was tried and refused.
+ * Otherwise it says why extraction was never tried.
  */
 export type BodylessCallable = BodyExtractionWarning | { origin: string; reason: string };
 
-/** The reason a `functions` entry carries no body. It is a fact about the slot, not a refusal. */
+/** Why a top-level `functions` entry is never lowered: it has no `body` slot. */
 export const FUNCTIONS_ENTRY_NO_BODY_REASON =
   'a `functions` entry has no metadata body: it runs only from the bundled runtime module (objectstack-runtime.*.mjs)';
+
+/** Why an inline function beside an authored `body` is never lowered: the slot already has one. */
+export const AUTHORED_BODY_BESIDE_FUNCTION_REASON =
+  'it carries its own `body`, so its inline function is not lowered and is bundled into the runtime module (objectstack-runtime.*.mjs) beside it';
 
 export interface LoweringResult {
   /** A deep-cloned, JSON-safe copy of the stack with handlers replaced by strings. */
@@ -72,21 +76,20 @@ export interface LoweringResult {
   /** Per-extraction failures (still emit handler ref + bundle, but warn). */
   bodyExtractionWarnings: BodyExtractionWarning[];
   /**
-   * Every callable that ships with no metadata `body`, each ONCE, in walk
-   * order, keyed by its ref. This is the list `--strict-body` counts.
+   * Every registered callable (an entry of `functions`) that no slot lowered
+   * into a metadata `body`, each ONCE, in registration order, keyed by its
+   * ref. This is the list `--strict-body` counts: the callables the runtime
+   * module still has to carry.
    *
-   * ⛔ Not derivable from the three counters above. `count - bodyExtracted`
-   * and `bodyExtractionWarnings` count different populations:
-   *   - a `functions` entry is in `count` but never extracted, so it leaves
-   *     no warning;
-   *   - a hook or action whose author wrote its `body` is in `count` but
-   *     never extracted, so `count - bodyExtracted` calls it bodyless;
-   *   - an ADR-0130 D4 artifact walks a package's callables twice (top level
-   *     and package body). `count` dedups by identity, while extraction runs
-   *     once per walk, so each refusal is recorded twice and each success is
-   *     counted twice.
-   * Here a callable is bodyless when some slot naming it carries no `body`,
-   * and that is recorded once per ref, against the first such slot.
+   * ⛔ Not derivable from the counters above. `count - bodyExtracted` is
+   * this list's length only when every callable is walked once, and the
+   * extraction warnings are a subset of it:
+   *   - a `functions` entry, or an inline function beside an authored
+   *     `body`, is never extracted, so it leaves no warning;
+   *   - a stack carrying the same callable at the top level AND in a
+   *     `packages[i].manifest` body (ADR-0130 D4) is walked twice. `count`
+   *     dedups by identity, while extraction runs once per walk, so each
+   *     refusal is recorded twice and each success is counted twice.
    */
   bodylessCallables: BodylessCallable[];
   /**
@@ -137,18 +140,22 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
   const taken = new Set<string>();
   const warnings: BodyExtractionWarning[] = [];
   const loweredHookRefs = new Set<string>();
-  /** ref → its row in `bodylessCallables`; the first slot without a body wins. */
-  const bodyless = new Map<string, BodylessCallable>();
+  /**
+   * ref → the row `bodylessCallables` reports for it unless some slot lowers
+   * it. The first slot that does not lower a callable supplies its row.
+   */
+  const unlowered = new Map<string, BodylessCallable>();
+  /** The refs some slot lowered into a `body`. */
+  const loweredRefs = new Set<string>();
   let bodyExtracted = 0;
 
-  function noteBodyless(ref: string, row: BodylessCallable): void {
-    if (!bodyless.has(ref)) bodyless.set(ref, row);
+  function noteUnlowered(ref: string, row: BodylessCallable): void {
+    if (!unlowered.has(ref)) unlowered.set(ref, row);
   }
 
   // Try to extract a metadata-only body from a callable. Returns null if the
   // body source contains a forbidden token — the caller still bundles the fn.
-  // Called only for a slot that has no `body` of its own, so a refusal leaves
-  // that slot, and the callable `ref` names, with no body.
+  // Called only for a slot with no `body` of its own; `ref` is the callable's.
   function tryExtractBody(fn: AnyFn, originLabel: string, ref: string): {
     language: 'js';
     source: string;
@@ -157,6 +164,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     try {
       const ext = extractHookBody(fn, originLabel);
       bodyExtracted += 1;
+      loweredRefs.add(ref);
       return { language: 'js', source: ext.source, capabilities: ext.capabilities };
     } catch (err: any) {
       // ⛔ The catch STAYS. Deleting it would make every refusal fatal and take
@@ -171,7 +179,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
         freeIdentifiers: err instanceof HookBodyExtractionError ? err.freeIdentifiers : [],
       };
       warnings.push(warning);
-      noteBodyless(ref, warning);
+      noteUnlowered(ref, warning);
       return null;
     }
   }
@@ -240,6 +248,8 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
               // marker the two hook write-set rules redirect their `path` on.
               loweredHookRefs.add(ref);
             }
+          } else {
+            noteUnlowered(ref, { origin: `hook '${name}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON });
           }
           hook.handler = ref;
         }
@@ -256,7 +266,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
         const obj = { ...rawObj };
         if (Array.isArray(obj.actions)) {
           obj.actions = (obj.actions as unknown[]).map((rawAct) =>
-            lowerActionCallable(rawAct, register, tryExtractBody, `${String(obj.name ?? 'object')}`),
+            lowerActionCallable(rawAct, register, tryExtractBody, noteUnlowered, `${String(obj.name ?? 'object')}`),
           );
         }
         return obj;
@@ -264,7 +274,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     }
     if (Array.isArray((lowered as any).actions)) {
       (lowered as any).actions = ((lowered as any).actions as unknown[]).map((rawAct) =>
-        lowerActionCallable(rawAct, register, tryExtractBody, 'global'),
+        lowerActionCallable(rawAct, register, tryExtractBody, noteUnlowered, 'global'),
       );
     }
 
@@ -282,7 +292,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
             ? next.name
             : 'anon_fn';
           const ref = register(next.handler as AnyFn, name);
-          noteBodyless(ref, { origin: `function '${name}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
+          noteUnlowered(ref, { origin: `function '${name}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
           next.name = ref;
           next.handler = ref;
         }
@@ -294,7 +304,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
       for (const [key, value] of Object.entries(fnsField)) {
         if (typeof value === 'function') {
           const ref = register(value as AnyFn, key);
-          noteBodyless(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
+          noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
           out[ref] = ref;
         } else if (isPlainObject(value) && typeof value.handler === 'function') {
           // A DECLARED entry (`{ handler, effect: 'writes' }`, #4396). Lower the
@@ -303,7 +313,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
           // artifact — dropping it here would silently un-declare the function
           // on every built deployment while it kept working from source.
           const ref = register(value.handler as AnyFn, key);
-          noteBodyless(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
+          noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
           out[ref] = { ...value, handler: ref };
         } else {
           // NOTHING ELSE IS THIS STEP'S TO JUDGE (#7318). Everything that is not
@@ -368,7 +378,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     count: Object.keys(functions).length,
     bodyExtracted,
     bodyExtractionWarnings: warnings,
-    bodylessCallables: [...bodyless.values()],
+    bodylessCallables: [...unlowered].filter(([ref]) => !loweredRefs.has(ref)).map(([, row]) => row),
     loweredHookRefs,
   };
 }
@@ -390,6 +400,7 @@ function lowerActionCallable(
   raw: unknown,
   register: (fn: AnyFn, base: string) => string,
   tryExtract: (fn: AnyFn, label: string, ref: string) => { language: 'js'; source: string; capabilities: string[] } | null,
+  noteUnlowered: (ref: string, row: BodylessCallable) => void,
   ownerLabel: string,
 ): unknown {
   if (!isPlainObject(raw)) return raw;
@@ -405,6 +416,8 @@ function lowerActionCallable(
   if (!action.body) {
     const body = tryExtract(fn, `action '${baseName}'`, ref);
     if (body) action.body = body;
+  } else {
+    noteUnlowered(ref, { origin: `action '${baseName}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON });
   }
   // Keep a string-named target so the legacy executor can still resolve it.
   action.target = ref;

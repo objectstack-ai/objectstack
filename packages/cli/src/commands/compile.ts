@@ -329,7 +329,8 @@ export default class Compile extends Command {
       if (!flags.json) printStep('Lowering inline handlers...');
       const lowering = lowerCallables(normalized);
 
-      // Strict-body gate: refuse to ship if any callable has no metadata body.
+      // Strict-body gate: refuse to ship if any callable was not lowered into a
+      // metadata body, i.e. if the runtime module would still have to carry it.
       // Body-only is the long-term target — `--strict-body` lets CI enforce it
       // before ESM-bundle emission becomes mandatory-off.
       //
