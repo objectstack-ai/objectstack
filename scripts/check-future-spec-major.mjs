@@ -338,16 +338,6 @@ const QUOTATION_EXEMPTIONS = Object.freeze([
       + 'the name.',
   },
   {
-    file: 'packages/spec/src/migrations/registry.ts',
-    major: 4997,
-    kind: 'measurement',
-    covers: 1,
-    witness: /controls objectstack 12966 and @objectstack\/spec 4997 on the same corpus/,
-    why:
-      'The same recorded evidence sentence, in the registry that carries the '
-      + 'semantic entry above. A count, not a version.',
-  },
-  {
     file: 'docs/adr/0021-analytics-dataset-semantic-layer.md',
     major: 6526,
     kind: 'measurement',
@@ -726,9 +716,9 @@ function selfTest() {
       files: F(
         "        + 'the string debounceDelay each occur 0 times across its 8228 tracked files, against lit '\n"
         + "        + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus.',\n",
-        'packages/spec/src/migrations/registry.ts',
+        'packages/spec/src/migrations/entries/semantic/18.kernel-health-check-and-hot-reload-durations-unit-in-key.ts',
       ),
-      ledger: [QUOTATION_EXEMPTIONS[4]],
+      ledger: [QUOTATION_EXEMPTIONS[3]],
       expect: 'green',
     },
     {

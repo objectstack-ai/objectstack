@@ -47,9 +47,9 @@ export const ROOT_OWNER = '@objectstack/spec-monorepo';
  * a merge that keeps one side whole loses nothing a regeneration cannot restore.
  * That property is what makes "defer and regenerate" a merge SEMANTICS rather than
  * a coin flip, and it is why `NOT_DRIVER_MANAGED` turns MIXED files away
- * (`skills/README.md`, `content/docs/ai/skills-reference.mdx`,
- * `src/migrations/registry.ts` — each in its own words: "a deferral would launder
- * the prose").
+ * (`skills/README.md`, `content/docs/ai/skills-reference.mdx` — each in its own
+ * words: "a deferral would launder the prose"; the migration registry was the third
+ * until #22554 made it git-ignored build output).
  *
  * `mixed` is the third answer those two lists could not express. A file can be
  * mixed AND still belong here, when the generated half is unreachable by any text
@@ -242,8 +242,8 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // is a whole generated tree; `content/docs/permissions/` is 22 hand-written prose
   // pages with ONE generated page among them, so the directory glob would hand 21
   // prose files to a driver that resolves to OURS — laundering away a sibling's
-  // prose edit, which is the exact trade `migrations/registry.ts` is kept out of
-  // this table for. The glob is recorded in NOT_DRIVER_MANAGED below.
+  // prose edit, which is the exact trade the migration registry was kept out of
+  // this table for while it was committed. The glob is recorded in NOT_DRIVER_MANAGED below.
   //
   // Why it was routed here (#13646, while the page carried `file:line` anchors): two
   // PRs that each ran `--fix` against their own tree wrote correct-for-themselves
@@ -477,16 +477,18 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   {
     path: 'packages/spec/src/migrations/registry.ts',
     gen: 'gen:migration-registry',
+    untracked: true,
     why:
-      'a MIXED file since #7297, and the mix is exactly why the driver must not own it. Its three '
-      + 'append tables are now generated into marked regions from `src/migrations/entries/` (one file '
-      + 'per entry), so a conflict INSIDE a region is resolved by `gen:migration-registry` and nothing '
-      + 'else — `check:migration-registry` fails if it was resolved any other way, which is what stops '
-      + "a resolution from silently dropping one side's retirement (#6957). But everything OUTSIDE the "
-      + 'markers — the tables\' load-bearing doc comments and each step\'s `rationale` — is still '
-      + 'hand-written, and the driver defers the WHOLE file to one side. Routing it here would let a '
-      + "regeneration launder away a sibling's prose edit, trading the silent drop this change removed "
-      + 'for a quieter one. So the prose conflict stays a human\'s, as it always was.',
+      'GITIGNORED since #22554 (ruling B on that card, completing #22449 B′): generated WHOLE by '
+      + '`gen:migration-registry` on `pnpm install` and as the first step of `build`, from two committed '
+      + 'sources — `src/migrations/registry.ts.template`, the hand-written skeleton outside the '
+      + '`<os-generated …>` markers, and `src/migrations/entries/`, one file per entry. Git never merges '
+      + 'it. It was a MIXED committed file from #7297 until then, kept out of the driver because a '
+      + "regeneration would launder a sibling's prose edit; that prose now lives in the template, which "
+      + 'is plain hand-written source and text-merges like any other, its conflicts a human\'s. A branch '
+      + 'that still carries the committed registry meets a modify/delete conflict on its merge of main, '
+      + 'which takes no driver: the deletion is the answer. Same expiry clause as the untracked entries '
+      + 'above: committing it again turns this entry red.',
   },
   {
     path: 'packages/spec/src/conversions/registry.ts',

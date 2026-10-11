@@ -102,12 +102,15 @@ describe('#22611 — `requiredPermissions` on a list view and a dashboard', () =
     expect(app).toMatchObject({ type: 'array', items: { type: 'string' } });
   });
 
-  it('the describe carries the machine-read `[PLANNED` marker for the not-enforced window, and no tracker number', () => {
+  it('[#22639] the describe carries NO machine-read `[PLANNED` marker now the gate enforces the key, and no tracker number', () => {
     // Wording is not pinned; the marker is, because a consumer parses it:
     // `markerStatus` in `scripts/liveness/check-liveness.mts` grades a row-less
-    // property `planned` off `[planned`. The enforcing change deletes the clause
-    // when both liveness rows flip to `live`.
-    expect(AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION).toMatch(/\[planned/i);
+    // property `planned` off `[planned`. The `/meta` read gate enforces the key
+    // (#22639), which deleted the not-enforced clause in the same edit that
+    // flipped both liveness rows to `live` — a marker left behind would grade
+    // an enforced key `planned` wherever no row overrides it.
+    expect(AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION).not.toMatch(/\[planned/i);
+    expect(AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION).not.toMatch(/not enforced/i);
     // Runtime text: no tracker number reaches an author.
     expect(AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION).not.toMatch(/#\d+/);
   });

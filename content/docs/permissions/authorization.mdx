@@ -396,12 +396,18 @@ substrate above.
 ## Grant lifecycle: the `active` switch (ADR-0049)
 
 Validity windows above date a **user's grant row**. The second lifecycle
-control dates the **catalogue row itself**: `sys_permission_set.active` and
-`sys_position.active`, the switch behind the Deactivate action on both objects.
-It answers a different question — "switch this grant off for everyone, without
-deleting it or unwinding the assignments" — and it is enforced in the same
-place, by the same discipline: **resolution-time filtering, fail-closed**, in
+control switches off the **permission set or position itself**: a
+`sys_metadata_activation` row of type `permission` or `position` whose `active`
+reads false. The activation ledger is deployment-wide. It answers a different
+question — "switch this grant off for everyone, without deleting it or
+unwinding the assignments" — and it is enforced in the same place, by the same
+discipline: **resolution-time filtering, fail-closed**, in
 `resolveAuthzContext`, with no cleanup job involved.
+
+A catalogue row's own `active` column (`sys_permission_set.active`,
+`sys_position.active`) no longer decides a grant. That column is what Setup's
+Deactivate action writes today, so a Deactivate in Setup does not switch the
+grant off.
 
 - A deactivated **permission set** contributes nothing: not its name, not its
   `system_permissions`, not its `tab_permissions`. As with an expired grant, a
@@ -409,13 +415,13 @@ place, by the same discipline: **resolution-time filtering, fail-closed**, in
   — the flag is applied *before* the posture is derived, not after. A
   **configured** administrator is judged elsewhere: that anchor reads the
   deployment's configuration and the caller's own `sys_user` row, never the
-  catalogue row, so the flag does not decide their standing.
+  ledger, so the switch does not decide their standing.
 - A deactivated **position** stops carrying its permission sets, and its name
   stops appearing in `positions`, so a permission set that merely shares the
   position's name cannot resolve through it either.
 - Assignments are untouched. `sys_user_position` and
-  `sys_user_permission_set` rows stay exactly as they were, and re-activating
-  the catalogue row restores every grant it carried, at the next resolution.
+  `sys_user_permission_set` rows stay exactly as they were, and switching the
+  ledger row back on restores every grant it carried, at the next resolution.
 
 The explain engine reports a deactivated-but-held row with the same dedicated
 contributor state the expired case gets (`state: 'deactivated'`, "held —
@@ -429,20 +435,19 @@ already walks: `sys_user_position` rows and direct `sys_user_permission_set`
 grants (a deactivated set reached only through an active position's linkage is
 not re-derived — that would replicate the resolver's aggregation).
 
-**Absent is ACTIVE.** Only a stored value that really reads false takes a grant
-away, so a row that predates the column keeps granting. The same predicate
-(`isRowActive`) is used by every reader, including the last-administrator
-guard's simulation — a guard that modelled "deactivated" differently from the
-resolver would permit exactly the write it exists to refuse.
+**Absent is ACTIVE.** Only a ledger row whose `active` reads false takes a
+grant away; a permission set or position with no ledger row is in effect. The
+last-administrator guard's enumeration still reads the catalogue row's
+`active`, so it counts a row-deactivated `admin_full_access` as off and refuses
+more than it must, never less.
 
-**Deactivating the break-glass set is refused.** Switching `admin_full_access`
-off un-makes every platform admin who holds it *through a grant row*, in one
-write — and re-activating it needs the permission just lost. That write is
-judged like deleting or renaming the row (ADR-0135 D5.2): it is refused while
-it would leave the environment with no administrator who can sign in. The
-enumeration behind that judgement counts **both** anchors, so an environment
-whose administrators are configured rather than granted is not empty, and the
-write is permitted there. Re-activation is never refused.
+**Switching the break-glass set off is refused.** A ledger row switching
+`admin_full_access` off would un-make every platform admin who holds it
+*through a grant row*, in one write — and switching it back on needs the
+permission just lost. The last-administrator guard refuses such a ledger
+write outright, whatever the administrator population (ADR-0135 D5.2), and
+refuses one whose target row it cannot read. Switching it back on is never
+refused.
 
 Deactivation is an incident-response control, so what it does **not** touch is
 deliberate. Administration surfaces keep listing and editing a deactivated

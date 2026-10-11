@@ -160,6 +160,8 @@ describe('ADR-0130 D4 — the manifest service registers the residual\'s objects
       acme_note: RELEASE_ID,
     });
     expect((ql.registry.resolveObject('acme_note') as { _packageId?: string } | undefined)?._packageId).toBe(RELEASE_ID);
+    // …with the stack's version beside it, as the metadata door stamps the residual (#22689).
+    expect((ql.registry.resolveObject('acme_note') as { _packageVersion?: string } | undefined)?._packageVersion).toBe('1.0.0');
     expect(unservedLines(recorder)).toEqual([]);
   });
 

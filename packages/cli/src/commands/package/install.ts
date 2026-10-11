@@ -26,7 +26,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { printHeader, printKV, printSuccess, printError, printStep, isExitSignal } from '../../utils/format.js';
+import { printHeader, printKV, printSuccess, printWarning, printError, printStep, isExitSignal } from '../../utils/format.js';
 
 export default class PackageInstall extends Command {
   static override description =
@@ -220,12 +220,34 @@ export default class PackageInstall extends Command {
       }
 
       const data = res.body?.data ?? res.body ?? {};
+      // [#22729] A `200` is not by itself a hot install. install-local's
+      // LENIENT path — a cloud-fetched manifest whose `manifest.register`
+      // throws — writes the ledger entry and answers `200` with
+      // `hotLoaded: false` and the register error's message as `hotLoadError`
+      // (#22695): the package is installed and loads at the runtime's next
+      // restart, and the running kernel does not hold it. Only an explicit
+      // `false` is read that way; an answer without the key (a host that
+      // predates it) prints as it always did. The air-gapped file path never
+      // reaches this answer — an inline manifest whose register throws is
+      // refused `422 PLUGIN_REGISTER_FAILED` — but the read is the same code.
+      //
+      // ⛔ No invented reason: a `hotLoaded: false` whose `hotLoadError` is
+      // missing, blank or not a string prints no reason line at all.
+      const notHotLoaded = data.hotLoaded === false;
+      const hotLoadError = typeof data.hotLoadError === 'string' ? data.hotLoadError.trim() : '';
       console.log('');
-      printSuccess('Package installed into the running kernel');
+      if (notHotLoaded) {
+        printWarning(
+          "Package installed, but the running kernel could not load it — it loads at the runtime's next restart",
+        );
+      } else {
+        printSuccess('Package installed into the running kernel');
+      }
       printKV('  Package',   String(data.manifestId ?? data.packageId ?? label));
       printKV('  Version',   String(data.version ?? flags.version));
       printKV('  Runtime',   runtime);
       if (data.installedAt) printKV('  Installed', String(data.installedAt));
+      if (notHotLoaded && hotLoadError) printKV('  Hot-load error', hotLoadError);
       console.log('');
       // #6721: the cache directory is quoted from the RESPONSE, never from a
       // literal or a locally-resolved constant. The directory lives on the
