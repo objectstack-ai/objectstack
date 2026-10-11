@@ -23,10 +23,25 @@ import { describe, it, expect } from 'vitest';
 import { FILTER_LOGIC_CASES, reduceFilterVerdict } from '@objectstack/spec/data';
 
 import {
-  validateEmptyCombinators,
+  validateEmptyCombinators as validateEmptyCombinatorsUnrecorded,
   FILTER_EMPTY_COMBINATOR,
   FILTER_EMPTY_NODE,
 } from './validate-empty-combinators.js';
+import { FILTER_KEYS } from './filter-walk.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the two ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateEmptyCombinators: typeof validateEmptyCombinatorsUnrecorded = (...args) => {
+  const findings = validateEmptyCombinatorsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -328,5 +343,98 @@ describe('validateEmptyCombinators — the vocabulary is the runtime\'s (#5322/#
       expect(findings, `${JSON.stringify(filter)} is a literal shape this rule reports`).toHaveLength(1);
       expect(findings[0].message).toContain(prose);
     }
+  });
+});
+
+describe('[#22161] one-line verdicts — filter-empty-combinator, filter-empty-node', () => {
+  const CONVERTED = [FILTER_EMPTY_COMBINATOR, FILTER_EMPTY_NODE];
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => CONVERTED.includes(f.rule));
+    // The coverage control first: both ids fired, the combinator id on all
+    // three shapes and the node id at all three positions.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...CONVERTED].sort());
+    const combinator = converted.filter((f) => f.rule === FILTER_EMPTY_COMBINATOR);
+    for (const shape of ['`$and: []`', '`$or: []`', '`$not: {}`']) {
+      expect(combinator.some((f) => f.message.startsWith(shape)), shape).toBe(true);
+    }
+    const node = converted.filter((f) => f.rule === FILTER_EMPTY_NODE);
+    for (const opening of ['An EMPTY filter node', 'An EMPTY branch (`{}`) of a `$or`', 'An EMPTY branch (`{}`) of a `$and`']) {
+      expect(node.some((f) => f.message.startsWith(opening)), opening).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence per shape and position', () => {
+    const verdict = (filter: unknown) => validateEmptyCombinators(widgetStack(filter))[0]!.message;
+    expect(verdict({ $and: [] })).toBe(
+      '`$and: []` is a conjunction of ZERO conditions, which every backend reduces to its identity, so it ' +
+        'matches EVERY row: this surface reads as filtered and is not',
+    );
+    expect(verdict({ $or: [] })).toBe(
+      '`$or: []` is a disjunction of ZERO branches, which every backend reduces to its identity, so it ' +
+        'matches NO row: this surface renders permanently empty',
+    );
+    expect(verdict({ $not: {} })).toBe(
+      '`$not: {}` negates an EMPTY node, which is TRUE, so it matches NO row: the opposite of the ' +
+        '"no filter" an empty operand looks like',
+    );
+    expect(verdict({})).toBe(
+      'An EMPTY filter node (`{}`) is TRUE, so it matches EVERY row exactly as if the key were absent: a ' +
+        'filter is declared and enforces nothing',
+    );
+    expect(verdict({ $or: [{ status: 'open' }, {}] })).toBe(
+      'An EMPTY branch (`{}`) of a `$or` is TRUE, and one TRUE disjunct ABSORBS the disjunction (it ' +
+        'matches EVERY row), so every branch written beside it is dead',
+    );
+    expect(verdict({ $and: [{ status: 'open' }, {}] })).toBe(
+      'An EMPTY branch (`{}`) of a `$and` is TRUE, the AND identity, so it contributes no condition and ' +
+        'the conjunction means whatever its other branches mean',
+    );
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [FILTER_EMPTY_COMBINATOR]: [
+        'on a read scope, hides every row',
+        'fail-closed by design',
+        'not an authoring surface',
+      ],
+      [FILTER_EMPTY_NODE]: [
+        'silently narrow the scope',
+        'lost in an edit',
+      ],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
+    // The identity table and the scope are one text each under both ids.
+    const [combinator, node] = CONVERTED.map((rule) => explainRule(rule)!.paragraphs);
+    expect(combinator![0]).toBe(node![0]);
+    expect(combinator!.at(-1)).toBe(node!.at(-1));
+  });
+
+  it('the explanation\'s identity table is the shared reduction\'s', () => {
+    // The explanation module imports nothing, so the row sets it writes out
+    // are held to `reduceFilterVerdict` here, the same function the verdicts
+    // derive their words from.
+    const identities = explainRule(FILTER_EMPTY_COMBINATOR)!.paragraphs[0]!;
+    expect(reduceFilterVerdict({ $and: [] })).toBe('true');
+    expect(reduceFilterVerdict({})).toBe('true');
+    expect(identities).toContain('`{ $and: [] }` and `{}` reduce to TRUE and match EVERY row');
+    expect(reduceFilterVerdict({ $or: [] })).toBe('false');
+    expect(reduceFilterVerdict({ $not: {} })).toBe('false');
+    expect(identities).toContain('`{ $or: [] }` and `{ $not: {} }` reduce to FALSE and match NO row');
+  });
+
+  it('the explanation names every filter key the walk visits', () => {
+    const scope = explainRule(FILTER_EMPTY_COMBINATOR)!.paragraphs.at(-1)!;
+    for (const key of FILTER_KEYS) expect(scope, key).toContain(`\`${key}\``);
   });
 });

@@ -413,6 +413,7 @@ import {
     mapDataError,
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
+    nestedRefusalEnvelope,
     boundedDeclaredUserMessage,
     boundedDeclaredRefusalMessage,
     declaredHttpStatus,
@@ -12136,6 +12137,26 @@ export class RestServer {
                     msg.replace(/^SHARING_NOT_ENABLED:\s*/, ''),
                 );
             }
+            // [#22719] A refusal none of the prefix arms above can read is asked
+            // of the `/data` door's own classification before the 500 below
+            // relays `.message`. For a sandboxed hook's refusal `.message` is
+            // the QuickJS debug wrapper, so `POST /rules`, `DELETE
+            // /rules/:idOrName` and `POST .../evaluate` answered `500` with
+            // `hook '<name>' threw: Error: …` where every conforming write door
+            // answers the hook's own sentence. A refusal that DECLARED its
+            // envelope (`status`/`statusCode` + `code`) is answered at its own
+            // status too, as on every door that asks this.
+            //
+            // AFTER the prefix arms, deliberately: each of them answers a 4xx
+            // this family already publishes, and none can read a sandbox error
+            // (its `.message` opens with the wrapper, never a prefix), so asking
+            // here moves only what used to reach the 500. Emitted in the nested
+            // envelope like `SHARING_NOT_ENABLED` above, for that arm's reason.
+            const refusal = classifiedRefusalAnswer(err);
+            if (refusal) {
+                const nested = nestedRefusalEnvelope(refusal);
+                return sendEnvelopeError(res, nested.status, nested.code, nested.message, nested.extra);
+            }
             logError(`[REST] sharing-rule ${defaultCode}:`, err);
             return res.status(500).json({ code: defaultCode, error: msg.slice(0, 500) });
         };
@@ -12310,8 +12331,13 @@ export class RestServer {
          * `query-multiplicity.ts`; that helper is shared with the whole file
          * and stays the reference point rather than being re-implemented here.
          */
-        const respondError = (res: any, status: number, code: string, message: string) =>
-            res.status(status).json({ error: { code, message } });
+        // [#22719] `extra` carries the declared channels of a classified refusal
+        // (`declaredCode`, `userMessage`) inside the same `error` object; every
+        // other arm passes none and writes exactly `{ code, message }`.
+        const respondError = (
+            res: any, status: number, code: string, message: string,
+            extra?: { declaredCode?: string; userMessage?: string },
+        ) => res.status(status).json({ error: { code, message, ...extra } });
         const respond501 = (res: any) => respondError(
             res, 501, 'NOT_IMPLEMENTED', 'Security service is not configured on this deployment',
         );
@@ -12323,6 +12349,20 @@ export class RestServer {
                 // each carry `code` + `statusCode`. The status mapping is
                 // unchanged — only the position of the code moves.
                 return respondError(res, status, err?.code ?? defaultCode, String(err?.message ?? err));
+            }
+            // [#22719] A refusal the typed arm cannot read is asked of the
+            // `/data` door's own classification before the 500 below relays
+            // `.message`. A sandboxed hook's refusal carries no `statusCode`
+            // (the sandbox lifts `status` only), so `confirm`, `dismiss` and
+            // `discard-overlay` answered `500` with the QuickJS debug wrapper
+            // where every conforming write door answers the hook's own
+            // sentence; a refusal declaring `status` + `code` is answered at
+            // its own status too. The typed arm above is untouched, and the
+            // answer leaves through this family's one emitter.
+            const refusal = classifiedRefusalAnswer(err);
+            if (refusal) {
+                const nested = nestedRefusalEnvelope(refusal);
+                return respondError(res, nested.status, nested.code, nested.message, nested.extra);
             }
             logError(`[REST] suggested-bindings ${defaultCode}:`, err);
             // The 500 arm keeps its 500-char cap: an unexpected fault's message
@@ -12553,6 +12593,27 @@ export class RestServer {
                     });
                     return true;
                 }
+            }
+            // [#22719] A refusal no prefix above matches is asked of the `/data`
+            // door's own classification before the caller's outer 500 relays
+            // `.message`. For a sandboxed hook's refusal `.message` is the
+            // QuickJS debug wrapper, so all nine write routes here answered
+            // `500 APPROVAL_*_FAILED` with `hook '<name>' threw: Error: …` where
+            // every conforming write door answers the hook's own sentence; a
+            // refusal declaring `status`/`statusCode` + `code` is answered at
+            // its own status too.
+            //
+            // AFTER the mapping, deliberately: every row above answers a code
+            // this family publishes, and none can read a sandbox error (its
+            // `.message` opens with the wrapper), so asking here moves only what
+            // used to reach the 500. Nested envelope, for the reason the
+            // sharing-rule family's `SHARING_NOT_ENABLED` arm gives: a new arm
+            // does not copy the flat `{ code, error }` dialect.
+            const refusal = classifiedRefusalAnswer(err);
+            if (refusal) {
+                const nested = nestedRefusalEnvelope(refusal);
+                sendEnvelopeError(res, nested.status, nested.code, nested.message, nested.extra);
+                return true;
             }
             return false;
         };

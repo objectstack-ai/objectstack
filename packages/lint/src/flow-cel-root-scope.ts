@@ -82,6 +82,11 @@
  *
  *  - **a record trigger** — the start node's `config.objectName` (the trigger
  *    object a record-change run's row belongs to) names an undeclared object;
+ *  - **a record trigger that names no object** — the trigger kind is
+ *    `record_change` and the start node names no `config.objectName`: the
+ *    record-change trigger then registers its hook with no object filter
+ *    (`record-change-trigger.ts`), so it fires on a write to ANY object, one the
+ *    stack does not declare included, and hands that row;
  *  - **a time-relative sweep** — the start node's `config.timeRelative.object`
  *    (`TimeRelativeTriggerSchema`; its own key, independent of `objectName`, and
  *    the object whose rows the sweep hands each run) is undeclared;
@@ -130,7 +135,7 @@
  *    its `context.record`. A parent's own `record` VARIABLE is not handed on —
  *    the child gets the parent's context, not its variables. Read to a fixpoint.
  *
- * ## The runtime publish gate stands down (#22636 is the carrier)
+ * ## The runtime publish gate stands down, by design
  *
  * The same pass runs at the runtime publish gate on a flow write, and there the
  * per-write snapshot carries the written flow alone beside `objects` /
@@ -139,9 +144,16 @@
  * `map` node could hand this flow any record. A false 422 on the only door a
  * Studio tenant has is worse than the gap, so this one judgment stands down there
  * ({@link perWriteSnapshotEntrance}); every other expression verdict at that door
- * is unchanged, and `objectstack validate` judges under the rule above. #22636
- * widens that snapshot to carry flows and actions; when it lands, this
- * stand-down goes.
+ * is unchanged, and `objectstack validate` judges under the rule above.
+ *
+ * ⛔ Not a hold-out awaiting a wider snapshot. Who launches a flow and what
+ * record it is handed are read from OTHER items of the stack, so this is a
+ * whole-stack judgment, and it belongs to `objectstack validate` (ADR-0109
+ * Decision §3's boundary); the runtime publish gate judges the written item
+ * against the four collections it carries. The snapshot stays as it is: ruling
+ * `5791822697` on #19527 (item 3: `RuntimeStackContext` / `CONTEXT_STACK_KEYS`
+ * are unchanged, because every gated write pays for what they carry), held for
+ * this judgment by ruling `6104584601` on #22636 (letter B).
  */
 
 import { firstUndeclaredReference, parseCelToAst, SCOPE_ROOTS } from '@objectstack/formula';
@@ -380,6 +392,10 @@ export function flowCelEntrances(
     if (triggerObject && undeclared(triggerObject)) {
       open(name, `its trigger object '${triggerObject}' (start config.objectName) is not declared in this stack, so the record's keys are not in hand`);
     }
+    if (kind === 'record_change' && !triggerObject) {
+      // No object filter on the hook: any object's write fires it and hands its row.
+      open(name, `its record trigger '${String(config.triggerType)}' names no object (start config.objectName), so it fires on a write to any object and the record's keys are not in hand`);
+    }
     const sweep = config.timeRelative && typeof config.timeRelative === 'object' ? (config.timeRelative as AnyRec) : undefined;
     const sweepObject = sweep ? nameOf(sweep.object) : undefined;
     if (sweepObject && undeclared(sweepObject)) {
@@ -466,7 +482,9 @@ export function flowCelEntrances(
 /**
  * The runtime publish gate's entrance: none visible. Its per-write snapshot
  * carries the written flow alone (module note), so this one judgment stands down
- * there until #22636 widens the snapshot.
+ * there, by design: it is a whole-stack judgment, `objectstack validate`'s, and
+ * the snapshot is not widened for it (rulings `5791822697` item 3 and
+ * `6104584601`, module note).
  */
 export function perWriteSnapshotEntrance(): FlowCelEntrance {
   return {

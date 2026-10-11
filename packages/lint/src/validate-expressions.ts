@@ -2169,8 +2169,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // another flow's `subflow` / `map` node). At the runtime publish gate
   // (`runtimeWriteType` set) the per-write snapshot holds the written flow alone,
   // so no entrance is visible there and the judgment stands down
-  // (`perWriteSnapshotEntrance`) until #22636 widens that snapshot; every other
-  // verdict this pass gives at that door is unchanged.
+  // (`perWriteSnapshotEntrance`), by design: a judgment that reads other items of
+  // the stack is `objectstack validate`'s, and that snapshot is not widened for
+  // it (rulings `5791822697` item 3 and `6104584601`; `flow-cel-root-scope.ts`'s
+  // module note). Every other verdict this pass gives at that door is unchanged.
   const runtimeGateWrite = options.runtimeWriteType !== undefined;
   const flowEntrances: ReadonlyMap<string, FlowCelEntrance> =
     objectWrite || runtimeGateWrite ? new Map() : flowCelEntrances(stack, fieldIndex);

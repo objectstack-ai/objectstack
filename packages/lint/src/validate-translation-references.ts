@@ -1460,6 +1460,10 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
 
   const universe = buildUniverse(stack);
 
+  // [#22161] Every `translation-target-unknown` message below is one verdict
+  // sentence (plus the nearest declared name, when there is one). Why the
+  // resolver never reads an orphan key, why it gates, and what each leg may
+  // name are `os explain translation-target-unknown`.
   const orphan = (where: string, path: string, message: string, hint: string) => {
     findings.push({
       severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
@@ -1511,12 +1515,10 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             objPath,
             hasPlatformObjectPrefix(objectName)
               ? `Translations are keyed to "${objectName}", which carries a platform namespace ` +
-                `prefix but is registered by no platform package, official plugin, or cloud ` +
-                `runtime object — and this stack does not define it either. Nothing resolves ` +
-                `these keys.` + suggest(objectName, universe.objects.keys())
+                `prefix but no platform package registers it and this stack does not define it, so ` +
+                `nothing resolves these keys.` + suggest(objectName, universe.objects.keys())
               : `Translations are keyed to "${objectName}", which no object in this stack ` +
-                `defines. The resolver looks up keys derived from the metadata, so this whole ` +
-                `subtree is dead weight — every label it carries renders untranslated.` +
+                `defines, so nothing reads this subtree and every label in it renders untranslated.` +
                 suggest(objectName, universe.objects.keys()),
             `Rename the key to the object it was written for, drop it, or ignore this if the ` +
               `object is contributed by another installed package.` +
@@ -1535,9 +1537,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `${inLocale} · object "${objectName}" · field "${fieldName}"`,
               fieldPath,
               `Translations are keyed to field "${fieldName}", which object "${objectName}" ` +
-                `does not declare. The label renders untranslated in this locale — and because ` +
-                `every neighbouring field DOES resolve, the hole reads as a styling quirk ` +
-                `rather than a missing translation.` + suggest(fieldName, facts.fields.keys()),
+                `does not declare, so its label renders untranslated in this locale.` +
+                suggest(fieldName, facts.fields.keys()),
               `Point the key at a declared field, or drop it if the field was removed or renamed.` +
                 (facts.fields.size > 0 ? ` Declared fields: ${listNames(facts.fields.keys())}.` : ''),
             );
@@ -1561,7 +1562,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · object "${objectName}" · view "${viewName}"`,
             `${objPath}._views.${viewName}`,
             `Translations are keyed to view "${viewName}", which no view of object ` +
-              `"${objectName}" declares. The view tab keeps its source-locale label.` +
+              `"${objectName}" declares, so the view tab keeps its source-locale label.` +
               suggest(viewName, facts.views),
             `Match the key to the view's \`name\` (not its label), or drop it.` +
               (facts.views.size > 0 ? ` Declared views: ${listNames(facts.views)}.` : ''),
@@ -1575,8 +1576,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · object "${objectName}" · section "${sectionName}"`,
             `${objPath}._sections.${sectionName}`,
             `Translations are keyed to section "${sectionName}", which nothing on object ` +
-              `"${objectName}" declares — no \`fieldGroups[].key\`, no named form-view section, ` +
-              `no named \`record:details\` section. The section heading stays in the source locale.` +
+              `"${objectName}" declares, so the section heading stays in the source locale.` +
               suggest(sectionName, facts.sections),
             `Sections are translatable only through a STABLE NAME: give the group/section a ` +
               `\`key\`/\`name\` and use it here, or drop the translation.` +
@@ -1601,9 +1601,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · object "${objectName}" · tab "${tabName}"`,
             `${objPath}._tabs.${tabName}`,
             `Translations are keyed to filter-preset tab "${tabName}", which no page over ` +
-              `object "${objectName}" declares in \`interfaceConfig.userFilters.tabs\`. The tab ` +
-              `keeps its source-locale label — above a grid whose every column resolves, so the ` +
-              `hole reads as a styling quirk rather than a missing translation.` +
+              `object "${objectName}" declares, so the tab keeps its source-locale label.` +
               suggest(tabName, facts.tabs),
             `Match the key to the tab's \`name\` (not its label), or drop it if the preset was ` +
               `renamed or removed.` +
@@ -1628,9 +1626,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · object "${objectName}" · validation "${ruleName}"`,
             `${objPath}._validations.${ruleName}`,
             `Translations are keyed to validation rule "${ruleName}", which object ` +
-              `"${objectName}" does not declare in \`validations[]\`. The rule's authored ` +
-              `\`message\` keeps its source locale in every refusal.` +
-              suggest(ruleName, facts.validations),
+              `"${objectName}" does not declare, so its refusal \`message\` stays in the source ` +
+              `locale.` + suggest(ruleName, facts.validations),
             `Match the key to the rule's \`name\`, or drop it if the rule was renamed or ` +
               `removed.` +
               (facts.validations.size > 0
@@ -1649,9 +1646,9 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             orphan(
               `${inLocale} · object "${objectName}" · action "${actionName}"`,
               actionPath,
-              `Translations are keyed to action "${actionName}", which is defined by neither ` +
-                `object "${objectName}"'s \`actions\` nor a \`stack.actions\` entry bound to it. ` +
-                `The button keeps its source-locale label.` + suggest(actionName, facts.actions.keys()),
+              `Translations are keyed to action "${actionName}", which object "${objectName}" ` +
+                `neither declares nor has bound from \`stack.actions\`, so the button keeps its ` +
+                `source-locale label.` + suggest(actionName, facts.actions.keys()),
               `Match the key to a defined action name, move it under the object that owns the ` +
                 `action, or drop it.` +
                 (facts.actions.size > 0 ? ` Actions on this object: ${listNames(facts.actions.keys())}.` : ''),
@@ -1678,12 +1675,10 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · global action "${actionName}"`,
             actionPath,
             owner
-              ? `Action "${actionName}" is bound to object "${owner}", so the resolver looks it ` +
-                `up under \`objects.${owner}._actions.${actionName}\` — never under ` +
-                `\`globalActions\`, which is only consulted for object-less actions. This key ` +
-                `is never read.`
+              ? `Action "${actionName}" is bound to object "${owner}", so the resolver reads its ` +
+                `translations from \`objects.${owner}._actions.${actionName}\` and never reads this key.`
               : `Translations are keyed to global action "${actionName}", which no object-less ` +
-                `action in this stack defines. The button keeps its source-locale label.` +
+                `action in this stack defines, so the button keeps its source-locale label.` +
                 suggest(actionName, universe.globalActions.keys()),
             owner
               ? `Move these keys under \`objects.${owner}._actions.${actionName}\`.`
@@ -1712,7 +1707,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · app "${appName}"`,
             appPath,
             `Translations are keyed to app "${appName}", which this stack neither defines nor ` +
-              `contributes into. The app launcher shows the source-locale label.` +
+              `contributes into, so the app launcher shows the source-locale label.` +
               suggest(appName, universe.apps.keys()),
             `Match the key to an app's \`name\`, or drop it.` +
               // Every resolvable name, declared or only contributed into
@@ -1738,12 +1733,10 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${appPath}.navigation.${navId}`,
             contributedOnly
               ? `Translations are keyed to navigation item "${navId}" of app "${appName}", ` +
-                `which this stack contributes into (\`manifest.navigationContributions\`) ` +
-                `without declaring — and it contributes no item with that id. Only the ids ` +
-                `contributed from here are addressable; the app's own entries are declared, ` +
-                `and translated, by the package that owns it.` + suggest(navId, navIds)
+                `which this stack contributes into without declaring and contributes no such ` +
+                `item to, so nothing reads this key.` + suggest(navId, navIds)
               : `Translations are keyed to navigation item "${navId}", which app "${appName}" ` +
-                `does not declare. The menu entry keeps its source-locale label.` +
+                `does not declare, so the menu entry keeps its source-locale label.` +
                 suggest(navId, navIds),
             contributedOnly
               ? `Match the key to a contributed item's \`id\`, or move it to the package that ` +
@@ -1766,7 +1759,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · dashboard "${dashName}"`,
             dashPath,
             `Translations are keyed to dashboard "${dashName}", which this stack does not ` +
-              `define. The dashboard title stays in the source locale.` +
+              `define, so the dashboard title stays in the source locale.` +
               suggest(dashName, universe.dashboards.keys()),
             `Match the key to a dashboard's \`name\`, or drop it.` +
               (universe.dashboards.size > 0 ? ` Defined dashboards: ${listNames(universe.dashboards.keys())}.` : ''),
@@ -1780,7 +1773,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · dashboard "${dashName}" · widget "${widgetId}"`,
             `${dashPath}.widgets.${widgetId}`,
             `Translations are keyed to widget "${widgetId}", which dashboard "${dashName}" ` +
-              `does not declare. The widget title stays in the source locale.` +
+              `does not declare, so the widget title stays in the source locale.` +
               suggest(widgetId, dash.widgets),
             `Match the key to the widget's \`id\`, or drop it.` +
               (dash.widgets.size > 0 ? ` Declared widget ids: ${listNames(dash.widgets)}.` : ''),
@@ -1792,7 +1785,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · dashboard "${dashName}" · action "${actionKey}"`,
             `${dashPath}.actions.${actionKey}`,
             `Translations are keyed to header action "${actionKey}", which dashboard ` +
-              `"${dashName}" does not declare. The button keeps its source-locale label.` +
+              `"${dashName}" does not declare, so the button keeps its source-locale label.` +
               suggest(actionKey, dash.actions),
             `Header-action translations are keyed by the action's \`actionUrl\`, not its label.` +
               (dash.actions.size > 0 ? ` Declared header actions: ${listNames(dash.actions)}.` : ''),
@@ -1808,8 +1801,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           orphan(
             `${inLocale} · flow "${flowName}"`,
             flowPath,
-            `Translations are keyed to flow "${flowName}", which this stack does not define. ` +
-              `The wizard renders its source-locale label and headings.` +
+            `Translations are keyed to flow "${flowName}", which this stack does not define, ` +
+              `so the wizard renders its source-locale label and headings.` +
               suggest(flowName, universe.flows.keys()),
             `Match the key to a flow's \`name\` (the machine name, not its label), or drop it.` +
               (universe.flows.size > 0 ? ` Defined flows: ${listNames(universe.flows.keys())}.` : ''),
@@ -1825,9 +1818,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           orphan(
             `${inLocale} · flow "${flowName}" · ${key}`,
             `${flowPath}.${key}`,
-            `Translations carry \`${key}\` for flow "${flowName}", which declares no \`${key}\`. A ` +
-              `toast is translated only where the flow authors one, so nothing resolves this key and the ` +
-              `runner keeps its own sentence.`,
+            `Translations carry \`${key}\` for flow "${flowName}", which declares no \`${key}\`, so ` +
+              `nothing resolves this key and the runner keeps its own sentence.`,
             `Declare \`${key}\` on the flow, or drop the key.`,
           );
         }
@@ -1841,10 +1833,9 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               screenPath,
               otherType
                 ? `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
-                  `declares as a \`${otherType}\` node, not a \`screen\`. Only screen nodes ` +
-                  `render a heading and fields for a user to read, so nothing resolves these keys.`
+                  `declares as a \`${otherType}\` node, not a \`screen\`, so nothing resolves these keys.`
                 : `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
-                  `declares no screen node for. The wizard step keeps its source-locale heading.` +
+                  `declares no screen node for, so the wizard step keeps its source-locale heading.` +
                   suggest(nodeId, flow.screens.keys()),
               `Screen translations are keyed by the node's \`id\` (the client's ` +
                 `\`ScreenSpec.nodeId\`), not its \`label\`.` +
@@ -1864,8 +1855,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `${inLocale} · flow "${flowName}" · screen "${nodeId}" · description`,
               `${screenPath}.description`,
               `Translations carry \`description\` for screen "${nodeId}" of flow "${flowName}", which ` +
-                `declares no \`config.description\`. Body text is translated only where the screen ` +
-                `authors one, so nothing resolves this key and the screen shows no body text.`,
+                `declares no \`config.description\`, so nothing resolves this key.`,
               `Declare \`config.description\` on the screen, or drop the key.`,
             );
           }
@@ -1888,12 +1878,10 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `${screenPath}.fields.${fieldName}`,
               objectForm
                 ? `Translations are keyed to screen field "${fieldName}", but screen "${nodeId}" ` +
-                  `is an OBJECT-FORM screen (\`config.objectName: "${objectForm}"\`) — it renders ` +
-                  `that object's own create/edit form, so its input labels come from ` +
-                  `\`objects.${objectForm}.fields.*\` and nothing reads a field key here.`
+                  `is an OBJECT-FORM screen over "${objectForm}", whose input labels come from ` +
+                  `\`objects.${objectForm}.fields.*\`, so nothing reads this key.`
                 : `Translations are keyed to screen field "${fieldName}", which screen "${nodeId}" ` +
-                  `of flow "${flowName}" does not declare. The input keeps its source-locale ` +
-                  `label while every neighbouring field on the same screen resolves.` +
+                  `of flow "${flowName}" does not declare, so the input keeps its source-locale label.` +
                   suggest(fieldName, screen.fields),
               objectForm
                 ? `Move this copy under \`objects.${objectForm}.fields.${fieldName}\`, or drop it.`
@@ -1913,14 +1901,13 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${flowPath}.refusals.${nodeId}`,
             nodeType === END_NODE_TYPE
               ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as an ` +
-                `\`end\` node that completes. Only an \`end\` declaring \`outcome: 'refused'\` shows a ` +
-                `message, so nothing resolves this key.`
+                `\`end\` node that completes, not one declaring \`outcome: 'refused'\`, so nothing ` +
+                `resolves this key.`
               : nodeType
                 ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as a ` +
-                  `\`${nodeType}\` node, not a refusing \`end\`. Only an \`end\` declaring ` +
-                  `\`outcome: 'refused'\` shows a message, so nothing resolves this key.`
+                  `\`${nodeType}\` node, not a refusing \`end\`, so nothing resolves this key.`
                 : `Translations are keyed to refusal "${nodeId}", a node id flow "${flowName}" does not ` +
-                  `declare. The refusal keeps its source-locale message.` +
+                  `declare, so the refusal keeps its source-locale message.` +
                   suggest(nodeId, flow.refusals),
             `Refusal translations are keyed by the \`id\` of an \`end\` node declaring ` +
               `\`outcome: 'refused'\`.` +
@@ -1967,10 +1954,13 @@ function checkOptionKeys(
       rule: TRANSLATION_OPTION_KEY_UNKNOWN,
       where: ctx.where,
       path: ctx.path,
+      // [#22161] One verdict sentence for every `translation-option-key-unknown`
+      // message in this file; how option keys are read, on which surfaces,
+      // and why this one only warns are `os explain translation-option-key-unknown`.
       message:
         `Option translations are keyed under field "${ctx.fieldName}" of object ` +
         `"${ctx.objectName}", which declares no \`options\` at all (field type ` +
-        `"${strName(ctx.field.type) ?? 'unknown'}"). Nothing reads this map.`,
+        `"${strName(ctx.field.type) ?? 'unknown'}"), so nothing reads this map.`,
       hint:
         `Declare the options on the field, move the translations to the field that owns ` +
         `them, or drop them.`,
@@ -1988,10 +1978,9 @@ function checkOptionKeys(
       path: `${ctx.path}.${key}`,
       message: byLabel
         ? `Option translation is keyed by the DISPLAY LABEL "${key}" instead of the stored ` +
-          `value "${byLabel}". The resolver looks the option up by value, so this entry is ` +
-          `never found and the option renders with its source-locale label.`
-        : `Option translation is keyed by "${key}", which is not one of the values declared ` +
-          `by field "${ctx.objectName}.${ctx.fieldName}". The option renders untranslated.` +
+          `value "${byLabel}", so the resolver never finds it and the option renders untranslated.`
+        : `Option translation is keyed by "${key}", which is not a value declared by field ` +
+          `"${ctx.objectName}.${ctx.fieldName}", so the option renders untranslated.` +
           suggest(key, declared.values),
       hint: byLabel
         ? `Rename the key to "${byLabel}".`
@@ -2087,7 +2076,7 @@ function checkActionParams(findings: TranslationRefFinding[], ctx: ActionEntryCo
       path: `${ctx.path}.params.${paramName}`,
       message:
         `Translations are keyed to parameter "${paramName}", which ${ctx.subject} does not ` +
-        `declare. The parameter's label and help text render untranslated in the action dialog.` +
+        `declare, so its label and help text render untranslated in the action dialog.` +
         suggest(paramName, declared),
       hint:
         `Match the key to a declared param \`name\`, or drop it.` +
@@ -2148,7 +2137,7 @@ function checkActionParamOptionKeys(
         `Option translations are keyed under parameter "${ctx.paramName}" of ${ctx.subject}, ` +
         `which declares no \`options\`` +
         (Array.isArray(raw) ? '' : ' and references no field') +
-        `. Nothing reads this map.`,
+        `, so nothing reads this map.`,
       hint:
         `Declare the options on the param, move the translations to the param that owns ` +
         `them, or drop them.`,
@@ -2166,10 +2155,9 @@ function checkActionParamOptionKeys(
       path: `${ctx.path}.${key}`,
       message: labelHit
         ? `Option translation is keyed by the DISPLAY LABEL "${key}" instead of the stored ` +
-          `value "${labelHit}". The resolver looks the option up by value, so this entry is ` +
-          `never found and the option renders with its source-locale label.`
-        : `Option translation is keyed by "${key}", which is not one of the values declared ` +
-          `by parameter "${ctx.paramName}" of ${ctx.subject}. The option renders untranslated.` +
+          `value "${labelHit}", so the resolver never finds it and the option renders untranslated.`
+        : `Option translation is keyed by "${key}", which is not a value declared by parameter ` +
+          `"${ctx.paramName}" of ${ctx.subject}, so the option renders untranslated.` +
           suggest(key, values),
       hint: labelHit
         ? `Rename the key to "${labelHit}".`
@@ -2210,7 +2198,7 @@ function checkScreenFieldOptionKeys(
       rule: TRANSLATION_OPTION_KEY_UNKNOWN,
       where: ctx.where,
       path: ctx.path,
-      message: `Option translations are keyed under ${ctx.subject}, which declares no \`options\`. Nothing reads this map.`,
+      message: `Option translations are keyed under ${ctx.subject}, which declares no \`options\`, so nothing reads this map.`,
       hint: `Declare the options on the screen field, move the translations to the field that owns them, or drop them.`,
     });
     return;
@@ -2226,10 +2214,9 @@ function checkScreenFieldOptionKeys(
       path: `${ctx.path}.${key}`,
       message: labelHit
         ? `Option translation is keyed by the DISPLAY LABEL "${key}" instead of the stored ` +
-          `value "${labelHit}". The resolver looks the option up by value, so this entry is ` +
-          `never found and the option renders with its source-locale label.`
-        : `Option translation is keyed by "${key}", which is not one of the values declared ` +
-          `by ${ctx.subject}. The option renders untranslated.` +
+          `value "${labelHit}", so the resolver never finds it and the option renders untranslated.`
+        : `Option translation is keyed by "${key}", which is not a value declared by ` +
+          `${ctx.subject}, so the option renders untranslated.` +
           suggest(key, ctx.declared.values),
       hint: labelHit
         ? `Rename the key to "${labelHit}".`
@@ -2266,8 +2253,7 @@ function checkActionOutcomeMessages(findings: TranslationRefFinding[], ctx: Acti
       message:
         (declared.size > 0
           ? `Translations are keyed to outcome "${outcome}", which ${ctx.subject} does not ` +
-            `declare in \`outcomeMessages\`. Only the outcomes the action declares are ` +
-            `translated, so this copy is never shown.` +
+            `declare in \`outcomeMessages\`, so this copy is never shown.` +
             suggest(outcome, declared)
           : `Translations are keyed to outcome "${outcome}", but ${ctx.subject} declares no ` +
             `\`outcomeMessages\` at all, so nothing reads this map and this copy is never shown.`),
@@ -2305,8 +2291,7 @@ function checkActionResultDialogLeaves(findings: TranslationRefFinding[], ctx: A
       path: `${ctx.path}.resultDialog.${leaf}`,
       message:
         `Translations carry a result dialog \`${leaf}\`, but ${ctx.subject} declares no ` +
-        `\`resultDialog\`, so nothing reads this copy: a bundle translates a dialog the ` +
-        `action declares and cannot add one.`,
+        `\`resultDialog\`, so nothing reads this copy.`,
       hint:
         `Move the \`resultDialog\` translations under the action that declares the dialog, ` +
         `declare the \`resultDialog\` on this action first if it should show one, or drop them.`,
@@ -2348,11 +2333,10 @@ function checkActionResultDialogFields(findings: TranslationRefFinding[], ctx: A
           `no \`resultDialog\`, so nothing reads this label.`
         : declared.size > 0
           ? `Translations are keyed to result field "${fieldPath}", which ${ctx.subject}'s ` +
-            `\`resultDialog.fields\` does not declare. Each label is looked up by a declared ` +
-            `field's literal \`path\`, so this one is never shown.` +
+            `\`resultDialog.fields\` does not declare, so this label is never shown.` +
             suggest(fieldPath, declared)
           : `Translations are keyed to result field "${fieldPath}", but ${ctx.subject}'s ` +
-            `\`resultDialog\` declares no \`fields\` — it renders the whole response as JSON — ` +
+            `\`resultDialog\` declares no \`fields\` (it renders the whole response as JSON), ` +
             `so nothing reads this label.`,
       hint:
         `Match the key to a declared field's literal \`path\` (dots included), or drop it.` +

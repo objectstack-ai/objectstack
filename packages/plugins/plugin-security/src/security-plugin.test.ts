@@ -4409,11 +4409,11 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
 
   /**
    * Boot the plugin far enough to run `runBootstrap` to completion, with the
-   * declarations served off the METADATA SERVICE — the seeder's own fallback
-   * source, and the one that answers at this moment in the boot: the anchor
-   * binding runs BEFORE `bootstrapDeclaredCapabilities` writes any
-   * `sys_capability` row. (The registry door is pinned on the other consumer,
-   * `suggested-audience-bindings.test.ts`.)
+   * stack's declarations held where a real boot holds them: in the engine
+   * registry, under the declaring package (`registerApp` stamps `_packageId`),
+   * beside the platform's own curated declarations. That registry is a declared
+   * capability's one home (ADR-0131 D3), and no `sys_capability` row is written
+   * for it.
    */
   async function boot(token: string, declaredCapabilities: any[]) {
     const tables: Record<string, any[]> = {
@@ -4435,6 +4435,9 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
       listItems: (type: string) => [...items.entries()].filter(([k]) => k.startsWith(`${type}:`)).map(([, v]) => v),
       isPackageDisabled: () => false,
     };
+    for (const capability of declaredCapabilities) {
+      registry.registerItem('capability', capability, 'name', 'com.example.app');
+    }
     const ql: any = {
       registry,
       registerMiddleware: () => {},
@@ -4476,7 +4479,7 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
     };
     const metadata = {
       get: async () => null,
-      list: async (type: string) => (type === 'capability' ? declaredCapabilities : []),
+      list: async () => [],
     };
     const services: Record<string, any> = {
       manifest: { register: vi.fn() },
