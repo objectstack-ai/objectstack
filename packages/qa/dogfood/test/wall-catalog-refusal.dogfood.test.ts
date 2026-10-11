@@ -24,6 +24,8 @@
 //     `403 FORBIDDEN`, and B's resolution does not move;
 //   - walled: the data door's catalog creates answer `403 PERMISSION_DENIED`,
 //     and nothing reaches the environment ledger;
+//   - walled: the permission-set clone door refuses org A a clone
+//     `403 PERMISSION_DENIED`, and nothing is saved;
 //   - walled CONTROLS: org A still assigns a catalog permission set to its own
 //     member, and the platform operator still saves the catalog;
 //   - `single` CONTROL: a `manage_metadata` holder who is not the platform
@@ -175,6 +177,22 @@ for (const posture of ['isolated', 'group'] as const) {
       const position = await stack.apiAs(tokA, 'POST', '/data/sys_position', { name: 'w_dd_pos', label: 'Data door position' });
       expect(await envelopeOf(position)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
       expect(await ql.find('sys_position', { where: { name: 'w_dd_pos' }, context: SYS })).toEqual([]);
+    });
+
+    it("the clone door refuses org A a clone of an environment set 403 PERMISSION_DENIED, and nothing is saved", async () => {
+      const res = await stack.apiAs(tokA, 'POST', `/security/permission-sets/${SHARED}/clone`, {
+        name: 'w_tenant_clone', label: 'Tenant clone',
+      });
+      expect(await envelopeOf(res)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+      expect((await definitionOf('permission', 'w_tenant_clone'))?.item).toBeFalsy();
+    });
+
+    it('CONTROL: the platform operator still clones a catalog set', async () => {
+      const res = await stack.apiAs(operator, 'POST', `/security/permission-sets/${SHARED}/clone`, {
+        name: 'w_operator_clone', label: 'Operator clone',
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect((await definitionOf('permission', 'w_operator_clone'))?.item?.name).toBe('w_operator_clone');
     });
 
     it('CONTROL: org A still assigns a catalog permission set to its own member', async () => {
