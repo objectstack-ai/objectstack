@@ -277,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 85 rows.
+ * CENSUS (generated): this list holds 86 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -494,6 +494,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'the session-less ADR-0043 action page an e-mail / IM approve or reject link opens: renders the confirm page for the `token` query parameter and never decides. Forwarded unread to the approvals slot\'s IApprovalService.handleActionPage and its Response returned as it is; HEAD is answered as this GET with no body, as the self-hosted mount answers it. The token is the only credential (the ADR-0069 gate allow-lists the exact path, the membership gate skips it), and an absent slot or member answers 501 NOT_IMPLEMENTED, never ROUTE_NOT_FOUND. This is the door for a kernel with no raw app; a self-hosted kernel serves the same path from plugin-approvals\' raw-app mount, which never passes through the dispatcher. Pinned in `domains/approvals-act.test.ts`' },
   { route: 'POST /approvals/act', domain: '/approvals/act', disposition: 'public',
     note: 'the redemption half of the ADR-0043 action page: the `token` rides in the form body, so the request is forwarded with its body UNREAD (the @objectstack/hono catch-all leaves the raw request readable) to IApprovalService.handleActionPage, which decides as the approver the token binds. A body consumed before it got here is a transport fault, answered 500 and logged rather than shown to the approver as an invalid link. Same credential, absence and door notes as the GET row' },
+
+  // ── webhooks redeliver (the hosted door) ──────────────────────────────────
+  { route: 'POST /webhooks/redeliver', domain: '/webhooks/redeliver', disposition: 'server-only',
+    note: 'the operator button that sends a finished webhook delivery again. Forwarded with its JSON body UNREAD to the webhooks slot\'s IWebhookService.handleRedeliver, resolved per request (plugin-webhooks registers the slot at kernel:ready, only once its redelivery veto is installed), and the member\'s Response returned as it is: the member judges the caller from the request\'s own credentials through the auth service (401 UNAUTHENTICATED with no signed-in user, exactly as the self-hosted mount answers it), scopes the row to the caller\'s active organization and answers every refusal itself. No preamble-gate exemption: unlike /approvals/act the credential is the session, so the ADR-0069 auth gate and the project-membership gate both apply, which makes this door stricter than the self-hosted mount, never looser. An absent slot or member answers 501 NOT_IMPLEMENTED, never ROUTE_NOT_FOUND; a body consumed before it got here is a transport fault, answered 500 and logged. POST only: the member does not match the method, so no other method is claimed and the member never runs for one. This is the door for a kernel with no raw app; a self-hosted kernel serves the same path from plugin-webhooks\' raw-app mount, which never passes through the dispatcher. NOT JS-SDK surface: the self-hosted route it bridges has never been, and this door declares no client method. Pinned in `domains/webhooks-redeliver.test.ts`' },
 
   // ── ai (dynamic route table, owned by another repo) ───────────────────────
   { route: '* /ai/**', domain: '/ai', disposition: 'dynamic',

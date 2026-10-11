@@ -118,7 +118,8 @@ describe('`objectstack validate` — a flow text slot reads `{{ }}` holes (#2211
       title: 'Deal {{ record.name }} won: {{ record.amount | currency }}',
       message: 'Failed: {{ $error.message }}',
     })).toEqual([]);
-    expect(validate('screen', { objectName: 'deal', mode: 'edit', recordId: '{record.id}', title: 'Edit {{ record.name }}' })).toEqual([]);
+    // [#19939] A screen's `recordId` is a value slot now: its id is a CEL envelope.
+    expect(validate('screen', { objectName: 'deal', mode: 'edit', recordId: { dialect: 'cel', source: 'record.id' }, title: 'Edit {{ record.name }}' })).toEqual([]);
   });
 
   it('refuses `By {{ $User.Id }}` in a text slot at `error`, with the remedy `{$User.Id}` gets (#22477)', () => {
