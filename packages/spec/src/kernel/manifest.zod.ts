@@ -609,10 +609,10 @@ export const ManifestSchema = strictObject({
    * [ADR-0131 D6] The install modes this package permits — see
    * {@link INSTALL_MODES} for what each one does.
    *
-   * Optional, with NO parse-time default: absent means `['managed']`, and every
-   * reader asks {@link resolveInstallModes} for that answer. Non-empty (omit the
-   * key instead of writing an empty list); naming a mode twice changes nothing,
-   * since a reader asks only whether a mode is listed. A package may permit
+   * Optional, with NO parse-time default: absent means `['managed']` only, the
+   * answer {@link resolveInstallModes} gives — the one reader of it. Non-empty
+   * (omit the key instead of writing an empty list); naming a mode twice changes
+   * nothing, since a reader asks only whether a mode is listed. A package may permit
    * `unmanaged` alone (a starter app a customer takes over wholesale); a
    * deployment that walls organizations then refuses it outright.
    *
