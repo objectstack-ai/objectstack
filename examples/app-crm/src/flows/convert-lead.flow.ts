@@ -107,8 +107,13 @@ export const ConvertLeadScreenFlow = defineFlow({
         idVariable: 'account_id',
         title: 'Step 1 of 2 · Customer',
         description: 'Review and complete the customer record carried over from the lead.',
+        // Each prefill is a value slot: a CEL value envelope, evaluated before
+        // the screen is served, so the form receives the value. `lead_record`
+        // is bound by `get_lead` (the decision above reads it), but `company`
+        // is optional on a lead, so its absence is guarded: the form opens
+        // the name blank, as it did when the template found nothing.
         defaults: {
-          name: '{lead_record.company}',
+          name: { dialect: 'cel', source: 'has(lead_record.company) ? lead_record.company : null' },
         },
       },
     },
@@ -127,10 +132,13 @@ export const ConvertLeadScreenFlow = defineFlow({
         idVariable: 'opportunity_id',
         title: 'Step 2 of 2 · Opportunity',
         description: 'Add the opportunity and its product line items. Saved together in one transaction.',
+        // `name` is required on a lead, and `account_id` is bound by the
+        // Customer step's `idVariable` before this step runs, so neither needs
+        // a `has()` guard.
         defaults: {
-          name: '{lead_record.name}',
-          account: '{account_id}',
-          stage: 'qualification',
+          name:    { dialect: 'cel', source: 'lead_record.name' },
+          account: { dialect: 'cel', source: 'account_id' },
+          stage:   'qualification',
         },
       },
     },

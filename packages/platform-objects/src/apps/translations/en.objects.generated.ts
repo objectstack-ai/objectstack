@@ -170,9 +170,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             label: "Phone Number",
             helpText: "Sign-in phone number (E.164, e.g. +8613800000000). Required when no email is given."
           },
-          generatePassword: {
-            label: "Generate Temporary Password"
-          },
           password: {
             label: "Password (leave empty to generate)"
           },
@@ -195,9 +192,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Set Password",
         successMessage: "Password updated",
         params: {
-          generatePassword: {
-            label: "Generate Temporary Password"
-          },
           newPassword: {
             label: "New Password (leave empty to generate)"
           },

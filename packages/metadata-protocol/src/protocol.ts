@@ -16122,7 +16122,8 @@ export class ObjectStackProtocolImplementation implements
      *    environment authoring, governed by `allowRuntimeCreate` and the hatch as
      *    before;
      *  - the removal of a stored overlay row that merges at read (#6960) — the
-     *    removal door's own carve-out, which restores the managed definition.
+     *    removal door's own carve-out, which removes no managed definition
+     *    (and changes what is served for `permission` alone).
      *
      * ⛔ The hatch is not consulted: `OS_METADATA_WRITABLE` unlocks a TYPE, and a
      * type-level unlock says nothing about an item a managed package ships.
@@ -16286,8 +16287,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private isDeclaredCodeDatasource(type: string, name: string): boolean {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
-        const hostCode = this.getServicesRegistry?.().get('code-datasource-names') as { has?: unknown } | undefined;
-        if (typeof hostCode?.has === 'function' && (hostCode as { has(n: string): boolean }).has(name)) return true;
+        if (this.isHostCodeDatasource(type, name)) return true;
         const registry = (this.engine as any)?.registry;
         if (typeof registry?.getAllPackages !== 'function') return false;
         for (const record of registry.getAllPackages() as unknown[]) {
@@ -16298,6 +16298,19 @@ export class ObjectStackProtocolImplementation implements
             }
         }
         return false;
+    }
+
+    /**
+     * [#21944] The host's code-datasource set alone — the first half of
+     * {@link isDeclaredCodeDatasource}, and exactly the names the
+     * datasource-admin boot restore reads to keep a stored row off a code
+     * definition and to name it in a warning ({@link loadMetaFromDb} leaves
+     * those rows to that warning).
+     */
+    private isHostCodeDatasource(type: string, name: string): boolean {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
+        const hostCode = this.getServicesRegistry?.().get('code-datasource-names') as { has?: unknown } | undefined;
+        return typeof hostCode?.has === 'function' && (hostCode as { has(n: string): boolean }).has(name);
     }
 
     /**
@@ -16584,8 +16597,10 @@ export class ObjectStackProtocolImplementation implements
      *    DELETE removes it as repair.
      *  - [ADR-0131 D6, triage ruling Q1 → C] a SEALED managed item
      *    ({@link isUnservedSealedOverlay}): an environment overlay row on an
-     *    item a managed package ships, of a type whose registry entry opens no
-     *    overlay channel (a managed flow, action, hook or object), is in no
+     *    item a managed package ships, of ANY type whose registry entry opens
+     *    no overlay channel ({@link isSealedManagedItem}: every type but the
+     *    five regime-O ones, so a merge-at-read `page` or `app` as much as a
+     *    flow or an object), `permission` excepted, is in no
      *    regime D6 recognises — the package definition wins. Such rows were
      *    written through the `OS_METADATA_WRITABLE` hatch before the seal; they
      *    stay at rest, untouched, and the boot report names them per type with
@@ -17010,8 +17025,11 @@ export class ObjectStackProtocolImplementation implements
      * [ADR-0131 D6] Managed content is sealed against removal as against edits:
      * the predicate is {@link isSealedManagedItem}, the save door's, so the
      * `OS_METADATA_WRITABLE` hatch no longer opens the removal either. The
-     * #6960 carve-out stands — removing a row that merges at read restores the
-     * managed definition, it does not remove it. The sentence names the managed
+     * #6960 carve-out stands — removing a row of a type that merges at read
+     * removes no managed definition. Only for `permission`, whose stored fork
+     * is still served ({@link isUnservedSealedOverlay}), does it change what is
+     * served; every other such row is served by no read already
+     * ({@link declinesStoredRow}). The sentence names the managed
      * package ({@link managedItemSealedSentence}).
      */
     private refusePackagedBaseRemoval(request: { type: string; name: string }): void {
@@ -26519,7 +26537,13 @@ export class ObjectStackProtocolImplementation implements
                     // Normalize DB type to singular (DB may store legacy plural forms)
                     const normalizedType = PLURAL_TO_SINGULAR[record.type] ?? record.type;
                     if (this.isUnservedSealedOverlay(normalizedType, String(record.name))) {
-                        sealedOverlays.push({ type: normalizedType, name: String(record.name) });
+                        // [#15206] A row under a datasource name the host
+                        // defines in code is named once, by the
+                        // datasource-admin boot restore's warning, which
+                        // carries its own remedy — not here as well.
+                        if (!this.isHostCodeDatasource(normalizedType, String(record.name))) {
+                            sealedOverlays.push({ type: normalizedType, name: String(record.name) });
+                        }
                         if (normalizedType === 'object') continue;
                     }
                     const data = this.convertStoredItem(
@@ -26812,6 +26836,10 @@ export class ObjectStackProtocolImplementation implements
      *    a false line.
      *  - **One aggregated line.** Counts per type plus a capped sample of
      *    names, so a tenant with a thousand such rows costs one line.
+     *  - **Each read is its own term.** A read that fails for any reason but
+     *    a missing table (an unprovisioned ledger holds no legacy row) costs
+     *    its own term only: the line names it NOT MEASURED, with the reason,
+     *    beside the terms that were measured.
      *  - **Best-effort, and non-fatal by construction.** A diagnostic must
      *    never be the reason a boot fails, so its own catch swallows: the
      *    caller's outer catch classifies REAL hydration outages
@@ -26825,7 +26853,7 @@ export class ObjectStackProtocolImplementation implements
             // organization: neither NULL nor the empty string.
             const LEGACY = { $and: [{ organization_id: { $null: false } }, { organization_id: { $ne: '' } }] };
             // An unprovisioned ledger holds no legacy row; any other failure is
-            // this diagnostic's own, and stays here.
+            // this diagnostic's own, and its term reports it (below).
             const orNoTable = async <T>(object: string, read: () => Promise<T>, empty: T): Promise<T> => {
                 try {
                     return await read();
@@ -26835,20 +26863,35 @@ export class ObjectStackProtocolImplementation implements
                 }
             };
 
+            // [#15206] Each of the four reads is its own term: one that fails
+            // costs its own term, never the others, and is printed NOT
+            // MEASURED with its reason — never a zero, never a silent line.
+            const unmeasured: string[] = [];
+            const isolated = async (object: string, read: () => Promise<void>): Promise<void> => {
+                try {
+                    await read();
+                } catch (error) {
+                    unmeasured.push(`${object} (${error instanceof Error ? error.message : String(error)})`);
+                }
+            };
+
             // Only the columns the line prints — never a row's body. The
             // three ledgers below are counted, never read: this runs on every
             // boot, and the populations it names can be large.
-            const rows = (await orNoTable('sys_metadata', async () => ((await this.engine.find('sys_metadata', {
-                where: { state: { $in: ['active', 'draft'] }, ...LEGACY },
-                fields: ['type', 'name', 'organization_id', 'state'],
-                context: { isSystem: true },
-            })) ?? []) as any[], [] as any[]))
-                // A driver that cannot lower the predicate hands back a
-                // superset; the names this line prints are re-checked here.
-                .filter((row) => {
-                    const org = (row as { organization_id?: string | null }).organization_id;
-                    return org !== null && org !== undefined && org !== '';
-                });
+            let rows: any[] = [];
+            await isolated('sys_metadata', async () => {
+                rows = (await orNoTable('sys_metadata', async () => ((await this.engine.find('sys_metadata', {
+                    where: { state: { $in: ['active', 'draft'] }, ...LEGACY },
+                    fields: ['type', 'name', 'organization_id', 'state'],
+                    context: { isSystem: true },
+                })) ?? []) as any[], [] as any[]))
+                    // A driver that cannot lower the predicate hands back a
+                    // superset; the names this line prints are re-checked here.
+                    .filter((row) => {
+                        const org = (row as { organization_id?: string | null }).organization_id;
+                        return org !== null && org !== undefined && org !== '';
+                    });
+            });
             const counts = new Map<string, number>();
             const samples = new Map<string, string[]>();
             for (const row of rows) {
@@ -26861,13 +26904,15 @@ export class ObjectStackProtocolImplementation implements
             }
             const ledgers: string[] = [];
             for (const ledger of ['sys_metadata_commit', 'sys_metadata_history', 'sys_metadata_audit']) {
-                const n = await orNoTable(ledger, () => this.engine.count(ledger, {
-                    where: LEGACY,
-                    context: { isSystem: true },
-                }), 0);
-                if (n > 0) ledgers.push(`${ledger}×${n}`);
+                await isolated(ledger, async () => {
+                    const n = await orNoTable(ledger, () => this.engine.count(ledger, {
+                        where: LEGACY,
+                        context: { isSystem: true },
+                    }), 0);
+                    if (n > 0) ledgers.push(`${ledger}×${n}`);
+                });
             }
-            if (rows.length === 0 && ledgers.length === 0) return;
+            if (rows.length === 0 && ledgers.length === 0 && unmeasured.length === 0) return;
 
             const detail = Array.from(counts.entries())
                 .map(([type, count]) => {
@@ -26888,6 +26933,9 @@ export class ObjectStackProtocolImplementation implements
                     ? `Legacy organization-scoped ledger rows, which the commit timeline, history, diff and audit ` +
                     `reads no longer show: ${ledgers.join(', ')}. `
                     : '') +
+                (unmeasured.length > 0
+                    ? `NOT MEASURED, so this account may be incomplete — the read failed: ${unmeasured.join(', ')}. `
+                    : '') +
                 `Nothing is deleted or rewritten: the v18 migration ceremony (\`os migrate\`, ADR-0131 D10) ` +
                 `carries these rows and names each one's fate — promoted to the environment layer, or reported ` +
                 `when another organization holds the same name.`,
@@ -26901,12 +26949,16 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * [ADR-0131 D6, triage ruling Q1 → C] Say out loud which stored
-     * ENVIRONMENT rows boot did not load because they overlay sealed managed
+     * ENVIRONMENT rows no read serves because they overlay sealed managed
      * content ({@link isUnservedSealedOverlay}): an overlay of an item a
-     * managed package ships, on a type whose registry entry opens no overlay
-     * channel — a managed flow, action, hook or object, written through the
-     * `OS_METADATA_WRITABLE` hatch before D6 sealed it. No read serves such a
-     * row: the package's definition wins.
+     * managed package ships, on ANY type whose registry entry opens no
+     * overlay channel ({@link isSealedManagedItem}: every type but the five
+     * regime-O ones, so a merge-at-read `page` or `app` as much as a flow or
+     * an object), `permission` excepted, written through the
+     * `OS_METADATA_WRITABLE` hatch before D6 sealed it. The package's
+     * definition wins; an `object` such row is not even loaded. A row under a
+     * datasource name the host defines in code is not listed: the
+     * datasource-admin boot restore names it, once ({@link isHostCodeDatasource}).
      *
      * Per type, a capped sample of names, and the two remedies the ruling
      * names. ⛔ Nothing here deletes or rewrites the row — its fate is the v18

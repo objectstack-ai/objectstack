@@ -77,8 +77,9 @@ this contract describe the same surface from the two sides.
 The `create_record` / `update_record` `fields` map carries the same value
 contract since #19938 (`FlowValueSlotSchema`, the "value slots" section):
 a field value is a CEL value envelope or a literal — a `{token}` template is
-refused there since #19939 — and the three maps are the expression ledger's
-`value`-role slots.
+refused there since #19939 — and those maps are the expression ledger's
+`value`-role slots, as are, since #19939, the three maps a node hands to a
+callee and a `screen`'s `defaults.*`, field `defaultValue` and `recordId`.
 
 Deliberately absent:
  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
@@ -230,8 +231,8 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **objectName** | `string` | optional | Render this object's full create/edit form instead of a flat field list |
 | **idVariable** | `string` | optional | Object form only: variable bound to the saved record's id — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **mode** | `Enum<'create' \| 'edit'>` | optional (default: `"create"`) | Object form only: create (default) or edit; 'edit' needs a recordId to name its target |
-| **recordId** | `string` | optional | Object form only: id of the record to edit (required for mode: 'edit' to be useful) |
-| **defaults** | `Record<string, any>` | optional | Object form only: prefilled values |
+| **recordId** | `string \| { dialect: 'cel'; source: string; ast?: any; meta?: object }` | optional | Object form only: id of the record to edit (required for mode: 'edit' to be useful) — a string, or a CEL value envelope `{ dialect: 'cel', source }` evaluated when the screen is served to the id, a non-blank string (anything else, null included, fails the run at the screen); a `{…}` template token is refused |
+| **defaults** | `Record<string, any>` | optional | Object form only: prefilled values keyed by the object's field names — each a CEL value envelope `{ dialect: 'cel', source }` evaluated when the screen is served (the client receives the value, never the envelope), or a literal written as it is; a `{…}` template token is refused |
 
 ### Nested Shape: `ScreenConfig.fields[number]`
 
@@ -242,7 +243,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **type** | `string` | optional | Input type |
 | **required** | `boolean` | optional | Whether a value is required to submit |
 | **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field; option values must stay distinct when read as text |
-| **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
+| **defaultValue** | `any` | optional | Prefilled value: a CEL value envelope `{ dialect: 'cel', source }` evaluated when the screen is served (the client receives the value, never the envelope), or a literal written as it is — a `{…}` template token is refused |
 | **placeholder** | `string` | optional | Input placeholder text |
 | **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
 | **min** | `number` | optional | Minimum accepted value (numeric fields); enforced on resume |
@@ -264,7 +265,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **type** | `string` | optional | Input type |
 | **required** | `boolean` | optional | Whether a value is required to submit |
 | **options** | `{ value: any; label: string }[]` | optional | Choices for a select-style field; option values must stay distinct when read as text |
-| **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
+| **defaultValue** | `any` | optional | Prefilled value: a CEL value envelope `{ dialect: 'cel', source }` evaluated when the screen is served (the client receives the value, never the envelope), or a literal written as it is — a `{…}` template token is refused |
 | **placeholder** | `string` | optional | Input placeholder text |
 | **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
 | **min** | `number` | optional | Minimum accepted value (numeric fields); enforced on resume |

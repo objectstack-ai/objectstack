@@ -16,7 +16,10 @@ import { interpolate, type VariableMap } from './template.js';
  *  - `map` `input` (#19939) — handed to each item's child flow, resolved once
  *    per item with the item (and index) variable bound in `variables`;
  *  - `script` `inputs` (#19939) — handed to the registered function as its
- *    `input`.
+ *    `input`;
+ *  - `screen` `defaults` (#19939) — an object form's prefill, served to the
+ *    client (and, through {@link resolveValueSlot}, a field's `defaultValue`
+ *    and an object form's `recordId`).
  *
  * Per key, by SHAPE — the rule the ledger resolver and the spec contract
  * (`FlowValueSlotSchema`) draw with the same predicate, imported rather than
@@ -63,9 +66,30 @@ export function resolveValueSlotMap(
 ): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(map ?? {})) {
-        out[key] = isExpressionEnvelopeShaped(value)
-            ? engine.evaluateValueEnvelope(value, variables, `${slot}.${key}`, context)
-            : interpolate(value, variables, context);
+        out[key] = resolveValueSlot(engine, value, variables, `${slot}.${key}`, context);
     }
     return out;
+}
+
+/**
+ * Resolve ONE value-slot value — the per-key rule of
+ * {@link resolveValueSlotMap}, for a slot that holds a single value rather than
+ * a map: since #19939 a `screen` field's `defaultValue` and an object form's
+ * `recordId` (`fields[].defaultValue`, `recordId` in the ledger), evaluated
+ * before the screen goes on the wire. The map resolver calls this per key, so
+ * the dispatch by shape is spelled once: an envelope-shaped value is evaluated
+ * by `AutomationEngine.evaluateValueEnvelope` (`where` names it in a refusal
+ * or a fault, `fields[0].defaultValue`), and every other value is a literal,
+ * handed on as a copy.
+ */
+export function resolveValueSlot(
+    engine: AutomationEngine,
+    value: unknown,
+    variables: VariableMap,
+    where: string,
+    context: AutomationContext,
+): unknown {
+    return isExpressionEnvelopeShaped(value)
+        ? engine.evaluateValueEnvelope(value, variables, where, context)
+        : interpolate(value, variables, context);
 }

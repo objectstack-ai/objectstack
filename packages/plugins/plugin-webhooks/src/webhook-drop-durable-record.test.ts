@@ -386,3 +386,61 @@ describe('webhook redeliver guard — signing configuration availability (#8069)
         await expect(guard({ source: 'flow', refId: 'node_1' })).resolves.toBeUndefined();
     });
 });
+
+/**
+ * [#22804] The off switch. `active: false` is how an operator stops an endpoint
+ * receiving events, and the field declares that an inactive webhook is skipped
+ * by the dispatcher; an explicit replay is the dispatcher too. The refusal
+ * reason is the contract an operator reads: it names the webhook, says it is
+ * inactive, and names the remedy (re-activate, then replay).
+ */
+describe('webhook redeliver guard — an inactive subscription is refused (#22804)', () => {
+    const row = { source: 'webhook', refId: 'wh-1' };
+
+    it('refuses an inactive subscription, naming the webhook, its state and the remedy', async () => {
+        const guard = createWebhookRedeliverGuard(makeEngine([subscriptionRow({ active: false })]));
+        const reason = await guard(row);
+        expect(reason).toContain("webhook 'orders_hook'");
+        expect(reason).toMatch(/\binactive\b/);
+        expect(reason).toMatch(/re-activate the webhook, then redeliver/);
+    });
+
+    it('refuses a null or absent `active` as the dispatcher skips it: only `active === true` replays', async () => {
+        // The subscription cache loads `{ active: true }`, so a row whose
+        // `active` is null or missing is never dispatched; the replay agrees.
+        const noActive: Record<string, unknown> = subscriptionRow();
+        delete noActive.active;
+        for (const subscription of [subscriptionRow({ active: null }), noActive]) {
+            const guard = createWebhookRedeliverGuard(makeEngine([subscription]));
+            await expect(guard(row), JSON.stringify(subscription)).resolves.toMatch(/\binactive\b/);
+        }
+    });
+
+    it('checks inactive before the secret: an unrecoverable key on an inactive webhook is never resolved', async () => {
+        let resolverCalls = 0;
+        const guard = createWebhookRedeliverGuard(
+            makeEngine([subscriptionRow({ active: false, signing_secret: SECRET_REF })], async () => {
+                resolverCalls += 1;
+                throw new Error('no CryptoProvider');
+            }),
+        );
+        await expect(guard(row)).resolves.toMatch(/\binactive\b/);
+        expect(resolverCalls).toBe(0);
+    });
+
+    it('control: the same subscriptions, active, are allowed — signed and unsigned', async () => {
+        const signed = createWebhookRedeliverGuard(
+            makeEngine([subscriptionRow({ active: true, signing_secret: SECRET_REF })], async () => 'whsec_live'),
+        );
+        await expect(signed(row)).resolves.toBeUndefined();
+        const unsigned = createWebhookRedeliverGuard(makeEngine([subscriptionRow({ active: true })]));
+        await expect(unsigned(row)).resolves.toBeUndefined();
+    });
+
+    it('control: a gone subscription keeps its own refusal, not the inactive one', async () => {
+        const guard = createWebhookRedeliverGuard(makeEngine([]));
+        const reason = await guard(row);
+        expect(reason).toContain('no longer exists');
+        expect(reason).not.toMatch(/\binactive\b/);
+    });
+});
