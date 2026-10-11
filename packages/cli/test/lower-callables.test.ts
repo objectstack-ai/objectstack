@@ -274,6 +274,16 @@ describe('[#22839] lowerCallables — bodylessCallables, one row per callable no
     ]);
   });
 
+  it('a callable lowered at ANY slot is not a row, as `count - bodyExtracted` already said', () => {
+    // One function object as a lowered hook handler AND a `functions` entry:
+    // one ref, lowered once. The list keeps the old population here; it only
+    // itemizes it.
+    const h = cleanHook(1);
+    const out = lowerCallables({ hooks: [h], functions: { tidy: h.handler } });
+    expect(out.count - out.bodyExtracted).toBe(0);
+    expect(out.bodylessCallables).toEqual([]);
+  });
+
   describe('ADR-0130 D4 — a package callable is walked twice and still counted once', () => {
     it('one refused hook shared by the top level and a package body → one row, not two', () => {
       const h = refusedHook(1);
