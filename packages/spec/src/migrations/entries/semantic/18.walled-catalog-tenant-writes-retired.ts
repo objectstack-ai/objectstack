@@ -13,11 +13,11 @@ export const entry: SemanticMigration = {
   // code span AND a table cell.
   surface:
     'on a group or isolated deployment, a write of a position, permission set or capability by a '
-    + 'caller below the platform operator: PUT, DELETE, publish and rollback of /meta/position, '
-    + '/meta/permission and /meta/capability on @objectstack/rest and the runtime dispatcher, the '
-    + 'permission-set clone door (POST /security/permission-sets/:name/clone), and a '
-    + 'data-door insert, update or delete on sys_position, sys_permission_set and sys_capability '
-    + 'through @objectstack/plugin-security',
+    + 'caller below the platform operator (an ADR-0090 D12 delegate whose scope authors environment '
+    + 'sets included): PUT, DELETE, publish and rollback of /meta/position, /meta/permission and '
+    + '/meta/capability on @objectstack/rest, and PUT on the runtime dispatcher; the permission-set '
+    + 'clone door (POST /security/permission-sets/:name/clone); and a data-door insert, update or '
+    + 'delete on sys_position, sys_permission_set and sys_capability through @objectstack/plugin-security',
   replacement:
     'the platform operator (the `PLATFORM_ADMIN` rung, the deployment\'s declared '
     + '`OS_PLATFORM_OWNER_EMAIL` owner) defines the catalog, in Studio or through a managed package; '
