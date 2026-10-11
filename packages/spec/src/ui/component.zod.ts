@@ -7198,7 +7198,7 @@ function buildObjectFormRuntimeField() {
     minLength: FieldSchema.shape.minLength.describe('Minimum character count — the native control\'s `minlength`'),
     maxLength: FieldSchema.shape.maxLength.describe('Maximum character count — the control\'s ceiling (a textarea also draws its counter)'),
     pattern: z.string().optional().describe('Regular expression the value must match, as a string — the native control\'s `pattern`, enforced by the browser at submit'),
-    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date)'),
+    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency)'),
     summaryOperations: FieldSchema.shape.summaryOperations.describe('The roll-up a summary field displays — the object field\'s own `{ object, field, function, … }`'),
     columns: FieldSchema.shape.inlineColumns.describe('The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes'),
     // [#21768] The `grid` widget's eight field-level keys, camelCase since

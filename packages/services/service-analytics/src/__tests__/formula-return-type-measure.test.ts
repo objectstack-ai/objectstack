@@ -77,7 +77,7 @@ import { AnalyticsService } from '../analytics-service.js';
 import { MEASURE_RESULT_TYPE_TEMPORAL, measureResultType } from '../measure-result-type.js';
 
 /**
- * The four members, read off the SPEC schema rather than restated here — the
+ * The declared members, read off the SPEC schema rather than restated here — the
  * same construction the `FieldType` walk in `measure-result-type.test.ts` uses.
  * A fifth member added upstream reds the exhaustiveness case below instead of
  * quietly inheriting a verdict nobody wrote for it.
@@ -93,10 +93,12 @@ const SPEC_RETURN_TYPES: readonly string[] = (() => {
 })();
 
 describe('A) the formula branch is retired — no declared returnType buys a result type back', () => {
-  it('the spec still declares the four members this file was written about', () => {
+  it('the spec still declares the four members this file was written about, and #22727\'s `currency`', () => {
     // The enum is read, not restated: the reversal is about what the MEASURE
-    // rule does with `returnType`, not about the key going away.
-    expect([...SPEC_RETURN_TYPES].sort()).toEqual(['boolean', 'date', 'number', 'text']);
+    // rule does with `returnType`, not about the key going away. #22727 added
+    // `currency` — a formula is still VIRTUAL in SQL storage whatever it
+    // returns, so the walk below holds it to the same `undefined` as the four.
+    expect([...SPEC_RETURN_TYPES].sort()).toEqual(['boolean', 'currency', 'date', 'number', 'text']);
   });
 
   it('⭐ the table REFUSES `min` / `max` over `formula` — the ground the ruling stood on', () => {

@@ -36,7 +36,7 @@ export interface TitleEligibleFieldDef {
   type?: string;
   /**
    * For `formula` fields: the declared result type. The framework field schema
-   * carries this as `returnType` (number/text/boolean/date); `valueType` is also
+   * carries this as `returnType` (number/text/boolean/date/currency); `valueType` is also
    * accepted for forward/cross-repo compatibility. A formula is title-eligible
    * ONLY when this is `text`.
    */
