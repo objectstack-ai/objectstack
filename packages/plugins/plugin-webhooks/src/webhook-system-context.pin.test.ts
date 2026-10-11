@@ -11,7 +11,7 @@
  * principal-less hand-off (ADR-0096 E1), which D5 closes. The refresh has no
  * caller; the guard runs inside the redeliver path after the delivery row was
  * read under the requesting caller's organization, and what it reads is the
- * subscription's existence, name and secret posture.
+ * subscription's existence, `active` switch, name and secret posture.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -49,9 +49,11 @@ describe('[#21913] plugin-webhooks sys_webhook reads carry the explicit system o
     });
 
     it('the redeliver guard reads the subscription under isSystem', async () => {
-        const { engine, calls } = recordingEngine([{ id: 'wh_1', name: 'hook', signing_secret: null }]);
+        // [#22804] `active: true` as every engine-written row carries it (the
+        // field is required, default `true`); the guard refuses any other value.
+        const { engine, calls } = recordingEngine([{ id: 'wh_1', name: 'hook', active: true, signing_secret: null }]);
         const guard = createWebhookRedeliverGuard(engine);
-        // A subscription that stores no secret is allowed: the read ran and answered.
+        // An active subscription that stores no secret is allowed: the read ran and answered.
         expect(await guard({ source: 'webhook', refId: 'wh_1' })).toBeUndefined();
         expect(calls).toEqual([{ verb: 'findOne', object: 'sys_webhook', context: { isSystem: true } }]);
     });
