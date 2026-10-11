@@ -28,12 +28,17 @@ import { describe, expect, it } from 'vitest';
 // key's history (CHANGELOG-shaped prose, quoted former refusal sentences, the
 // tombstone's own prescription, the retired-keys entry). One reference is
 // legitimate by SHAPE, not by site: the tombstone declaration itself, a
-// property whose initializer is a `retiredKey(...)` call. This file is
-// excluded because its refusal leg authors the old key on purpose.
+// property whose initializer is a `retiredKey(...)` call. One file is
+// legitimate by PURPOSE: the sibling refusal pin, which authors the old key to
+// prove the parse refuses it. It is not skipped — its references are counted
+// apart and REQUIRED, which makes it this leg's live positive control: the
+// walker reached it and the matcher saw real code.
 describe('tree-scoped absence: no TypeScript source in the declared radius reads or writes `allowOrgOverride`', () => {
   const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
   const THIS_FILE = path.relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/');
+  /** The refusal pin: authors the old key on purpose (see above). Counted apart, never skipped. */
+  const REFUSAL_PIN = THIS_FILE.replace(/-absence\.test\.ts$/, '-retirement.test.ts');
   const OLD = 'allowOrgOverride';
   const NEW = 'allowEnvironmentOverlay';
 
@@ -94,6 +99,7 @@ describe('tree-scoped absence: no TypeScript source in the declared radius reads
 
   it('no code reference survives inside the declared radius', () => {
     const offenders: string[] = [];
+    const refusalPinReferences: string[] = [];
     const newReaders = new Set<string>();
     let visited = 0;
     const walk = (dir: string) => {
@@ -118,7 +124,9 @@ describe('tree-scoped absence: no TypeScript source in the declared radius reads
         }
         if (text.includes(NEW) && codeReferences(rel, text, NEW).length > 0) newReaders.add(rel);
         if (!text.includes(OLD)) continue;
-        for (const where of codeReferences(rel, text, OLD)) offenders.push(`${rel}:${where}`);
+        for (const where of codeReferences(rel, text, OLD)) {
+          (rel === REFUSAL_PIN ? refusalPinReferences : offenders).push(`${rel}:${where}`);
+        }
       }
     };
     for (const root of WALK_ROOTS) walk(path.join(REPO_ROOT, root));
@@ -127,6 +135,11 @@ describe('tree-scoped absence: no TypeScript source in the declared radius reads
     // the hand-renamed readers outside this package are found by the same
     // matcher under the new name.
     expect(visited).toBeGreaterThan(1000);
+    expect(REFUSAL_PIN).not.toBe(THIS_FILE);
+    expect(fs.existsSync(path.join(REPO_ROOT, REFUSAL_PIN)), `${REFUSAL_PIN} exists`).toBe(true);
+    // Live positive control: the refusal pin's deliberate `allowOrgOverride: true`
+    // and `: false` are real code references, and the walk found them.
+    expect(refusalPinReferences.length).toBeGreaterThanOrEqual(2);
     expect([...newReaders]).toEqual(expect.arrayContaining([
       'packages/metadata-protocol/src/protocol.ts',
       'packages/metadata-protocol/src/sys-metadata-repository.ts',
