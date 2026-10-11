@@ -56,8 +56,8 @@ import type {
 // fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
-import type { ObjectCapabilitiesParsed } from '@objectstack/spec/data';
+import { canServeApiOperation, isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
+import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
@@ -6394,6 +6394,31 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * [#22738] May `payload_display` carry a title read from `target`, the object
+   * a snapshot's lookup points at? Asked of the spec's one exposure decision
+   * (ADR-0049) for `get`, the read `GET /data/{target}/{id}` performs and the
+   * operation the data door's `$expand` and the dataset door's labels ask of
+   * the same target. It takes no caller: the read runs under a system context.
+   *
+   * A refused target is not read, so its key gets no display value and the
+   * snapshot's stored id stands, the answer a deleted target already gets. A
+   * declaration that cannot be read withholds too (fail-closed, at `warn`).
+   */
+  private servesPayloadDisplayTarget(target: string): boolean {
+    let enable: EnableLike | null | undefined;
+    try {
+      enable = (this.engine as any).getSchema?.(target)?.enable;
+    } catch (err: any) {
+      this.logger?.warn?.(
+        `[approvals] ApprovalService.enrichRows: the API exposure declaration of "${target}" could not be read, `
+        + `so its titles are not resolved and the stored ids stand (fail-closed): ${err?.message ?? err}`,
+      );
+      return false;
+    }
+    return canServeApiOperation(enable, 'get');
+  }
+
+  /**
    * Field key → display label for an object's schema. Lets the inbox summary
    * show a human field name ("考核状态") instead of a title-cased machine key
    * ("Assessment Status"). For a single-locale project the schema label already
@@ -6421,7 +6446,8 @@ export class ApprovalService implements IApprovalService {
    * Batched: one query per distinct object (target + referenced) plus one
    * `sys_user` lookup. Best-effort — a deleted record falls back to the
    * payload snapshot, and any failure leaves the field unset rather than
-   * failing the list.
+   * failing the list. [#22738] A referenced object whose declared exposure
+   * does not serve `get` is not read ({@link servesPayloadDisplayTarget}).
    */
   private async enrichRows(rows: ApprovalRequestRow[]): Promise<void> {
     if (!rows.length) return;
@@ -6479,6 +6505,7 @@ export class ApprovalService implements IApprovalService {
     }
     const refTitles = new Map<string, string>();
     for (const [object, idSet] of refIds) {
+      if (!this.servesPayloadDisplayTarget(object)) continue;
       const ids = Array.from(idSet);
       const displayField = this.resolveDisplayField(object);
       try {
