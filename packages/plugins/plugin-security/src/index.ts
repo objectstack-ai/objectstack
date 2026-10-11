@@ -72,21 +72,8 @@ export type {
   CollisionReportSink,
   PermissionSetNameCollisionDiagnostic,
 } from './permission-set-name-collision.js';
-// [#18023] The CAPABILITY axis of the same refusal, exported for the same
-// reason: the runtime door (`bootstrapDeclaredCapabilities`) raises it today,
-// and the author-time door — `@objectstack/lint`'s capability rule, `os build`
-// / `os validate` — must consume these rather than re-derive the wording or
-// re-spell the token. ⛔ The owner-comparison predicate is NOT duplicated for
-// it: both axes call `permissionSetNameIsForeign` above.
-export {
-  CAPABILITY_NAME_COLLISION,
-  capabilityNameCollisionDiagnostic,
-  formatCapabilityNameCollisionDiagnostic,
-  reportCapabilityNameCollisions,
-} from './capability-name-collision.js';
-export type { CapabilityNameCollisionDiagnostic } from './capability-name-collision.js';
-// [#18091] The seeders' remaining refusals. EXPORTED on the criterion the two
-// blocks above state and no wider: a refusal an AUTHOR can cause has a second
+// [#18091] The seeders' remaining refusals. EXPORTED on the criterion the
+// block above states and no wider: a refusal an AUTHOR can cause has a second
 // door by construction — the author-time one (`@objectstack/lint`, `os build` /
 // `os validate`) — and a door that re-spells the token or re-derives the
 // wording is the drift these modules exist to prevent. A package declaring a

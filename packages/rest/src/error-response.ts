@@ -71,6 +71,7 @@ import {
 } from '@objectstack/types';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { ErrorCode } from '@objectstack/spec/api';
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { logError } from './log.js';
 
 export {
@@ -675,6 +676,61 @@ export function classifiedRefusalAnswer(
     if (!declaresEnvelope && sandboxBusinessMessage(error) === undefined) return undefined;
     const resolved = resolveErrorResponse(error);
     return resolved.status < 500 ? resolved : undefined;
+}
+
+/**
+ * [#22719] {@link classifiedRefusalAnswer}'s answer, re-dressed for a door that
+ * publishes the NESTED ADR-0112 D5 envelope (`{ error: { code, message } }`)
+ * rather than the flat one the classification is phrased in.
+ *
+ * ## Why it exists
+ *
+ * Three hand-built route families in `rest-server.ts` — the sharing-rule, the
+ * suggested-binding (and the since-retired overlay-discard) and the approval arms — answered a
+ * refusal their own arms could not read as a server fault, relaying
+ * `.message`. For a sandboxed hook's refusal `.message` is the QuickJS debug
+ * wrapper, so each answered `500` with `hook '<name>' threw: Error: …` where
+ * every conforming write door answers the hook's own sentence
+ * (`rest-write-route-hook-refusal-sentence.ledger.test.ts`). Each family now
+ * asks {@link classifiedRefusalAnswer} — the `/data` door's classification —
+ * before that 500, and emits this through its OWN emitter, so the answer's
+ * position is the family's and its classification is the shared one.
+ *
+ * ## The derivation is the record-share family's
+ *
+ * `respondSharingError` in `rest-server.ts` re-dresses the same answer inline,
+ * and its comments carry the argument for each field; they are not restated:
+ *
+ *  - `code` is REQUIRED by the nested envelope and the flat classification
+ *    legitimately carries none for an undeclared sandbox refusal, so the
+ *    catalog's own floor ({@link standardErrorCodeForHttpStatus}) fills it;
+ *  - `declaredCode` is the CLASSIFICATION's, never the raw thrown field,
+ *    because presence there means demotion;
+ *  - `userMessage` is the classification's, already bounded.
+ *
+ * ⛔ Nothing else rides. The flat body's `issues` and `object` are not
+ * forwarded, the scope that family keeps: `ApiError.details` is a shape
+ * decision, not a rename. `extra` is absent when there is nothing to carry,
+ * so an emitter writes exactly `{ code, message }` for a refusal that declared
+ * nothing.
+ */
+export function nestedRefusalEnvelope(refusal: { status: number; body: Record<string, unknown> }): {
+    status: number;
+    code: ErrorCode;
+    message: string;
+    extra?: { declaredCode?: string; userMessage?: string };
+} {
+    const { status, body } = refusal;
+    const extra = {
+        ...(typeof body.declaredCode === 'string' ? { declaredCode: body.declaredCode } : {}),
+        ...(typeof body.userMessage === 'string' ? { userMessage: body.userMessage } : {}),
+    };
+    return {
+        status,
+        code: typeof body.code === 'string' ? body.code as ErrorCode : standardErrorCodeForHttpStatus(status),
+        message: String(body.error ?? ''),
+        ...(Object.keys(extra).length > 0 ? { extra } : {}),
+    };
 }
 
 /**

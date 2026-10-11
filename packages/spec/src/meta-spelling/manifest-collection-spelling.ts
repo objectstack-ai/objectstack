@@ -76,8 +76,8 @@ export const PLURAL_TO_SINGULAR: Record<string, string> = {
   positions: 'position',
   permissions: 'permission',
   // [ADR-0066 D1, #5870] Package-declared authorization capabilities. The
-  // singular form is what `bootstrapDeclaredCapabilities` reads back
-  // (`readDeclared(ql, 'capability')`) and what `AppPlugin` already registers
+  // singular form is what the registry and the security catalog read back
+  // (`listItems('capability')`) and what `AppPlugin` already registers
   // under; without the mapping the registration seam stored them as
   // `'capabilities'`, a store nothing reads.
   capabilities: 'capability',

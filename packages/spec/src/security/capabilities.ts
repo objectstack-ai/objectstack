@@ -93,9 +93,8 @@ export const PLATFORM_CAPABILITY_NAMES: ReadonlySet<string> = new Set(
  * capability of its own — the counterpart, on the declaration side, of the
  * curated {@link PLATFORM_CAPABILITIES}. Authored via {@link defineCapability}
  * and collected on a stack's `capabilities` array, these declarations flow
- * EXPLICITLY into the `sys_capability` registry at boot with `managed_by:
- * 'package'` + `package_id` provenance (seeded by
- * `@objectstack/plugin-security`'s `bootstrapDeclaredCapabilities`).
+ * EXPLICITLY into the registry at boot under their owning package (ADR-0131
+ * D3); no `sys_capability` row is written for them.
  *
  * This replaces the old implicit "derive an untitled capability from whatever a
  * permission set happens to reference in `systemPermissions[]`" back-door: a
@@ -127,8 +126,8 @@ export const PLATFORM_CAPABILITY_NAMES: ReadonlySet<string> = new Set(
  *  - **The shape is `.strict()`.** Unlike `api` (which is on that suite's
  *    `STILL_STRIP` list because `ApiEndpointSchema` doubles as the parser for
  *    STORED rows carrying `packageId` / `state`), nothing re-parses a stored
- *    `sys_capability` row through this schema — `bootstrapDeclaredCapabilities`
- *    reads named fields off the body (`capabilityRowFields`). So closing it
+ *    `sys_capability` row through this schema — no row is written for a
+ *    declared capability (ADR-0131 D3). So closing it
  *    costs nothing and buys the declared = enforced posture an AUTHORIZATION
  *    surface should have had from the start.
  */

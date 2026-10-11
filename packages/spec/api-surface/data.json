@@ -781,6 +781,8 @@
     "VALUE_ROUNDTRIP_COLLISION_PAIRS (const)",
     "VALUE_ROUNDTRIP_FIELDS (const)",
     "VALUE_ROUNDTRIP_ROWS (const)",
+    "ValidationAdvisoryEvent (type)",
+    "ValidationAdvisoryEventSchema (const)",
     "ValidationRule (type)",
     "ValidationRuleSchema (const)",
     "ValueForm (type)",

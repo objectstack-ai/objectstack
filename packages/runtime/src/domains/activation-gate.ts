@@ -86,6 +86,7 @@ import { effectiveTenancyPosture, AuthzStoreUnavailableError } from '@objectstac
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
+import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 
 /** [ADR-0126 §5] Refusal vocabulary for the activation (enable/disable) gates. */
 export const ACTIVATION_DENY_STATUS = 403;
@@ -139,6 +140,86 @@ export const ACTION_ACTIVATION_SUBJECT: ActivationSubject = {
 };
 
 /**
+ * [ADR-0126 §3 regime C, as ADR-0131 D6 amends it] The position door's wording.
+ *
+ * A position is pre-charted on the regime and has no clone door, so — as for
+ * actions — the refusal names the operator and the per-organization half that
+ * stays open: an organization administrator still decides who HOLDS the
+ * position in their own organization.
+ */
+export const POSITION_ACTIVATION_SUBJECT: ActivationSubject = {
+    subject: 'a position',
+    remedy:
+        'To switch a position off for this installation, ask your platform operator; removing its assignments in your ' +
+        'own organization stays open to you.',
+};
+
+/**
+ * [ADR-0126 §3 regime C, as ADR-0131 D6 amends it] The permission-set door's
+ * wording. Regime C charters the clone for permission sets (the "Clone" action
+ * the packaged-base refusal already names), so the remedy is the flow door's.
+ */
+export const PERMISSION_SET_ACTIVATION_SUBJECT: ActivationSubject = {
+    subject: 'a permission set',
+    remedy: 'To customize this permission set for your organization, clone it under a new name instead.',
+};
+
+/**
+ * The activation body every `_activation` door reads: `{ enabled?: boolean }`,
+ * unknown keys refused, `enabled` defaulting to `true`.
+ *
+ * One reader so the doors cannot drift into two body contracts. The flow
+ * toggle's lesson is why each check is here: on an unchecked body
+ * `{"enable": false}` — one letter off — ENABLED the artifact and answered 200,
+ * and the caller trying to switch something OFF is exactly the caller this must
+ * not silently invert. The 400s go through the shared `validationFailure`
+ * constructor, so they carry the `VALIDATION_FAILED` envelope and `fields[]`
+ * shape every other door does.
+ *
+ * Returns a refusal to short-circuit on, or the `enabled` value to write.
+ */
+export function readActivationBody(
+    deps: DomainHandlerDeps,
+    body: unknown,
+): { refusal: HttpDispatcherResult } | { refusal?: undefined; enabled: boolean } {
+    const invalidBody = (
+        message: string,
+        fields: Array<{ field: string; code: string; message: string }>,
+    ): { refusal: HttpDispatcherResult } => ({
+        refusal: {
+            handled: true,
+            response: deps.error(message, VALIDATION_FAILED_STATUS, validationFailureDetails(validationFailure(message, fields))),
+        },
+    });
+
+    const toggleBody = body ?? {};
+    if (typeof toggleBody !== 'object' || Array.isArray(toggleBody)) {
+        return invalidBody('Invalid activation body — expected { enabled?: boolean }', [
+            { field: '(body)', code: 'invalid_type', message: 'expected an object' },
+        ]);
+    }
+    const unknownKeys = Object.keys(toggleBody).filter((k) => k !== 'enabled');
+    if (unknownKeys.length > 0) {
+        return invalidBody(
+            `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the activation body is { enabled?: boolean }`,
+            // `unknown_field` — the ADR-0114 catalog member for "a key the
+            // target does not declare".
+            unknownKeys.map((k) => ({
+                field: k,
+                code: 'unknown_field',
+                message: 'not an activation field — did you mean `enabled`?',
+            })),
+        );
+    }
+    if ('enabled' in toggleBody && typeof (toggleBody as Record<string, unknown>).enabled !== 'boolean') {
+        return invalidBody('`enabled` must be a boolean (JSON true/false, not a string)', [
+            { field: 'enabled', code: 'invalid_type', message: 'expected a boolean' },
+        ]);
+    }
+    return { enabled: (toggleBody as { enabled?: boolean }).enabled ?? true };
+}
+
+/**
  * The §5 gate itself.
  *
  * Returns a refusal to short-circuit on, `undefined` to proceed — the shape
@@ -155,21 +236,24 @@ export const ACTION_ACTIVATION_SUBJECT: ActivationSubject = {
  * THROW. See the posture read below for the class that throws and why a caller
  * must not absorb it into "no gate to enforce".
  *
- * ⚠️ TWO DOORS, one gate body — so every exit above, the throw included,
- * reaches BOTH of them and neither is "the" activation door:
+ * ⚠️ THREE DOORS, one gate body — so every exit above, the throw included,
+ * reaches ALL of them and none is "the" activation door:
  *
  *   - `./actions.ts` — `POST /actions/_activation/:object/:action`, calling
  *     this function directly with {@link ACTION_ACTIVATION_SUBJECT};
  *   - `./automation.ts` — `POST /automation/:name/toggle`, through its
  *     `refuseUngrantedFlowActivationWrite` wrapper and
- *     {@link FLOW_ACTIVATION_SUBJECT}.
+ *     {@link FLOW_ACTIVATION_SUBJECT};
+ *   - `./catalog-activation.ts` — `POST /security/_activation/:type/:name`
+ *     for `position` and `permission`, calling this function directly with
+ *     {@link POSITION_ACTIVATION_SUBJECT} / {@link PERMISSION_SET_ACTIVATION_SUBJECT}.
  *
- * Both `await` the call, so the throw exit is a rejected promise the domain
+ * All `await` the call, so the throw exit is a rejected promise the domain
  * handler propagates and the dispatcher's error exit renders — nothing is
- * unhandled at either door. Written down because a change to this body is a
- * change to two routes: a claim about "the gate" that was measured at one door
- * is a claim about half the surface, and both doors are pinned together in
- * `./tenancy-posture-outage-gates.test.ts` for that reason.
+ * unhandled at any door. Written down because a change to this body is a
+ * change to every route above: a claim about "the gate" that was measured at
+ * one door is a claim about part of the surface, and the doors are pinned
+ * together in `./tenancy-posture-outage-gates.test.ts` for that reason.
  */
 export async function refuseUngrantedActivationWrite(
     deps: DomainHandlerDeps,

@@ -86,7 +86,6 @@ import {
   seedCtx,
 } from './organization-scope.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
-import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
 import { RLSCompiler, RLS_DENY_FILTER, compiledPolicyNameOf, policyDeclaresClause } from './rls-compiler.js';
 import {
@@ -177,7 +176,7 @@ import {
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
 import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-positions.js';
-import { registerBuiltinCapabilities, withoutPlatformCapabilityDeclarations } from './builtin-capabilities.js';
+import { registerBuiltinCapabilities } from './builtin-capabilities.js';
 
 /**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
@@ -4500,10 +4499,9 @@ export class SecurityPlugin implements Plugin {
         // [#18535, ADR-0090 D5] The stack's declared `capabilities:` — the half
         // of the anchor question the predicate cannot discover for itself. Read
         // ONCE per pass, from the DECLARATIONS rather than from `sys_capability`:
-        // this binding runs before `bootstrapDeclaredCapabilities` seeds those
-        // rows (see `declared-capability-context.ts` for why that order is
-        // fixed), so the rows are empty here on a first boot. Unreadable or
-        // absent ⇒ `undefined` ⇒ the pre-#17811 verdict, which refuses.
+        // the registry is a package capability's one home (ADR-0131 D3), and no
+        // row is seeded for it. Unreadable or absent ⇒ `undefined` ⇒ the
+        // pre-#17811 verdict, which refuses.
         const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
         for (const baselineName of this.baselinePermissionSets) {
           const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
@@ -4823,27 +4821,6 @@ export class SecurityPlugin implements Plugin {
           });
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
-        }
-        // [ADR-0066 D1] Seed the EXPLICIT package capability declarations
-        // (`defineCapability` / `stack.capabilities`) into `sys_capability` with
-        // `managed_by:'package'` + package_id provenance. The permission sets are
-        // passed as well, so a refusal can name the grantor(s) it affects (#4967
-        // Part 3).
-        // [ADR-0131 D3] The platform's curated capabilities get no row here: they
-        // are served by the registry (`registerBuiltinCapabilities`,
-        // `GET /api/v1/meta/capability`), and the curated + derived-default
-        // capability seeder is retired.
-        try {
-          // [ADR-0131 D3] Handed the engine WITHOUT this plugin's own curated
-          // declarations (`builtin-capabilities.ts`): they are not a package's,
-          // and read here each would be refused as a package claiming a curated
-          // name.
-          await bootstrapDeclaredCapabilities(withoutPlatformCapabilityDeclarations(ql), this.metadata, {
-            logger: ctx.logger,
-            permissionSets: this.bootstrapPermissionSets,
-          });
-        } catch (e) {
-          ctx.logger.warn('[security] declared-capability seeding failed', { error: (e as Error).message });
         }
         // [A4 #2920] Heal residual legacy `managed_by` values (env sets stamped
         // 'user'; older positions stamped system/config/user) onto the unified

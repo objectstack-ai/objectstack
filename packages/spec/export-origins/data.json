@@ -768,6 +768,8 @@
     "VALUE_ROUNDTRIP_COLLISION_PAIRS": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_COLLISION_PAIRS (const)",
     "VALUE_ROUNDTRIP_FIELDS": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_FIELDS (const)",
     "VALUE_ROUNDTRIP_ROWS": "src/data/value-roundtrip-conformance.ts#VALUE_ROUNDTRIP_ROWS (const)",
+    "ValidationAdvisoryEvent": "src/data/data-engine.zod.ts#ValidationAdvisoryEvent (type)",
+    "ValidationAdvisoryEventSchema": "src/data/data-engine.zod.ts#ValidationAdvisoryEventSchema (const)",
     "ValidationRule": "src/data/validation.zod.ts#ValidationRule (type)",
     "ValidationRuleSchema": "src/data/validation.zod.ts#ValidationRuleSchema (const)",
     "ValueForm": "src/data/field-value.zod.ts#ValueForm (type)",
