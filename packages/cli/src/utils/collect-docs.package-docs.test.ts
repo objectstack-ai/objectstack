@@ -200,7 +200,7 @@ describe('collectDocsFromSrc reads src/<pkg>/docs/ for a resolvable package', ()
 
 // ── Clause 4: the #18428 warning stays, and says WHY ───────────────────────
 describe('the #18170 warning stays for a directory neither convention reads', () => {
-  it('a stack with no packages[] gets the original sentence, unchanged', () => {
+  it('a stack with no packages[] gets the single-package sentence', () => {
     writePackageDoc('sales', 'crm_index', 'MARKER-none');
     const { docs, packageDocs, issues } = collectDocsFromSrc(configPath);
 
@@ -210,14 +210,12 @@ describe('the #18170 warning stays for a directory neither convention reads', ()
     expect(issues[0].severity).toBe('warning');
     expect(issues[0].rule).toBe('docs/uncollected-directory');
     expect(issues[0].path).toBe('src/sales/docs');
-    // The exact pre-#18431 text, so a rewrite of the single-package message
-    // fails here rather than in a customer's build log.
+    // The exact text, so a rewrite of the single-package message fails here
+    // rather than in a customer's build log. [#22161] One verdict sentence:
+    // the reasoning it used to carry is `os explain docs/uncollected-directory`.
     expect(issues[0].message).toBe(
-      'src/sales/docs/ holds 1 Markdown file(s) that were NOT collected: package docs are read from src/docs/ only'
-      + " (ADR-0046 §3.2), so these are absent from the artifact's `docs[]` and from every book that includes them."
-      + ' Move them into src/docs/ (doc names carry the package namespace prefix, so packages do not collide there),'
-      + ' declare them inline as `defineStack({ docs })`, or delete them if they are not package docs.'
-      + ' Found: crm_index.md',
+      '1 Markdown file(s) NOT collected (crm_index.md) — package docs are read from src/docs/ only'
+      + ' (ADR-0046 §3.2); move them there',
     );
   });
 

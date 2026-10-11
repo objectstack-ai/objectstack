@@ -21,10 +21,13 @@
  * the same shape through the real `os validate` / `os build` binaries.
  */
 
-import { resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FUNCTIONAL_COMPLETENESS_RULES } from '@objectstack/spec/kernel';
 import * as lint from '@objectstack/lint';
 import {
   AUTHORING_RULES,
@@ -36,6 +39,9 @@ import {
   validateSecurityPosture,
 } from '@objectstack/lint';
 import Explain, { SCHEMAS } from '../src/commands/explain';
+import { checkHookBodyLowering } from '../src/lint/hook-body-lowering';
+import { collectDocsFromSrc, lintDocNavTargets, lintDocs } from '../src/utils/collect-docs';
+import { judgePicklistReferences } from '../src/utils/picklist-references';
 import {
   authoringFindingDetailLines,
   explainPointer,
@@ -261,5 +267,113 @@ describe('the printed shape of each shortened rule — verdict, fix, rule line w
     expect(lines[1]).toBe(`      rule: expression-invalid  at ${finding.path}`);
     expect(out).not.toMatch(/fix: source:/);
     expect(out).not.toMatch(/^\s*fix:/m);
+  });
+});
+
+// ── The rule ids `packages/cli` produces (#22841) ──────────────────────────
+// Module scope: what a lowered hook body cannot reach.
+const SLA_MATRIX: Record<string, number> = { high: 4, low: 48 };
+
+/** A handler whose `String(fn)` yields `text` (or throws, for `null`): the extractor's two instrument cases. */
+const opaqueHandler = (text: string | null) => {
+  const fn = () => undefined;
+  Object.defineProperty(fn, 'toString', {
+    value: () => {
+      if (text === null) throw new Error('cannot stringify');
+      return text;
+    },
+  });
+  return fn;
+};
+
+/**
+ * One real finding of every rule id `packages/cli` produces, each from its own
+ * producer, as `{ rule, message, fix }` (a picklist notice's fix is its `hint`;
+ * a doc finding carries none).
+ */
+function cliFindings(): Array<{ rule: string; message: string; fix?: string }> {
+  const hookIssues = checkHookBodyLowering({
+    hooks: [
+      { name: 'case_sla', object: 'case', events: ['beforeInsert'], handler: (ctx: any) => { ctx.input.sla_hours = SLA_MATRIX[ctx.input.priority]; } },
+      { name: 'enrich_lead', object: 'lead', events: ['beforeInsert'], handler: async (ctx: any) => { ctx.input.score = (await fetch('https://example.invalid/enrich')).status; } },
+      { name: 'opaque', object: 'o', events: ['beforeInsert'], handler: opaqueHandler('???') },
+      { name: 'exploding', object: 'o', events: ['beforeInsert'], handler: opaqueHandler(null) },
+    ],
+  });
+
+  const dir = mkdtempSync(join(tmpdir(), 'os-explain-cli-rule-ids-'));
+  let fileIssues: ReturnType<typeof collectDocsFromSrc>['issues'];
+  try {
+    const configPath = join(dir, 'objectstack.config.ts');
+    writeFileSync(configPath, 'export default {};\n');
+    mkdirSync(join(dir, 'src', 'docs'), { recursive: true });
+    writeFileSync(join(dir, 'src', 'docs', 'crm_scalar.md'), '---\ntags: tutorial\n---\n\n# S');
+    mkdirSync(join(dir, 'src', 'sales', 'docs'), { recursive: true });
+    writeFileSync(join(dir, 'src', 'sales', 'docs', 'crm_index.md'), '# CRM');
+    fileIssues = collectDocsFromSrc(configPath).issues;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  const duplicate = lintDocs([{ name: 'crm_index', content: 'a' }, { name: 'crm_index', content: 'b' }], 'crm');
+  const nav = lintDocNavTargets({
+    manifest: { id: 'com.example.crm', namespace: 'crm' },
+    books: [{ name: 'crm_manual', groups: [] }],
+    apps: [{
+      name: 'crm_app',
+      label: 'CRM',
+      navigation: [
+        { id: 'nav_page', type: 'doc', doc: 'crm_lead_gide' },
+        { id: 'nav_book', type: 'doc', book: 'crm_manuel' },
+      ],
+    }],
+  }, new Set(['crm_lead_guide']));
+
+  const { notices } = judgePicklistReferences({
+    manifest: { id: 'com.example.pk', name: 'com.example.pk', version: '1.0.0', type: 'app', dependencies: { 'com.acme.crm': '^1.0.0' } },
+    objects: [{ name: 'pk_account', fields: { industry: { type: 'select', label: 'Industry', picklist: 'industry' } } }],
+  });
+
+  return [
+    ...hookIssues.map(({ rule, message, fix }) => ({ rule, message, fix })),
+    ...[...fileIssues, ...duplicate, ...nav].map(({ rule, message }) => ({ rule, message })),
+    ...notices.map(({ rule, message, hint }) => ({ rule, message, fix: hint })),
+  ];
+}
+
+describe('the rule ids packages/cli produces — one verdict line, one fix, and an explanation (#22841)', () => {
+  it('fires each from its producer, and they are exactly the explained ids no lint rule produces', () => {
+    const lintIds = new Set<string>([...exportedRuleIds(), ...FUNCTIONAL_COMPLETENESS_RULES]);
+    const explainedElsewhere = Object.keys(RULE_EXPLANATIONS).filter((id) => !lintIds.has(id)).sort();
+    const fired = [...new Set(cliFindings().map((f) => f.rule))].sort();
+    expect(fired).toEqual([
+      'docs/duplicate-name',
+      'docs/frontmatter-tags',
+      'docs/nav-target',
+      'docs/uncollected-directory',
+      'hook-body/bundled-fallback',
+      'hook-body/extraction-failed',
+      'hook-body/not-lowerable',
+      'hook-body/unparseable',
+      'picklist-reference-unverified',
+    ]);
+    expect(explainedElsewhere).toEqual(fired);
+  });
+
+  it('each verdict is one line of at most 200 characters, each fix too, and each rule line points at its explanation', () => {
+    const findings = cliFindings();
+    for (const f of findings) {
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+      expect(f.message, f.rule).not.toContain('\n');
+      if (f.fix !== undefined) {
+        expect(f.fix.length, `${f.rule} fix: ${f.fix}`).toBeLessThanOrEqual(200);
+        expect(f.fix, f.rule).not.toContain('\n');
+      }
+      expect(explainPointer(f.rule), f.rule).toBe(` — \`os explain ${f.rule}\` for ${RULE_EXPLANATIONS[f.rule].covers}`);
+    }
+    // `os lint` prints a `fix:` line for each hook-body finding.
+    const hookBody = findings.filter((f) => f.rule.startsWith('hook-body/'));
+    expect(hookBody).toHaveLength(4);
+    expect(hookBody.every((f) => typeof f.fix === 'string' && f.fix.length > 0)).toBe(true);
   });
 });

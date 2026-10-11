@@ -31,14 +31,41 @@ function exportedRuleIds(): Set<string> {
   return ids;
 }
 
+/**
+ * The rule ids `@objectstack/cli` produces that this table explains. The CLI
+ * depends on this package, so their constants cannot be imported here; the
+ * CLI's `test/explain-rule-id.test.ts` fires each one from its producer and
+ * holds it to its entry. Exact: a key that is neither one of these nor an
+ * exported rule id fails below, and so does a listed id with no entry.
+ */
+const CLI_PRODUCED_RULE_IDS: readonly string[] = [
+  'hook-body/not-lowerable',
+  'hook-body/bundled-fallback',
+  'hook-body/unparseable',
+  'hook-body/extraction-failed',
+  'docs/uncollected-directory',
+  'docs/duplicate-name',
+  'docs/nav-target',
+  'docs/frontmatter-tags',
+  'picklist-reference-unverified',
+];
+
 describe('rule explanations (#22161)', () => {
   it('every entry explains a rule id a rule file exports, under its own key', () => {
     const ids = exportedRuleIds();
     expect(Object.keys(RULE_EXPLANATIONS).length).toBeGreaterThan(0);
     for (const [key, entry] of Object.entries(RULE_EXPLANATIONS)) {
       expect(entry.rule, `entry under "${key}"`).toBe(key);
+      if (CLI_PRODUCED_RULE_IDS.includes(key)) continue;
       expect(ids.has(key), `"${key}" is not an exported rule id constant`).toBe(true);
     }
+  });
+
+  it('the entries for CLI-produced ids are exactly the declared list, and none is a rule id here', () => {
+    const ids = exportedRuleIds();
+    const outside = Object.keys(RULE_EXPLANATIONS).filter((key) => !ids.has(key));
+    expect([...outside].sort()).toEqual([...CLI_PRODUCED_RULE_IDS].sort());
+    expect(CLI_PRODUCED_RULE_IDS.filter((id) => ids.has(id))).toEqual([]);
   });
 
   it('each entry completes the rule-line pointer and carries real text', () => {
