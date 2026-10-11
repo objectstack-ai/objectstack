@@ -6,6 +6,7 @@ import type {
     II18nService,
     IMetadataService,
     IRealtimeService,
+    IWebhookService,
 } from '@objectstack/spec/contracts';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { inProcessSessionReadInput } from '@objectstack/types';
@@ -57,6 +58,49 @@ interface MessagingHttpSurface {
     ): void;
 }
 
+/**
+ * [#22756] The service slot this plugin fills: `IWebhookService`
+ * (`@objectstack/spec/contracts`), named after the plugin's platform
+ * capability token, as the contract's docblock declares it.
+ */
+const WEBHOOKS_SLOT = 'webhooks';
+
+/**
+ * [#22756] The slice of a Hono context the redeliver door reads and answers
+ * through, and nothing more: the request's headers (the caller's credentials),
+ * its JSON body, and `json(body, status)`.
+ *
+ * Both faces of the door hand {@link WebhookOutboxPlugin.serveRedeliver} one of
+ * these. The self-hosted mount hands it the real Hono context, so its answers
+ * are the ones it always gave. The `webhooks` service's `handleRedeliver` hands
+ * it {@link requestDoorContext} over a web-standard `Request`. So both faces run
+ * ONE copy of the door's rules: who may press it, whose rows it reaches, and
+ * what each refusal answers.
+ */
+interface RedeliverDoorContext<R> {
+    req: { raw: { headers: Headers }; json(): Promise<any> };
+    json(body: unknown, status?: number): R;
+}
+
+/**
+ * [#22756] A web-standard `Request` as the door's context, answering the way
+ * Hono's `c.json` answers: the body is `JSON.stringify(body)`, the one header is
+ * `Content-Type: application/json`, and the status defaults to `200`.
+ *
+ * The body is read with `request.json()`, which parses exactly what Hono's
+ * `c.req.json()` parses (the body's text, then `JSON.parse`), so a body that is
+ * not JSON is refused the same way at both faces.
+ */
+function requestDoorContext(request: Request): RedeliverDoorContext<Response> {
+    return {
+        req: { raw: request, json: () => request.json() },
+        json: (body, status) => new Response(JSON.stringify(body), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+        }),
+    };
+}
+
 export interface WebhookOutboxPluginOptions {
     /**
      * Auto-enqueue config. When enabled (default `true` if the realtime + data
@@ -81,7 +125,9 @@ export interface WebhookOutboxPluginOptions {
  *   - the `sys_webhook` configuration object,
  *   - the {@link AutoEnqueuer} that turns `data.record.*` events into outbox
  *     rows (`source: 'webhook'`), and
- *   - the redeliver admin endpoint.
+ *   - the redeliver door: the self-hosted `POST /api/v1/webhooks/redeliver`
+ *     mount, and the `webhooks` service's transport-neutral `handleRedeliver`
+ *     (`IWebhookService`), which serve one set of rules.
  *
  * End-to-end flow:
  *
@@ -174,6 +220,12 @@ export class WebhookOutboxPlugin implements Plugin {
                 // deployment without realtime would silently fail to materialize
                 // declared webhooks — the very no-op this bridge closes (#3461).
                 await this.bootDeclaredWebhooks(ctx);
+                // [#22756] The redelivery veto, and beside it the `webhooks`
+                // service — gated on the engine and messaging alone, like the
+                // step above, and never on the auto-enqueue prerequisites. It
+                // runs before the enqueuer writes its first row (#8069), and
+                // before the mount below is mounted.
+                this.bootRedeliverDoor(ctx, autoEnqueueOpt);
                 await this.bootAutoEnqueue(ctx, autoEnqueueOpt);
                 this.registerAdminRoutes(ctx);
             });
@@ -303,10 +355,11 @@ export class WebhookOutboxPlugin implements Plugin {
         }
 
         const enqOpts = (typeof opt === 'object' ? opt : {}) as AutoEnqueuerOptions;
-        // [#8069] Install the redelivery veto BEFORE the enqueuer starts
-        // writing rows, so no delivery row can ever exist while the refusal
-        // that protects it does not.
-        this.installRedeliverGuard(ctx, messaging, engine, enqOpts.subscriptionsObject);
+        // [#8069] The redelivery veto is already installed: `bootRedeliverDoor`
+        // ran first, so no delivery row can ever exist while the refusal that
+        // protects it does not. [#22756] It is installed THERE, and not here,
+        // because this function returns early without realtime or with
+        // `autoEnqueue: false`, and the door serves on those kernels too.
         this.autoEnqueuer = new AutoEnqueuer(
             engine,
             realtime,
@@ -316,6 +369,46 @@ export class WebhookOutboxPlugin implements Plugin {
         await this.autoEnqueuer.start();
         ctx.registerService('webhook.autoEnqueuer', this.autoEnqueuer);
         ctx.logger.info?.('[webhook-auto-enqueuer] started (enqueues source=webhook onto sys_http_delivery)');
+    }
+
+    /**
+     * [#22756] Install the #8069 redelivery veto, and register the `webhooks`
+     * service beside it.
+     *
+     * The veto needs the data engine (it reads the subscription) and messaging
+     * (it is installed there). It does NOT need realtime or auto-enqueue: it
+     * judges a row being REPLAYED, and a row can be replayed on a kernel that
+     * enqueues nothing. It used to be installed inside {@link bootAutoEnqueue},
+     * which returns early without realtime or with `autoEnqueue: false`, so on
+     * those kernels the door served while the veto was never installed.
+     *
+     * The service is registered only once the veto is installed, so no kernel
+     * serves `handleRedeliver` without it. Where the veto cannot be installed
+     * the slot stays empty, and the member's caller answers its typed absence
+     * (the contract's rule) rather than a door with no veto.
+     *
+     * `subscriptionsObject` is read from the auto-enqueue options, as before,
+     * so a host that renamed its subscriptions object keeps the veto reading it.
+     */
+    private bootRedeliverDoor(ctx: PluginContext, opt: boolean | AutoEnqueuerOptions): void {
+        const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
+        const messaging = this.getMessaging(ctx);
+        if (!engine || !messaging) {
+            ctx.logger.warn?.(
+                '[webhook-outbox] redeliver veto not installed and the webhooks service not registered '
+                    + '— the data engine or the messaging service is not available',
+                { hasEngine: !!engine, hasMessaging: !!messaging },
+            );
+            return;
+        }
+        const subscriptionsObject = typeof opt === 'object' ? opt.subscriptionsObject : undefined;
+        if (!this.installRedeliverGuard(ctx, messaging, engine, subscriptionsObject)) return;
+
+        const service: IWebhookService = {
+            handleRedeliver: (request: Request) =>
+                this.serveRedeliver(ctx, messaging, requestDoorContext(request)),
+        };
+        ctx.registerService(WEBHOOKS_SLOT, service);
     }
 
     /**
@@ -329,13 +422,16 @@ export class WebhookOutboxPlugin implements Plugin {
      * dispatcher still reports a delivery, while the fail-closed signing
      * guarantee the system claims (#7799) is not actually being kept. That is a
      * durability/consistency degradation wearing a functional one's clothes.
+     *
+     * [#22756] Returns whether the guard is installed: the `webhooks` service
+     * is registered only when it is.
      */
     private installRedeliverGuard(
         ctx: PluginContext,
         messaging: MessagingHttpSurface,
         engine: IDataEngine,
         subscriptionsObject?: string,
-    ): void {
+    ): boolean {
         if (typeof messaging.registerRedeliverGuard !== 'function') {
             ctx.logger.error?.(
                 '[webhook-outbox] messaging service exposes no registerRedeliverGuard() — redelivery '
@@ -343,16 +439,17 @@ export class WebhookOutboxPlugin implements Plugin {
                     + 'pressing redeliver may send a delivery that can no longer be authenticated '
                     + '(an unsigned send, which webhook delivery otherwise never makes). The POST '
                     + '/api/v1/webhooks/redeliver endpoint is reachable by any '
-                    + 'authenticated user. Fix: upgrade @objectstack/service-messaging to a build that '
-                    + 'implements registerRedeliverGuard.',
+                    + 'authenticated user; the webhooks service is not registered. Fix: upgrade '
+                    + '@objectstack/service-messaging to a build that implements registerRedeliverGuard.',
             );
-            return;
+            return false;
         }
         messaging.registerRedeliverGuard(
             'webhook',
             createWebhookRedeliverGuard(engine, subscriptionsObject),
         );
         ctx.logger.debug?.('[webhook-outbox] redeliver guard installed for source=webhook');
+        return true;
     }
 
     private tryGetService<T>(ctx: PluginContext, names: string[]): T | undefined {
@@ -369,8 +466,45 @@ export class WebhookOutboxPlugin implements Plugin {
 
     /**
      * Mount POST /api/v1/webhooks/redeliver on the host Hono app, if one is
-     * available. Delegates to `messaging.redeliverHttp(deliveryId, …)`. Auth is
-     * the better-auth session cookie — every authenticated user counts.
+     * available. The door itself is {@link serveRedeliver}, handed the Hono
+     * context as it is, so the mount answers what it always answered.
+     *
+     * [#22756] The server is read as `http.server` first, then the deprecated
+     * `http-server` alias, as `plugin-approvals` reads it. The canonical name
+     * is the only one present on every provider path: `runtime.ts`'s
+     * `config.server` path registers no alias, so an alias-only read never
+     * mounted the door there. `tryGetService` asks each name in its own `try`,
+     * because `getService` throws on an empty slot. Where both names are
+     * registered (`plugin-hono-server` registers one server under both), the
+     * first answers, so the path is mounted once.
+     */
+    private registerAdminRoutes(ctx: PluginContext): void {
+        const http = this.tryGetService<any>(ctx, ['http.server', 'http-server']);
+        if (!http || typeof http.getRawApp !== 'function') {
+            ctx.logger.debug?.('[webhook-outbox] HTTP server not available; redeliver endpoint not mounted');
+            return;
+        }
+        const rawApp = http.getRawApp();
+        const messaging = this.getMessaging(ctx);
+        if (!rawApp || !messaging) return;
+
+        rawApp.post('/api/v1/webhooks/redeliver', async (c: any) => this.serveRedeliver(ctx, messaging, c));
+
+        ctx.logger.info?.('[webhook-outbox] redeliver endpoint mounted at POST /api/v1/webhooks/redeliver');
+    }
+
+    /**
+     * The redeliver door: `POST /api/v1/webhooks/redeliver`. Delegates to
+     * `messaging.redeliverHttp(deliveryId, …)`. Auth is the better-auth session
+     * cookie — every authenticated user counts.
+     *
+     * [#22756] ONE body, two faces. The self-hosted mount
+     * ({@link registerAdminRoutes}) hands it the Hono context; the `webhooks`
+     * service's `handleRedeliver` hands it a `Request` through
+     * {@link requestDoorContext}. Neither face carries a rule of its own, so
+     * they cannot drift: the same caller, the same tenant, the same veto and
+     * the same answer for every refusal. The mount is not a caller of the
+     * member, and nothing here mounts anything.
      *
      * [#10740] Which is precisely why the caller's ACTIVE ORGANIZATION is
      * resolved here and threaded into the call. `sys_http_delivery` is
@@ -385,79 +519,70 @@ export class WebhookOutboxPlugin implements Plugin {
      * the correct outcome. ⛔ It is never repaired with `bypassTenantAudit`,
      * which would silence the report without closing anything.
      */
-    private registerAdminRoutes(ctx: PluginContext): void {
-        const http = this.tryGetService<any>(ctx, ['http-server']);
-        if (!http || typeof http.getRawApp !== 'function') {
-            ctx.logger.debug?.('[webhook-outbox] HTTP server not available; redeliver endpoint not mounted');
-            return;
+    private async serveRedeliver<R>(
+        ctx: PluginContext,
+        messaging: MessagingHttpSurface,
+        c: RedeliverDoorContext<R>,
+    ): Promise<R> {
+        const session = await this.resolveSession(ctx, c);
+        const userId = session?.user?.id;
+        if (typeof userId !== 'string' || userId.length === 0) {
+            return c.json(
+                { success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to redeliver webhook deliveries.' } },
+                401,
+            );
         }
-        const rawApp = http.getRawApp();
-        const messaging = this.getMessaging(ctx);
-        if (!rawApp || !messaging) return;
-
-        rawApp.post('/api/v1/webhooks/redeliver', async (c: any) => {
-            const session = await this.resolveSession(ctx, c);
-            const userId = session?.user?.id;
-            if (typeof userId !== 'string' || userId.length === 0) {
-                return c.json(
-                    { success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to redeliver webhook deliveries.' } },
-                    401,
-                );
+        let body: any;
+        try {
+            body = await c.req.json();
+        } catch {
+            return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Request body must be JSON.' } }, 400);
+        }
+        const deliveryId = typeof body?.deliveryId === 'string' ? body.deliveryId.trim() : '';
+        if (!deliveryId) {
+            return c.json(
+                { success: false, error: { code: 'MISSING_REQUIRED_FIELD', message: 'Body must include `deliveryId: string`.' } },
+                400,
+            );
+        }
+        try {
+            // [#10740] `session.session.activeOrganizationId` is the
+            // canonical spelling of the caller's active organization
+            // (better-auth's organization plugin; see
+            // `plugin-auth/auth-schema-config.ts`). Read from the one
+            // place it lives — a `??` chain over alternative spellings
+            // would make a MISSING organization indistinguishable from a
+            // differently-shaped one, and the missing case is the one that
+            // must stay visible.
+            const activeOrg = session?.session?.activeOrganizationId;
+            const tenantId = typeof activeOrg === 'string' && activeOrg.length > 0
+                ? activeOrg
+                : undefined;
+            const row = await messaging.redeliverHttp(deliveryId, { tenantId });
+            ctx.logger.info?.('[webhook-outbox] redelivered', { deliveryId, requestedBy: userId, tenantId });
+            return c.json({ success: true, data: { id: row.id, status: row.status } });
+        } catch (err: any) {
+            const code = err?.code;
+            if (code === 'RESOURCE_NOT_FOUND') {
+                return c.json({ success: false, error: { code, message: err.message } }, 404);
             }
-            let body: any;
-            try {
-                body = await c.req.json();
-            } catch {
-                return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Request body must be JSON.' } }, 400);
+            // [#8069] `DELIVERY_NEVER_SENT` is a refusal, not a server
+            // fault: the row is a parked record of a delivery that was
+            // never prepared, and re-sending it would be a FIRST delivery —
+            // unsigned, because the secret that would have signed it is
+            // what went missing. 409 alongside the eligibility refusal, so
+            // an operator tool can present both the same way; without this
+            // arm it would surface as a 500 and read as a transient glitch
+            // worth retrying.
+            if (code === 'DELIVERY_NOT_ELIGIBLE' || code === 'DELIVERY_NEVER_SENT') {
+                return c.json({ success: false, error: { code, message: err.message } }, 409);
             }
-            const deliveryId = typeof body?.deliveryId === 'string' ? body.deliveryId.trim() : '';
-            if (!deliveryId) {
-                return c.json(
-                    { success: false, error: { code: 'MISSING_REQUIRED_FIELD', message: 'Body must include `deliveryId: string`.' } },
-                    400,
-                );
-            }
-            try {
-                // [#10740] `session.session.activeOrganizationId` is the
-                // canonical spelling of the caller's active organization
-                // (better-auth's organization plugin; see
-                // `plugin-auth/auth-schema-config.ts`). Read from the one
-                // place it lives — a `??` chain over alternative spellings
-                // would make a MISSING organization indistinguishable from a
-                // differently-shaped one, and the missing case is the one that
-                // must stay visible.
-                const activeOrg = session?.session?.activeOrganizationId;
-                const tenantId = typeof activeOrg === 'string' && activeOrg.length > 0
-                    ? activeOrg
-                    : undefined;
-                const row = await messaging.redeliverHttp(deliveryId, { tenantId });
-                ctx.logger.info?.('[webhook-outbox] redelivered', { deliveryId, requestedBy: userId, tenantId });
-                return c.json({ success: true, data: { id: row.id, status: row.status } });
-            } catch (err: any) {
-                const code = err?.code;
-                if (code === 'RESOURCE_NOT_FOUND') {
-                    return c.json({ success: false, error: { code, message: err.message } }, 404);
-                }
-                // [#8069] `DELIVERY_NEVER_SENT` is a refusal, not a server
-                // fault: the row is a parked record of a delivery that was
-                // never prepared, and re-sending it would be a FIRST delivery —
-                // unsigned, because the secret that would have signed it is
-                // what went missing. 409 alongside the eligibility refusal, so
-                // an operator tool can present both the same way; without this
-                // arm it would surface as a 500 and read as a transient glitch
-                // worth retrying.
-                if (code === 'DELIVERY_NOT_ELIGIBLE' || code === 'DELIVERY_NEVER_SENT') {
-                    return c.json({ success: false, error: { code, message: err.message } }, 409);
-                }
-                ctx.logger.error?.('[webhook-outbox] redeliver failed', err as Error);
-                return c.json(
-                    { success: false, error: { code: 'INTERNAL_ERROR', message: err?.message ?? String(err) } },
-                    500,
-                );
-            }
-        });
-
-        ctx.logger.info?.('[webhook-outbox] redeliver endpoint mounted at POST /api/v1/webhooks/redeliver');
+            ctx.logger.error?.('[webhook-outbox] redeliver failed', err as Error);
+            return c.json(
+                { success: false, error: { code: 'INTERNAL_ERROR', message: err?.message ?? String(err) } },
+                500,
+            );
+        }
     }
 
     /**
