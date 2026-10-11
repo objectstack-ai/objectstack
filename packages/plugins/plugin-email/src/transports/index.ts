@@ -44,11 +44,12 @@ export function isEmailTransportProvider(value: unknown): value is EmailTranspor
  *
  * It exists as a value because more than one assembly site has to answer that
  * question and refuse an incomplete configuration: {@link makeTransport} here,
- * and `resolveEmailCapabilityArg` in `@objectstack/cli` (#5132), which used to
- * answer it with its own `provider !== 'log' && provider !== 'smtp'` literal
- * and silently rewrote the provider to `log` when the key was missing. Two
- * literals describing one vocabulary is exactly the drift #5094 was filed for,
- * so the CLI imports this instead of restating it.
+ * and `resolveEmailCapabilityArg` (#5132, written in `@objectstack/cli` and in
+ * `../capability-arg.ts` since #22301), which used to answer it with its own
+ * `provider !== 'log' && provider !== 'smtp'` literal and silently rewrote the
+ * provider to `log` when the key was missing. Two literals describing one
+ * vocabulary is exactly the drift #5094 was filed for, so that reader imports
+ * this instead of restating it.
  *
  * The tie to {@link makeTransport} is a compile error rather than a convention:
  * its `resend` / `postmark` arms pass their tag to `requireApiKey`, whose

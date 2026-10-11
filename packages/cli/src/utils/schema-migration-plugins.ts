@@ -1906,12 +1906,17 @@ async function materializeHostPlugins(
  *    host plugins, so a config's own instance of the same name supersedes it.
  *  - **The capability providers** (`serve` 5): the stack's `requires`, read by
  *    `serve`'s rule (a host config's own; otherwise the compiled artifact's when
- *    it declares any; otherwise the config's), plus the always-on slate every
- *    served boot mounts (`PLATFORM_ALWAYS_ON_CAPABILITIES`, `@objectstack/spec`)
- *    — looked up in `CAPABILITY_PROVIDERS` and skipped when already held, by
- *    `providesCapability`'s exact identity match (`@objectstack/core`). The
+ *    it declares any; otherwise the config's), expanded by the rule `serve`
+ *    and `@objectstack/verify`'s `bootStack` read — `resolveServedCapabilities`
+ *    (`@objectstack/core`, #22301): `email` for a declared `auth`, the
+ *    always-on slate every served boot mounts (`PLATFORM_ALWAYS_ON_CAPABILITIES`,
+ *    `@objectstack/spec`), `job` / `queue` ahead of what schedules background
+ *    work — looked up in `CAPABILITY_PROVIDERS` and skipped when already held,
+ *    by `providesCapability`'s exact identity match (`@objectstack/core`). The
  *    slate is `serve`'s with no `--preset`: these commands take no preset, as
- *    they take no `--dev`.
+ *    they take no `--dev`; and no host default (MCP, pinyin search), as
+ *    `bootStack` passes none. Each provider is still constructed for its
+ *    declarations only (below), never from the deployment's configuration.
  *  - **The REST API plugin**, which `serve` composes on every boot and whose
  *    `init()` declares `sys_import_job` (#22202).
  *
@@ -1944,8 +1949,7 @@ async function composeServedPlatform(input: {
   artifactRequires?: readonly string[];
   packageRoot: string;
 }): Promise<{ authFamily: unknown[]; plugins: unknown[]; notes: string[] }> {
-  const { CAPABILITY_PROVIDERS, providesCapability } = await import('@objectstack/core');
-  const { PLATFORM_ALWAYS_ON_CAPABILITIES } = await import('@objectstack/spec/kernel');
+  const { CAPABILITY_PROVIDERS, providesCapability, resolveServedCapabilities } = await import('@objectstack/core');
   const config = input.config ?? {};
   // `serve`'s `requires` — the rule {@link composeAuthGatedSecurity} states.
   const requires = !isHostConfig(config) && Array.isArray(input.artifactRequires)
@@ -1996,7 +2000,7 @@ async function composeServedPlatform(input: {
     }
     return composeProviderForDeclarations(new Ctor() as object);
   };
-  for (const token of [...new Set([...requires, ...PLATFORM_ALWAYS_ON_CAPABILITIES])]) {
+  for (const token of resolveServedCapabilities(requires).tokens) {
     const spec = CAPABILITY_PROVIDERS[token];
     // A tier token (`auth`, `ui`, `i18n`, `ai`) or one no open package
     // provides mounts nothing in `serve`'s resolver either.

@@ -4,8 +4,11 @@
 // actually reads off `config.email` — #5307.
 //
 // `config.email` has exactly ONE reader in the whole repo (this file's
-// neighbour, `serve.ts`), and `EmailServiceConfigSchema` is the operator-facing
-// contract for it. Nothing held the two together, so the schema fell behind the
+// neighbour, `capability-arg.ts` — written in `@objectstack/cli`'s `serve.ts`
+// until #22301 moved it here, beside the transport vocabulary it refuses
+// against, so `os serve` and `@objectstack/verify`'s `bootStack` construct the
+// email provider by one reader; this test moved with it), and
+// `EmailServiceConfigSchema` is the operator-facing contract for it. Nothing held the two together, so the schema fell behind the
 // reader twice in one family:
 //
 //   - #5104 — `provider: 'smtp'` shipped in #5087 and the enum still stopped at
@@ -27,10 +30,10 @@
 // is added.
 //
 // This package's `tsconfig.json` includes `src` (tests and all), so the
-// compile-time witness below is real: `pnpm --filter @objectstack/cli
+// compile-time witness below is real: `pnpm --filter @objectstack/plugin-email
 // typecheck` fails on a config the schema cannot express, before any test runs.
 // The spec-side companion — `@objectstack/spec`'s own `system/email-config.test.ts`,
-// named without its repo-relative path here for the reason this directory's
+// named without its repo-relative path here for the reason `@objectstack/cli`'s
 // `serve-multi-node-cap-advisory.pin.test.ts` gives for the same gate: a quoted
 // literal starting at `packages/` would force `check:cross-package-test-inputs`
 // to demand a glob for a file this test never actually reads — has to be
@@ -40,10 +43,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { EmailServiceConfigSchema } from '@objectstack/spec/system';
 import type { EmailServiceConfig } from '@objectstack/spec/system';
-import { resolveEmailCapabilityArg } from './serve.js';
+import { resolveEmailCapabilityArg } from './capability-arg.js';
 // The repo's one comment/code separator (#9367). This file used to scan RAW
 // source with no separator at all (until commit 5359a9b4c): a docblock or a `// TODO: also
 // read cfgEmail.foo` line was indistinguishable from a real dot access. Typed
@@ -52,23 +54,24 @@ import { resolveEmailCapabilityArg } from './serve.js';
 // suppression.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
-const SERVE_SOURCE = readFileSync(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'serve.ts'),
-  'utf8',
-);
+// Seeded from `__dirname`, as this package's `smtp-port-contract.test.ts` is:
+// the package's build config compiles to CommonJS, where `import.meta` does
+// not type-check.
+const READER_SOURCE = readFileSync(path.resolve(__dirname, 'capability-arg.ts'), 'utf8');
 
 /**
- * `serve.ts` with every comment span blanked (offsets preserved, bytes
- * replaced with spaces) — see `keysReadFromConfigEmail` below for why the
- * scan reads this instead of `SERVE_SOURCE` directly (since commit 5359a9b4c).
+ * `capability-arg.ts` with every comment span blanked (offsets preserved,
+ * bytes replaced with spaces) — see `keysReadFromConfigEmail` below for why
+ * the scan reads this instead of `READER_SOURCE` directly (since commit
+ * 5359a9b4c).
  */
-const MASKED_SERVE_SOURCE = maskComments(SERVE_SOURCE);
+const MASKED_READER_SOURCE = maskComments(READER_SOURCE);
 
 /**
  * Every `config.email` key the resolver reads, straight from its source — the
  * issue's own repro command:
  *
- *   grep -oE "cfgEmail\.[a-zA-Z]+" packages/cli/src/commands/serve.ts | sort -u
+ *   grep -oE "cfgEmail\.[a-zA-Z]+" <this package>/src/capability-arg.ts | sort -u
  *
  * `cfgEmail` is the resolver's parameter name for `config.email`, and every
  * read of it in that function is a dot access (no destructuring, no computed
@@ -77,11 +80,11 @@ const MASKED_SERVE_SOURCE = maskComments(SERVE_SOURCE);
  * the next reader learns the scan has to change with it.
  *
  * Takes `source` explicitly (default the real file's masked text, since commit 5359a9b4c)
- * rather than closing over `SERVE_SOURCE`/`MASKED_SERVE_SOURCE` directly, so
+ * rather than closing over `READER_SOURCE`/`MASKED_READER_SOURCE` directly, so
  * the vacuity-proof tests below can drive the exact same regex over a raw vs.
  * a masked variant of a shape and show the two disagree.
  */
-function keysReadFromConfigEmail(source: string = MASKED_SERVE_SOURCE): string[] {
+function keysReadFromConfigEmail(source: string = MASKED_READER_SOURCE): string[] {
   const reads = source.match(/cfgEmail\.[A-Za-z_$][\w$]*/g) ?? [];
   return [...new Set(reads.map((r) => r.slice('cfgEmail.'.length)))].sort();
 }
@@ -154,7 +157,7 @@ describe('EmailServiceConfigSchema ↔ resolveEmailCapabilityArg', () => {
  * Vacuity proof (commit 5359a9b4c): both directions the raw scan was one ordinary
  * comment away from getting wrong, reproduced on synthetic sources shaped
  * like the real resolver so the two legs (raw vs. masked) can be compared
- * without waiting for `serve.ts` to actually regress. Each `it` shows the RAW
+ * without waiting for `capability-arg.ts` to actually regress. Each `it` shows the RAW
  * leg producing the wrong verdict — the verdict this file's scan would have
  * produced before commit 5359a9b4c — and the MASKED leg producing the right one.
  */
@@ -244,7 +247,7 @@ describe('a config the schema accepts reaches the plugin intact', () => {
     // `appName` AFTER the spread. This pin now guards the new order.
     //
     // Its angle is this file's own, and not a restatement of
-    // `serve-email-appname-precedence.test.ts`: that file feeds the resolver
+    // `@objectstack/cli`'s `serve-email-appname-precedence.test.ts`: that file feeds the resolver
     // raw objects, whereas the config below goes through the real
     // `EmailServiceConfigSchema.parse()` first. So what is pinned here is that
     // the two keys #5307 added to the CONTRACT survive the parse AND land on

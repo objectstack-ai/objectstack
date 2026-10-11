@@ -16,6 +16,15 @@
 
 export { EmailServicePlugin, resolveDurableQueue, resolveAttachmentStore } from './email-plugin.js';
 export type { EmailServicePluginOptions } from './email-plugin.js';
+// [#22301] What a served boot constructs `EmailServicePlugin` with, from the
+// deployment's mail configuration — read by `@objectstack/core`'s
+// `resolveCapabilityArgument` off this module, for `os serve` and for
+// `@objectstack/verify`'s `bootStack` alike.
+export {
+  resolveEmailCapabilityArg,
+  resolveDeploymentAppName,
+  type EmailCapabilityArg,
+} from './capability-arg.js';
 export {
   LogTransport,
   normalizeMessage,

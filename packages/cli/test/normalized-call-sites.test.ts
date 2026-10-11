@@ -399,10 +399,6 @@ const READS: Readonly<Record<string, ReadRow>> = {
     why: 'its one caller is `lintConfig`, which hands it the stack it folded on entry.',
   },
   // ── os serve ───────────────────────────────────────────────────────────
-  'commands/serve.ts :: config.analyticsCubes': {
-    reads: 'top-level',
-    why: 'the first leg of the rule, kept so the legacy `cubes` spelling keeps its precedence: the top level\'s own array, then `cubes`, then `resolveStackCollection(config, \'analyticsCubes\')` for the bodies.',
-  },
   'commands/serve.ts :: config.docs': {
     reads: 'top-level',
     why: 'the dev mirror of `os build`: the read is the top level\'s own inline `docs`, which never move. The root `src/docs` collection is placed by `placeCollectedDocs`, as `os build` places it: on the body of the package whose id is the stack\'s `manifest.id` on a multi-package stack, on the top level when no single package owns it, and each package\'s own docs on that package\'s body.',
