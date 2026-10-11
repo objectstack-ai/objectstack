@@ -498,7 +498,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     object: 'sys_audience_binding_suggestion',
     census: P1,
     fate: 'attribution',
-    citation: `${D3_ORG_ROWS}; an organization resolves its own suggestions (ADR-0090 D9); ${D10_SINGLE}`,
+    citation: `${D3_ORG_ROWS}; the suggestion record is deployment-level, owned by the Default Organization (ADR-0090 D5); ${D10_SINGLE}`,
     anchors: [],
   },
   {

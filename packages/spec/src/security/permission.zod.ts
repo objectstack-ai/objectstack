@@ -863,7 +863,9 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
    *    and every persona silently degrades.
    *  - **Package-level** (the set ships in an installed package with a
    *    `packageId`): never auto-bound — it materializes a pending
-   *    `sys_audience_binding_suggestion` row that an admin confirms in Setup.
+   *    `sys_audience_binding_suggestion` row that an admin confirms in Setup:
+   *    one caller holding `manage_metadata` accepts it once for the whole
+   *    deployment, and the `everyone` definition is then derived to carry it.
    *
    * Carries no runtime semantics of its own beyond these boot-time effects.
    * (The former `isProfile` flag was removed by ADR-0090 D2.)
