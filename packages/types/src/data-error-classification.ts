@@ -775,6 +775,38 @@ function isSandboxOrigin(error: any): boolean {
 }
 
 /**
+ * [#22741] Is this the sandbox's OWN fault: a `SandboxError` the runner raised
+ * itself, rather than one a sandboxed body threw?
+ *
+ * Both halves are read off the producer, `runtime/src/sandbox/quickjs-runner.ts`:
+ *
+ *  - its class names itself `'SandboxError'` (`this.name`), and
+ *  - its contract leaves `innerMessage` undefined for "the sandbox's own
+ *    internal errors (capability denials, timeouts, marshalling failures)",
+ *    so {@link isSandboxOrigin} answers `false` for them.
+ *
+ * So the CPU budget, the wall-clock ceiling, a denied capability, an
+ * unavailable `ctx.api`, a failed install or marshal, and a nested body's fault
+ * relayed across a VM hop all answer `true`. A body's refusal or crash carries
+ * `innerMessage` and answers `false`; it is {@link isSandboxOrigin}'s.
+ *
+ * The class is recognised by its declared name rather than by `instanceof`,
+ * for the reason {@link isEngineDuplicateRecordEnvelope} gives: the import
+ * runner's row report (`@objectstack/core`) sits below `@objectstack/runtime`
+ * and never sees the class.
+ *
+ * ⛔ Not a withholding rule. {@link mapDataError} asks nothing here: it answers
+ * these errors from their message like any other unclassified throw, which for
+ * the runner's fault texts is its sanitised `500 INTERNAL_ERROR` terminal. This
+ * predicate lets the import row recognise the error so it can take that door's
+ * sentence, as it does for a crash; the verdict stays the door's.
+ */
+export function isSandboxOwnFault(error: unknown): boolean {
+    const name = (error as { name?: unknown } | null | undefined)?.name;
+    return name === 'SandboxError' && !isSandboxOrigin(error);
+}
+
+/**
  * [commit cf6e0a193] Did a sandboxed body CRASH — as opposed to reporting a refusal?
  *
  * The two reads {@link sandboxBusinessMessage} already makes, asked from the
