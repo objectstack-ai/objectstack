@@ -91,9 +91,29 @@ export const AUTHORED_BODY_BESIDE_FUNCTION_REASON =
 export interface LoweringResult {
   /** A deep-cloned, JSON-safe copy of the stack with handlers replaced by strings. */
   lowered: Record<string, unknown>;
-  /** name → original handler function. Empty when nothing needed lowering. */
+  /**
+   * ref → the callable it names: the runtime module's `functions` export, entry
+   * for entry. Empty when nothing needed lowering.
+   *
+   * This map is the ONE reading of which ref names which code. The runtime
+   * module is generated from it (`buildRuntimeBundle` locates each callable by
+   * identity, see `locateCallables`), never by re-deriving names from the
+   * config, because the runtime resolves a hook's `handler`, an action's
+   * `target` and a `functions` key against one merged namespace.
+   *
+   * An authored `functions` name (a map key, an array entry's `name`) is a ref
+   * of its own: it ships under that name and names its own callable, even when
+   * another slot binds the same function or wants the same name. A ref minted
+   * for a hook or an action is internal, so it is the one that takes a numeric
+   * suffix on a collision.
+   */
   functions: Record<string, (...args: unknown[]) => unknown>;
-  /** Number of registered callables (the keys of `functions`), each once. */
+  /**
+   * Number of refs the runtime module serves (the keys of `functions`). Two
+   * authored `functions` names bound to one function are two refs; slots that
+   * only re-bind a callable already registered (a handler shared by two hooks,
+   * the same callable in a `packages[i].manifest` body) add none.
+   */
   count: number;
   /** Number of SLOTS that emitted a metadata-only `body` (one callable can fill several). */
   bodyExtracted: number;
@@ -156,10 +176,10 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
- * Generate a unique reference name. Hook handlers reuse the hook name
- * verbatim (callers should ensure hook names are unique anyway).
- * Anonymous registrations (e.g. `functions: { foo: fn }`) use the map key.
- * Collisions get a numeric suffix.
+ * Generate a unique reference name for an internal ref. Hook handlers reuse
+ * the hook name verbatim and action targets `<owner>_<action>`, unless that
+ * name is already taken; every authored `functions` name is taken before any
+ * internal ref is minted. Collisions get a numeric suffix.
  */
 function uniqueName(base: string, taken: Set<string>): string {
   if (!taken.has(base)) return base;
@@ -240,14 +260,97 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
    */
   const refByFn = new Map<AnyFn, string>();
 
-  /** Register one callable and answer its ref, reusing the ref if it has one. */
+  /**
+   * Authored `functions` name → the callable its entry binds (`undefined` for
+   * an entry that carries no callable, such as an already-lowered ref).
+   *
+   * Filled by {@link claimAuthoredNames} BEFORE any slot is walked, so the
+   * names are taken before a hook or an action mints an internal ref. The walk
+   * order (hooks, then actions, then `functions`) used to decide who kept a
+   * contested name: a hook named like a `functions` key kept it, the key was
+   * re-keyed to a `__2` ref the runtime module never served, and the hook's
+   * ref then resolved to the `functions` entry's code. A function shared with
+   * a hook lost its authored key outright, since the key was re-keyed to the
+   * hook's ref.
+   *
+   * The first binding of a name wins it. A later entry binding the same name
+   * to a DIFFERENT callable (a second `packages[i].manifest` body, or a
+   * duplicated `name` in the array form) cannot share one flat runtime-module
+   * namespace with it, so it keeps today's suffixed ref ({@link suffixedByName}).
+   */
+  const authoredFn = new Map<string, AnyFn | undefined>();
+  /** (authored name, callable) → the suffixed ref a contested name was minted under, so every walk agrees. */
+  const suffixedByName = new Map<string, Map<AnyFn, string>>();
+
+  function claimAuthoredName(name: string, fn: AnyFn | undefined): void {
+    if (authoredFn.has(name)) return;
+    authoredFn.set(name, fn);
+    taken.add(name);
+    // A hook or action bound to this same function re-uses the authored name
+    // rather than minting a second ref for it.
+    if (fn !== undefined && !refByFn.has(fn)) refByFn.set(fn, name);
+  }
+
+  /** Take every authored `functions` name of one stack-shaped body (map keys, array `name`s). */
+  function claimAuthoredNames(body: Record<string, unknown>): void {
+    const fnsField = body.functions;
+    if (Array.isArray(fnsField)) {
+      for (const entry of fnsField) {
+        if (!isPlainObject(entry) || typeof entry.name !== 'string' || entry.name.length === 0) continue;
+        claimAuthoredName(entry.name, typeof entry.handler === 'function' ? (entry.handler as AnyFn) : undefined);
+      }
+    } else if (isPlainObject(fnsField)) {
+      for (const [key, value] of Object.entries(fnsField)) {
+        if (typeof value === 'function') claimAuthoredName(key, value as AnyFn);
+        else if (isPlainObject(value) && typeof value.handler === 'function') claimAuthoredName(key, value.handler as AnyFn);
+        else claimAuthoredName(key, undefined);
+      }
+    }
+  }
+
+  /** Make `ref` serve `fn` in the runtime module (first registration of the ref wins its place). */
+  function serve(ref: string, fn: AnyFn): void {
+    if (!Object.prototype.hasOwnProperty.call(functions, ref)) functions[ref] = fn;
+  }
+
+  /**
+   * Register one callable bound at an INTERNAL slot (a hook, an action, a
+   * nameless `functions` array entry) and answer its ref, reusing the ref the
+   * callable already has: an authored `functions` name bound to it, or the ref
+   * an earlier slot minted for it.
+   */
   function register(fn: AnyFn, base: string): string {
     const seen = refByFn.get(fn);
-    if (seen !== undefined) return seen;
+    if (seen !== undefined) {
+      serve(seen, fn);
+      return seen;
+    }
     const ref = uniqueName(base, taken);
     taken.add(ref);
-    functions[ref] = fn;
+    serve(ref, fn);
     refByFn.set(fn, ref);
+    return ref;
+  }
+
+  /**
+   * Register the callable of an authored `functions` entry and answer its ref:
+   * the authored name itself, whatever other slot binds the same function.
+   */
+  function registerAuthored(fn: AnyFn, name: string): string {
+    if (authoredFn.get(name) === fn) {
+      serve(name, fn);
+      return name;
+    }
+    let byFn = suffixedByName.get(name);
+    if (byFn === undefined) suffixedByName.set(name, (byFn = new Map()));
+    let ref = byFn.get(fn);
+    if (ref === undefined) {
+      ref = uniqueName(name, taken);
+      taken.add(ref);
+      byFn.set(fn, ref);
+    }
+    serve(ref, fn);
+    if (!refByFn.has(fn)) refByFn.set(fn, ref);
     return ref;
   }
 
@@ -326,10 +429,9 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
         if (!isPlainObject(entry)) return entry;
         const next = { ...entry };
         if (typeof next.handler === 'function') {
-          const name = typeof next.name === 'string' && next.name.length > 0
-            ? next.name
-            : 'anon_fn';
-          const ref = register(next.handler as AnyFn, name);
+          const authored = typeof next.name === 'string' && next.name.length > 0;
+          const name = authored ? (next.name as string) : 'anon_fn';
+          const ref = authored ? registerAuthored(next.handler as AnyFn, name) : register(next.handler as AnyFn, name);
           noteUnlowered(ref, { origin: `function '${name}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           next.name = ref;
           next.handler = ref;
@@ -341,7 +443,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
       const out: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(fnsField)) {
         if (typeof value === 'function') {
-          const ref = register(value as AnyFn, key);
+          const ref = registerAuthored(value as AnyFn, key);
           noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           out[ref] = ref;
         } else if (isPlainObject(value) && typeof value.handler === 'function') {
@@ -350,7 +452,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
           // it, so what the function said about itself survives into the
           // artifact — dropping it here would silently un-declare the function
           // on every built deployment while it kept working from source.
-          const ref = register(value.handler as AnyFn, key);
+          const ref = registerAuthored(value.handler as AnyFn, key);
           noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           out[ref] = { ...value, handler: ref };
         } else {
@@ -385,6 +487,16 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     }
 
     return lowered;
+  }
+
+  // 0. Take every authored `functions` name, in every body the walks below
+  //    visit, before any hook or action mints an internal ref (see
+  //    `authoredFn`). The bodies are the ones step 3 walks, in its order.
+  claimAuthoredNames(input);
+  if (Array.isArray(input.packages)) {
+    for (const entry of input.packages as unknown[]) {
+      if (isPlainObject(entry) && isPlainObject(entry.manifest)) claimAuthoredNames(entry.manifest);
+    }
   }
 
   const lowered = lowerBody(input);
