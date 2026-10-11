@@ -12,7 +12,10 @@ import type { SemanticMigration } from '../../types.js';
 // where a guarded form's null is supplied and wins over a child's default, and
 // to a screen's three positions that hand a value to the client (an object
 // form's defaults, a field's defaultValue, an object form's recordId), each
-// evaluated before the screen goes on the wire.
+// evaluated before the screen goes on the wire, and to the list a loop with a
+// body and a map iterate (collection), whose literal is an inline array and
+// where a variable's bare name, which the structured loop and map never read,
+// is refused too.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -24,7 +27,9 @@ export const entry: SemanticMigration = {
     + 'script node (the inputs map), and of a screen node (an object form\'s defaults map and its recordId, and '
     + 'each field\'s defaultValue) — a string value, or a '
     + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
-    + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included',
+    + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included; and the '
+    + 'collection of a loop node with a body and of a map node — any string value: a single-brace template token, '
+    + 'or a variable\'s bare name',
   replacement:
     'a CEL value envelope, { dialect: "cel", source: "…" }, evaluated to the value: a path is the same path '
     + '(record.owner; a numeric segment becomes an index, items[0]; a variable whose name starts with $ is read '
@@ -54,7 +59,12 @@ export const entry: SemanticMigration = {
     + 'opens the field blank over the object field\'s declared defaultValue, so write that default in the guard\'s '
     + 'null branch to keep it, and a field\'s defaultValue seeds the field with null. recordId stays a string when '
     + 'written as one, and an envelope there must evaluate to the record\'s id, a non-blank string: anything else, '
-    + 'null included, fails the run at the screen, so route around a screen whose record may be absent',
+    + 'null included, fails the run at the screen, so route around a screen whose record may be absent. A loop\'s '
+    + 'or a map\'s collection is the list the node iterates: an envelope that evaluates to a list, { dialect: '
+    + '"cel", source: "tasks" }, or the items written as an inline array, iterated as written (its strings are '
+    + 'data, never interpolated); a variable\'s bare name there is that name in an envelope. Anything the envelope '
+    + 'evaluates to but a list fails the node, null included, as a token that resolved to nothing did, so where the '
+    + 'list may be absent write a guard answering [] to iterate nothing (has(vars.tasks) ? vars.tasks : [])',
   reason:
     'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
     + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -75,7 +85,14 @@ export const entry: SemanticMigration = {
     + 'is null, which the child takes as supplied, so the default no longer applies unless the guard writes it. '
     + 'On a screen, a whole token that resolved to nothing served nothing: an object form then seeded the field '
     + 'from the object field\'s defaultValue, and a recordId that resolved to nothing served an edit form with no '
-    + 'record, which opened with nothing read and could not save. A '
+    + 'record, which opened with nothing read and could not save. In a loop\'s or a map\'s collection an absent '
+    + 'variable failed the node under the template as well, but as a returned failure (the step\'s NODE_FAILURE, '
+    + 'did not resolve to an array) where CEL fails the run with an evaluation fault naming the variable '
+    + '(EXECUTION_ERROR), which a fault edge routes alike but the step and the run record differently; and a '
+    + 'variable\'s bare name there — the spelling the contract declared — was handed to the interpolator, which '
+    + 'returned it unchanged, so the structured loop and map failed every run that reached them, while the '
+    + 'same name in an envelope iterates: rewriting it would change what the flow does. A legacy loop with no '
+    + 'body is not touched: it reads collection as a bare variable name, unparsed and unjudged. A '
     + 'flow carrying '
     + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
     + 'carrying one is skipped at boot with a warn naming it.',
@@ -92,7 +109,10 @@ export const entry: SemanticMigration = {
     + 'fractional offset as the whole number of days meant. In a subflow or map input where the child\'s '
     + 'defaultValue should apply to an absent value, write that default in the guard\'s null branch, or leave the '
     + 'key out; in an object form\'s defaults, likewise write the object field\'s default in the guard. For a '
-    + 'screen\'s recordId, find the paths where the record can be absent and route them around the screen. Re-run '
-    + 'the flow paths that write those fields and serve those screens, and compare the stored and served values '
-    + 'with the ones the template wrote.',
+    + 'screen\'s recordId, find the paths where the record can be absent and route them around the screen. For a '
+    + 'loop\'s or a map\'s collection, write the list\'s variable in the envelope; a bare name there never '
+    + 'iterated, so decide whether the loop should run at all before rewriting it, and where the list may be '
+    + 'absent and the node should iterate nothing, guard it to answer []. Re-run '
+    + 'the flow paths that write those fields, serve those screens and iterate those lists, and compare the '
+    + 'stored and served values and the iterations with the ones the template produced.',
 };
