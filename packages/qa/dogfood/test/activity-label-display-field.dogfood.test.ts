@@ -144,7 +144,7 @@ describe('[#21878] an activity row names its record by the ADR-0079 title, with 
       for (const name of PRINCIPALS[who]) {
         const setId = await idOf('sys_permission_set', { name });
         expect(setId, `fixture permission set ${name} seeded`).toBeTruthy();
-        await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: setId }, SYS);
+        await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
       }
     }
 

@@ -218,12 +218,14 @@ const MANAGER_ONLY_FIX =
   "an approver that cannot resolve empty, e.g. { type: 'org_membership_level', value: 'owner' }";
 
 /**
- * [#22161] The group arm's `fix:` line: its three routes in one line. What
- * recovers a request that lands empty anyway is the explanation's.
+ * [#22161] The group arm's `fix:` line: its three routes in one line, the
+ * third in #22824's words — `fallback` NAMES who decides, rather than leave a
+ * slate that names no one to the organization's administrators (the verdict's
+ * own outcome). What happens when even that names no one is the explanation's.
  */
 const GROUP_ONLY_FIX =
   "Staff at least one target, add an approver that cannot resolve empty (e.g. { type: 'org_membership_level', " +
-  "value: 'owner' }), or declare onEmptyApprovers: 'fallback' with a fallbackApprovers list";
+  "value: 'owner' }), or name who decides in fallbackApprovers with onEmptyApprovers: 'fallback'";
 
 export type ApprovalApproverSeverity = 'error' | 'warning' | 'info';
 
@@ -522,9 +524,10 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
 
       // Empty-slate dead-end (#3424): when EVERY approver on the node routes to
       // a group whose membership can be empty (an unstaffed position, an empty
-      // team/department), the request can resolve to an empty `pending_approvers`
-      // at runtime — no concrete user can act, and with `lockRecord` the record
-      // stays locked with no recovery except a platform/tenant admin override.
+      // team/department), no person the node names can act at runtime, and
+      // under the default `admin_rescue` the request opens on the
+      // organization's administrators instead (#22824), the record locked
+      // under `lockRecord` until one of them decides.
       // Advisory (`info`): staffing is runtime data a linter can't see, so this
       // flags the risky SHAPE and prescribes a guaranteed-staffed fallback.
       const routable = approvers.filter(
@@ -541,10 +544,10 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           where,
           path: `${nodePath}.config.approvers`,
           // [#22161] One verdict sentence; why staffing is unreadable here and
-          // what recovers a stuck request is `os explain` text.
+          // who decides an empty slate is `os explain` text.
           message:
             `every approver on this node routes to a group (position/team/department), so if ` +
-            `none is staffed the request opens on an empty slate and waits forever` +
+            `none is staffed the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
           hint: GROUP_ONLY_FIX,
         });
@@ -590,7 +593,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           // runtime fact; that reasoning is `os explain` text.
           message:
             `every approver on this node is { type: 'manager' }, so where sys_user.manager_id ` +
-            `is unset the request opens on an empty slate and waits forever` +
+            `is unset the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
           hint: MANAGER_ONLY_FIX,
         });

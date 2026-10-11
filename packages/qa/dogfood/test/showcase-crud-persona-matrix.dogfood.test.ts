@@ -349,7 +349,7 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
         expect(uid, `persona ${email} provisioned`).toBeTruthy();
         await ql.insert(
           'sys_user_permission_set',
-          { user_id: uid, permission_set_id: ps.id },
+          { user_id: uid, permission_set: ps.name },
           { context: SYS },
         );
       }

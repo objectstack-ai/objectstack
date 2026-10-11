@@ -753,13 +753,13 @@ describe('[#22161] one-line verdicts — approval-approvers-may-resolve-empty, a
     const [group] = validateApprovalApprovers(stackWithApprovers([{ type: 'position', value: 'exec' }]));
     expect(group.message).toBe(
       'every approver on this node routes to a group (position/team/department), so if none is ' +
-        'staffed the request opens on an empty slate and waits forever, and (lockRecord) the record ' +
+        "staffed the request opens on the organization's administrators, and (lockRecord) the record " +
         'stays locked',
     );
     const [manager] = validateApprovalApprovers(stackWithApprovers([{ type: 'manager' }]));
     expect(manager.message).toBe(
       "every approver on this node is { type: 'manager' }, so where sys_user.manager_id is unset the " +
-        'request opens on an empty slate and waits forever, and (lockRecord) the record stays locked',
+        "request opens on the organization's administrators, and (lockRecord) the record stays locked",
     );
   });
 
@@ -777,7 +777,7 @@ describe('[#22161] one-line verdicts — approval-approvers-may-resolve-empty, a
     const facts: Record<string, string[]> = {
       [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY]: [
         '`pending_approvers`',
-        'no in-product recovery',
+        "the organization's administrators",
         '`sys_user.manager_id`',
         'a seed row of `sys_user`',
         "`onEmptyApprovers: 'fallback'` does not silence it",

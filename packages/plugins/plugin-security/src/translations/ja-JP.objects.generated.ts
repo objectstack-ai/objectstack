@@ -322,12 +322,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "sys_user への外部キー。"
       },
       permission_set_id: {
-        label: "権限セット",
-        help: "sys_permission_set への外部キー。"
+        label: "権限セット（旧 ID）",
+        help: "[ADR-0131 D10] sys_permission_set 行への旧 ID 参照。後続の段階でデータとともに削除されます。書き込まれず、何かを付与するために読まれることもありません。付与は permission_set で権限セットを名前で指定します。"
       },
       permission_set: {
-        label: "権限セット名",
-        help: "[ADR-0131 D4] この付与が保持する権限セットのマシン名（sys_permission_set.name）。permission_set_id を含むすべての書き込みで、プラットフォームが permission_set_id から書き込みます。指定された値はその名前と一致する必要があり、一致しない場合は書き込みが拒否されます。この列が存在する前に書き込まれた付与では NULL です。"
+        label: "権限セット",
+        help: "[ADR-0131 D4] この付与が保持する権限セットのマシン名（セキュリティカタログでの名前）。カタログにない名前は拒否されます。この列が存在する前に書き込まれた付与でのみ NULL です。"
       },
       organization_id: {
         label: "組織",

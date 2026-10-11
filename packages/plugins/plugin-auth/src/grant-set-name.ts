@@ -6,10 +6,11 @@
  * column — the reference the grant keeps once ADR-0131 C8 drops
  * `permission_set_id`.
  *
- * `plugin-security` writes the column (its engine hooks derive it from the id
- * on every grant write, and a one-time backfill names the grants written before
- * the column existed); this package only reads it. Internal: not re-exported
- * from the package entry.
+ * Every grant writer stores the name and nothing else (this package's
+ * self-registration grant among them); `plugin-security` refuses a non-system
+ * grant naming a set the security catalog does not hold, and a one-time
+ * backfill names the grants written before the column existed. Internal: not
+ * re-exported from the package entry.
  *
  * A grant whose name is `NULL` or blank names no set. That is a grant written
  * before the column existed on an upgraded deployment's first boot, before the
@@ -21,9 +22,6 @@
 
 /** The grant's NAME reference to its permission set (ADR-0131 D4). */
 export const GRANT_SET_NAME_FIELD = 'permission_set';
-
-/** The grant's id reference to the catalog row (dropped by ADR-0131 C8). */
-export const GRANT_SET_ID_FIELD = 'permission_set_id';
 
 /**
  * The permission set a stored grant names, or `undefined` for a grant that

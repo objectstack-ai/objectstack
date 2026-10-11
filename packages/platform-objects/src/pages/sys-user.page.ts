@@ -223,13 +223,15 @@ export const SysUserDetailPage: Page = {
           },
           {
             // [ADR-0091 D1] Direct permission-set grants (直接授权) — pure SDUI.
-            // sys_user_permission_set is an ordinary id-keyed junction:
-            // user_id / permission_set_id are lookups keyed by record id, so
-            // the list keys on `relationshipField: 'user_id'` (no
-            // relationshipValueField). The Add picker binds a permission set by
-            // its id (linkField: 'permission_set_id'); server-side gates
-            // (audience-anchor D5/D9, delegated-admin D12) surface their denial
-            // reason in the Add dialog.
+            // The list keys on `relationshipField: 'user_id'` (a lookup keyed by
+            // record id, no relationshipValueField). [ADR-0131 D4] A grant names
+            // its set BY NAME, so the Add picker stores the set's MACHINE NAME
+            // (valueField: 'name', linkField: 'permission_set'), exactly as the
+            // position picker above does; server-side gates (the catalog name
+            // refusal, delegated-admin D12) surface their reason in the dialog.
+            // The picker still lists `sys_permission_set` rows: the related
+            // list's Add picker reads object records only, and listing the
+            // security catalog itself is an objectui change.
             //
             // [ADR-0091 D1/D2] `valid_from` / `valid_until` are listed because
             // they decide whether the grant confers anything: the resolver drops
@@ -246,7 +248,7 @@ export const SysUserDetailPage: Page = {
                 properties: {
                   objectName: 'sys_user_permission_set',
                   relationshipField: 'user_id',
-                  columns: ['permission_set_id', 'organization_id', 'valid_from', 'valid_until', 'granted_by', 'created_at'],
+                  columns: ['permission_set', 'organization_id', 'valid_from', 'valid_until', 'granted_by', 'created_at'],
                   sort: [{ field: 'created_at', order: 'desc' }],
                   limit: 25,
                   showViewAll: true,
@@ -254,9 +256,10 @@ export const SysUserDetailPage: Page = {
                   add: {
                     picker: {
                       object: 'sys_permission_set',
+                      valueField: 'name',
                       labelField: 'label',
                     },
-                    linkField: 'permission_set_id',
+                    linkField: 'permission_set',
                     label: {
                       en: 'Grant permission set',
                       'zh-CN': '授予权限集',

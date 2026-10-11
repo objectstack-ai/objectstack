@@ -2183,7 +2183,7 @@ const MANAGER_ONLY_ROUTES =
   'manager_id column included, leaving that directory the one surface that authors its ' +
   'manager. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
   'fallbackApprovers list: an empty manager rung then opens the request on those people instead ' +
-  'of on a slot nobody can act on, which needs no write to the column at all.';
+  'of on the organization\'s administrators, which needs no write to the column at all.';
 
 const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
   rule: 'approval-approvers-may-resolve-empty',
@@ -2191,11 +2191,15 @@ const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'An approval node opens its request on the people its approvers expand to at runtime. When ' +
       'EVERY approver on the node routes to a group whose membership is runtime data — a ' +
-      '`position`, a `team` or a `department` — and none is staffed, the request opens on an empty ' +
-      '`pending_approvers` slate: no user can act, so it waits forever, and under the default ' +
-      '`lockRecord: true` the record stays locked with it, with no in-product recovery. An approver ' +
-      'of any other type on the node is a non-group route, so a mixed slate is not judged.',
-    'The `manager` arm is the same dead end with a cause the flow cannot repair. ' +
+      '`position`, a `team` or a `department` — and none is staffed, no person the node names can ' +
+      'act. Under the default `onEmptyApprovers: \'admin_rescue\'` the request then opens on the ' +
+      "organization's administrators (the people holding its organization-admin capability) " +
+      'instead, and under the default `lockRecord: true` the record stays locked until one of them ' +
+      'decides. Declare `onEmptyApprovers: \'fallback\'` with a `fallbackApprovers` list to name who ' +
+      'decides instead; only an organization with no administrator leaves the request on an empty ' +
+      '`pending_approvers` slate, for a platform administrator\'s override. An approver of any ' +
+      'other type on the node is a non-group route, so a mixed slate is not judged.',
+    'The `manager` arm reaches the same empty slate with a cause the flow cannot repair. ' +
       '`{ type: \'manager\' }` resolves from `sys_user.manager_id` of the user the record names ' +
       '(the field `value` names, else the owner), and returns nobody where that column is unset; a ' +
       'static check cannot read that column, so this does not assert the slate IS empty — it reports ' +
@@ -2212,13 +2216,13 @@ const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
       'the rule flags the SHAPE, and an `info` finding never blocks a build or a publish.',
     'For the group arm: make sure at least one target is always staffed, or add a guaranteed-staffed ' +
       'approver entry, e.g. { type: \'org_membership_level\', value: \'owner\' }, or declare ' +
-      'onEmptyApprovers: \'fallback\' with a fallbackApprovers list for the node to open on when the ' +
+      'onEmptyApprovers: \'fallback\' with a fallbackApprovers list to name who decides when the ' +
       'groups come back empty.',
     MANAGER_ONLY_REMEDY,
     MANAGER_ONLY_ROUTES,
-    'For either arm, a request that still lands empty is recoverable only by a platform/tenant admin ' +
-      'override, which may act on any pending request so that one nobody in its slate can decide never ' +
-      'stays stuck.',
+    'For either arm, a slate that still names no one opens on the organization\'s administrators under ' +
+      'the default `onEmptyApprovers: \'admin_rescue\'` (the first paragraph), and declaring ' +
+      '`onEmptyApprovers: \'fallback\'` with a `fallbackApprovers` list names who decides instead.',
   ],
 };
 

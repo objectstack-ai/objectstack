@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   detectFreeIdentifiers,
   NODE_ONLY_GLOBALS,
+  parseFunction,
   SANDBOX_GLOBALS,
 } from './detect-free-identifiers.js';
 
@@ -150,6 +151,33 @@ describe('detectFreeIdentifiers (#1876 — body self-containment)', () => {
       };
       expect(src(handler)).toContain('previous: prev');
       expect(detectFreeIdentifiers(src(handler)).free).toEqual([]);
+    });
+  });
+
+  // [#22837] A method shorthand is not a statement, so the first wrap parsed it
+  // as a call and a block; with exactly ONE function nested in that block, the
+  // nested function was the only function-like node and was returned as the
+  // handler. Measured before the span check: both verdicts below were wrong.
+  describe('reads the handler itself, never a function nested in it (#22837)', () => {
+    const method = 'async h(ctx) { const k = 2; ctx.input.x = [1].map((i) => i * k); }';
+
+    it('a method local that one nested function closes over is bound, not free', () => {
+      expect(detectFreeIdentifiers(method).free).toEqual([]);
+    });
+
+    it('a module-scope helper called outside that nested function is free', () => {
+      const r = detectFreeIdentifiers('async h(ctx) { ctx.input.x = helper(ctx.input.n); [1].map((i) => i); }');
+      expect(r.free).toEqual(['helper']);
+    });
+
+    it('the node returned is the method, whose parameter list is the handler\'s', () => {
+      const fn = parseFunction(method);
+      expect(fn && fn.parameters.map((p) => p.getText())).toEqual(['ctx']);
+    });
+
+    it('CONTROL: an arrow and a function expression with one nested function were never affected', () => {
+      expect(parseFunction('async (ctx) => { [1].map((i) => i); }')?.parameters.map((p) => p.getText())).toEqual(['ctx']);
+      expect(parseFunction('async function (h) { [1].map((i) => i); }')?.parameters.map((p) => p.getText())).toEqual(['h']);
     });
   });
 

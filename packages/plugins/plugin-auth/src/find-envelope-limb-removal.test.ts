@@ -45,7 +45,8 @@
  * ## The fifteenth case is a different defect
  *
  * `settleSelfRegistrationGrant` also carried the silent-DROP shape, and commit
- * 9e9f03abe fixed it in the OPPOSITE direction — see the last `describe` in the file.
+ * 9e9f03abe fixed it in the OPPOSITE direction; ADR-0131 D4 then retired the
+ * row read itself — see the last `describe` in the file.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -91,7 +92,7 @@ const sysUserPermissionSet = {
     user_id: { name: 'user_id', type: 'text' as const },
     permission_set_id: { name: 'permission_set_id', type: 'text' as const },
     // [ADR-0131 D4] The grant's set by NAME, which `settleSelfRegistrationGrant`
-    // writes beside the id; undeclared, the engine refuses that insert.
+    // writes alone; undeclared, the engine refuses that insert.
     permission_set: { name: 'permission_set', type: 'text' as const },
     organization_id: { name: 'organization_id', type: 'text' as const },
   },
@@ -171,7 +172,8 @@ function expectBareArray(value: unknown, label: string): void {
 }
 
 /**
- * The fourteen blocks, each paired with the read it performs — same object,
+ * The blocks, each paired with the read it performs — thirteen since B4's read
+ * (`findPermissionSetRows`) was retired with the grant's id (ADR-0131 D4) — same object,
  * same query, same call facade (`withSystemReadContext` for the `AuthManager`
  * blocks; the three-argument `ql.find(o, q, { context })` for the standalone
  * migration/probe modules; the context-inside-the-query form for
@@ -201,12 +203,6 @@ const BLOCKS: Array<{
     site: 'auth-manager.ts — #15738 uniqueness probe',
     populated: (e) => (withSystemReadContext(e) as never as { find: Function }).find('sys_user', { where: { email: 'alice@corp.example' }, limit: 50 }),
     empty: (e) => (withSystemReadContext(e) as never as { find: Function }).find('sys_user', { where: { email: 'ghost@corp.example' }, limit: 50 }),
-  },
-  {
-    id: 'B4  findPermissionSetRows',
-    site: 'auth-manager.ts — sys_permission_set by name',
-    populated: (e) => (withSystemReadContext(e) as never as { find: Function }).find('sys_permission_set', { where: { name: 'member_default' }, limit: 50 }),
-    empty: (e) => (withSystemReadContext(e) as never as { find: Function }).find('sys_permission_set', { where: { name: 'ghost' }, limit: 50 }),
   },
   {
     id: 'B5  settleSelfRegistrationGrant',
@@ -328,7 +324,7 @@ describe('#15597 — the control: these pins CAN go red', () => {
    * `expectBareArray` really discriminates — asserted directly, since no engine
    * can hand it an envelope any more.
    */
-  it('an afterFind hook that returns an envelope is now REFUSED at every one of the fourteen reads', async () => {
+  it('an afterFind hook that returns an envelope is now REFUSED at every one of the reads', async () => {
     const engine = await bootEngine();
     await seedAll(engine);
 
@@ -435,149 +431,40 @@ describe('#15597 — the blocks driven through their real production entry point
     expect(canon.scanned).toBe(1);
   });
 
-  it('AuthManager.findPermissionSetRows reads the bare array (B4)', async () => {
-    const engine = await bootEngine();
-    await seedAll(engine);
-    const manager = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine as never } as never);
-    const rows = await (manager as never as { findPermissionSetRows: Function }).findPermissionSetRows('member_default');
-    expectBareArray(rows, 'B4 via findPermissionSetRows');
-    expect(rows.length).toBe(1);
-    expect(rows[0].id).toBe('ps_1');
-  });
 });
 
 /**
- * ## The fifteenth block: the silent-DROP shape, fixed the OPPOSITE way (commit 9e9f03abe)
+ * ## The fifteenth block, retired with its read
  *
- * `settleSelfRegistrationGrant` filtered its permission-set candidates with
- * `r?.active !== false && typeof r?.id === 'string' && r.id`. The first clause
- * is a selection predicate and stays. The second silently DROPPED a malformed
- * row, and these cases pin why that is the opposite defect from a dead limb:
- * the branch is reachable, and its old behaviour was wrong in two ways that
- * both looked normal from outside.
+ * `settleSelfRegistrationGrant` once picked a `sys_permission_set` row to take
+ * the grant's id from, and commit 9e9f03abe made it refuse a malformed row
+ * rather than drop it (B4 was that row read). [ADR-0131 D4] The grant now
+ * names its set and reads no `sys_permission_set` row at all, so there is no
+ * candidate row to drop, malformed or otherwise — pinned below.
  */
-describe('#15597 — settleSelfRegistrationGrant refuses on a malformed row instead of dropping it', () => {
+describe('[ADR-0131 D4] settleSelfRegistrationGrant names the set and reads no sys_permission_set row', () => {
   const USER = { id: 'usr_new', name: 'New Person', email: 'new@corp.example' };
 
-  async function settle(
-    engine: ObjectQL,
-    setName: string,
-    lines: string[],
-    /**
-     * The organization `settleSelfRegistrationGrant` resolves, read the way the
-     * method itself reads it — `this.config.getTenancy?.()` then `defaultOrgId()`.
-     * Omitted, nothing resolves and `organizationId` stays null; supplied, the
-     * org-scoped arm of the row selection is the one that runs.
-     */
-    orgId?: string,
-  ): Promise<void> {
-    const manager = new AuthManager({
-      secret: SECRET,
-      baseUrl: 'http://localhost:3000',
-      dataEngine: engine as never,
-      ...(orgId ? { getTenancy: () => ({ defaultOrgId: async () => orgId }) } : {}),
-      logger: { error: (m: string) => lines.push(String(m)), warn: (m: string) => lines.push(String(m)), info: () => {} },
-    } as never);
-    (manager as never as { stageSelfRegistrationGrant: Function }).stageSelfRegistrationGrant(USER.email, setName);
-    await (manager as never as { settleSelfRegistrationGrant: Function }).settleSelfRegistrationGrant(USER);
-  }
-
-  const grants = (engine: ObjectQL): Promise<unknown[]> =>
-    engine.find('sys_user_permission_set', { limit: 100 }, SYSTEM) as Promise<unknown[]>;
-
-  it('a WELL-FORMED family still grants — the fix costs the happy path nothing', async () => {
-    const engine = await bootEngine();
-    await engine.insert('sys_user', USER, SYSTEM);
-    await engine.insert('sys_permission_set', { id: 'ps_ok', name: 'portal_user', label: 'Portal' }, SYSTEM);
-
-    const lines: string[] = [];
-    await settle(engine, 'portal_user', lines);
-
-    const rows = await grants(engine);
-    expect(rows.length).toBe(1);
-    expect((rows[0] as { permission_set_id: string }).permission_set_id).toBe('ps_ok');
-  });
-
-  it('a MALFORMED sole row is refused and NAMED — not reported as "no row named X resolves"', async () => {
-    const engine = await bootEngine();
-    await engine.insert('sys_user', USER, SYSTEM);
-    // Active, named exactly right, and present — only its id is unusable.
-    await engine.insert('sys_permission_set', { id: '', name: 'portal_user', label: 'Portal' }, SYSTEM);
-
-    const lines: string[] = [];
-    await settle(engine, 'portal_user', lines);
-
-    expect(await grants(engine)).toEqual([]);
-    const report = lines.join('\n');
-    // The cause names the real fact. Before the fix the row was dropped and
-    // this said "no active sys_permission_set row named 'portal_user'
-    // resolves" — false, and it sends an operator to look for a missing row.
-    expect(report, `nothing reported; logged: ${JSON.stringify(lines)}`).toContain('no usable id');
-    expect(report).not.toContain('resolves for organization');
-  });
-
-  it('⭐ the wrong-GRANT case: a malformed ORG row no longer silently falls through to the GLOBAL set', async () => {
-    // This is the case that makes the direction matter rather than being
-    // cosmetic. Two rows carry the declared name: the organization's own row
-    // (malformed id) and a global one (well-formed). The old trailing filter
-    // dropped the org row, `rows.find((r) => r.organization_id == null)` then
-    // matched the GLOBAL row, and the self-registrant was granted a permission
-    // set their organization never declared — silently, with a success log.
-    //
-    // The organization is RESOLVED here (`getTenancy`), which is the shape that
-    // actually bit and the reason this case does not lean on its sibling: with
-    // an org in hand the wrong grant is not merely "some global row", it is
-    // `ps_global` STAMPED `organization_id: 'org_1'` — the write spreads the
-    // resolved org onto the row — so the store ends up asserting that org_1
-    // granted a set org_1 never declared. Asserted by column below, not just by
-    // row count, so the stamp itself is pinned.
+  it('grants by name even where the only row of that name is malformed, and stamps the resolved organization', async () => {
     const engine = await bootEngine();
     await engine.insert('sys_user', USER, SYSTEM);
     await engine.insert('sys_organization', { id: 'org_1', name: 'Default', slug: 'default' }, SYSTEM);
     await engine.insert('sys_permission_set', { id: '', name: 'portal_user', label: 'Org scoped', organization_id: 'org_1' }, SYSTEM);
-    await engine.insert('sys_permission_set', { id: 'ps_global', name: 'portal_user', label: 'Global' }, SYSTEM);
-
     const lines: string[] = [];
-    await settle(engine, 'portal_user', lines, 'org_1');
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: 'http://localhost:3000',
+      dataEngine: engine as never,
+      getTenancy: () => ({ defaultOrgId: async () => 'org_1' }),
+      logger: { error: (m: string) => lines.push(String(m)), warn: (m: string) => lines.push(String(m)), info: () => {} },
+    } as never);
+    (manager as never as { stageSelfRegistrationGrant: Function }).stageSelfRegistrationGrant(USER.email, 'portal_user');
+    await (manager as never as { settleSelfRegistrationGrant: Function }).settleSelfRegistrationGrant(USER);
 
-    // Reverse-verified by ablation (recorded because the pre-fix behaviour is
-    // the whole argument): with the old trailing filter restored and nothing
-    // else changed, this case goes red with a granted row —
-    // `permission_set_id: 'ps_global'`, `organization_id: null` — i.e. the
-    // self-registrant really was handed the global set. The sibling case above
-    // goes red at the same time with `Cause: no active sys_permission_set row
-    // named 'portal_user' resolves`, which is the false cause. The other two
-    // cases in this describe stay GREEN under that ablation, by design: they
-    // are the no-regression and boundary guards, not the discriminators.
-    // Refused, and in particular NOT granted the global set.
-    const rows = await grants(engine);
-    expect(rows, `granted anyway: ${JSON.stringify(rows)}`).toEqual([]);
-    // The specific wrong write, named: no row may claim org_1 granted ps_global.
-    expect(
-      rows.some(
-        (r) =>
-          (r as { permission_set_id?: unknown }).permission_set_id === 'ps_global' &&
-          (r as { organization_id?: unknown }).organization_id === 'org_1',
-      ),
-      'ps_global was granted STAMPED with org_1 — the organization is now recorded as having granted a set it never declared',
-    ).toBe(false);
-    expect(lines.join('\n')).toContain('no usable id');
-  });
-
-  it('[ADR-0131 D3] the row\'s `active` no longer selects — the row carries the id, the ledger the switch', async () => {
-    // Whether the set grants was asked at admission, of the catalog and the
-    // activation ledger; the resolver reads no catalog row, so a row flag is
-    // not a deactivation and the settlement does not read it.
-    const engine = await bootEngine();
-    await engine.insert('sys_user', USER, SYSTEM);
-    await engine.insert('sys_permission_set', { id: 'ps_off', name: 'portal_user', label: 'Portal', active: false }, SYSTEM);
-
-    const lines: string[] = [];
-    await settle(engine, 'portal_user', lines);
-
-    const rows = await grants(engine);
-    expect(rows.length).toBe(1);
-    expect((rows[0] as { permission_set_id: string }).permission_set_id).toBe('ps_off');
-    expect(lines.join('\n')).not.toContain('no usable id');
+    const rows = (await engine.find('sys_user_permission_set', { limit: 100 }, SYSTEM)) as Array<Record<string, unknown>>;
+    expect(rows.map((r) => [r.user_id, r.permission_set, r.permission_set_id ?? null, r.organization_id])).toEqual([
+      ['usr_new', 'portal_user', null, 'org_1'],
+    ]);
+    expect(lines).toEqual([]);
   });
 });

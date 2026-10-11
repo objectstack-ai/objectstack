@@ -45,6 +45,7 @@ import {
   ROUTED_POSITION,
   OTHER_POSITION,
   EMAIL_APPROVER,
+  CO_APPROVER,
 } from './fixtures/position-address-readers-fixture.js';
 
 const SYS = { context: { isSystem: true } } as const;
@@ -106,13 +107,14 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
           const created = await stack.apiAs(submitterToken, 'POST', '/data/pa_position_request', { name });
           expect(created.status).toBe(201);
           const rows = (await list(adminToken, [SLOT])).filter((r) => !seen.has(r.id));
-          expect(rows.map((r) => r.pending_approvers)).toEqual([[SLOT]]);
+          expect(rows.map((r) => r.pending_approvers)).toEqual([[SLOT, CO_APPROVER]]);
           seen.add(rows[0].id);
           return rows[0].id;
         };
 
         // Three requests opened before anyone holds the position, so each
-        // slate is the literal slot.
+        // slate holds the literal slot (beside the named co-approver, see the
+        // fixture's header).
         const tableRequest = await openPositionRequest('table');
         const consoleSpellingRequest = await openPositionRequest('console-spelling');
         const adminRequest = await openPositionRequest('admin');

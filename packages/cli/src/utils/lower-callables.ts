@@ -21,7 +21,12 @@
  * emitting it.
  */
 
-import { extractHookBody, HookBodyExtractionError, type HookBodyRefusalKind } from './extract-hook-body.js';
+import {
+  extractLoweredBody,
+  HookBodyExtractionError,
+  type HookBodyRefusalKind,
+  type LoweringFace,
+} from './extract-hook-body.js';
 
 /**
  * One recorded extraction refusal.
@@ -156,13 +161,15 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
   // Try to extract a metadata-only body from a callable. Returns null if the
   // body source contains a forbidden token — the caller still bundles the fn.
   // Called only for a slot with no `body` of its own; `ref` is the callable's.
-  function tryExtractBody(fn: AnyFn, originLabel: string, ref: string): {
+  // `face` is the wrapper the body will run in (#22837): a hook handler's one
+  // parameter is rebound to the sandbox's `ctx`; an action target's is not.
+  function tryExtractBody(fn: AnyFn, originLabel: string, ref: string, face: LoweringFace): {
     language: 'js';
     source: string;
     capabilities: string[];
   } | null {
     try {
-      const ext = extractHookBody(fn, originLabel);
+      const ext = extractLoweredBody(fn, originLabel, face);
       bodyExtracted += 1;
       loweredRefs.add(ref);
       return { language: 'js', source: ext.source, capabilities: ext.capabilities };
@@ -241,7 +248,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
 
           // Extract metadata body unless the user already provided one.
           if (!hook.body) {
-            const body = tryExtractBody(hook.handler as AnyFn, `hook '${name}'`, ref);
+            const body = tryExtractBody(hook.handler as AnyFn, `hook '${name}'`, ref, 'hook');
             if (body) {
               hook.body = body;
               // [#16546] This ref's `body` was minted here, not authored — the
@@ -399,7 +406,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
 function lowerActionCallable(
   raw: unknown,
   register: (fn: AnyFn, base: string) => string,
-  tryExtract: (fn: AnyFn, label: string, ref: string) => { language: 'js'; source: string; capabilities: string[] } | null,
+  tryExtract: (fn: AnyFn, label: string, ref: string, face: LoweringFace) => { language: 'js'; source: string; capabilities: string[] } | null,
   noteUnlowered: (ref: string, row: BodylessCallable) => void,
   ownerLabel: string,
 ): unknown {
@@ -414,7 +421,7 @@ function lowerActionCallable(
   const fn = action.target as AnyFn;
   const ref = register(fn, baseName);
   if (!action.body) {
-    const body = tryExtract(fn, `action '${baseName}'`, ref);
+    const body = tryExtract(fn, `action '${baseName}'`, ref, 'action');
     if (body) action.body = body;
   } else {
     noteUnlowered(ref, { origin: `action '${baseName}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON });
