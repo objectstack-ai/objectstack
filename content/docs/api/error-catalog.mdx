@@ -285,14 +285,14 @@ object is rejected with `400 VALIDATION_FAILED`, and the specifics ride in
 
 ```json
 {
-  "error": "Permission Set: no sys_permission_set record has id \"ps_missing\"",
+  "error": "User: no sys_user record has id \"usr_missing\"",
   "code": "VALIDATION_FAILED",
   "fields": [{
-    "field": "permission_set_id",
+    "field": "user_id",
     "code": "reference_not_found",
-    "label": "Permission Set",
-    "constraint": { "target": "sys_permission_set" },
-    "value": "ps_missing"
+    "label": "User",
+    "constraint": { "target": "sys_user" },
+    "value": "usr_missing"
   }]
 }
 ```

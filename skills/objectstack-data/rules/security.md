@@ -38,26 +38,23 @@ export const salesUser = definePermissionSet({
 
 Declaring a set grants nobody anything — an assignment is **data**: one row in
 the join object **`sys_user_permission_set`** (`@objectstack/plugin-security`),
-carrying `user_id`, `permission_set_id`, and an optional `organization_id`
-(`null` = every org context). Optional `valid_from` / `valid_until` bound a
-half-open window; `granted_by` is stamped by the gate on insert — never author
-it.
+carrying `user_id`, `permission_set` (the set's machine **`name`**) and an
+optional `organization_id` (`null` = every org context). Optional `valid_from` /
+`valid_until` bound a half-open window; `granted_by` is stamped by the gate on
+insert — never author it.
 
-⚠️ **`permission_set_id` takes the `sys_permission_set` RECORD ID, not the set's
-`name`** — a `name` there matches nothing, raises no error, and silently grants
-nothing. Declared sets are upserted by `name` with a **generated** `id` on
-`kernel:ready` (ADR-0086 D5) — that id differs per environment, so resolve it first.
+⚠️ **`permission_set` takes the set's `name`, never a record id** — a name the
+security catalog does not hold is refused `400 VALIDATION_FAILED`
+(`reference_not_found`), and a row with no name is refused `required`.
+`permission_set_id` is a legacy column: do not write it.
 
-Assignment is two calls, both `POST /api/v1/data/{object}`
-(`…/query` with a QueryAST body for the read): look up the set's `id` in
-`sys_permission_set` by `name`, then insert
-`{ user_id, permission_set_id, organization_id }` into
-`sys_user_permission_set`. Only a tenant admin — or a delegated `adminScope`
-carrying `manageAssignments` for that set and user (ADR-0090 D12) — may write
-it; plain CRUD bits on the table are not enough.
+Assignment is one call: `POST /api/v1/data/sys_user_permission_set` with
+`{ user_id, permission_set: '<name>', organization_id }`. Only a tenant admin —
+or a delegated `adminScope` carrying `manageAssignments` for that set and user
+(ADR-0090 D12) — may write it; plain CRUD bits on the table are not enough.
 
-**Grant looks inert?** Check in order: a `name` in `permission_set_id`; the set
-is `active: false`; the validity window has passed; `organization_id` mismatch.
+**Grant looks inert?** Check in order: the set is switched off; the validity
+window has passed; `organization_id` mismatch.
 `GET /api/v1/security/explain?object=&operation=&userId=` answers from the
 enforcing code path (explaining another user needs `manage_users`).
 

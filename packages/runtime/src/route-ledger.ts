@@ -277,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 87 rows.
+ * CENSUS (generated): this list holds 88 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -502,6 +502,9 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: "authored metadata, so `manage_metadata` gates it — the same `isFlowAuthoringWrite` door as `POST /automation` above: fail-closed on an absent executionContext, an absent `systemPermissions` or an empty one, refusing 403 `PERMISSION_DENIED`, with only `isSystem` bypassing" },
   { route: 'DELETE /automation/:name', domain: '/automation', disposition: 'sdk', client: 'automation.delete',
     note: "authored metadata, so `manage_metadata` gates it — the same `isFlowAuthoringWrite` door as `POST /automation` above, and the destructive member of the family: before the gate a tenant org owner WITHOUT the capability deregistered a registered flow, 200, and flow metadata is registered at ENVIRONMENT scope so the write crossed the tenant wall. Fail-closed on an absent executionContext, an absent `systemPermissions` or an empty one, refusing 403 `PERMISSION_DENIED`, with only `isSystem` bypassing" },
+  // [#22773] The inbound hook's hosted door (segment 2 of ruling A on #22757).
+  { route: 'POST /automation/hooks/:flowName/:hookId', domain: '/automation', disposition: 'public',
+    note: 'the inbound hook a third-party sender posts a signed event through to start an `api` flow (ADR-0041 Tier 1). Session-less by design: the HMAC signature over the raw body, under the hook\'s own secret, is the only credential, and the trigger-api slot\'s ITriggerApiService.handleInboundHook verifies it before anything is enqueued. The ONE route under /automation the domain\'s anonymous floor admits: the ADR-0069 allow-list\'s one parameterised row (core auth-gate.ts, exactly these four segments, POST only) is read by the floor, the ADR-0069 gate and the membership gate\'s skip through one reading, and the domain hands the route to `domains/automation-hooks.ts` on the statement after the floor, ahead of every other /automation gate. Forwarded with its body UNREAD, the two path parameters decoded, the slot resolved per request, and the member\'s Response returned as it is. An absent slot or member answers 501 NOT_IMPLEMENTED, never ROUTE_NOT_FOUND; a body consumed before it got here is a transport fault, answered 500 and logged. Every other method on the path stays an ordinary /automation request at the floor. This is the door for a kernel with no raw app; a self-hosted kernel serves the same path from the trigger\'s raw-app mount, which never passes through the dispatcher. NOT JS-SDK surface: a sender is a third-party service, not a client of this SDK. Pinned in `domains/automation-hooks.test.ts`' },
 
   // ── auth (better-auth passthrough) ────────────────────────────────────────
   { route: '* /auth/**', domain: '/auth', disposition: 'sdk', client: 'auth.me',

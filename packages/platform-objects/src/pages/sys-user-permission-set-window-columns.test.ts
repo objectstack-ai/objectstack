@@ -44,6 +44,13 @@ describe('sys_user page — the permission-set assignments list', () => {
 
   it('lists valid_from and valid_until beside the set', () => {
     const columns = lists[0]?.columns as unknown[];
-    expect(columns).toEqual(expect.arrayContaining(['permission_set_id', 'valid_from', 'valid_until']));
+    expect(columns).toEqual(expect.arrayContaining(['permission_set', 'valid_from', 'valid_until']));
+  });
+
+  it('[ADR-0131 D4] the Add picker writes the set BY NAME, and the list never shows the legacy id', () => {
+    const list = lists[0] as any;
+    expect(list.add.linkField).toBe('permission_set');
+    expect(list.add.picker.valueField).toBe('name');
+    expect(list.columns).not.toContain('permission_set_id');
   });
 });

@@ -81,7 +81,7 @@ describe('showcase client-liaison fixtures (#9308 fixtures 2 + 4)', () => {
     const set = await ql.findOne('sys_permission_set', { where: { name: LIAISON_SET }, context: SYS });
     expect(set?.id, `${LIAISON_SET} is seeded by the security bootstrap`).toBeTruthy();
     const uid = (await ql.findOne('sys_user', { where: { email: LIAISON_EMAIL }, context: SYS }))?.id;
-    await ql.insert('sys_user_permission_set', { user_id: uid, permission_set_id: set.id }, { context: SYS });
+    await ql.insert('sys_user_permission_set', { user_id: uid, permission_set: set.name }, { context: SYS });
 
     const briefBy = async (title: string) =>
       String((await ql.findOne('showcase_client_brief', { where: { title }, context: SYS }))?.id ?? '');

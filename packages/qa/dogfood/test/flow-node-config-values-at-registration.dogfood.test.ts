@@ -51,7 +51,11 @@ import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 
 const OBJECT = 'esc_value_request';
-/** A position nothing in this fixture staffs: the request opens and waits. */
+/**
+ * A position nothing in this fixture staffs: the request opens, and under the
+ * default `onEmptyApprovers: 'admin_rescue'` it opens on the organization's
+ * administrators (the signed-in dev admin owns the default organization).
+ */
 const UNSTAFFED = 'esc_value_unstaffed';
 
 const PACKAGED_SUB_HOUR = 'esc_value_packaged_sub_hour';
@@ -274,7 +278,9 @@ describe('a flow node config its contract refuses is refused at registration, an
     const rows = ((await pending.json()) as { data: Array<Record<string, unknown>> }).data;
     const opened = rows.filter((row) => String(row.record_id) === recordId);
     expect(opened.length, JSON.stringify(rows)).toBe(1);
-    expect(opened[0].pending_approvers).toEqual([`position:${UNSTAFFED}`]);
+    const ql: any = await stack.kernel.getServiceAsync('objectql');
+    const admin = await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, context: { isSystem: true } });
+    expect(opened[0].pending_approvers).toEqual([String(admin?.id)]);
   });
 
   it('package load: a flow the kernel:ready bind refuses is not left registered from the boot pull', async () => {

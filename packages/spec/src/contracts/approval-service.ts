@@ -845,9 +845,7 @@ export interface ApprovalDecisionResult {
 export interface IApprovalService {
   /**
    * "My approvals" inbox. Supports filtering by status, target object,
-   * record id, or by who is expected to act next: the caller's approver
-   * identities (`approverId`) and, for a caller who may override them, the
-   * pending requests nobody on the slate can decide (`unstaffed`).
+   * record id, or by the user expected to act next.
    */
   listRequests(
     filter: {
@@ -862,39 +860,6 @@ export interface IApprovalService {
        * instead of one request per identity.
        */
       approverId?: string | string[];
-      /**
-       * Also match the PENDING requests whose slate names no person, returned
-       * only to a caller who may override them. These are the requests the
-       * `onEmptyApprovers: 'admin_rescue'` default leaves to a privileged
-       * override.
-       *
-       * Unstaffed means the request's current `pending_approvers` holds no
-       * user id and no email: only `type:value` literals left by an approver
-       * target with no holder (`position:<p>`, `team:<t>`), or nothing at all.
-       * It is the same test the open path makes before it warns that a
-       * request is "decidable only by a privileged admin". It reads the slate
-       * as it stands, not the directory: a slate whose last named approver
-       * has already acted and left only literals matches too, and so does a
-       * `position:<p>` slot whose position gained a holder after the request
-       * opened (that holder also finds it under `approverId`). A slate that
-       * still names a person never matches, even when that person has since
-       * left the organization.
-       *
-       * "May override" is the privileged-override rule that admits the
-       * override decision itself and sets `viewer.can_override`. A request
-       * this member adds is never one the caller is refused on: each returned
-       * row reads `viewer.can_override: true`. A caller who may override
-       * nothing gets nothing from it. No row is added and nothing is refused.
-       *
-       * It is an ARM of the approver match, not a narrowing of it. With
-       * `approverId`, a request matches when EITHER holds (OR): one of those
-       * identities holds a pending slot, or the request is unstaffed and the
-       * caller may override it. So one request answers "my pending approvals,
-       * rescues included", and its `countRequests` total counts both arms.
-       * Without `approverId` it selects the unstaffed requests alone. `false`
-       * is the same as absent. Every other member still narrows the result.
-       */
-      unstaffed?: boolean;
       submitterId?: string;
       /**
        * Free-text search, pushed into the engine query: matches the source
@@ -904,13 +869,11 @@ export interface IApprovalService {
       q?: string;
       /**
        * Page window, applied by the engine for every filter; a status array
-       * pushes down as `$in`. The two "who acts next" arms (`approverId`,
-       * `unstaffed`) first resolve to a bounded set of request ids: the
-       * approver index for `approverId`, the pending-request scan for
-       * `unstaffed`, each within the implementation's id window
-       * (`APPROVER_INDEX_CAP`, 10,000 in `@objectstack/plugin-approvals`,
-       * which warns when a probe reaches it). The window then applies
-       * engine-side to the rows in that set.
+       * pushes down as `$in`. `approverId` first resolves to a bounded set of
+       * request ids through the approver index, within the implementation's
+       * id window (`APPROVER_INDEX_CAP`, 10,000 in
+       * `@objectstack/plugin-approvals`, which warns when a probe reaches
+       * it). The window then applies engine-side to the rows in that set.
        */
       limit?: number;
       offset?: number;

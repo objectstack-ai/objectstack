@@ -5,9 +5,13 @@
 // Two objects, each with one autolaunched `approval` flow:
 //
 //   - `pa_position_request` routes to a POSITION nobody holds when the request
-//     opens, so its slate is the literal `position:<p>` slot — the shape a
-//     HotCRM approval carries when its approver position is staffed only after
-//     submission (the #21350 fixture's precondition, owned by this pin);
+//     opens, so its slate keeps the literal `position:<p>` slot, the slot a
+//     holder staffed only after submission decides (the #21350 fixture's
+//     precondition, owned by this pin) — beside a named co-approver who never
+//     acts. The co-approver is what keeps the literal on the slate: a slate of
+//     literals ALONE names no one, and under the default
+//     `onEmptyApprovers: 'admin_rescue'` it now opens on the organization's
+//     administrators instead (#22824);
 //   - `pa_email_request` routes to a `user` approver authored as an EMAIL, so
 //     its slate is the email itself.
 //
@@ -29,6 +33,9 @@ export const OTHER_POSITION = 'pa_bystander';
 /** The email the email-routed request's `user` approver is authored as. */
 export const EMAIL_APPROVER = 'pa-email-reviewer@example.com';
 
+/** The named co-approver beside the position: no account is ever this address. */
+export const CO_APPROVER = 'pa-co-approver@example.com';
+
 const requestObject = (name: string, label: string) => ObjectSchema.create({
   name,
   label,
@@ -42,11 +49,11 @@ const requestObject = (name: string, label: string) => ObjectSchema.create({
 export const PositionRequest = requestObject('pa_position_request', 'Position Request');
 export const EmailRequest = requestObject('pa_email_request', 'Email Request');
 
-const routedFlow = (name: string, object: string, approver: { type: 'position' | 'user'; value: string }) =>
+const routedFlow = (name: string, object: string, approvers: Array<{ type: 'position' | 'user'; value: string }>) =>
   defineFlow({
     name,
     label: name,
-    description: `Fires on insert and routes to a ${approver.type} approver.`,
+    description: `Fires on insert and routes to ${approvers.map((a) => `a ${a.type}`).join(' and ')} approver.`,
     type: 'autolaunched',
     status: 'active',
     nodes: [
@@ -55,7 +62,7 @@ const routedFlow = (name: string, object: string, approver: { type: 'position' |
         id: 'review',
         type: 'approval',
         label: 'Review',
-        config: { approvers: [approver], behavior: 'first_response' },
+        config: { approvers, behavior: 'first_response' },
       },
       { id: 'approved', type: 'end', label: 'Approved' },
       { id: 'rejected', type: 'end', label: 'Rejected' },
@@ -81,8 +88,11 @@ export const positionAddressReadersStack = defineStack({
   requires: ['automation', 'triggers'],
   objects: [PositionRequest, EmailRequest],
   flows: [
-    routedFlow('pa_position_flow', 'pa_position_request', { type: 'position', value: ROUTED_POSITION }),
-    routedFlow('pa_email_flow', 'pa_email_request', { type: 'user', value: EMAIL_APPROVER }),
+    routedFlow('pa_position_flow', 'pa_position_request', [
+      { type: 'position', value: ROUTED_POSITION },
+      { type: 'user', value: CO_APPROVER },
+    ]),
+    routedFlow('pa_email_flow', 'pa_email_request', [{ type: 'user', value: EMAIL_APPROVER }]),
   ],
 });
 

@@ -221,7 +221,9 @@ export {
   isAuthGateAllowlisted,
   evaluateAuthGate,
   normalizeAuthGate,
+  matchInboundHookRoute,
   type AuthGate,
+  type InboundHookRouteMatch,
 } from './auth-gate.js';
 
 // #2567 — the single anonymous-deny decision shared by every HTTP seam.

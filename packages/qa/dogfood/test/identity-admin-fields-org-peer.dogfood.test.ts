@@ -152,7 +152,7 @@ describe('[#21237] the identity object Admin group at the HTTP door: org peers a
     const [activitySet] = await findRows(ql, 'sys_permission_set', { name: activityReadSet.name }, 1);
     expect(activitySet, 'fixture permission set seeded').toBeTruthy();
     for (const who of ['member', 'owner', 'admin']) {
-      await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set_id: activitySet.id }, { context: SYS });
+      await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: activitySet.name }, { context: SYS });
     }
 
     // The colleague's group values, written as the system in two steps so the

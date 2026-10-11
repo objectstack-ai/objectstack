@@ -25,9 +25,11 @@
  *   literal (an unstaffed position) names no one;
  * - the control: a step whose approvers resolve to nobody notifies no one,
  *   and the node's `onEmptyApprovers` policy is what decides that case —
- *   `admin_rescue` opens on literals and tells nobody, `auto_approve` and
- *   `fail` open nothing, `fallback` opens on — and tells — its fallback
- *   approvers;
+ *   `admin_rescue` with no organization administrator to route to (none here)
+ *   opens on literals and tells nobody, `auto_approve` and `fail` open
+ *   nothing, `fallback` opens on — and tells — its fallback approvers. The
+ *   administrators an `admin_rescue` request opens on, and their messages,
+ *   are `admin-rescue-named-slate.integration.test.ts`'s;
  * - an out-of-office delegate is told once, by `approval.ooo_substituted`,
  *   never a second time by the opening;
  * - a channel that throws never fails the opening.
@@ -217,7 +219,7 @@ describe('opening an approval step tells each resolved approver, once (approval.
   describe('control — a step whose approvers resolve to nobody notifies no one; onEmptyApprovers decides it', () => {
     const UNSTAFFED = [{ type: 'position', value: 'treasury' }];
 
-    it('admin_rescue (the default) opens on the literal and tells nobody', async () => {
+    it('admin_rescue (the default), with no organization administrator, opens on the literal and tells nobody', async () => {
       const row = await open('rescue', UNSTAFFED);
       expect([row.status, row.pending_approvers]).toEqual(['pending', ['position:treasury']]);
       expect(messagesAbout(row.id)).toEqual([]);

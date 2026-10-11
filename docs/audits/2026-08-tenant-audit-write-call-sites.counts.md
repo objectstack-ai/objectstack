@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 231 |
-| Object name statically decidable | 156 |
+| Write call sites | 232 |
+| Object name statically decidable | 157 |
 | Object name chosen at run time | 75 |
-| Against a tenancy-enabled object | 155 |
+| Against a tenancy-enabled object | 156 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 170 |
+| Threading a tenant context | 171 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 126 |
+| Threading a decidably elevated context | 127 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 97 |
 
@@ -90,7 +90,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-11 at `f6bce8aaf`.
+Measured on 2026-10-11 at `5d0a4a152`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
@@ -107,7 +107,7 @@ Measured on 2026-10-11 at `f6bce8aaf`.
 | `packages/plugins/organizations/src/claim-orphan-org-rows.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/action-slot-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 14 |
+| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 15 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_request` | enabled | elevated | 1 |
