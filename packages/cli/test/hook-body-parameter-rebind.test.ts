@@ -42,7 +42,6 @@ const refusal = (fn: Fn, label = "hook 'h'"): HookBodyExtractionError => {
  * means what the handler means.
  */
 const runLowered = async (source: string, ctx: unknown): Promise<unknown> =>
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- the emitted SOURCE is the subject under test
   (new Function(`return (async (ctx) => { ${source} });`)() as (c: unknown) => Promise<unknown>)(ctx);
 
 const hookCtx = () => ({ input: { name: 'alpha' } as Record<string, unknown>, previous: undefined as unknown });

@@ -248,7 +248,6 @@ function absentFromBody(inProcess: Map<string, NestedFace>, body: Map<string, Ne
 
 /** A real handler that reads `ctx.<path>`, as the source text an author writes. */
 const readerOf = (path: string): ((...a: unknown[]) => unknown) =>
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- the handler's SOURCE is the subject under test
   new Function(`return async (ctx) => { const value = ctx.${path}; ctx.input.note = String(value); };`)() as (
     ...a: unknown[]
   ) => unknown;

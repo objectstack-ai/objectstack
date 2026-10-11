@@ -282,13 +282,13 @@ const SUBMITTED_RX = new RegExp(
  * member (`const api = ctx.api; const { transaction } = api`) is over-refused,
  * the safe direction the entries below already accept.
  *
- * `callable: false` is for a member whose NAME the body face legitimately calls
+ * `exemptCalls` is for a member whose NAME the body face legitimately CALLS
  * through another receiver: `api.transaction(fn)` off a root alias of
  * `ctx.api` is the body's transaction route and is not refused; a READ of
  * `.transaction` off a root is.
  */
-function hookContextMemberRx(member: string, { callable = true }: { callable?: boolean } = {}): RegExp {
-  const notCalled = callable ? '' : String.raw`(?!\s*(?:\?\.\s*)?\()`;
+function hookContextMemberRx(member: string, { exemptCalls = false }: { exemptCalls?: boolean } = {}): RegExp {
+  const notCalled = exemptCalls ? String.raw`(?!\s*(?:\?\.\s*)?\()` : '';
   return new RegExp(
     [
       String.raw`${ROOT_RECEIVER}\s*\??\.\s*${member}\b${notCalled}`,
@@ -496,7 +496,7 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string; face?: LoweringFac
       + 'this handler bundled so it runs in-process, where `ctx.ql` exists',
   },
   {
-    rx: hookContextMemberRx('transaction', { callable: false }),
+    rx: hookContextMemberRx('transaction', { exemptCalls: true }),
     face: 'hook',
     reason:
       '`ctx.transaction` is not reachable from a sandboxed body — the VM\'s `ctx` carries no transaction '
