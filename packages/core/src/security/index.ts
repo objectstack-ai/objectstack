@@ -156,6 +156,10 @@ export {
   // [#20580] The session arm's membership check (#15409 ruling B), so the
   // permission explainer resolves the user it explains through the same one.
   vetOrganizationClaim,
+  // [ADR-0049, ADR-0131 D3, ADR-0126 §4] The one deactivation read of the
+  // security catalog — the `sys_metadata_activation` ledger, never a catalog
+  // row's `active` column — shared with the explainer and the security plugin.
+  readDisabledCatalogNames,
   resolveLocalizationContext,
   type ResolvedAuthzContext,
   type ResolveAuthzInput,
@@ -232,9 +236,12 @@ export { isRowActive, type ActivatableRow } from './row-active.js';
 // ADR-0131 D2–D4 — the ONE by-name read of the security catalog (positions,
 // permission sets, capabilities) over the engine registry and the metadata
 // service. It says a definition EXISTS under a name, never that it is in
-// effect: the row `active` flag above stays the authority for that.
+// effect: the activation ledger is the authority for that
+// (`readDisabledCatalogNames`, exported with the resolver below).
 export {
   createSecurityCatalogReader,
+  bindSecurityCatalogReader,
+  securityCatalogReaderOf,
   type SecurityCatalogType,
   type SecurityCatalogSourceName,
   type SecurityCatalogRegistry,
@@ -243,6 +250,23 @@ export {
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
 } from './security-catalog.js';
+
+// ADR-0131 D3/D4/D10 — the junction rows turned into the `permissionSets` each
+// position definition carries. Applied by the upgrade ceremony (`os migrate`),
+// never at boot.
+export {
+  convertPositionBindingRows,
+  convertDeactivatedCatalogRows,
+  type ActivatableCatalogRow,
+  type CatalogLedgerRow,
+  type CatalogDeactivationConversion,
+  type CatalogRowForConversion,
+  type PositionBindingRow,
+  type PositionBindingConversionInput,
+  type PositionBindingFate,
+  type DanglingPositionBinding,
+  type PositionBindingConversion,
+} from './position-binding-conversion.js';
 
 // [commit f8eb73601] The measured read surface of the administrator derivation — the
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.

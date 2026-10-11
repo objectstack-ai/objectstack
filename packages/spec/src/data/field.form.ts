@@ -99,11 +99,14 @@ export const fieldForm = defineForm({
         // reach the translation catalogs (a schema-derived sub-field never does).
         // Schema defaults (`dynamic`, `CNY`) are placeholders the renderer never
         // writes on mount, so an untouched composite stays absent.
+        // #22727 — a formula returning `currency` carries its currency in this
+        // same key, so the row shows for it too; the gate is the returnType
+        // row's own value, not a second control.
         {
           field: 'currencyConfig',
           type: 'composite',
-          visibleWhen: "data.type == 'currency'",
-          helpText: 'Which currency this field is in. Unset: dynamic mode. The stored value is a bare number in either mode.',
+          visibleWhen: "data.type == 'currency' || (data.type == 'formula' && data.returnType == 'currency')",
+          helpText: 'Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in either mode.',
           fields: [
             { field: 'currencyMode', type: 'select', helpText: 'dynamic (the default): the field has no currency of its own, and amounts display in the tenant default currency (the localization.currency setting). fixed: the field has one currency, defaultCurrency.', options: [
               { label: 'Dynamic — the tenant default currency', value: 'dynamic' },
@@ -309,14 +312,16 @@ export const fieldForm = defineForm({
       collapsed: true,
       fields: [
         { field: 'expression', widget: 'textarea', helpText: 'CEL expression to calculate this field (makes it read-only)' },
-        // The four members are what FieldSchema declares — an explicit list, not
+        // The five members are what FieldSchema declares — an explicit list, not
         // the derived enum, so this row cannot pick up a member the formula
-        // return type does not have.
-        { field: 'returnType', type: 'select', visibleWhen: "data.type == 'formula'", helpText: 'Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression.', options: [
+        // return type does not have. `currency` joined with #22727; its currency
+        // is the `currencyConfig` row above, shown for a currency formula too.
+        { field: 'returnType', type: 'select', visibleWhen: "data.type == 'formula'", helpText: 'Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset).', options: [
           { label: 'Text', value: 'text' },
           { label: 'Number', value: 'number' },
           { label: 'Boolean', value: 'boolean' },
           { label: 'Date', value: 'date' },
+          { label: 'Currency', value: 'currency' },
         ] },
         {
           field: 'summaryOperations',

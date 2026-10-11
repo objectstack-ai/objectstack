@@ -40,15 +40,21 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "everyone"
             ]
           }
         },
-        "limit": 200,
+        "limit": 2,
         "isSystem": true
       },
       {
@@ -115,8 +121,14 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "org_owner",
@@ -124,7 +136,7 @@
             ]
           }
         },
-        "limit": 200,
+        "limit": 4,
         "isSystem": true
       },
       {
@@ -188,15 +200,21 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "everyone"
             ]
           }
         },
-        "limit": 200,
+        "limit": 2,
         "isSystem": true
       },
       {
@@ -272,47 +290,29 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "org_member",
               "contributor",
               "auditor",
               "retired",
-              "everyone"
+              "everyone",
+              "write_all",
+              "read_all",
+              "admin_full_access",
+              "base_access"
             ]
           }
         },
-        "limit": 200,
-        "isSystem": true
-      },
-      {
-        "object": "sys_position_permission_set",
-        "where": {
-          "position_id": {
-            "$in": [
-              "p_contrib",
-              "p_auditor",
-              "p_everyone"
-            ]
-          }
-        },
-        "limit": 500,
-        "isSystem": true
-      },
-      {
-        "object": "sys_permission_set",
-        "where": {
-          "id": {
-            "$in": [
-              "ps_write",
-              "ps_read",
-              "ps_base"
-            ]
-          }
-        },
-        "limit": 500,
+        "limit": 18,
         "isSystem": true
       },
       {
@@ -386,16 +386,25 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "org_member",
-              "everyone"
+              "everyone",
+              "admin_full_access",
+              "org_tools",
+              "dead_set"
             ]
           }
         },
-        "limit": 200,
+        "limit": 10,
         "isSystem": true
       },
       {
@@ -404,33 +413,6 @@
           "id": "u_ps"
         },
         "limit": 1,
-        "isSystem": true
-      },
-      {
-        "object": "sys_permission_set",
-        "where": {
-          "name": {
-            "$in": [
-              "admin_full_access",
-              "org_tools",
-              "dead_set"
-            ]
-          },
-          "organization_id": null
-        },
-        "limit": 500,
-        "isSystem": true
-      },
-      {
-        "object": "sys_permission_set",
-        "where": {
-          "name": {
-            "$in": [
-              "org_tools"
-            ]
-          }
-        },
-        "limit": 500,
         "isSystem": true
       }
     ]
@@ -493,29 +475,24 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "org_admin",
-              "everyone"
+              "everyone",
+              "low",
+              "organization_admin"
             ]
           }
         },
-        "limit": 200,
-        "isSystem": true
-      },
-      {
-        "object": "sys_position_permission_set",
-        "where": {
-          "position_id": {
-            "$in": [
-              "p_orgadmin",
-              "p_everyone"
-            ]
-          }
-        },
-        "limit": 500,
+        "limit": 8,
         "isSystem": true
       },
       {
@@ -524,31 +501,6 @@
           "id": "u_ta"
         },
         "limit": 1,
-        "isSystem": true
-      },
-      {
-        "object": "sys_permission_set",
-        "where": {
-          "name": {
-            "$in": [
-              "low"
-            ]
-          },
-          "organization_id": null
-        },
-        "limit": 500,
-        "isSystem": true
-      },
-      {
-        "object": "sys_permission_set",
-        "where": {
-          "id": {
-            "$in": [
-              "ps_oa"
-            ]
-          }
-        },
-        "limit": 500,
         "isSystem": true
       }
     ]
@@ -615,8 +567,14 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "org_member",
@@ -624,7 +582,7 @@
             ]
           }
         },
-        "limit": 200,
+        "limit": 4,
         "isSystem": true
       }
     ]
@@ -678,15 +636,21 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "everyone"
             ]
           }
         },
-        "limit": 200,
+        "limit": 2,
         "isSystem": true
       }
     ]
@@ -748,29 +712,23 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "org_member",
-              "everyone"
+              "everyone",
+              "extra"
             ]
           }
         },
-        "limit": 200,
-        "isSystem": true
-      },
-      {
-        "object": "sys_permission_set",
-        "where": {
-          "name": {
-            "$in": [
-              "extra"
-            ]
-          },
-          "organization_id": null
-        },
-        "limit": 500,
+        "limit": 6,
         "isSystem": true
       }
     ]
@@ -2025,8 +1983,14 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "org_member",
@@ -2034,7 +1998,7 @@
             ]
           }
         },
-        "limit": 200,
+        "limit": 4,
         "isSystem": true
       },
       {
@@ -2094,8 +2058,14 @@
         "isSystem": true
       },
       {
-        "object": "sys_position",
+        "object": "sys_metadata_activation",
         "where": {
+          "metadata_type": {
+            "$in": [
+              "position",
+              "permission"
+            ]
+          },
           "name": {
             "$in": [
               "org_owner",
@@ -2105,7 +2075,7 @@
             ]
           }
         },
-        "limit": 200,
+        "limit": 8,
         "isSystem": true
       },
       {

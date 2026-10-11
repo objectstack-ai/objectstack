@@ -16,7 +16,8 @@ import type {
   SchemaValidationReport,
 } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError } from '@objectstack/types';
+// [#22719] …and so is the read of a sandboxed hook's refusal sentence.
+import { sendOk, sendError, sandboxBusinessMessage } from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 
 /**
@@ -383,13 +384,35 @@ export function registerExternalDatasourceRoutes(
     sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The external-datasource service is not available.');
 
   /**
+   * [#22719] The sentence both catch arms hand the caller: a sandboxed hook's
+   * own words when the refusal came from one, the thrown message otherwise.
+   *
+   * A hook refusing a write the service makes arrives as a `SandboxError`
+   * whose `.message` is the QuickJS debug wrapper and whose `.innerMessage` is
+   * the sentence, so `draft`, `import`, `refresh-catalog` and `validate`
+   * answered `hook '<name>' threw: Error: …` where every conforming write door
+   * answers the hook's own sentence. {@link sandboxBusinessMessage} is that
+   * read, shared rather than re-derived — ⛔ never a strip of the wrapper off
+   * `.message`. It answers `undefined` for anything that is not a sandboxed
+   * refusal, so every other message here is byte-identical.
+   *
+   * ⛔ Only the SENTENCE moves. Both arms keep their status and their code:
+   * `EXTERNAL_IMPORT_ERROR` is what the import route answers for a refusal it
+   * relays from the metadata door (a declared `409 DESTRUCTIVE_CHANGE`
+   * included, which the import dogfood pins at `400`), so this family's status
+   * is its own decision and the shared classification is not asked here.
+   */
+  const refusalSentence = (err: unknown): string =>
+    sandboxBusinessMessage(err) ?? (err instanceof Error ? err.message : String(err));
+
+  /**
    * A refusal from the external-datasource service — same code as the
    * admin-routes path (#4249). Named after the service, not one operation:
    * since #4264 every route here except the import (which has its own
    * registered code) answers its catch with this.
    */
   const refused = (res: any, err: unknown) =>
-    sendError(res, 400, 'EXTERNAL_DATASOURCE_ERROR', err instanceof Error ? err.message : String(err));
+    sendError(res, 400, 'EXTERNAL_DATASOURCE_ERROR', refusalSentence(err));
 
   /**
    * ONE declaration of this registrar's surface (#5822): the array below is
@@ -466,12 +489,7 @@ export function registerExternalDatasourceRoutes(
           );
           sendOk(res, { object: result }, 201);
         } catch (err) {
-          sendError(
-            res,
-            400,
-            'EXTERNAL_IMPORT_ERROR',
-            err instanceof Error ? err.message : String(err),
-          );
+          sendError(res, 400, 'EXTERNAL_IMPORT_ERROR', refusalSentence(err));
         }
       },
     },

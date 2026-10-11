@@ -59,6 +59,7 @@ import {
 } from '@objectstack/service-datasource';
 import type { IntrospectedColumn, IntrospectedSchema } from '@objectstack/spec/contracts';
 import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const DS = 'demo_ext';
 
@@ -186,7 +187,7 @@ const HOLDS: Record<string, string> = {
   // `u_twin_plain` holds nothing, deliberately — it is not listed.
 };
 
-const makeQl = () => ({
+const makeQl = () => bindTestSecurityCatalog({
   find: async (object: string, opts: any) => {
     const where = opts?.where ?? {};
     if (object === 'sys_user_permission_set') {
@@ -216,7 +217,7 @@ const makeQl = () => ({
     }
     return [];
   },
-});
+}, { permissions: Object.values(SETS) });
 
 /**
  * One server, one service, both registrars — the point of the fixture.

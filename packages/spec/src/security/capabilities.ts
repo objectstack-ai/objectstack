@@ -11,14 +11,14 @@ import { strictObject } from '../shared/strict-object';
  * The built-in authorization capabilities the framework ships, as first-class
  * definitions (name / label / description / scope). This module is the SINGLE
  * SOURCE OF TRUTH consumed by:
- *   - `@objectstack/plugin-security` `bootstrapSystemCapabilities`, which seeds
- *     these into `sys_capability` records at boot (`managed_by: 'platform'`), and
+ *   - `@objectstack/plugin-security` `registerBuiltinCapabilities`, which
+ *     registers these as `capability` metadata items at boot (ADR-0131 D3), and
  *   - the authoring lint `validateCapabilityReferences` (ADR-0066 ⑨), which
  *     resolves capability references (`requiredPermissions`) against these names
  *     plus any a stack declares via a permission set's `systemPermissions`.
  *
  * Keeping the list here (in the contract package, which everything depends on)
- * avoids a spec→plugin dependency inversion and keeps the seeder and the lint
+ * avoids a spec→plugin dependency inversion and keeps the registry and the lint
  * from drifting apart.
  */
 
@@ -93,9 +93,8 @@ export const PLATFORM_CAPABILITY_NAMES: ReadonlySet<string> = new Set(
  * capability of its own — the counterpart, on the declaration side, of the
  * curated {@link PLATFORM_CAPABILITIES}. Authored via {@link defineCapability}
  * and collected on a stack's `capabilities` array, these declarations flow
- * EXPLICITLY into the `sys_capability` registry at boot with `managed_by:
- * 'package'` + `package_id` provenance (seeded by
- * `@objectstack/plugin-security`'s `bootstrapDeclaredCapabilities`).
+ * EXPLICITLY into the registry at boot under their owning package (ADR-0131
+ * D3); no `sys_capability` row is written for them.
  *
  * This replaces the old implicit "derive an untitled capability from whatever a
  * permission set happens to reference in `systemPermissions[]`" back-door: a
@@ -127,8 +126,8 @@ export const PLATFORM_CAPABILITY_NAMES: ReadonlySet<string> = new Set(
  *  - **The shape is `.strict()`.** Unlike `api` (which is on that suite's
  *    `STILL_STRIP` list because `ApiEndpointSchema` doubles as the parser for
  *    STORED rows carrying `packageId` / `state`), nothing re-parses a stored
- *    `sys_capability` row through this schema — `bootstrapDeclaredCapabilities`
- *    reads named fields off the body (`capabilityRowFields`). So closing it
+ *    `sys_capability` row through this schema — no row is written for a
+ *    declared capability (ADR-0131 D3). So closing it
  *    costs nothing and buys the declared = enforced posture an AUTHORIZATION
  *    surface should have had from the start.
  */

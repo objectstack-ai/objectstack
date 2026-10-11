@@ -37,9 +37,9 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 // verification — `@objectstack/organizations` above all — must be resolved from
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
-import { materializeStackPlugin } from '@objectstack/core';
+import { materializeStackPlugin, resolveCapabilityArgument } from '@objectstack/core';
 import { createHandle, type VerifyHandle } from './handle.js';
-import { constructRequiredProviders } from './required-providers.js';
+import { constructServedProviders } from './required-providers.js';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -197,9 +197,13 @@ export interface BootOptions {
    */
   security?: SecurityPlugin;
   /**
-   * Override the AnalyticsServicePlugin instance. Defaults to a vanilla
-   * `new AnalyticsServicePlugin()`, which auto-bridges `getReadScope` to the
-   * `security` service.
+   * Override the AnalyticsServicePlugin instance. Defaults to the instance
+   * `objectstack serve` constructs for the app — `new AnalyticsServicePlugin({
+   * cubes })` with the app's `analyticsCubes` (the top level, then its legacy
+   * `cubes` spelling, then each package body's; `resolveCapabilityArgument`,
+   * `@objectstack/core`, #22301) — which auto-bridges `getReadScope` to the
+   * `security` service. An instance passed here wins whole: it is not handed
+   * the app's cubes.
    *
    * The reason to override is to prove ADR-0021 D-C's SECOND belt in isolation
    * (#3602): pass `new AnalyticsServicePlugin({ getReadScope: () => undefined })`
@@ -419,15 +423,18 @@ export interface BootOptions {
    * `AuditPlugin` for the attachments surface). Registered in array order.
    * Default `[]`.
    *
-   * [#22301] Not for what the configuration itself declares: the boot mounts
-   * the providers the app's `requires` names, by `objectstack serve`'s table
-   * (see `./required-providers.ts`), and the plugins in the app's own `plugins`
-   * array, by `serve`'s rule for an entry (`materializeStackPlugin`,
-   * `@objectstack/core`). A plugin here TAKES PRECEDENCE over both, by
-   * identity:
+   * [#22301] Not for what `objectstack serve` composes from the configuration:
+   * the boot mounts the providers the app's `requires` names and the always-on
+   * slate `serve` mounts for every app, each built from the app's configuration
+   * by `serve`'s rules (see `./required-providers.ts`), and the plugins in the
+   * app's own `plugins` array, by `serve`'s rule for an entry
+   * (`materializeStackPlugin`, `@objectstack/core`). A plugin here TAKES
+   * PRECEDENCE over both, by identity:
    *
-   *  - over a `requires` provider it IS (exact `name` or class name, `serve`'s
-   *    "an explicit instance wins" rule) — the capability is skipped whole;
+   *  - over a provider it IS (exact `name` or class name, `serve`'s "an
+   *    explicit instance wins" rule) — the capability is skipped whole, so a
+   *    suite that needs a provider configured its own way (a storage root, a
+   *    mail transport) passes its instance here;
    *  - over an entry of the app's `plugins` array that has the same `name`,
    *    the identity the kernel registers a plugin under — that entry is not
    *    mounted, and this instance is the one the boot keeps.
@@ -651,14 +658,27 @@ function claimConfiguration(config: unknown): ConfigurationClaim {
  * ## What it composes — one composition rule (#22301, ruling A)
  *
  * For one configuration, what `objectstack serve` composes from it: the
- * harness's service set, the providers the app's `requires` names
- * (`./required-providers.ts`), and the plugins in the app's own `plugins`
- * array, by `serve`'s rule for an entry — with {@link BootOptions.extraPlugins}
- * taking precedence by identity, and every app-relative path anchored to
- * {@link BootOptions.hostRoot}. An entry of that array that cannot be loaded
- * or registered fails the boot, with its remedy. There is no switch: an app's
- * tests boot what the app declares, so a plugin the app forgot to declare
- * fails in its tests the way it would in production.
+ * harness's service set; the providers `serve` mounts for it — the ones the
+ * app's `requires` names and the always-on slate `serve` mounts for every app
+ * (`queue`, `job`, `cache`, `settings`, `email`, `storage`, `sms`, `sharing`,
+ * `messaging`, `analytics`, `package-registry`), each built from the app's
+ * configuration the way `serve` builds it: the app's `analyticsCubes`, its
+ * `email` / `sms` blocks with the `OS_EMAIL_*` / `OS_SMS_*` environment over
+ * them, the `OS_STORAGE_LOCAL_ROOT` storage root (`./required-providers.ts`);
+ * and the plugins in the app's own `plugins` array, by `serve`'s rule for an
+ * entry — with {@link BootOptions.extraPlugins} taking precedence by
+ * identity, and every app-relative path anchored to
+ * {@link BootOptions.hostRoot}. A provider or an entry of that array that
+ * cannot be built, loaded or registered fails the boot, with its remedy. There
+ * is no switch: an app's tests boot what the app declares, so a plugin the app
+ * forgot to declare, or a mail configuration no transport can deliver
+ * through, fails in its tests the way it would in production.
+ *
+ * Not composed here, because they are decisions about a server PROCESS rather
+ * than about the configuration: `serve`'s MCP endpoint (`OS_MCP_SERVER_ENABLED`)
+ * and its pinyin search (`OS_SEARCH_PINYIN_ENABLED`, which `serve` stamps from
+ * the stack's locales). A suite that exercises either passes the provider in
+ * {@link BootOptions.extraPlugins}.
  *
  * ### Offline CI: `OS_CLOUD_URL=off`
  *
@@ -810,7 +830,17 @@ async function bootClaimed(
   const cryptoProvider = harnessCryptoProvider();
   const settingsPlugin = new SettingsServicePlugin({ cryptoProvider });
   await kernel.use(settingsPlugin);
-  const analyticsPlugin = opts.analytics ?? new AnalyticsServicePlugin();
+  // [#22301] Built from the app's configuration the way `objectstack serve`
+  // builds it — the app's `analyticsCubes` — by the rule both boots read
+  // (`resolveCapabilityArgument`, `@objectstack/core`). A caller's instance wins
+  // whole (see BootOptions.analytics).
+  const analyticsPlugin =
+    opts.analytics ??
+    new AnalyticsServicePlugin(
+      resolveCapabilityArgument('analytics', { stack: config, packageRoot: hostRoot }).argument as ConstructorParameters<
+        typeof AnalyticsServicePlugin
+      >[0],
+    );
   await kernel.use(analyticsPlugin);
   // [ADR-0131 D3 / D11] The production `single` shape, as `objectstack dev` /
   // `serve` boot it: `AuthPlugin`'s defaults, owner bind included. Under
@@ -990,14 +1020,16 @@ async function bootClaimed(
     throw e;
   }
 
-  // [#22301] The providers the app's `requires` names, as `objectstack serve`
-  // mounts them — same reader, same table, same "an explicit instance wins"
-  // rule (see `./required-providers.ts`). In the `extraPlugins` slot, after it,
-  // so a caller's own instance is the one that stays. The harness's sharing
-  // service is constructed here so a `requires: ['sharing']` sees it held.
+  // [#22301] The providers `objectstack serve` mounts for this configuration —
+  // the app's `requires` and the always-on slate, each built from the app's
+  // configuration — by `serve`'s own rules: the same token rule, table,
+  // argument rule and "an explicit instance wins" match (see
+  // `./required-providers.ts`). In the `extraPlugins` slot, after it, so a
+  // caller's own instance is the one that stays. The harness's sharing service
+  // is constructed here so the slate's `sharing` sees it held.
   const sharingPlugin = new SharingServicePlugin();
   try {
-    const requiredProviders = await constructRequiredProviders({
+    const servedProviders = await constructServedProviders({
       config,
       held: [
         settingsPlugin,
@@ -1007,11 +1039,9 @@ async function bootClaimed(
         ...(opts.extraPlugins ?? []),
         ...appPlugins.map((entry) => entry.plugin),
       ],
-      dependents: appPlugins.map((entry) => entry.plugin),
-      isRegistered: (name) => kernel.hasPlugin(name),
       packageRoot: hostRoot,
     });
-    for (const plugin of requiredProviders) {
+    for (const plugin of servedProviders) {
       await kernel.use(plugin as any);
     }
   } catch (e) {

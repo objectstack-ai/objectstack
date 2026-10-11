@@ -165,7 +165,10 @@ describe('[#13419] MUST FIRE — a position folded onto its own same-name set wi
   it('names the ungoverned grant and the two ways out, not just the collision', async () => {
     const { warn } = await resolveWith({ userId: 'u1', positions: ['sales_rep'], permissions: [] });
     const message = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes(EVENT))!;
-    expect(message).toContain('sys_position_permission_set');
+    // [ADR-0131 D3/D4] The governed way out is the position definition's
+    // `permissionSets` — a junction row no longer grants or governs anything.
+    expect(message).toContain("permissionSets: ['sales_rep']");
+    expect(message).not.toContain('sys_position_permission_set');
     expect(message).toContain('ungoverned');
     expect(message).toMatch(/rename/i);
   });

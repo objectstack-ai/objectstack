@@ -40,9 +40,9 @@ const FLOOR = [
   'DetailRecordNotFoundError',
   'MasterReferenceMissingError',
   'MaskedValueWriteError',
-  'PermissionSetReadUnansweredError',
   'ExplainObjectNotFoundError',
   'PermissionSetNameConflictError',
+  'PositionNameConflictError',
 ];
 
 /**

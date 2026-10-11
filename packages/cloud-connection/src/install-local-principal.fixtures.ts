@@ -36,8 +36,16 @@
  * that some callers are not.
  */
 
+import { bindSecurityCatalogReader, createSecurityCatalogReader } from '@objectstack/core';
+
 /** The default fixture user id — matches what the suites already asserted on. */
 export const INSTALLER_USER_ID = 'admin';
+
+/**
+ * [ADR-0131 D3/D4] The installer's set as the security catalog declares it —
+ * the resolver reads a set's body from its definition, never from the row.
+ */
+export const INSTALLER_SET = { name: 'admin_full_access', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] };
 
 /**
  * The `sys_*` rows that make `userId` a holder of `manage_metadata`, shaped the
@@ -51,6 +59,7 @@ export function installerGrantRows(userId: string = INSTALLER_USER_ID): Record<s
         sys_member: [],
         sys_user_position: [],
         sys_position: [],
+        sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: [
             { id: 'ups_installer', user_id: userId, permission_set_id: 'ps_installer', permission_set: 'admin_full_access', organization_id: null },
@@ -87,11 +96,22 @@ export function withInstallerGrants<T extends Record<string, any>>(
 ): T {
     const rows = installerGrantRows(userId);
     const inner = typeof engine?.find === 'function' ? engine.find.bind(engine) : undefined;
-    return {
+    const wrapped = {
         ...engine,
         find: async (object: string, options?: unknown) => {
             if (Object.prototype.hasOwnProperty.call(rows, object)) return rows[object];
             return inner ? inner(object, options) : [];
         },
     } as T;
+    // What the security plugin binds to a real engine: the catalog the
+    // installer's grant names its set in.
+    bindSecurityCatalogReader(wrapped, createSecurityCatalogReader({
+        registry: {
+            getItem: (type, name) => (type === 'permission' && name === INSTALLER_SET.name ? INSTALLER_SET : undefined),
+            listItems: (type) => (type === 'permission' ? [INSTALLER_SET] : []),
+            isPackageDisabled: () => false,
+        },
+        metadata: { get: () => undefined, list: () => [] },
+    }));
+    return wrapped;
 }

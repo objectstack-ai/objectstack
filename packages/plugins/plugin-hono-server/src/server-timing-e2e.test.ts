@@ -17,13 +17,14 @@ import { describe, it, expect } from 'vitest';
 import { HonoServerPlugin } from './hono-plugin';
 import { registerCurrentUserEndpoints } from './current-user-endpoints';
 import type { PluginContext } from '@objectstack/core';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 
 /**
  * Fake data engine: an UNSCOPED `admin_full_access` grant for `admin1` (the
  * seeded platform admin) vs. a `member_default` grant for `member1`, plus the
  * `widget` rows the data route returns. Every other read resolves empty.
  */
-const makeQl = () => ({
+const makeQl = () => bindTestSecurityCatalog({
     find: async (object: string, opts: any) => {
         const where = opts?.where ?? {};
         if (object === 'sys_user_permission_set') {
@@ -44,7 +45,7 @@ const makeQl = () => ({
         // sys_member, sys_user — nothing to contribute.
         return [];
     },
-});
+}, { permissions: [{ name: 'admin_full_access' }, { name: 'member_default' }] });
 
 /** Fake auth service: session keyed off the request's `cookie` header. */
 const makeAuth = () => ({

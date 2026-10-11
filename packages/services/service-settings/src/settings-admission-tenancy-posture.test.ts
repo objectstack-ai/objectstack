@@ -73,6 +73,7 @@ import {
   AUTHZ_STORE_UNAVAILABLE_STATUS,
 } from '@objectstack/core';
 import type { SettingsContext } from './settings-service.types.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 /**
  * The seam's own return value, captured through a PASS-THROUGH of the real
@@ -340,6 +341,8 @@ async function mount(tenancy: Tenancy): Promise<Mounted> {
     // The caller's bound is held BY PRESENCE, never re-derived here.
     return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
   };
+  // [ADR-0131 D3/D4] The security catalog the resolver reads, as those rows convert to it.
+  bindCatalogFromTables(engine, PERMISSION_TABLES);
 
   const http = new MockHttp();
 

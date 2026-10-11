@@ -836,7 +836,7 @@ const PAGE_ASSIGNED_PROFILES_RETIRED =
   + 'gated nothing: no renderer, route or metadata read door ever read the key, so a page that '
   + '"assigned profiles" stayed open to every caller who could reach it. Delete the key. Page '
   + "audience is the permission set's: gate the DATA the page shows with the object's permission "
-  + 'sets, and bind those sets to people through positions (`sys_position_permission_set`) — '
+  + "sets, and bind those sets to people through positions (named in a position's `permissionSets`) — "
   + 'those are the checks the runtime actually runs. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
@@ -849,7 +849,7 @@ const PAGE_AUDIENCE_WRONG_LAYER =
   '`profiles` / `assignedTo` are not page keys (ADR-0090 D2: no Profile concept). Page '
   + "audience is the permission set's — gate the DATA the page shows with the object's "
   + 'permission sets, and bind those sets to people through positions '
-  + '(`sys_position_permission_set`), never on the page itself.';
+  + "(named in a position's `permissionSets`), never on the page itself.";
 
 // ─── The print page (#22158: card ① of the #8346 ruling) ───────────────────
 //

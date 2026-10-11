@@ -65,7 +65,7 @@ describe('delegation of duty (ADR-0091 D3) — end to end', () => {
         fallbackPermissionSet: 'deleg_member',
       }),
     });
-    await stack.signIn();
+    const adminToken = await stack.signIn();
     delegatorToken = await stack.signUp(DELEGATOR);
     await stack.signUp(DELEGATE);
     ql = await stack.kernel.getServiceAsync('objectql');
@@ -81,10 +81,16 @@ describe('delegation of duty (ADR-0091 D3) — end to end', () => {
     expect(org?.id, 'the boot created the Default Organization').toBeTruthy();
     orgId = String(org.id);
 
-    // A delegatable position + a non-delegatable one (system inserts sidestep
-    // authoring rules). The delegator DIRECTLY holds the delegatable one.
-    await ql.insert('sys_position', { id: 'pos_vac_appr', name: 'vacation_approver', label: 'Vacation Approver', delegatable: true, active: true, organization_id: orgId }, SYS);
-    await ql.insert('sys_position', { id: 'pos_locked', name: 'locked_duty', label: 'Locked Duty', delegatable: false, active: true, organization_id: orgId }, SYS);
+    // A delegatable position + a non-delegatable one, declared where the gate
+    // and the resolver read a position (ADR-0131 D3/D4): the security catalog,
+    // through the metadata door. The delegator DIRECTLY holds the delegatable one.
+    for (const [name, label, delegatable] of [
+      ['vacation_approver', 'Vacation Approver', true],
+      ['locked_duty', 'Locked Duty', false],
+    ] as const) {
+      const saved = await stack.apiAs(adminToken, 'PUT', `/meta/position/${name}`, { name, label, delegatable });
+      expect(saved.status, await saved.clone().text().catch(() => '')).toBe(200);
+    }
     await ql.insert('sys_user_position', { id: 'hold_boss', user_id: delegatorId, position: 'vacation_approver', organization_id: orgId }, SYS);
     await ql.insert('sys_user_position', { id: 'hold_boss_locked', user_id: delegatorId, position: 'locked_duty', organization_id: orgId }, SYS);
   }, 90_000);

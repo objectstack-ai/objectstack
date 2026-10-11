@@ -37,7 +37,7 @@
  * reconciliation are unaffected).
  */
 
-import { isGrantActive } from '@objectstack/core';
+import { isGrantActive, securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
 import type { AdminScope, AdminScopeParsed, PermissionSet } from '@objectstack/spec/security';
 import { PermissionDeniedError } from './errors.js';
 import {
@@ -45,13 +45,11 @@ import {
   rowOrganizationId,
   seedCtx as organizationScopedCtx,
 } from './organization-scope.js';
-import { GRANT_SET_ID_FIELD, grantSetNameOf, readGrantSetRows } from './grant-permission-set-name.js';
+import { GRANT_SET_ID_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 /**
- * Max by-name candidates read when resolving a scope's business-unit anchor,
- * or a position's own `sys_position` row (the same shape: `sys_position.name`
- * is per-organization too — see `resolveOwnPosition`).
+ * Max by-name candidates read when resolving a scope's business-unit anchor.
  *
  * `sys_business_unit.name` carries NO uniqueness — the object's only unique
  * index is `(code, organization_id)` — so under a walled posture two
@@ -76,11 +74,12 @@ const DEFAULT_DELEGATION_CEILING_MS = 30 * 24 * 60 * 60 * 1000;
  * active organization, never a scan across all of them.
  *
  * The same spelling as `SecurityPlugin.callerOrganizationId`, and deliberately
- * so: the `adminScope` this gate resolves arrives on a permission set the
- * plugin loaded through `dbLoaderFor(callerOrganizationId(context))`, i.e. out
- * of THAT organization's catalog. Resolving the scope's business-unit anchor in
- * any other organization pairs an authority minted in one tenant with a tree
- * owned by another — which is what an unscoped by-name read did.
+ * so: the `adminScope` this gate resolves arrives on a permission set resolved
+ * for THAT organization's caller. Resolving the scope's business-unit anchor in
+ * any other organization pairs an authority held in one tenant with a tree
+ * owned by another — which is what an unscoped by-name read did. (The set
+ * itself is the security catalog's, which is environment-level — ADR-0131 D3;
+ * the business units are not.)
  *
  * Under the `single` posture this is the Default Organization: since ADR-0131
  * C1 it exists from boot, and every session on a stock `single` deployment —
@@ -237,6 +236,12 @@ interface HeldScope {
   subtree: Set<string>;
 }
 
+/** A permission set a position distributes, as the containment check reads it. */
+interface BoundSet {
+  name: string;
+  adminScope?: unknown;
+}
+
 function rowsOf(opCtx: any): any[] {
   const d = opCtx?.data;
   if (Array.isArray(d)) return d;
@@ -391,7 +396,7 @@ export class DelegatedAdminGate {
 
     switch (opCtx.object) {
       case 'sys_user_position':
-        return this.assertAssignmentWrite(opCtx, held, organizationId);
+        return this.assertAssignmentWrite(opCtx, held);
       case 'sys_user_permission_set':
         return this.assertDirectGrantWrite(opCtx, held);
       case 'sys_position_permission_set':
@@ -465,18 +470,20 @@ export class DelegatedAdminGate {
   ): Promise<DelegableScopeReport> {
     const ql = this.deps.ql;
     const organizationId = callerOrganizationId(callerContext);
+    // [ADR-0131 D3/D4] Every position the security catalog holds — the
+    // environment registry, one namespace per deployment — never the
+    // per-organization `sys_position` rows: a position declared only in the
+    // registry is assignable, and a row with no definition grants nothing
+    // (the resolver reads the catalog), so it is not offered.
     const allPositions = async (): Promise<string[]> => {
-      if (!ql?.find) return [];
+      const catalog = this.catalog();
+      if (!catalog) return [];
       try {
-        const rows = await ql.find('sys_position', {
-          limit: 1000,
-          context: organizationScopedCtx(organizationId),
-        });
-        return (Array.isArray(rows) ? rows : [])
-          .map((r: any) => String(r?.name ?? ''))
+        return (await catalog.list('position'))
+          .map((entry) => entry.name)
           .filter((n) => n && !ANCHOR_POSITIONS.has(n));
       } catch {
-        return [];
+        return []; // a picker over an unreadable catalog offers nothing (fail closed)
       }
     };
 
@@ -530,7 +537,12 @@ export class DelegatedAdminGate {
     const assignablePositions: string[] = [];
     if (placing.length > 0) {
       for (const positionName of await allPositions()) {
-        const boundSets = await this.setsBoundToPosition(positionName, organizationId);
+        let boundSets: BoundSet[];
+        try {
+          boundSets = await this.setsBoundToPosition(positionName);
+        } catch {
+          continue; // a position whose binding cannot be read is not offered
+        }
         const ok = placing.some((s) =>
           boundSets.every(
             (bound) =>
@@ -675,12 +687,12 @@ export class DelegatedAdminGate {
       }
 
       // 5. The position must opt in to delegation.
-      if (!(await this.positionIsDelegatable(positionName, organizationId))) {
+      if (!(await this.positionIsDelegatable(positionName))) {
         deny(`position '${positionName}' is not delegatable — set delegatable: true on the position to allow it`, { position: positionName });
       }
 
       // 6. A delegatable position must not distribute administration.
-      const boundSets = await this.setsBoundToPosition(positionName, organizationId);
+      const boundSets = await this.setsBoundToPosition(positionName);
       for (const b of boundSets) {
         if (parseMaybeJson((b as any).admin_scope ?? (b as any).adminScope)) {
           deny(`position '${positionName}' distributes the admin set '${b.name}' — administration cannot be self-delegated (D12 containment)`, { position: positionName, permissionSet: b.name });
@@ -728,49 +740,23 @@ export class DelegatedAdminGate {
       }));
   }
 
-  /**
-   * Resolve a position NAME to the caller's own organization's `sys_position`
-   * row — the one read both position-keyed authority decisions below stand on.
-   *
-   * `sys_position` is a per-organization catalog upserted by
-   * `(name, organization_id)`, and `name` carries no installation-wide
-   * uniqueness, so under a walled posture two organizations may each hold a
-   * position of the same name. A `limit: 1` read under a bare system context
-   * answered whichever row the driver ordered first — an id ordering, not an
-   * organization — and that row then decided whether the position may be
-   * self-delegated and which permission sets it distributes.
-   *
-   * The same two arms {@link resolveSubtree} uses for a business-unit anchor,
-   * and for the same reasons: the read carries the caller's organization so
-   * the driver composes a tenant predicate, and {@link resolveOwnOrganizationRow}
-   * reduces what came back to the caller's OWN row (a driver's compatibility
-   * arm also returns organization-less rows; a driver with no tenant scoping
-   * returns every organization's).
-   *
-   * Fail closed: a name with no row in the caller's organization resolves to
-   * `null` — never to another organization's row, never to an unscoped read.
-   * An organization-less caller (`single` posture) keeps the by-name answer —
-   * there is no other organization for it to cross into.
-   */
-  private async resolveOwnPosition(positionName: string, organizationId?: string): Promise<any | null> {
-    const ql = this.deps.ql;
-    if (!ql?.find || !positionName) return null;
-    const rows = await ql.find('sys_position', {
-      where: { name: positionName },
-      limit: ANCHOR_CANDIDATE_LIMIT,
-      context: organizationScopedCtx(organizationId),
-    });
-    return resolveOwnOrganizationRow(Array.isArray(rows) ? rows : [], organizationId).own;
+  /** The security catalog bound to this gate's engine (ADR-0131 D3), or `undefined` when none was bound. */
+  private catalog(): SecurityCatalogReader | undefined {
+    return securityCatalogReaderOf(this.deps.ql);
   }
 
-  /** [ADR-0091 D3 rule 5] Does the caller's OWN organization's row for this
-   *  position opt in to delegation? A position with no row there is not
-   *  delegatable (fail closed — see {@link resolveOwnPosition}). */
-  private async positionIsDelegatable(positionName: string, organizationId?: string): Promise<boolean> {
+  /**
+   * [ADR-0091 D3 rule 5] Does the position's DEFINITION opt in to delegation
+   * (`PositionSchema.delegatable`)? Read from the security catalog by name
+   * (ADR-0131 D3/D4) — the environment registry, one definition per name per
+   * deployment — never from a per-organization `sys_position` row. A name the
+   * catalog does not hold, an unbound or unreadable catalog: not delegatable
+   * (fail closed).
+   */
+  private async positionIsDelegatable(positionName: string): Promise<boolean> {
     try {
-      const pos = await this.resolveOwnPosition(positionName, organizationId);
-      const v = (pos as any)?.delegatable;
-      return v === true || v === 1 || v === '1';
+      const entry = await this.catalog()?.resolve('position', positionName);
+      return entry?.definition.delegatable === true;
     } catch {
       return false;
     }
@@ -778,16 +764,12 @@ export class DelegatedAdminGate {
 
   // ── sys_user_position: user ↔ position assignments ──────────────────
 
-  private async assertAssignmentWrite(
-    opCtx: any,
-    held: HeldScope[],
-    organizationId?: string,
-  ): Promise<void> {
+  private async assertAssignmentWrite(opCtx: any, held: HeldScope[]): Promise<void> {
     const targets = await this.materializeTargets(opCtx, 'sys_user_position');
     for (const t of targets) {
       const buId = t.next?.business_unit_id ?? null;
       const positionName = String(t.next?.position ?? t.prev?.position ?? '');
-      const boundSets = positionName ? await this.setsBoundToPosition(positionName, organizationId) : [];
+      const boundSets = positionName ? await this.setsBoundToPosition(positionName) : [];
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
@@ -1232,39 +1214,39 @@ export class DelegatedAdminGate {
     return [{ next: null, prev }];
   }
 
-  /** The permission sets the caller's OWN organization's row for this position
-   *  distributes. A position with no row there distributes nothing (fail
-   *  closed — see {@link resolveOwnPosition}); the bindings and sets are then
-   *  read by the resolved row's id, which no other organization shares. */
-  private async setsBoundToPosition(
-    positionName: string,
-    organizationId?: string,
-  ): Promise<Array<{ name: string; admin_scope?: any }>> {
-    const ql = this.deps.ql;
-    if (!ql?.find) return [];
-    try {
-      const pos = await this.resolveOwnPosition(positionName, organizationId);
-      if (!pos?.id) return [];
-      const bindings = await ql.find('sys_position_permission_set', {
-        where: { position_id: pos.id },
-        limit: 1000,
-        context: SYSTEM_CTX,
-      });
-      const setIds = (Array.isArray(bindings) ? bindings : [])
-        .map((b: any) => b?.permission_set_id)
-        .filter(Boolean);
-      if (setIds.length === 0) return [];
-      const setRows = await ql.find('sys_permission_set', {
-        where: { id: { $in: setIds } },
-        limit: setIds.length,
-        context: SYSTEM_CTX,
-      });
-      return (Array.isArray(setRows) ? setRows : [])
-        .map((r: any) => ({ name: String(r?.name ?? ''), admin_scope: r?.admin_scope }))
-        .filter((r: any) => r.name);
-    } catch {
-      return [];
+  /**
+   * [ADR-0131 D3/D4] The permission sets a position distributes: the names its
+   * DEFINITION carries (`PositionSchema.permissionSets`), each with the
+   * `adminScope` of the catalog's definition of that name — the binding the
+   * authorization resolver grants through, read from the same security
+   * catalog, never from a `sys_position_permission_set` junction row (which
+   * grants nothing since the resolver stopped reading it). So the D12
+   * containment and the assignable-positions listing judge exactly what an
+   * assignment will grant.
+   *
+   * A name the definition carries that the catalog does not hold is still
+   * returned, with no `adminScope`: it grants nothing today, but the binding is
+   * declared, and a set authored under that name later starts granting with no
+   * further write — so a delegate must have it allowlisted too (refuses more,
+   * never less). A position the catalog does not hold distributes nothing.
+   *
+   * ⛔ A catalog that cannot be read is not "distributes nothing": that would
+   * approve every assignment's allowlist check. The read's own loud failure
+   * (`AuthzStoreUnavailableError`) propagates, and the write is refused with it.
+   */
+  private async setsBoundToPosition(positionName: string): Promise<BoundSet[]> {
+    const catalog = this.catalog();
+    if (!catalog || !positionName) return [];
+    const position = await catalog.resolve('position', positionName);
+    const names = Array.isArray(position?.definition.permissionSets)
+      ? (position.definition.permissionSets as unknown[]).filter((n): n is string => typeof n === 'string' && n !== '')
+      : [];
+    const out: BoundSet[] = [];
+    for (const name of new Set(names)) {
+      const set = await catalog.resolve('permission', name);
+      out.push({ name, ...(set?.definition.adminScope ? { adminScope: set.definition.adminScope } : {}) });
     }
+    return out;
   }
 
   /**
@@ -1272,15 +1254,17 @@ export class DelegatedAdminGate {
    *
    * - **The grant's own set** — a delete, or an update that keeps the grant's
    *   set: read BY NAME from the grant's `permission_set` (the pre-image's, or
-   *   the name the update supplies), through {@link readGrantSetRows}. A grant
-   *   that names nothing, or names a set with no catalog row it applies to,
-   *   is not one a delegate can be shown to hold authority over, so the write
-   *   is refused (`unresolved`) — fail closed; a tenant admin is not judged
-   *   here at all.
+   *   the name the update supplies), in the security catalog (ADR-0131 D3) —
+   *   the definition the resolver grants. A grant that names nothing, or names
+   *   a set the catalog does not hold, is not one a delegate can be shown to
+   *   hold authority over, so the write is refused (`unresolved`) — fail
+   *   closed; a tenant admin is not judged here at all.
    * - **The set the write points the grant AT** — an insert, or an update that
-   *   re-points `permission_set_id`: the caller's own reference, read by that
-   *   id as before. The name is not the caller's to supply (the platform
-   *   derives it from that id after this gate), so there is no name to read.
+   *   re-points `permission_set_id`: the caller's own reference. The name is
+   *   not the caller's to supply (the platform derives it from that id after
+   *   this gate), so the id is read to its row's NAME — the grant id lookup,
+   *   which goes with the `permission_set_id` column — and the body judged is
+   *   the catalog's definition of that name.
    */
   private async directGrantSet(
     t: { next: any | null; prev: any | null },
@@ -1289,8 +1273,10 @@ export class DelegatedAdminGate {
     const repointed = !!t.next
       && (!t.prev || String(t.next[GRANT_SET_ID_FIELD] ?? '') !== String(t.prev[GRANT_SET_ID_FIELD] ?? ''));
     if (repointed) {
-      const setRow = await this.loadSetRowById(row[GRANT_SET_ID_FIELD]);
-      return { setRow, setName: String(setRow?.name ?? row[GRANT_SET_ID_FIELD] ?? '') };
+      const idRow = await this.loadSetRowById(row[GRANT_SET_ID_FIELD]);
+      const idName = typeof idRow?.name === 'string' && idRow.name !== '' ? idRow.name : undefined;
+      const setRow = idName ? await this.catalogSet(idName) : null;
+      return { setRow, setName: idName ?? String(row[GRANT_SET_ID_FIELD] ?? '') };
     }
     const name = grantSetNameOf(row);
     if (!name) {
@@ -1300,23 +1286,28 @@ export class DelegatedAdminGate {
         unresolved: 'the grant names no permission set (it is not yet named, or could not be) — only a tenant admin may change it',
       };
     }
-    const setRow = await this.loadSetRowForGrant(row);
+    const setRow = await this.catalogSet(name);
     if (!setRow) {
       return {
         setRow: null,
         setName: name,
-        unresolved: `permission set '${name}' has no catalog row this grant applies to — only a tenant admin may change it`,
+        unresolved: `permission set '${name}' is not in the security catalog, so this grant confers nothing — only a tenant admin may change it`,
       };
     }
-    return { setRow, setName: String(setRow.name ?? name) };
+    return { setRow, setName: name };
   }
 
-  /** The catalog row a stored grant names, by its name (`null` when none applies or the read fails). */
-  private async loadSetRowForGrant(grant: any): Promise<any | null> {
-    if (!this.deps.ql?.find) return null;
+  /**
+   * The security catalog's definition of the permission set `name`, as the
+   * containment check reads it (`{ name, adminScope }`), or `null` when the
+   * catalog holds no such set, none is bound, or the read fails (fail closed:
+   * the caller refuses a delegate's write it cannot judge).
+   */
+  private async catalogSet(name: string): Promise<BoundSet | null> {
     try {
-      const setRowOf = await readGrantSetRows(this.deps.ql, [grant]);
-      return setRowOf(grant) ?? null;
+      const entry = await this.catalog()?.resolve('permission', name);
+      if (!entry) return null;
+      return { name: entry.name, ...(entry.definition.adminScope ? { adminScope: entry.definition.adminScope } : {}) };
     } catch {
       return null;
     }

@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, isRowActive, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
@@ -43,6 +43,7 @@ import {
 import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
 import { createPositionWriteThrough } from './position-write-through.js';
 import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
+import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
   explainAccess,
   buildContextForUser,
@@ -85,9 +86,7 @@ import {
   resolveOwnOrganizationRow,
   seedCtx,
 } from './organization-scope.js';
-import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
-import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
 import { RLSCompiler, RLS_DENY_FILTER, compiledPolicyNameOf, policyDeclaresClause } from './rls-compiler.js';
 import {
@@ -100,7 +99,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readDisabledCatalogNames } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -156,7 +155,6 @@ import {
   DetailRecordNotFoundError,
   MasterReferenceMissingError,
   MaskedValueWriteError,
-  PermissionSetReadUnansweredError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
@@ -178,8 +176,8 @@ import {
   securityPluginManifestHeader,
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
-import { registerBuiltinPositions } from './builtin-positions.js';
-import { registerBuiltinCapabilities, withoutPlatformCapabilityDeclarations } from './builtin-capabilities.js';
+import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-positions.js';
+import { registerBuiltinCapabilities } from './builtin-capabilities.js';
 
 /**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
@@ -1025,53 +1023,6 @@ function userFacingDenialMessage(
 }
 
 /**
- * The `sys_permission_set` page the enforcement-plane loader asked for, or a
- * REFUSAL — never a different empty.
- *
- * ## The shape, driven rather than declared
- *
- * `ObjectQL.find` resolves a BARE array of row objects. That is MEASURED, not
- * read off `IDataEngine.find`'s declared `Promise<any[]>`: a declared type is
- * not proof here, because this repo also carries a `find()` that resolves a
- * `QueryResult` envelope and never an array. `engine-find-bare-array.pin.test.ts`
- * boots a real `ObjectQL` over a real `SqlDriver`, starts this plugin against
- * it, and pins what this very loader receives — on a populated page and an
- * empty one. The `{ records }` limb this function replaced was therefore
- * unreachable: dead code that read as a contract.
- *
- * ## Why anything else REFUSES instead of returning `[]`
- *
- * This is the enforcement plane. A value this loader cannot read is a read that
- * did not answer, and the one thing it must never become is "this principal has
- * no permission sets" — a statement that silently withdraws grants that exist
- * while the request keeps looking normal. `PermissionEvaluator
- * .resolvePermissionSets` catches the refusal one frame up, keeps the request
- * fail-closed exactly as before, and reports it once (#2565's warn, which the
- * old swallow made unreachable).
- *
- * A non-object ELEMENT refuses for the same reason, and that half is the
- * repair's other direction: it used to be dropped in silence by the trailing
- * `r?.name === name` filter, which is the same invention one row at a time.
- */
-function permissionSetPageOrRefuse(rows: unknown, names: readonly string[]): any[] {
-  if (!Array.isArray(rows)) {
-    throw new PermissionSetReadUnansweredError(
-      names,
-      `the engine resolved ${rows === null ? 'null' : typeof rows}, not an array of rows`,
-    );
-  }
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') {
-      throw new PermissionSetReadUnansweredError(
-        names,
-        `the page carried a ${row === null ? 'null' : typeof row} where a row object was contracted`,
-      );
-    }
-  }
-  return rows;
-}
-
-/**
  * [ADR-0058 D4] The policies whose predicate the write post-image check
  * compiles, out of the policies that apply to this principal, object and write
  * operation (`insert` / `update`, `all` included).
@@ -1380,37 +1331,20 @@ export class SecurityPlugin implements Plugin {
    */
   private readonly objectSecurityMetaCache = new Map<string, ObjectSecurityMeta>();
   /**
-   * Permission-set loader FACTORY, parameterised by the caller's organization.
-   * A factory rather than a bare loader because the read is organization-scoped
-   * and the organization is a per-request fact — see where it is built for why
-   * an unscoped by-name read stops being correct once the catalog is
-   * materialized per organization.
+   * [ADR-0131 D3/D4] The permission-set loader for names the metadata list and
+   * the bootstrap sets did not answer: the security catalog's definitions, by
+   * name. Environment-level — the catalog takes no organization — so one loader
+   * serves every caller. See where it is built.
    */
-  private dbLoaderFor?: (organizationId?: string) => (names: string[]) => Promise<PermissionSet[]>;
-
-  /**
-   * The organization a permission-set resolution runs in — the caller's own
-   * active organization, never a scan across all of them.
-   *
-   * Undefined for a `single`-posture caller (and for any context carrying no
-   * organization at all), which lands on the organization-less surface that
-   * posture correctly has. Both spellings are read for the same reason the
-   * sharing service reads both: `tenantId` is the declared envelope field and
-   * `organizationId` is the cast one, and a hand-built context may carry
-   * either.
-   */
-  private callerOrganizationId(context: any): string | undefined {
-    const id = (context?.organizationId ?? context?.tenantId);
-    return typeof id === 'string' && id !== '' ? id : undefined;
-  }
+  private catalogSetLoader?: (names: string[]) => Promise<PermissionSet[]>;
 
   /**
    * The permission-set loader for ONE caller. `undefined` when no engine is
-   * wired, exactly as the un-parameterised loader used to be, so
-   * `resolvePermissionSets` keeps its "no db source" branch.
+   * wired, so `resolvePermissionSets` keeps its "no third source" branch. The
+   * caller does not choose the answer: the catalog is environment-level.
    */
-  private dbLoaderForContext(context: any): ((names: string[]) => Promise<PermissionSet[]>) | undefined {
-    return this.dbLoaderFor?.(this.callerOrganizationId(context));
+  private dbLoaderForContext(_context: any): ((names: string[]) => Promise<PermissionSet[]>) | undefined {
+    return this.catalogSetLoader;
   }
   /**
    * [#10757] Per-EXECUTION-CONTEXT memo for
@@ -1785,14 +1719,53 @@ export class SecurityPlugin implements Plugin {
     // id — the provenance the manifest stamps on `permissions`. Here, on the
     // engine handle `start()` already holds, before `kernel:ready` runs the
     // seeders and before any request reaches the metadata door. Rows keep
-    // seeding from the same list (`bootstrapBuiltinRoles`); nothing here writes
-    // a row or moves a grant.
-    if (registerBuiltinPositions((ql as { registry?: unknown }).registry, SECURITY_PLUGIN_ID) === 0) {
+    // seeding from the same list (`bootstrapBuiltinRoles`).
+    const builtinRegistry = (ql as { registry?: unknown }).registry;
+    if (registerBuiltinPositions(builtinRegistry, SECURITY_PLUGIN_ID) === 0) {
       ctx.logger.warn(
         '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
           + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
-          + 'them. Their sys_position rows still seed and no grant changes, but the security catalog read and '
-          + 'GET /api/v1/meta/position will not list them.',
+          + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
+          + '`everyone` baseline sets are granted through no position.',
+      );
+    }
+    // [ADR-0090 D5, ADR-0131 D3/D4] `everyone` declares the deployment's
+    // baseline in its `permissionSets` — the binding the authorization resolver
+    // reads, in place of the junction rows the boot used to write. At
+    // `kernel:ready`, where that binding ran, because the high-privilege check
+    // reads the stack's declared capabilities (#18535) and they are all in by
+    // then; the check and its report are the binding's own.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:ready', async () => {
+        try {
+          const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
+          const everyoneSets = this.baselinePermissionSets.filter((name) => {
+            const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
+            const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
+            if (offending) {
+              ctx.logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set: name, offending });
+            }
+            return !offending;
+          });
+          if (everyoneSets.length > 0) declareEveryoneBaseline(builtinRegistry, SECURITY_PLUGIN_ID, everyoneSets);
+        } catch (e) {
+          ctx.logger.warn('[security] everyone-anchor baseline declaration failed (non-fatal)', { error: (e as Error).message });
+        }
+      });
+    }
+
+    // [ADR-0131 D3/D4] Bind the security catalog read to this engine: every
+    // authorization resolution over it (`resolveUserAuthzGrants`, core) reads
+    // positions, the sets they name and the set bodies through this reader.
+    // An engine with no reader bound resolves an empty catalog — no position
+    // distributes a set and no set grants — so a failure here is said at once.
+    try {
+      bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: (ql as any).registry, metadata: metadata as any }));
+    } catch (e) {
+      ctx.logger.warn(
+        '[security] the security catalog read was NOT bound to the ObjectQL engine: '
+          + `${(e as Error).message} Every permission set and every position-bound set resolves to nothing `
+          + 'until the engine exposes its registry and the metadata service is registered.',
       );
     }
 
@@ -1982,156 +1955,42 @@ export class SecurityPlugin implements Plugin {
       );
     }
 
-    // Construct a dbLoader FACTORY once that lets resolvePermissionSets
-    // surface user-defined permission sets from `sys_permission_set`
-    // (created via the admin UI) in addition to plugin-registered ones.
+    // [ADR-0131 D3/D4] The third source `resolvePermissionSets` asks, for the
+    // names the metadata list and the bootstrap sets did not answer: the
+    // security catalog's definition of each name (`securityCatalogReaderOf`,
+    // the reader `bindSecurityCatalogReader` attached to this engine in
+    // `start()`) — the environment registry, where every package manifest's
+    // sets and every environment-authored set hydrated from `sys_metadata`
+    // live. It is the same read the authorization resolver takes a set's body
+    // from, so enforcement and resolution read one source.
     //
-    // Scoped to the CALLER's organization rather than unscoped. Once the
-    // catalog is materialized per organization, several organizations hold a
-    // row for the same name, and a by-name `$in` under a bare
-    // `{ isSystem: true }` resolves whichever copy the driver ordered first —
-    // one tenant's grants answering another tenant's request. Threading the
-    // organization routes the read through `SqlDriver.applyTenantScope` (the
-    // governed chokepoint, unchanged by this work), and
-    // `resolveOwnOrganizationRow` then prefers this organization's own row over
-    // any organization-less one still standing.
+    // ⛔ No `sys_permission_set` row is read. A set that exists only as a row
+    // (an organization's Setup-authored set under a wall, a row whose
+    // definition was never saved) has no registry home, and the resolver
+    // already grants nothing through it (#15196 Q3 = A); a row fallback here
+    // would grant its object map anyway — a second source the cutover retires
+    // (#22601 → B).
     //
-    // The `limit` moves with it. `names.length` was exactly right while one row
-    // existed per name, and is a TRUNCATION the moment copies exist: the driver
-    // returns this organization's rows AND any organization-less ones, so the
-    // cap must admit both or a caller silently loses sets. It stays bounded — a
-    // multiple of the names asked for, never unbounded.
-    const dbLoaderFor = ql
-      ? (organizationId?: string) => async (names: string[]) => {
-          // ⛔ NO `catch` here, and ⛔ no invented empty below — this seam is
-          // the DROP-shaped half of this cleanup and is repaired in the OPPOSITE
-          // direction from the dead limbs elsewhere in this plugin.
-          //
-          // Three distinct facts used to leave here as one value, `[]`: the read
-          // succeeded on an empty catalog; the read THREW; the read resolved
-          // something this loader could not read. Only the first is an answer.
-          // The other two were inventions, and this is the enforcement plane —
-          // "no permission sets" silently withdraws grants that EXIST while
-          // every request still looks completely normal. The residue comment
-          // below already names that failure ("revokes standing access with no
-          // signal at the moment of loss"); the swallow above it produced the
-          // same loss for a whole page at once.
-          //
-          // The refusal is not this seam's invention: `resolvePermissionSets`
-          // ALREADY declares how a throwing loader is handled — it catches, the
-          // unresolved sets grant nothing (fail closed, unchanged), and the
-          // failure is named in a warn, because without it "a transient DB error
-          // makes custom permission sets silently vanish and the resulting 403s
-          // are undiagnosable" (#2565). Swallowing here made that warn
-          // UNREACHABLE. Letting the read fault propagate is what re-arms a
-          // diagnostic this repo had already built, and it is the direction the
-          // 2026-08-11 store-fault ruling settles: a fault propagates.
-          // [#20555] With NO active organization the read asks for the
-          // organization-less rows ONLY. `seedCtx(undefined)` carries no
-          // tenant, and `applyTenantScope` reads "no tenant" as an unscoped
-          // path, so a bare by-name read returned every organization's row of
-          // each name — and `resolveOwnOrganizationRow` answers an undefined
-          // organization with whichever row came first. The names asked for
-          // include the caller's POSITIONS (the fold in
-          // `resolvePermissionSetsForContextUnmemoized`), and with no active
-          // organization those still carry every membership's role plus the
-          // `everyone` anchor. Measured over a real `SqlDriver`: a member of
-          // one organization, with none active, resolved a set ANOTHER
-          // organization had authored under the name `org_member` — its
-          // `systemPermissions` and its object map, view/modify-all included —
-          // and a GLOBAL grant resolved another organization's same-named copy
-          // in place of the global row it named.
-          //
-          // The rule is the one `resolveUserAuthzGrants` applies to grant rows,
-          // and ADR-0123 D2's "tenant-scoped reads resolve to nothing": a row
-          // scoped to an organization applies only while that organization is
-          // active; an organization-less row applies everywhere. With a tenant
-          // the driver's scope already returns exactly those two classes. With
-          // none, the predicate below is that same scope, pushed into the read
-          // rather than filtered after it — after the `limit`, other
-          // organizations' copies could crowd out the global row this caller
-          // does hold.
-          const where = organizationId
-            ? { name: { $in: names } }
-            : { name: { $in: names }, organization_id: null };
-          const rows = await ql.find(
-            'sys_permission_set',
-            { where, limit: Math.max(names.length * 4, 20) },
-            { context: seedCtx(organizationId) },
-          );
-          const fetched = permissionSetPageOrRefuse(rows, names);
-          // One row per NAME: this organization's own where it has one, an
-          // organization-less leftover only where it does not.
-          //
-          // The residue arm is load-bearing and was missing (#11121 shipped the
-          // comment without it, and its suite covers seeding rather than this
-          // loader). `resolveOwnOrganizationRow` is written for SEEDERS, where
-          // refusing to see a residue as "already seeded" is the whole point —
-          // so it never returns one as `own`. ENFORCEMENT wants the opposite
-          // reading: an organization-less row is still a row this principal was
-          // granted, and dropping it revokes standing access with no signal at
-          // the moment of loss — the failure mode this catalog's own header,
-          // and `resolve-authz-context`'s `sys_position` read, both call out as
-          // the thing not to do. The asymmetry was observable on a single row:
-          // its `system_permissions` and `tab_permissions` kept applying (that
-          // read is unscoped by id) while its `object_permissions` and
-          // `admin_scope` silently stopped.
-          //
-          // Preference order is unchanged and still closes the cross-tenant
-          // bleed #11121 fixed: this organization's own row WINS wherever it
-          // exists, and a leftover is consulted only in its absence. With no
-          // active organization every row here is organization-less (the read
-          // above asked for nothing else), so `own` is one of those.
-          const byName = new Map<string, any>();
-          for (const name of new Set(names)) {
-            const { own, organizationLessResidue } = resolveOwnOrganizationRow(
-              fetched.filter((r: any) => r?.name === name),
-              organizationId,
-            );
-            const row = own ?? organizationLessResidue;
-            if (row) byName.set(name, row);
-          }
-          const all = Array.from(byName.values());
-          // [ADR-0049] A DEACTIVATED set grants nothing. Not defence in depth
-          // that nothing reaches: `resolvePermissionSetsForContext` requests
-          // `context.positions` as permission-set NAMES too (a position name is
-          // commonly reused as a set name), so an ACTIVE position whose name
-          // matches a DEACTIVATED `sys_permission_set` row arrives here with
-          // that name still standing — this loader is the only place that read
-          // is judged. Filtered in memory rather than by a `where` predicate:
-          // `active: true` would also drop rows whose column is NULL (rows
-          // predating the field), and boolean `where` coercion differs per
-          // driver. `isRowActive` is the same predicate the core resolver and
-          // the break-glass guard use, so the three cannot drift.
-          const list = all.filter((r: any) => isRowActive(r));
-          const parseJson = (v: any, fallback: any) => {
-            if (typeof v !== 'string') return v ?? fallback;
-            try { return JSON.parse(v || JSON.stringify(fallback)); } catch { return fallback; }
-          };
-          return list.map((r: any) => ({
-            name: r.name,
-            label: r.label,
-            objects: parseJson(r.object_permissions, {}),
-            fields: parseJson(r.field_permissions, {}),
-            systemPermissions: parseJson(r.system_permissions, []),
-            // [#7616] Hydrate the tab column too. Nothing on the DATA plane
-            // reads `tabPermissions` (the evaluator never mentions it), so this
-            // is inert for enforcement — but `resolvePermissionSetsForContext`
-            // is published on the `security` service as returning the sets
-            // WHOLE, and a loader that dropped this column would make that
-            // declaration false for every DB-authored set: the UI-plane copy in
-            // `/me/apps` reads exactly `tab_permissions` off the same row.
-            // Declared ≠ delivered is the failure this contract exists to
-            // prevent, so the column is loaded where the promise is made. The
-            // row is already fetched in full — no extra query, one JSON parse.
-            tabPermissions: parseJson(r.tab_permissions, {}),
-            // [ADR-0090 D12] Hydrate the delegated-admin scope so the gate can
-            // resolve a DB-authored delegate's authority. Null column → absent.
-            ...(r.admin_scope ? { adminScope: parseJson(r.admin_scope, undefined) } : {}),
-          }));
-        }
-      : undefined;
-    this.dbLoaderFor = dbLoaderFor;
+    // ⛔ No `catch` either. A catalog read that did not happen throws the
+    // reader's own `AuthzStoreUnavailableError`, and `resolvePermissionSets`
+    // catches it one frame up: the unresolved sets grant nothing (fail closed)
+    // and the failure is named in its warn (#2565). Swallowing it here would
+    // report "no such set" for a read that never answered.
+    //
+    // Whether a set is switched off is not this loader's question: the names
+    // it is asked for arrive already judged by the resolver's ledger read,
+    // except a POSITION name folded into the request, which
+    // `resolvePermissionSetsForContextUnmemoized` judges itself.
+    this.catalogSetLoader = async (names: string[]) => {
+      const catalog = securityCatalogReaderOf(ql);
+      if (!catalog) return [];
+      const out: PermissionSet[] = [];
+      for (const name of new Set(names)) {
+        const entry = await catalog.resolve('permission', name);
+        if (entry) out.push(entry.definition as unknown as PermissionSet);
+      }
+      return out;
+    };
 
     // [ADR-0090 D12] Delegated-admin gate shares the SAME permission-set
     // resolution as the CRUD middleware, so a delegate's authority and their
@@ -4661,10 +4520,9 @@ export class SecurityPlugin implements Plugin {
         // [#18535, ADR-0090 D5] The stack's declared `capabilities:` — the half
         // of the anchor question the predicate cannot discover for itself. Read
         // ONCE per pass, from the DECLARATIONS rather than from `sys_capability`:
-        // this binding runs before `bootstrapDeclaredCapabilities` seeds those
-        // rows (see `declared-capability-context.ts` for why that order is
-        // fixed), so the rows are empty here on a first boot. Unreadable or
-        // absent ⇒ `undefined` ⇒ the pre-#17811 verdict, which refuses.
+        // the registry is a package capability's one home (ADR-0131 D3), and no
+        // row is seeded for it. Unreadable or absent ⇒ `undefined` ⇒ the
+        // pre-#17811 verdict, which refuses.
         const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
         for (const baselineName of this.baselinePermissionSets) {
           const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
@@ -4984,42 +4842,6 @@ export class SecurityPlugin implements Plugin {
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
         }
-        // [ADR-0066 D1] Seed the capability registry (sys_capability) in two
-        // passes. FIRST the EXPLICIT package declarations (`defineCapability` /
-        // `stack.capabilities`) land with `managed_by:'package'` + package_id
-        // provenance — the formal replacement for the implicit derive-from-
-        // systemPermissions back-door. THEN the platform curated set + the
-        // back-compat derived defaults, SKIPPING any name that already HAS a row
-        // (so the placeholder never clobbers the authored capability).
-        // [#4967 Part 1] The skip list is the names the first pass confirmed are
-        // materialized — not every name it read. A declaration the first pass
-        // REFUSES (no owning package) writes no row, so skipping its derivation
-        // too left the capability existing nowhere and every grant naming it
-        // inert; it now falls through to the placeholder. The permission sets are
-        // passed to the first pass as well, so a refusal can name the grantor(s)
-        // it affects (#4967 Part 3).
-        let materializedCapabilityNames: string[] = [];
-        try {
-          // [ADR-0131 D3] Handed the engine WITHOUT this plugin's own curated
-          // declarations (`builtin-capabilities.ts`): they are not a package's,
-          // the curated pass below seeds their rows, and read here each would be
-          // refused as a package claiming a curated name.
-          const capOutcome = await bootstrapDeclaredCapabilities(withoutPlatformCapabilityDeclarations(ql), this.metadata, {
-            logger: ctx.logger,
-            permissionSets: this.bootstrapPermissionSets,
-          });
-          materializedCapabilityNames = capOutcome.materializedNames;
-        } catch (e) {
-          ctx.logger.warn('[security] declared-capability seeding failed', { error: (e as Error).message });
-        }
-        try {
-          await bootstrapSystemCapabilities(ql, this.bootstrapPermissionSets, {
-            logger: ctx.logger,
-            materializedCapabilityNames,
-          });
-        } catch (e) {
-          ctx.logger.warn('[security] capability seeding failed', { error: (e as Error).message });
-        }
         // [A4 #2920] Heal residual legacy `managed_by` values (env sets stamped
         // 'user'; older positions stamped system/config/user) onto the unified
         // platform/package/admin vocab. Runs after the seeders so their canonical
@@ -5100,6 +4922,34 @@ export class SecurityPlugin implements Plugin {
       (ctx as any).hook('kernel:bootstrapped', runPositionBackfill);
     } else {
       void runPositionBackfill();
+    }
+
+    // [ADR-0131 D3/D4] The catalog reference report: per organization, every
+    // assignment and grant whose name the security catalog does not resolve,
+    // every grant that names nothing, every position row with no definition
+    // (by name and organization), and under `single` every position name more
+    // than one row carries. A reference that resolves nowhere confers nothing;
+    // this is what makes that loud. Registered AFTER the two backfills above,
+    // so it runs after them (handlers run in registration order) and does not
+    // report a name either one resolved this boot. It writes nothing. Only at
+    // `kernel:bootstrapped`: run any earlier, it would judge a catalog that is
+    // still being filled. See `catalog-reference-report.ts`.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
+        try {
+          await reportCatalogReferences(ql as any, {
+            posture: this.tenancyPosture,
+            catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+            logger: ctx.logger,
+          });
+        } catch (e) {
+          ctx.logger.warn(
+            '[security] the catalog reference report did not run — assignments and grants whose names the ' +
+              'security catalog does not resolve go unreported for this boot',
+            { error: (e as Error)?.message },
+          );
+        }
+      });
     }
 
     // ── Project the permission sets of a package that arrives AFTER the boot ──
@@ -7078,6 +6928,7 @@ export class SecurityPlugin implements Plugin {
       this.dbLoaderForContext(context),
       { logger: this.logger },
     );
+    permissionSets = await this.dropDeactivatedFoldedSets(positions, explicitPermissionSets, baselineApplied, permissionSets);
     // [#13419 执行要点 3] Report — never alter — a grant that exists ONLY because
     // this method folded a POSITION name into the permission-set request above.
     this.reportNameFoldCollisions(positions, explicitPermissionSets, baselineApplied, permissionSets);
@@ -7100,6 +6951,43 @@ export class SecurityPlugin implements Plugin {
       );
     }
     return permissionSets;
+  }
+
+  /**
+   * [ADR-0049, ADR-0131 D3] Drop a set that reached the resolution ONLY because
+   * a POSITION of the same name was folded into the request, when the
+   * activation ledger switched that set off.
+   *
+   * Every other name arrives already judged: `context.permissions` is the
+   * resolver's output, which drops a deactivated set (§6b), and the baseline
+   * is the deployment's configuration, applied regardless. A folded position
+   * name is the one name nobody judged as a SET — the position is in effect,
+   * but the set that shares its name may not be. The row loader this replaced
+   * judged it with the catalog row's `active` column; the switch now lives in
+   * `sys_metadata_activation`, read through the resolver's own
+   * `readDisabledCatalogNames`, so this path and the resolver cannot disagree.
+   *
+   * The ledger is read only when a folded name actually resolved, so a request
+   * with no such collision issues no read. A read that fails throws
+   * (`AuthzStoreUnavailableError`), and the request fails closed.
+   */
+  private async dropDeactivatedFoldedSets(
+    positions: unknown,
+    explicitPermissionSets: unknown,
+    baselineApplied: string[],
+    resolved: PermissionSet[],
+  ): Promise<PermissionSet[]> {
+    if (!Array.isArray(positions) || positions.length === 0 || resolved.length === 0) return resolved;
+    const judged = new Set<string>(baselineApplied);
+    for (const n of Array.isArray(explicitPermissionSets) ? explicitPermissionSets : []) {
+      if (typeof n === 'string') judged.add(n);
+    }
+    const resolvedNames = new Set(resolved.map((ps) => (ps as any)?.name).filter((n: unknown): n is string => typeof n === 'string'));
+    const folded = positions.filter((n): n is string => typeof n === 'string' && resolvedNames.has(n) && !judged.has(n));
+    if (folded.length === 0) return resolved;
+    const disabled = await readDisabledCatalogNames(this.ql, [], [...new Set(folded)]);
+    if (disabled.permissions.size === 0) return resolved;
+    return resolved.filter((ps) => !disabled.permissions.has((ps as any)?.name));
   }
 
   /**
@@ -7128,8 +7016,9 @@ export class SecurityPlugin implements Plugin {
    *      and app-showcase's `finance` / `legal`) are all of that kind. ⛔ A
    *      false positive on a built-in identity is the most expensive failure
    *      this warning has, and this clause is what prevents it;
-   *   2. `P` was NOT already requested through the governed channel. Junction
-   *      rows arrive as permission-set NAMES in `context.permissions`
+   *   2. `P` was NOT already requested through the governed channel. The sets
+   *      a position's definition names (`permissionSets`, ADR-0131 D3/D4)
+   *      arrive as permission-set NAMES in `context.permissions`
    *      (`resolve-authz-context.ts` §6b pushes `ps.name`), as do directly
    *      assigned sets. Either way the grant does not depend on the fold, so
    *      there is nothing ungoverned to report;
@@ -7180,11 +7069,10 @@ export class SecurityPlugin implements Plugin {
       // who can resolve it is already looking.
       this.logger.warn?.(
         `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
-          `because a POSITION of the same name resolved by name — there is no ` +
-          `sys_position_permission_set row binding them. This grant is in force and ungoverned: ` +
-          `it appears in no junction table an operator can inspect. Bind it explicitly ` +
-          `(sys_position_permission_set: position '${position}' -> permission set '${position}') ` +
-          `or rename one of the two.`,
+          `because a POSITION of the same name resolved by name — the position's definition ` +
+          `does not name it in its permissionSets. This grant is in force and ungoverned: ` +
+          `no position declares it. Declare it explicitly (position '${position}': ` +
+          `permissionSets: ['${position}']) or rename one of the two.`,
         {
           event: POSITION_NAME_FOLD_EVENT,
           position,
@@ -7613,13 +7501,11 @@ export class SecurityPlugin implements Plugin {
    *
    * A name in `PLATFORM_CAPABILITY_NAMES` is a capability the PLATFORM
    * defines: grants (`systemPermissions`) and requirements
-   * (`requiredPermissions`) resolve it by name, and the curated seeder owns
-   * the row for it in the NULL-organization bucket
-   * (`bootstrap-system-capabilities.ts`). A Setup-authored row claiming such
-   * a name is a declaration the platform cannot honour — it can never BE the
-   * curated capability (provenance forging is refused by the gate above), and
-   * once it holds the name's bucket slot the seeder must decline the
-   * collision on every boot (`blockedCurated`, #8470). Maintainer ruling on
+   * (`requiredPermissions`) resolve it by name, and its definition is served
+   * by the registry (`builtin-capabilities.ts`, ADR-0131 D3), not by a row. A
+   * Setup-authored row claiming such a name is a declaration the platform
+   * cannot honour — it can never BE the curated capability (provenance
+   * forging is refused by the gate above). Maintainer ruling on
    * #8552 (2026-08-13): refuse the collision AT THE WRITE DOOR — create and
    * rename both — naming the colliding curated name; never answer 200.
    *

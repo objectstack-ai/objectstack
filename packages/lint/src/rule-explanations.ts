@@ -2033,6 +2033,624 @@ const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Approval approvers (`validate-approval-approvers.ts`) ───────────────────
+
+const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
+  rule: 'approval-approvers-may-resolve-empty',
+  covers: 'why an all-group or all-manager slate can stall',
+  paragraphs: [
+    'An approval node opens its request on the people its approvers expand to at runtime. When ' +
+      'EVERY approver on the node routes to a group whose membership is runtime data — a ' +
+      '`position`, a `team` or a `department` — and none is staffed, the request opens on an empty ' +
+      '`pending_approvers` slate: no user can act, so it waits forever, and under the default ' +
+      '`lockRecord: true` the record stays locked with it, with no in-product recovery. An approver ' +
+      'of any other type on the node is a non-group route, so a mixed slate is not judged.',
+    'The `manager` arm is the same dead end with a cause the product cannot repair. ' +
+      '`{ type: \'manager\' }` resolves from `sys_user.manager_id` of the user the record names ' +
+      '(the field `value` names, else the owner), and returns nobody where that column is unset; a ' +
+      'static check cannot read that column, so this does not assert the slate IS empty — it reports ' +
+      'that nothing else on the node can approve if it is. The arm fires only when the whole slate ' +
+      'is `manager` rungs, so no node draws both arms, and a slate mixing groups and `manager` is ' +
+      'silent.',
+    'One fact in the stack silences the `manager` arm: a seed row of `sys_user` carrying a ' +
+      'non-empty `manager_id`, which shows the stack populates the column. Declaring ' +
+      '`onEmptyApprovers: \'fallback\'` does not silence it, because a `fallbackApprovers` list can ' +
+      'itself resolve to nobody, which a static check cannot see either. The runtime publish gate ' +
+      'carries no seeds, so a Studio publish of a manager-only flow draws the advisory however the ' +
+      'users are wired.',
+    'Both arms are `info`: staffing and the manager column are runtime data a linter cannot see, so ' +
+      'the rule flags the SHAPE, and an `info` finding never blocks a build or a publish.',
+  ],
+};
+
+const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION: RuleExplanation = {
+  rule: 'approval-approver-not-membership-tier',
+  covers: 'what an org_membership_level approver resolves against',
+  paragraphs: [
+    '`org_membership_level` — and `role`, its deprecated spelling — resolves against the ' +
+      'better-auth org-membership tier a member holds (`sys_member.role`), never against positions. ' +
+      'The vocabulary is closed and framework-owned (ADR-0108): the tiers the verdict lists are ' +
+      'read from `@objectstack/spec`\'s `BUILTIN_MEMBERSHIP_ROLES`, and a value is compared ' +
+      'case-insensitively.',
+    'After ADR-0090 D3 renamed `sys_role` to `sys_position`, an approver authored as ' +
+      '`{ type: \'role\', value: \'sales_manager\' }` finds no member row: the expansion falls back ' +
+      'to the `role:sales_manager` literal, and the request waits on an approver that can never ' +
+      'act. A business role is always a position, resolved through `sys_user_position`.',
+    'A warning, not an error: the runtime keeps its literal fallback rather than refusing the node. ' +
+      'When the value is not a tier, this finding is reported instead of ' +
+      '`approval-approver-type-deprecated` on the same approver: the bad value is the more serious ' +
+      'defect, and its fix (`position`) differs from the deprecation\'s (`org_membership_level`).',
+  ],
+};
+
+// ── Data-model rules (`data-model-rules.ts`) ───────────────────────────────
+// The three ADR-0120 uniqueness ids run on `os validate` and `os build` as
+// registry entries and on `os lint` through `lintDataModel`; the other three
+// are `lintDataModel`'s own sweep.
+
+/** The ADR-0120 scope words, as the two uniqueness spellings read them (both write it out). */
+const UNIQUE_SCOPE_WORDS =
+  'ADR-0120 gives uniqueness two scope words: `\'organization\'`, one holder per organization, and ' +
+  '`\'global\'`, installation-wide. On a FIELD, bare `unique: true` is the positional synonym of ' +
+  '`\'organization\'` and stays valid; on a declared INDEX the same spelling states no scope, and ' +
+  'is judged as `\'global\'`.';
+
+/** Where the three `lintDataModel` sweep ids are reported (all three write it out). */
+const DATA_MODEL_SWEEP_REACH =
+  'Reach: `os lint` and the metadata-generation rubric run this rule, and nothing else does — it ' +
+  'is not an `os validate` / `os build` rule and does not run at the metadata save door, so its ' +
+  'severity moves `os lint`\'s exit code and the rubric\'s score, never a publish verdict.';
+
+const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION: RuleExplanation = {
+  rule: 'unique/legacy-organization-composite',
+  covers: 'what a hand-written organization composite enforces',
+  paragraphs: [
+    'A declared unique index that lists the organization column itself — `organization_id`, or the ' +
+      'object\'s `tenancy.tenantField` — is the hand-written per-organization composite that ' +
+      'predates the scope vocabulary (ADR-0120 S6). It reads as "unique per organization" but ' +
+      'materializes as a plain composite, and SQL UNIQUE is NULL-distinct: it enforces nothing on a ' +
+      'row whose organization column is NULL, which on a single-organization deployment is every ' +
+      'row.',
+    'Respelled `unique: \'organization\'`, the NULL rows become one platform bucket ' +
+      '(`COALESCE(organization_id, \'__global__\')`) that is unique among themselves, which is what ' +
+      'closes the hole.',
+    'Advisory, and never auto-fixed (ADR-0120 D5c): the legacy spelling stays valid indefinitely ' +
+      'and forces no drift, and opting in is a real physical tightening that goes through the D4 ' +
+      'ceremony, because rows the void constraint admitted may still be there. Not reported: ' +
+      '`unique: \'organization\'` itself, and a unique on the organization column alone, which is ' +
+      'not a composite.',
+  ],
+};
+
+const UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION: RuleExplanation = {
+  rule: 'unique/unscoped-declared-index',
+  covers: 'why a declared unique index must state its scope',
+  paragraphs: [
+    'Bare `unique: true` on a declared index states no scope (ADR-0120 D5a). It built the index ' +
+      'over exactly its `fields` — installation-wide — while reading like "unique per ' +
+      'organization", so on an organization-scoped object a value one organization holds refused ' +
+      'the same value in every other. The rule fires on the spelling alone, with no tenancy ' +
+      'inference: `organization_id` is kernel-injected at registration, so a guess from the ' +
+      'authored fields would be wrong half the time.',
+    UNIQUE_SCOPE_WORDS,
+    'Protocol 18 refuses the spelling (ADR-0120 D7) through two channels. The schema ' +
+      '(`IndexSchema.unique`) refuses it at every door that parses — `os validate`, `os build`, ' +
+      '`ObjectSchema.create` and the runtime save door — and this rule refuses it where nothing ' +
+      'parses: `os lint`, which judges the normalized stack. Stored metadata that still carries it ' +
+      'converts to `unique: \'global\'`, which builds the same physical index.',
+  ],
+};
+
+const UNIQUE_DOUBLE_DECLARATION_EXPLANATION: RuleExplanation = {
+  rule: 'unique/double-declaration',
+  covers: 'how a field unique and an index unique combine',
+  paragraphs: [
+    'One column carries both a field-level `unique` and a declared single-column unique index, and ' +
+      'the two are judged in the scope vocabulary (ADR-0120 D5b), from the two spellings alone with ' +
+      'no tenancy inference.',
+    UNIQUE_SCOPE_WORDS,
+    'Different scopes CONTRADICT: the installation-wide index is physically stricter and wins, so ' +
+      'the per-organization constraint can never be tripped and one of the two declared intents is ' +
+      'silently dead. The same scope on both sides is REDUNDANT — the same index declared twice — ' +
+      'and dropping one gives the intent a single home.',
+    'A composite declared index is not judged here: listing the organization column is the legacy ' +
+      'organization spelling, `unique/legacy-organization-composite`\'s question. Advisory: the ' +
+      'stack is well-defined, and the cost is an intent that never takes effect.',
+  ],
+};
+
+const RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION: RuleExplanation = {
+  rule: 'relationship/master-detail-required',
+  covers: 'why a master_detail reference must be required',
+  paragraphs: [
+    'A detail record cannot exist without its master, so a `master_detail` reference should be ' +
+      '`required: true`. On most objects nothing at runtime refuses a detail saved without one, so ' +
+      'there the rule is a warning.',
+    'On a `sharingModel: \'controlled_by_parent\'` object it is an error. Such an object derives ALL ' +
+      'of its record access through the master reference (ADR-0055), and the derived read filter — ' +
+      '`masterFK IN (accessible master ids)` — never matches an empty master, so a detail saved ' +
+      'without one is readable by nobody and refused on every later write. Record validation never ' +
+      'checks a field that is not `required`, and skips `readonly` and `system` fields before its ' +
+      'required check, so on the three shapes reported — `required` absent or false, ' +
+      '`required: true` with `readonly: true`, and `required: true` with `system: true` — the ' +
+      'security gate (`assertControlledByParentWrite`) is the only thing refusing such an insert.',
+    'Every `master_detail` field of such an object is judged, not only the one the runtime resolves ' +
+      'as the master: that is the scope `ObjectSchema.create()` enforces when it forces ' +
+      '`required: true` and refuses an explicit `required: false`. The builder never inspects ' +
+      '`readonly` or `system`, and a plain object literal or a raw `.parse()` of stored metadata ' +
+      'never runs it, so this rule is where all three shapes meet a refusal at authoring time. One ' +
+      'finding per field, located at its first defect.',
+    DATA_MODEL_SWEEP_REACH,
+  ],
+};
+
+const ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION: RuleExplanation = {
+  rule: 'rollup/non-numeric-aggregand',
+  covers: 'why a min/max roll-up needs a numeric child field',
+  paragraphs: [
+    'A `summary` field persists its roll-up\'s answer, and its value contract is a finite number: ' +
+      '`summary` is a member of the spec\'s `NUMERIC_VALUE_TYPES`. `min` and `max` answer with a ' +
+      'value of the CHILD field\'s own type, and the engine stores the driver\'s answer verbatim, so ' +
+      'an ordinary "latest shipment" roll-up — `max` over a `datetime` child — computes an instant ' +
+      'into a number column.',
+    'Accepted children are the numeric value types and the boolean ones, which aggregate as numbers ' +
+      'on every backend. This is deliberately not the analytics aggregate table, which accepts a ' +
+      'temporal `min` / `max` because a dataset measure RETURNS its answer to the caller instead of ' +
+      'storing it.',
+    'Judged: `min` and `max` only — `count` reads no value off the field, and `sum` / `avg` over a ' +
+      'non-numeric child is a different shape. Silent when the child object or field does not ' +
+      'resolve in this stack (another package, a partial load): a rule that cannot answer does not ' +
+      'block.',
+    DATA_MODEL_SWEEP_REACH,
+  ],
+};
+
+const RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION: RuleExplanation = {
+  rule: 'relationship/delete-behavior',
+  covers: 'what deleting a master does to its details',
+  paragraphs: [
+    'On a `master_detail` field the engine resolves every `deleteBehavior` except `restrict` — an ' +
+      'unset one included — to `cascade`: deleting the master deletes its details. Declaring the ' +
+      'value states that choice where a reader can see it: `cascade` accepts it, and `restrict` ' +
+      'refuses to delete a master that still has details.',
+    '`set_null` is not a choice here. A detail cannot outlive its master — a nulled master reference ' +
+      'would orphan it — so an authored `deleteBehavior: \'set_null\'` on a `master_detail` is ' +
+      'refused at the parse. Where children must survive their parent, the relationship is a ' +
+      '`lookup`, not a `master_detail`.',
+    DATA_MODEL_SWEEP_REACH,
+  ],
+};
+
+// ── AI agent authoring (`validate-ai-agent-authoring.ts`) ──────────────────
+
+/**
+ * The platform agent roster and its aliases (all three ids). The aliases are
+ * held to the rule's own table by its tests, which run the rule on each.
+ */
+const PLATFORM_AGENT_ROSTER =
+  'The kernel ships exactly two agents, `ask` and `build`, and the surface the user is in binds one ' +
+  '(ADR-0063 §2). Their retired spellings — `data_chat` for `ask`, `metadata_assistant` for ' +
+  '`build` — are registered one way in the alias registry at plugin init: resolution only, kept ' +
+  'for old bookmarks and persisted `agent_id`s, never separate records, and the agent catalog ' +
+  'shows each agent once under its canonical name.';
+
+const DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION: RuleExplanation = {
+  rule: 'default-agent-legacy-alias',
+  covers: 'why a retired agent alias is the wrong spelling',
+  paragraphs: [
+    PLATFORM_AGENT_ROSTER,
+    'So an aliased `defaultAgent` is not broken: it resolves, and the app gets the agent it meant. ' +
+      'What is wrong is the spelling in the artifact, and it is also the weaker pin: resolution ' +
+      'depends on the owning package\'s in-process alias registration having run, which the ' +
+      'canonical id does not. A warning for that reason, and an id of its own beside ' +
+      '`default-agent-outside-roster`, because an alias resolves and an unknown name does not.',
+  ],
+};
+
+const DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION: RuleExplanation = {
+  rule: 'default-agent-outside-roster',
+  covers: 'what an app\'s defaultAgent resolves against',
+  paragraphs: [
+    PLATFORM_AGENT_ROSTER,
+    '`app.defaultAgent` is resolved against those two names and their aliases only. An unrecognized ' +
+      'name is not rejected: it silently falls back to the platform default at runtime (ADR-0063 ' +
+      '§1), so the pin has no effect and the value drifts from what actually serves the app.',
+    'The key is a plain snake_case identifier in the schema, so any value parses, validates and ' +
+      'builds. The check is a warning rather than a schema enum on purpose: narrowing the key is a ' +
+      'breaking authoring change ADR-0063 already walked back once.',
+  ],
+};
+
+const AGENT_AUTHORING_WITHDRAWN_EXPLANATION: RuleExplanation = {
+  rule: 'agent-authoring-withdrawn',
+  covers: 'why a stack-declared agent never runs',
+  paragraphs: [
+    PLATFORM_AGENT_ROSTER,
+    'ADR-0063 §2 withdrew tenant and app-package custom agents: third parties extend the platform ' +
+      'by authoring skills. The runtime enforces it on both paths — `listAgents()` filters ' +
+      'non-platform records out of the catalog and `loadAgent()` refuses them — so a stack-authored ' +
+      'agent 404s on chat and cannot be pinned through `app.defaultAgent`: it parses, validates and ' +
+      'ships as inert metadata.',
+    'A declaration named after a platform agent — `ask`, `build`, or an alias of one — is a ' +
+      'different case: it shadows the platform\'s record, which the runtime serves for that name ' +
+      'while ignoring this one, so the declaration has no effect and drifts from the platform\'s ' +
+      'definition.',
+    'A warning, not an error: the platform\'s own packages legitimately author agent records, and ' +
+      'the rule cannot tell a platform package from an app package by reading the stack alone — the ' +
+      'runtime is what gates. Not a schema refinement either: an existing stack must keep parsing ' +
+      '(ADR-0078).',
+  ],
+};
+
+// ── View references (`lint-view-refs.ts`) ──────────────────────────────────
+
+const VIEW_REF_NAV_VIEW_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'view-ref-nav-view-missing',
+  covers: 'how a navigation viewName is resolved',
+  paragraphs: [
+    'An app navigation entry\'s `viewName` names a list view of its object, and an unresolvable name ' +
+      'does not fail: the console falls back to the object\'s default view, else its first list ' +
+      'view, and keeps the entry\'s authored label and icon. The sidebar reads correctly while ' +
+      'opening the wrong view, `os validate` and `os build` stay green, and renaming a list view ' +
+      'silently degrades every entry that points at it; the console\'s only signal is a ' +
+      'browser-console warning.',
+    'The name is matched the way the console\'s `resolveViewId` matches it, in all three ' +
+      'directions: the exact id, a short name retried as `OBJECT.NAME`, and a qualified name ' +
+      'retried with the `OBJECT.` prefix stripped. `all` is not special-cased: it resolves only ' +
+      'when the object declares it. A name that resolves to a FORM view of the object is still ' +
+      'reported, because the object\'s view switcher never offers one. The verdict quotes at most ' +
+      'three of the object\'s list views.',
+    'An error, because it fires only when this stack declared a non-empty list-view namespace for ' +
+      'the object. Skipped: an object this stack does not declare or contributes no expandable list ' +
+      'view for, an entry carrying `requiresObject` (another package provides the object), an ' +
+      'interpolated name, and an entry with `recordId` (the schema ignores `viewName` there). A view ' +
+      'saved at runtime is invisible to any author-time pass.',
+  ],
+};
+
+const VIEW_KEY_COLLISION_EXPLANATION: RuleExplanation = {
+  rule: 'view-key-collision',
+  covers: 'what a renamed view key does to its references',
+  paragraphs: [
+    'List and form views share one `OBJECT.KEY` namespace when a view container is expanded. A ' +
+      'colliding key is renamed — `OBJECT.KEY` becomes `OBJECT.KEY_2` — so the registry key stays ' +
+      'unique, and every reference to the requested name resolves to the OTHER view: a ' +
+      '`type: \'form\'` action target and a navigation `viewName` alike.',
+    'A warning, not an error: the rename alone breaks something only when the name is referenced, ' +
+      'and a reference that lands on the wrong kind of view is reported on its own, by ' +
+      '`view-ref-form-target-kind` or `view-ref-nav-view-missing`.',
+  ],
+};
+
+// ── Chart bindings (`validate-chart-bindings.ts`) ──────────────────────────
+
+/** Which chart surfaces the two ids judge, and which they leave alone (both write it out). */
+const CHART_BINDING_SURFACES =
+  'Judged on the chart surfaces the dashboard rule does not reach: a report\'s own selection ' +
+  '(`rows`, `columns`, `values`) and its chart, a list-view chart, and a dataset-bound page chart ' +
+  'component. Not judged: the react `ObjectChart` block, which is object-bound and keyed by raw ' +
+  'field names (`validate-react-page-props` judges it), and the chart of a `joined` report or of a ' +
+  'report block, which no renderer draws (their own selections are judged).';
+
+const CHART_MEASURE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'chart-measure-unknown',
+  covers: 'which chart positions bind a measure, per surface',
+  paragraphs: [
+    'Post-ADR-0021 a dataset query\'s result rows are keyed by MEASURE NAME (`sum_amount`), not by ' +
+      'the base field (`amount`). A position that names a raw field instead of a declared measure ' +
+      'still renders, and the series it feeds comes back empty.',
+    'At a QUERY position the name is a binding, and an unknown one is an error: a report\'s ' +
+      '`values` and its chart\'s `yAxis` (the embedded report chart queries `chart.xAxis` × ' +
+      '`chart.yAxis` itself), a list-view chart\'s `values`, and a page chart\'s `values`.',
+    'At a PRESENTATION position the renderer does not bind the name, so an unknown one is a ' +
+      'warning: a report `chart.series[]` entry is a per-measure display-name override, paired with ' +
+      'the derived series whose key it equals and ignored when it names no declared measure; a page ' +
+      'chart\'s `series[]` is replaced wholesale by one derived entry per selected measure; and a ' +
+      'page chart\'s `yAxis[].field` keeps its slot (the count turns on a secondary axis) and its ' +
+      'scale, while the plotted columns come from `values`.',
+    CHART_BINDING_SURFACES,
+  ],
+};
+
+const CHART_AXIS_NOT_SELECTED_EXPLANATION: RuleExplanation = {
+  rule: 'chart-axis-not-selected',
+  covers: 'which selection a chart position is measured against',
+  paragraphs: [
+    'The entry sits at a PRESENTATION position — a report `chart.series[]` override, or a page ' +
+      'chart\'s `series[]` or `yAxis[].field` — and names a measure the dataset declares but the ' +
+      'chart does not select. No series is derived for it, so the entry lands on nothing and the ' +
+      'chart drawn is unaffected. Advisory: the selection may legitimately be widened at runtime. A ' +
+      'query position is never reported: it IS the selection, or the query itself.',
+    'The selection is per surface. On a page chart it is `values`, the measure set the query asks ' +
+      'for. On a report it is the chart\'s own `chart.yAxis`: the embedded chart queries ' +
+      'exactly one dimension × one measure and derives ONE series, while `report.values` is the ' +
+      'selection of the table beneath it. So a report\'s `chart.yAxis` is never reported — a chart ' +
+      'cannot fail to select what it queries — and a `chart.series[].name` override lands only when ' +
+      'it names `chart.yAxis`. The verdict quotes at most three names of the selection.',
+    CHART_BINDING_SURFACES,
+  ],
+};
+
+// ── Dashboard header actions (`validate-dashboard-action-refs.ts`) ──────────
+
+/** Which dashboard surface the two ids judge, and which targets they leave alone (both write it out). */
+const DASHBOARD_HEADER_ACTION_SCOPE =
+  'Judged: a dashboard\'s `header.actions[]`, the one dashboard surface that draws an action ' +
+  'button, over the whole stack (a single published item cannot see the actions and pages it ' +
+  'would resolve against, so the runtime publish gate does not run it). The per-widget ' +
+  '`actionUrl`, `actionType` and `actionIcon` were retired in `@objectstack/spec` 17 — no ' +
+  'renderer ever drew a per-widget button — so the parse refuses them by name. Not judged: an ' +
+  'interpolated target (`${…}`), resolved by the renderer at click time, and a `flow` or `api` ' +
+  'target, which resolves against the automation engine or is an opaque endpoint.';
+
+const DASHBOARD_ACTION_TARGET_UNDEFINED_EXPLANATION: RuleExplanation = {
+  rule: 'dashboard-action-target-undefined',
+  covers: 'what a script or modal header-action target must name',
+  paragraphs: [
+    'A header action names its target in `actionUrl`, a free string the schema cannot check, so ' +
+      'a target defined nowhere parses and ships. The button renders, and on click it does ' +
+      'nothing (`script`) or the runtime refuses the dispatch (`modal`): a dangling reference, the ' +
+      'shape ADR-0049 rules out for a declared reference. An error, so `os validate` and ' +
+      '`os build` fail.',
+    'A `script` target must name a defined action: a `stack.actions` entry or an entry of any ' +
+      'object\'s `actions`, by `name`. A `modal` target must name a declared page (`stack.pages`), ' +
+      'and only a page: the runtime resolves a string modal target against page metadata and ' +
+      'refuses everything else, so a defined action name, a bare object name and the retired ' +
+      '`VERB_OBJECT` convention (`create_opportunity` for object `opportunity`) are all reported. ' +
+      'To open an object\'s form, use `actionType: \'form\'` with an `OBJECT.VIEW` form-view target.',
+    DASHBOARD_HEADER_ACTION_SCOPE,
+  ],
+};
+
+const DASHBOARD_ACTION_ROUTE_UNRESOLVED_EXPLANATION: RuleExplanation = {
+  rule: 'dashboard-action-route-unresolved',
+  covers: 'how a url header-action route is resolved',
+  paragraphs: [
+    'A `url` target — and a header action with no `actionType`, which the renderer treats as ' +
+      '`url` — is a relative in-app path. Every `COLLECTION/NAME` pair in it is checked, for the ' +
+      'collections `apps`, `objects`, `reports`, `dashboards`, `pages` and `views` (singular or ' +
+      'plural), and each name this stack does not register is reported on its own, so a bad app ' +
+      'name at the head of a path does not hide a bad dashboard name at its tail. A view is ' +
+      'routable by a view container\'s name or by an object\'s name (its default view).',
+    'A warning, not an error: route resolution depends on the app context, and a path may be ' +
+      'served by another installed package or by a host or console route. Skipped: an external URL ' +
+      '(`http(s)://` or `//`), a path that does not start with `/`, and an opaque route with no ' +
+      'recognised collection segment anywhere in it.',
+    DASHBOARD_HEADER_ACTION_SCOPE,
+  ],
+};
+
+// ── Empty filter shapes (`validate-empty-combinators.ts`) ──────────────────
+
+/**
+ * The identity table both ids rest on (both write it out). The rule derives
+ * its row-set words from `reduceFilterVerdict`; `validate-empty-combinators.test.ts`
+ * holds this sentence to the same reduction.
+ */
+const EMPTY_FILTER_IDENTITIES =
+  'Every backend reduces an empty shape to its boolean identity through one shared reduction ' +
+  '(`reduceFilterVerdict` in `@objectstack/spec/data`): `{ $and: [] }` and `{}` reduce to TRUE ' +
+  'and match EVERY row; `{ $or: [] }` and `{ $not: {} }` reduce to FALSE and match NO row. The ' +
+  'asymmetry is why each finding\'s fix is per shape: a generic "empty filter" reading teaches ' +
+  'the wrong fix half the time.';
+
+/**
+ * What both ids judge and what they leave alone (both write it out). The
+ * filter keys are held to `FILTER_KEYS` by `validate-empty-combinators.test.ts`.
+ */
+const EMPTY_FILTER_SCOPE =
+  'Judged: a filter literal written in the metadata, under a `filter`, `filters`, ' +
+  '`runtimeFilter`, `relatedListFilter`, `filterBy` or `lookupFilters` key anywhere in a ' +
+  'dashboard, object, view, report, dataset, page, app or flow (a CRUD node\'s filter included). ' +
+  'The runtime is unchanged — a stack that ignores the finding runs exactly as before — and a ' +
+  'filter a producer builds while serving a request never enters the metadata, so a read scope ' +
+  'whose disjuncts loop down to zero keeps failing closed. Not judged: `{ FIELD: {} }` (a field ' +
+  'with zero operators, another rule\'s refusal), a non-array `$and` / `$or` or non-object ' +
+  '`$not` operand (the schema and the drivers refuse those by name), the array filter form, and ' +
+  'an absent `filter` key, which is the canonical spelling of "no filter".';
+
+const FILTER_EMPTY_COMBINATOR_EXPLANATION: RuleExplanation = {
+  rule: 'filter-empty-combinator',
+  covers: 'what an empty combinator matches, and why it is refused',
+  paragraphs: [
+    EMPTY_FILTER_IDENTITIES,
+    'So `$and: []` constrains nothing while it reads as a filter; `$or: []` renders the surface ' +
+      'permanently empty and, on a read scope, hides every row (fail-closed by design: an empty ' +
+      'disjunction never opens a read scope to the whole table); and `$not: {}` matches NO row, ' +
+      'the opposite of the "no filter" an empty operand looks like. An error: no reading of the ' +
+      'literal behaves as written, and a literal empty combinator is not an authoring surface.',
+    EMPTY_FILTER_SCOPE,
+  ],
+};
+
+const FILTER_EMPTY_NODE_EXPLANATION: RuleExplanation = {
+  rule: 'filter-empty-node',
+  covers: 'what an empty filter node matches where it stands',
+  paragraphs: [
+    EMPTY_FILTER_IDENTITIES,
+    'An empty node is TRUE wherever it stands. As the whole filter it matches EVERY row, exactly ' +
+      'as if the key were absent, so a filter is declared and enforces nothing. As a branch of ' +
+      '`$or` it is a TRUE disjunct, which ABSORBS the disjunction, so every branch beside it is ' +
+      'dead (a compiler that dropped the branch instead would silently narrow the scope to the ' +
+      'branches that survive, which is why the runtime absorbs). As a branch of `$and` it is the ' +
+      'AND identity and contributes no condition, indistinguishable from a branch whose condition ' +
+      'was lost in an edit. An error: no reading of the literal behaves as written.',
+    EMPTY_FILTER_SCOPE,
+  ],
+};
+
+// ── List-view field references (`validate-list-view-field-refs.ts`) ────────
+
+/** Why a dotted name is judged by its head only (both ids write it out). */
+const LIST_VIEW_HEAD_ONLY =
+  'A list view declares no ADR-0021 `include`, so it compiles no joins: a dotted name in it is ' +
+  'judged by its HEAD segment, and its hops are never walked — walking them would bless ' +
+  '`owner.name` on a surface whose query doors (projection, filter and sort) all refuse a ' +
+  'dotted path by name. A head that does not resolve is `list-view-field-unknown`; a head that ' +
+  'resolves, at a position whose name reaches a query door, is `list-view-field-dotted`.';
+
+const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-field-unknown',
+  covers: 'what a dangling list-view field reference costs',
+  paragraphs: [
+    // The positions are held to `listViewWalkedPositions()` by the rule's test.
+    'Every field a list view names must be a field of its bound object: its `columns` (and a ' +
+      'column\'s `summary` and `prefix`), `filterableFields`, `hiddenFields`, `fieldOrder`, ' +
+      '`grouping`, `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
+      '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
+      '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
+      'view renders successfully with a blank, empty or wrong result, and nothing else reports the ' +
+      'miss.',
+    'An error where the miss changes what the view returns or collapses what it lays out — for ' +
+      'example, a filter key, user filter or gantt quick filter matches no record; a column is sent as the ' +
+      'projection, where the REST ingress answers `400 INVALID_FIELD`; a `kanban.groupByField` ' +
+      'collapses every card into one lane; a required date field of a `gantt`, `calendar` or ' +
+      '`timeline` leaves nothing to place; a map with no coordinate field plots no marker; a ' +
+      '`tree.parentField` flattens the tree; a `gantt.lockField` unfreezes every row and a ' +
+      '`gantt.objectField` stops every bar opening its record. A warning where one decoration ' +
+      'drops and the rest renders — an optional colour, title, tooltip or cover binding, or a stale ' +
+      '`hiddenFields` or `fieldOrder` entry, which hides or orders nothing.',
+    LIST_VIEW_HEAD_ONLY,
+    'Not judged: an object this stack does not define, an object with no readable field map (an ' +
+      'external or introspected schema), a hop through a registry-injected system column, a list ' +
+      'view bound to a provider other than `object`, and the positions other rules own: `sort` ' +
+      '(`sort-field-unknown`), `searchableFields` (`searchable-field-unknown`), the `chart` ' +
+      'bindings, action names, `conditionalFormatting` predicates and `addRecord.formView`. An ' +
+      'unresolvable `data.object` skips the whole list view, so one typo yields one finding.',
+  ],
+};
+
+const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-field-dotted',
+  covers: 'which list-view positions refuse a dotted path, and why',
+  paragraphs: [
+    LIST_VIEW_HEAD_ONLY,
+    'Only a position whose name reaches a query door is judged, each by that door\'s own verdict. ' +
+      'Projection: `columns[]` is sent as the query\'s `$select`, and both doors refuse every ' +
+      'dotted entry whatever its head (`assertProjectionHasNoDottedPaths` on the engine boundary, ' +
+      '`assertProjectionFieldsExist` at the REST ingress, both `400 INVALID_FIELD`), so the view\'s ' +
+      'FIRST fetch is refused, not rendered.',
+    'Filter: the view\'s `filter`, its `userFilters.tabs[].filter`, `filterableFields` and ' +
+      '`userFilters.fields` are judged by the head\'s class, through the classifier the door ' +
+      'itself uses (`classifyDottedFilterHead`). A relation head stores the related record\'s id, ' +
+      'not an embedded document; a virtual head is computed on read, so no driver materialises a ' +
+      'column; a scalar head stores a single value, with nothing beneath it. No backend serves such ' +
+      'a path, so the predicate could only match zero records, and the query is REFUSED ' +
+      '(`assertFilterIsMaterializable` and the REST ingress, `400 INVALID_FIELD`) rather than ' +
+      'answered with an empty list. A structured or JSON head, an array (`multiple: true`) head, a ' +
+      'file head and an unreadable head are served by the door, so they are not reported.',
+    'Not judged, because each is read client-side out of the fetched row, where a dotted path ' +
+      'walks an embedded record: `gantt.quickFilters[].field`, `gantt.tooltipFields[]` and every ' +
+      'renderer binding. `sort` keeps its own rule. Always an error: every judged position is ' +
+      'refused outright by its door.',
+  ],
+};
+
+// ── Translation bundles (`validate-translation-references.ts`, `validate-translatable-sections.ts`) ──
+
+/** How a bundle key is read at all (the two reference ids write it out). */
+const TRANSLATION_LOOKUP =
+  'The resolver never walks a bundle: it derives each key from the metadata it is rendering — an ' +
+  'object\'s field, a view\'s `name`, an option\'s stored `value` — and looks that key up. A key ' +
+  'the metadata never derives is read by nothing, and the string it was written for renders in ' +
+  'the source locale while every neighbouring label resolves, so the app looks translated and ' +
+  'the one hole reads as a styling quirk rather than a missing translation.';
+
+const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'translation-target-unknown',
+  covers: 'what each translation key may name, and why it gates',
+  paragraphs: [
+    TRANSLATION_LOOKUP,
+    'An error, not a warning: an orphan key is not inert, it is misleading. Grepping its id ' +
+      'returns a confident-looking hit in every locale — to a reviewer and to an AI author alike — ' +
+      'long after the field, view, section or navigation entry it was written for was deleted. The ' +
+      'forward half of the same parity, a declared surface with no translation, already fails, so ' +
+      'the two halves gate alike.',
+    'Under `objects.OBJECT` (an object this stack, or a sibling package of the same artifact, ' +
+      'defines): `fields.FIELD` a declared field (a system column, `_id`, `name` and `space` are ' +
+      'never reported); `_views.VIEW` a view\'s `name`, not its label; `_sections.KEY` a ' +
+      '`fieldGroups[].key`, a named form-view section or a named `record:details` section — a ' +
+      'section is translatable only through a stable name; `_tabs.TAB` a filter-preset tab that a ' +
+      'page over the object declares in `interfaceConfig.userFilters.tabs` (a list view\'s own ' +
+      '`tabs` has no renderer); `_validations.RULE` a rule in the object\'s `validations[]`, whose ' +
+      '`message` otherwise stays in its source locale beside platform refusals in the caller\'s ' +
+      'locale; `_actions.ACTION` an action of that object or a `stack.actions` entry bound to it.',
+    '`globalActions.ACTION` an object-less action: an action bound to an object is read from ' +
+      '`objects.OBJECT._actions.ACTION` and never from `globalActions`. `apps.APP` an app this ' +
+      'stack declares or contributes into, and `apps.APP.navigation.ID` a navigation item `id` it ' +
+      'declares or contributes; under an app this stack only contributes into ' +
+      '(`manifest.navigationContributions`), the contributed ids alone, because the app\'s own ' +
+      'entries are declared and translated by the package that owns it. `dashboards.DASH` a ' +
+      'dashboard, `.widgets.ID` a widget `id` on it, and `.actions.URL` a header action\'s ' +
+      '`actionUrl`, not its label.',
+    // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
+    '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
+      'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
+      'node at any depth, loop, parallel and try/catch regions included; `.screens.NODE.description` ' +
+      'a screen that authors `config.description`; `.screens.NODE.fields.FIELD` a ' +
+      '`config.fields[].name` on that screen — an OBJECT-FORM screen (`config.objectName`) declares ' +
+      'none, and its input labels live under `objects.OBJECT.fields`; `.refusals.NODE` the `id` of ' +
+      'an `end` node declaring `outcome: \'refused\'`.',
+    'Under an action entry: `params.PARAM` a declared param `name`; `outcomeMessages.OUTCOME` an ' +
+      'outcome the action\'s own `outcomeMessages` declares; `resultDialog.title`, `.description` ' +
+      'and `.acknowledge` an action that declares a `resultDialog` at all; ' +
+      '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included. A ' +
+      'bundle translates what the action declares and cannot add an outcome or a dialog.',
+    'Not judged: a platform object in the registry, and an object this stack only extends through ' +
+      '`objectExtensions[]` — the owner\'s field set is not visible from here, so the whole subtree ' +
+      'is skipped (a platform-prefixed name that no platform package, official plugin or cloud ' +
+      'runtime object registers is reported on the object key alone). `messages`, ' +
+      '`validationMessages`, `settings`, `settingsCommon` and `metadataForms` ' +
+      'are keyed by code and by the platform, with no universe to resolve against, and a misspelled ' +
+      'leaf attribute (`labl:`) is a schema-shape question.',
+  ],
+};
+
+const TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'translation-option-key-unknown',
+  covers: 'how option translations are keyed',
+  paragraphs: [
+    TRANSLATION_LOOKUP,
+    'An option translation is keyed by the option\'s stored `value` — read as text, so `1` for a ' +
+      'number value and `true` for a boolean — never by its display label and never by a variant ' +
+      'spelling (`direct_mail`, not `Direct Mail` or `direct-mail`). A key that matches an ' +
+      'option\'s label is reported with the value to rename it to; any other key with the nearest ' +
+      'declared value.',
+    'Judged on three surfaces, each against the one option list its resolver walks: an object ' +
+      'field\'s `options`; an action param\'s inline `options` (a param that references a `field` ' +
+      'and declares no inline list takes the field\'s list when the dialog renders, so its keys are ' +
+      'not judged); and a flow screen field\'s own `options`. A map under something that declares ' +
+      'no options at all is read by nothing.',
+    'A warning, where `translation-target-unknown` is an error: a mis-keyed option names ' +
+      'something real, so its fix is a rename, not a deletion.',
+  ],
+};
+
+const TRANSLATION_SECTION_NAME_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'translation-section-name-missing',
+  covers: 'why a section with no name cannot be translated',
+  paragraphs: [
+    'A section heading is translated through `objects.OBJECT._sections.NAME.label`, and every ' +
+      'renderer keys the heading off `section.name` (form, modal form and `record:details` alike), ' +
+      'so a section with a `label` and no `name` has no key a bundle can carry: its heading renders ' +
+      'the authored label in EVERY locale.',
+    'No other gate sees it. The object is translated, so every neighbouring label resolves and ' +
+      'the hole is invisible; `translation-target-unknown` has no key to report as an orphan; and ' +
+      'the i18n coverage report walks `sections[].name`, so a nameless section contributes nothing ' +
+      'to walk and coverage reads complete.',
+    'Why the renderer does not fall back to a key slugified from the label: that would fossilise ' +
+      'a second contract (`_sections.SLUG_OF_LABEL`) beside the declared one, and the slug would ' +
+      'move the day anyone edits the heading text. The defect is at the producer, so this rule is ' +
+      'where the producer hears about it.',
+    'A warning: the section is real and renders, and only its heading stays in the source locale. ' +
+      'Judged only on an object that some `stack.translations` bundle carries a node for (a ' +
+      'monolingual stack owes nobody a section name), and only on the array form of `sections`: a ' +
+      'name-keyed map supplies the name from its key, and a `fieldGroups` section is keyed by ' +
+      '`fieldGroups[].key`. Surfaces: a view container\'s `sections`, its default `form` and every ' +
+      '`listViews.*` / `formViews.*` sub-container, on stack views and on views embedded in an ' +
+      'object, and `record:details` sections anywhere in a page\'s component tree.',
+  ],
+};
 
 /**
  * Every rule explanation this package ships, keyed by rule id. `os explain
@@ -2126,6 +2744,30 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_DISPATCH_CONTRACT_MISMATCH_EXPLANATION.rule]: ACTION_DISPATCH_CONTRACT_MISMATCH_EXPLANATION,
   [COMPONENT_TYPE_UNKNOWN_EXPLANATION.rule]: COMPONENT_TYPE_UNKNOWN_EXPLANATION,
   [FILTER_PRESET_COMPARAND_EXPLANATION.rule]: FILTER_PRESET_COMPARAND_EXPLANATION,
+  [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION.rule]: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION,
+  [APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION.rule]: APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION,
+  [UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION.rule]: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION,
+  [UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION.rule]: UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION,
+  [UNIQUE_DOUBLE_DECLARATION_EXPLANATION.rule]: UNIQUE_DOUBLE_DECLARATION_EXPLANATION,
+  [RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION.rule]: RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION,
+  [ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION.rule]: ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION,
+  [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
+  [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,
+  [DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION.rule]: DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION,
+  [AGENT_AUTHORING_WITHDRAWN_EXPLANATION.rule]: AGENT_AUTHORING_WITHDRAWN_EXPLANATION,
+  [VIEW_REF_NAV_VIEW_MISSING_EXPLANATION.rule]: VIEW_REF_NAV_VIEW_MISSING_EXPLANATION,
+  [VIEW_KEY_COLLISION_EXPLANATION.rule]: VIEW_KEY_COLLISION_EXPLANATION,
+  [CHART_MEASURE_UNKNOWN_EXPLANATION.rule]: CHART_MEASURE_UNKNOWN_EXPLANATION,
+  [CHART_AXIS_NOT_SELECTED_EXPLANATION.rule]: CHART_AXIS_NOT_SELECTED_EXPLANATION,
+  [DASHBOARD_ACTION_TARGET_UNDEFINED_EXPLANATION.rule]: DASHBOARD_ACTION_TARGET_UNDEFINED_EXPLANATION,
+  [DASHBOARD_ACTION_ROUTE_UNRESOLVED_EXPLANATION.rule]: DASHBOARD_ACTION_ROUTE_UNRESOLVED_EXPLANATION,
+  [FILTER_EMPTY_COMBINATOR_EXPLANATION.rule]: FILTER_EMPTY_COMBINATOR_EXPLANATION,
+  [FILTER_EMPTY_NODE_EXPLANATION.rule]: FILTER_EMPTY_NODE_EXPLANATION,
+  [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
+  [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
+  [TRANSLATION_TARGET_UNKNOWN_EXPLANATION.rule]: TRANSLATION_TARGET_UNKNOWN_EXPLANATION,
+  [TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION.rule]: TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION,
+  [TRANSLATION_SECTION_NAME_MISSING_EXPLANATION.rule]: TRANSLATION_SECTION_NAME_MISSING_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

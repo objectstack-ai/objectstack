@@ -43,6 +43,7 @@ import {
   SysMetadataAuditObject,
 } from '@objectstack/metadata-core';
 import { createSecurityCatalogReader, resetPlatformAdminEmailMemo } from '@objectstack/core';
+import { mapDataError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { DATA_MIGRATION_FLAG_OBJECT } from '@objectstack/spec/system';
 import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
@@ -150,7 +151,10 @@ async function boot(opts: { posture?: 'single' | 'isolated'; door?: boolean; led
     ? null
     : new ObjectStackProtocolImplementation(engine as never, () => new Map(), undefined);
   const metadata = {
-    get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+    get: async (type: string, name: string) =>
+      type === 'permission'
+        ? ([...defaultPermissionSets, QA_ADMIN] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+        : engine.getSchema(name) ?? null,
     list: async (type: string) => (type === 'position' ? [] : [...defaultPermissionSets, QA_ADMIN]),
   };
   const services: Record<string, unknown> = {
@@ -246,7 +250,12 @@ describe('[ADR-0131 D3] position write-through under single — a Setup position
     expect(await b.catalogResolves('regional_lead')).toBe(true);
   });
 
-  it('a user assigned to a Setup-created position is granted exactly what the row-only position granted', async () => {
+  // [ADR-0131 D3/D4] The resolver reads a position's sets from its definition's
+  // `permissionSets`, never from the junction: the binding Setup makes as a
+  // `sys_position_permission_set` row grants nothing, with the write-through or
+  // without it. Setup moves onto the definition with C9 and the write-through's
+  // retirement; until then this is the measured gap the release note names.
+  it('a user assigned to a Setup-created position is granted the same with or without the write-through — and a junction binding grants nothing', async () => {
     const grantsThrough = async (door: boolean) => {
       const b = await boot({ door });
       await b.engine.insert('sys_user', {
@@ -276,7 +285,26 @@ describe('[ADR-0131 D3] position write-through under single — a Setup position
     expect(before.defined).toBe(0);
     expect(after.defined).toBe(1);
     expect(after.grants).toEqual(before.grants);
-    expect(after.grants).toMatchObject({ positions: expect.arrayContaining(['report_reader']), permissions: ['pw_reports'] });
+    expect(after.grants).toMatchObject({ positions: expect.arrayContaining(['report_reader']) });
+    expect((after.grants as any).permissions).not.toContain('pw_reports');
+  });
+
+  // [ADR-0131 D3/D4] `permissionSets` has no row column: a Setup edit of the
+  // row saves the definition again, and must carry the binding the metadata
+  // door declared rather than clear it.
+  it('a row edit keeps the `permissionSets` the stored definition names, and a rename carries them to the new name', async () => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'night_lead', label: 'Night lead' });
+    await (b.protocol as any).saveMetaItem({
+      type: 'position', name: 'night_lead', item: { name: 'night_lead', label: 'Night lead', permissionSets: ['night_tools'] },
+    });
+    expect((await b.envRows('night_lead')).map((r) => r.body.permissionSets)).toEqual([['night_tools']]);
+    await patch(b, created.id, { label: 'Night supervisor' });
+    expect((await b.envRows('night_lead')).map((r) => r.body)).toEqual([
+      { name: 'night_lead', label: 'Night supervisor', delegatable: false, permissionSets: ['night_tools'] },
+    ]);
+    await patch(b, created.id, { name: 'night_supervisor' });
+    expect((await b.envRows('night_supervisor')).map((r) => r.body.permissionSets)).toEqual([['night_tools']]);
   });
 
   it('an edit keeps the row and the definition agreeing; a deactivation and is_default stay on the row', async () => {
@@ -595,6 +623,80 @@ describe('[C2 stage S10, ADR-0048 addendum N.2/N.3] one namespace — a create o
   });
 });
 
+describe('[ruling Q (a)] one holder per position name per deployment — a create or a rename into a name the environment catalog holds is refused', () => {
+  /**
+   * The wire envelope the REST door answers (`mapDataError`) — the one a
+   * second row of a name in ONE organization already answers, pinned as the
+   * control below.
+   */
+  const DUPLICATE = { code: 'UNIQUE_VIOLATION', status: 409 };
+  const httpEnvelope = (e: unknown) => {
+    const r = mapDataError(e, 'sys_position');
+    return { code: (r.body as { code?: unknown }).code, status: r.status };
+  };
+  const OTHER_ORG = 'org_pw_other';
+  /** An administrator of a SECOND organization of the same `single` deployment. */
+  const otherAdmin = (b: Booted) => ({ ...b.admin, tenantId: OTHER_ORG, accessible_org_ids: [OTHER_ORG] });
+  const bootTwo = async () => {
+    const b = await boot();
+    await b.engine.insert('sys_organization', { id: OTHER_ORG, name: 'PW Other', slug: 'pw-other' }, { context: SYS } as any);
+    return b;
+  };
+
+  it("a second organization's create of a name the first organization's position holds is refused 409; the first definition is untouched", async () => {
+    const b = await bootTwo();
+    await create(b, { name: 'shift_lead', label: 'Shift lead', description: 'First holder' });
+    const refusal = await refusalOf(b.engine.insert('sys_position', { name: 'shift_lead', label: 'Theirs' }, { context: otherAdmin(b) } as any));
+    expect(httpEnvelope(refusal)).toEqual(DUPLICATE);
+    // One dialect: a second holder in the SAME organization answers the same.
+    expect(httpEnvelope(await refusalOf(create(b, { name: 'shift_lead', label: 'Again' })))).toEqual(DUPLICATE);
+    expect((await b.rows('shift_lead')).map((r) => r.label)).toEqual(['Shift lead']);
+    expect((await b.envRows('shift_lead')).map((r) => r.body)).toEqual([
+      { name: 'shift_lead', label: 'Shift lead', description: 'First holder', delegatable: false },
+    ]);
+  });
+
+  it("a create of a name saved only through the metadata door is refused 409; the definition keeps its permissionSets", async () => {
+    const b = await boot();
+    await b.protocol.saveMetaItem({
+      type: 'position', name: 'door_lead', item: { name: 'door_lead', label: 'Door lead', permissionSets: ['viewer_readonly'] },
+    });
+    const refusal = await refusalOf(create(b, { name: 'door_lead', label: 'Setup copy' }));
+    expect(httpEnvelope(refusal)).toEqual(DUPLICATE);
+    expect(await b.rows('door_lead')).toEqual([]);
+    expect((await b.envRows('door_lead')).map((r) => r.body)).toEqual([
+      { name: 'door_lead', label: 'Door lead', permissionSets: ['viewer_readonly'] },
+    ]);
+  });
+
+  it('a rename into a name the environment catalog holds is refused 409; the row keeps its old name', async () => {
+    const b = await bootTwo();
+    await create(b, { name: 'dock_chief', label: 'Dock chief' });
+    const mine: any = await b.engine.insert('sys_position', { name: 'yard_chief', label: 'Yard chief' }, { context: otherAdmin(b) } as any);
+    const refusal = await refusalOf(b.engine.update('sys_position', { id: mine.id, name: 'dock_chief' }, { context: otherAdmin(b) } as any));
+    expect(httpEnvelope(refusal)).toEqual(DUPLICATE);
+    expect((await b.rows('yard_chief')).map((r) => r.id)).toEqual([mine.id]);
+    expect((await b.envRows('dock_chief')).map((r) => r.body.label)).toEqual(['Dock chief']);
+  });
+
+  it('control: a name no definition holds is created, and an edit that keeps a held name is no second holder', async () => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'free_lead', label: 'Free lead' });
+    await patch(b, created.id, { label: 'Free lead (relabelled)' });
+    expect((await b.envRows('free_lead')).map((r) => r.body.label)).toEqual(['Free lead (relabelled)']);
+  });
+
+  it('a catalog that cannot be read refuses the create — accepting would merge blind', async () => {
+    const b = await boot();
+    const unreadable = Object.assign(new Error('catalog unreadable'), { code: 'AUTHZ_STORE_UNAVAILABLE', status: 503 });
+    vi.spyOn((b.engine as any).registry, 'getItem').mockImplementation(() => { throw unreadable; });
+    const refusal: any = await refusalOf(create(b, { name: 'blind_lead', label: 'Blind lead' }));
+    expect(refusal).not.toBeNull();
+    vi.restoreAllMocks();
+    expect(await b.rows('blind_lead')).toEqual([]);
+  });
+});
+
 describe('[ADR-0131 D3] Q3 = A — a package cannot register a name a Setup position holds in the environment ledger', () => {
   it('the registry item seam refuses it 422 NAMESPACE_CONFLICT, naming both holders', async () => {
     const b = await boot();
@@ -617,6 +719,21 @@ describe('[ADR-0131 D3] controls — what the write-through leaves exactly as it
     expect((await b.rows('plant_lead')).map((r) => r.organization_id)).toEqual([ORG]);
     expect(saves).not.toHaveBeenCalled();
     expect(await b.envRows('plant_lead')).toEqual([]);
+  });
+
+  // [ADR-0131 D3, #15196 Q3 = A] The promotion path the release note names:
+  // under a wall an organization's Setup position is a row with no definition,
+  // so it grants nothing; the metadata door takes an environment definition
+  // under the same name, and that definition is what the catalog then serves.
+  it('a walled posture: an organization\'s row-only position is promoted by an environment definition saved at the metadata door', async () => {
+    const b = await boot({ posture: 'isolated' });
+    await create(b, { name: 'plant_auditor', label: 'Plant auditor' });
+    expect(await b.catalogResolves('plant_auditor')).toBe(false);
+    await (b.protocol as any).saveMetaItem({
+      type: 'position', name: 'plant_auditor', item: { name: 'plant_auditor', label: 'Plant auditor', permissionSets: ['plant_tools'] },
+    });
+    expect((await b.envRows('plant_auditor')).map((r) => r.body.permissionSets)).toEqual([['plant_tools']]);
+    expect(await b.catalogResolves('plant_auditor')).toBe(true);
   });
 
   it('a system write is never translated', async () => {

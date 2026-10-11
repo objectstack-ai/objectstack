@@ -22,9 +22,10 @@
 import {
   isGrantActive,
   isGrantExpired,
-  isRowActive,
   derivePosture as deriveAdminPosture,
+  readDisabledCatalogNames,
   resolveUserAuthzGrants,
+  securityCatalogReaderOf,
 } from '@objectstack/core';
 import {
   crossFieldClassRefusalCarriedBy,
@@ -66,7 +67,7 @@ import {
   unresolvedPostureExplainDetail,
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
-import { grantSetNameOf, readGrantSetRows } from './grant-permission-set-name.js';
+import { grantSetNameOf } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -450,7 +451,7 @@ function untilOfGrantRow(r: any): string | undefined {
  * `contributors[].state`): a grant row the principal HOLDS that the resolver
  * fail-closed DROPPED, with the closed reason enumeration naming why —
  * `expired` (ADR-0091 D2 validity window) or `deactivated` (ADR-0049 / #8613
- * catalogue `active` switch). `until` is the window bound, present only for
+ * switch, read from the `sys_metadata_activation` ledger). `until` is the window bound, present only for
  * the expired reason. One array, one reason discriminant — deliberately NOT a
  * sibling array per cause (maintainer ruling 2026-08-18).
  */
@@ -477,20 +478,25 @@ export interface DroppedGrant {
  *    "held until … — expired" instead of silently omitting a grant the admin
  *    knows they granted. This is "why did access DISAPPEAR", and only a dropped
  *    row can answer it.
- *  - **deactivated** (commit 42b05af89) — a row whose CATALOGUE entry
- *    (`sys_permission_set.active` / `sys_position.active`) is switched off
- *    (ADR-0049 / #8613), so the grant stopped resolving for everyone holding
- *    it. Deactivation is an incident-response control with no date on the
+ *  - **deactivated** (commit 42b05af89) — a row whose position or permission
+ *    set is switched off (ADR-0049 / #8613), so the grant stopped resolving
+ *    for everyone holding it. The switch is the activation ledger's
+ *    (`sys_metadata_activation`, ADR-0126 §3 regime C as ADR-0131 D6 amends
+ *    it), asked through the resolver's own read (`readDisabledCatalogNames`),
+ *    so explain and enforce cannot disagree; a catalog row's `active` column
+ *    is not read. Deactivation is an incident-response control with no date on the
  *    user's own grant row, so without this state the set is simply ABSENT and
  *    explain answers like the grant never existed — the exact silence the
  *    contributor-attribution feature exists to prevent.
  *  - **delegated** — the `delegated_from` provenance of a row that DID resolve,
  *    so a position can be attributed "via delegation from X, until Y".
  *
- * All verdicts come from the SAME shared predicate modules the resolver uses
- * (`isGrantActive` / `isGrantExpired` for the ADR-0091 window, `isRowActive`
- * for the ADR-0049 switch — all `@objectstack/core`) — one implementation of
- * each rule, consulted twice, never re-derived here.
+ * All verdicts come from the SAME shared reads the resolver uses
+ * (`isGrantActive` / `isGrantExpired` for the ADR-0091 window,
+ * `readDisabledCatalogNames` for the ADR-0049 switch, the security catalog
+ * (`securityCatalogReaderOf`) for whether a set exists — all
+ * `@objectstack/core`) — one implementation of each rule, consulted twice,
+ * never re-derived here.
  *
  * A row that is BOTH expired and deactivated reports `expired`: the window
  * verdict is judged on the user's own grant row, the same order the resolver
@@ -500,9 +506,8 @@ export interface DroppedGrant {
  * re-read for the grants this pass already walks — `sys_user_position` rows
  * and direct `sys_user_permission_set` grants. A deactivated position held via
  * role projection, or a deactivated SET reached only through an active
- * position's `sys_position_permission_set` linkage, is not re-derived here —
- * that would replicate the resolver's aggregation, which is the design this
- * pass exists to avoid.
+ * position's `permissionSets`, is not re-derived here — that would replicate
+ * the resolver's aggregation, which is the design this pass exists to avoid.
  */
 async function collectGrantProvenance(
   ql: any,
@@ -535,21 +540,14 @@ async function collectGrantProvenance(
         droppedGrants.push({ kind: 'position', name: p, state: 'expired', until: untilOfGrantRow(r) });
       }
     }
-    // [commit 42b05af89 / ADR-0049] A held position whose `sys_position` catalogue row is
-    // explicitly deactivated was dropped by the resolver (step 6a) — report it
-    // instead of letting it vanish. A name with no row has no flag to read and
-    // is untouched, matching the resolver.
+    // [commit 42b05af89 / ADR-0049] A held position the activation ledger
+    // switched off was dropped by the resolver (step 6a) — report it instead of
+    // letting it vanish. The resolver's own ledger read, so a name with no
+    // ledger row is in effect here exactly as it is there.
     if (heldPositionNames.size > 0) {
-      const posRows = await ql.find('sys_position', {
-        where: { name: { $in: Array.from(heldPositionNames) } },
-        limit: heldPositionNames.size,
-        context: SYSTEM_CTX,
-      });
-      for (const row of Array.isArray(posRows) ? posRows : []) {
-        const n = String((row as any)?.name ?? '');
-        if (n && heldPositionNames.has(n) && !isRowActive(row)) {
-          droppedGrants.push({ kind: 'position', name: n, state: 'deactivated' });
-        }
+      const disabled = await readDisabledCatalogNames(ql, Array.from(heldPositionNames), []);
+      for (const n of heldPositionNames) {
+        if (disabled.positions.has(n)) droppedGrants.push({ kind: 'position', name: n, state: 'deactivated' });
       }
     }
   } catch { /* table unavailable → no provenance to report */ }
@@ -564,27 +562,30 @@ async function collectGrantProvenance(
     // deactivated — the one remaining reason the resolver drops them (step 6b).
     const activeRows = grantRows.filter((g: any) => isGrantActive(g, nowMs));
     if (expiredRows.length > 0 || activeRows.length > 0) {
-      // [commit 42b05af89] One `sys_permission_set` read serves both reasons:
-      // the set row an expired grant names, and the ADR-0049 `active` flag of
-      // the one a held grant names. [ADR-0131 D4] Read by the grant's NAME —
-      // its own organization's row, else the organization-less one
-      // ({@link readGrantSetRows}); deactivation is still the row's flag.
-      const setRowOf = await readGrantSetRows(ql, [...expiredRows, ...activeRows]);
+      // [ADR-0131 D3/D4] A grant's set is the security catalog's definition of
+      // the name it carries — the one the resolver grants (step 6). A name the
+      // catalog does not hold resolves nothing either way, so it is reported
+      // neither as expired nor as deactivated: there is no set to lose.
+      const catalog = securityCatalogReaderOf(ql);
+      const held = new Set<string>();
+      for (const g of [...expiredRows, ...activeRows]) {
+        const n = grantSetNameOf(g) as string;
+        if (!held.has(n) && catalog && (await catalog.resolve('permission', n))) held.add(n);
+      }
       for (const g of expiredRows) {
-        const s = setRowOf(g);
-        const n = (s as any)?.name;
-        if (n) droppedGrants.push({ kind: 'permission_set', name: String(n), state: 'expired', until: untilOfGrantRow(g) });
+        const n = grantSetNameOf(g) as string;
+        if (held.has(n)) droppedGrants.push({ kind: 'permission_set', name: n, state: 'expired', until: untilOfGrantRow(g) });
       }
-      const deactivatedNames = new Set<string>();
-      for (const g of activeRows) {
-        const s = setRowOf(g);
-        const n = (s as any)?.name;
-        // Dedupe: several grant rows can point at one deactivated set; the
-        // catalogue-row fact is reported once.
-        if (n && !isRowActive(s)) deactivatedNames.add(String(n));
-      }
-      for (const n of deactivatedNames) {
-        droppedGrants.push({ kind: 'permission_set', name: n, state: 'deactivated' });
+      // [commit 42b05af89 / ADR-0049] Whether a held set is switched off is the
+      // activation ledger's answer, read once for every name a window-active
+      // grant carries — the resolver's own read. Several grant rows can name
+      // one deactivated set; the fact is reported once.
+      const activeNames = [...new Set(activeRows.map((g: any) => grantSetNameOf(g) as string))].filter((n) => held.has(n));
+      if (activeNames.length > 0) {
+        const disabled = await readDisabledCatalogNames(ql, [], activeNames);
+        for (const n of activeNames) {
+          if (disabled.permissions.has(n)) droppedGrants.push({ kind: 'permission_set', name: n, state: 'deactivated' });
+        }
       }
     }
   } catch { /* table unavailable → no provenance to report */ }

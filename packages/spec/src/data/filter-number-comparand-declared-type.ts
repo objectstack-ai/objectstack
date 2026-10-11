@@ -250,6 +250,7 @@
  */
 
 import type { FilterCondition } from './filter.zod';
+import type { Field } from './field.zod';
 import {
   BOOLEAN_VALUE_TYPES,
   CALENDAR_DATE_TYPES,
@@ -676,7 +677,7 @@ export interface NumberComparandDoorFixtureField {
   /** `formula` — a CEL expression, present so the field is a legal declaration. */
   readonly expression?: string;
   /** `formula` — the declared return type under test, or absent for the deferred row. */
-  readonly returnType?: 'number' | 'text' | 'boolean' | 'date';
+  readonly returnType?: NonNullable<Field['returnType']>;
   /** `summary` — a roll-up declaration, present so the field is a legal declaration. */
   readonly summaryOperations?: { readonly object: string; readonly field: string; readonly function: 'count' };
   /** Single-choice types (`select` / `radio`) — one option, present so the field is a legal declaration. */
@@ -729,7 +730,7 @@ export const NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS: readonly NumberComparandDoorF
     name: `f_formula_${returnType}`,
     type: 'formula',
     expression: '1',
-    returnType: returnType as 'number' | 'text' | 'boolean' | 'date',
+    returnType: returnType as NonNullable<Field['returnType']>,
   })),
   { name: 'f_formula_untyped', type: 'formula', expression: '1' },
 ];

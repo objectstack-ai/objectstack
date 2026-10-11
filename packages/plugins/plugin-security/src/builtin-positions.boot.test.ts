@@ -252,7 +252,10 @@ async function boot(scenario: Scenario): Promise<Booted> {
   };
 
   const metadata = {
-    get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+    get: async (type: string, name: string) =>
+      type === 'position' || type === 'permission'
+        ? ((await metadata.list(type)) as Array<{ name?: string }>).find((d) => d.name === name) ?? null
+        : engine.getSchema(name) ?? null,
     list: async (type: string) => {
       if (type === 'position') return DECLARED_POSITIONS.map((p) => ({ ...p }));
       if (type === 'permission') return [...defaultPermissionSets, QA_ADMIN, APP_DEFAULT];
@@ -394,14 +397,20 @@ async function tenantPositionWrites(engine: ObjectQL): Promise<Record<string, Wr
   const everyone = await own('everyone');
   const platformAdmin = await own('platform_admin');
   return {
-    'assign a position no catalog row carries': await outcome(engine.insert(
+    'assign a position the security catalog does not hold': await outcome(engine.insert(
       'sys_user_position', { user_id: 'usr_member', position: 'zz_dangling' }, { context: tenant } as any,
     )),
-    'control: create a position': await outcome(engine.insert(
+    'control: create a position row': await outcome(engine.insert(
       'sys_position', { name: 'zz_tenant_post', label: 'Tenant Post' }, { context: tenant } as any,
     )),
-    'control: assign it': await outcome(engine.insert(
+    // [ADR-0131 D3/D4] This harness mounts no metadata door, so the row gets
+    // no definition: a position only a row carries grants nothing, and an
+    // assignment naming it is refused like a dangling name.
+    'assign the row-only position': await outcome(engine.insert(
       'sys_user_position', { user_id: 'usr_member', position: 'zz_tenant_post' }, { context: tenant } as any,
+    )),
+    'control: assign a stack-declared position (no row needed)': await outcome(engine.insert(
+      'sys_user_position', { user_id: 'usr_member', position: DECLARED_POSITIONS[0].name }, { context: tenant } as any,
     )),
     'delete the everyone row': await outcome(engine.delete('sys_position', { where: { id: everyone?.id }, context: tenant } as any)),
     'relabel the platform_admin row': await outcome(engine.update(
@@ -472,7 +481,7 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
     if (scenario.organizationAtBoot) {
       it('grants every principal what it was granted before the declarations', async () => {
         const { engine } = booted.get(name)!;
-        expect(await grantsByPrincipal(engine, scenario.posture)).toEqual(GRANT_GOLDEN[scenario.posture]);
+        expect(await grantsByPrincipal(engine, scenario.posture)).toEqual(grantGoldenFor(scenario));
       });
 
       it('still refuses a tenant a dangling position name, and deleting or relabelling a built-in row', async () => {
@@ -484,21 +493,27 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
 }
 
 /**
- * The tenant position writes — the same in both postures. The dangling name is
+ * The tenant position writes — the same in both postures. A name the security
+ * catalog does not hold, a dangling one or a row with no definition alike, is
  * the position catalog refusal's envelope (`reference_not_found` at
- * `position`); the two built-in rows are refused on their `platform`
- * provenance.
+ * `position`); a stack-declared position is assigned with no row; the two
+ * built-in rows are refused on their `platform` provenance.
  */
 const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
-  'assign a position no catalog row carries': {
+  'assign a position the security catalog does not hold': {
     ok: false,
     code: 'VALIDATION_FAILED',
     fields: ['position:reference_not_found'],
   },
-  'control: create a position': {
+  'control: create a position row': {
     ok: true,
   },
-  'control: assign it': {
+  'assign the row-only position': {
+    ok: false,
+    code: 'VALIDATION_FAILED',
+    fields: ['position:reference_not_found'],
+  },
+  'control: assign a stack-declared position (no row needed)': {
     ok: true,
   },
   'delete the everyone row': {
@@ -700,12 +715,20 @@ const DOOR_AUTHORED_ROWS: Record<'single' | 'walled', { census: string[]; ledger
 };
 
 /**
- * Recorded before the declarations (module doc). `field_default` on every
- * human principal is the `everyone` binding; `single` also binds the
- * platform's `member_default` (its organization-less catalog holds that set),
- * while the walled organization's catalog holds only its own copy of the app's
- * set. The organization administrator's set is the walled `organization_admin`
+ * Recorded before the declarations (module doc). `field_default` and
+ * `member_default` on every human principal are the `everyone` anchor's sets.
+ * The organization administrator's set is the walled `organization_admin`
  * against the wall-less `organization_admin_no_bypass` (ADR-0105 D4).
+ *
+ * ⚠️ One recorded move ([ADR-0131] D3/D4, C3 stage 1): `everyone`'s sets are
+ * the baseline its definition names — the same in every posture. Before, they
+ * were junction rows the boot wrote per organization, and the walled
+ * organization's catalog held only its own copy of the app's set, so walled
+ * `everyone` never bound the organization-less `member_default`. It now
+ * names it under a wall too. `member_default` carries no system or tab
+ * permission, and enforcement applied it to every human as the additive
+ * baseline already (ADR-0090 D5), so the walled envelope gains its name and
+ * nothing it grants.
  */
 const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
   single: {
@@ -771,7 +794,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'member@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['field_default', 'viewer_readonly'],
+      permissions: ['field_default', 'member_default', 'viewer_readonly'],
       positions: ['everyone', 'org_member'],
       posture: 'MEMBER',
       systemPermissions: [],
@@ -780,7 +803,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'orgadmin@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['field_default', 'organization_admin'],
+      permissions: ['field_default', 'member_default', 'organization_admin'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
       systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
@@ -789,7 +812,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: [],
       email: 'admin@eq.example',
       org_user_ids: ['usr_admin', 'usr_member', 'usr_orgadmin'],
-      permissions: ['admin_full_access', 'field_default'],
+      permissions: ['admin_full_access', 'field_default', 'member_default'],
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
@@ -805,3 +828,26 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
     },
   },
 };
+
+/** The `everyone` anchor's sets in {@link GRANT_GOLDEN} — the deployment's baseline. */
+const BASELINE_SETS = ['field_default', 'member_default'];
+
+/**
+ * {@link GRANT_GOLDEN} for a scenario. Under {@link SHADOWING_DEFINITIONS} a
+ * stored package-less `everyone` definition answers the catalog read ahead of
+ * the built-in (the registry's bare-slot precedence, ADR-0005) and names no
+ * set, so the envelope carries no baseline name — enforcement still applies the
+ * baseline additively (ADR-0090 D5). A v18 boot refuses such a stored
+ * definition under a packaged name (`os migrate security-catalog-overlays`).
+ */
+function grantGoldenFor(scenario: Scenario): unknown {
+  const golden = GRANT_GOLDEN[scenario.posture] as Record<string, { permissions: string[] }>;
+  if (!scenario.shadowedBuiltins) return golden;
+  return Object.fromEntries(
+    Object.entries(golden).map(([who, grants]) => [
+      who,
+      who === 'agent' ? grants : { ...grants, permissions: grants.permissions.filter((p) => !BASELINE_SETS.includes(p)) },
+    ]),
+  );
+}
+

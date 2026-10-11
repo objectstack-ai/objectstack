@@ -45,6 +45,7 @@ import { describe, it, expect } from 'vitest';
 import { ADMIN_STANDING_SURFACE, adminStandingTables } from './admin-standing-surface.js';
 import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveAuthzContext } from './resolve-authz-context.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 /** table -> every column name the resolver touched on it. */
 type Observation = Map<string, Set<string>>;
@@ -79,7 +80,7 @@ function makeRecordingQl(tables: Record<string, Array<Record<string, unknown>>>,
   const raw = (row: Record<string, unknown>, key: string): unknown =>
     key in row ? row[key] : row[camelOf(key)];
 
-  return {
+  return bindCatalogFromTables({
     async find(object: string, opts: { where?: Record<string, unknown>; limit?: number } = {}) {
       if (!seen.has(object)) seen.set(object, new Set<string>());
       const where = opts?.where ?? {};
@@ -116,7 +117,7 @@ function makeRecordingQl(tables: Record<string, Array<Record<string, unknown>>>,
           }),
       );
     },
-  };
+  }, tables);
 }
 
 const headers = () => new Headers();
@@ -211,8 +212,8 @@ const VARIANTS: Record<
   },
 
   // Standing taken away every way the resolver knows: the set switched off
-  // (ADR-0049), the grant scoped to an organization, the window closed
-  // (ADR-0091), the position deactivated, and the JSON blobs stored as strings.
+  // (ADR-0049, in the activation ledger), the grant scoped to an organization,
+  // the window closed (ADR-0091), and the JSON blobs stored as strings.
   'standing revoked every way': {
     org: 'org_1',
     tables: {
@@ -258,6 +259,11 @@ const VARIANTS: Record<
           tab_permissions: JSON.stringify({ setup: 'visible' }),
         },
         { id: 'pst_2', name: 'contributor_set', active: true },
+      ],
+      // [ADR-0131 D3, ADR-0126 §4] The switch the resolver honours: the set row's
+      // own `active` above is no longer read.
+      sys_metadata_activation: [
+        { id: 'act_1', metadata_type: 'permission', name: 'admin_full_access', package_id: null, active: false },
       ],
     },
   },

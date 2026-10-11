@@ -594,7 +594,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       currencyConfig: {
         label: "Currency Config",
-        helpText: "Which currency this field is in. Unset: dynamic mode. The stored value is a bare number in either mode."
+        helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in either mode."
       },
       "currencyConfig.currencyMode": {
         label: "Currency Mode",
@@ -744,7 +744,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Return Type",
-        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression."
+        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset)."
       },
       summaryOperations: {
         label: "Summary Operations",
@@ -2351,7 +2351,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     sections: {
       position: {
         label: "Position",
-        description: "A position is a flat, assignable bundle of permission sets (e.g. sales_rep, sales_manager). Capability lives on permission sets; visibility depth lives on the business-unit tree."
+        description: "A position is a flat, assignable bundle of permission sets (e.g. sales_rep, sales_manager): it names the sets it distributes. Capability lives on permission sets; visibility depth lives on the business-unit tree."
       }
     },
     fields: {
@@ -2364,6 +2364,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       description: {
         label: "Description"
+      },
+      permissionSets: {
+        label: "Permission Sets",
+        helpText: "Permission sets this position distributes, by name (snake_case)."
       },
       delegatable: {
         label: "Delegatable",
