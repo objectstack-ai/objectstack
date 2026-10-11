@@ -18,7 +18,7 @@
 import { validateActionParams, type ActionSession, type ResolvedActionParam } from '@objectstack/spec/ui';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
-import { EngineQueryOptionsSchema } from '@objectstack/spec/data';
+import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
@@ -30,7 +30,12 @@ import {
     type AIActionConfirmation,
     type ActionConfirmationRequiredDetails,
 } from '@objectstack/spec/contracts';
-import { checkApiExposure } from './api-exposure.js';
+import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from './api-exposure.js';
+// [#22823] The ONE walk every door that hands a caller's filter to the engine
+// takes to find its nested-relation conditions and each one's target — the data
+// door's and the MCP stdio bridge's, imported rather than re-walked so this door
+// cannot disagree with them about which conditions a filter holds.
+import { relationConditionSites } from '@objectstack/core';
 // [#9446] The ONE #9378 status table. Imported rather than re-read here: this
 // door's blanket `FLOW_FAILED` was the second of three readings of one engine
 // result, and a second definition of the rule is what let the doors diverge.
@@ -145,6 +150,11 @@ export interface ActionExecutionDeps {
  * engine's live registry first, then the metadata service. `undefined` when
  * neither answers — callers FAIL CLOSED on that (echo no record), because an
  * unjudged record is exactly the one that may carry a stored credential.
+ *
+ * [#22823] It is also the read {@link refuseUnservedRelationTargets} takes, for
+ * the filtered object's field map and each condition target's `enable` block:
+ * the engine's own registry first is the schema the engine's relation lowering
+ * reads. That caller falls OPEN on `undefined`, as the exposure gate does.
  */
 export async function resolveWriteResponseSchema(
     deps: ActionExecutionDeps,
@@ -166,6 +176,94 @@ export async function resolveWriteResponseSchema(
     } catch {
         return undefined;
     }
+}
+
+/**
+ * [#22823] The runtime action a NESTED-RELATION condition's TARGET is judged as
+ * by this door's exposure gate: `query`, which the spec's derivation
+ * (`DATA_ACTION_TO_API_OPERATION`) maps to `list`. A condition is a predicate
+ * over the whole target — the engine runs `find(target, { where: condition })`
+ * bounded by a match cap, not by ids the caller holds — which is the read the
+ * target's own filtered query performs. The data door judges the same target as
+ * `list` (its own `RELATION_CONDITION_TARGET_OPERATION`, `@objectstack/metadata-protocol`),
+ * and so does the MCP stdio bridge (`GATED_ACTIONS.query`).
+ */
+const RELATION_CONDITION_TARGET_ACTION = 'query';
+/** The canonical operation that action derives to, named in the refusal. */
+const RELATION_CONDITION_TARGET_OPERATION = DATA_ACTION_TO_API_OPERATION[RELATION_CONDITION_TARGET_ACTION];
+
+/**
+ * [#22823] Census row 10 of #22661. `callData` hands a caller's `where` to the
+ * ObjectQL ENGINE on two arms: the `query`/`find` fallback that serves when no
+ * protocol service resolves, and the `aggregate` arm, which never takes the
+ * protocol. The engine lowers each NESTED-RELATION condition
+ * (`{ <lookup>: { <field of the related object>: … } }`) by reading the related
+ * object as the caller (`ObjectQL.lowerRelationConditions`) and keeping the
+ * rows whose related record matched, so the condition is a predicate over an
+ * object nobody addressed. The exposure gate at the top of `callData` judges
+ * only the ADDRESSED object.
+ *
+ * So each condition's TARGET is asked the same gate the addressed object is
+ * asked ({@link checkApiExposure}, for {@link RELATION_CONDITION_TARGET_ACTION}),
+ * before the engine is called, and a target the gate does not serve REFUSES the
+ * call. Refused, not withheld: dropping the condition would widen the result.
+ * The conditions are found by the one walk the data door
+ * (`refuseUnservedRelationTarget`, #22737) and the MCP stdio bridge
+ * (`enforceRelationTargetExposure`, #22777) take, `relationConditionSites` from
+ * `@objectstack/core`, and the refusal is the data door's: the protocol path
+ * this fallback stands in for answers the same condition `404
+ * OBJECT_API_DISABLED` / `405 OBJECT_API_METHOD_NOT_ALLOWED`, and one
+ * `callData` must not give two answers depending on whether the deployment
+ * registered the protocol slot (the #5138 rule this file already keeps).
+ *
+ * Callers skip it for a system context, exactly as they skip the addressed
+ * gate: these flags govern API exposure, not the engine's own reads. A schema
+ * that cannot be resolved finds no condition (the filtered object) or serves
+ * (a target), the gate's own fail-open.
+ */
+async function refuseUnservedRelationTargets(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    engine: unknown,
+    object: string,
+    where: unknown,
+    scopeId?: string,
+): Promise<void> {
+    if (where == null || typeof where !== 'object') return;
+    const schema = await resolveWriteResponseSchema(deps, requestContext, engine, object, scopeId);
+    const fields = (schema as { fields?: Record<string, any> } | undefined)?.fields;
+    for (const site of relationConditionSites(fields, where)) {
+        const target = await resolveWriteResponseSchema(deps, requestContext, engine, site.target, scopeId);
+        const gate = checkApiExposure(target as ObjectApiDef | undefined, RELATION_CONDITION_TARGET_ACTION);
+        if (!gate.allowed) throw unservedRelationTargetError(site.target, `where.${site.field}`, gate);
+    }
+}
+
+/**
+ * [#22823] The data door's refusal of an unserved nested-relation condition
+ * target, field for field (`refuseUnservedRelationTarget`): `code` and `status`
+ * by the gate's verdict, the TARGET as `object` (the route's object is not the
+ * one switched off), the condition's position as `param`, and the effective
+ * operation set as `allowed` on a 405.
+ */
+function unservedRelationTargetError(target: string, param: string, gate: ApiExposureDecision): Error {
+    const consequence = `, so the condition on it at '${param}' was not evaluated and the query was not run. `
+        + 'Filter on the lookup\'s stored id instead, or remove the condition.';
+    const disabled = gate.status === 404;
+    const err: any = new Error(disabled
+        ? `Object '${target}' is not exposed via the API${consequence}`
+        : `API operation '${RELATION_CONDITION_TARGET_OPERATION}' is not allowed on object '${target}'${consequence}`);
+    if (disabled) {
+        err.code = 'OBJECT_API_DISABLED';
+        err.status = 404;
+    } else {
+        err.code = 'OBJECT_API_METHOD_NOT_ALLOWED';
+        err.status = 405;
+        err.allowed = gate.allowedOperations ?? [];
+    }
+    err.object = target;
+    err.param = param;
+    return err;
 }
 
 /** The engine for a schema lookup, or `undefined` — a lookup failure is judged by the caller's fail-closed branch. */
@@ -390,6 +488,12 @@ export async function callData(deps: ActionExecutionDeps,
                         `normalization this path serves only canonical QueryAST keys (${FALLBACK_QUERY_KEYS.join(', ')}).`,
                 };
             }
+            // [#22823] …and each nested-relation condition's TARGET, before the
+            // engine reads it — the protocol path asks the same of the same
+            // sites (`refuseUnservedRelationTarget`).
+            if (!executionContext?.isSystem) {
+                await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId);
+            }
             let all = await ql.find(params.object, findOpts(bag));
             if (!Array.isArray(all) && all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
@@ -416,6 +520,14 @@ export async function callData(deps: ActionExecutionDeps,
         const engine = (await deps.getObjectQL(requestContext, scopeId))
             ?? await deps.resolveService(requestContext, 'objectql', scopeId).catch(() => null);
         if (engine && typeof engine.aggregate === 'function') {
+            // [#22823] This arm takes no protocol, so it is the engine's door on
+            // every assembly: each nested-relation condition's TARGET in `where`
+            // is asked before the engine aggregates, as the query fallback asks
+            // it (the engine lowers relation conditions in `where` only, never
+            // in an aggregation's own `filter`).
+            if (!executionContext?.isSystem) {
+                await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
+            }
             const rows = await engine.aggregate(
                 params.object,
                 {
