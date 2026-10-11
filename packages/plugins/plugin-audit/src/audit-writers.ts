@@ -496,6 +496,10 @@ function referenceTargetForSummary(field: any): string {
   return typeof target === 'string' ? target.trim() : '';
 }
 
+/** [#22738] What `objectName` declares: `getSchema()` on the engine. A throw is no answer. */
+type DeclarationReader = (objectName: string) => { enable?: unknown } | null | undefined;
+type WarnSink = { warn?: (message: string) => void };
+
 /**
  * [#22738] May an activity summary carry a title read from `target`, the object
  * a tracked reference points at? Asked of the spec's one exposure decision
@@ -508,11 +512,7 @@ function referenceTargetForSummary(field: any): string {
  * that cannot be read withholds too (fail-closed, at `warn`). Only rows written
  * from now on change; a written row is a snapshot and is never rewritten.
  */
-function servesSummaryTitleTarget(
-  target: string,
-  readDeclaration: (objectName: string) => { enable?: unknown } | null | undefined,
-  logger?: { warn?: (message: string) => void },
-): boolean {
+function servesSummaryTitleTarget(target: string, readDeclaration: DeclarationReader, logger?: WarnSink): boolean {
   let enable: EnableLike | null | undefined;
   try {
     enable = readDeclaration(target)?.enable as EnableLike | null | undefined;
