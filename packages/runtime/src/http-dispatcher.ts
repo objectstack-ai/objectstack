@@ -44,6 +44,7 @@ import { createPackagesDomain, handlePackagesRequest } from './domains/packages.
 import { createAutomationDomain, handleAutomationRequest } from './domains/automation.js';
 import { createAuthDomain, handleAuthRequest } from './domains/auth.js';
 import { createApprovalsActDomain, APPROVALS_ACT_ROUTE } from './domains/approvals.js';
+import { createWebhooksRedeliverDomain } from './domains/webhooks.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
 import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
@@ -851,6 +852,11 @@ export class HttpDispatcher {
         // ruling A, segment 2): exactly `/approvals/act`, forwarded to the
         // `approvals` slot's `handleActionPage`. See `./domains/approvals.ts`.
         this.domainRegistry.register(createApprovalsActDomain(this.domainDeps));
+        // The webhook redeliver door for a kernel with no raw app (#22755,
+        // segment 2 of #22564's stage 2; ruling A on #22438): exactly
+        // `POST /webhooks/redeliver`, forwarded to the `webhooks` slot's
+        // `handleRedeliver`, resolved per request. See `./domains/webhooks.ts`.
+        this.domainRegistry.register(createWebhooksRedeliverDomain(this.domainDeps));
         this.domainRegistry.register(createAiDomain(this.domainDeps));
         this.domainRegistry.register(createActionsDomain(this.domainDeps));
         for (const route of createMcpDomains(this.domainDeps)) this.domainRegistry.register(route);

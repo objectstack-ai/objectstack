@@ -8,9 +8,11 @@
  *
  * A value slot is a config position whose authored value BECOMES a value: the
  * expression ledger's `value` role (`assignment.assignments.*`,
- * `create_record.fields.*`, `update_record.fields.*`, and the three maps a
- * node hands to a callee — `subflow.input.*`, `map.input.*`,
- * `script.inputs.*` — `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
+ * `create_record.fields.*`, `update_record.fields.*`, the three maps a node
+ * hands to a callee — `subflow.input.*`, `map.input.*`, `script.inputs.*` —
+ * and a `screen`'s three positions that hand a value to the client —
+ * `defaults.*`, `fields[].defaultValue`, `recordId` —
+ * `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
  * `assignment` shapes the executor still reads (the
  * `assignments: [{ variable, value }]` array and the bare
  * `{ <variable>: <value> }` config). Until this retirement every string
@@ -115,6 +117,32 @@
  * reaches the build doors through {@link flowNodeValueTemplateRefusals}; the
  * executor's contract parse, which judges a value with no position, names the
  * remedy without it.
+ *
+ * ## A screen's prefill and record id — evaluated before the screen is served
+ *
+ * Three value slots hand their value to the CLIENT: an object form's
+ * `defaults` (its fields' prefill), a flat field's `defaultValue`, and an
+ * object form's `recordId` (the record `edit` mode opens). The `screen`
+ * executor evaluates each envelope before the screen goes on the wire, so the
+ * client receives the value, never the envelope. Where a whole token resolved
+ * to nothing, the template served NOTHING there, and each position answers
+ * the guarded form's `null` its own way, so the refusal at a top-level value
+ * adds the screen sentence (`SCREEN_VALUE_SLOTS`, keyed by the ledger entry):
+ *
+ *  - `defaults.<field>`: the object form seeded a field the prefill left out
+ *    from the object's declared `defaultValue`, and takes a `null` prefill as
+ *    a value — it opens the field blank over that default. So: write the
+ *    default in the guard's `null` branch to keep it.
+ *  - `fields[i].defaultValue`: the screen now carries `null` where it carried
+ *    nothing, which a client seeds the field with and submits back.
+ *  - `recordId`: it must evaluate to the record's id, a non-blank string; the
+ *    executor refuses anything else at the screen, `null` included, where the
+ *    template served the screen with no record id (an `edit` form then opens
+ *    empty and cannot save). So: route around a screen whose record may be
+ *    absent rather than guarding the id.
+ *
+ * A `$User` path that never resolved served nothing in every run, and the
+ * sentence says leaving the value out keeps exactly that.
  *
  * ## The token grammar is the interpolator's
  *
@@ -491,9 +519,9 @@ const CALLEE_INPUT_SLOTS: Readonly<Record<string, Callee>> = {
  */
 function calleeSentence(callee: Callee, mapKey: string, key: string, token: Token): string | undefined {
   const flow = callee === 'child-flow' ? 'the child flow' : callee === 'item-flow' ? 'each item\'s child flow' : undefined;
-  const neverResolved = token.kind === 'user' && !isRunUserIdToken(token.inner);
-  const handsNull = token.kind === 'path' || token.kind === 'expression' || (token.kind === 'user' && !neverResolved);
-  if (!handsNull && !neverResolved) return undefined;
+  const absent = absentCaseOf(token);
+  if (absent === undefined) return undefined;
+  const neverResolved = absent === 'never-resolved';
   if (flow === undefined) {
     return neverResolved
       ? `\`${mapKey}.${key}\` is the function's \`input.${key}\`, which the template handed \`undefined\` in every run: `
@@ -508,6 +536,88 @@ function calleeSentence(callee: Callee, mapKey: string, key: string, token: Toke
       + `\`${key}\` from its \`defaultValue\`; the guarded form hands \`null\`, a supplied value, which wins over that `
       + 'default. To keep the default, write it in the guard\'s `null` branch; leave the key out of '
       + `\`${mapKey}\` only where the value is never meant to be supplied.`;
+}
+
+/**
+ * What a refused whole token's remedy changes where the value was ABSENT —
+ * the case a callee's input and a screen's value slots each answer their own
+ * way — or `undefined` where the remedy changes nothing there: a date macro
+ * (never absent), braces that are neither a path nor an expression.
+ *
+ *  - `'null'`: the template wrote nothing for a token that resolved to
+ *    nothing, and the remedy's guarded form writes `null` — a path, an
+ *    expression, the run user's id;
+ *  - `'never-resolved'`: a `$User` path other than the id, which wrote
+ *    nothing in every run.
+ */
+function absentCaseOf(token: Token): 'null' | 'never-resolved' | undefined {
+  if (token.kind === 'user') return isRunUserIdToken(token.inner) ? 'null' : 'never-resolved';
+  return token.kind === 'path' || token.kind === 'expression' ? 'null' : undefined;
+}
+
+/**
+ * Which of a `screen`'s value slots a ledger entry is — keyed by the entry
+ * (`<nodeType> <path>`), like {@link CALLEE_INPUT_SLOTS}, so the sentence
+ * follows the ledger's declaration (see the module docblock, "A screen's
+ * prefill and record id").
+ */
+type ScreenSlot = 'form-default' | 'field-default' | 'record-id';
+
+const SCREEN_VALUE_SLOTS: Readonly<Record<string, ScreenSlot>> = {
+  'screen defaults.*': 'form-default',
+  'screen fields[].defaultValue': 'field-default',
+  'screen recordId': 'record-id',
+};
+
+/**
+ * The screen sentence for a refused TOP-LEVEL value of one of a `screen`'s
+ * value slots, located at `at` (`defaults.account`, `fields[0].defaultValue`,
+ * `recordId`) — what the client is served where the template served nothing —
+ * or `undefined` where the remedy changes nothing there (text with holes is a
+ * string; see {@link absentCaseOf}).
+ *
+ * Measured through the engine (`screen-value-slots.test.ts` in
+ * `service-automation`): an unresolved whole token served nothing (the key
+ * left off the wire); a guarded envelope's `null` is served as `null`; a
+ * `recordId` that evaluates to anything but a non-blank string fails the run
+ * at the screen. And at objectui's pinned console: an object form seeds a
+ * field a prefill leaves out from the object's declared `defaultValue` and
+ * keeps a `null` prefill as a value; a flat field's `defaultValue` seeds the
+ * field and is submitted back; an `edit` form with no `recordId` opens with
+ * nothing read and refuses to save.
+ */
+function screenSentence(slot: ScreenSlot, at: string, token: Token): string | undefined {
+  const absent = absentCaseOf(token);
+  if (absent === undefined) return undefined;
+  if (slot === 'record-id') {
+    return absent === 'never-resolved'
+      ? '`recordId` names the record an `edit` form opens, and the template served this screen with no record id in '
+        + 'every run, so the form opened with no record and could not save: compute the id of the record it should '
+        + 'open.'
+      : '`recordId` names the record an `edit` form opens, so the envelope must evaluate to that record\'s id, a '
+        + 'non-blank string: anything else — the guarded form\'s `null` included — fails the run at this screen, '
+        + 'where the template served it with no record id and the `edit` form opened with no record and could not '
+        + 'save. Where the record may be absent, route around the screen with a `decision` on the value rather '
+        + 'than guarding the id.';
+  }
+  if (slot === 'form-default') {
+    const field = at.slice('defaults.'.length);
+    return absent === 'never-resolved'
+      ? `\`${at}\` prefills the object form's \`${field}\` field, which the template prefilled with nothing in every `
+        + 'run, so the form seeded it from the object\'s declared `defaultValue`: leaving the key out of `defaults` '
+        + 'keeps exactly that.'
+      : `\`${at}\` prefills the object form's \`${field}\` field. Where the template prefilled nothing, the form `
+        + 'seeded that field from the object\'s declared `defaultValue`; the guarded form prefills `null`, which the '
+        + 'form keeps as a value and opens the field blank over that default. To keep the default, write it in the '
+        + 'guard\'s `null` branch; leave the key out of `defaults` only where the field is never meant to be '
+        + 'prefilled.';
+  }
+  return absent === 'never-resolved'
+    ? `\`${at}\` prefills this screen field, which the template prefilled with nothing in every run: leaving `
+      + '`defaultValue` out keeps exactly that.'
+    : `\`${at}\` prefills this screen field. Where the template prefilled nothing, the guarded form prefills `
+      + '`null`, a value the field is seeded with and that is submitted back where the field held none. To prefill '
+      + 'a value of your own when the value is absent, write it in the guard\'s `null` branch.';
 }
 
 function joinPath(prefix: string, inner: readonly (string | number)[]): string {
@@ -535,7 +645,9 @@ function joinPath(prefix: string, inner: readonly (string | number)[]): string {
  * At a top-level value of a map the node hands to a callee (`subflow.input`,
  * `map.input`, `script.inputs`), a remedy that names a guard or a run-user
  * read ends with the callee sentence: what the callee is handed instead of
- * nothing (see the module docblock).
+ * nothing (see the module docblock). At a top-level value of a `screen`'s value
+ * slots (`defaults.*`, `fields[].defaultValue`, `recordId`) it ends with the
+ * screen sentence: what the client is served instead of nothing.
  */
 export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown): FlowNodeValueTemplateRefusal[] {
   const out: FlowNodeValueTemplateRefusal[] = [];
@@ -553,18 +665,25 @@ export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown)
     }
   };
   for (const found of resolveFlowNodeValueSlots(nodeType, config)) {
-    const receiver = CALLEE_INPUT_SLOTS[`${found.entry.nodeType} ${found.entry.path}`];
-    // The map's own key (`input.<key>`) — the entry's path ends in its `*`.
+    const entryKey = `${found.entry.nodeType} ${found.entry.path}`;
+    const receiver = CALLEE_INPUT_SLOTS[entryKey];
+    const screenSlot = SCREEN_VALUE_SLOTS[entryKey];
+    // The map's own key (`input.<key>`) — a callee entry's path ends in its `*`.
     const mapKey = found.entry.path.slice(0, -2);
     const key = found.path.slice(found.entry.path.length - 1);
-    const callee = receiver === undefined
+    const sentenceFor = receiver !== undefined
+      ? (whole: Token): string | undefined => calleeSentence(receiver, mapKey, key, whole)
+      : screenSlot !== undefined
+        ? (whole: Token): string | undefined => screenSentence(screenSlot, found.path, whole)
+        : undefined;
+    const sentence = sentenceFor === undefined
       ? undefined
       : (refusal: ValueSlotTemplateRefusal): string | undefined => {
         if (refusal.path.length > 0) return undefined;
         const whole = wholeTokenOf(refusal.source, tokensOf(refusal.source));
-        return whole === undefined ? undefined : calleeSentence(receiver, mapKey, key, whole);
+        return whole === undefined ? undefined : sentenceFor(whole);
       };
-    judge(found.path, found.entry.label, found.value, false, callee);
+    judge(found.path, found.entry.label, found.value, false, sentence);
   }
   if (nodeType === 'assignment' && config !== null && typeof config === 'object' && !Array.isArray(config)) {
     const raw = (config as Record<string, unknown>).assignments;

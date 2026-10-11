@@ -33,6 +33,20 @@ export default defineConfig({
         find: /^@objectstack\/plugin-approvals$/,
         replacement: path.resolve(__dirname, '../../plugins/plugin-approvals/src/index.ts'),
       },
+      // `hono-webhooks-redeliver.conformance.test.ts` boots the REAL
+      // plugin-webhooks on both of its doors — the self-hosted raw-app mount
+      // and the `handleRedeliver` member behind the dispatcher domain — over
+      // the REAL messaging service and outbox, so its verdict about either is
+      // about this checkout's source, not the last `dist` of either package.
+      // Both entries are anchored regexes, so no subpath is swallowed.
+      {
+        find: /^@objectstack\/plugin-webhooks$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-webhooks/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/service-messaging$/,
+        replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts'),
+      },
     ],
   },
   test: {

@@ -1014,12 +1014,13 @@ export interface ISecurityService {
   describeDelegableScope(callerContext?: SecurityContext): Promise<DelegableScope>;
 
   /**
-   * List install-time audience-binding suggestions (packages propose an
-   * audience anchor; a tenant admin confirms or dismisses). Re-syncs before
-   * reading and reports what that sync changed.
+   * List install-time audience-binding suggestions (a package proposes its
+   * `isDefault` set for every signed-in member; a `manage_metadata` holder
+   * decides once for the whole deployment). Re-syncs before reading and
+   * reports what that sync changed.
    *
-   * Administrative: implementations gate this on tenant-admin and throw
-   * otherwise.
+   * Administrative: implementations gate this on `manage_metadata` — under a
+   * walled tenancy posture, on the platform operator — and throw otherwise.
    */
   listAudienceBindingSuggestions(
     callerContext?: SecurityContext,
@@ -1027,16 +1028,23 @@ export interface ISecurityService {
   ): Promise<{ suggestions: AudienceBindingSuggestion[]; synced: AudienceBindingSuggestionSync }>;
 
   /**
-   * Confirm a pending suggestion — writes the binding under the anchor and
-   * delegated-admin gates. Throws when the suggestion is unknown or no longer
-   * pending. `bindingCreated` is `false` when the binding already existed.
+   * Confirm a pending suggestion — writes the binding: the acceptance is
+   * recorded once for the deployment and the `everyone` anchor's definition is
+   * re-derived to carry the set. Gated like the list; refuses a set with a bit
+   * the anchor forbids. Throws when the suggestion is unknown or no longer
+   * pending. `bindingCreated` is `false` when the definition already named the
+   * set.
    */
   confirmAudienceBindingSuggestion(
     callerContext: SecurityContext,
     id: string,
   ): Promise<{ suggestion: AudienceBindingSuggestion; bindingCreated: boolean }>;
 
-  /** Dismiss a pending suggestion. Throws when it is unknown or not pending. */
+  /**
+   * Dismiss a pending suggestion, or revoke an accepted one (the `everyone`
+   * definition is re-derived without the set). Gated like the list. Throws
+   * when it is unknown or neither pending nor accepted.
+   */
   dismissAudienceBindingSuggestion(
     callerContext: SecurityContext,
     id: string,
