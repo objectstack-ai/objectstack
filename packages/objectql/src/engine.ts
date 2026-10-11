@@ -4682,27 +4682,20 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [#22782] Run `write` inside a unit of work when, and only when, its
-   * `after*` dispatch can ABORT and no unit is open yet.
+   * [#22782] Run `write` inside a unit of work when its `after*` dispatch can
+   * ABORT and no unit is open, so the abort rolls back what `HookSchema.onError`
+   * says it does: the row and every `ctx.api` write the chain made. "Can abort"
+   * is a metadata-bound hook (`meta` — the only entries with a declared
+   * `onError`) on `event` for `object`, blocking (not `async`), `onError`
+   * `abort` (the default), automations not skipped. Hook count and order are
+   * untouched (#7413); only the boundary around them moves.
    *
-   * `HookSchema.onError` says `abort` rolls the transaction back. The three
-   * paths {@link DISPATCHABLE_HOOK_EVENTS} names open one; a plain write opened
-   * none, so a throwing `afterInsert` refused the caller while the row, and
-   * every `ctx.api` write the chain made before it, stayed stored. The unit is
-   * opened for exactly the case that needs it: a metadata-bound hook (`meta`,
-   * the only entries carrying a declared `onError`) on `event` for `object`
-   * that is blocking (not `async`) and whose `onError` is `abort` (the
-   * default), with automations not skipped. Hook count and order are untouched
-   * (#7413); only the boundary around them moves.
-   *
-   * No unit — today's path — when one is already open (the ambient store or an
-   * explicitly threaded handle: the caller's unit is the one that rolls back),
-   * when `object` is not on the default driver (`transaction()` covers that
-   * driver alone, so the object's own write would be refused), or when that
-   * driver declares no transactions (ADR-0119 D1; asking would only warn).
-   *
-   * ⚠️ `SummaryRecomputeError` is the one failure that says "the records WERE
-   * written", so it is rethrown AFTER the commit, never through the rollback.
+   * No unit — the pre-#22782 path — when one is open (ambient or threaded: the
+   * caller's unit decides), when `object` is off the default driver
+   * (`transaction()` covers that one alone and would refuse the write), or when
+   * that driver has no transactions (ADR-0119 D1; asking would only warn).
+   * `SummaryRecomputeError` means "the records WERE written": it is rethrown
+   * after the commit, never through the rollback.
    */
   private async inAfterAbortUnit<T>(
     event: 'afterInsert' | 'afterUpdate' | 'afterDelete',
@@ -19527,11 +19520,9 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       // Run the callback inside the ambient transaction store so internal
       // queries during writes reuse this transaction's connection (ADR-0034).
-      // [#22782] The entry is CLOSED once the callback settles, before the
-      // commit: work it started and did not await (an `async: true` hook)
-      // inherits this store, and finding the handle there it ran on a finished
-      // transaction ("Transaction query already complete") and was lost. Closed,
-      // it runs on its own connection, as it would outside any unit.
+      // [#22782] CLOSED once the callback settles, before the commit: work it
+      // started and did not await (an `async: true` hook) inherits this store,
+      // ran on the finished handle and lost its write. Now it runs unenrolled.
       const result = await this.txStore.run(ambientEntry, () => callback(trxCtx, { owned: true }))
         .finally(() => { ambientEntry.transaction = undefined; ambientEntry.scope = undefined; });
       if (drv.commit) await drv.commit(trx);
