@@ -2146,7 +2146,12 @@ describe('ApprovalService — the unstaffed arm (#22725)', () => {
     await svc.openNodeRequest(empty('opp_empty'), CTX);
     const mine = await svc.openNodeRequest(staffed('opp_mine', 'nobody'), CTX) as any;
 
+    const slateScans = () => engine._finds.filter(f => f.object === 'sys_approval_request'
+      && Array.isArray(f.options?.fields) && f.options.fields.includes('pending_approvers')).length;
+    const before = slateScans();
     expect(await read({ status: 'pending', unstaffed: true }, MEMBER)).toMatchObject({ ids: [], total: 0 });
+    // A caller who may override nothing is answered without the arm's scan.
+    expect(slateScans()).toBe(before);
     // Beside the member's own identities, the arm leaves their queue exactly as
     // `approverId` alone answers it.
     const withFlag = await read({ status: 'pending', approverId: ['nobody'], unstaffed: true }, MEMBER);
