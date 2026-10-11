@@ -329,11 +329,14 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
 
   it('under a walled posture, an organization-authored position has no catalog home: listed by name and organization; the organization\'s built-in copies are not', async () => {
     const b = await boot({ posture: 'isolated' });
-    // The organizations' own copies of the built-ins, which the walled
-    // catalog seeds when an organization is created.
-    const seeded = (await b.engine.find('sys_position', { where: { name: 'everyone' }, context: SYS })) as any[];
-    expect(seeded.map((r) => r.organization_id).sort(), 'PRECONDITION: each organization holds its built-in copies')
-      .toEqual([ORG, OTHER_ORG]);
+    // The organizations' own copies of the built-ins, as an existing database
+    // holds them: the retired built-in seeder wrote them per organization, and
+    // since ADR-0131 D2 no boot writes them (stage 6a).
+    await insertRows(b, 'sys_position', [
+      { id: 'pos_everyone_own', name: 'everyone', label: 'Everyone', managed_by: 'platform', organization_id: ORG },
+      { id: 'pos_everyone_other', name: 'everyone', label: 'Everyone', managed_by: 'platform', organization_id: OTHER_ORG },
+      { id: 'pos_org_member_own', name: 'org_member', label: 'Organization Member', managed_by: 'platform', organization_id: ORG },
+    ]);
     await insertRows(b, 'sys_position', [
       { id: 'pos_regional_own', name: 'regional_lead', label: 'Regional lead', organization_id: ORG },
       { id: 'pos_regional_other', name: 'regional_lead', label: 'Regional lead', organization_id: OTHER_ORG },
