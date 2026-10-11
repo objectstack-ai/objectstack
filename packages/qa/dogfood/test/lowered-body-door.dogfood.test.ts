@@ -157,7 +157,7 @@ describe('the divergence: a handler that passes in-process and refuses once lowe
     expect(ok.status).toBeLessThan(300);
     const refused = await lowered.apiAs(loweredToken, 'POST', '/data/lbd_stash_note', { name: 'beta' });
     expect(refused.status).toBe(500);
-    expect(((await refused.json()) as { error?: { code?: unknown } }).error?.code).toBe('INTERNAL_ERROR');
+    expect(await refused.json()).toMatchObject({ code: 'INTERNAL_ERROR' });
   });
 });
 
@@ -173,12 +173,16 @@ describe('the refusal envelope: a declared refusal, as each path answers it', ()
     expect(await lowered.rows('lbd_refuse_note')).toEqual([]);
   });
 
-  it('over REST, both paths answer the declared envelope', async () => {
+  it('over REST, both paths answer the declared envelope, the same body on the wire', async () => {
+    const bodies: unknown[] = [];
     for (const [stack, token] of [[source, sourceToken], [lowered, loweredToken]] as const) {
       const res = await stack.apiAs(token, 'POST', '/data/lbd_refuse_note', { name: 'ab' });
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { error?: { code?: unknown } }).error?.code).toBe('VALIDATION_FAILED');
+      const body = await res.json();
+      expect(body).toMatchObject({ code: 'VALIDATION_FAILED' });
+      bodies.push(body);
     }
+    expect(bodies[1]).toEqual(bodies[0]);
   });
 });
 
