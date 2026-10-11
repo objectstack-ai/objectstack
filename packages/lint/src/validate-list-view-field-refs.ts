@@ -542,22 +542,20 @@ export function listViewWalkedPositions(): string[] {
   ];
 }
 
-/** Filter positions on a list view, as `[key path from the view, where suffix]`. */
-const SILENT_EMPTY =
-  'Nothing resolves the name at render time: the view renders successfully with a blank, ' +
-  'empty or wrong result, and no gate reports the miss.';
-
 /**
  * [#14282] The message and hint for a dotted reference at a position whose
  * name reaches a query door, or `undefined` when the door itself leaves the
  * path unjudged.
  *
  * The wording deliberately borrows the DOORS' own sentences ("no backend
- * serves the path, so the predicate can only match zero records";
- * "denormalise the value onto '<object>' … and name that"). One vocabulary
- * across the doors is a stated value of both refusals — an author refused at
- * author time and one refused at request time must not be sent two different
- * ways about one string.
+ * serves the path"; "denormalise the value onto '<object>' … and name that").
+ * One vocabulary across the doors is a stated value of both refusals — an
+ * author refused at author time and one refused at request time must not be
+ * sent two different ways about one string.
+ *
+ * [#22161] The message is one verdict sentence; which positions reach which
+ * door, how each door judges a head, and what is left unjudged are
+ * `os explain list-view-field-dotted`.
  */
 function describeDottedRefusal(
   axis: Exclude<DottedAxis, undefined>,
@@ -576,11 +574,8 @@ function describeDottedRefusal(
     // `f.includes('.')` and refuses every dotted entry, whatever the head is.
     return {
       message:
-        `${subject} "${written}" is a dotted path. A list view declares no ADR-0021 \`include\`, ` +
-        `so it compiles no joins, and the columns are sent as the query's projection — where a ` +
-        `dotted entry is refused by name: \`assertProjectionHasNoDottedPaths\` on the engine ` +
-        `boundary and \`assertProjectionFieldsExist\` at the REST ingress, both ` +
-        `\`400 INVALID_FIELD\`. The view's FIRST fetch is refused, not rendered.`,
+        `${subject} "${written}" is a dotted path, so the query projection refuses it ` +
+        `(\`assertProjectionHasNoDottedPaths\`) and the view's first fetch answers 400 INVALID_FIELD`,
       hint:
         `Name a whole column of "${object}" — "${head}" — and read into its value in the client, ` +
         `or read the related record with \`expand\`. ${denormalise}`,
@@ -593,19 +588,14 @@ function describeDottedRefusal(
   const type = meta?.type ? `\`${meta.type}\`` : 'an unreadable';
   const because =
     headClass === 'relation'
-      ? `whose head "${head}" is a ${type} field on object "${object}" — it stores the related ` +
-        "record's id, not an embedded document, and a list view compiles no joins to traverse it"
+      ? "it stores the related record's id"
       : headClass === 'virtual'
-        ? `whose head "${head}" is a ${type} field on object "${object}" — its value is computed ` +
-          'on read, so no driver materialises a column for the path to reach into'
-        : `whose head "${head}" is a ${type} field on object "${object}" that stores a single ` +
-          'scalar value — there is nothing beneath it for a path to reach';
+        ? 'computed on read, never stored'
+        : 'it stores a single scalar value';
   return {
     message:
-      `${subject} "${written}" is a dotted path ${because}. No backend serves the path, so the ` +
-      'predicate can only match zero records: the query is REFUSED rather than answered with an ' +
-      'empty list (`assertFilterIsMaterializable` and the REST ingress both answer ' +
-      '`400 INVALID_FIELD`).',
+      `${subject} "${written}" is a dotted path whose head "${head}" is a ${type} field on ` +
+      `"${object}" (${because}), so no backend serves it and the query answers 400 INVALID_FIELD`,
     hint: `Filter on a column of "${object}" itself. ${denormalise}`,
   };
 }
@@ -686,13 +676,12 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
       rule: LIST_VIEW_FIELD_UNKNOWN,
       where,
       path,
+      // [#22161] The shared field-path verdict, plus which written reference
+      // it judged when that was dotted. What the miss costs at each position,
+      // and why only the head is judged, are `os explain list-view-field-unknown`.
       message:
         account.message
-        + (dotted
-          ? ` (the head segment of the written reference "${written}"; a list view compiles `
-            + 'no joins, so only the head can name a column here)'
-          : '')
-        + ` ${SILENT_EMPTY}`,
+        + (dotted ? ` (the head of "${written}": a list view compiles no joins)` : ''),
       hint:
         `Name a field that exists on "${object}", or drop the entry. ${account.detail}`,
     });

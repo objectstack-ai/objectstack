@@ -224,22 +224,19 @@ interface Ctx {
 }
 
 function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ctx): void {
-  const spelling = key === '$not' ? '`$not: {}`' : `\`${key}: []\``;
-
+  // [#22161] One verdict sentence per shape, its row set still derived from
+  // the shared reduction. The identity table, what a read scope does with
+  // `$or: []`, and why a literal is not an authoring surface are
+  // `os explain filter-empty-combinator`.
   const message =
     key === '$and'
-      ? '`$and: []` is a conjunction of ZERO conditions. Every backend reduces an empty combinator to ' +
-        'its boolean identity, so it ' +
-        `${rows(VERDICT_OF.$and)} — the key is authored, and it constrains nothing, so this surface ` +
-        'reads as filtered and is not.'
+      ? '`$and: []` is a conjunction of ZERO conditions, which every backend reduces to its ' +
+        `identity, so it ${rows(VERDICT_OF.$and)}: this surface reads as filtered and is not`
       : key === '$or'
-        ? '`$or: []` is a disjunction of ZERO branches. Every backend reduces an empty combinator to ' +
-          'its boolean identity, so it ' +
-          `${rows(VERDICT_OF.$or)}: this surface renders permanently empty, and on a read scope it hides ` +
-          'every row (fail-closed by design: an empty disjunction never opens a read scope to the whole ' +
-          'table).'
-        : '`$not: {}` negates an EMPTY node. An empty node is TRUE and NOT TRUE is FALSE, so it ' +
-          `${rows(VERDICT_OF.$not)} — the opposite of the "no filter" an empty operand looks like.`;
+        ? '`$or: []` is a disjunction of ZERO branches, which every backend reduces to its ' +
+          `identity, so it ${rows(VERDICT_OF.$or)}: this surface renders permanently empty`
+        : '`$not: {}` negates an EMPTY node, which is TRUE, so it ' +
+          `${rows(VERDICT_OF.$not)}: the opposite of the "no filter" an empty operand looks like`;
 
   const hint =
     key === '$and'
@@ -256,7 +253,7 @@ function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ct
     rule: FILTER_EMPTY_COMBINATOR,
     where: ctx.where,
     path,
-    message: `${message} A literal ${spelling} is not an authoring surface.`,
+    message,
     hint:
       `${hint} A PROGRAMMATIC producer that loops to zero operands keeps the runtime identity ` +
       'unchanged — this rule judges only what is written in the metadata.',
@@ -264,6 +261,8 @@ function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ct
 }
 
 function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): void {
+  // [#22161] One verdict sentence per position; the identity table and the
+  // per-position reasoning are `os explain filter-empty-node`.
   if (position === 'root') {
     ctx.out.push({
       severity: 'error',
@@ -271,10 +270,9 @@ function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): voi
       where: ctx.where,
       path,
       message:
-        'An EMPTY filter node (`{}`) is authored here. Every backend reduces an empty node to its boolean ' +
-        'identity, so it is ' +
-        `TRUE — it ${rows(VERDICT_OF.node)}, exactly as if the key were absent — so a filter is declared ` +
-        'and enforces nothing.',
+        'An EMPTY filter node (`{}`) is TRUE, so it ' +
+        `${rows(VERDICT_OF.node)} exactly as if the key were absent: a filter is declared and enforces ` +
+        'nothing',
       hint:
         `${OMIT_THE_KEY} If you meant to constrain something, write the condition into the node. ` +
         `${MATCH_NONE_SPELLING}`,
@@ -289,9 +287,8 @@ function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): voi
       where: ctx.where,
       path,
       message:
-        'An EMPTY branch (`{}`) of a `$or`. An empty node is TRUE, and one TRUE disjunct ABSORBS the ' +
-        `whole disjunction (\`{ $or: [{ status: 'open' }, {}] }\` ${rows(VERDICT_OF.orWithEmptyBranch)}), ` +
-        'so every branch you wrote beside it is dead.',
+        'An EMPTY branch (`{}`) of a `$or` is TRUE, and one TRUE disjunct ABSORBS the disjunction ' +
+        `(it ${rows(VERDICT_OF.orWithEmptyBranch)}), so every branch written beside it is dead`,
       hint:
         'Delete the empty branch — the `$or` then means what it looks like. If it was meant to carry a ' +
         'condition, write it. (A compiler that DROPPED the empty branch instead would silently NARROW ' +
@@ -306,8 +303,8 @@ function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): voi
     where: ctx.where,
     path,
     message:
-      'An EMPTY branch (`{}`) of a `$and`. An empty node is TRUE — the AND identity — so the branch ' +
-      'contributes no condition and the conjunction means whatever its other branches mean.',
+      'An EMPTY branch (`{}`) of a `$and` is TRUE, the AND identity, so it contributes no condition ' +
+      'and the conjunction means whatever its other branches mean',
     hint:
       'Delete the empty branch, or write the condition it was meant to carry. A branch that constrains ' +
       'nothing is indistinguishable from one whose condition was lost in an edit.',

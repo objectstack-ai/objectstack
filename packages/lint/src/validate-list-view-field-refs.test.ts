@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import {
-  validateListViewFieldRefs,
+  validateListViewFieldRefs as validateListViewFieldRefsUnrecorded,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   listViewWalkedPositions,
@@ -21,6 +21,20 @@ import {
 } from './validate-list-view-field-refs.js';
 import { SORT_FIELD_UNKNOWN } from './validate-sortable-fields.js';
 import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the two ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateListViewFieldRefs: typeof validateListViewFieldRefsUnrecorded = (...args) => {
+  const findings = validateListViewFieldRefsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -645,7 +659,7 @@ describe('#14282 — a dotted key the FILTER door refuses, and the ones it serve
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('views[0].list.filter[0].field');
     expect(findings[0].message).toContain('lookup');
-    expect(findings[0].message).toContain('can only match zero records');
+    expect(findings[0].message).toContain('so no backend serves it');
   });
 
   it('a virtual head is refused — nothing materialises a column to reach into', () => {
@@ -993,5 +1007,108 @@ describe('#14107 acceptance — the measured positions gate `validate` AND `buil
     const { errors, advisories } = splitBySeverity(runAuthoringRules('build', { normalized }));
     expect(errors.map((f) => f.rule)).not.toContain(LIST_VIEW_FIELD_UNKNOWN);
     expect(advisories.map((f) => f.rule)).toContain(LIST_VIEW_FIELD_UNKNOWN);
+  });
+});
+
+describe('[#22161] one-line verdicts — list-view-field-unknown, list-view-field-dotted', () => {
+  const CONVERTED = [LIST_VIEW_FIELD_UNKNOWN, LIST_VIEW_FIELD_DOTTED];
+  const filterOn = (field: string): AnyRec => ({ filter: [{ field, operator: 'equals', value: 'x' }] });
+  const only = (patch: AnyRec) => {
+    const findings = validateListViewFieldRefs(stackWith(mutate(patch)));
+    expect(findings).toHaveLength(1);
+    return findings[0]!.message;
+  };
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => CONVERTED.includes(f.rule));
+    // The coverage control first: both ids fired; the unknown id plain and on
+    // a dotted head; the dotted id at the projection and at the filter door,
+    // for each head class the filter door refuses.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...CONVERTED].sort());
+    const unknown = converted.filter((f) => f.rule === LIST_VIEW_FIELD_UNKNOWN);
+    expect(unknown.some((f) => f.message.includes('(the head of "'))).toBe(true);
+    expect(unknown.some((f) => !f.message.includes('(the head of "'))).toBe(true);
+    const dotted = converted.filter((f) => f.rule === LIST_VIEW_FIELD_DOTTED);
+    for (const arm of ['the query projection refuses it', "it stores the related record's id", 'computed on read', 'it stores a single scalar value']) {
+      expect(dotted.some((f) => f.message.includes(arm)), arm).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence per arm', () => {
+    expect(only({ kanban: { groupByField: 'statuss' } })).toBe(
+      'groupByField "statuss" is not a field on object "duly_task". Did you mean "status"?',
+    );
+    expect(only({ columns: [{ field: 'ownr.name' }] })).toBe(
+      'columns[0].field "ownr" is not a field on object "duly_task". Did you mean "owner"? (the head of ' +
+        '"ownr.name": a list view compiles no joins)',
+    );
+    expect(only({ columns: [{ field: 'owner.name' }] })).toBe(
+      'columns[0].field "owner.name" is a dotted path, so the query projection refuses it ' +
+        "(`assertProjectionHasNoDottedPaths`) and the view's first fetch answers 400 INVALID_FIELD",
+    );
+    expect(only(filterOn('owner.name'))).toBe(
+      'filter key "owner.name" is a dotted path whose head "owner" is a `lookup` field on "duly_task" ' +
+        "(it stores the related record's id), so no backend serves it and the query answers 400 INVALID_FIELD",
+    );
+    expect(only(filterOn('score.x'))).toBe(
+      'filter key "score.x" is a dotted path whose head "score" is a `formula` field on "duly_task" ' +
+        '(computed on read, never stored), so no backend serves it and the query answers 400 INVALID_FIELD',
+    );
+    expect(only(filterOn('title.x'))).toBe(
+      'filter key "title.x" is a dotted path whose head "title" is a `text` field on "duly_task" (it ' +
+        'stores a single scalar value), so no backend serves it and the query answers 400 INVALID_FIELD',
+    );
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [LIST_VIEW_FIELD_UNKNOWN]: [
+        'renders successfully with a blank, empty or wrong result',
+        '`kanban.groupByField`',
+        '`gantt.lockField`',
+        '`gantt.objectField`',
+        '`sort-field-unknown`',
+        '`searchable-field-unknown`',
+        'one typo yields one finding',
+      ],
+      [LIST_VIEW_FIELD_DOTTED]: [
+        'ADR-0021 `include`',
+        '`assertProjectionFieldsExist`',
+        'FIRST fetch is refused',
+        '`classifyDottedFilterHead`',
+        '`assertFilterIsMaterializable`',
+        'could only match zero records',
+        '`gantt.quickFilters[].field`',
+        '`gantt.tooltipFields[]`',
+      ],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
+    // Why only the head is judged is one text under both ids.
+    const headOnly = explainRule(LIST_VIEW_FIELD_DOTTED)!.paragraphs[0]!;
+    expect(explainRule(LIST_VIEW_FIELD_UNKNOWN)!.paragraphs).toContain(headOnly);
+  });
+
+  it('the explanation names every position the rule walks', () => {
+    // The explanation module imports nothing, so its position list is held to
+    // the rule's own derived set: every walked block or key, and the two
+    // positions nested in a `columns[]` entry.
+    const text = explainRule(LIST_VIEW_FIELD_UNKNOWN)!.paragraphs[0]!;
+    const names = new Set(
+      listViewWalkedPositions().map((position) => {
+        const parts = position.split('.');
+        return parts[0] === 'columns' && parts.length > 1 ? parts[1]! : parts[0]!;
+      }),
+    );
+    expect(names.size).toBeGreaterThan(10);
+    for (const name of names) expect(text, name).toContain(`\`${name}\``);
   });
 });

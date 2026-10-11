@@ -4,15 +4,16 @@ import { describe, it, expect } from 'vitest';
 // The contract the object branch's coverage is pinned against (#13835) — see
 // the coverage describe block at the foot of this file. `@objectstack/spec` is
 // already a runtime dependency of this package, so the pin adds no edge.
-import { ObjectTranslationDataSchema, TranslationDataSchema } from '@objectstack/spec/system';
+import { FLOW_TERMINAL_MESSAGE_KEYS, ObjectTranslationDataSchema, TranslationDataSchema } from '@objectstack/spec/system';
 // The schema the #18441 fold is SIZED against — see the surface pin in that
 // block. Same package, already a runtime dependency, so no new edge either.
 import { ObjectExtensionSchema } from '@objectstack/spec/data';
 import {
-  validateTranslationReferences,
+  validateTranslationReferences as validateTranslationReferencesUnrecorded,
   TRANSLATION_TARGET_UNKNOWN,
   TRANSLATION_OPTION_KEY_UNKNOWN,
 } from './validate-translation-references.js';
+import { explainRule } from './rule-explanations.js';
 // Real shipped metadata — see the `#5415` describe block for why this is
 // imported rather than reduced by hand.
 import { Contact } from '../../../examples/app-showcase/src/data/objects/contact.object.js';
@@ -20,6 +21,19 @@ import { ContactViews } from '../../../examples/app-showcase/src/ui/views/contac
 // …and the frozen snapshot of it (#8515), for the one case whose control needs
 // a section that has no name.
 import { SnapshotContact, SnapshotContactViews } from './showcase-shape.fixtures.js';
+
+// [#22161] Each finding of the two ids is one verdict sentence (plus the
+// nearest declared name, when there is one); the reasoning it used to carry is
+// the id's `os explain` entry. Every direct call below records what it fired,
+// and the last cases in this file hold each recorded verdict to one line of at
+// most 200 characters — every firing variant this suite exercises, not a
+// chosen few. Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateTranslationReferences: typeof validateTranslationReferencesUnrecorded = (...args) => {
+  const findings = validateTranslationReferencesUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /**
  * ⭐ Severity, re-judged in place (#16310) — ⛔ not deleted.
@@ -2164,8 +2178,9 @@ describe('validateTranslationReferences — flow refusals (#22450)', () => {
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.quote_generation.refusals.done');
-    expect(firstSentence(findings[0].message)).toBe(
-      'Translations are keyed to refusal "done", which flow "quote_generation" declares as an `end` node that completes.',
+    expect(findings[0].message).toBe(
+      'Translations are keyed to refusal "done", which flow "quote_generation" declares as an `end` node ' +
+        "that completes, not one declaring `outcome: 'refused'`, so nothing resolves this key.",
     );
     expect(findings[0].hint).toContain('Declared refusing end node ids: refuse_held.');
   });
@@ -2179,7 +2194,8 @@ describe('validateTranslationReferences — flow refusals (#22450)', () => {
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.quote_generation.refusals.refuse_hold');
     expect(firstSentence(findings[0].message)).toBe(
-      'Translations are keyed to refusal "refuse_hold", a node id flow "quote_generation" does not declare.',
+      'Translations are keyed to refusal "refuse_hold", a node id flow "quote_generation" does not ' +
+        'declare, so the refusal keeps its source-locale message.',
     );
     expect(findings[0].message).toContain('Did you mean "refuse_held"?');
   });
@@ -2193,7 +2209,8 @@ describe('validateTranslationReferences — flow refusals (#22450)', () => {
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.quote_generations');
     expect(firstSentence(findings[0].message)).toBe(
-      'Translations are keyed to flow "quote_generations", which this stack does not define.',
+      'Translations are keyed to flow "quote_generations", which this stack does not define, so the ' +
+        'wizard renders its source-locale label and headings.',
     );
   });
 
@@ -2204,8 +2221,9 @@ describe('validateTranslationReferences — flow refusals (#22450)', () => {
       );
       expect(findings).toHaveLength(1);
       expect(findings[0].path).toBe(`translations[0]["zh-CN"].flows.quote_generation.refusals.${nodeId}`);
-      expect(firstSentence(findings[0].message)).toBe(
-        `Translations are keyed to refusal "${nodeId}", which flow "quote_generation" declares as a \`${type}\` node, not a refusing \`end\`.`,
+      expect(findings[0].message).toBe(
+        `Translations are keyed to refusal "${nodeId}", which flow "quote_generation" declares as a ` +
+          `\`${type}\` node, not a refusing \`end\`, so nothing resolves this key.`,
       );
     }
   });
@@ -2273,8 +2291,9 @@ describe('validateTranslationReferences — flow toasts and screen-field options
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.errorMessage');
-    expect(firstSentence(findings[0].message)).toBe(
-      'Translations carry `errorMessage` for flow "contract_intake", which declares no `errorMessage`.',
+    expect(findings[0].message).toBe(
+      'Translations carry `errorMessage` for flow "contract_intake", which declares no `errorMessage`, so ' +
+        'nothing resolves this key and the runner keeps its own sentence.',
     );
   });
 
@@ -2285,7 +2304,8 @@ describe('validateTranslationReferences — flow toasts and screen-field options
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.screens.details.fields.our_entity.options.hk');
     expect(firstSentence(findings[0].message)).toBe(
-      'Option translation is keyed by "hk", which is not one of the values declared by screen field "our_entity" of screen "details" in flow "contract_intake".',
+      'Option translation is keyed by "hk", which is not a value declared by screen field "our_entity" of ' +
+        'screen "details" in flow "contract_intake", so the option renders untranslated.',
     );
     expect(findings[0].message).toContain('Did you mean "hq"?');
   });
@@ -2294,8 +2314,9 @@ describe('validateTranslationReferences — flow toasts and screen-field options
     const findings = validateTranslationReferences(bundle(fieldsOf({ our_entity: { options: { 'Head office': '总部' } } })));
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(TRANSLATION_OPTION_KEY_UNKNOWN);
-    expect(firstSentence(findings[0].message)).toBe(
-      'Option translation is keyed by the DISPLAY LABEL "Head office" instead of the stored value "hq".',
+    expect(findings[0].message).toBe(
+      'Option translation is keyed by the DISPLAY LABEL "Head office" instead of the stored value "hq", so ' +
+        'the resolver never finds it and the option renders untranslated.',
     );
     expect(findings[0].hint).toBe('Rename the key to "hq".');
   });
@@ -2305,8 +2326,9 @@ describe('validateTranslationReferences — flow toasts and screen-field options
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(TRANSLATION_OPTION_KEY_UNKNOWN);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.screens.details.fields.notes.options');
-    expect(firstSentence(findings[0].message)).toBe(
-      'Option translations are keyed under screen field "notes" of screen "details" in flow "contract_intake", which declares no `options`.',
+    expect(findings[0].message).toBe(
+      'Option translations are keyed under screen field "notes" of screen "details" in flow ' +
+        '"contract_intake", which declares no `options`, so nothing reads this map.',
     );
   });
 
@@ -2326,8 +2348,9 @@ describe('validateTranslationReferences — flow toasts and screen-field options
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.contract_intake.screens.details.description');
-    expect(firstSentence(findings[0].message)).toBe(
-      'Translations carry `description` for screen "details" of flow "contract_intake", which declares no `config.description`.',
+    expect(findings[0].message).toBe(
+      'Translations carry `description` for screen "details" of flow "contract_intake", which declares no ' +
+        '`config.description`, so nothing resolves this key.',
     );
   });
 });
@@ -3699,5 +3722,138 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         validateTranslationReferences(coverageStack({ ...onEnv(real('bound')), globalActions: real('global') })),
       ).toEqual([]);
     });
+  });
+});
+
+describe('[#22161] one-line verdicts — translation-target-unknown, translation-option-key-unknown', () => {
+  const CONVERTED = [TRANSLATION_TARGET_UNKNOWN, TRANSLATION_OPTION_KEY_UNKNOWN];
+
+  /** One fragment per message arm, each unique to its arm. */
+  const TARGET_ARMS = [
+    'which carries a platform namespace prefix',
+    'which no object in this stack defines',
+    'Translations are keyed to field "',
+    'Translations are keyed to view "',
+    'Translations are keyed to section "',
+    'Translations are keyed to filter-preset tab "',
+    'Translations are keyed to validation rule "',
+    'Translations are keyed to action "',
+    'is bound to object "',
+    'Translations are keyed to global action "',
+    'Translations are keyed to app "',
+    'contributes into without declaring',
+    'so the menu entry keeps its source-locale label',
+    'Translations are keyed to dashboard "',
+    'Translations are keyed to widget "',
+    'Translations are keyed to header action "',
+    'so the wizard renders its source-locale label',
+    'Translations carry `errorMessage`',
+    'node, not a `screen`',
+    'declares no screen node for',
+    'Translations carry `description`',
+    'is an OBJECT-FORM screen over',
+    'so the input keeps its source-locale label',
+    '`end` node that completes',
+    'node, not a refusing `end`',
+    'a node id flow',
+    'Translations are keyed to parameter "',
+    'does not declare in `outcomeMessages`',
+    'declares no `outcomeMessages` at all',
+    'Translations carry a result dialog',
+    'declares no `resultDialog`, so nothing reads this label',
+    '`resultDialog.fields` does not declare',
+    'declares no `fields` (it renders the whole response as JSON)',
+  ];
+  const OPTION_ARMS = [
+    'which declares no `options` at all (field type',
+    'keyed by the DISPLAY LABEL',
+    'which is not a value declared by field "',
+    'Option translations are keyed under parameter "',
+    'which is not a value declared by parameter "',
+    'Option translations are keyed under screen field "',
+    'which is not a value declared by screen field "',
+  ];
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => CONVERTED.includes(f.rule));
+    // The coverage control first: both ids fired, and every message arm of
+    // each fired at least once.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...CONVERTED].sort());
+    for (const [rule, arms] of [[TRANSLATION_TARGET_UNKNOWN, TARGET_ARMS], [TRANSLATION_OPTION_KEY_UNKNOWN, OPTION_ARMS]] as const) {
+      const messages = converted.filter((f) => f.rule === rule).map((f) => f.message);
+      for (const arm of arms) expect(messages.some((m) => m.includes(arm)), `${rule}: ${arm}`).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence, with the nearest declared name after it', () => {
+    const lead = { name: 'crm_lead', fields: { status: { type: 'select', options: [{ value: 'open', label: 'Open' }] } } };
+    const on = (objects: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      validateTranslationReferences({ objects: [lead], ...extra, translations: [{ 'zh-CN': { objects } }] }).map(
+        (f) => f.message,
+      );
+    expect(on({ crm_leed: { label: 'x' } })).toEqual([
+      'Translations are keyed to "crm_leed", which no object in this stack defines, so nothing reads this ' +
+        'subtree and every label in it renders untranslated. Did you mean "crm_lead"?',
+    ]);
+    expect(on({ crm_lead: { fields: { statuss: { label: 'x' } } } })).toEqual([
+      'Translations are keyed to field "statuss", which object "crm_lead" does not declare, so its label ' +
+        'renders untranslated in this locale. Did you mean "status"?',
+    ]);
+    expect(on({ crm_lead: { _tabs: { mine: { label: 'x' } } } })).toEqual([
+      'Translations are keyed to filter-preset tab "mine", which no page over object "crm_lead" declares, ' +
+        'so the tab keeps its source-locale label.',
+    ]);
+    expect(on({ crm_lead: { fields: { status: { options: { Open: 'x' } } } } })).toEqual([
+      'Option translation is keyed by the DISPLAY LABEL "Open" instead of the stored value "open", so the ' +
+        'resolver never finds it and the option renders untranslated.',
+    ]);
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [TRANSLATION_TARGET_UNKNOWN]: [
+        'styling quirk',
+        'confident-looking hit in every locale',
+        '`fieldGroups[].key`',
+        'named `record:details` section',
+        '`interfaceConfig.userFilters.tabs`',
+        "beside platform refusals in the caller's locale",
+        'never from `globalActions`',
+        '`manifest.navigationContributions`',
+        'declared and translated by the package that owns it',
+        'loop, parallel and try/catch regions included',
+        'cannot add an outcome or a dialog',
+        'dots included',
+        '`objectExtensions[]`',
+        'official plugin or cloud runtime object',
+        '`metadataForms`',
+      ],
+      [TRANSLATION_OPTION_KEY_UNKNOWN]: [
+        'stored `value`',
+        '`1` for a number value and `true` for a boolean',
+        '`direct-mail`',
+        'inline `options`',
+        "screen field's own `options`",
+        'a rename, not a deletion',
+      ],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
+    // How a bundle key is read at all is one text under both ids.
+    const [target, option] = CONVERTED.map((rule) => explainRule(rule)!.paragraphs[0]);
+    expect(target).toBe(option);
+  });
+
+  it('the explanation names every flow toast key the rule judges', () => {
+    const text = explainRule(TRANSLATION_TARGET_UNKNOWN)!.paragraphs.join('\n');
+    for (const key of FLOW_TERMINAL_MESSAGE_KEYS) expect(text, key).toContain(`\`.${key}\``);
   });
 });

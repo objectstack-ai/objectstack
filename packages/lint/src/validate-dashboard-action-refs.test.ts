@@ -2,10 +2,24 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateDashboardActionRefs,
+  validateDashboardActionRefs as validateDashboardActionRefsUnrecorded,
   DASHBOARD_ACTION_TARGET_UNDEFINED,
   DASHBOARD_ACTION_ROUTE_UNRESOLVED,
 } from './validate-dashboard-action-refs';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the two ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateDashboardActionRefs: typeof validateDashboardActionRefsUnrecorded = (...args) => {
+  const findings = validateDashboardActionRefsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /** Build a stack with a single dashboard whose header carries `actions`. */
 function dashWithHeaderActions(actions: unknown[], extra: Record<string, unknown> = {}) {
@@ -347,5 +361,90 @@ describe('validateDashboardActionRefs (ADR-0049 references / #3367)', () => {
     expect(
       validateDashboardActionRefs({ dashboards: [{ name: 'd', widgets: [], header: {} }] }),
     ).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — dashboard-action-target-undefined, dashboard-action-route-unresolved', () => {
+  const CONVERTED = [DASHBOARD_ACTION_TARGET_UNDEFINED, DASHBOARD_ACTION_ROUTE_UNRESOLVED];
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => CONVERTED.includes(f.rule));
+    // The coverage control first: both ids fired, the target id on both arms,
+    // and the route id on a path with two bad segments.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...CONVERTED].sort());
+    const target = converted.filter((f) => f.rule === DASHBOARD_ACTION_TARGET_UNDEFINED);
+    expect(target.some((f) => f.message.startsWith('modal '))).toBe(true);
+    expect(target.some((f) => f.message.startsWith('script '))).toBe(true);
+    expect(
+      converted.some((f) => f.message.includes('"/apps/no_such_app_nope/dashboard/no_such_dashboard_nope"')),
+    ).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence per arm', () => {
+    const findings = validateDashboardActionRefs(
+      dashWithHeaderActions([
+        { label: 'Export PDF', actionType: 'script', actionUrl: 'export_dashboard_pdf' },
+        { label: 'New Deal', actionType: 'modal', actionUrl: 'create_opportunity' },
+        { label: 'Forecast', actionType: 'url', actionUrl: '/reports/forecast' },
+      ]),
+    );
+    expect(findings.map((f) => f.message)).toEqual([
+      'script action target "export_dashboard_pdf" names no defined action, so the button renders and ' +
+        'does nothing when clicked',
+      'modal action target "create_opportunity" names no declared page (a modal target names a page, ' +
+        'only), so the button renders and the runtime refuses the dispatch on click',
+      'url action target "/reports/forecast" names reports/forecast, and no report named "forecast" is ' +
+        'registered in this stack, so the button likely opens a dead route',
+    ]);
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [DASHBOARD_ACTION_TARGET_UNDEFINED]: [
+        'ADR-0049',
+        '`stack.actions`',
+        '`stack.pages`',
+        'bare object name',
+        '`VERB_OBJECT` convention',
+        "`actionType: 'form'`",
+      ],
+      [DASHBOARD_ACTION_ROUTE_UNRESOLVED]: [
+        'no `actionType`',
+        '`apps`, `objects`, `reports`, `dashboards`, `pages` and `views`',
+        'does not hide a bad dashboard name',
+        'another installed package',
+        '`http(s)://`',
+        'opaque route',
+      ],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+      // The scope paragraph is one text under both ids.
+      expect(text).toContain('`header.actions[]`');
+      expect(text).toContain('retired in `@objectstack/spec` 17');
+    }
+    const scopeOf = (rule: string) => explainRule(rule)!.paragraphs.at(-1);
+    expect(scopeOf(DASHBOARD_ACTION_TARGET_UNDEFINED)).toBe(scopeOf(DASHBOARD_ACTION_ROUTE_UNRESOLVED));
+  });
+
+  it('the collections the route explanation lists are the ones the rule resolves', () => {
+    // The explanation module imports nothing, so its collection list is held
+    // to the rule by running the rule: each named collection, singular and
+    // plural, reports an unknown name.
+    for (const plural of ['apps', 'objects', 'reports', 'dashboards', 'pages', 'views']) {
+      for (const segment of [plural, plural.replace(/s$/, '')]) {
+        const findings = validateDashboardActionRefsUnrecorded(
+          dashWithHeaderActions([{ label: 'Go', actionType: 'url', actionUrl: `/${segment}/zz_nope` }]),
+        );
+        expect(findings.map((f) => f.rule), segment).toEqual([DASHBOARD_ACTION_ROUTE_UNRESOLVED]);
+      }
+    }
   });
 });

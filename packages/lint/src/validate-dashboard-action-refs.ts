@@ -293,15 +293,14 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
         rule: DASHBOARD_ACTION_TARGET_UNDEFINED,
         where,
         path,
+        // [#22161] One verdict sentence; what a target may name, and why a
+        // dangling one gates, is `os explain dashboard-action-target-undefined`.
         message:
           actionType === 'modal'
-            ? `modal action target "${target}" names no declared page — a modal target ` +
-              `names a PAGE, only. The button renders but the runtime ` +
-              `refuses the dispatch when clicked — a dangling reference ` +
-              `(ADR-0049: a declared reference must resolve).`
-            : `script action target "${target}" resolves to no defined action. ` +
-              `The button renders but does nothing when clicked — a dangling reference ` +
-              `the runtime cannot dispatch (ADR-0049: a declared reference must resolve).`,
+            ? `modal action target "${target}" names no declared page (a modal target names a ` +
+              `page, only), so the button renders and the runtime refuses the dispatch on click`
+            : `script action target "${target}" names no defined action, so the button renders ` +
+              `and does nothing when clicked`,
         hint:
           actionType === 'modal'
             ? `Point actionUrl at a declared page (stack.pages), or use ` +
@@ -324,10 +323,13 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
           rule: DASHBOARD_ACTION_ROUTE_UNRESOLVED,
           where,
           path,
+          // [#22161] One verdict sentence, naming the one segment that misses;
+          // what is resolved and what is skipped is
+          // `os explain dashboard-action-route-unresolved`.
           message:
-            `url action target "${target}" points at ${route.collection}/${route.name}, ` +
-            `but no ${route.collection.replace(/s$/, '')} named "${route.name}" is registered ` +
-            `in this stack — the button likely navigates to a dead route.`,
+            `url action target "${target}" names ${route.collection}/${route.name}, and no ` +
+            `${route.collection.replace(/s$/, '')} named "${route.name}" is registered in this ` +
+            `stack, so the button likely opens a dead route`,
           hint:
             `Check the path for a typo, define the referenced ${route.collection.replace(/s$/, '')}, ` +
             `or ignore this if the route is served by another installed package or a host/console route.`,
