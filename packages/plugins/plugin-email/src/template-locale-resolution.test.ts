@@ -13,7 +13,7 @@
 // rows; its rule is the one these pinned against the row loader, unchanged.
 
 import { describe, it, expect } from 'vitest';
-import { EmailService, DEFAULT_TEMPLATE_LOCALE, type EmailTemplateRow, type TemplateLoader } from './email-service.js';
+import { EmailService, type EmailTemplateRow, type TemplateLoader } from './email-service.js';
 import { createRegistryEmailTemplateLoader } from './template-loader.js';
 import { EmailServicePlugin } from './email-plugin.js';
 import type { IEmailTransport, NormalizedEmailMessage, TransportSendResult } from '@objectstack/spec/contracts';

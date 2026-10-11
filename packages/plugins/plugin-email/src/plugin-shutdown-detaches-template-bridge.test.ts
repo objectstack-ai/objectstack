@@ -32,6 +32,7 @@ import { describe, it, expect } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { EmailServicePlugin } from './email-plugin.js';
+import { EMAIL_TEMPLATE_DOOR_PACKAGE } from './email-template-door.js';
 
 type AnyRecord = Record<string, any>;
 type Hook = { event: string; handler: (ctx: AnyRecord) => unknown; packageId?: string };
@@ -51,6 +52,8 @@ function fakeEngine() {
             for (let i = hooks.length - 1; i >= 0; i--) if (hooks[i].packageId === packageId) hooks.splice(i, 1);
             return before - hooks.length;
         },
+        /** The door's own hooks — the plugin binds others (the outbox drain) that are not under test here. */
+        doorHooks() { return hooks.filter((h) => h.packageId === EMAIL_TEMPLATE_DOOR_PACKAGE); },
         /** An organization's create, as the engine runs it: every `beforeInsert` hook first. */
         async organizationCreate() {
             for (const h of hooks.filter((x) => x.event === 'beforeInsert')) {
@@ -91,12 +94,13 @@ describe('#10772 EmailServicePlugin releases what it binds on kernel shutdown', 
 
         // POSITIVE CONTROL — the door really is bound, so the assertion below
         // measures a release and not a door that never closed.
+        expect(fixture.engine.doorHooks()).toHaveLength(2);
         await expect(fixture.engine.organizationCreate()).rejects.toThrow(/^PERMISSION_DENIED/);
 
         await kernel.shutdown();
 
         // THE PIN. Before #10772 the kernel had no `destroy()` to call.
-        expect(fixture.engine.hooks).toEqual([]);
+        expect(fixture.engine.doorHooks()).toEqual([]);
         await expect(fixture.engine.organizationCreate()).resolves.toBeUndefined();
     });
 
@@ -117,11 +121,11 @@ describe('#10772 EmailServicePlugin releases what it binds on kernel shutdown', 
     it('the retained dispose() alias still tears down for an embedder that calls it directly', async () => {
         const { plugin, fixture } = await boot();
 
-        expect(fixture.engine.hooks).not.toEqual([]);
+        expect(fixture.engine.doorHooks()).toHaveLength(2);
 
         await plugin.dispose();
 
-        expect(fixture.engine.hooks).toEqual([]);
+        expect(fixture.engine.doorHooks()).toEqual([]);
     });
 
     it('a teardown on a plugin the kernel never started is a no-op rather than a throw', async () => {
