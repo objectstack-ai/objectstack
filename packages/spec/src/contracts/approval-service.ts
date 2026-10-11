@@ -863,18 +863,22 @@ export interface IApprovalService {
        */
       approverId?: string | string[];
       /**
-       * Also match the PENDING requests that nobody on the slate can decide,
-       * returned only to a caller who may override them.
+       * Also match the PENDING requests whose slate names no person, returned
+       * only to a caller who may override them. These are the requests the
+       * `onEmptyApprovers: 'admin_rescue'` default leaves to a privileged
+       * override.
        *
-       * Unstaffed means the request's current `pending_approvers` names no
-       * person: no user id and no email, only `type:value` literals left by an
-       * approver target with no holder (`position:<p>`, `team:<t>`), or
-       * nothing at all. It is the same test the open path makes before it
-       * warns that a request is "decidable only by a privileged admin", the
-       * `onEmptyApprovers: 'admin_rescue'` default. It is applied to the slate
-       * as it stands, so a slate whose last named approver has already acted
-       * and left only literals matches too. A slate that still names a person
-       * never matches, even when that person has since left the organization.
+       * Unstaffed means the request's current `pending_approvers` holds no
+       * user id and no email: only `type:value` literals left by an approver
+       * target with no holder (`position:<p>`, `team:<t>`), or nothing at all.
+       * It is the same test the open path makes before it warns that a
+       * request is "decidable only by a privileged admin". It reads the slate
+       * as it stands, not the directory: a slate whose last named approver
+       * has already acted and left only literals matches too, and so does a
+       * `position:<p>` slot whose position gained a holder after the request
+       * opened (that holder also finds it under `approverId`). A slate that
+       * still names a person never matches, even when that person has since
+       * left the organization.
        *
        * "May override" is the privileged-override rule that admits the
        * override decision itself and sets `viewer.can_override`. A request

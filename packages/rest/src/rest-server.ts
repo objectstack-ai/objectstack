@@ -12618,9 +12618,9 @@ export class RestServer {
                     // door cannot read is the caller's `400`.
                     let limit: number | undefined;
                     let offset: number | undefined;
-                    // [#22725] The `unstaffed` arm: the pending requests no
-                    // one on the slate can decide, for a caller who may
-                    // override them, ORed with `approverId` by the service
+                    // [#22725] The `unstaffed` arm: the pending requests whose
+                    // slate names no person, for a caller who may override
+                    // them, ORed with `approverId` by the service
                     // (the contract's member docblock). Read `true` / `false`
                     // only: a guessed `false` would be a 200 without the arm.
                     let unstaffed: boolean | undefined;

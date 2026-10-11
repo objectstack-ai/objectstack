@@ -455,9 +455,9 @@ spelling, and no holder acts under it.
 Other filters: `status`, `object`, `recordId`, `submitterId`, `q`, `limit`,
 `offset`, and `unstaffed`.
 
-`unstaffed=true` adds the requests nobody on the slate can decide: pending
-requests whose slate names no person, only unstaffed literals such as
-`position:<name>`, or nothing at all. This is what `admin_rescue` opens. They
+`unstaffed=true` adds the pending requests whose slate names no person: only
+unstaffed literals such as `position:<name>`, or nothing at all. This is what
+`admin_rescue` opens. They
 are added only for a caller who may override them: an admin with override
 authority (`admin_full_access`, or `organization_admin` within their
 organization). Every such row reads `viewer.can_override: true`. For anyone else the parameter
@@ -470,9 +470,11 @@ curl -b cookies.txt \
 ```
 
 It reads `true` or `false` only (`false` is the same as leaving it out); any
-other value is refused with `400`. A slate that still names a person never
-matches, even if that person has since left. Reassign such a request from the
-**All** view.
+other value is refused with `400`. The test reads the slate, not the directory:
+a `position:<name>` slot whose position gained a holder after the request opened
+still matches (that holder also finds it under `approverId`), and a slate that
+still names a person never matches, even if that person has since left.
+Reassign such a request from the **All** view.
 
 <Callout type="warn">
 **`approverId` is a filter, not authorization.** What you may see is decided
