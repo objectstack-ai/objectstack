@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 228 |
+| Write call sites | 231 |
 | Object name statically decidable | 156 |
-| Object name chosen at run time | 72 |
+| Object name chosen at run time | 75 |
 | Against a tenancy-enabled object | 155 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 167 |
+| Threading a tenant context | 170 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 121 |
+| Threading a decidably elevated context | 126 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 99 |
+| Threading a context of undecidable elevation | 97 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-11 at `7e9137b0a`.
+Measured on 2026-10-11 at `f6bce8aaf`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 632 |
+| tracked non-test sources scanned | 633 |
 | engine-shaped types recognised | 72 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 161 |
+| same-named calls subtracted as non-engine | 162 |
 
 ## Every site
 
@@ -150,8 +150,12 @@ Measured on 2026-10-11 at `7e9137b0a`.
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `sys_email` | enabled | elevated | 1 |
+| `packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts` | `insert` | `object` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts` | `update` | `object` | undecidable | elevated | 2 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `sys_email` | enabled | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `sys_email` | enabled | elevated | 1 |
+| `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `sys_email_template` | enabled | elevated | 1 |
+| `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `sys_email_template` | enabled | elevated | 1 |
 | `packages/plugins/plugin-pinyin-search/src/companion-projection.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `insert` | `object` | undecidable | elevated | 1 |
@@ -169,10 +173,9 @@ Measured on 2026-10-11 at `7e9137b0a`.
 | `packages/plugins/plugin-security/src/position-environment-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/position-write-through.ts` | `delete` | `sys_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/position-write-through.ts` | `update` | `sys_position` | enabled | elevated | 1 |
-| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 2 |
+| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 3 |
-| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_position_permission_set` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
 | `packages/plugins/plugin-sharing/src/primary-bu-projection.ts` | `update` | `sys_user` | enabled | elevated | 2 |
 | `packages/plugins/plugin-sharing/src/record-orphan-cleanup.ts` | `delete` | `table` | undecidable | options unreadable | 2 |

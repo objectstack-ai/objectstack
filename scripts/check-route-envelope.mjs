@@ -497,6 +497,11 @@ const DISPATCHER_DOMAINS = {
   // built in ONE place instead of once per domain, which is this check's own
   // thesis; it answers through `deps.error` like any domain body.
   'unavailable.ts': { handBuilt: 0 },
+  // [#22755] The `/webhooks/redeliver` bridge: the webhooks member's own JSON
+  // `Response` is handed back as `result` (the `/approvals/act` shape), and
+  // every refusal it makes itself — the two 501s, the sanitised 500s — goes
+  // through `deps.error`.
+  'webhooks.ts': { handBuilt: 0 },
 
   // Kind 1 — enveloped, hand-built only because the helper cannot say it.
   'keys.ts': {

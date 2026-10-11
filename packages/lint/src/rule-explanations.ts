@@ -1460,9 +1460,11 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
   covers: 'why an inbound api flow needs a secret',
   paragraphs: [
     'An inbound api hook is armed only with a per-flow secret that every post is HMAC-verified against ' +
-      '(ADR-0041): the `x-objectstack-signature` header carries \'sha256=\' and the hex HMAC-SHA256 of ' +
-      'the raw body. A usable secret is a string that is not blank after trimming, on the start node\'s ' +
-      '`config.secret`; absent, blank and non-string are one verdict.',
+      '(ADR-0041): the `x-objectstack-signature` header carries `t=<unix seconds>,v1=<hex>`, where the hex ' +
+      'is the HMAC-SHA256 of `<t>.<raw body>` under the secret, and the door refuses a `t` more than 300 ' +
+      'seconds from its own clock, so a captured post stops verifying. A usable secret is a string that is ' +
+      'not blank after trimming, on the start node\'s `config.secret`; absent, blank and non-string are one ' +
+      'verdict.',
     'The automation engine refuses to register a flow bound to the api trigger without one — a ' +
       'hardcoded check in `registerFlow`, before any trigger is consulted and whatever the flow\'s ' +
       '`status` — and the trigger refuses to arm it, so the flow never receives a post. The `/automation` ' +

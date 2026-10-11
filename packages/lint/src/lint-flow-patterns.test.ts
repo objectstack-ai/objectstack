@@ -2722,6 +2722,24 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
           .toBe(1);
       });
 
+      // [#19939, stage S2] A screen's prefill and record id joined the value
+      // slots: the hint flips there by asking the judge — no line of its own —
+      // with the sentence the judge gives at that position.
+      it.each([
+        ['defaults', 'screen form default', (v: unknown) => ({ objectName: 'task', defaults: { who: v } }), 'prefills the object form\'s `who` field'],
+        ['field defaultValue', 'screen field default value', (v: unknown) => ({ fields: [{ name: 'who', type: 'text', defaultValue: v }] }), 'prefills this screen field'],
+        ['recordId', 'screen record id', (v: unknown) => ({ objectName: 'task', mode: 'edit', recordId: v }), 'names the record an `edit` form opens'],
+      ] as const)('screen %s: names the CEL envelope and what the client is served, not `{source.id}`', (_what, label, configOf, sentence) => {
+        const [f] = bareDollar(valueFlow('screen', configOf('$source.id')));
+        expect(f!.message).toContain(`in the ${label}`);
+        expect(f!.hint).toContain('A value slot reads a CEL value envelope');
+        expect(f!.hint).not.toContain('Wrap it and bind a variable');
+        expect(prescribedSources(f!.hint!)).toEqual(['source.id']);
+        expect(f!.hint).toContain(sentence);
+        expect(refusalsOf(valueFlow('screen', configOf('{source.id}'))).valueJudge).toBe(1);
+        expect(refusalsOf(valueFlow('screen', configOf(CEL('source.id'))))).toEqual(NONE);
+      });
+
       it('control: both spellings the hint used to prescribe are refused in the same slot', () => {
         for (const old of ['{source.id}', '{$User.Id}']) {
           expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { v: old } })).valueJudge, old).toBe(1);
@@ -2852,6 +2870,19 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(f!.hint).not.toContain('Use `{var}`');
         expect(prescribedSources(f!.hint!)).toEqual(["'Re: ' + record.title"]);
         expect(refusalsOf(valueFlow(type, configOf(CEL("'Re: ' + record.title"))))).toEqual(NONE);
+      });
+
+      // [#19939, stage S2] …and at a screen's value slots.
+      it.each([
+        ['defaults', 'screen form default', (v: unknown) => ({ objectName: 'task', defaults: { subject: v } })],
+        ['field defaultValue', 'screen field default value', (v: unknown) => ({ fields: [{ name: 'subject', type: 'text', defaultValue: v }] })],
+        ['recordId', 'screen record id', (v: unknown) => ({ objectName: 'task', mode: 'edit', recordId: v })],
+      ] as const)('in a screen %s: names the envelope for the hole it means', (_what, label, configOf) => {
+        const [f] = doubleBrace(valueFlow('screen', configOf('Re: {{ record.title }}')));
+        expect(f!.message).toContain(`the ${label} reads a CEL value envelope, not a template`);
+        expect(f!.hint).not.toContain('Use `{var}`');
+        expect(prescribedSources(f!.hint!)).toEqual(["'Re: ' + record.title"]);
+        expect(refusalsOf(valueFlow('screen', configOf(CEL("'Re: ' + record.title"))))).toEqual(NONE);
       });
 
       it('control: outside the value and text slots the single brace still resolves, and the double-brace hint still names it', () => {
