@@ -10,7 +10,9 @@
  * the callback's context (`tx.object(…)`, or a caller's `{ context: trx }`)
  * and from there into the triggered hook's `ctx.api`. Both close when the
  * callback settles, through the one helper both surfaces run their body in
- * (`ObjectQL.runOpenedUnit`, #22782's mechanism).
+ * (`ObjectQL.runOpenedUnit`, #22782's mechanism). The write door reads the
+ * handle the same way, so a late write opens the door's own unit (#22782)
+ * when its hooks call for one, as a write outside any unit does.
  *
  * The driver's handle refuses use once its unit committed or rolled back,
  * exactly as a knex transaction does ("Transaction query already complete"):
