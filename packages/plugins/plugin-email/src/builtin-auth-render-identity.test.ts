@@ -10,8 +10,15 @@
  * resolved from there. They are now code-declared `email_template` items under
  * the email plugin's own package and resolved from the registry, so this pins
  * the rendered subject, HTML and plain-text faces of every built-in template in
- * every locale against `RENDERED` below — captured from the row path, through
- * the real `EmailService.renderTemplate`, before that path was deleted.
+ * every locale against `RENDERED` below — captured from the row path (the rows
+ * `seedTemplates` wrote through `mapTemplateToRow`, read by the row loader),
+ * through the real `EmailService.renderTemplate`, in the commit that ran both
+ * paths side by side and found them identical, before the row path was
+ * deleted.
+ *
+ * The registry path is the real one: `EmailServicePlugin` booted to
+ * `kernel:ready` over a real ObjectQL, its manifest registered through
+ * `registerApp`, and the `email` service it installs rendering each template.
  *
  * The subject is pinned in clear; the two bodies by SHA-256, since each is a few
  * kilobytes of inline-styled markup. A digest still pins every byte.
@@ -20,13 +27,8 @@
 import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { EmailService, type TemplateLoader } from './email-service.js';
-import {
-  BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID,
-  createRegistryEmailTemplateLoader,
-  createSysEmailTemplateLoader,
-} from './template-loader.js';
-import { mapTemplateToRow } from './bootstrap-declared-email-templates.js';
+import type { EmailService } from './email-service.js';
+import { EmailServicePlugin } from './email-plugin.js';
 import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
 
 /** Every hole any built-in names, with values that exercise escaping (`&`, `<`). */
@@ -47,9 +49,8 @@ const DATA = {
 };
 
 /**
- * The row path's render of every built-in, captured through this file's own
- * `renderAll` before the row path was deleted: subject in clear, HTML and text
- * faces by SHA-256.
+ * The row path's render of every built-in with `DATA`, captured before the
+ * row path was deleted: subject in clear, HTML and text faces by SHA-256.
  */
 const RENDERED: Record<string, { subject: string; html: string; text: string }> = {
   'auth.password_reset@en-US': {
@@ -176,49 +177,40 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
-async function renderAll(loader: TemplateLoader): Promise<Record<string, { subject: string; html: string; text: string }>> {
-  const svc = new EmailService({ transport: { send: async () => ({ messageId: 'x' }) } as never, templateLoader: loader });
-  const out: Record<string, { subject: string; html: string; text: string }> = {};
-  for (const tpl of BUILTIN_AUTH_TEMPLATES) {
-    const r = await svc.renderTemplate({ template: tpl.name, locale: tpl.locale, data: DATA });
-    out[`${tpl.name}@${tpl.locale}`] = { subject: r.subject, html: sha256(r.html), text: sha256(r.text) };
-  }
-  return out;
-}
-
-/** The seeded-row path: the rows `seedTemplates` wrote, read by the row loader. */
-function rowPathLoader(): TemplateLoader {
-  const rows = BUILTIN_AUTH_TEMPLATES.map((tpl, i) => ({ id: `etpl_${String(i).padStart(3, '0')}`, ...mapTemplateToRow(tpl) }));
-  return createSysEmailTemplateLoader({
-    async find(_object: string, query: Record<string, unknown>) {
-      const where = (query.where ?? {}) as Record<string, unknown>;
-      const hit = rows.filter((r: Record<string, unknown>) => Object.entries(where).every(([k, v]) => r[k] === v));
-      return typeof query.limit === 'number' ? hit.slice(0, query.limit) : hit;
-    },
-  });
-}
-
-/** The registry path: the built-ins registered through a manifest, as the plugin registers them. */
-function registryPathLoader(): TemplateLoader {
+/** Boot the plugin over a real ObjectQL and hand back the `email` service it installs. */
+async function bootEmailService(): Promise<EmailService> {
   const ql = new ObjectQL();
-  ql.registerApp({
-    id: BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID,
-    name: 'Email Service',
-    version: '1.0.0',
-    type: 'plugin',
-    scope: 'system',
-    namespace: 'sys',
-    emailTemplates: BUILTIN_AUTH_TEMPLATES,
-  });
-  return createRegistryEmailTemplateLoader({ registry: ql.registry as never });
+  const services: Record<string, unknown> = {
+    manifest: { register: (m: unknown) => ql.registerApp(m) },
+    objectql: ql,
+  };
+  const hooks: Record<string, Array<() => Promise<void> | void>> = {};
+  const ctx = {
+    logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+    getService: <T,>(name: string): T => {
+      if (!(name in services)) throw new Error(`service '${name}' not registered`);
+      return services[name] as T;
+    },
+    registerService: (name: string, svc: unknown) => { services[name] = svc; },
+    hook: (name: string, fn: () => Promise<void> | void) => { (hooks[name] ??= []).push(fn); },
+  };
+  const plugin = new EmailServicePlugin({ persist: false, transport: { send: async () => ({ messageId: 'x' }) } as never });
+  await plugin.init(ctx as never);
+  await plugin.start(ctx as never);
+  for (const fn of hooks['kernel:ready'] ?? []) await fn();
+  return services.email as EmailService;
 }
 
 describe('every built-in auth mail renders byte-identical from the registry', () => {
-  it('the row path and the registry path render the same bytes', async () => {
-    const rowPath = await renderAll(rowPathLoader());
-    const registryPath = await renderAll(registryPathLoader());
-    expect(Object.keys(registryPath)).toHaveLength(BUILTIN_AUTH_TEMPLATES.length);
-    expect(rowPath).toEqual(RENDERED);
-    expect(registryPath).toEqual(rowPath);
+  it('renders every built-in template, in every locale, to the seeded row\'s bytes', async () => {
+    const svc = await bootEmailService();
+    const rendered: Record<string, { subject: string; html: string; text: string }> = {};
+    for (const tpl of BUILTIN_AUTH_TEMPLATES) {
+      const r = await svc.renderTemplate({ template: tpl.name, locale: tpl.locale, data: DATA });
+      rendered[`${tpl.name}@${tpl.locale}`] = { subject: r.subject, html: sha256(r.html), text: sha256(r.text) };
+    }
+
+    expect(Object.keys(rendered)).toHaveLength(24);
+    expect(rendered).toEqual(RENDERED);
   });
 });

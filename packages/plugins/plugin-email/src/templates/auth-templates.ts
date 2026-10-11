@@ -3,9 +3,11 @@
 import type { EmailTemplateDefinition as EmailTemplate } from '@objectstack/spec/system';
 
 /**
- * Built-in auth email templates seeded into `sys_email_template` on
- * EmailServicePlugin startup. Each template is `isSystem: true` so
- * tenants may overlay subject/body but should not delete the row.
+ * Built-in auth email templates, code-declared as `email_template` items of
+ * the email plugin's own package (`EmailServicePlugin.init` registers them
+ * through its manifest) and resolved from the registry like any declared
+ * template. An app declaring the same `(name, locale)` wins over them, and a
+ * Studio save overrides them at environment level.
  *
  * Templates use `{{path.to.value}}` placeholders; `{{{...}}}` for
  * unescaped URLs (see template-engine.ts).
@@ -674,11 +676,11 @@ export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATES: EmailTemplate[] = [
 /**
  * Every built-in auth template, in every supported locale (#8195).
  *
- * ⚠️ Seeding is what makes a row *selectable*: `EmailService.sendTemplate`
- * resolves `(name, locale)` out of `sys_email_template`, so a locale row that
- * is exported but missing from this list resolves to nothing and the ladder
- * silently falls back to the `en-US` body. Adding a locale row means adding it
- * here in the same edit.
+ * ⚠️ Registration is what makes a member *selectable*: `EmailService.sendTemplate`
+ * resolves `(name, locale)` out of the registry, and only this list is
+ * registered, so a locale member that is exported but missing from it
+ * resolves to nothing and the ladder silently falls back to the `en-US` body.
+ * Adding a locale member means adding it here in the same edit.
  */
 export const BUILTIN_AUTH_TEMPLATES: EmailTemplate[] = [
   ...AUTH_PASSWORD_RESET_TEMPLATES,
