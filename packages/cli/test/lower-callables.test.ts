@@ -284,6 +284,21 @@ describe('[#22839] lowerCallables — bodylessCallables, one row per callable no
     expect(out.bodylessCallables).toEqual([]);
   });
 
+  it('one walk: a handler shared by two hooks no longer hides a `functions` entry from the count', () => {
+    // One function object lowered at two slots counts as two lowered bodies
+    // but one callable, so the old `count - bodyExtracted` read 0 with no
+    // warning and the old gate passed. The `functions` entry beside it was
+    // never lowered: it is the one row.
+    const shared = cleanHook(1).handler;
+    const out = lowerCallables({
+      hooks: [{ ...cleanHook(1), handler: shared }, { ...cleanHook(2), handler: shared }],
+      functions: { score_lead: () => 1 },
+    });
+    expect(out.count - out.bodyExtracted).toBe(0);
+    expect(out.bodyExtractionWarnings).toEqual([]);
+    expect(out.bodylessCallables).toEqual([{ origin: "function 'score_lead'", reason: FUNCTIONS_ENTRY_NO_BODY_REASON }]);
+  });
+
   describe('ADR-0130 D4 — a package callable is walked twice and still counted once', () => {
     it('one refused hook shared by the top level and a package body → one row, not two', () => {
       const h = refusedHook(1);
