@@ -13292,10 +13292,11 @@ export class ObjectStackProtocolImplementation implements
         // whether more pages remain (true server-side pagination). Without a limit
         // the full result set is returned, so its length already IS the total.
         //
-        // engine.count() only honors `where`; a `search`/`distinct` query can't be
-        // reproduced by it, so for those we skip the count and fall back to a
-        // page-local estimate (a full page implies there may be more) rather than
-        // reporting a wrong total.
+        // [#22790] The count takes the query's `search` / `searchFields` too: the
+        // engine expands them through the one ADR-0061 expander `find` uses, so
+        // `total` counts exactly the rows this query pages. A search used to skip
+        // the count and report a page-local estimate (`offset + page + 1`) that
+        // the Console rendered as the record count.
         //
         // [#22588] `limit: 0` IS a limit. It asks for no rows (objectstack#6485,
         // the drivers' pagination conformance), so `records.length` is 0 and was
@@ -13306,9 +13307,8 @@ export class ObjectStackProtocolImplementation implements
         // the full set is the total" arm, which is true of every limit except
         // this one. So `>= 0`: a zero-row request is a paged request like any
         // other, and the three arms below keep their meaning for it — the count
-        // runs (`total` is the filtered count, whatever the page size), `$count=false`
-        // still omits `total` instead of reporting the page's 0, and `search`
-        // still reports its page-local estimate rather than a count.
+        // runs (`total` is the filtered count, whatever the page size), and
+        // `$count=false` still omits `total` instead of reporting the page's 0.
         const pageLimit = typeof options.limit === 'number' && options.limit >= 0 ? options.limit : undefined;
         const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
         let total: number | undefined = records.length;
@@ -13318,7 +13318,6 @@ export class ObjectStackProtocolImplementation implements
             // the flag's ONLY observable effect platform-wide, on a capability
             // that never deduplicated a row. Removed with `query.distinct`
             // (tombstoned in spec 17); `total`/`hasMore` are truthful again.
-            const countable = options.search == null;
             if (countOptOut) {
                 // [#10757] The caller said it does not need `total`, so the
                 // COUNT query is not issued at all — that is the whole point of
@@ -13330,19 +13329,16 @@ export class ObjectStackProtocolImplementation implements
                 // filter (IF REQUESTED)",
                 // `packages/spec/src/api/protocol.zod.ts`), so absent is the
                 // declared shape for "not requested" — and it is the only
-                // honest one: the `search` branch below reports an estimate
-                // because it has no better number to give, while here a real
-                // number was available and the caller declined it. Handing back
-                // a plausible-looking guess under those circumstances is how a
+                // honest one: a real number was available and the caller
+                // declined it. Handing back a plausible-looking guess is how a
                 // page-local estimate ends up rendered as a record count.
                 //
                 // `hasMore` is still answered, from the page alone: a FULL page
-                // means there may be more. Same page-local rule the search
-                // branch uses, and it never over-reports the data — it can only
-                // say "maybe more" on an exactly-full last page.
+                // means there may be more. It never over-reports the data — it
+                // can only say "maybe more" on an exactly-full last page.
                 hasMore = records.length === pageLimit;
                 total = undefined;
-            } else if (countable) {
+            } else {
                 // [#10757] `counted` is a separate, always-assigned local so
                 // `hasMore` below compares against a `number`: `total` became
                 // optional when `$count=false` gained the right to omit it, and
@@ -13351,6 +13347,8 @@ export class ObjectStackProtocolImplementation implements
                 try {
                     counted = await this.engine.count(request.object, {
                         where: options.where,
+                        search: options.search,
+                        searchFields: options.searchFields,
                         context: options.context,
                     } as any);
                 } catch {
@@ -13360,9 +13358,6 @@ export class ObjectStackProtocolImplementation implements
                 }
                 total = counted;
                 hasMore = pageOffset + records.length < counted;
-            } else {
-                hasMore = records.length === pageLimit;
-                total = pageOffset + records.length + (hasMore ? 1 : 0);
             }
         }
         return {

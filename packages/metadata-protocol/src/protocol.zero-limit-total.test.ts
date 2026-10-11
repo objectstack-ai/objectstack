@@ -30,9 +30,9 @@
  *     count for a zero-row page would pass (1) and fail here.
  *  3. The two neighbouring arms keep their meaning for a zero-row page:
  *     `$count=false` still issues no COUNT and omits `total` (it no longer
- *     reports the page's `0` as if it were a count), and `search` still issues
- *     no COUNT — `engine.count()` cannot reproduce a search, which is why that
- *     arm reports a page-local estimate at every page size.
+ *     reports the page's `0` as if it were a count), and a `search` is counted
+ *     like any other filter (#22790: the COUNT carries the search the rows
+ *     were read with).
  *  4. Absent a limit nothing moves: no COUNT, `total` is the set's length.
  */
 
@@ -149,10 +149,12 @@ describe('[#22588] the neighbouring arms keep their meaning for a zero-row page'
         expect('total' in result).toBe(false);
     });
 
-    it('search still issues no COUNT — engine.count() cannot reproduce a search', async () => {
-        const { result, count } = await list({ $top: '0', $search: 't' });
+    it('a search is counted, with the search the rows were read with (#22790)', async () => {
+        const { result, count, find } = await list({ $top: '0', $search: 't' });
 
-        expect(count).not.toHaveBeenCalled();
+        expect(count).toHaveBeenCalledTimes(1);
+        expect((count.mock.calls[0] as unknown[])[1]).toMatchObject({ search: 't' });
+        expect((find.mock.calls[0] as unknown[])[1]).toMatchObject({ search: 't' });
         expect(result.records).toEqual([]);
     });
 

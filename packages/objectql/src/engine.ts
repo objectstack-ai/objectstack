@@ -619,12 +619,13 @@ const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'multi',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
-const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where']);
-// `search` / `searchFields` are READ by `aggregate` through the same ADR-0061
-// expander `find` uses ({@link ObjectQL.expandSearchOnAggregateOptions}), so a
-// grouped answer under a search is the grouping of the searched rows. Before
-// `EngineAggregateOptionsSchema` declared them they were refused here, and the
-// one wire path to this verb left them out — the unsearched groups answered.
+// `search` / `searchFields` are READ by `count` and `aggregate` through the
+// same ADR-0061 expander `find` uses ({@link ObjectQL.expandSearchOnOptions}),
+// so a count or a grouped answer under a search is over the searched rows.
+// Before their schemas declared them they were refused here, and the wire paths
+// left them out: the unsearched groups answered, and a paged list's `total`
+// under a search was a page-local estimate (#22790).
+const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
   'search', 'searchFields',
@@ -12679,13 +12680,15 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * The aggregate verb's door into {@link expandSearchOnAst} — ⛔ not a second
-   * expander. `QuerySchema.search` (ADR-0061 D1) is declared beside `groupBy` /
-   * `aggregations` with no carve-out, so a grouped read under a search groups
-   * the SEARCHED rows: the same cross-field `$or`, resolved from the same
-   * server-side searchable set and the same `searchFields` narrowing, ANDed
-   * with `where` exactly as on `find` — before the security middlewares run,
-   * so an injected RLS predicate composes with it the same way on both verbs.
+   * The aggregate and count verbs' door into {@link expandSearchOnAst} — ⛔ not
+   * a second expander. `QuerySchema.search` (ADR-0061 D1) is declared beside
+   * `groupBy` / `aggregations` with no carve-out, so a grouped read under a
+   * search groups the SEARCHED rows, and a count under one counts them (#22790:
+   * `findData`'s paged `total`): the same cross-field `$or`, resolved from the
+   * same server-side searchable set, `internal: true` exclusion and
+   * `searchFields` narrowing, ANDed with `where` exactly as on `find` — before
+   * the security middlewares run, so an injected RLS predicate composes with it
+   * the same way on every verb.
    *
    * The expansion runs on a carrier AST holding only the three keys it reads,
    * and the result is a COPY of `query` with `where` replaced and the two
@@ -12694,16 +12697,13 @@ export class ObjectQL implements IObjectQLEngine {
    * `opCtx.options` unexpanded. The common path — no search key — returns the
    * same reference and allocates nothing.
    */
-  private expandSearchOnAggregateOptions(
-    object: string,
-    query: EngineAggregateOptions,
-  ): EngineAggregateOptions {
+  private expandSearchOnOptions<T extends EngineAggregateOptions | EngineCountOptions>(object: string, query: T): T {
     if (query.search === undefined && query.searchFields === undefined) return query;
     const { search, searchFields, ...rest } = query;
     const carrier = { object, where: rest.where, search, searchFields } as QueryAST;
     this.expandSearchOnAst(carrier, this._registry.getObject(object));
-    if (carrier.where === undefined) return rest;
-    return { ...rest, where: carrier.where };
+    if (carrier.where === undefined) return rest as T;
+    return { ...rest, where: carrier.where } as T;
   }
 
   /**
@@ -18695,6 +18695,10 @@ export class ObjectQL implements IObjectQLEngine {
      query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
      rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
      query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
+     // [#22790] ADR-0061 `search` → the rows are searched before they are
+     // counted, by the one expander `find` runs, at the same point in the
+     // sequence — so the count is the number of rows `find` returns for the bag.
+     if (query) query = this.expandSearchOnOptions(object, query);
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -18830,7 +18834,7 @@ export class ObjectQL implements IObjectQLEngine {
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).
-      query = this.expandSearchOnAggregateOptions(object, query);
+      query = this.expandSearchOnOptions(object, query);
       this.rejectCredentialAggregation(object, query);
       // [#20783] …and a `groupBy` entry naming a structured-JSON field (`json`,
       // `composite`, `address`, …) is refused `INVALID_FIELD` / 400 here, before
