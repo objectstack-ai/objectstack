@@ -13,7 +13,7 @@ Clause-②: no
   - RLS predicates: `rls-predicate-unknown-user-variable` (618 → 193) and `rls-predicate-unparseable` (523 → 171);
   - hook bodies: `hook-api-update-readonly-when-field` (607 → 173);
   - action names: `action-name-undefined` (560 → 195);
-  - AI skills: `ai-skill-tool-unresolved` (548 → 176);
+  - AI skills: `ai-skill-tool-unresolved` (548 → 189);
   - organization axis: `org-axis-permission-inheritance` (542 → 145) and `org-axis-cross-org-bu-grant` (315 → 141);
   - object names: `object-reference-unknown` (522 → 134) and `object-reference-unregistered-platform` (500 → 187);
   - filters: `filter-empty-node` (515 → 113).
