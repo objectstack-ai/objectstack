@@ -142,6 +142,24 @@ describe('runReferenceShapeProofs — on a real stack', () => {
       hardFailures: 0,
     });
   }, 120_000);
+});
+
+describe('runReferenceShapeProofs — the negative control, on a stack of its own', () => {
+  // Its own boot, deliberately: a wrong-shaped value the lax posture admits
+  // REVOKES the stack's ADR-0104 attestation (the engine closes the gate on
+  // evidence it has just contradicted), so any strict reading taken on the
+  // same stack afterwards would be a reading of a warn-first deployment.
+  let stack: VerifyStack;
+  let token: string;
+
+  beforeAll(async () => {
+    stack = await bootStack(app as never);
+    token = await stack.signIn();
+  }, 120_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
 
   it('NEGATIVE CONTROL: the same metadata on a posture that admits wrong shapes is reported with holes', async () => {
     const prior = process.env[LAX];
