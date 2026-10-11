@@ -76,7 +76,8 @@
  * a field value is a CEL value envelope or a literal — a `{token}` template is
  * refused there since #19939 — and those maps are the expression ledger's
  * `value`-role slots, as are, since #19939, the three maps a node hands to a
- * callee and a `screen`'s `defaults.*`, field `defaultValue` and `recordId`.
+ * callee, a `screen`'s `defaults.*`, field `defaultValue` and `recordId`, and
+ * the list a `loop` and a `map` iterate (`FlowCollectionSlotSchema`).
  *
  * Deliberately absent:
  *  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
@@ -99,6 +100,9 @@ import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 // one judge, composed into every value slot's contract below rather than
 // re-spelled here.
 import { valueSlotTemplateRefusals } from './flow-value-slot-template';
+// [#19939] A `collection`'s bare variable name is named in an envelope: what a
+// variable path is, and its CEL spelling, are the token module's.
+import { celPath, templateTokenKind } from './flow-template-token';
 // [#22110] ADR-0032 §3's `{{ }}` delimiter in the text slots — the one judge of
 // the single-brace tokens they still carry, composed into the screen and end
 // contracts below rather than re-spelled here.
@@ -258,9 +262,10 @@ const CRUD_BULK_INTENT_GUIDANCE = {
  * every way an envelope can be malformed AND for every `value`-role slot the
  * expression ledger declares (`assignment.assignments.*`,
  * `create_record.fields.*`, `update_record.fields.*`, and since #19939
- * `subflow.input.*`, `map.input.*`, `script.inputs.*` and a `screen`'s
- * `defaults.*`, `fields[].defaultValue` and `recordId`), so an author (or an
- * agent reading the issue) learns the rule before the detail.
+ * `subflow.input.*`, `map.input.*`, `script.inputs.*`, a `screen`'s
+ * `defaults.*`, `fields[].defaultValue` and `recordId`, and a `loop`'s and a
+ * `map`'s `collection`), so an author (or an agent reading the issue) learns
+ * the rule before the detail.
  *
  * Slot-neutral on purpose (#19938): the refusal's LOCATION names the slot
  * (`config.fields.<field>`, `config.assignments.<variable>`). A sentence that
@@ -432,6 +437,94 @@ export const FlowValueSlotSchema = celValueSlotSchema(
 
 export type FlowValueSlot = z.input<typeof FlowValueSlotSchema>;
 export type FlowValueSlotParsed = z.infer<typeof FlowValueSlotSchema>;
+
+/**
+ * What a `loop`'s or a `map`'s `collection` is (#19939) — the sentence every
+ * refusal of a value there that is neither a list nor an envelope leads with.
+ */
+const COLLECTION_SLOT_RULE =
+  '`collection` is the list the node iterates: a CEL value envelope that evaluates to one, '
+  + '`{ dialect: \'cel\', source: \'…\' }`, or the items written as an inline array.';
+
+/** How a value that is neither a list nor an envelope is named in a collection's refusal. */
+function collectionValuePhrase(value: unknown): string {
+  if (value === undefined) return 'This node writes none.';
+  if (value === null) return 'This one is `null`.';
+  const kind = typeof value;
+  return `This one is ${kind === 'object' ? 'an object' : `a ${kind}`}.`;
+}
+
+/**
+ * Why a `collection` value that is neither a list nor a CEL value envelope is
+ * refused (#19939): a string carrying a `{…}` token gets the value-slot judge's
+ * refusal and its CEL spelling ({@link valueSlotTemplateRefusals}, the one
+ * judge); a variable's bare name — the arm the contract declared until this
+ * change and the structured `loop` and `map` never read — names that variable
+ * in an envelope; anything else gets the rule.
+ */
+function collectionLiteralRefusal(value: unknown): string {
+  if (typeof value !== 'string') return `${COLLECTION_SLOT_RULE} ${collectionValuePhrase(value)}`;
+  const [tokenRefusal] = valueSlotTemplateRefusals(value, { collection: true });
+  if (tokenRefusal !== undefined) return tokenRefusal.message;
+  const name = value.trim();
+  if (templateTokenKind(name) !== 'path') return `${COLLECTION_SLOT_RULE} A string is not one.`;
+  return (
+    `${COLLECTION_SLOT_RULE} A variable's bare name, \`${name}\`, is not one: the structured \`loop\` and \`map\` `
+    + 'never read a name here — the template interpolator handed the string back unchanged, so every run failed at '
+    + `the node. Name the list in a CEL value envelope, \`{ dialect: 'cel', source: '${celPath(name)}' }\`.`
+  );
+}
+
+/**
+ * The list a `loop` (with a `body`) and a `map` iterate — their `collection`, a
+ * `value` slot whose literal is a list (#19939, the C half of #11182 ruling D;
+ * ADR-0032 Decision 2, a computed value is whole-field CEL):
+ *
+ *  - a **CEL value envelope** ({@link AssignmentExpressionValueSchema}) is
+ *    evaluated by the executor in the run's scope, and must evaluate to a
+ *    list — anything else, `null` included, fails the node, as a `{token}`
+ *    that resolved to nothing did;
+ *  - an **inline array** is the list, iterated as written: its elements are
+ *    data — never interpolated, never evaluated — as they always were;
+ *  - a **string** is refused ({@link collectionLiteralRefusal}): a `{…}` token
+ *    of the retired template dialect by the one value-slot judge, naming its
+ *    CEL spelling; a variable's bare name — declared here until #19939 and
+ *    never read by the structured `loop` or `map`, where the interpolator
+ *    handed the name back and the run failed at the node — naming that
+ *    variable in an envelope;
+ *  - anything else is refused with the rule; a malformed envelope leads with
+ *    {@link VALUE_ENVELOPE_REFUSAL}, as in every value slot.
+ *
+ * A union rather than {@link FlowValueSlotSchema}'s open `unknown`, like
+ * `screen.recordId`'s: the literal arm is narrower (a list, never a string),
+ * and the union keeps that in the published JSON Schema and the inferred type.
+ *
+ * It carries no `xExpression` marker: the `loop` and `map` descriptors declare
+ * the slot to the expression ledger (`xExpression: 'value'` on their
+ * `collection`), and `MapConfigSchema` reaches the reconciliation ratchet
+ * through `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`, so a marker here would declare
+ * `map.collection` twice. A `loop` with no `body` is the legacy flat-graph
+ * form, which its executor never parses against this contract.
+ */
+export const FlowCollectionSlotSchema = z.union([z.array(z.unknown()), AssignmentExpressionValueSchema], {
+  error: (issue) => {
+    const input = (issue as { input?: unknown }).input;
+    if (!isExpressionEnvelopeShaped(input)) return collectionLiteralRefusal(input);
+    const result = AssignmentExpressionValueSchema.safeParse(input);
+    const details = result.success
+      ? []
+      : result.error.issues.map((i) => `${i.path.length > 0 ? `\`${i.path.map(String).join('.')}\`: ` : ''}${i.message}`);
+    return [VALUE_ENVELOPE_REFUSAL, ...details].join(' ');
+  },
+}).meta({
+  description:
+    'The list the node iterates: a CEL value envelope `{ dialect: \'cel\', source }` evaluated in the run\'s scope to '
+    + 'a list (anything else, null included, fails the node), or an inline array of the items, iterated as written — '
+    + 'a string is refused, a `{…}` template token or a variable\'s bare name alike',
+});
+
+export type FlowCollectionSlot = z.input<typeof FlowCollectionSlotSchema>;
+export type FlowCollectionSlotParsed = z.infer<typeof FlowCollectionSlotSchema>;
 
 // ─── CRUD quartet ────────────────────────────────────────────────────
 
@@ -1148,6 +1241,11 @@ export type EndConfigParsed = z.infer<typeof EndConfigSchema>;
  * undeclared `flow` alias is NOT part of this contract: the ADR-0087 D2
  * conversion `flow-node-map-flow-alias` rewrites it at load, so the executor
  * only ever sees `flowName` (#4045 — the `notify.source` graduation path).
+ *
+ * `collection` is a `value` slot whose literal is a list (#19939,
+ * {@link FlowCollectionSlotSchema}), the same contract a `loop` with a `body`
+ * declares: a CEL value envelope the executor evaluates in the run's scope, or
+ * an inline array.
  */
 export const MapConfigSchema = lazySchema(() => strictObject({
   surface: 'this map node config',
@@ -1161,9 +1259,12 @@ export const MapConfigSchema = lazySchema(() => strictObject({
       + 'delete `flow`.',
   },
 }, {
-  /** The collection — a `{token}` template / bare variable name, or an inline array. */
-  collection: z.union([z.string(), z.array(z.unknown())])
-    .describe('Template/variable resolving to the array to process (an inline array is accepted)'),
+  /**
+   * The list each item's subflow runs for — a CEL value envelope evaluated to a
+   * list, or an inline array; a string is refused (#19939,
+   * {@link FlowCollectionSlotSchema}).
+   */
+  collection: FlowCollectionSlotSchema,
   /** The per-item subflow (execute-time required). */
   flowName: z.string().describe('Subflow run for each item — it may pause (e.g. an approval)'),
   /** Variable the current item is bound to inside each item's scope — never a `$` name: those are the engine's (#22572). */

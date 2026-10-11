@@ -42,8 +42,8 @@
  *    publish NO descriptor `configSchema` on purpose (a published partial
  *    schema would drop the editors their hand-written forms need — the #4210
  *    incident), so their contract is a Zod schema in that module and the marker
- *    rides `.meta({ xExpression })` through `z.toJSONSchema`, the same channel
- *    `loop.collection` already used.
+ *    rides `.meta({ xExpression })` through `z.toJSONSchema`, the channel every
+ *    spec Zod contract's markers ride.
  *
  * Until #4439 only the first channel was read, and because the ratchet also
  * fails on a ledger entry no channel declares, a schemaless node's expression
@@ -60,16 +60,19 @@
  *
  *  - `'expression'` → **bare CEL**. `{…}` is the #1491 brace-trap and a hard error.
  *  - `'template'` → **single-brace `{var}` flow interpolation**, the dialect
- *    `interpolate()` implements for flow node config. `{…}` is the *correct*
- *    spelling here.
+ *    `interpolate()` implements for flow node config. It marked a `loop`'s and
+ *    a `map`'s `collection` until #19939 made both value slots; no slot
+ *    declares it since, and the ledger has no role for it — the reconciliation
+ *    ratchet refuses the marker as unknown, so a single-brace slot cannot be
+ *    declared back in.
  *  - The **double-brace `{{ }}` text template** of ADR-0032 §3, which is what
  *    `validateExpression`'s `'template'` role enforces — a different dialect from
  *    the one above, and not the one flow config uses.
  *
- * A dialect-blind check would be worse than none: it would reject every correct
- * `loop.collection` while still passing every wrong `visibleWhen`. Each entry
- * therefore records the dialect, and only those with a validator that actually
- * implements that dialect are checked.
+ * A dialect-blind check would be worse than none: it would have refused every
+ * correct `{tasks}` collection while still passing every wrong `visibleWhen`.
+ * Each entry therefore records the dialect, and only those with a validator
+ * that actually implements that dialect are checked.
  */
 
 // The repo's one notion of "blank" (`source.trim()`), shared with the evaluated
@@ -87,18 +90,6 @@ export type FlowNodeExpressionRole =
    * `objectstack validate`.
    */
   | 'predicate'
-  /**
-   * Single-brace `{var}` flow interpolation, resolved by `interpolate()` against
-   * the flow's live variables.
-   *
-   * **Declared but not validated.** No validator implements this dialect: the
-   * `'template'` role of `validateExpression` enforces the ADR-0032 §3
-   * *double-brace* text template and rejects a single `{x}` as a legacy hole, so
-   * routing these slots through it would fail every correct `loop.collection` in
-   * every existing flow. Recorded here so the reconciliation ratchet still sees
-   * the marker and a future validator has one place to hook into.
-   */
-  | 'flow-template'
   /**
    * A CEL **value** expression — evaluated by the expression engine to the
    * value the variable takes (`validateExpression`'s `'value'` role: parses as
@@ -149,6 +140,11 @@ export type FlowNodeExpressionRole =
    * form's `recordId` — again declared and evaluated in the same change: the
    * `screen` executor evaluates each before the screen goes on the wire,
    * through the same resolver.
+   *
+   * And for the list a `loop` (with a `body`) and a `map` iterate — their
+   * `collection` — again declared and evaluated in the same change. Its
+   * literal is narrower than the other value slots': an inline array, iterated
+   * as written; a string is no list, and is refused (`FlowCollectionSlotSchema`).
    */
   | 'value';
 
@@ -193,6 +189,19 @@ export interface FlowNodeExpressionPath {
    * which only decides what the expression walk emits.
    */
   readonly required?: true;
+  /**
+   * [#19939] The executor reads this slot only on a config that carries this
+   * key, present and not `null` — today `body`, on `loop`'s `collection`. A
+   * `loop` with no `body` is the legacy flat-graph form, which its executor
+   * neither parses nor evaluates: it reads `collection` as a bare variable
+   * name and sets `$loopItems` / `$loopIndex` (`loop-node.ts`). Both walks
+   * ({@link resolveFlowNodeExpressions}, {@link resolveFlowNodeValueSlots})
+   * skip the entry on such a config, so no door judges the slot in a dialect
+   * that form never reads. It is the ledger's statement of the contract map's
+   * `parsedWhen` for `loop` (`flow-node-config-refusals.ts`), held equal to it
+   * by a test.
+   */
+  readonly onlyWithKey?: string;
 }
 
 /**
@@ -215,11 +224,10 @@ export interface FlowNodeExpressionPath {
  * `flow-text-slot-template.ts`). Those are text-with-holes,
  * the shape essentially every node config string has, already covered
  * generically (`validate-flow-template-paths`, the CLI flow linter's
- * `collectTemplateStrings`). A `flow-template` ledger entry means something
- * narrower: a slot whose value is a *reference that must resolve to a value*,
- * like `loop.collection`. The #4439 sweep of the schemaless class found exactly
- * one genuinely declared expression slot — `decision.conditions[].expression` —
- * and `script.template` is a template **id**, not a template body.
+ * `collectTemplateStrings`). The #4439 sweep of the schemaless class found
+ * exactly one genuinely declared expression slot —
+ * `decision.conditions[].expression` — and `script.template` is a template
+ * **id**, not a template body.
  *
  * A `value` entry (#14149) is listed for a third reason, not either of those:
  * the slot's authored value may be an expression *envelope* — `{ dialect:
@@ -246,6 +254,18 @@ export interface FlowNodeExpressionPath {
  * position with no marker — a map as `additionalProperties: true`; the
  * ratchet walks an object-valued `additionalProperties` as the `*` segment and
  * maps the `value` marker to this role.
+ *
+ * So is, since #19939, the list a `loop` and a `map` iterate, their
+ * `collection` — the one value slot whose marker rides the DESCRIPTOR channel:
+ * the two descriptors publish `collection` with `xExpression: 'value'` (it was
+ * `'template'`, the single-brace slot both were), and its contract,
+ * `FlowCollectionSlotSchema`, carries no marker, so neither channel declares
+ * it twice. Its literal is an inline array, iterated as written — the walk
+ * reads no string inside one — and a string there is refused, a `{token}` by
+ * the value-slot judge and a bare variable name by the contract. `loop`'s
+ * entry carries {@link FlowNodeExpressionPath.onlyWithKey} (`body`): a
+ * body-less `loop` is the legacy flat-graph form, which reads `collection`
+ * as a bare name and is judged nowhere.
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -272,15 +292,24 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     required: true,
   },
   {
+    // [#19939] The list a structured `loop` iterates (#11182 ruling D;
+    // ADR-0032 Decision 2): a CEL value envelope the executor evaluates in the
+    // run's scope, or an inline array. Declared on the `loop` descriptor's
+    // `collection` (`xExpression: 'value'`). Read only with a `body`: a
+    // body-less `loop` is the legacy flat-graph form, which reads `collection`
+    // as a bare variable name and is parsed by nothing (`parsedWhen`).
     nodeType: 'loop',
     path: 'collection',
-    role: 'flow-template',
+    role: 'value',
     label: 'loop collection',
+    onlyWithKey: 'body',
   },
   {
+    // The same slot on the `map` node: the list it runs a child flow per item
+    // of. Declared on the `map` descriptor's `collection`.
     nodeType: 'map',
     path: 'collection',
-    role: 'flow-template',
+    role: 'value',
     label: 'map collection',
   },
   {
@@ -353,8 +382,8 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     // (and index) variable bound, and handed to that item's child flow.
     // Declared through `MapConfigSchema.input` (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`):
     // the descriptor's own `input` is `additionalProperties: true` with no
-    // marker, exactly like the `fields` maps above. ⛔ Not `map.collection`,
-    // which keeps its `flow-template` entry above.
+    // marker, exactly like the `fields` maps above. `map.collection` keeps its
+    // marker on the descriptor channel (its entry above).
     nodeType: 'map',
     path: 'input.*',
     role: 'value',
@@ -475,11 +504,6 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  *    an evaluator agreeing to ignore it only proves the platform did not crash.
  *    It is now emitted so the consumer can refuse it, by the same
  *    {@link predicateSlotRefusal} every other unauthorable value meets.
- *  - `flow-template`: the pre-#17493 string rule — a non-blank string only —
- *    minus the refusal. No validator implements that dialect (see
- *    {@link FlowNodeExpressionRole}), so emitting a blank or a non-string there
- *    would hand every consumer a finding none of them can judge; that ruling
- *    reached the `predicate` slots and nothing else.
  *  - `value`: the slot holds a VALUE that may be spelled as an expression, so
  *    only envelope-shaped objects ({@link isExpressionEnvelopeShaped}) are
  *    emitted. A string there is a literal, not an expression to parse (a
@@ -487,6 +511,10 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  *    and every other literal is data.
  *    Existing entries resolve byte-identically: no ledger path before #14149
  *    carries a `*` segment or the `value` role.
+ *
+ * An entry with {@link FlowNodeExpressionPath.onlyWithKey} is skipped on a
+ * config that does not carry that key (#19939): its executor never reads the
+ * slot there.
  */
 export function resolveFlowNodeExpressions(
   nodeType: string,
@@ -495,16 +523,15 @@ export function resolveFlowNodeExpressions(
   if (config == null || typeof config !== 'object') return [];
   const out: ResolvedFlowNodeExpression[] = [];
   for (const entry of FLOW_NODE_EXPRESSION_PATHS) {
-    if (entry.nodeType !== nodeType) continue;
+    if (entry.nodeType !== nodeType || !readOn(entry, config)) continue;
     walk(config as Record<string, unknown>, entry.path.split('.'), '', (path, value) => {
       if (entry.role === 'value') {
         if (isExpressionEnvelopeShaped(value)) out.push({ entry, path, value });
       } else if (typeof value === 'string') {
-        // #17493 — a BLANK string in a `predicate` slot is emitted, for the
-        // consumer to refuse (see `predicateSlotRefusal`); a `flow-template`
-        // slot keeps skipping it.
-        if (entry.role === 'predicate' || NON_BLANK_STRING(value)) out.push({ entry, path, value });
-      } else if (entry.role === 'predicate' && (value != null || entry.required)) {
+        // #17493 — every string in a `predicate` slot is emitted, a BLANK one
+        // included, for the consumer to refuse (see `predicateSlotRefusal`).
+        out.push({ entry, path, value });
+      } else if (value != null || entry.required) {
         // #15572 — a non-string in a predicate slot. Emitted so a consumer can
         // REFUSE it (see `predicateSlotRefusal`), never so it can be parsed.
         // #19961 — on a REQUIRED slot, absent and `null` are emitted too: the
@@ -537,12 +564,21 @@ export function resolveFlowNodeValueSlots(nodeType: string, config: unknown): Re
   if (config == null || typeof config !== 'object') return [];
   const out: ResolvedFlowNodeExpression[] = [];
   for (const entry of FLOW_NODE_EXPRESSION_PATHS) {
-    if (entry.nodeType !== nodeType || entry.role !== 'value') continue;
+    if (entry.nodeType !== nodeType || entry.role !== 'value' || !readOn(entry, config)) continue;
     walk(config as Record<string, unknown>, entry.path.split('.'), '', (path, value) => {
       if (value !== undefined) out.push({ entry, path, value });
     });
   }
   return out;
+}
+
+/**
+ * Does the executor read `entry`'s slot on this `config` at all — false only
+ * for an entry with {@link FlowNodeExpressionPath.onlyWithKey} on a config
+ * that does not carry that key (present and not `null`).
+ */
+function readOn(entry: FlowNodeExpressionPath, config: object): boolean {
+  return entry.onlyWithKey === undefined || (config as Record<string, unknown>)[entry.onlyWithKey] != null;
 }
 
 /**
