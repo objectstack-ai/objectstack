@@ -6,7 +6,7 @@ fix(lint): the navigation, object-reference, capability, action-name, import-map
 
 Clause-②: no
 
-- **Shorter verdicts.** Each finding of these 10 rule ids now prints a `message` of one verdict sentence. Every finding the rules' own test suites fire is at most LINT_MAX characters, and the runtime publish gate's suite at most MP_MAX; before, the longest of each ran from 227 to 629 characters. The ids:
+- **Shorter verdicts.** Each finding of these 10 rule ids now prints a `message` of one verdict sentence. Every finding the rules' own test suites fire is at most 199 characters, and the runtime publish gate's suite at most 95; before, the longest of each ran from 227 to 629 characters. The ids:
   - app navigation (`apps[].navigation`, `areas[]`): `nav-object-ungranted`, `nav-object-unservable`, `nav-target-unresolved`;
   - object field-name lists (`highlightFields`, `publicSharing.redactFields`, `indexes[].fields` and the field-level `relatedListColumns`, `lookupColumns`, `lookupFilters`, `dependsOn`): `object-field-ref-unknown`;
   - object-name references: `object-reference-unregistered-platform` (its sibling `object-reference-unknown` already printed one sentence of at most 175 characters and is unchanged);
