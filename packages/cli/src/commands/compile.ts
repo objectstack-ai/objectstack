@@ -329,17 +329,18 @@ export default class Compile extends Command {
       if (!flags.json) printStep('Lowering inline handlers...');
       const lowering = lowerCallables(normalized);
 
-      // Strict-body gate: refuse to ship if any callable failed body extraction.
+      // Strict-body gate: refuse to ship if any callable has no metadata body.
       // Body-only is the long-term target — `--strict-body` lets CI enforce it
       // before ESM-bundle emission becomes mandatory-off.
-      const missingBody = lowering.count - lowering.bodyExtracted;
+      //
+      // `issues` is one row per callable, each callable once, so the header's
+      // count and the `--json` list are the same number. ⛔ Never rebuild it
+      // from `count - bodyExtracted` plus the extraction warnings: those count
+      // different populations (`bodylessCallables`' doc says how). Summing them
+      // printed one more callable than it listed and published a placeholder
+      // row in `issues` that named no callable.
       if (flags['strict-body']) {
-        const issues = [
-          ...lowering.bodyExtractionWarnings,
-          ...(missingBody > 0
-            ? [{ origin: '<aggregate>', reason: `${missingBody} callable(s) lowered to handler ref but produced no body` }]
-            : []),
-        ];
+        const issues = lowering.bodylessCallables;
         if (issues.length > 0) {
           if (flags.json) {
             await emitJson({ success: false, error: 'strict-body: missing body', issues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });

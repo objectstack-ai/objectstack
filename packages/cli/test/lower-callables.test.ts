@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { lowerCallables } from '../src/utils/lower-callables.js';
+import { FUNCTIONS_ENTRY_NO_BODY_REASON, lowerCallables } from '../src/utils/lower-callables.js';
 
 describe('lowerCallables', () => {
   it('replaces Hook.handler functions with their hook name and registers the original', () => {
@@ -153,6 +153,119 @@ describe('lowerCallables', () => {
     // Round-trip through JSON.stringify must not throw or drop fields.
     const json = JSON.stringify(out.lowered);
     expect(JSON.parse(json).hooks[0].handler).toBe('h');
+  });
+});
+
+// ─── [#22839] bodylessCallables — the population `--strict-body` counts ───
+//
+// `objectstack build --strict-body` prints `issues.length` as "N callable(s)
+// lack a metadata body" and publishes `issues` under `--json`, with `issues`
+// built from this list. It used to be the extraction warnings plus one
+// placeholder row whenever `count - bodyExtracted > 0`, so one refused handler
+// printed 2 and four printed 5, and `--json` carried a row that named no
+// callable. The pins below hold the list to "one row per callable that ships
+// with no body, each once". Each divergence case also asserts the old
+// arithmetic's answer beside it, so it shows the two disagree on that input.
+
+/** A handler the extractor refuses: it names a module-scope identifier. */
+const refusedHook = (i: number) => ({
+  name: `refused_${i}`,
+  object: 'doc',
+  events: ['beforeInsert'],
+  handler: (ctx: any) => {
+    ctx.record.slug = moduleHelper(ctx.record.name);
+  },
+});
+
+/** A handler the extractor lowers: parameters and globals only. */
+const cleanHook = (i: number) => ({
+  name: `clean_${i}`,
+  object: 'doc',
+  events: ['beforeInsert'],
+  handler: (ctx: any) => {
+    ctx.record.id = Math.round(Number(ctx.record.raw));
+  },
+});
+
+describe('[#22839] lowerCallables — bodylessCallables, one row per callable with no body', () => {
+  it('CONTROL — every callable lowered: the list is empty', () => {
+    const out = lowerCallables({ hooks: [cleanHook(1), cleanHook(2)] });
+    expect(out.bodyExtracted).toBe(2);
+    expect(out.bodylessCallables).toEqual([]);
+  });
+
+  it('one refused handler → one row, the refusal itself (no placeholder row)', () => {
+    const out = lowerCallables({ hooks: [refusedHook(1)] });
+    expect(out.bodylessCallables).toHaveLength(1);
+    expect(out.bodylessCallables[0]).toBe(out.bodyExtractionWarnings[0]);
+    expect(out.bodylessCallables[0].origin).toBe("hook 'refused_1'");
+  });
+
+  it('four refused handlers → four rows, one per hook, in walk order', () => {
+    const out = lowerCallables({ hooks: [1, 2, 3, 4].map(refusedHook) });
+    expect(out.bodylessCallables.map((r) => r.origin)).toEqual([
+      "hook 'refused_1'",
+      "hook 'refused_2'",
+      "hook 'refused_3'",
+      "hook 'refused_4'",
+    ]);
+  });
+
+  it('a refused action is a row too, under its action origin', () => {
+    const out = lowerCallables({
+      objects: [{ name: 'doc', actions: [{ name: 'stamp', target: refusedHook(1).handler }] }],
+    });
+    expect(out.bodylessCallables.map((r) => r.origin)).toEqual(["action 'doc_stamp'"]);
+  });
+
+  it('a `functions` entry is a row although it leaves NO extraction warning', () => {
+    // It has no `body` slot, so it is never extracted. `count - bodyExtracted`
+    // saw it (the old placeholder row's only job); the warnings never did.
+    const out = lowerCallables({
+      functions: { score_lead: () => 1, stamp_writes: { handler: () => 2, effect: 'writes' } },
+      hooks: [refusedHook(1)],
+    });
+    expect(out.bodyExtractionWarnings).toHaveLength(1);
+    expect(out.count - out.bodyExtracted).toBe(3);
+    expect(out.bodylessCallables).toEqual([
+      expect.objectContaining({ origin: "hook 'refused_1'" }),
+      { origin: "function 'score_lead'", reason: FUNCTIONS_ENTRY_NO_BODY_REASON },
+      { origin: "function 'stamp_writes'", reason: FUNCTIONS_ENTRY_NO_BODY_REASON },
+    ]);
+
+    const arr = lowerCallables({ functions: [{ name: 'arr_fn', handler: () => 3 }] });
+    expect(arr.bodylessCallables).toEqual([{ origin: "function 'arr_fn'", reason: FUNCTIONS_ENTRY_NO_BODY_REASON }]);
+  });
+
+  it('a hook whose author wrote its `body` is NOT a row, though `count - bodyExtracted` counts it', () => {
+    const out = lowerCallables({
+      hooks: [{ ...cleanHook(1), body: { language: 'js', source: 'ctx.record.id = 1;' } }],
+    });
+    expect(out.count - out.bodyExtracted).toBe(1);
+    expect(out.bodylessCallables).toEqual([]);
+  });
+
+  describe('ADR-0130 D4 — a package callable is walked twice and still counted once', () => {
+    it('one refused hook shared by the top level and a package body → one row, not two', () => {
+      const h = refusedHook(1);
+      const out = lowerCallables({ hooks: [h], packages: [{ manifest: { id: 'p.orders', hooks: [h] } }] });
+      expect(out.bodyExtractionWarnings).toHaveLength(2);
+      expect(out.bodylessCallables.map((r) => r.origin)).toEqual(["hook 'refused_1'"]);
+    });
+
+    it('a shared `functions` entry is still a row when a shared hook is lowered in both walks', () => {
+      // The double-counted success hides the entry from `count - bodyExtracted`
+      // (2 - 2 = 0); the old gate passed this artifact.
+      const h = cleanHook(1);
+      const fn = () => 3;
+      const out = lowerCallables({
+        hooks: [h],
+        functions: { score_lead: fn },
+        packages: [{ manifest: { id: 'p.orders', hooks: [h], functions: { score_lead: fn } } }],
+      });
+      expect(out.count - out.bodyExtracted).toBe(0);
+      expect(out.bodylessCallables).toEqual([{ origin: "function 'score_lead'", reason: FUNCTIONS_ENTRY_NO_BODY_REASON }]);
+    });
   });
 });
 
