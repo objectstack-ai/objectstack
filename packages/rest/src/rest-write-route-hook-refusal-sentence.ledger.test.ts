@@ -42,7 +42,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { sanitizeRowError } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
@@ -391,19 +390,43 @@ describe('[#22694] §3 MEASURED, NOT REPAIRED: these doors answer the debug wrap
     }
 });
 
-describe('[#22694] §4 CONTROL: a hook body that CRASHED still answers as a fault on both import doors', () => {
-    const crash = sandboxCrash();
-    it.each([
-        ['POST /api/v1/data/:object/import', importRow, undefined],
-        ['POST /api/v1/data/:object/import/jobs', jobRow, IMPORT_JOB_PROTOCOL],
-    ] as const)('%s', async (route, answer, protocol) => {
-        const b = boot(sandboxCrash, protocol?.(sandboxCrash));
-        const res = await drive(b, route, IMPORT_BODY);
+/** A refusal that DECLARED a server-band status: the doors keep the status and withhold the prose. */
+function sandboxDeclared5xx(): Error {
+    const err = new Error("hook 'mz_guard' threw: Error: The ledger service is down.");
+    err.name = 'SandboxError';
+    return Object.assign(err, { innerMessage: 'The ledger service is down.', status: 503, code: 'SERVICE_UNAVAILABLE' });
+}
 
-        const row = await answer(res, b);
-        // The native error text is never presented as the author's sentence;
-        // the row is built from `.message` exactly as before this card.
-        expect(row).not.toBe('TypeError: boom');
-        expect(row).toBe(sanitizeRowError(crash.message));
+/**
+ * [#22718] A body that CRASHED and a refusal that declared a 5xx are answered
+ * as faults by the data doors, with their text withheld. Both import rows are
+ * held to that answer. §2 is the control: a refusal row keeps the hook's
+ * sentence on both import doors.
+ */
+describe('[#22718] §4 a sandboxed body the doors answer as a fault reads as that fault on both import doors', () => {
+    it.each([
+        ['a body that CRASHED', sandboxCrash, /TypeError|boom/],
+        ['a refusal that declared a 5xx', sandboxDeclared5xx, /ledger/],
+    ] as const)('%s', async (_label, error, leak) => {
+        const doors: unknown[] = [];
+        for (const [route, body] of [['POST /api/v1/data/:object', { name: 'x' }], ['POST /api/v1/data/:object/createMany', [{ name: 'x' }]]] as const) {
+            const res = await drive(boot(error), route, body);
+            expect(res.statusCode, route).toBeGreaterThanOrEqual(500);
+            doors.push(sentenceOf(res.body));
+        }
+        expect(doors[1]).toBe(doors[0]);
+        expect(String(doors[0])).not.toMatch(leak);
+
+        for (const [route, answer, protocol] of [
+            ['POST /api/v1/data/:object/import', importRow, undefined],
+            ['POST /api/v1/data/:object/import/jobs', jobRow, IMPORT_JOB_PROTOCOL],
+        ] as const) {
+            const b = boot(error, protocol?.(error));
+            const row = await answer(await drive(b, route, IMPORT_BODY), b);
+
+            expect(b.calls, route).toContain('protocol.insertManyData');
+            expect(row, route).toBe(doors[0]);
+            expect(String(row), route).not.toMatch(WRAPPER_RE);
+        }
     }, 60_000);
 });
