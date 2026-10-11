@@ -1,6 +1,6 @@
 # ADR-0087: Metadata protocol upgrades for AI consumers — conversion over notification, executable migrations, machine-verifiable upgrades
 
-**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what has landed and which cards carry the rest, and the struck clauses in the P2 phase-status bullet)
+**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0059](./0059-third-party-backward-compatibility-gates.md) (layered backward-compat gates — this ADR is its consumer-facing sequel), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-unenforced metadata — the un-checked `engines.protocol` is exactly this class), [ADR-0025](./0025-plugin-package-distribution.md) (§3.2 `engines.protocol` / `engines.platform` compatibility ranges, §3.10 #3 protocol-first check order), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (the authoring population this ADR designs for), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs), AGENTS.md Prime Directive #12 (contract-first, no consumer-side dialect fallbacks — §"Why the conversion layer does not violate PD #12" draws the line)
 **Consumers**: `@objectstack/spec` (protocol version constant, conversion layer, deprecation/change registries), `@objectstack/cli` (`validate`, `doctor`, `migrate meta`), the runtime metadata loader (handshake + conversion), `@objectstack/mcp` (the AI-native change/migration surface), `@objectstack/create-objectstack`, the Release workflow, and every third-party consumer — whose maintainer is assumed to be an **AI agent**
@@ -205,7 +205,9 @@ chain** — the database-migration model applied to metadata source files.
 > **Amended 2026-08-06 (#5837), paths only.** `api-surface.json` became the directory
 > `api-surface/` (one shard per entry point) and ships in the npm artifact as such; the
 > release diff reads whichever layout the previously published tarball carried. `spec-changes.json`
-> is deliberately unsharded — it is keyed by version, which has never been a conflict surface.
+> was left deliberately unsharded — it is keyed by version, which was never a conflict surface.
+> That call was about merging its committed copy, which #22485 deleted (PR #22638): nothing
+> merges it any more.
 
 > **Amended 2026-10-09 (#22449, ruling B′) — where the two projections live.** Ruling
 > `6078203801` on #22449, letter B′, which the maintainer answered 「同意」 at
@@ -255,20 +257,23 @@ chain** — the database-migration model applied to metadata source files.
 >   artifact when it is non-empty. That step is red only when a side cannot be
 >   generated, never because of the size of a diff.
 >
-> **The ruled end state, and the cards that still carry it.** Not landed when this
-> note was written, and stated here as ruled rather than as done:
+> **The ruled end state, landed** (trued up 2026-10-11). Not landed when this note was
+> first written; both remaining cards have landed since, each deleting one committed copy
+> and its `merge=os-regen` route in `.gitattributes`:
 >
-> - condition (2), the guide's public address and the pointer stub at
->   `docs/protocol-upgrade-guide.md` — #22483;
-> - the deletion of the committed copies (the per-major projection in
->   `packages/spec/spec-changes.json`, the guide body at
->   `docs/protocol-upgrade-guide.md`) and of their two `merge=os-regen` routes in
->   `.gitattributes` — #22485, which lands last.
+> - condition (2) — #22483, landed as `514bf3c101` (PR #22556). The guide's public
+>   address is the docs site, one page per protocol major, generated at docs build into
+>   the gitignored `content/docs/protocol-upgrade/`. `docs/protocol-upgrade-guide.md`
+>   stays at its path as a hand-written pointer stub naming that address; the guide body
+>   it used to hold left git with its route;
+> - the committed `packages/spec/spec-changes.json` and its route — #22485, landed last
+>   as `46064dfa03` (PR #22638).
 >
-> Until #22485 lands the committed copies stay in the tree, and the generators'
-> no-flag mode (`gen:spec-changes`, `gen:upgrade-guide`) still writes them, but
-> `check:spec-changes` and `check:upgrade-guide` no longer compare them: they can go
-> stale, and the copies that ship are the record. Condition (3) is cloud's half and
+> No committed copy of either projection remains. `packages/spec/spec-changes.json` and
+> `packages/spec/protocol-upgrade-guide.md` are gitignored paths the publish lane writes
+> for `files[]` to ship, and the generators' no-flag mode writes only untracked output
+> (`gen:spec-changes` that `spec-changes.json`, `gen:upgrade-guide` the docs pages), so a
+> registry entry's pull request regenerates neither. Condition (3) is cloud's half and
 > lives in that repository (objectstack-ai/cloud#2750); this record governs the
 > framework half.
 >
@@ -281,7 +286,7 @@ chain** — the database-migration model applied to metadata source files.
 > generators the publish lane runs, and the registry entries those projections are
 > computed from stay committed, reviewable source. What leaves git is the committed
 > aggregate and the re-sync laps it cost. The 2026-08-06 note above ("deliberately
-> unsharded") is about that committed copy, which #22485 removes.
+> unsharded") is about that committed copy, which #22485 removed.
 
 - The Release workflow diffs the current `api-surface.json` against the previously
   published one (reusing the ADR-0059 §3 gate artifact instead of discarding it),
@@ -428,18 +433,19 @@ scaling framework-side execution when the consumers can execute themselves.
   **amended 2026-10-09** — it is generated from the registries at publish, as
   `protocol-upgrade-guide.md` inside the npm artifact and on the GitHub Release,
   and in memory, with its diff rendered, at pull request;
-  `docs/protocol-upgrade-guide.md` is ruled to become a pointer stub naming the
-  guide's public address, which #22483 carries.
+  `docs/protocol-upgrade-guide.md` became a pointer stub naming the guide's
+  public address, the docs site's per-major pages (#22483, PR #22556).
 
   > **Amended (2026-10-09) — the projections are generated at publish, not
   > committed.** Provenance: ruling `6078203801` on #22449 (letter B′; maintainer
   > 「同意」), which supersedes the 2026-08-10 #6957 ruling's rejection of option B
   > and keeps its reason, the review diff, as its condition (1); the generation
   > half landed as `5b12503c31` (PR #22533, card #22482). The struck clauses
-  > describe committed copies drift-checked in CI. Those copies stay in the tree
-  > until #22485 deletes them, and `check:spec-changes` / `check:upgrade-guide`
-  > no longer compare them. The amendment note under D4 is the full record:
-  > what is generated where, and what #22483 and #22485 still carry.
+  > describe committed copies drift-checked in CI. Those copies are gone — the
+  > guide's at #22483 (PR #22556), `spec-changes.json`'s at #22485 (PR #22638) —
+  > and `check:spec-changes` / `check:upgrade-guide` generate in memory and
+  > compare nothing. The amendment note under D4 is the full record: what is
+  > generated where, and where each part landed.
 - **P3 — MCP tools + RC discipline (D6): deferred, evidence-gated** (as the ADR
   Boundaries intended): built when external-consumer demand justifies the
   operational surface. Nothing else in this ADR depends on it.
