@@ -18,7 +18,7 @@
 //     the door switched off, for a holder of that position.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { resolveUserAuthzGrants } from '@objectstack/core';
+import { resolveUserAuthzGrants, securityCatalogReaderOf } from '@objectstack/core';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 
@@ -33,6 +33,14 @@ const POSITION_SET = 'showcase_auditor';
 const HELD_POSITION = 'exec';
 const HELD_POSITION_SET = 'showcase_executive';
 const HOLDER_EMAIL = 'exec.holder@example.com';
+/**
+ * A position and a permission set saved through the metadata door, so no
+ * package ships either: the environment-authored items the door switches as
+ * well as packaged ones (#22621 → A), held by a holder of their own.
+ */
+const ENV_POSITION = 'door_env_position';
+const ENV_SET = 'door_env_set';
+const ENV_HOLDER_EMAIL = 'env.holder@example.com';
 
 interface Engine {
     find(object: string, options?: unknown): Promise<Array<Record<string, unknown>>>;
@@ -161,6 +169,76 @@ describe('the catalog activation door, on a booted showcase', () => {
         }
         const restored = await rowsOf('permission', 'admin_full_access');
         expect(restored.every((r) => r.active === true || r.active === 1)).toBe(true);
+    });
+
+    // [#22621 → A] An item the environment authored has no package, and the
+    // ledger row the door writes for it says so: `package_id` is empty, never a
+    // placeholder a reader could take for a package. The row is honoured all
+    // the same, because the resolver keys it by type and name only.
+    it('an environment-authored position and permission set switch off and back on, and the resolver honours both', async () => {
+        const savedSet = await stack.apiAs(token, 'PUT', `/meta/permission/${ENV_SET}`, {
+            name: ENV_SET, label: 'Saved in the environment', objects: {},
+        });
+        expect(savedSet.status, await savedSet.clone().text()).toBe(200);
+        const savedPosition = await stack.apiAs(token, 'PUT', `/meta/position/${ENV_POSITION}`, {
+            name: ENV_POSITION, label: 'Saved in the environment', permissionSets: [ENV_SET],
+        });
+        expect(savedPosition.status, await savedPosition.clone().text()).toBe(200);
+
+        // Anti-vacuity: the catalog the door reads really holds both, and
+        // neither names a package — the case under test, not a packaged one.
+        const reader = securityCatalogReaderOf(ql);
+        expect(reader, 'no security catalog bound to the booted engine').toBeTruthy();
+        const position = await reader!.resolve('position', ENV_POSITION);
+        const set = await reader!.resolve('permission', ENV_SET);
+        expect(position?.name).toBe(ENV_POSITION);
+        expect(set?.name).toBe(ENV_SET);
+        expect(position?.packageId).toBeUndefined();
+        expect(set?.packageId).toBeUndefined();
+
+        await stack.signUp(ENV_HOLDER_EMAIL);
+        const [user] = await ql.find('sys_user', { where: { email: ENV_HOLDER_EMAIL }, limit: 1, context: SYSTEM_CTX });
+        expect(user?.id, `no sys_user row for ${ENV_HOLDER_EMAIL}`).toBeTruthy();
+        const holder = String(user.id);
+        await ql.insert(
+            'sys_user_position',
+            { id: 'usp_catalog_activation_env', user_id: holder, position: ENV_POSITION },
+            { context: SYSTEM_CTX },
+        );
+
+        // CONTROL: before any flip the position grants its set.
+        const before = await resolveUserAuthzGrants(ql as never, holder, {});
+        expect(before.positions).toContain(ENV_POSITION);
+        expect(before.permissions).toContain(ENV_SET);
+
+        const positionOff = await flip('position', ENV_POSITION, { enabled: false });
+        expect(positionOff.status, await positionOff.clone().text()).toBe(200);
+        const positionRows = await rowsOf('position', ENV_POSITION);
+        expect(positionRows).toHaveLength(1);
+        expect(positionRows[0].active === false || positionRows[0].active === 0).toBe(true);
+        expect(positionRows[0].package_id ?? null).toBeNull();
+        const positionSwitchedOff = await resolveUserAuthzGrants(ql as never, holder, {});
+        expect(positionSwitchedOff.positions).not.toContain(ENV_POSITION);
+        expect(positionSwitchedOff.permissions).not.toContain(ENV_SET);
+
+        const positionOn = await flip('position', ENV_POSITION, { enabled: true });
+        expect(positionOn.status, await positionOn.clone().text()).toBe(200);
+        expect(await rowsOf('position', ENV_POSITION)).toHaveLength(1);
+
+        const setOff = await flip('permission', ENV_SET, { enabled: false });
+        expect(setOff.status, await setOff.clone().text()).toBe(200);
+        const setRows = await rowsOf('permission', ENV_SET);
+        expect(setRows).toHaveLength(1);
+        expect(setRows[0].package_id ?? null).toBeNull();
+        const setSwitchedOff = await resolveUserAuthzGrants(ql as never, holder, {});
+        expect(setSwitchedOff.positions).toContain(ENV_POSITION);
+        expect(setSwitchedOff.permissions).not.toContain(ENV_SET);
+
+        const setOn = await flip('permission', ENV_SET, { enabled: true });
+        expect(setOn.status, await setOn.clone().text()).toBe(200);
+        const after = await resolveUserAuthzGrants(ql as never, holder, {});
+        expect(after.positions).toContain(ENV_POSITION);
+        expect(after.permissions).toContain(ENV_SET);
     });
 
     it('a name nobody declares is 404 and writes nothing', async () => {
