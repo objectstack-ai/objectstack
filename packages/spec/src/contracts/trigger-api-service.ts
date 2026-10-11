@@ -44,8 +44,14 @@ export interface ITriggerApiService {
    * today, in this order:
    *  - It looks up the hook armed for `hook.flowName` and compares
    *    `hook.hookId` with it in constant time. An unknown flow and a wrong
-   *    hook id answer identically, `404 RESOURCE_NOT_FOUND`, so the door is
-   *    no oracle for which flows exist.
+   *    hook id answer identically, `404 RESOURCE_NOT_FOUND`. The hook is
+   *    matched BEFORE the signature is verified, so an unsigned post that
+   *    names an armed flow and its hook id gets the `503` or `401` below
+   *    instead of that `404`: the hook id, not the flow name, is what keeps
+   *    an armed flow unprobeable. A flow left on the default hook id
+   *    (`default`, when its start node's `config.hookId` names none) can be
+   *    probed that way. Whether every unverified post should get one uniform
+   *    refusal is the hardening card's question (#22769), not this contract's.
    *  - It reads that hook's own secret, at this moment, so a rotation applies
    *    to the next post. A secret that cannot be read answers
    *    `503 SERVICE_UNAVAILABLE`. ⛔ It never verifies against no secret.
