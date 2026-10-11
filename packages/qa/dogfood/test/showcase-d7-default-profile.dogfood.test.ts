@@ -38,6 +38,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
+import { createSecurityCatalogReader } from '@objectstack/core';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, appDefaultPermissionSetName } from '@objectstack/plugin-security';
@@ -101,26 +102,18 @@ describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () =
     expect(r.status, 'the platform baseline COMPOSES with the declared default, it is not replaced by it').toBe(200);
   });
 
-  it('and the explain surface tells the same story: BOTH sets are bound to the everyone anchor (#7555)', async () => {
+  it('and the catalog tells the same story: BOTH sets are named on the everyone definition (#7555)', async () => {
     // The runtime composing while the anchor carried only the app's set would
-    // make `security/explain` — and the Setup UI reading the same join table —
-    // report a narrower default than every request actually applies. The join
-    // table takes many rows per position; the boot binding writes one per
-    // baseline name.
-    const everyone = await ql.findOne('sys_position', { where: { name: 'everyone' }, context: SYS });
-    expect(everyone?.id, 'everyone anchor seeded').toBeTruthy();
-    const bound: string[] = [];
-    for (const name of ['showcase_member_default', 'member_default']) {
-      const set = await ql.findOne('sys_permission_set', { where: { name }, context: SYS });
-      if (!set?.id) continue;
-      const row = await ql.findOne('sys_position_permission_set', {
-        where: { position_id: everyone.id, permission_set_id: set.id }, context: SYS,
-      });
-      if (row) bound.push(name);
-    }
-    expect(bound, 'everyone ← app baseline AND platform baseline').toEqual([
+    // make `security/explain` report a narrower default than every request
+    // actually applies. [ADR-0131 D2/D3] The anchor's binding is its
+    // definition's `permissionSets`, which the resolver reads; the boot writes
+    // no `sys_position` or junction row for it.
+    const reader = createSecurityCatalogReader({ registry: ql.registry, metadata: stack.kernel.getService('metadata') });
+    const everyone = await reader.resolve('position', 'everyone');
+    expect((everyone?.definition as any)?.permissionSets, 'everyone ← app baseline AND platform baseline').toEqual([
       'showcase_member_default',
       'member_default',
     ]);
+    expect(await ql.find('sys_position_permission_set', { where: {}, context: SYS }), 'no junction row is written').toEqual([]);
   });
 });

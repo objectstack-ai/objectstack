@@ -13,9 +13,23 @@ import { normalizeStackInput } from '@objectstack/spec';
 import {
   PERMISSION_RETIRED_LIFECYCLE_RESIDUE,
   retiredKeyPrescription,
-  validateRetiredPermissionResidue,
+  validateRetiredPermissionResidue as validateRetiredPermissionResidueUnrecorded,
 } from './validate-retired-permission-residue.js';
 import { AUTHORING_COMMANDS, authoringRulesFor, runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain permission-retired-lifecycle-residue`. Every direct
+// call below records what it fired, and the last cases in this file hold each
+// recorded verdict to one line of at most 200 characters — every firing
+// variant this suite exercises, not a chosen few. Run the whole file: those
+// cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateRetiredPermissionResidue: typeof validateRetiredPermissionResidueUnrecorded = (...args) => {
+  const findings = validateRetiredPermissionResidueUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -174,5 +188,51 @@ describe('validateRetiredPermissionResidue (#17425)', () => {
         ).toEqual([]);
       }
     });
+  });
+});
+
+describe('[#22161] one-line verdicts — permission-retired-lifecycle-residue', () => {
+  it('reads as one sentence', () => {
+    const findings = validateRetiredPermissionResidue(normalized({ allowRestore: false }));
+    expect(findings.map((f) => f.message)).toEqual([
+      'sets `allowRestore: false`, the retired default of a key removed in @objectstack/spec 17, which the '
+        + 'parse strips in silence, so this line grants nothing',
+    ]);
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(PERMISSION_RETIRED_LIFECYCLE_RESIDUE);
+    expect(entry, 'no `os explain permission-retired-lifecycle-residue` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    // The residue table, the refusal of every other value and the
+    // prescription's source are each held to the rule by the cases above.
+    for (const fact of [
+      '`allowRestore` and `allowPurge`',
+      'ADR-0049',
+      'retired default, `false`',
+      'every other value is refused at the parse',
+      '`definePermissionSet`',
+      'ADR-0087 D2',
+      'never on the load path',
+      'before the parse',
+      'read from the tombstone on `ObjectPermissionSchema`',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+    for (const [key, residue] of RETIRED) {
+      expect(text, key).toContain(`\`${key}\``);
+      expect(residue).toBe(false);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === PERMISSION_RETIRED_LIFECYCLE_RESIDUE);
+    // The coverage control first: both retired keys fired.
+    expect(converted.some((f) => f.message.startsWith('sets `allowRestore: false`'))).toBe(true);
+    expect(converted.some((f) => f.message.startsWith('sets `allowPurge: false`'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

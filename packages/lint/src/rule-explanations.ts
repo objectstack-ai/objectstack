@@ -2971,6 +2971,262 @@ const PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Flow credential literals (`lint-flow-credential-literals.ts`) ──────────
+
+const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
+  rule: 'flow-credential-literal',
+  covers: 'which positions are judged, and where a credential goes',
+  paragraphs: [
+    // The positions and the region kinds are held to the rule by its test, each fired.
+    'A flow definition is served, as authored, to every member who can read flows, and three ' +
+      'positions in it are open on that read path: an `http` node\'s `config.headers` entries, the ' +
+      'query parameters of an `http` node\'s `config.url`, and a node\'s `connectorConfig.input`, ' +
+      'walked to every depth (an array element is judged under its parent\'s key). The read ' +
+      'projection that withholds the spec\'s DECLARED credential slots cannot withhold a value here ' +
+      'without also breaking the round trip of every ordinary value, so a literal credential in one ' +
+      'of them is readable by all of those members. Every node is judged, including one nested in a ' +
+      '`try_catch`, `loop` or `parallel` region, because the read path serves it the same way.',
+    'The supported home for an outbound credential is a declarative connector, whose ' +
+      '`auth.credentialRef` names a secrets-layer reference resolved at boot (an environment ' +
+      'variable in the open tier) and never stored in metadata (ADR-0097 §3), called from a ' +
+      '`connector_action` node. The fix line routes by shape, to a variant the connector auth schema ' +
+      'really has: a header credential to `bearer` or a header `api-key`, a query-string key to ' +
+      '`api-key` with `paramName`. A credential in `connectorConfig.input` is dropped instead, ' +
+      'because the connector authenticates through its own `auth`. No variant carries a secret in a ' +
+      'url path, so a url path is not judged and no fix line promises one.',
+    'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
+      'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
+      '`token` can hold something that is not a secret, and a false positive costs a line of ' +
+      'reading, never a blocked save. A `{variable}` template is not a literal and draws nothing. ' +
+      'The finding names where the value sits and never the value itself, because it travels into ' +
+      'CI logs, the runtime gate\'s server log line and the save response.',
+  ],
+};
+
+// ── AI agent ↔ skill ↔ tool references (`validate-ai-surface-affinity.ts`, `validate-ai-tool-references.ts`) ──
+
+const AI_SKILL_SURFACE_MISMATCH_EXPLANATION: RuleExplanation = {
+  rule: 'ai-skill-surface-mismatch',
+  covers: 'how an agent and its skills must share a surface',
+  paragraphs: [
+    // The defaults and the `both` arm are held to the rule by its test.
+    'An agent binds one product surface, `ask` or `build` (ADR-0063 §1), and a skill declares the ' +
+      'surface it belongs to: `ask`, `build` or `both` (ADR-0063 §3). A skill attaches only to an ' +
+      'agent of its own surface, and `both` attaches to either (ADR-0064 §3). Each side defaults to ' +
+      '`ask` when its `surface` is absent, as the runtime defaults it.',
+    'The runtime treats a mismatch as a fast load error: `resolveActiveSkills()` throws on the ' +
+      'first incompatible binding, so an agent carrying one fails at chat time with a 500, after the ' +
+      'stack parsed, validated and deployed cleanly. Both sides are declared in the same stack, so ' +
+      'the contradiction is provable statically, and this is an error with no false positive by ' +
+      'construction.',
+    'Judged: each name in an agent\'s `skills` that resolves to a skill this stack declares. A name ' +
+      'that resolves to no declared skill is skipped, not reported: kernel skills (`schema_reader`, ' +
+      'the `ask` and `build` bundles) are registered at run time and invisible to a static read, so ' +
+      'resolving names against `stack.skills` alone would flag every one of them.',
+  ],
+};
+
+const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
+  rule: 'ai-skill-tool-unresolved',
+  covers: 'how a skill tool name resolves, and why it only warns',
+  paragraphs: [
+    // The three sources and the wildcard are held to the rule by its test, each one silencing it.
+    'A `skill.tools` entry resolves, in order, against the stack\'s own `stack.tools` names; ' +
+      '`PLATFORM_PROVIDED_TOOL_NAMES` (`@objectstack/spec/system`), the tools the cloud AI runtime ' +
+      'registers at boot; and the materialised action tools, one `action_<name>` per declarative ' +
+      'action in `stack.actions` or any object\'s `actions` (ADR-0109: the default path declares no ' +
+      'tool record at all). A trailing-wildcard entry (`action_*`, `crm_*`) resolves when any member ' +
+      'of that universe starts with its prefix.',
+    // The headless paths are held to the rule by its test, each one materialising.
+    'An action materialises as a tool only when it opts in, `ai.exposed: true` with an ' +
+      '`ai.description` (ADR-0011), and has a headless path: a declarative `operation: \'update\'`, ' +
+      'a `script` action with a target or a body, or an `api` or `flow` action with a target. A ' +
+      '`url`, `modal` or `form` action is UI-only and stays human-driven by design. Naming ' +
+      '`action_<name>` for an action that exists but never materialises is its own verdict with its ' +
+      'own fix (opt it in, or drop the reference), because it is a different mistake from naming a ' +
+      'tool that exists nowhere.',
+    'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
+      'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
+      'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +
+      'platform registry can register tools no static read can see, and the runtime tolerates ' +
+      'unresolved names on purpose, since a skill may be authored before its tools exist. Judged ' +
+      'over the whole stack by `os validate`, `os lint` and `os build`, never at the runtime publish ' +
+      'gate, whose per-write snapshot carries neither `stack.tools` nor `stack.actions`.',
+  ],
+};
+
+// ── Flow filter tokens (`validate-flow-filter-tokens.ts`) ──────────────────
+
+const FLOW_FILTER_TOKEN_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'flow-filter-token-unknown',
+  covers: 'the two vocabularies a flow filter token resolves in',
+  paragraphs: [
+    // The function lists are held to `FLOW_TEMPLATE_DATE_FUNCTIONS` and
+    // `FLOW_TEMPLATE_VALUE_FUNCTIONS` by the rule's test.
+    'A flow node\'s filter value is resolved in two layers. The automation template evaluator reads ' +
+      'it first, in the flow template dialect: `{NOW()}` and `{TODAY()}` with an optional ± N day ' +
+      'offset, `{$User.Id}`, `{record.<field>}`, and the value functions round, floor, ceil, abs, ' +
+      'min and max. Only a token that evaluator does not resolve is handed on to ObjectQL ' +
+      '(`interpolateFilter`), whose filter placeholders (`{current_user_id}`, `{today}`, ' +
+      '`{30_days_ago}` and the rest) resolve it there.',
+    'A token in call position that is a function in neither vocabulary never reaches the query: ' +
+      '`resolveToken` throws `FlowExpressionFunctionError`, a guard refusal a `fault` edge may not ' +
+      'swallow, so the node cannot run at all. That is why this is an error. An unknown token in a ' +
+      'presentation filter fails differently, reaching the data engine as a literal so the surface ' +
+      'renders empty, and `filter-token-unknown` reports that one.',
+    'Judged: the string values inside the authored filters of `flows`, and only the call-position ' +
+      'arm, whose reference set is closed. Bare and dotted identifiers (`{recordId}`, ' +
+      '`{record.id}`) address the run\'s variable map, which is open, so they are never judged here, ' +
+      'and a junk shape is reported by the CRUD guard at run time. This is its own id rather than ' +
+      '`flows` added to `filter-token-unknown`\'s walk, because the two positions share neither the ' +
+      'vocabulary nor the consequence, and a machine consumer keyed on the id cannot see which ' +
+      'position fired.',
+  ],
+};
+
+// ── Managed-object API methods (`validate-managed-api-methods.ts`) ─────────
+
+const MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION: RuleExplanation = {
+  rule: 'object/managed-api-method-unaffordable',
+  covers: 'why an advertised write verb needs its affordance',
+  paragraphs: [
+    // The verb table is held to `MANAGED_WRITE_VERB_AFFORDANCE` by the rule's test.
+    'A managed object (`managedBy` set) resolves its affordances from its bucket\'s default row and ' +
+      'its own `userActions` (ADR-0092, ADR-0103), and each generic write verb in ' +
+      '`enable.apiMethods` needs one: `create` needs `create`, `update` and `upsert` need `edit`, ' +
+      '`delete` and `purge` need `delete`. Reads are never affordance-gated. The verdict comes from ' +
+      'the shared predicate `checkManagedApiMethodAffordances` (`@objectstack/spec/data`), the same ' +
+      'call objectql\'s registry makes at registration, so the two never disagree about a verb.',
+    'The registry strips each refused verb at registration and logs a warning, so the declaration ' +
+      'advertises an API surface the object does not serve, and the only trace is a boot-log line ' +
+      'read after an incident. Boot stays warn-and-strip on purpose, so a metadata typo cannot kill ' +
+      'a control-plane boot; this rule refuses the same contradiction where the author is: at every ' +
+      'CLI door, judged before the parse, and at the runtime publish gate for an `object` write.',
+    'One finding per object, not per verb: several refused verbs on one object are one mistake and ' +
+      'one edit. The fix line offers both ways out: drop the verbs, or open the affordance, and only ' +
+      'for a write a user context may really perform, once the guard that enforces it exists ' +
+      '(ADR-0092 D4: an affordance never ships ahead of its guard).',
+  ],
+};
+
+// ── Organization-axis red lines (`validate-org-axis-red-lines.ts`) ─────────
+
+const ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION: RuleExplanation = {
+  rule: 'org-axis-cross-org-bu-grant',
+  covers: 'why business-unit trees stay inside one organization',
+  paragraphs: [
+    'ADR-0105 makes the organization tree a reporting and grouping dimension, never a permission ' +
+      'hierarchy, and D6 draws two red lines to keep it so. This is the second (the first is ' +
+      '`org-axis-permission-inheritance`): business-unit trees stay inside one organization. ' +
+      '`sys_business_unit` is org-scoped, and every business-unit mechanism (`unit_and_subordinates` ' +
+      'sharing, `adminScope` delegation, depth scopes) resolves within one organization.',
+    // The recipients and both opt-out spellings are held to the rule by its test.
+    'A sharing rule whose `sharedWith` recipient is `business_unit` (that unit\'s members) or ' +
+      '`unit_and_subordinates` (that unit plus every descendant unit), on an object that opted out ' +
+      'of tenancy (`tenancy.enabled: false`, or `systemFields.tenant: false`), has no organization ' +
+      'column to scope against: the grant reaches every organization\'s rows, the ' +
+      'cross-organization business-unit tree the ADR rejected, arrived at by accident.',
+    'The other recipients are the sanctioned way to share a platform-global object (ADR-0066): ' +
+      '`user`, `team` and `position` expand flat, and `field` reads the users a column on the record ' +
+      'itself names, so none of them walks a business-unit tree. A platform-global catalog everyone ' +
+      'should read wants an organization-wide default of `public_read`, not a business-unit grant. ' +
+      'An error: it mirrors a real enforcement property, the org-predicated business-unit resolver, ' +
+      'so the failure moves from a silent wrong answer to an authoring fix.',
+  ],
+};
+
+// ── Retired permission residue (`validate-retired-permission-residue.ts`) ──
+
+const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
+  rule: 'permission-retired-lifecycle-residue',
+  covers: 'why a retired default is accepted, and why it is flagged',
+  paragraphs: [
+    // The keys and their residue value are held to the rule by its test.
+    '`allowRestore` and `allowPurge` were removed from object permissions in `@objectstack/spec` 17 ' +
+      '(ADR-0049). The parse still accepts each at its retired default, `false`, as inert residue ' +
+      'and strips it without a word, because real built artifacts carry that residue once per ' +
+      'permission entry and a notice per occurrence would be a storm; every other value is refused ' +
+      'at the parse, with the prescription attached.',
+    'The loud channels for a retired key miss one author: TypeScript\'s `never` reaches only typed ' +
+      'sources (`definePermissionSet`), and the ADR-0087 D2 conversion that `os migrate meta` runs ' +
+      'speaks only when someone runs it, never on the load path. So a JSON or YAML author who writes ' +
+      'the key at its residue value gets a clean parse, no signal, and a line that grants nothing. ' +
+      'This rule is that missing signal, judged on the raw authored stack before the parse, where ' +
+      'the residue is still attributable to a line somebody wrote.',
+    'A warning: the line is harmless, only dead. The fix line is the retirement\'s own ' +
+      'prescription, read from the tombstone on `ObjectPermissionSchema`, so the parse-time refusal ' +
+      'and this finding never word it differently. Judged at every CLI door and at the runtime ' +
+      'publish gate for a `permission` write.',
+  ],
+};
+
+// ── Seed datasets (`validate-seed-replay-safety.ts`, `validate-seed-state-machine.ts`) ──
+
+const SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION: RuleExplanation = {
+  rule: 'seed-insert-mode-duplicates-on-replay',
+  covers: 'why a seed dataset must be safe to replay',
+  paragraphs: [
+    'Seeds are replayed, not applied once: every `data` dataset is loaded again on each dev-server ' +
+      'boot and each package re-publish, so a dataset\'s mode must be idempotent. `mode: \'insert\'` ' +
+      'is the one that is not: the loader\'s insert path writes every record unconditionally, with no ' +
+      'existing-row check, so the table grows by the dataset\'s size on every restart (three rows, ' +
+      'then six, then nine).',
+    // The modes are held to the rule by its test, each one silent.
+    'The fix line names the idempotent modes, `ignore` (skip rows that already exist) and `upsert` ' +
+      '(create or update), each matching on the dataset\'s `externalId`: a single natural-key field, ' +
+      'or a composite list of fields for a join or junction table with no single natural key ' +
+      '(`[\'team\', \'project\']`).',
+    'A warning, not a refusal: an insert seed loads and works on a fresh database, and the defect ' +
+      'shows only from the second boot on.',
+  ],
+};
+
+const SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION: RuleExplanation = {
+  rule: 'seed-value-outside-state-machine',
+  covers: 'which states a seeded value may name',
+  paragraphs: [
+    'Seed writes are exempt from the `state_machine` validation rule: a curated seed records ' +
+      'established facts, so a record may be born mid-lifecycle (a `completed` project, a ' +
+      '`closed_won` opportunity) without the entry guard refusing it. The exemption also skips the ' +
+      'machine\'s check that a value is a state at all, and a field-level `select` catches only a ' +
+      'value outside its `options`, so a typo on a free-text state field, or a valid option that is ' +
+      'no declared state, lands silently.',
+    // The three sources of the declared set are held to the rule by its test, each one silencing it.
+    'So a seeded value need not be an initial state, but it must be a state the machine DECLARES: ' +
+      'the union of its `initialStates`, the keys of its `transitions` map and every transition ' +
+      'target. The verdict names the first three declared states in alphabetical order and counts ' +
+      'the rest.',
+    'Not judged: an absent or empty value, a value that is not a plain string (an unresolved ' +
+      'expression envelope, a number), and a `state_machine` rule that declares no state at all. A ' +
+      'warning: a curated value the machine does not know is suspicious, not necessarily wrong.',
+  ],
+};
+
+// ── Semantic-role provenance (`validate-semantic-roles.ts`) ────────────────
+
+const SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'semantic-role-field-unprovisioned',
+  covers: 'why an injected anchor on an external object is blank',
+  paragraphs: [
+    'An object\'s semantic roles point into its own field map (ADR-0085): `stageField` (stage ' +
+      'detection) and each `highlightFields` entry (the default list columns, record cards, ' +
+      'previews and the detail highlight strip). A pointer at a system column the registry injects ' +
+      '(`owner_id`, `created_by`, `organization_id` and the rest) resolves on every object that gets ' +
+      'the column, so naming one is legitimate.',
+    // The external arm, the local twin and the declared column are held to the rule by its test.
+    'An `external` object (ADR-0015) is the exception: the platform registers the injected anchors, ' +
+      'but the remote schema owns the table and no column backs them, so a role pointing at one ' +
+      'drives its consumers off a column that is blank on every record. A column the author declares ' +
+      'in the object\'s own `fields` (mapped through the external binding\'s `columnMap`) is the ' +
+      'author\'s and never reported.',
+    'Existence and provenance are separate questions: whether an entry names a field at all is ' +
+      '`object-field-ref-unknown` at `highlightFields` and `semantic-role-field-unknown` at ' +
+      '`stageField`, and this rule asks only about the storage behind a name that resolves. A ' +
+      'warning, like the other semantic-role rules: every consumer degrades to an empty value and ' +
+      'nothing breaks.',
+  ],
+};
+
 /**
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
@@ -3097,6 +3353,16 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION.rule]: MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION,
   [VIEW_CONTAINER_SHAPE_EXPLANATION.rule]: VIEW_CONTAINER_SHAPE_EXPLANATION,
   [PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION.rule]: PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION,
+  [FLOW_CREDENTIAL_LITERAL_EXPLANATION.rule]: FLOW_CREDENTIAL_LITERAL_EXPLANATION,
+  [AI_SKILL_SURFACE_MISMATCH_EXPLANATION.rule]: AI_SKILL_SURFACE_MISMATCH_EXPLANATION,
+  [AI_SKILL_TOOL_UNRESOLVED_EXPLANATION.rule]: AI_SKILL_TOOL_UNRESOLVED_EXPLANATION,
+  [FLOW_FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FLOW_FILTER_TOKEN_UNKNOWN_EXPLANATION,
+  [MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION.rule]: MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION,
+  [ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION.rule]: ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION,
+  [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
+  [SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION.rule]: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION,
+  [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
+  [SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

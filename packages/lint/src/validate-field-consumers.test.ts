@@ -8,10 +8,21 @@ import {
   CARRIER_ROOTS,
   CONSUMER_ROOTS,
   FIELD_NO_CONSUMERS,
-  validateFieldConsumers,
+  validateFieldConsumers as validateFieldConsumersUnrecorded,
 } from './validate-field-consumers.js';
 import { AUTHORING_COMMANDS, AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
 import { explainRule } from './rule-explanations.js';
+
+// [#22161] Every direct call below records what it fired, and the last cases
+// in this file hold each recorded verdict to one line of at most 200
+// characters — every firing variant this suite exercises, not a chosen few.
+// Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateFieldConsumers: typeof validateFieldConsumersUnrecorded = (...args) => {
+  const findings = validateFieldConsumersUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -1528,5 +1539,53 @@ describe('[#21439] validateFieldConsumers — an analytics member credits every 
       });
       expect(Object.keys(v).sort()).toEqual([...JUDGED].sort());
     });
+  });
+});
+
+describe('[#22161] one-line verdicts — field-no-consumers, the same-name clause bounded', () => {
+  /** `n` objects each declaring `description`, with a view naming only `owner`'s name field. */
+  const sharedName = (n: number, carried = false): AnyRec => ({
+    objects: Array.from({ length: n }, (_, i) => ({
+      name: `obj_${i}`,
+      fields: { name: { type: 'text' }, description: { type: 'textarea' } },
+    })),
+    views: [{ name: 'v', object: 'obj_0', list: { type: 'grid', data: { provider: 'object', object: 'obj_0' }, columns: ['name'] } }],
+    ...(carried ? { data: [{ object: 'obj_0', records: [{ name: 'a', description: 'b' }] }] } : {}),
+  });
+
+  it('names the one other object when there is one', () => {
+    const f = validateFieldConsumers(sharedName(2)).find((x) => x.object === 'obj_0' && x.field === 'description');
+    expect(f?.message).toBe(
+      'declared, but nothing in this stack displays or reads it (inert; a consumer of the same name on '
+        + '"obj_1" does not count)',
+    );
+  });
+
+  it('names the first other object and counts the rest, however many declare the name', () => {
+    const f = validateFieldConsumers(sharedName(12)).find((x) => x.object === 'obj_0' && x.field === 'description');
+    expect(f?.message).toBe(
+      'declared, but nothing in this stack displays or reads it (inert; a consumer of the same name on '
+        + '"obj_1" (and 10 more) does not count)',
+    );
+    const carried = validateFieldConsumers(sharedName(12, true))
+      .find((x) => x.object === 'obj_0' && x.field === 'description');
+    expect(carried?.message).toBe(
+      'declared, but nothing in this stack displays or reads it (carrier-only: 1 site(s) name it without '
+        + 'reading it; a consumer of the same name on "obj_1" (and 10 more) does not count)',
+    );
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FIELD_NO_CONSUMERS);
+    // The coverage control first: every arm fired — inert, carrier-only, a
+    // single other object and a counted remainder.
+    expect(converted.some((f) => f.message.endsWith('(inert)'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('(carrier-only: '))).toBe(true);
+    expect(converted.some((f) => /same name on "[^"]+" does not count/.test(f.message))).toBe(true);
+    expect(converted.some((f) => / \(and \d+ more\) does not count/.test(f.message))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

@@ -1,9 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// ADR-0057 D6 / #2077 — stack-declared `roles` + `sharingRules` are seeded into
-// sys_position / sys_sharing_rule at boot, so they stop being decorative. The issue
-// reported booting the showcase yielded sys_position count = 0 and sys_sharing_rule
-// count = 0. This proves the opposite, plus the spec→runtime translation.
+// ADR-0057 D6 / #2077 — stack-declared positions + `sharingRules` are not
+// decorative. The issue reported booting the showcase yielded sys_position
+// count = 0 and sys_sharing_rule count = 0. Declared sharing rules are seeded
+// into sys_sharing_rule at boot, with the spec→runtime translation. Declared
+// positions are served by the security catalog from the registry — ADR-0131
+// D2 retired the position seeders, so the boot writes no sys_position row and
+// the catalog read is where a declared position is live.
 //
 // @proof: showcase-declarative-rbac-seeding
 //
@@ -12,6 +15,7 @@
 // authz-row: declarative-rbac-seeding
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import { createSecurityCatalogReader } from '@objectstack/core';
 import { type VerifyStack } from '@objectstack/verify';
 import { getSharedShowcase } from './shared-showcase.js';
 
@@ -25,9 +29,9 @@ describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
     ql = await stack.kernel.getServiceAsync('objectql');
   }, 60_000);
 
-  it('declared roles land in sys_position (was count = 0)', async () => {
-    const roles = await ql.find('sys_position', { where: {}, context: { isSystem: true } });
-    const names = (roles ?? []).map((r: any) => r.name);
+  it('declared positions are served by the security catalog (was count = 0)', async () => {
+    const reader = createSecurityCatalogReader({ registry: ql.registry, metadata: stack.kernel.getService('metadata') });
+    const names = (await reader.list('position')).map((e) => e.name);
     expect(names, 'showcase declares contributor/manager/exec').toEqual(
       expect.arrayContaining(['contributor', 'manager', 'exec']),
     );
@@ -76,10 +80,5 @@ describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
     expect(contacts.recipient_id).toBe('manager');
     const criteria = JSON.parse(contacts.criteria_json);
     expect(criteria).toEqual({ $and: [{ stage: 'qualified' }, { company: 'Northwind' }] });
-  });
-
-  it('re-seed is idempotent (no duplicate rows on a second boot)', async () => {
-    const roles = await ql.find('sys_position', { where: { name: 'manager' }, context: { isSystem: true } });
-    expect((roles ?? []).length, 'exactly one manager role').toBe(1);
   });
 });

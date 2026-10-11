@@ -300,9 +300,10 @@ same writes. What moved is the hook's view.
   `ctx.submitted`.
 - A self-assignment (`data.x = data.x`) on such a field is now a **no-op** — the stored
   value stands, and the write is stripped and reported exactly as an un-hooked one is.
-- `ctx.submitted` is **not** marshalled onto the sandboxed `body` face. A `body` deriving
-  from a read-only column reads `ctx.previous`, the stored row, which is the correct
-  source either way.
+- `ctx.submitted` is **not** marshalled onto the sandboxed `body` face, and `objectstack
+  build` refuses to lower a handler that reads it (the handler is bundled instead). A
+  `body` deriving from a read-only column reads `ctx.previous`, the stored row, which is
+  the correct source either way.
 
 `readonlyWhen` locks are deliberately still hook-writable (#9107).
 
