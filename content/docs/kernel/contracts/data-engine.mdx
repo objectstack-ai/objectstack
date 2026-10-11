@@ -331,10 +331,11 @@ interface EngineUpdateOptions {
 
 ### WriteObservabilityOptions
 
-The write methods (`insert` / `update`) additionally accept two **in-process**
-options that govern what happens when caller-supplied write fields are legally
+The write methods (`insert` / `update`) additionally accept three **in-process**
+options. Two govern what happens when caller-supplied write fields are legally
 stripped from the payload before the driver write: observe the strip
-(`onFieldsDropped`) or refuse the write outright (`strictReadonlyWrites`).
+(`onFieldsDropped`) or refuse the write outright (`strictReadonlyWrites`). The
+third, `onValidationAdvisory`, reports the write's advisory validation-rule hits.
 
 The strips these two options cover are the engine's legal ones:
 
@@ -354,6 +355,7 @@ on `insert` too since the 2026-09-03 ruling — see **On `insert`** below.
 ```typescript
 interface WriteObservabilityOptions {
   onFieldsDropped?: (event: DroppedFieldsEvent) => void;
+  onValidationAdvisory?: (event: ValidationAdvisoryEvent) => void;
   strictReadonlyWrites?: boolean;  // refuse instead of stripping. Default: false
 }
 
@@ -363,6 +365,14 @@ interface DroppedFieldsEvent {
   // why they were dropped — an OPEN vocabulary that grows with the write
   // path's legal strips; branch on it exhaustively, never with a binary test
   reason: 'readonly' | 'readonly_when' | 'primary_key' | 'computed';
+}
+
+interface ValidationAdvisoryEvent {
+  rule: string;                   // the advisory validation rule's declared `name`
+  severity: 'warning' | 'info';   // never `error`: an `error` rule refuses the write instead
+  field: string;                  // the rule's first declared field, or `_record`
+  code: string;                   // the finding code a refused write reports for the same rule
+  message: string;                // the rule's author-written message, in the caller's locale
 }
 ```
 
@@ -425,6 +435,24 @@ legacy record numbers (#3493) exempts the runtime-owned strip only, and a
 non-system create that asks for it still has its static `readonly` fields stripped,
 with a `warn` saying the exemption is UPDATE-only (#6640).
 
+#### `onValidationAdvisory` — the write's advisory rule hits
+
+The engine calls the listener once per ADVISORY validation-rule hit on the write
+the options were passed to: a `severity: 'warning'` or `'info'` rule whose verdict
+on the written record was "violated". Advisory rules never block, so the write
+proceeds. It is called per row on `insert`, and on `update` both by id and per
+matched row of a `multi` update. A nested write that a hook or a flow makes
+inside this one carries its own options, so that write's hits never reach this
+listener. A rule that could not be evaluated is not a hit, and is reported in the
+server log only. The listener fires when the rules are evaluated, before the
+driver write, so a hit is provisional until the write resolves. Passing it
+changes no server-side reporting: the per-write `warn` line, and a seed / boot
+load's one summary line per rule.
+
+The DataProtocol's `createData`, `updateData` and `cloneData` pass this listener
+and answer the hits as `warnings` (`ValidateDataIssue` entries carrying `rule`
+and `severity`), present only when there is at least one hit.
+
 <Callout type="warn">
 **Layering — this is the engine seam, and since the 2026-09-03 ruling the only
 one.** The DataProtocol create faces (`createData`, `cloneData`, `createManyData`,
@@ -436,15 +464,19 @@ declares one; none carries a `readonly` policy of its own any more — see
 
 <Callout type="warn">
 `WriteObservabilityOptions` is a **TS-contract-level, in-process-only** bag —
-both members. It is deliberately not part of the serializable Zod options schemas:
+all three members. It is deliberately not part of the serializable Zod options schemas:
 a function is unrepresentable in JSON Schema and cannot cross the RPC (Virtual
 Data Engine) boundary, so remote callers never receive these events; and putting
 `strictReadonlyWrites` in the serializable bag would let any client toggle
 write-refusal on a security-adjacent path (#5126 ruling). A remote caller can set
-neither and gets NEITHER behaviour: its write is stripped and committed, silently
-from its side — a 200 whose read-only columns kept their stored values. Widening
-strict to the wire is a SEPARATE decision. A listener that throws never breaks the
-write — the engine catches and logs.
+none of the three, and for the strips it gets NEITHER behaviour: its write is
+stripped and committed, silently from its side — a 200 whose read-only columns
+kept their stored values. Widening strict to the wire is a SEPARATE decision.
+Advisory rule hits do reach a remote caller, through the answer rather than the
+listener: the DataProtocol's `createData`, `updateData` and `cloneData` pass
+`onValidationAdvisory` in-process and answer the hits as `warnings`, which is how
+a remote caller sees them. A listener that throws never breaks the write — the
+engine catches and logs.
 </Callout>
 
 ### delete
