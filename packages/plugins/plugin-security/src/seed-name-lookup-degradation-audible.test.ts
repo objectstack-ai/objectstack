@@ -17,8 +17,8 @@
  * because the mute was never on the injected arm.
  *
  * So case 1 runs a **lit control on the same subject in the same run** —
- * `reportCapabilityRowsUnreadable`, an #18091 site that already reaches the
- * console with no sink. A zero from this site is a reading only while that
+ * `reportThroughSink` with no sink, the one derivation every repaired site
+ * reaches the console through. A zero from this site is a reading only while that
  * control fires; if the harness ever stops capturing `console.warn`, the
  * control goes to zero too and the case fails instead of passing vacuously.
  *
@@ -43,7 +43,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildExistingByName } from './seed-name-lookup.js';
-import { reportCapabilityRowsUnreadable } from './seed-refusal-diagnostics.js';
+import { reportThroughSink } from './seed-refusal-sink.js';
 
 /** A driver seam that cannot answer at all — the outage arm. */
 function unreadableQl() {
@@ -102,15 +102,15 @@ describe('[#18570] batched seed existence read — its own failure is audible wi
       await buildExistingByName(unreadableQl() as any, 'sys_capability', ['alpha', 'beta']);
 
       // THE LIT CONTROL, same run, same subject (author-visible output with no
-      // sink injected): an #18091 site that already reaches the console.
-      reportCapabilityRowsUnreadable(undefined, { unreadable: 2, total: 2 });
+      // sink injected): the derivation every repaired site reaches the console through.
+      reportThroughSink(undefined, '[control] lit control', { unreadable: 2, total: 2 });
     });
 
     const lines = seen.map((args) => String(args[0]));
 
     // The control fires — so a zero from the site under repair would be a
     // reading rather than a dead harness.
-    expect(lines.filter((l) => l.includes('capability_rows_unreadable'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('[control] lit control'))).toHaveLength(1);
 
     // And the site under repair is no longer the silent one. Pre-#18570 this
     // run produced the control line ALONE.

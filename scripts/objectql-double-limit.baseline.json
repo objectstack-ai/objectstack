@@ -582,25 +582,13 @@
     "packages/plugins/plugin-security/src/auto-org-admin-grant.test.ts": {
       "unjudged": 1
     },
-    "packages/plugins/plugin-security/src/bootstrap-declared-permissions.test.ts": {
-      "blind": 1
-    },
     "packages/plugins/plugin-security/src/bootstrap-platform-admin-walled-owner.test.ts": {
       "blind": 1
-    },
-    "packages/plugins/plugin-security/src/bootstrap-platform-admin.test.ts": {
-      "blind": 1
-    },
-    "packages/plugins/plugin-security/src/bootstrap-seed-round-trips.test.ts": {
-      "unjudged": 1
     },
     "packages/plugins/plugin-security/src/cleanup-package-permissions.test.ts": {
       "blind": 1
     },
     "packages/plugins/plugin-security/src/explain-engine.test.ts": {
-      "blind": 1
-    },
-    "packages/plugins/plugin-security/src/normalize-managed-by.test.ts": {
       "blind": 1
     },
     "packages/plugins/plugin-security/src/packaged-permission-set-overlay-detection.test.ts": {
@@ -611,9 +599,6 @@
     },
     "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts": {
       "blind": 1
-    },
-    "packages/plugins/plugin-security/src/permission-set-drift.test.ts": {
-      "unjudged": 1
     },
     "packages/plugins/plugin-security/src/permission-set-projection.test.ts": {
       "unjudged": 1
