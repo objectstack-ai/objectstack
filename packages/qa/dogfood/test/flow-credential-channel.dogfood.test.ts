@@ -89,7 +89,11 @@ function inbound(name: string, secrets: { hook?: string; sign?: string } = {}, l
     };
 }
 
-const sign = (secret: string, body: string) => 'sha256=' + createHmac('sha256', secret).update(body, 'utf8').digest('hex');
+/** The timestamped `x-objectstack-signature`, the one form the inbound door accepts, signed now from the published recipe. */
+const sign = (secret: string, body: string) => {
+    const t = Math.floor(Date.now() / 1000);
+    return `t=${t},v1=` + createHmac('sha256', secret).update(`${t}.${body}`, 'utf8').digest('hex');
+};
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : Array.isArray(r?.value) ? r.value : []);
 const hasAny = (v: unknown, secrets: readonly string[]) => secrets.some((s) => JSON.stringify(v ?? null).includes(s));
 

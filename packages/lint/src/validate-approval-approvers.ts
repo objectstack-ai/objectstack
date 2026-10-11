@@ -87,7 +87,7 @@ const RESERVED_OUTPUT_KEYS = new Set(['decision', 'requestId']);
  * group-gated.
  *
  * ⛔ `manager` stays OUT of this set and is judged by its own arm below
- * ({@link MANAGER_ONLY_REMEDY}), for two reasons that are not interchangeable:
+ * ({@link MANAGER_ONLY_FIX}), for two reasons that are not interchangeable:
  * the group message ("routes to a group (position/team/department)") would be
  * false about it, and the REMEDY differs — an unstaffed position is staffed
  * in-product, an unset `sys_user.manager_id` is not (#16748). Folding `manager`
@@ -107,6 +107,13 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
 
 /**
  * How an operator actually populates `sys_user.manager_id` (#16748 / #16678).
+ *
+ * [#22161] The graded routes below are printed by
+ * `os explain approval-approvers-may-resolve-empty`: their text is the
+ * `MANAGER_ONLY_REMEDY` and `MANAGER_ONLY_ROUTES` paragraphs of that id's entry
+ * in `rule-explanations.ts`, the one copy, and this block stays the
+ * measurement behind each grade. The `manager` arm's `fix:` line
+ * ({@link MANAGER_ONLY_FIX}) names the first route and the escape in one line.
  *
  * ⚠️ STILL NOT "edit the user in the Console". The column is `readonly: true`
  * and stays out of ADR-0092's Tier 1, so `getManagedUpdateWhitelist('sys_user')`
@@ -191,42 +198,34 @@ const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
  * generated `content/docs/references/automation/approval.mdx`, once per shape
  * that reuses the approver entry — so a stale copy there multiplies) and the
  * `manager` callout in `content/docs/automation/approvals.mdx`. Neither
- * RESTATES the remedy — both point back here, which is why there is still
- * exactly one copy to edit.
+ * RESTATES the remedy — both point back at this rule, which is why there is
+ * still exactly one copy to edit: since #22161 that copy is the explanation's
+ * two paragraphs, which the finding reaches through its `rule:` line's
+ * `os explain` pointer rather than on its `fix:` line.
  */
-// ⛔ The tracker ids stay in the comments above and never in this string:
-// `check:doc-authoring` Rule 3 — a runtime string reaches authors, operators and
-// generated surfaces, none of whom can resolve `#NNNN`. The reader who can
-// resolve it is reading this source.
-const MANAGER_ONLY_REMEDY =
-  `sys_user.manager_id is not a profile column — the data API's managed-update whitelist is ` +
-  `{name, image, locale} and the column is readonly on the user form, so it is never populated by ` +
-  `editing the user in the Console. It has a dedicated admin operation instead: a platform admin ` +
-  `uses Set Manager (Setup → Users, from the user's row menu or record header) or POSTs ` +
-  `{ userId, managerId } to /api/v1/auth/admin/set-user-manager, with managerId set to null ` +
-  `to clear the link.`;
+// ⛔ The tracker ids stay in the comments above and never in the strings below
+// or in the explanation: `check:doc-authoring` Rule 3 — a runtime string reaches
+// authors, operators and generated surfaces, none of whom can resolve `#NNNN`.
+// The reader who can resolve it is reading this source.
+/**
+ * [#22161] The `manager` arm's `fix:` line: the first route the docblock above
+ * grades (the admin operation, or its bulk import) and the escape that needs
+ * no write to the column, in one line. Every route, graded, is the
+ * explanation's (see above).
+ */
+const MANAGER_ONLY_FIX =
+  "Set every submitter's sys_user.manager_id (Setup → Users → Set Manager, or the admin user import), or add " +
+  "an approver that cannot resolve empty, e.g. { type: 'org_membership_level', value: 'owner' }";
 
 /**
- * The routes an operator can actually take, GRADED — the measurement behind
- * each grade is in {@link MANAGER_ONLY_REMEDY}'s docblock.
+ * [#22161] The group arm's `fix:` line: its three routes in one line, the
+ * third in #22824's words — `fallback` NAMES who decides, rather than leave a
+ * slate that names no one to the organization's administrators (the verdict's
+ * own outcome). What happens when even that names no one is the explanation's.
  */
-const MANAGER_ONLY_ROUTES =
-  `That endpoint is the route this platform gives you, and it refuses a link that would make a ` +
-  `user their own manager, close a cycle, run past the chain depth cap, or point across an ` +
-  `organization boundary. For many users at once, the admin bulk import ` +
-  `(POST /api/v1/auth/admin/import-users) reads a manager_id column holding the manager's ` +
-  `email address, or phone number where phone sign-in is enabled — someone in the same file or ` +
-  `an existing user — and links each row once every row in the file exists, through those same ` +
-  `refusals; a link it cannot make is reported on that row's manager result and never fails the ` +
-  `user it imported. The column is also written by a seed, or by any other system-context ` +
-  `write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ` +
-  `populate it too, but only through a provisioning path your own deployment supplies: this ` +
-  `platform declares the SCIM 'manager' attribute without projecting it onto the column — and ` +
-  `where an identity carries source 'idp_provisioned' the admin operation refuses, the import's ` +
-  `manager_id column included, leaving that directory the one surface that authors its ` +
-  `manager. Or declare onEmptyApprovers: 'fallback' on the node, with a ` +
-  `fallbackApprovers list: an empty manager rung then opens the request on those people instead ` +
-  `of on a slot nobody can act on, which needs no write to the column at all.`;
+const GROUP_ONLY_FIX =
+  "Staff at least one target, add an approver that cannot resolve empty (e.g. { type: 'org_membership_level', " +
+  "value: 'owner' }), or name who decides in fallbackApprovers with onEmptyApprovers: 'fallback'";
 
 export type ApprovalApproverSeverity = 'error' | 'warning' | 'info';
 
@@ -545,18 +544,12 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           where,
           path: `${nodePath}.config.approvers`,
           // [#22161] One verdict sentence; why staffing is unreadable here and
-          // what recovers a stuck request is `os explain` text.
+          // who decides an empty slate is `os explain` text.
           message:
             `every approver on this node routes to a group (position/team/department), so if ` +
             `none is staffed the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
-          hint:
-            `Make sure at least one target is always staffed, or add a guaranteed-staffed ` +
-            `approver entry, e.g. { type: 'org_membership_level', value: 'owner' }, or declare ` +
-            `onEmptyApprovers: 'fallback' with a fallbackApprovers list to name who decides ` +
-            `when the groups come back empty. A request that still lands empty opens on the ` +
-            `organization's administrators; only an organization with no administrator leaves it ` +
-            `to a platform administrator's override.`,
+          hint: GROUP_ONLY_FIX,
         });
       }
 
@@ -568,7 +561,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
       // the whole slate is manager rungs that is the same empty-slate dead-end
       // the #3424 arm above flags for positions — with a strictly WORSE cause.
       // An unstaffed position is an operator's to fix in-product; an unset
-      // `manager_id` is not (see {@link MANAGER_ONLY_REMEDY}). So the rule that
+      // `manager_id` is not (see {@link MANAGER_ONLY_FIX}). So the rule that
       // exists for the recoverable rung was, until this arm, silent on the
       // unrecoverable one — and `manager` is the canonical first rung of a
       // tiered ladder, so the silent case was also the common one.
@@ -602,12 +595,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             `every approver on this node is { type: 'manager' }, so where sys_user.manager_id ` +
             `is unset the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
-          hint:
-            `${MANAGER_ONLY_REMEDY} ${MANAGER_ONLY_ROUTES} Populate it for everyone who submits ` +
-            `this request, or take the other escape that needs none of that: add a second approver ` +
-            `entry which cannot resolve empty, e.g. { type: 'org_membership_level', value: 'owner' }. ` +
-            `A request that still lands empty opens on the organization's administrators; to name who ` +
-            `decides instead, declare onEmptyApprovers: 'fallback' with a fallbackApprovers list.`,
+          hint: MANAGER_ONLY_FIX,
         });
       }
 

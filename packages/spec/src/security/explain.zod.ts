@@ -277,9 +277,14 @@ export const ExplainRequestSchema = lazySchema(() => z.object({
    *   refused at validation (HTTP 400), never silently truncated. Empty arrays
    *   are refused too — send at least one id or omit the field.
    * - **Missing records**: an id that does not resolve to a readable row under
-   *   a system read (filtered, deleted, or never existed) gets
-   *   `{ recordId, visible: false }` with `decidedBy` omitted — the same
-   *   fail-closed answer the singular form gives for that id.
+   *   a system read (filtered, deleted, or never existed), and an id the ASKER
+   *   (the caller of explain) cannot read, gets `{ recordId, visible: false }`
+   *   with `decidedBy` omitted — the same fail-closed answer the singular form
+   *   gives for that id. An asker explaining another principal cannot read an
+   *   id its own by-id read finds no row for or refuses (a declared 4xx); a
+   *   principal explaining itself cannot read an id its own by-id read finds no
+   *   row for, and a refused read leaves its explanation as its own doors
+   *   answer.
    * - **Mutually exclusive** with `recordId`: a request carrying both is
    *   refused loudly rather than silently preferring either spelling.
    * - Batch responses carry the per-layer trace at OBJECT level only (no
@@ -390,9 +395,19 @@ export const ExplainDecisionSchema = lazySchema(() => z.object({
    * (the layer whose `record.outcome` excluded it, or the last one to admit it).
    * The per-layer `record` attributions above carry the full trace; this is the
    * summary a UI pins next to the record.
+   *
+   * An id the ASKER cannot read answers as a missing record, alongside a
+   * filtered, deleted or never-existed id: `visible: false` with `decidedBy`
+   * omitted, and every layer's `record` attribution the one an id no row
+   * carries gets. The asker is the caller of explain, not the principal
+   * explained. An asker explaining another principal cannot read an id its own
+   * by-id read finds no row for or refuses (a declared 4xx, such as no read
+   * grant on the object). A principal explaining itself cannot read an id its
+   * own by-id read finds no row for; a refused read does not count, so its
+   * explanation shows what its own doors answer.
    */
   record: ExplainRecordVerdictSchema.optional()
-    .describe('Row-level verdict for the specific record; set only for singular record-grained requests.'),
+    .describe('Row-level verdict for the specific record; set only for singular record-grained requests. An id the asker (the caller of explain) cannot read answers as missing, like a filtered, deleted or never-existed id: visible false, decidedBy omitted. Explaining another principal, the asker cannot read an id its own by-id read finds no row for or refuses; a principal explaining itself cannot read an id its read finds no row for.'),
   /**
    * [#8326] Batch record-grained verdicts — present only when the request
    * carried `recordIds`. `records[i]` answers `recordIds[i]` (same order, same

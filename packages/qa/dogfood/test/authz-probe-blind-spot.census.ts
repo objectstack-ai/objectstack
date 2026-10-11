@@ -106,7 +106,7 @@
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
 //     this table reaches 1.
-//   `packages/runtime/src/route-ledger.ts`: 87 rows over 23 domains. Its
+//   `packages/runtime/src/route-ledger.ts`: 88 rows over 23 domains. Its
 //     machine contract is DOMAIN-level, by live registry introspection
 //     (`domainRegistry.list()`), the per-route rows being documentation. It
 //     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all
@@ -438,11 +438,19 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `blindSpot` stays 0, `keys` stays 23 and the domain-file counts in the
     // note below are unchanged. Controls moved with the row ("route: '" and
     // "domain: '" 86 -> 87, RouteLedgerEntry unchanged at 2).
-    population: 87,
-    reachable: 87,
+    // [ADR-0126 §7.1] 87 -> 88: the `POST /security/permission-sets/:name/clone`
+    // row arrived with its mount (the permission-set clone door). It carries
+    // `domain: '/security'`, an EXISTING key, so `reachable` moves with
+    // `population`, `blindSpot` stays 0 and `keys` stays 23. Its module,
+    // `domains/permission-set-clone.ts`, declares no DomainRoute prefix — the
+    // `/security` domain dispatches to it — so the domain-file counts in the
+    // note below are unchanged. Controls moved with the row ("route: '" and
+    // "domain: '" 87 -> 88, RouteLedgerEntry unchanged at 2).
+    population: 88,
+    reachable: 88,
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
-    controls: { "route: '": 87, "domain: '": 87, RouteLedgerEntry: 2 },
+    controls: { "route: '": 88, "domain: '": 88, RouteLedgerEntry: 2 },
     // [#22432] Re-derived on the merged ref: the note's two counts had stood at
     // 11 files / 5 classified / 16 baselined since before the `/analytics`
     // domain was classified (#21061), which named one more file and moved one

@@ -29,7 +29,7 @@ const RLS_RULE_IDS: readonly string[] = [
   RLS_PREDICATE_UNKNOWN_FIELD,
   RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
 ];
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateRlsPredicateEnforceability: typeof validateRlsPredicateEnforceabilityUnrecorded = (...args) => {
   const findings = validateRlsPredicateEnforceabilityUnrecorded(...args);
   fired.push(...findings);
@@ -86,9 +86,11 @@ describe('validateRlsPredicateEnforceability — predicates the runtime can only
     expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/DROPS a policy/);
     expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/RLS_DENY_FILTER/);
     expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/ZERO rows/);
-    // …and prescribe the fix that works on THIS surface.
-    expect(findings[0].hint).toMatch(/field != null/);
-    expect(findings[0].hint).toMatch(/INTERPRETED/);
+    // …and prescribe the fix that works on THIS surface: the `fix:` line in
+    // one line, and why `has()` is wrong here in the explanation (#22161).
+    expect(findings[0].hint).toMatch(/record\.x != null/);
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/field != null/);
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toMatch(/INTERPRETED/);
   });
 
   it.each([
@@ -421,20 +423,26 @@ describe('validateRlsPredicateEnforceability — a bounds overrun is its own id 
 
   it('prescribes shrinking, and never sends the author to check their dialect', () => {
     const [f] = atGa(() => validateRlsPredicateEnforceability(policyWith('using', OVER_BUDGET.maxAstNodes)));
-    // The real remedies.
+    // [#22161] The `fix:` line names the remedies in one line; the four
+    // options in full are the explanation's.
+    const why = explanationOf(RLS_PREDICATE_OVER_BUDGET);
     expect(f.hint).toMatch(/field in \[a, b, …\]/);
     expect(f.hint).toMatch(/current_user\.<key>/);
-    expect(f.hint).toMatch(/[Dd]enormalise/);
-    expect(f.hint).toMatch(/hook or action body/);
+    expect(why).toMatch(/[Dd]enormalise/);
+    expect(why).toMatch(/hook or action body/);
     // Splitting is only sound on a top-level `||`; policies are OR-ed, so
-    // splitting an `&&` would WIDEN access. Saying so is the point of the hint.
-    expect(f.hint).toMatch(/never split a top-level `&&`/);
-    expect(f.hint).toMatch(/WIDEN access/);
+    // splitting an `&&` would WIDEN access. Saying so is the point of the
+    // hint: the one-line `fix:` keeps the warning, the explanation says why.
+    expect(f.hint).toMatch(/split a top-level `\|\|` across policies \(never a top-level `&&`\)/);
+    expect(why).toMatch(/never split a top-level `&&`/);
+    expect(why).toMatch(/WIDEN access/);
     // …and explicitly NOT the SQL-vs-CEL prose this class used to get.
-    expect(f.hint).toMatch(/no syntax or dialect error/);
-    expect(f.hint).not.toMatch(/canonical CEL \(ADR-0058 D1\)/);
-    expect(f.hint).not.toMatch(/rather than SQL `AND` \/ `OR`/);
-    expect(f.hint).not.toMatch(/LIKE/);
+    expect(why).toMatch(/no syntax or dialect error/);
+    for (const text of [f.hint, why]) {
+      expect(text).not.toMatch(/canonical CEL \(ADR-0058 D1\)/);
+      expect(text).not.toMatch(/rather than SQL `AND` \/ `OR`/);
+      expect(text).not.toMatch(/LIKE/);
+    }
   });
 
   it('names the bound that was actually blown, not a hard-coded one', () => {
@@ -692,9 +700,14 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     // …and the miss itself, with the platform's own "did you mean".
     expect(f.message).toMatch(/"is_private_nope" is not a field on object "crm_opportunity"/);
     expect(f.message).toMatch(/Did you mean "is_private"\?/);
-    // The hint lists the columns that DO exist and names the rename story.
-    expect(f.hint).toMatch(/Fields on "crm_opportunity": amount, assigned_to_id/);
-    expect(f.hint).toMatch(/RENAMED/);
+    // [#22161] The `fix:` line names the remedy in one line — the verdict's
+    // "Did you mean" names the nearest column — and the explanation tells the
+    // rename story.
+    expect(f.hint).toBe(
+      'Point the predicate at a column the object declares (denormalise a value from another object onto it ' +
+        'first), or delete the policy if the narrowing is gone',
+    );
+    expect(why).toMatch(/RENAMED/);
   });
 
   it('says the same for an unresolved `current_user.*`, and prescribes the §7.3.1 route', () => {
@@ -890,10 +903,28 @@ describe('validateRlsPredicateEnforceability — the refusals the SHAPE check ca
       'record.assigned_to_id in current_user.id',
       'replace `record.assigned_to_id in current_user.id` with `record.assigned_to_id == current_user.id`',
     ],
-    ['record.assigned_to_id in current_user', '`record.assigned_to_id in current_user.org_user_ids`'],
-    ['record.assigned_to_id.startsWith(current_user)', '`record.assigned_to_id.startsWith(current_user.id)`'],
-    ['record.assigned_to_id.contains(current_user)', '`record.assigned_to_id.contains(current_user.email)`'],
-    ['record.assigned_to_id.endsWith(current_user)', '`record.assigned_to_id.endsWith(current_user.organization_id)`'],
+    // [#22161] The one-line `fix:` names the key SLOT for the bare root; the
+    // explanation lists the kernel keys by what each holds.
+    [
+      'record.assigned_to_id in current_user',
+      'replace `record.assigned_to_id in current_user` with the membership key that holds the set: ' +
+        '`record.assigned_to_id in current_user.<key>`',
+    ],
+    [
+      'record.assigned_to_id.startsWith(current_user)',
+      'replace `record.assigned_to_id.startsWith(current_user)` with the key that holds the string: ' +
+        '`record.assigned_to_id.startsWith(current_user.<key>)`',
+    ],
+    [
+      'record.assigned_to_id.contains(current_user)',
+      'replace `record.assigned_to_id.contains(current_user)` with the key that holds the string: ' +
+        '`record.assigned_to_id.contains(current_user.<key>)`',
+    ],
+    [
+      'record.assigned_to_id.endsWith(current_user)',
+      'replace `record.assigned_to_id.endsWith(current_user)` with the key that holds the string: ' +
+        '`record.assigned_to_id.endsWith(current_user.<key>)`',
+    ],
     [
       'record.assigned_to_id.startsWith(current_user.org_user_ids)',
       'the membership test `record.assigned_to_id in current_user.org_user_ids`',
@@ -963,13 +994,18 @@ describe('validateRlsPredicateEnforceability — the refusals the SHAPE check ca
     );
   });
 
-  it('rewrites EVERY site the fault lands in, in one finding', () => {
+  it('rewrites the first site the fault lands in and counts the rest, in one finding', () => {
+    // [#22161] One line: the first site's rewrite, then `(and N more)`; every
+    // site admits the same rewrite, which the explanation says.
     const findings = validateRlsPredicateEnforceability(
       siteWith('using', 'record.assigned_to_id != current_user.org_user_ids && record.owner_id != current_user.org_user_ids'),
     );
     expect(findings.map((f) => f.rule)).toEqual([RLS_PREDICATE_UNENFORCEABLE]);
-    expect(findings[0].hint).toContain('`!(record.assigned_to_id in current_user.org_user_ids)`');
-    expect(findings[0].hint).toContain('`!(record.owner_id in current_user.org_user_ids)`');
+    expect(findings[0].hint).toBe(
+      'replace `record.assigned_to_id != current_user.org_user_ids` with ' +
+        '`!(record.assigned_to_id in current_user.org_user_ids)` (and 1 more)',
+    );
+    expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toContain('every site admits the same rewrite');
   });
 
   it('CONTROLS — the literal list keeps its one shape finding, and every spelling the hints point at is clean', () => {
@@ -1214,5 +1250,56 @@ describe('[#22161] one-line verdicts — the five ids', () => {
     expect(explanationOf(RLS_PREDICATE_UNENFORCEABLE)).toContain(
       `the membership sets ${spell(ofType('array'))} as LISTS and ${spell(ofType('scalar'))} as one value each`,
     );
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. The three ids this slice converted name
+// their remedy in one line; what the hints enumerated is each id's `os explain`
+// entry. (`rls-predicate-unknown-user-variable` and `rls-predicate-unparseable`
+// keep their longer hints: a later slice's.)
+describe('[#22161] one-line fixes — rls-predicate-unenforceable, -over-budget, -unknown-field', () => {
+  const ONE_LINE_FIX_IDS: readonly string[] = [
+    RLS_PREDICATE_UNENFORCEABLE,
+    RLS_PREDICATE_OVER_BUDGET,
+    RLS_PREDICATE_UNKNOWN_FIELD,
+  ];
+
+  it('every `fix:` line of the three ids the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => ONE_LINE_FIX_IDS.includes(f.rule));
+    // Coverage control: each id fired, and the unenforceable id on its shape,
+    // type-fault and null-comparand arms, so the bound cannot pass over one.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...ONE_LINE_FIX_IDS].sort());
+    const unenforceable = converted.filter((f) => f.rule === RLS_PREDICATE_UNENFORCEABLE).map((f) => f.hint);
+    expect(unenforceable.some((h) => h.startsWith('Rewrite the predicate inside the lowerable subset'))).toBe(true);
+    expect(unenforceable.some((h) => / with `!\(record\.\w+ in current_user\.\w+\)`/.test(h))).toBe(true);
+    expect(unenforceable.some((h) => h.includes('== null'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const facts: Record<string, readonly string[]> = {
+      [RLS_PREDICATE_UNENFORCEABLE]: [
+        'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`',
+        '(3) Arithmetic on a column (`amount * 2 > 100`) never lowers',
+        '"one of these" is `x in set`, "none of these" is `!(x in set)`',
+        'an app-staged §7.3.1 set',
+        '`null` has no place inside a list or opposite an ordering operator',
+        'or move the condition into a validation rule or a hook',
+      ],
+      [RLS_PREDICATE_OVER_BUDGET]: [
+        '(1) Collapse a long',
+        '(ADR-0105 D11)',
+        '(3) Denormalise a repeated sub-expression',
+        'never split a top-level `&&` this way, which would WIDEN access',
+        '`ScriptBody { language: \'js\' }`',
+      ],
+      [RLS_PREDICATE_UNKNOWN_FIELD]: ['RENAMED', 'RLS cannot join to it (ADR-0055)', 'the verdict\'s "Did you mean"'],
+    };
+    for (const rule of ONE_LINE_FIX_IDS) {
+      for (const fact of facts[rule]) expect(explanationOf(rule), `${rule} explanation names ${fact}`).toContain(fact);
+    }
   });
 });

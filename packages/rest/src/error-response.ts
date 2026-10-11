@@ -61,6 +61,7 @@ import {
     fiveXxArmDisplacesDeclared4xx,
     isSandboxCrash,
     isSandboxOrigin,
+    isSandboxOwnFault,
     mapDataError,
     sandboxBusinessMessage,
     structuredCodeAnswer,
@@ -679,6 +680,77 @@ export function classifiedRefusalAnswer(
 }
 
 /**
+ * [#22764] The `/data` door's answer for a SANDBOXED body it answers as a
+ * FAULT, or `undefined` for every other throw, which stays the catching
+ * route's own.
+ *
+ * ## Why it exists
+ *
+ * {@link classifiedRefusalAnswer} answers a sandbox's REFUSAL and declines
+ * every 5xx, so a hand-built family that asks it still owns the two sandbox
+ * shapes the doors answer as faults, and each family's own terminal relayed
+ * `.message` for them:
+ *
+ *  - a body that CRASHED ({@link isSandboxCrash}, #7543). `.message` is the
+ *    QuickJS wrapper around the runtime's native text, so the approvals,
+ *    sharing-rule, suggested-binding, publish and external-datasource doors
+ *    answered `hook '<name>' threw: TypeError: …`, and the four external ones
+ *    at `400`, a fault answered as the caller's mistake;
+ *  - a refusal that DECLARED a server-band status. The doors keep the status
+ *    and withhold the prose (#5437) unless the producer declared it a refusal
+ *    (#16146); the families folded it into their own `500` with the wrapper,
+ *    or relayed the sentence at the declared status;
+ *  - [#22885] the sandbox's OWN fault ({@link isSandboxOwnFault}): a
+ *    `SandboxError` the runner raised itself, with no `innerMessage` — a
+ *    denied capability, an unavailable `ctx.api` or a missing `ctx.api`
+ *    method, a budget, an install or marshal failure, a nested body's fault
+ *    relayed one VM hop up. It is no sandbox ORIGIN, so it fell past the two
+ *    shapes above to each family's own terminal, which relayed the runner's
+ *    diagnostic text (naming the hook, the object, the capability) where the
+ *    `/data` door answers `500 INTERNAL_ERROR` (#22868). Measured: twenty-three
+ *    write rows across these families answered that text, the four external
+ *    ones at `400`.
+ *
+ * ## One answer, not a second fault terminal
+ *
+ * The answer IS {@link resolveErrorResponse}'s — the classification door
+ * `sendThrownError` and `handleRouteError` send for the same throw — so its
+ * status, `code`, withheld sentence and declared channels (`declaredCode`,
+ * `userMessage`) cannot drift from the doors'. A crash takes that function's
+ * crash terminal ahead of any declared status (#17273), exactly as there.
+ * The caller re-dresses it in its own envelope, as it does a classified
+ * refusal ({@link nestedRefusalEnvelope} for the nested families), and logs
+ * the original error first: the client no longer reads the words, so the
+ * operator must.
+ *
+ * [#22885] The own fault takes that same terminal, recognised by the predicate
+ * `classifyDataError` asks (#22868): the producer's identity, never its text,
+ * so the same words thrown by anything else keep the catching route's answer.
+ * ⛔ Not a second rule: no own-fault branch of its own here or in a family.
+ *
+ * ## What it deliberately leaves alone
+ *
+ *  - A throw that is not a sandbox's. A producer-declared 5xx from a service
+ *    keeps the catching route's terminal: the publish door's prose withhold is
+ *    byte for byte its dispatcher twin's heuristic (#8086), and widening it
+ *    at one door would mint the divergence that note closes. No measured
+ *    producer behind these families declares one in any case.
+ *  - A sandboxed refusal declaring a 4xx. That is the refusal half's, and the
+ *    four external routes answer it at their own `400`, unchanged.
+ */
+export function sandboxFaultAnswer(
+    error: any,
+): { status: number; body: Record<string, unknown> } | undefined {
+    if (isSandboxOwnFault(error)) return resolveErrorResponse(error);
+    if (!isSandboxOrigin(error)) return undefined;
+    if (!isSandboxCrash(error)) {
+        const declared = declaredHttpStatus(error);
+        if (declared === undefined || declared < 500) return undefined;
+    }
+    return resolveErrorResponse(error);
+}
+
+/**
  * [#22719] {@link classifiedRefusalAnswer}'s answer, re-dressed for a door that
  * publishes the NESTED ADR-0112 D5 envelope (`{ error: { code, message } }`)
  * rather than the flat one the classification is phrased in.
@@ -713,6 +785,10 @@ export function classifiedRefusalAnswer(
  * decision, not a rename. `extra` is absent when there is nothing to carry,
  * so an emitter writes exactly `{ code, message }` for a refusal that declared
  * nothing.
+ *
+ * [#22764] The same families re-dress {@link sandboxFaultAnswer}'s answer
+ * through it too: that answer is phrased in the same flat classification, so
+ * the derivation above holds unchanged for a fault.
  */
 export function nestedRefusalEnvelope(refusal: { status: number; body: Record<string, unknown> }): {
     status: number;

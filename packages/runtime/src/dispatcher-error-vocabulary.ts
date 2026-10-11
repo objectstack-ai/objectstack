@@ -1227,6 +1227,33 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'and are invisible to `enclosingOpeners`. Same values, same verdict; recorded so the count is ' +
             'read as a lower bound.',
     },
+    // permission-set clone door — domains/permission-set-clone.ts
+    {
+        code: 'required',
+        file: 'packages/runtime/src/domains/permission-set-clone.ts',
+        shape: 'objlitexpr',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The permission-set clone door reads its `{ name, label }` body exactly as the flow clone door does: ' +
+            '`validationFailure(message, [{ field, code, message }])` with the field code an INLINE ternary — ' +
+            '`code: name === undefined ? \'required\' : \'invalid_type\'`. Both branches are ADR-0114 D2 ' +
+            '`FieldErrorCode` members in `ApiError.details.fields[]`; `error.code` carries the envelope\'s own ' +
+            'VALIDATION_FAILED. The automation rows above, one door over (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_type',
+        file: 'packages/runtime/src/domains/permission-set-clone.ts',
+        shape: 'objlitexpr',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The permission-set clone door reads its `{ name, label }` body exactly as the flow clone door does: ' +
+            '`validationFailure(message, [{ field, code, message }])` with the field code an INLINE ternary — ' +
+            '`code: name === undefined ? \'required\' : \'invalid_type\'`. Both branches are ADR-0114 D2 ' +
+            '`FieldErrorCode` members in `ApiError.details.fields[]`; `error.code` carries the envelope\'s own ' +
+            'VALIDATION_FAILED. The automation rows above, one door over (ADR-0112 D6).',
+    },
 ];
 
 /**

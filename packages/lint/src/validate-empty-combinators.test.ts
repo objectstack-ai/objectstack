@@ -36,7 +36,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict to one line of at most 200 characters — every firing variant this
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateEmptyCombinators: typeof validateEmptyCombinatorsUnrecorded = (...args) => {
   const findings = validateEmptyCombinatorsUnrecorded(...args);
   fired.push(...findings);
@@ -71,7 +71,10 @@ describe('validateEmptyCombinators — the literal shapes are refused', () => {
     expect(findings[0].path).toBe(`${WIDGET_PATH}.$and`);
     // Per-shape: the AND identity matches everything.
     expect(findings[0].message).toContain('matches EVERY row');
-    expect(findings[0].hint).toContain('DELETE the key');
+    // [#22161] One remedy line; why the absent key is the spelling is the
+    // explanation's.
+    expect(findings[0].hint).toContain('delete the key');
+    expect(explainRule(FILTER_EMPTY_COMBINATOR)!.paragraphs.join('\n')).toContain('DELETE the key');
   });
 
   it('refuses `$or: []` and says it is the OPPOSITE of "no filter"', () => {
@@ -84,7 +87,9 @@ describe('validateEmptyCombinators — the literal shapes are refused', () => {
     // The half a generic message gets wrong: OR identity is match-NONE.
     expect(findings[0].message).toContain('matches NO row');
     expect(findings[0].message).not.toContain('matches EVERY row');
-    expect(findings[0].hint).toContain('OPPOSITE');
+    // [#22161] The verdict says it is the opposite; the one-line `fix:` says
+    // what emptying the array does instead of relaxing it.
+    expect(findings[0].hint).toContain('closes the filter instead of relaxing it');
   });
 
   it('refuses `$not: {}` and prescribes putting the negated condition inside', () => {
@@ -436,5 +441,29 @@ describe('[#22161] one-line verdicts — filter-empty-combinator, filter-empty-n
   it('the explanation names every filter key the walk visits', () => {
     const scope = explainRule(FILTER_EMPTY_COMBINATOR)!.paragraphs.at(-1)!;
     for (const key of FILTER_KEYS) expect(scope, key).toContain(`\`${key}\``);
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. `filter-empty-combinator` names its
+// remedy in one line per shape; the declared match-none spelling and the
+// programmatic-producer note are its explanation's. (`filter-empty-node` keeps
+// its longer root-arm hint: a later slice's.)
+describe('[#22161] one-line fixes — filter-empty-combinator', () => {
+  it('every `fix:` line of the id the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FILTER_EMPTY_COMBINATOR);
+    // Coverage control: all three shapes fired.
+    for (const shape of ['$and', '$or', '$not']) {
+      expect(converted.some((f) => f.message.startsWith(`\`${shape}`)), shape).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const text = explainRule(FILTER_EMPTY_COMBINATOR)!.paragraphs.join('\n');
+    expect(text).toContain('`{ <field>: { $in: [] } }` is the declared spelling');
+    expect(text).toContain('A PROGRAMMATIC producer that loops to zero operands keeps the runtime identity unchanged');
   });
 });

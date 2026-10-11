@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AUTHORED_BODY_BESIDE_FUNCTION_REASON,
   FUNCTIONS_ENTRY_NO_BODY_REASON,
+  isExtractionRefusal,
   lowerCallables,
 } from '../src/utils/lower-callables.js';
 
@@ -168,9 +169,12 @@ describe('lowerCallables', () => {
 // placeholder row whenever `count - bodyExtracted > 0`, so one refused handler
 // printed 2 and four printed 5, and `--json` carried a row that named no
 // callable. The pins below hold the list to "one row per registered callable
-// that no slot lowered into a body, each once": the placeholder's own
-// population, itemized. The cases where the warnings miss a callable, or the
-// old arithmetic miscounts one, also assert the old answer beside the new one.
+// the runtime module still has to carry, each once". It is also the list
+// `objectstack build` decides that module from: a callable bound at a slot
+// with no body (a `functions` entry, a refused extraction) stays on it even
+// when another slot lowered the same function. The cases where the warnings
+// miss a callable, or the old arithmetic miscounts one, also assert the old
+// answer beside the new one.
 
 /** A handler the extractor refuses: it names a module-scope identifier. */
 const refusedHook = (i: number) => ({
@@ -274,14 +278,61 @@ describe('[#22839] lowerCallables — bodylessCallables, one row per callable no
     ]);
   });
 
-  it('a callable lowered at ANY slot is not a row, as `count - bodyExtracted` already said', () => {
+  it('a `functions` entry bound to a function some hook lowered is still a row: the hook body does not run the entry', () => {
     // One function object as a lowered hook handler AND a `functions` entry:
-    // one ref, lowered once. The list keeps the old population here; it only
-    // itemizes it.
+    // one ref, lowered once, so `count - bodyExtracted` read 0 and the
+    // runtime module was skipped. The hook got a body; the entry has no body
+    // slot and runs only from the module, so it is the row.
     const h = cleanHook(1);
     const out = lowerCallables({ hooks: [h], functions: { tidy: h.handler } });
     expect(out.count - out.bodyExtracted).toBe(0);
+    expect((out.lowered.hooks as any[])[0].body).toBeDefined();
+    expect(out.bodylessCallables).toEqual([{ origin: "function 'tidy'", reason: FUNCTIONS_ENTRY_NO_BODY_REASON }]);
+  });
+
+  it('a slot whose extraction was refused is still a row when another slot lowered the same function', () => {
+    // The hook face refuses a second parameter; the action face lowers it.
+    // The action got a body; the hook did not, and runs only from the module.
+    const both = (a: any, b: any) => {
+      a.input.title = String(b);
+    };
+    const out = lowerCallables({
+      hooks: [{ name: 'two_params', object: 'doc', events: ['beforeInsert'], handler: both }],
+      objects: [{ name: 'doc', actions: [{ name: 'stamp', target: both }] }],
+    });
+    expect((out.lowered.objects as any[])[0].actions[0].body).toBeDefined();
+    expect((out.lowered.hooks as any[])[0].body).toBeUndefined();
+    expect(out.bodylessCallables).toHaveLength(1);
+    expect(out.bodylessCallables[0]).toBe(out.bodyExtractionWarnings[0]);
+    expect(out.bodylessCallables[0].origin).toBe("hook 'two_params'");
+  });
+
+  it('an authored-`body` slot IS taken off the list by a lowering elsewhere: every slot then has a body', () => {
+    const h = cleanHook(1);
+    const out = lowerCallables({
+      hooks: [{ ...h, name: 'authored', body: { language: 'js', source: 'ctx.record.id = 1;' } }, h],
+    });
+    expect((out.lowered.hooks as any[]).map((hook) => hook.body !== undefined)).toEqual([true, true]);
     expect(out.bodylessCallables).toEqual([]);
+  });
+
+  it('a function bound at several slots reports its strongest row: a refusal, then a `functions` entry, then an authored `body`', () => {
+    const h = cleanHook(1);
+    const beside = lowerCallables({
+      hooks: [{ ...h, body: { language: 'js', source: 'ctx.record.id = 1;' } }],
+      functions: { tidy: h.handler },
+    });
+    expect(beside.bodylessCallables).toEqual([{ origin: "function 'tidy'", reason: FUNCTIONS_ENTRY_NO_BODY_REASON }]);
+
+    // A double walk reaches a package's hook AFTER the top level's `functions`.
+    const r = refusedHook(1);
+    const refused = lowerCallables({
+      functions: { slug: r.handler },
+      packages: [{ manifest: { id: 'p.orders', hooks: [r] } }],
+    });
+    expect(refused.bodylessCallables).toHaveLength(1);
+    expect(refused.bodylessCallables[0]).toBe(refused.bodyExtractionWarnings[0]);
+    expect(isExtractionRefusal(refused.bodylessCallables[0])).toBe(true);
   });
 
   it('one walk: a handler shared by two hooks no longer hides a `functions` entry from the count', () => {
@@ -320,6 +371,38 @@ describe('[#22839] lowerCallables — bodylessCallables, one row per callable no
       expect(out.count - out.bodyExtracted).toBe(0);
       expect(out.bodylessCallables).toEqual([{ origin: "function 'score_lead'", reason: FUNCTIONS_ENTRY_NO_BODY_REASON }]);
     });
+
+    it('CONTROL — a clean hook lowered in both walks, and nothing else: the list is empty', () => {
+      const h = cleanHook(1);
+      const out = lowerCallables({ hooks: [h], packages: [{ manifest: { id: 'p.orders', hooks: [h] } }] });
+      expect(out.bodyExtracted).toBe(2);
+      expect(out.bodylessCallables).toEqual([]);
+    });
+  });
+
+  it('the list is non-empty wherever the old runtime-module test was true: the decision only moves from skip to write', () => {
+    // `objectstack build` writes the module iff this list is non-empty. It
+    // used to write it iff `count - bodyExtracted > 0` or a warning was
+    // recorded. Every shape the old test wrote a module for still gets one.
+    const r = refusedHook(1);
+    const h = cleanHook(2);
+    const shapes: Record<string, unknown>[] = [
+      { hooks: [cleanHook(1)] },
+      { hooks: [r] },
+      { hooks: [r], packages: [{ manifest: { id: 'p', hooks: [r] } }] },
+      { hooks: [{ ...h, body: { language: 'js', source: 'return;' } }] },
+      { hooks: [{ ...h, body: { language: 'js', source: 'return;' } }, h] },
+      { hooks: [h], functions: { tidy: h.handler } },
+      { functions: { score_lead: () => 1 } },
+      { objects: [{ name: 'doc', actions: [{ name: 'stamp', target: r.handler }] }] },
+    ];
+    for (const shape of shapes) {
+      const out = lowerCallables(shape);
+      const oldWrote = out.count - out.bodyExtracted > 0 || out.bodyExtractionWarnings.length > 0;
+      if (oldWrote) expect(out.bodylessCallables.length, JSON.stringify(Object.keys(shape))).toBeGreaterThan(0);
+      // Every refusal is a row of the list, so the warnings add nothing to the decision.
+      if (out.bodyExtractionWarnings.length > 0) expect(out.bodylessCallables.some(isExtractionRefusal)).toBe(true);
+    }
   });
 });
 

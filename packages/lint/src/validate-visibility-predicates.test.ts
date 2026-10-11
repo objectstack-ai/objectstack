@@ -1522,8 +1522,13 @@ describe('visibility-predicate-over-budget (#7217)', () => {
       // ⛔ The defect itself: the dialect prescription must not reach this class.
       expect(findings[0].hint).not.toMatch(/bare CEL/);
       expect(findings[0].hint).not.toContain('`===`');
-      expect(findings[0].hint).toContain('SIZE fault, not a dialect mistake');
+      // [#22161] One remedy line; that it is a SIZE fault is the explanation's.
+      expect(findings[0].hint).toMatch(/^Make the predicate smaller/);
+      expect(explainRule(VISIBILITY_PREDICATE_OVER_BUDGET)!.paragraphs.join('\n')).toContain(
+        'SIZE fault, not a dialect mistake',
+      );
       expect(findings[0].hint).toContain("`record.f in ['a', 'b', …]`");
+      expect(findings[0].hint.length).toBeLessThanOrEqual(200);
     });
 
     it('the SAME predicate under budget is clean — paired so it cannot pass vacuously', () => {
@@ -1546,7 +1551,8 @@ describe('visibility-predicate-over-budget (#7217)', () => {
     const findings = overBudgetFindings(formStack(source as string));
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain(`\`${limit}\` budget (platform limit ${value})`);
-    expect(findings[0].hint).toContain('SIZE fault, not a dialect mistake');
+    expect(findings[0].hint).toMatch(/^Make the predicate smaller/);
+    expect(findings[0].hint.length).toBeLessThanOrEqual(200);
   });
 
   it('a genuine dialect fault keeps the #6253 id, message and hint verbatim', () => {

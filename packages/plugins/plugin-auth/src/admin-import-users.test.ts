@@ -660,3 +660,117 @@ describe('[#17422] the import protocol literal is typed BY `ImportProtocolLike`'
     });
   }
 });
+
+/**
+ * [#22800] The identity import's lookup cells are judged like every other
+ * `runImport` caller's: the run protocol carries the declaration reader the
+ * import already holds (the one the parser reads `sys_user`'s fields through),
+ * so `servesReferenceTarget` (`@objectstack/core`, #22739) asks each lookup
+ * TARGET its declared exposure for `list` before a cell is matched against it.
+ *
+ * A target whose declaration refuses `list` answers as a target the caller
+ * cannot read: `reference_not_found` for a cell naming a record, a cell naming
+ * none and a pasted id alike, and nothing of the target is read. A serving
+ * target is unchanged. The import's reads run under the system identity, which
+ * is no exemption: the decision takes no caller.
+ *
+ * Fixture objects only. The decision's own matrix (every refusing and serving
+ * declaration, fail-closed) is pinned once, in
+ * `packages/core/src/utils/import-runner-reference-exposure.test.ts`; this
+ * block pins that THIS door asks it. The engine is `makeDeps`' pinned double,
+ * with only its `find` overridden to answer the fixture target.
+ */
+describe('[#22800] the identity import asks each lookup target its declared exposure, for list', () => {
+  const TARGET = 'fx_unit';
+  const RECORD = { id: 'fx_1', name: 'Existing' };
+  const LOOKUP = 'fx_unit_id';
+  /** The `sys_user` declaration the reader serves: two plain columns and one lookup into the fixture target. */
+  const SYS_USER = {
+    name: 'sys_user',
+    fields: {
+      email: { type: 'text', label: 'Email' },
+      name: { type: 'text', label: 'Name' },
+      [LOOKUP]: { type: 'lookup', label: 'Unit', reference: TARGET },
+    },
+  };
+  /** A cell naming the record, a cell naming none, and the record's id. */
+  const ROWS = [
+    { email: 'a@fx.test', [LOOKUP]: 'Existing' },
+    { email: 'b@fx.test', [LOOKUP]: 'Missing' },
+    { email: 'c@fx.test', [LOOKUP]: 'fx_1' },
+  ];
+
+  /** The target's declaration is `enable` (absent = no `enable` block); `reader: false` composes no declaration reader at all. */
+  function exposureDeps(enable: unknown, opts: { reader?: boolean } = {}) {
+    const m = makeDeps();
+    const engine = m.deps.getDataEngine()!;
+    const find = vi.fn(async (object: string, q: { where?: Record<string, unknown> }) => {
+      if (object !== TARGET) return engine.find(object, q);
+      const [[field, value]] = Object.entries(q.where ?? {});
+      return (RECORD as Record<string, unknown>)[field] === value ? [RECORD] : [];
+    });
+    const getMetaItem = vi.fn(async ({ name }: { type: string; name: string }) => {
+      if (name === 'sys_user') return { type: 'object', name, item: SYS_USER };
+      if (name === TARGET) return { type: 'object', name, item: { name, ...(enable === undefined ? {} : { enable }) } };
+      return { type: 'object', name, item: undefined };
+    });
+    const deps: IdentityImportDeps = {
+      ...m.deps,
+      getDataEngine: () => ({ ...engine, find }),
+      ...(opts.reader === false ? {} : { getMetaItem }),
+    };
+    return { ...m, deps, find, getMetaItem };
+  }
+
+  type RowVerdict = { ok: boolean; code?: string; field?: string };
+  const verdict = (r: RowVerdict) => ({ ok: r.ok, code: r.code, field: r.field });
+  const NOT_FOUND = { ok: false, code: 'reference_not_found', field: LOOKUP };
+  const OK = { ok: true, code: undefined, field: undefined };
+  const targetReads = (h: ReturnType<typeof exposureDeps>) => h.find.mock.calls.filter(([object]) => object === TARGET);
+
+  async function rowVerdicts(h: ReturnType<typeof exposureDeps>) {
+    const res = await runAdminImportUsers(h.deps, makeRequest({ passwordPolicy: 'none', format: 'json', rows: ROWS }), ACTOR);
+    expect(res.status).toBe(200);
+    return (res.body.data as { rows: RowVerdict[] }).rows.map(verdict);
+  }
+
+  for (const [label, enable] of [
+    ['apiEnabled: false', { apiEnabled: false }],
+    ['a whitelist granting get but not list', { apiMethods: ['get'] }],
+  ] as const) {
+    it(`${label}: a match, a miss and an id all answer reference_not_found, and the target is never read`, async () => {
+      const h = exposureDeps(enable);
+      expect(await rowVerdicts(h)).toEqual([NOT_FOUND, NOT_FOUND, NOT_FOUND]);
+      expect(targetReads(h)).toEqual([]);
+      expect(h.createUser).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const [label, enable] of [
+    ['no enable block', undefined],
+    ['a whitelist granting list', { apiMethods: ['list'] }],
+  ] as const) {
+    it(`CONTROL ${label}: a match and an id resolve, a miss is reported, as before`, async () => {
+      const h = exposureDeps(enable);
+      expect(await rowVerdicts(h)).toEqual([OK, NOT_FOUND, OK]);
+      expect(targetReads(h).length).toBeGreaterThan(0);
+      expect(h.createUser).toHaveBeenCalledTimes(2);
+    });
+  }
+
+  it('the target is asked through the reader the import holds, once per import, by its own name', async () => {
+    const h = exposureDeps({ apiEnabled: false });
+    await rowVerdicts(h);
+    expect(h.getMetaItem.mock.calls.map(([ref]) => ref)).toEqual([
+      { type: 'object', name: 'sys_user' },
+      { type: 'object', name: TARGET },
+    ]);
+  });
+
+  it('CONTROL without a declaration reader no cell is a reference: the target is neither asked nor read', async () => {
+    const h = exposureDeps({ apiEnabled: false }, { reader: false });
+    expect(await rowVerdicts(h)).toEqual([OK, OK, OK]);
+    expect(h.getMetaItem).not.toHaveBeenCalled();
+    expect(targetReads(h)).toEqual([]);
+  });
+});

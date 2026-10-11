@@ -13,6 +13,7 @@ import { normalizeStackInput } from '@objectstack/spec';
 import {
   PERMISSION_RETIRED_LIFECYCLE_RESIDUE,
   retiredKeyPrescription,
+  retiredKeyRemedy,
   validateRetiredPermissionResidue as validateRetiredPermissionResidueUnrecorded,
 } from './validate-retired-permission-residue.js';
 import { AUTHORING_COMMANDS, authoringRulesFor, runAuthoringRules } from './authoring-rules.js';
@@ -24,7 +25,7 @@ import { explainRule } from './rule-explanations.js';
 // recorded verdict to one line of at most 200 characters — every firing
 // variant this suite exercises, not a chosen few. Run the whole file: those
 // cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateRetiredPermissionResidue: typeof validateRetiredPermissionResidueUnrecorded = (...args) => {
   const findings = validateRetiredPermissionResidueUnrecorded(...args);
   fired.push(...findings);
@@ -107,11 +108,16 @@ describe('validateRetiredPermissionResidue (#17425)', () => {
         (ObjectPermissionSchema as unknown as { shape: Record<string, { description?: string }> })
           .shape.allowRestore.description,
       ).replace(/^\[REMOVED\]\s*/, '');
-      expect(finding.hint).toBe(fromSchema);
-      // Anti-vacuity: an empty derivation would make the assertion above true
-      // and the rule silent. The prescription's two load-bearing clauses.
-      expect(finding.hint).toContain('Delete the key');
-      expect(finding.hint).toContain('os migrate meta --from 17');
+      // [#22161] The `fix:` line is the prescription's remedy sentence, CUT
+      // from it — never retyped — so it is a piece of the schema's own text.
+      expect(finding.hint).toBe(retiredKeyRemedy(fromSchema));
+      expect(fromSchema).toContain(finding.hint);
+      // Anti-vacuity: an empty derivation would make the assertions above true
+      // and the rule silent. The prescription's two load-bearing clauses, and
+      // the remedy the `fix:` line keeps.
+      expect(fromSchema).toContain('Delete the key');
+      expect(fromSchema).toContain('os migrate meta --from 17');
+      expect(finding.hint).toBe('Delete the key');
     });
 
     it('the prescription resolves for every key the rule knows about', () => {
@@ -234,5 +240,35 @@ describe('[#22161] one-line verdicts — permission-retired-lifecycle-residue', 
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. The finding used to carry the whole
+// retirement prescription (573 and 681 characters); it carries the remedy
+// sentence, cut from it, and the explanation says what deleting the key leaves.
+describe('[#22161] one-line fixes — permission-retired-lifecycle-residue', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === PERMISSION_RETIRED_LIFECYCLE_RESIDUE);
+    expect(converted.some((f) => f.message.startsWith('sets `allowRestore: false`'))).toBe(true);
+    expect(converted.some((f) => f.message.startsWith('sets `allowPurge: false`'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('retiredKeyRemedy cuts the "Delete the key" sentence, at its dash only past 200, and never invents', () => {
+    expect(retiredKeyRemedy('`k` was removed. Delete the key — x. Run it.')).toBe('Delete the key — x');
+    expect(retiredKeyRemedy(`\`k\` was removed. Delete the key — ${'x'.repeat(200)}. Run it.`)).toBe('Delete the key');
+    // No remedy sentence: the prescription is returned whole, never replaced.
+    expect(retiredKeyRemedy('`k` was removed.')).toBe('`k` was removed.');
+  });
+
+  it('`os explain` says what deleting the key leaves, and names no tracker id', () => {
+    const text = explainRule(PERMISSION_RETIRED_LIFECYCLE_RESIDUE)!.paragraphs.join('\n');
+    expect(text).toContain('stays denied fail-closed by the permission evaluator\'s destructive-operation backstop');
+    expect(text).toContain('the M2 lifecycle initiative');
+    expect(text).not.toMatch(/os migrate meta --from/);
+    expect(text).not.toMatch(/#\d{3,}/);
   });
 });

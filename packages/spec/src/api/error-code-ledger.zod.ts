@@ -459,6 +459,16 @@ export const ERROR_CODE_LEDGER = {
     'FLOW_NO_START_NODE',
     'INVALID_OR_EXPIRED',         // share-link token
     'NEEDS_PASSWORD',             // share link requires a password
+    // [#22823] The data door's two exposure codes, stamped by `callData`'s
+    // nested-relation walk (`refuseUnservedRelationTargets`,
+    // `action-execution.ts`) when a condition's related object does not serve
+    // `list`: 404 for `apiEnabled: false`, 405 with `allowed` for a whitelist.
+    // Reached on the `query` fallback (no protocol service resolved) and on the
+    // `aggregate` arm. The protocol path's answer for the same condition is
+    // `@objectstack/metadata-protocol`'s row; `@objectstack/rest` keeps its own
+    // rows for the addressed object. Provenance, not identity (see above).
+    'OBJECT_API_DISABLED',
+    'OBJECT_API_METHOD_NOT_ALLOWED',
     // [#7557] `DELETE /packages/:id` on the DISPATCHER door — per-item failures
     // used to ride inside a 200 with a hardcoded `success: true`. Second
     // EMITTER of the code `@objectstack/rest` already registers for the
@@ -635,6 +645,20 @@ export const ERROR_CODE_LEDGER = {
     'REGISTRY_TYPE_NOT_CANONICAL',  // [#9111] a SchemaRegistry overlay entry was offered a non-canonical metadata `type` — the mint door asserts, the caller folds
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic; [#9174] also refused on `revertCommit`'s restore limb, per-item on `failed[]`, NOT batch-atomic
+    // [ADR-0131 D6] The `unmanaged` install mode's two refusals, both stamped
+    // by `importUnmanagedPackage` (`protocol.ts`) before the new base exists,
+    // so nothing is written. Each gives a consumer a branch no existing code
+    // gives: the package installs MANAGED instead, and neither the
+    // `OS_METADATA_WRITABLE` hatch (`NOT_CREATABLE`'s remedy) nor a retry
+    // helps. No HTTP door on this tree yet; the thrown value is the boundary.
+    //  - UNCOPYABLE, 422: the body carries what the copy cannot write as
+    //    environment rows — a runtime-uncreatable type, code, an extension of
+    //    another package's items, or an artifact envelope.
+    //  - WALLED_POSTURE, 409: the deployment's REQUESTED tenancy posture
+    //    (`group` / `isolated`, or an unrecognised value, read fail-closed)
+    //    walls organizations, and one shared editable copy cannot sit behind it.
+    'UNMANAGED_INSTALL_UNCOPYABLE',
+    'UNMANAGED_INSTALL_WALLED_POSTURE',
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
     'VERSION_NOT_FOUND',

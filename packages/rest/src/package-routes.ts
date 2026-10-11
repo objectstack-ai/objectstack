@@ -17,8 +17,9 @@ import {
   sandboxBusinessMessage,
   INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
-import { classifiedRefusalAnswer } from './error-response.js';
+import { classifiedRefusalAnswer, nestedRefusalEnvelope, sandboxFaultAnswer } from './error-response.js';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
+import { logError } from './log.js';
 
 /**
  * [#7033 / #7023] The authorization gate for the REST package transport.
@@ -202,8 +203,29 @@ async function refusePackageRequest(
  * mapping, which is why the classification's body is not re-dressed here the
  * way the hand-built families in `rest-server.ts` re-dress it: their 500 arm
  * read nothing, this door already reads everything but the sandbox.
+ *
+ * ## [#22764] …and a sandboxed body the doors answer as a fault reads as one
+ *
+ * The two reads above leave the sandbox's FAULT shapes to this door's own
+ * mapping, and both shipped words the doors withhold: a body that CRASHED
+ * answered `500 INTERNAL_ERROR` with the QuickJS wrapper around the native
+ * error text (the business read declines a crash, so the raw message stood),
+ * and a refusal that DECLARED `503` answered at its status with its sentence.
+ * {@link sandboxFaultAnswer} is the doors' answer for those two, so it
+ * is asked first and re-dressed whole, the way the nested families re-dress
+ * it. The original error is logged first, the one place its words now reach.
+ * [#22885] It answers the sandbox's own fault too (a denied capability, a
+ * budget), which reached the raw message below until then. Every other throw
+ * is answered below exactly as before.
  */
 function sendThrownError(res: any, error: unknown): void {
+  const fault = sandboxFaultAnswer(error);
+  if (fault) {
+    logError('[REST] package publish error:', error);
+    const nested = nestedRefusalEnvelope(fault);
+    sendError(res, nested.status, nested.code, nested.message, nested.extra);
+    return;
+  }
   const thrown = resolveThrownHttpError(error, classifiedRefusalAnswer(error)?.status ?? 500);
   // The dispatcher twin's withhold, byte for byte — one rule, two doors. Its
   // other limb is the shared sandbox read (#22719), not the raw message.
