@@ -159,11 +159,11 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
     const rows = await svc.listRequests(filter, ctx);
     return { ids: rows.map((r) => r.id).sort(), total: await svc.countRequests(filter, ctx) };
   };
-  const actionsOf = async (requestId: string) => engine.find('sys_approval_action', {
+  const actionsOf = async (requestId: string): Promise<any[]> => engine.find('sys_approval_action', {
     where: { request_id: requestId }, context: SYSTEM,
-  } as any) as Promise<any[]>;
+  });
   const snapshotOf = async (requestId: string) => {
-    const [row] = await engine.find('sys_approval_request', { where: { id: requestId }, context: SYSTEM } as any) as any[];
+    const [row]: any[] = await engine.find('sys_approval_request', { where: { id: requestId }, context: SYSTEM });
     return JSON.parse(row.node_config_json);
   };
 

@@ -2806,7 +2806,7 @@ export class ApprovalService implements IApprovalService {
       const rows = await this.engine.find('sys_member', {
         where: { organization_id: org }, fields: ['user_id'],
         limit: ApprovalService.APPROVER_INDEX_CAP, context: SYSTEM_CTX,
-      } as any);
+      });
       const list: any[] = Array.isArray(rows) ? rows : [];
       if (list.length >= ApprovalService.APPROVER_INDEX_CAP) {
         this.logger?.warn?.('[approvals] organization-administrator probe hit its window — results may be truncated', {
