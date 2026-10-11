@@ -1187,19 +1187,6 @@ export const ERROR_CODE_LEDGER = {
     // per this file's header a code emitted by several packages is listed
     // once per emitting package — provenance, not identity — so the union,
     // its casing and every other package's rows are unchanged.
-    //
-    // `PermissionSetOverlayStateError` (`permission-set-overlay-discard.ts`),
-    // 409: `discardPermissionSetOverlay` found no active overlay to discard.
-    // Served by `@objectstack/rest`'s `POST …/security/permission-sets/:id/
-    // discard-overlay` route, whose `handleError` reads the thrown `code`
-    // ahead of its `INTERNAL` default.
-    'INVALID_STATE',
-    // `PermissionSetNotFoundError` (`permission-set-overlay-discard.ts`),
-    // 404: the addressed `sys_permission_set` row does not exist. Same route
-    // and door as the row above. A waived synonym of `RESOURCE_NOT_FOUND`
-    // (`STANDARD_SYNONYM_WAIVERS` admits it per code, not per package — this
-    // row widens that waiver's emitter list, never the waiver table).
-    'NOT_FOUND',
     // `PackagedPermissionSetLockedError` and
     // `PackagedPermissionSetProvenanceUnknownError`
     // (`packaged-permission-set-lock.ts`), 403: a data-path write targets a
@@ -1697,10 +1684,8 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
   {
     code: 'NOT_FOUND',
     shadows: 'RESOURCE_NOT_FOUND',
-    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing; ' +
-      'plugin-security lists the same pre-existing wire value under its own provenance row ' +
-      '(its permission-set overlay-discard 404). Wire value kept; consolidation deferred until ' +
-      'it has a measured victim.',
+    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing. ' +
+      'Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {
     code: 'UNAUTHORIZED',

@@ -313,10 +313,9 @@ const ANSWERS_THE_WRAPPER: Record<string, WrapperDoor> = {
     'POST /api/v1/sharing/rules': { called: 'sharingRules.defineRule', status: 500, body: {} },
     'DELETE /api/v1/sharing/rules/:idOrName': { called: 'sharingRules.deleteRule', status: 500 },
     'POST /api/v1/sharing/rules/:idOrName/evaluate': { called: 'sharingRules.evaluateRule', status: 500 },
-    // Suggested bindings and the overlay discard: the 500 arm relays `.message`.
+    // Suggested bindings: the 500 arm relays `.message`.
     'POST /api/v1/security/suggested-bindings/:id/confirm': { called: 'security.confirmAudienceBindingSuggestion', status: 500 },
     'POST /api/v1/security/suggested-bindings/:id/dismiss': { called: 'security.dismissAudienceBindingSuggestion', status: 500 },
-    'POST /api/v1/security/permission-sets/:id/discard-overlay': { called: 'security.discardPermissionSetOverlay', status: 500 },
     // Approvals: no `handleApprovalError` prefix matches, so the outer 500 relays `.message`.
     'POST /api/v1/approvals/requests/:id/approve': { called: 'approvals.decide', status: 500, body: {} },
     'POST /api/v1/approvals/requests/:id/reject': { called: 'approvals.decide', status: 500, body: {} },
@@ -354,7 +353,7 @@ describe('[#22694] §1 the REST ledger\'s write rows, each with exactly one disp
         const maps = [Object.keys(ANSWERS_THE_SENTENCE), Object.keys(ANSWERS_THE_WRAPPER), [...NO_REFUSAL_REACHES_THE_ANSWER.keys()]];
         const named = maps.flat();
         const ledgered = WRITE_ROWS.map((row) => row.route);
-        expect(ledgered.length).toBeGreaterThanOrEqual(45);
+        expect(ledgered.length).toBeGreaterThanOrEqual(44);
         for (const route of ledgered) {
             expect(named.filter((r) => r === route), `no single disposition for ${route}`).toHaveLength(1);
         }

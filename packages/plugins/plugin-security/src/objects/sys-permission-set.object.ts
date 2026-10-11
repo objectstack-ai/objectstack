@@ -69,29 +69,6 @@ export const SysPermissionSet = ObjectSchema.create({
       refreshAfter: true,
     },
     {
-      // [field report — rc→GA declared≠enforced surfacing] The sanctioned,
-      // audited counterpart to the field remediation's raw
-      // `DELETE FROM sys_metadata WHERE type='permission' AND name='…'` — see
-      // `permission-set-overlay-discard.ts`. Refuses (403) on any set that is
-      // not currently package-declared, so it can never destroy a genuinely
-      // environment-authored set's work.
-      name: 'discard_permission_set_overlay',
-      label: 'Discard Overlay',
-      icon: 'refresh-ccw',
-      variant: 'danger',
-      mode: 'custom',
-      locations: ['list_item', 'record_header'],
-      type: 'api',
-      method: 'POST',
-      target: '/api/v1/security/permission-sets/{id}/discard-overlay',
-      confirmText:
-        'Discard the environment overlay shadowing this package-declared set and resync it to the shipped ' +
-        'artifact? This only removes the customization overlay — it never touches an environment-authored set.',
-      successMessage: 'Overlay discarded — the set is resynced to the shipped artifact',
-      refreshAfter: true,
-      visible: "has(record.drift_status) && record.drift_status == 'overlay_shadow'",
-    },
-    {
       // [commit 5cb62d88b] ⭐ THIS PARAMS LIST *IS* THE PAYLOAD. Every definition facet a
       // clone should carry has to be named below: the action POSTs its param
       // VALUES to the generic data door, so a column that is not a param is
@@ -378,8 +355,7 @@ export const SysPermissionSet = ObjectSchema.create({
       readonly: true,
       description:
         "Cause of a declared≠enforced mismatch for this package-declared set. 'overlay_shadow' = a Studio-" +
-        "authored environment overlay is shadowing the packaged declaration — resync it with the Discard " +
-        "Overlay action. 'provenance_skip' = this row predates package provenance tracking, so boot sync " +
+        "authored environment overlay is shadowing the packaged declaration. 'provenance_skip' = this row predates package provenance tracking, so boot sync " +
         "treats it as environment-authored and never reconciles it with the package (no automated fix — file " +
         "an issue / see the ops runbook for the manual adoption recipe). Absent = enforced grants match the " +
         "shipped artifact, or this set is not currently package-declared.",

@@ -201,13 +201,10 @@ describe('RBAC object canonical names + row actions', () => {
     expect(names).toEqual(['activate_position', 'clone_position', 'deactivate_position', 'set_default_position']);
   });
 
-  it('SysPermissionSet exposes activate/deactivate/clone/discard-overlay row actions', () => {
+  it('SysPermissionSet exposes activate/deactivate/clone row actions', () => {
     const names = (SysPermissionSet.actions ?? []).map((a) => a.name).sort();
-    // [field report — rc→GA declared≠enforced surfacing] `discard_permission_set_overlay`
-    // is the sanctioned counterpart to the field remediation's raw SQL.
     expect(names).toEqual([
       'activate_permission_set', 'clone_permission_set', 'deactivate_permission_set',
-      'discard_permission_set_overlay',
     ]);
   });
 

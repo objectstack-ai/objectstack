@@ -46,9 +46,8 @@
  * page in it at all.
  *
  * ⭐ The answer comes from the engine's SchemaRegistry instead — the same
- * source `bootstrapDeclaredPermissions`' {@link readDeclared} and
- * `permission-set-overlay-discard.ts`'s eligibility test already use, so this
- * plugin keeps ONE spelling of "package-declared" rather than two (Prime
+ * source `bootstrapDeclaredPermissions`' {@link readDeclared} already uses,
+ * so this plugin keeps ONE spelling of "package-declared" rather than two (Prime
  * Directive #8). That read is an in-memory array: no page, no cap, no `$in`,
  * no driver. Truncation is not a failure mode it HAS, which is a structural
  * property rather than a promise — `packaged-permission-set-lock.test.ts`
@@ -74,8 +73,7 @@
  *    keeps on purpose, and would be the over-broad refusal the ruling did not
  *    ask for.
  *
- * So provenance is decided from the ARTIFACT, exactly as
- * `permission-set-overlay-discard.ts` decided it for the discard action.
+ * So provenance is decided from the ARTIFACT.
  *
  * ## Fail-closed on ambiguity
  *
@@ -309,8 +307,7 @@ const PROVENANCE_UNKNOWN_USER_MESSAGE =
  * member: it is an ADR-0112 registered extension code, and because this
  * package stamps it, `ERROR_CODE_LEDGER['@objectstack/plugin-security']`
  * lists it beside metadata-protocol's row (provenance, not identity — a code
- * shipped in `dist` is registered under every package that stamps it; the
- * same holds for the two overlay-discard codes). What changes is the
+ * shipped in `dist` is registered under every package that stamps it). What changes is the
  * MESSAGE: the producer's says the type has not opted into overlay writes,
  * which tells an admin nothing they can act on. The ruling's whole point is
  * that the refusal teaches the sanctioned path.

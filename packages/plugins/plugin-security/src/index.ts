@@ -164,8 +164,7 @@ export type {
   SuggestionReconcileScope,
 } from './suggested-audience-bindings.js';
 // [field report — rc→GA declared≠enforced surfacing] "declared ≠ enforced"
-// per-set diagnostics (overlay_shadow / provenance_skip) + the sanctioned
-// operator discard action.
+// per-set diagnostics (overlay_shadow / provenance_skip).
 export {
   computePermissionSetDriftDiagnostics,
   persistPermissionSetDriftDiagnostics,
@@ -176,15 +175,6 @@ export type {
   PermissionSetDriftDiagnostic,
   DriftDiagnosticsOptions,
 } from './permission-set-drift.js';
-export {
-  discardPermissionSetOverlay,
-  PermissionSetNotFoundError,
-  PermissionSetOverlayStateError,
-} from './permission-set-overlay-discard.js';
-export type {
-  PermissionSetOverlayDiscardDeps,
-  PermissionSetOverlayDiscardResult,
-} from './permission-set-overlay-discard.js';
 // [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce 式)」]
 // Lock the base, clone to customize: the write-door provenance rule and its
 // refusals, plus the DETECTION READING for overlays that already exist.

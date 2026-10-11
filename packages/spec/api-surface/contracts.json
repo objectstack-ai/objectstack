@@ -219,7 +219,6 @@
     "OwnershipFloorAlternate (interface)",
     "PendingActionRow (interface)",
     "PendingActionStatus (type)",
-    "PermissionSetOverlayDiscardResult (interface)",
     "PlanUpgradeInput (interface)",
     "Plugin (interface)",
     "PluginStartupResult (type)",
