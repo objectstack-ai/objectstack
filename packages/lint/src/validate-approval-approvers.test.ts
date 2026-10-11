@@ -820,7 +820,7 @@ describe('[#22161] one-line fixes — approval-approvers-may-resolve-empty', () 
     const [group] = validateApprovalApprovers(stackWithApprovers([{ type: 'position', value: 'exec' }]));
     expect(group.hint).toBe(
       "Staff at least one target, add an approver that cannot resolve empty (e.g. { type: 'org_membership_level', " +
-        "value: 'owner' }), or declare onEmptyApprovers: 'fallback' with a fallbackApprovers list",
+        "value: 'owner' }), or name who decides in fallbackApprovers with onEmptyApprovers: 'fallback'",
     );
   });
 
@@ -828,11 +828,31 @@ describe('[#22161] one-line fixes — approval-approvers-may-resolve-empty', () 
     const text = explainRule(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY)!.paragraphs.join('\n');
     for (const fact of [
       'make sure at least one target is always staffed',
-      'recoverable only by a platform/tenant admin override',
-      'which may act on any pending request',
+      // #22824: a slate that names no one opens on the organization's
+      // administrators; `fallback` names who decides instead.
+      "a slate that still names no one opens on the organization's administrators",
+      'names who decides instead',
+      "instead of on the organization's administrators, which needs no write to the column at all",
       '/api/v1/auth/admin/set-user-manager',
       '/api/v1/auth/admin/import-users',
       'needs no write to the column at all',
     ]) expect(text, `explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 11, after #22824 landed beside it: no sentence the rule prints
+// or explains may still describe the empty-slate outcome #22824 retired (the
+// request waiting on a slate nobody can act on, decided only by an override
+// for an organization that HAS administrators).
+describe('[#22161] one-line fixes — approval-approvers-may-resolve-empty, against #22824', () => {
+  it('neither fix line nor the explanation describes the retired empty-slate outcome', () => {
+    const [group] = validateApprovalApprovers(stackWithApprovers([{ type: 'position', value: 'exec' }]));
+    const [manager] = validateApprovalApprovers(stackWithApprovers([{ type: 'manager' }]));
+    const text = explainRule(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY)!.paragraphs.join('\n');
+    for (const printed of [group.hint, manager.hint, text]) {
+      expect(printed).not.toMatch(/waits forever|recoverable only|nobody can act on|no in-product recovery/);
+    }
+    // The override survives only as the no-administrator case.
+    expect(text).toContain("only an organization with no administrator leaves the request on an empty");
   });
 });
