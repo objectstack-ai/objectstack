@@ -2767,19 +2767,6 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * better-auth org-membership tier (`sys_member.role`: owner/admin/member) —
-   * NOT positions. Named for the projection (`org_membership_level`, ADR-0057
-   * D7 / ADR-0090 D3), not for better-auth's column: the column name is theirs
-   * and stays, the platform-facing word does not.
-   *
-   * Read RAW, like every routing read here, and with nothing available to
-   * filter even if it were not: `sys_member` carries no ADR-0091 D2 window
-   * columns, and a tier name has no `sys_position` row to read `active` off.
-   * {@link expandPositionUsers} carries the ruling both reads inherit
-   * (#8613 / commit 04d03c3a0) — this method is also the second limb of that union, so a
-   * change here changes position routing too.
-   */
-  /**
    * [#22824] The organization's administrators: the slate an empty
    * `onEmptyApprovers: 'admin_rescue'` request opens on.
    *
@@ -2844,6 +2831,19 @@ export class ApprovalService implements IApprovalService {
     }
   }
 
+  /**
+   * better-auth org-membership tier (`sys_member.role`: owner/admin/member) —
+   * NOT positions. Named for the projection (`org_membership_level`, ADR-0057
+   * D7 / ADR-0090 D3), not for better-auth's column: the column name is theirs
+   * and stays, the platform-facing word does not.
+   *
+   * Read RAW, like every routing read here, and with nothing available to
+   * filter even if it were not: `sys_member` carries no ADR-0091 D2 window
+   * columns, and a tier name has no `sys_position` row to read `active` off.
+   * {@link expandPositionUsers} carries the ruling both reads inherit
+   * (#8613 / commit 04d03c3a0) — this method is also the second limb of that union, so a
+   * change here changes position routing too.
+   */
   private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
     if (!tier) return [];
     const filter: any = { role: tier };
