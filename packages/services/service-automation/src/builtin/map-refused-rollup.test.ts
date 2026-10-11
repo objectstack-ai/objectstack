@@ -84,7 +84,7 @@ function parentFlow() {
       {
         id: 'each', type: 'map', label: 'For each',
         config: {
-          flowName: 'per_item', collection: '{items}',
+          flowName: 'per_item', collection: { dialect: 'cel', source: 'items' },
           iteratorVariable: 'item', input: { val: { dialect: 'cel', source: 'item' } }, outputVariable: 'mapped',
         },
       },

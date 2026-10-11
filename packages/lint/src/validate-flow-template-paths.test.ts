@@ -550,7 +550,7 @@ describe('validateFlowTemplatePaths', () => {
                 type: 'loop',
                 label: 'Each',
                 config: {
-                  collection: '{items}',
+                  collection: { dialect: 'cel', source: 'items' },
                   body: {
                     nodes: [
                       {

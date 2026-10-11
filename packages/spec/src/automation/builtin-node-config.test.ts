@@ -402,14 +402,14 @@ describe('ScreenFieldConfigSchema — the bound pair, help text and lookup targe
 describe('MapConfigSchema — an unknown key is refused, not stripped', () => {
   it('accepts every declared key', () => {
     expect(MapConfigSchema.parse({
-      collection: '{tasks}', flowName: 'one_task_signoff', iteratorVariable: 'item',
+      collection: { dialect: 'cel', source: 'tasks' }, flowName: 'one_task_signoff', iteratorVariable: 'item',
       // [#19939] `input.*` is a value slot: the item's id is a CEL envelope.
       indexVariable: 'i', itemObject: 'showcase_task', input: { id: { dialect: 'cel', source: 'item.id' } }, outputVariable: 'results',
     }).flowName).toBe('one_task_signoff');
   });
 
   it('prescribes `flowName` for the undeclared `flow` fallback', () => {
-    const message = unknownKeyMessage(MapConfigSchema, { collection: '{tasks}', flowName: 'per_row', flow: 'ignored' })!;
+    const message = unknownKeyMessage(MapConfigSchema, { collection: { dialect: 'cel', source: 'tasks' }, flowName: 'per_row', flow: 'ignored' })!;
     expect(message).toContain('this map node config');
     expect(message).toContain('flow-node-map-flow-alias');
     expect(message).toMatch(/delete/i);
@@ -423,9 +423,9 @@ describe('MapConfigSchema — an unknown key is refused, not stripped', () => {
     // author wrote two names for one thing and the platform picked one without
     // saying so. This is the case where picking would be a guess, so the
     // refusal names both keys instead.
-    expect(MapConfigSchema.safeParse({ collection: '{r}', flowName: 'per_row', flow: 'per_row_v2' }).success)
+    expect(MapConfigSchema.safeParse({ collection: { dialect: 'cel', source: 'r' }, flowName: 'per_row', flow: 'per_row_v2' }).success)
       .toBe(false);
-    const message = unknownKeyMessage(MapConfigSchema, { collection: '{r}', flowName: 'per_row', flow: 'per_row_v2' })!;
+    const message = unknownKeyMessage(MapConfigSchema, { collection: { dialect: 'cel', source: 'r' }, flowName: 'per_row', flow: 'per_row_v2' })!;
     expect(message).toContain('`flow`');
     expect(message).toContain('`flowName`');
   });

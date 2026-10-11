@@ -142,7 +142,7 @@ const MAP_NODE = {
     id: 'per_cell', type: 'map', label: 'For each cell',
     config: {
         flowName: 'cell_flow',
-        collection: '{cells}',
+        collection: { dialect: 'cel', source: 'cells' },
         iteratorVariable: 'cell',
         // [#19939] `input.*` is a value slot. `row` is the enclosing loop's
         // iterator, and the `parallel` parent binds none, so it is guarded —
@@ -168,7 +168,7 @@ function containedSetup(pausing: boolean): Harness {
             {
                 id: 'sweep', type: 'loop', label: 'For each row',
                 config: {
-                    collection: '{rows}', iteratorVariable: 'row',
+                    collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row',
                     body: {
                         nodes: [
                             {
@@ -208,7 +208,7 @@ function loopBodySetup(pausing: boolean): Harness {
             {
                 id: 'sweep', type: 'loop', label: 'For each row',
                 config: {
-                    collection: '{rows}', iteratorVariable: 'row',
+                    collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row',
                     body: { nodes: [MAP_NODE], edges: [] },
                 },
             },

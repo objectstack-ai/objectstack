@@ -395,7 +395,7 @@ const underNestedRegionEdges = (valid?: AnyRec): SweptCollection => ({
         {
           id: 'lp',
           type: 'loop',
-          config: { collection: 'x', body: { nodes: [...EDGE_ENDPOINT_NODES], edges: members } },
+          config: { collection: { dialect: 'cel', source: 'x' }, body: { nodes: [...EDGE_ENDPOINT_NODES], edges: members } },
         },
       ],
       edges: [],
@@ -425,7 +425,7 @@ const underNestedRegion = (valid?: AnyRec): SweptCollection => ({
     flows: [{
       name: 'crm_flow',
       edges: [],
-      nodes: [VALID_NODE, { id: 'lp', type: 'loop', config: { collection: 'x', body: { nodes: members, edges: [] } } }],
+      nodes: [VALID_NODE, { id: 'lp', type: 'loop', config: { collection: { dialect: 'cel', source: 'x' }, body: { nodes: members, edges: [] } } }],
     }],
   }),
   valid,

@@ -132,7 +132,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                 type: 'loop',
                 label: 'Each case',
                 config: {
-                    collection: '{cases}',
+                    collection: { dialect: 'cel', source: 'cases' },
                     iteratorVariable: 'currentCase',
                     body: {
                         nodes: [
@@ -306,7 +306,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                 {
                     id: 'each', type: 'loop', label: 'Each',
                     config: {
-                        collection: '{cases}', iteratorVariable: 'currentCase',
+                        collection: { dialect: 'cel', source: 'cases' }, iteratorVariable: 'currentCase',
                         body: {
                             nodes: [{ id: 'call', type: 'subflow', label: 'Call', config: { flowName: 'child' } }],
                             edges: [],
@@ -351,7 +351,7 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
                 {
                     id: 'each', type: 'loop', label: 'Each',
                     config: {
-                        collection: '{cases}', iteratorVariable: 'currentCase',
+                        collection: { dialect: 'cel', source: 'cases' }, iteratorVariable: 'currentCase',
                         body: {
                             nodes: [{
                                 id: 'fan', type: 'parallel', label: 'Fan',

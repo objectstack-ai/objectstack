@@ -41,7 +41,7 @@ import { ScriptConfigSchema, SubflowConfigSchema } from './schemaless-node-confi
 const OUTPUT_VARIABLE_CONTRACTS = [
   { type: 'get_record', schema: GetRecordConfigSchema, base: { objectName: 'lead' } },
   { type: 'create_record', schema: CreateRecordConfigSchema, base: { objectName: 'lead' } },
-  { type: 'map', schema: MapConfigSchema, base: { collection: 'rows', flowName: 'per_row' } },
+  { type: 'map', schema: MapConfigSchema, base: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'per_row' } },
   { type: 'script', schema: ScriptConfigSchema, base: { function: 'score_lead' } },
   { type: 'subflow', schema: SubflowConfigSchema, base: { flowName: 'child' } },
 ] as const;
@@ -289,16 +289,16 @@ const BINDING_SITES: readonly BindingSite[] = [
       key,
       label: `loop ${key}`,
       declaredBy: 'LoopConfigSchema',
-      contract: { schema: LoopConfigSchema, config: (name) => ({ collection: 'rows', body: LOOP_BODY, [key]: name }), path: () => key },
-      flow: (name) => flowWith('loop', { collection: 'rows', body: LOOP_BODY, [key]: name }),
+      contract: { schema: LoopConfigSchema, config: (name) => ({ collection: { dialect: 'cel', source: 'rows' }, body: LOOP_BODY, [key]: name }), path: () => key },
+      flow: (name) => flowWith('loop', { collection: { dialect: 'cel', source: 'rows' }, body: LOOP_BODY, [key]: name }),
       flowPath: () => `nodes.1.config.${key}`,
     },
     {
       key,
       label: `map ${key}`,
       declaredBy: 'MapConfigSchema',
-      contract: { schema: MapConfigSchema, config: (name) => ({ collection: 'rows', flowName: 'per_row', [key]: name }), path: () => key },
-      flow: (name) => flowWith('map', { collection: 'rows', flowName: 'per_row', [key]: name }),
+      contract: { schema: MapConfigSchema, config: (name) => ({ collection: { dialect: 'cel', source: 'rows' }, flowName: 'per_row', [key]: name }), path: () => key },
+      flow: (name) => flowWith('map', { collection: { dialect: 'cel', source: 'rows' }, flowName: 'per_row', [key]: name }),
       flowPath: () => `nodes.1.config.${key}`,
     },
   ]),
@@ -388,8 +388,8 @@ describe('every binding door refuses a `$` name — #22572 closes the family', (
   });
 
   it('CONTROL: the defaults are kept — `iteratorVariable` is still `item` on a loop and a map, `$error` on a try_catch', () => {
-    const loop = LoopConfigSchema.safeParse({ collection: 'rows', body: LOOP_BODY });
-    const map = MapConfigSchema.safeParse({ collection: 'rows', flowName: 'per_row' });
+    const loop = LoopConfigSchema.safeParse({ collection: { dialect: 'cel', source: 'rows' }, body: LOOP_BODY });
+    const map = MapConfigSchema.safeParse({ collection: { dialect: 'cel', source: 'rows' }, flowName: 'per_row' });
     expect(loop.success && loop.data.iteratorVariable).toBe('item');
     expect(map.success && map.data.iteratorVariable).toBe('item');
     expect(loop.success && loop.data.indexVariable).toBeUndefined();
@@ -416,7 +416,7 @@ describe('every binding door refuses a `$` name — #22572 closes the family', (
   it('the remedy reads: a loop binding `row` and a body text slot reading `{{ row.name }}` parse clean', () => {
     expect(textSlotTemplateRefusal('Due: {{ $row.name }}')).toBeDefined();
     const body = { nodes: [{ id: 'tell', type: 'notify', label: 'Tell', config: { title: 'Due', message: 'Due: {{ row.name }}', recipients: ['ops'] } }], edges: [] };
-    expect(issuesOf(flowWith('loop', { collection: 'rows', iteratorVariable: 'row', body }))).toEqual([]);
+    expect(issuesOf(flowWith('loop', { collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', body }))).toEqual([]);
   });
 });
 
@@ -435,7 +435,7 @@ describe('assignment targets — the names the executor binds, in each of its th
 
   it('a region body\'s assignment is refused at the path the author wrote', () => {
     const region = { nodes: [{ id: 'set', type: 'assignment', label: 'Set', config: { assignments: { $total: 1 } } }], edges: [] };
-    expect(issuesOf(flowWith('loop', { collection: 'rows', body: region })).map(({ path }) => path)).toEqual([
+    expect(issuesOf(flowWith('loop', { collection: { dialect: 'cel', source: 'rows' }, body: region })).map(({ path }) => path)).toEqual([
       'nodes.1.config.body.nodes.0.config.assignments.$total',
     ]);
   });

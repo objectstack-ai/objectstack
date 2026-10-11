@@ -594,7 +594,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
               id: 'sweep',
               type: 'loop',
               config: {
-                collection: '{items}',
+                collection: { dialect: 'cel', source: 'items' },
                 iteratorVariable: 'status',
                 body: { nodes: [{ id: 'inner', type: 'assignment', config: { assignments: {} } }], edges: [] },
               },
@@ -2739,7 +2739,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           name: 'loop_flow',
           nodes: [
             { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
-            { id: 'loop_1', type: 'loop', config: { collection: '{tasks}', iteratorVariable: 'task' } },
+            { id: 'loop_1', type: 'loop', config: { collection: { dialect: 'cel', source: 'tasks' }, iteratorVariable: 'task' } },
           ],
           edges: [],
         }],
@@ -2771,7 +2771,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
 
       it('flags a brace-in-CEL predicate inside a loop body, naming the region', () => {
         const issues = validateStackExpressions(flowWith({
-          id: 'loop_1', type: 'loop', config: { collection: '{rows}', body: badRegion() },
+          id: 'loop_1', type: 'loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: badRegion() },
         }));
         // Both the body node's `config.condition` and the body edge's condition.
         expect(issues).toHaveLength(2);
@@ -2795,9 +2795,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         const issues = validateStackExpressions(flowWith({
           id: 'outer', type: 'loop',
           config: {
-            collection: '{rows}',
+            collection: { dialect: 'cel', source: 'rows' },
             body: {
-              nodes: [{ id: 'inner', type: 'loop', config: { collection: '{cols}', body: badRegion() } }],
+              nodes: [{ id: 'inner', type: 'loop', config: { collection: { dialect: 'cel', source: 'cols' }, body: badRegion() } }],
               edges: [],
             },
           },
@@ -2810,7 +2810,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(validateStackExpressions(flowWith({
           id: 'loop_1', type: 'loop',
           config: {
-            collection: '{rows}',
+            collection: { dialect: 'cel', source: 'rows' },
             body: {
               nodes: [
                 { id: 'gate', type: 'decision', config: { condition: 'record.rating >= 4' } },
@@ -4889,7 +4889,7 @@ describe('a blank string in a ledger predicate slot (#17493)', () => {
   it('reaches a `decision` inside an ADR-0031 region body', () => {
     const found = errorsOf(flowStack({
       id: 'sweep', type: 'loop',
-      config: { collection: '{items}', iteratorVariable: 'item', body: { nodes: [decision('   ')], edges: [] } },
+      config: { collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', body: { nodes: [decision('   ')], edges: [] } },
     }));
     expect(found).toHaveLength(1);
     expect(found[0].where).toContain("loop 'sweep' body");
@@ -5019,8 +5019,8 @@ describe('node config an executor requires (#20316)', () => {
     validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
 
   it.each([
-    { type: 'loop', whole: { collection: '{rows}', body: { nodes: [{ id: 'b', type: 'assignment' }], edges: [] } }, key: 'collection' },
-    { type: 'map', whole: { collection: '{rows}', flowName: 'child_flow' }, key: 'collection' },
+    { type: 'loop', whole: { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [{ id: 'b', type: 'assignment' }], edges: [] } }, key: 'collection' },
+    { type: 'map', whole: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'child_flow' }, key: 'collection' },
     { type: 'get_record', whole: { objectName: 'account' }, key: 'objectName' },
     { type: 'http', whole: { url: 'https://example.com/hook' }, key: 'url' },
     { type: 'subflow', whole: { flowName: 'child_flow' }, key: 'flowName' },
