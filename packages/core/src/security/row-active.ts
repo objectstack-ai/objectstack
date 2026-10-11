@@ -12,11 +12,21 @@
  * > Deactivate this position? Users keep their assignment but the position stops
  * > granting permissions until re-activated.
  *
- * Nothing read the column, so the promise was false: deactivation changed a
- * badge in Setup and the assignments kept granting. Correctness lives at
- * RESOLUTION time — the same placement ADR-0091 chose for validity windows,
- * and for the same reason: a catalogue flag that is only honoured by a cleanup
- * job is an unenforced security property.
+ * ⚠️ The catalogue row's `active` column DECIDES NO GRANT any more (ADR-0131
+ * D3, ADR-0126 §4). `resolveUserAuthzGrants` reads deactivation for both types
+ * from the deployment-level activation ledger, `sys_metadata_activation`
+ * (`metadata_type` `position` / `permission`), written through
+ * `POST /api/v1/security/_activation/:type/:name`; it never calls this
+ * predicate. The Deactivate dialog's promise is kept by that ledger row, not by
+ * this column.
+ *
+ * What still reads the column through this predicate, on `main`: the
+ * last-administrator guard's enumeration (`plugin-auth` `last-admin-guard.ts`),
+ * the explain engine's "deactivated" label (`plugin-security`
+ * `explain-engine.ts`), the security plugin's set loader (`plugin-security`
+ * `security-plugin.ts`) and the sharing-rule position check (`plugin-sharing`
+ * `sharing-rule-service.ts`). The reasoning below is about reading the column
+ * at all, and holds for each of them.
  *
  * ## Why the predicate is "explicitly deactivated", not "explicitly active"
  *
@@ -57,9 +67,9 @@ export interface ActivatableRow {
  * True unless the row carries an `active` column that is explicitly OFF.
  *
  * The ONE predicate every reader of `sys_permission_set.active` /
- * `sys_position.active` uses, so the resolver that enforces the flag and the
- * break-glass guard that simulates a write to it can never disagree about what
- * "deactivated" means.
+ * `sys_position.active` uses (the readers are listed in the module doc), so
+ * they can never disagree about what a deactivated ROW means. It is not the
+ * grant switch: the resolver reads the activation ledger instead.
  */
 export function isRowActive(row: ActivatableRow | null | undefined): boolean {
   if (!row) return false;
