@@ -315,7 +315,7 @@ const MetadataTypeRegistryEntryBaseSchema = z.object({
    */
   allowOrgOverride: retiredKey(
     '`MetadataTypeRegistryEntry.allowOrgOverride` was renamed to `allowEnvironmentOverlay` in '
-    + '@objectstack/spec 18 (ADR-0131 D6) — the per-organization overlay axis was retired, and '
+    + '@objectstack/spec 17 (ADR-0131 D6) — the per-organization overlay axis was retired, and '
     + 'the key now names the one scope it governs: whether an environment may overlay an item '
     + 'of this type that a managed package ships. Rename the key to `allowEnvironmentOverlay`; '
     + 'the value is unchanged.',

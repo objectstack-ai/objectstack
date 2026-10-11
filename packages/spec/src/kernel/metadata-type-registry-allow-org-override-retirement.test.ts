@@ -56,7 +56,7 @@ describe('MetadataTypeRegistryEntry.allowOrgOverride is renamed to allowEnvironm
     expect(issue!.path).toEqual(['allowOrgOverride']);
     // The prescription IS the migration doc for whoever hits it.
     expect(issue!.message).toMatch(
-      /`MetadataTypeRegistryEntry\.allowOrgOverride` was renamed to `allowEnvironmentOverlay` in @objectstack\/spec 18/s,
+      /`MetadataTypeRegistryEntry\.allowOrgOverride` was renamed to `allowEnvironmentOverlay` in @objectstack\/spec 17/s,
     );
     expect(issue!.message).toMatch(/Rename the key to `allowEnvironmentOverlay`; the value is unchanged/s);
     // `false` is refused exactly like `true`: the key is gone, not one value of it.
