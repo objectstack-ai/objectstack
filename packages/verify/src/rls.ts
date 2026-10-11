@@ -375,12 +375,12 @@ export function rlsProbePermissionSet(config: any): PermissionSet {
  * above.
  *
  * The probe set must be REGISTERED at boot, not written as a bare
- * `sys_permission_set` row: `PermissionEvaluator.resolvePermissionSets` resolves
- * a name from metadata first, the bootstrap list second, and the DB row only as
- * a last resort — and that last-resort loader hydrates `objects` / `fields` /
- * `systemPermissions` / `tabPermissions` but NOT `rowLevelSecurity`. A row-only
- * probe set would therefore grant the object bits and silently drop the
- * narrowing, which is the one thing that makes the persona a probe at all.
+ * `sys_permission_set` row: [ADR-0131 D3/D4] a set's definition comes from the
+ * registry alone — `PermissionEvaluator.resolvePermissionSets` reads metadata,
+ * then the bootstrap list, then the security catalog, and none of the three
+ * reads a `sys_permission_set` row. A row-only probe set would resolve nowhere
+ * and grant nothing, narrowing included, which is the one thing that makes the
+ * persona a probe at all.
  *
  * `appSecurityPluginOptions(config)` is carried through verbatim so the app's
  * declared default profile still resolves exactly as it does under `bootStack`'s
@@ -441,11 +441,14 @@ export async function provisionRlsProbePersona(
 
   const probeSet = rlsProbePermissionSet(config);
 
-  // The grant is keyed by ROW ID, and `resolveUserAuthzGrants` reads the row
-  // only to learn its NAME — the definition then resolves from the registered
-  // bootstrap list (`rlsProbeSecurity`), which is the copy that carries the
-  // narrowing. Find-or-create so it works whether or not this boot already
-  // seeded the registered set into the table.
+  // [ADR-0131 D4] The grant holds its set BY NAME: `resolveUserAuthzGrants`
+  // reads the grant's `permission_set` column and takes the definition from
+  // the registry (`rlsProbeSecurity`), the copy that carries the narrowing. It
+  // reads neither `permission_set_id` nor this row. The row is read only for
+  // its id, because `permission_set_id` is still a required column and the
+  // platform derives the grant's name from it, refusing a disagreement.
+  // Find-or-create so it works whether or not this boot already seeded the
+  // registered set into the table.
   const existing = rowsOf(
     await ql.find('sys_permission_set', { where: { name: RLS_PROBE_PERMISSION_SET }, limit: 1 }, sysCtx),
   );
