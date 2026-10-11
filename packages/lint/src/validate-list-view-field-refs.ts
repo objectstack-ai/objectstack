@@ -591,11 +591,11 @@ function describeDottedRefusal(
       ? "it stores the related record's id"
       : headClass === 'virtual'
         ? 'computed on read, never stored'
-        : 'it stores a single scalar value';
+        : 'a single scalar value';
   return {
     message:
       `${subject} "${written}" is a dotted path whose head "${head}" is a ${type} field on ` +
-      `"${object}" (${because}), so no backend serves it and the query answers 400 INVALID_FIELD`,
+      `"${object}" (${because}), so no backend serves the path (400 INVALID_FIELD)`,
     hint: `Filter on a column of "${object}" itself. ${denormalise}`,
   };
 }

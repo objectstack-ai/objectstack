@@ -327,9 +327,8 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
           // what is resolved and what is skipped is
           // `os explain dashboard-action-route-unresolved`.
           message:
-            `url action target "${target}" names ${route.collection}/${route.name}, and no ` +
-            `${route.collection.replace(/s$/, '')} named "${route.name}" is registered in this ` +
-            `stack, so the button likely opens a dead route`,
+            `url action target "${target}": no ${route.collection.replace(/s$/, '')} named ` +
+            `"${route.name}" is registered in this stack, so the button likely opens a dead route`,
           hint:
             `Check the path for a typo, define the referenced ${route.collection.replace(/s$/, '')}, ` +
             `or ignore this if the route is served by another installed package or a host/console route.`,

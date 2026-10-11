@@ -1626,8 +1626,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · object "${objectName}" · validation "${ruleName}"`,
             `${objPath}._validations.${ruleName}`,
             `Translations are keyed to validation rule "${ruleName}", which object ` +
-              `"${objectName}" does not declare, so the rule's \`message\` keeps its source locale ` +
-              `in every refusal.` + suggest(ruleName, facts.validations),
+              `"${objectName}" does not declare, so its refusal \`message\` stays in the source ` +
+              `locale.` + suggest(ruleName, facts.validations),
             `Match the key to the rule's \`name\`, or drop it if the rule was renamed or ` +
               `removed.` +
               (facts.validations.size > 0

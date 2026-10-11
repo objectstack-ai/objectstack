@@ -3774,6 +3774,23 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
     'which is not a value declared by screen field "',
   ];
 
+  it('refuses a result field under a dialog that declares no `fields` (the one arm no case above fires)', () => {
+    // Runs before the bound case below, which reads what it fires.
+    const findings = validateTranslationReferences({
+      actions: [{ name: 'show_receipt', label: 'Receipt', type: 'api', target: '/api/v1/receipt', resultDialog: { title: 'Done' } }],
+      translations: [{ 'zh-CN': { globalActions: { show_receipt: { resultDialog: { fields: { token: '令牌' } } } } } }],
+    });
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.message])).toEqual([
+      [
+        TRANSLATION_TARGET_UNKNOWN,
+        'error',
+        'translations[0]["zh-CN"].globalActions.show_receipt.resultDialog.fields.token',
+        'Translations are keyed to result field "token", but action "show_receipt"\'s `resultDialog` declares ' +
+          'no `fields` (it renders the whole response as JSON), so nothing reads this label.',
+      ],
+    ]);
+  });
+
   it('every verdict the cases above fired is one line of at most 200 characters', () => {
     const converted = fired.filter((f) => CONVERTED.includes(f.rule));
     // The coverage control first: both ids fired, and every message arm of

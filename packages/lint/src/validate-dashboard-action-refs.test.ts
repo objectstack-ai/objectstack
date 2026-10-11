@@ -397,8 +397,8 @@ describe('[#22161] one-line verdicts — dashboard-action-target-undefined, dash
         'does nothing when clicked',
       'modal action target "create_opportunity" names no declared page (a modal target names a page, ' +
         'only), so the button renders and the runtime refuses the dispatch on click',
-      'url action target "/reports/forecast" names reports/forecast, and no report named "forecast" is ' +
-        'registered in this stack, so the button likely opens a dead route',
+      'url action target "/reports/forecast": no report named "forecast" is registered in this stack, so ' +
+        'the button likely opens a dead route',
     ]);
   });
 

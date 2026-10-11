@@ -659,7 +659,7 @@ describe('#14282 — a dotted key the FILTER door refuses, and the ones it serve
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('views[0].list.filter[0].field');
     expect(findings[0].message).toContain('lookup');
-    expect(findings[0].message).toContain('so no backend serves it');
+    expect(findings[0].message).toContain('so no backend serves the path');
   });
 
   it('a virtual head is refused — nothing materialises a column to reach into', () => {
@@ -1029,7 +1029,7 @@ describe('[#22161] one-line verdicts — list-view-field-unknown, list-view-fiel
     expect(unknown.some((f) => f.message.includes('(the head of "'))).toBe(true);
     expect(unknown.some((f) => !f.message.includes('(the head of "'))).toBe(true);
     const dotted = converted.filter((f) => f.rule === LIST_VIEW_FIELD_DOTTED);
-    for (const arm of ['the query projection refuses it', "it stores the related record's id", 'computed on read', 'it stores a single scalar value']) {
+    for (const arm of ['the query projection refuses it', "it stores the related record's id", 'computed on read', '(a single scalar value)']) {
       expect(dotted.some((f) => f.message.includes(arm)), arm).toBe(true);
     }
     for (const f of converted) {
@@ -1052,15 +1052,15 @@ describe('[#22161] one-line verdicts — list-view-field-unknown, list-view-fiel
     );
     expect(only(filterOn('owner.name'))).toBe(
       'filter key "owner.name" is a dotted path whose head "owner" is a `lookup` field on "duly_task" ' +
-        "(it stores the related record's id), so no backend serves it and the query answers 400 INVALID_FIELD",
+        "(it stores the related record's id), so no backend serves the path (400 INVALID_FIELD)",
     );
     expect(only(filterOn('score.x'))).toBe(
       'filter key "score.x" is a dotted path whose head "score" is a `formula` field on "duly_task" ' +
-        '(computed on read, never stored), so no backend serves it and the query answers 400 INVALID_FIELD',
+        '(computed on read, never stored), so no backend serves the path (400 INVALID_FIELD)',
     );
     expect(only(filterOn('title.x'))).toBe(
-      'filter key "title.x" is a dotted path whose head "title" is a `text` field on "duly_task" (it ' +
-        'stores a single scalar value), so no backend serves it and the query answers 400 INVALID_FIELD',
+      'filter key "title.x" is a dotted path whose head "title" is a `text` field on "duly_task" (a ' +
+        'single scalar value), so no backend serves the path (400 INVALID_FIELD)',
     );
   });
 
