@@ -41,6 +41,32 @@ Derived from the changesets objectui declared over the range — 28 releasing of
 
 - _(no changeset)_ fix(scripts): an injected tree hashes apart from an installed one, so a local Spec Main Shape Gate reproduction cannot leave verdicts a sibling worktree replays (objectui#12114) (… (objectui `a194b4e37`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+Clause-②: yes (widening: the html-page save gate and `os validate` read the SDUI manifest this console ships, and at this pin `element:repeater` and `element:number` publish the node-level `dataSource` binding as their only query input. A page source with `<element:repeater dataSource={{ object: 'account' }} />` and no flat `object` was refused with `missing-required-prop` against the previous manifest and passes against this one; a flat `object` / `filter` / `sort` / `limit` still passes, now with a non-gating `unknown-prop` warning.)
+
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+     changeset, the regenerated `sdui.manifest.json` and its record
+     `scripts/sdui-manifest.record.json`, the re-recorded
+     `packages/sdui-parser/objectui-lockstep.json` (its grammar region, diagnostic codes
+     and containment predicate are unchanged across the range) and the re-measured pin
+     citations in `packages/spec/src`, which carry their own `@objectstack/spec` patch
+     changeset. It adds, removes or renames no ObjectStack-authorable key: no Zod schema,
+     no spec declaration and no stored `sys_metadata` shape moves in it, so
+     `objectstack migrate meta` has nothing here to rewrite, and this body carries no
+     FROM/TO prescription of its own.
+     The manifest is the one accept set that moves, and it moves in one direction. Its
+     `element:repeater` row loses the `object` (required), `filter`, `sort` and `limit`
+     inputs and its `element:number` row loses `object` and `filter` (objectui#12085,
+     `ce991bd70`), the html tier's half of the retirement `@objectstack/spec` already
+     carries with its own disposition (`element-flat-data-binding-retired`, #11509).
+     Measured with `compile()` of `@objectstack/sdui-parser` against both manifests: a
+     repeater bound through `dataSource` alone goes from `missing-required-prop` (error)
+     to clean, and the flat keys go from clean to `unknown-prop` (warning, which the save
+     gate does not refuse). Nothing that passed before is refused now.
+     The range carries one declared-breaking objectui change, by its author's breaking
+     annotation and not by a declared `major`: objectui#6349 batch 10 (`12ff25631`), the
+     row type of `@object-ui/collaboration`'s `VersionHistory` timeline is declared as
+     `VersionHistoryEntry` instead of `VersionEntry`. An objectui TypeScript type; no
+     ObjectStack key. No commit subject in the range carries `!`. -->
 
 objectui range: `20c6d351ad74...0df67f237c5a`
