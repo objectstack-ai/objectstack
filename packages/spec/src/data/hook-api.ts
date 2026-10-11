@@ -113,7 +113,7 @@ import type {
  * than re-spelled so there is one declaration of each key's type.
  *
  * ⚠️ They are legal on `find` / `findOne` / `update` / `delete` and NOT on
- * `count`, which forwards no bag at all and whose legal set is `where` alone.
+ * `count`, which forwards no bag at all and whose legal set is `where` and the search pair.
  * That asymmetry is engine behaviour, it is invisible from any document, and it
  * is precisely the kind of thing a hand-written copy gets wrong — which is why
  * {@link HookCountQuery} below is the one shape that does not carry these.
@@ -144,11 +144,12 @@ export type HookQuery = Omit<EngineQueryOptions, 'context' | 'top' | 'cursor' | 
   HookDriverPassthroughOptions;
 
 /**
- * The query bag `ctx.api.object(n).count()` accepts — `where` and nothing else.
+ * The query bag `ctx.api.object(n).count()` accepts — `where` and the ADR-0061
+ * `search` / `searchFields` pair (expanded as on `find`), and nothing else.
  *
  * ⛔ Not {@link HookQuery} narrowed by habit: `count` never forwards its bag to
  * the driver, so the pass-through keys that are legal on every other method are
- * REJECTED here (`ENGINE_COUNT_OPTION_KEYS` is `{ context, where }`), and so are
+ * REJECTED here (`ENGINE_COUNT_OPTION_KEYS` is `{ context, where, search, searchFields }`), and so are
  * `limit` / `orderBy` / `fields`, which a count honours nowhere.
  */
 export type HookCountQuery = Omit<EngineCountOptions, 'context'>;

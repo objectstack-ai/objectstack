@@ -934,9 +934,10 @@ export function validateFlowApiTriggerSecret(
         `refuses to register the flow`,
       hint:
         `Set a non-blank string config.secret on the start node, and sign each post with it: the ` +
-        `x-objectstack-signature header carries 'sha256=' and the hex HMAC-SHA256 of the raw body. A flow that is ` +
-        `only ever started explicitly and never receives inbound posts is type: 'autolaunched', with no ` +
-        `triggerType: 'api' on its start node — that flow needs no secret.`,
+        `x-objectstack-signature header carries t=<unix seconds>,v1=<hex>, the hex being the HMAC-SHA256 of ` +
+        `'<t>.<raw body>' under the secret, and a t more than 300 seconds from the server clock is refused. ` +
+        `A flow that is only ever started explicitly and never receives inbound posts is type: 'autolaunched', ` +
+        `with no triggerType: 'api' on its start node — that flow needs no secret.`,
     });
   });
   return findings;

@@ -25,7 +25,13 @@ export const positionForm = defineForm({
         { field: 'description', colSpan: 2 },
         // [ADR-0131 D3/D4] The sets a holder of this position holds, by name —
         // what the authorization resolver reads (the junction rows grant nothing).
-        { field: 'permissionSets', type: 'tags', colSpan: 2, helpText: 'Permission sets this position distributes, by name (snake_case).' },
+        // D4 resolves a reference registry-first, so the row binds the
+        // permission-set registry (metadata type `permission`) rather than a
+        // free-text tag box: `ref-multi:<type>` is the list form of the
+        // `ref:<type>` pickers (`ref:object`, `ref:dataset`), offering the
+        // declared names and committing each pick's name. An explicit widget
+        // outranks type inference, so the row declares no `type`.
+        { field: 'permissionSets', widget: 'ref-multi:permission', colSpan: 2, helpText: 'Permission sets this position distributes, by name (snake_case).' },
         // #19331 — `delegatable` is declared by PositionSchema and was offered by
         // no control, so the only door to an ADR-0091 D3 self-service delegation
         // was the Source tab's free-text JSON. A boolean node takes the boolean

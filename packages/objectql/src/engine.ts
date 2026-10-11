@@ -400,12 +400,16 @@ export interface AdmittedValueShapeViolationTally {
  * push a handler's own `ctx.api` writes outside the transaction the write ran
  * in, and an in-engine audit hook depends on landing inside it.
  *
- * Three ordinary paths open such a unit around the dispatch:
+ * Four ordinary paths open such a unit around the dispatch:
+ *   - the write door itself, when the object has a blocking metadata-bound
+ *     `after*` hook whose `onError` is `abort` — so that abort rolls the row
+ *     back as `HookSchema.onError` says (#22782, `opensAfterAbortUnit`);
  *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
  *     dependent's own `afterDelete` fires inside the wrap the parent opened,
  *     and the parent's row removal can still refuse afterwards (#7413). The
- *     PARENT's `afterDelete` is outside that wrap by construction, so it is
- *     unaffected; the cascaded CHILDREN's are not;
+ *     PARENT's `afterDelete` is outside that wrap by construction (inside the
+ *     door's own unit when the first path opened one); the cascaded
+ *     CHILDREN's are not;
  *   - `runAtomicBatch` in `@objectstack/metadata-protocol` —
  *     `batchData`/`deleteManyData` with `atomic: true` runs every member's
  *     `after*` inside one transaction that aborts on the first failure
@@ -619,12 +623,13 @@ const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'multi',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
-const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where']);
-// `search` / `searchFields` are READ by `aggregate` through the same ADR-0061
-// expander `find` uses ({@link ObjectQL.expandSearchOnAggregateOptions}), so a
-// grouped answer under a search is the grouping of the searched rows. Before
-// `EngineAggregateOptionsSchema` declared them they were refused here, and the
-// one wire path to this verb left them out — the unsearched groups answered.
+// `search` / `searchFields` are READ by `count` and `aggregate` through the
+// same ADR-0061 expander `find` uses ({@link ObjectQL.expandSearchOnOptions}),
+// so a count or a grouped answer under a search is over the searched rows.
+// Before their schemas declared them they were refused here, and the wire paths
+// left them out: the unsearched groups answered, and a paged list's `total`
+// under a search was a page-local estimate (#22790).
+const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
   'search', 'searchFields',
@@ -4675,6 +4680,52 @@ export class ObjectQL implements IObjectQLEngine {
     const entries = this.hooks.get(event);
     if (!entries || entries.length === 0) return false;
     return entries.some((entry) => hookMatchesObject(entry, object));
+  }
+
+  /**
+   * [#22782] Does this write need its own unit of work? Yes when its `after*`
+   * dispatch can ABORT and no unit is open, so the abort rolls back what
+   * `HookSchema.onError` says: the row and every `ctx.api` write the chain made. "Can abort"
+   * is a metadata-bound hook (`meta` — the only entries with a declared
+   * `onError`) on `event` for `object`, blocking (not `async`), `onError`
+   * `abort` (the default), automations not skipped. Hook count and order are
+   * untouched (#7413); only the boundary around them moves.
+   *
+   * No unit — the pre-#22782 path — when one is open (ambient or threaded: the
+   * caller's unit decides), when `object` is off the default driver
+   * (`transaction()` covers that one alone and would refuse the write), or when
+   * that driver has no transactions (ADR-0119 D1; asking would only warn).
+   * `SummaryRecomputeError` means "the records WERE written": it is rethrown
+   * after the commit, never through the rollback.
+   */
+  private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
+    if (context?.transaction !== undefined || this.txStore.getStore()?.transaction !== undefined) return false;
+    if ((context as { skipAutomations?: unknown } | undefined)?.skipAutomations) return false;
+    const aborting = (this.hooks.get(event) ?? []).some((entry) =>
+      entry.meta && !entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort' && hookMatchesObject(entry, object));
+    if (!aborting) return false;
+    const defaultDriver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
+    try {
+      return this.getDriver(object) === defaultDriver && driverSupportsTransactions(defaultDriver);
+    } catch {
+      return false; // the write itself reports an unroutable object
+    }
+  }
+
+  /** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
+  private async inAfterAbortUnit<T>(write: () => Promise<T>): Promise<T> {
+    let written: SummaryRecomputeError | undefined;
+    const result = await this.transaction(async () => {
+      try {
+        return await write();
+      } catch (e) {
+        if (!(e instanceof SummaryRecomputeError)) throw e;
+        written = e;
+        return undefined as T;
+      }
+    });
+    if (written) throw written;
+    return result;
   }
 
   /**
@@ -12679,13 +12730,15 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * The aggregate verb's door into {@link expandSearchOnAst} — ⛔ not a second
-   * expander. `QuerySchema.search` (ADR-0061 D1) is declared beside `groupBy` /
-   * `aggregations` with no carve-out, so a grouped read under a search groups
-   * the SEARCHED rows: the same cross-field `$or`, resolved from the same
-   * server-side searchable set and the same `searchFields` narrowing, ANDed
-   * with `where` exactly as on `find` — before the security middlewares run,
-   * so an injected RLS predicate composes with it the same way on both verbs.
+   * The aggregate and count verbs' door into {@link expandSearchOnAst} — ⛔ not
+   * a second expander. `QuerySchema.search` (ADR-0061 D1) is declared beside
+   * `groupBy` / `aggregations` with no carve-out, so a grouped read under a
+   * search groups the SEARCHED rows, and a count under one counts them (#22790:
+   * `findData`'s paged `total`): the same cross-field `$or`, resolved from the
+   * same server-side searchable set, `internal: true` exclusion and
+   * `searchFields` narrowing, ANDed with `where` exactly as on `find` — before
+   * the security middlewares run, so an injected RLS predicate composes with it
+   * the same way on every verb.
    *
    * The expansion runs on a carrier AST holding only the three keys it reads,
    * and the result is a COPY of `query` with `where` replaced and the two
@@ -12694,16 +12747,13 @@ export class ObjectQL implements IObjectQLEngine {
    * `opCtx.options` unexpanded. The common path — no search key — returns the
    * same reference and allocates nothing.
    */
-  private expandSearchOnAggregateOptions(
-    object: string,
-    query: EngineAggregateOptions,
-  ): EngineAggregateOptions {
+  private expandSearchOnOptions<T extends EngineAggregateOptions | EngineCountOptions>(object: string, query: T): T {
     if (query.search === undefined && query.searchFields === undefined) return query;
     const { search, searchFields, ...rest } = query;
     const carrier = { object, where: rest.where, search, searchFields } as QueryAST;
     this.expandSearchOnAst(carrier, this._registry.getObject(object));
-    if (carrier.where === undefined) return rest;
-    return { ...rest, where: carrier.where };
+    if (carrier.where === undefined) return rest as T;
+    return { ...rest, where: carrier.where } as T;
   }
 
   /**
@@ -13990,6 +14040,10 @@ export class ObjectQL implements IObjectQLEngine {
    */
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
+    // [#22782] An aborting `afterInsert` rolls this write back — see `opensAfterAbortUnit`.
+    if (this.opensAfterAbortUnit('afterInsert', object, options?.context)) {
+      return this.inAfterAbortUnit(() => this.insert(object, data, options));
+    }
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
     // [#8844] The organization set is about to change. Dropped BEFORE the write
@@ -15165,6 +15219,10 @@ export class ObjectQL implements IObjectQLEngine {
    */
   async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
      object = this.resolveObjectName(object);
+     // [#22782] An aborting `afterUpdate` rolls this write back — see `opensAfterAbortUnit`.
+     if (this.opensAfterAbortUnit('afterUpdate', object, options?.context)) {
+       return this.inAfterAbortUnit(() => this.update(object, data, options));
+     }
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      // [#8844] See the insert face — an organization row that changes identity
@@ -18144,6 +18202,10 @@ export class ObjectQL implements IObjectQLEngine {
 
   async delete(object: string, options?: EngineDeleteOptions): Promise<boolean | number> {
     object = this.resolveObjectName(object);
+    // [#22782] An aborting `afterDelete` rolls this write back — see `opensAfterAbortUnit`.
+    if (this.opensAfterAbortUnit('afterDelete', object, options?.context)) {
+      return this.inAfterAbortUnit(() => this.delete(object, options));
+    }
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     // [#8844] See the insert face — deleting the install's only organization
@@ -18695,6 +18757,10 @@ export class ObjectQL implements IObjectQLEngine {
      query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
      rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
      query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
+     // [#22790] ADR-0061 `search` → the rows are searched before they are
+     // counted, by the one expander `find` runs, at the same point in the
+     // sequence — so the count is the number of rows `find` returns for the bag.
+     if (query) query = this.expandSearchOnOptions(object, query);
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -18830,7 +18896,7 @@ export class ObjectQL implements IObjectQLEngine {
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).
-      query = this.expandSearchOnAggregateOptions(object, query);
+      query = this.expandSearchOnOptions(object, query);
       this.rejectCredentialAggregation(object, query);
       // [#20783] …and a `groupBy` entry naming a structured-JSON field (`json`,
       // `composite`, `address`, …) is refused `INVALID_FIELD` / 400 here, before
@@ -19451,13 +19517,16 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const trx = await drv.beginTransaction();
     const trxCtx = { ...(baseContext ?? {}), transaction: trx };
+    const ambientEntry: { transaction: unknown; scope?: TransactionScope } =
+      { transaction: trx, scope: this.newTransactionScope(driver!) };
     try {
       // Run the callback inside the ambient transaction store so internal
       // queries during writes reuse this transaction's connection (ADR-0034).
-      const result = await this.txStore.run(
-        { transaction: trx, scope: this.newTransactionScope(driver!) },
-        () => callback(trxCtx, { owned: true }),
-      );
+      // [#22782] CLOSED once the callback settles, before the commit: work it
+      // started and did not await (an `async: true` hook) inherits this store,
+      // ran on the finished handle and lost its write. Now it runs unenrolled.
+      const result = await this.txStore.run(ambientEntry, () => callback(trxCtx, { owned: true }))
+        .finally(() => { ambientEntry.transaction = undefined; ambientEntry.scope = undefined; });
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;

@@ -112,7 +112,7 @@ engine.registerHook('beforeInsert', async (ctx) => {
 
 Hooks declared as **`Hook` metadata** additionally honour an **`onError`** policy (`'abort'` | `'log'`, default `'abort'`). It is a metadata field — `registerHook()` has no `onError` option:
 
-- `onError: 'abort'` (default) — the error propagates, rolling back the transaction (when the hook is blocking) and cancelling the operation.
+- `onError: 'abort'` (default) — the error propagates, rolling back the transaction (when the hook is blocking) and cancelling the operation. For an `after*` hook the write door opens that transaction itself when none is open, but only for an object on the default datasource whose driver declares transactions; elsewhere the operation is refused while its row stays stored.
 - `onError: 'log'` — the error is logged and swallowed; the operation is **not** cancelled.
 
 ### Ordering

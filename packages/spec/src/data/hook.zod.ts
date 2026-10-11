@@ -151,7 +151,12 @@ function refuseBodyOnStoredMetadataTarget(
  * hook has already run. Ruled on #7477 (2026-08-11) as the declared semantics,
  * not an implementation detail to be re-timed later.
  *
- * Three ordinary ways a write ends up inside such a unit:
+ * Four ordinary ways a write ends up inside such a unit:
+ *   - the write door itself, when the object has a blocking (not `async`)
+ *     `after*` hook whose `onError` is `abort` (the default) — limited to an
+ *     object on the default datasource whose driver declares transactions, so
+ *     that hook's abort rolls the row back (#22782); see `onError` below for
+ *     what `abort` means where this unit is not opened;
  *   - a by-id `delete()` whose cascade is atomic — each dependent's own
  *     `afterDelete` runs inside the wrap the parent opened (#7413);
  *   - a `batchData`/`deleteManyData` call with `atomic: true` — every member's
@@ -419,10 +424,23 @@ export const HookSchema = lazySchema(() => strictObject(
   /**
    * Error Policy
    * What to do if the hook throws an exception?
-   * - abort: Rollback transaction (if blocking)
+   * - abort: refuse the operation. A blocking (not `async`) hook's abort rolls
+   *   the write back — its row and the `ctx.api` writes the hook chain made
+   *   through the engine — whenever the write runs inside a unit of work: a
+   *   caller's `transaction()`, an atomic batch or cascade, or the unit the
+   *   write door opens for a blocking `abort` `after*` hook (#22782). The door
+   *   opens that unit only for an object on the default datasource whose
+   *   driver declares transactions. Elsewhere — an object on another
+   *   datasource, or a driver without transactions — an `after*` hook's abort
+   *   refuses the caller while the row stays stored. A `before*` hook's abort
+   *   refuses the write before it is issued, so nothing is stored either way.
    * - log: Log error and continue
    */
-  onError: z.enum(['abort', 'log']).default('abort').describe('Error handling strategy'),
+  onError: z.enum(['abort', 'log']).default('abort').describe(
+    'Error handling strategy. abort: refuse the operation; a blocking hook\'s abort rolls the write back inside a unit of work, '
+    + 'which the write door opens for an after* hook on an object on the default datasource whose driver declares transactions '
+    + '(elsewhere the caller is refused and the row stays stored). log: log the error and continue',
+  ),
 
   /**
    * Execution identity for the hook's `ctx.api` data operations (#14010;
