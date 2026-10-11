@@ -42,12 +42,14 @@ const STACK = {
       name: 'vrs_account',
       label: 'Account',
       pluralLabel: 'Accounts',
+      sharingModel: 'private',
       fields: { name: { type: 'text', label: 'Name', required: true } },
     },
     {
       name: 'vrs_contact',
       label: 'Contact',
       pluralLabel: 'Contacts',
+      sharingModel: 'private',
       fields: {
         name: { type: 'text', label: 'Name', required: true },
         account: { type: 'lookup', reference: 'vrs_account', label: 'Account' },
