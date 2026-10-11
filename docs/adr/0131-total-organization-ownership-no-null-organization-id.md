@@ -379,16 +379,18 @@ The `single` anchor's own disposition is #11979's (Choice 4B), which this record
 
 **Spelling note (2026-10-11, #22831).** The second install mode is spelled `unmanaged`: the maintainer's
 ruling **B** on [#15213](https://github.com/objectstack-ai/objectstack/issues/15213) (record `6108509158`,
-「同意」, 2026-10-11). This record was accepted spelling it `template`; the value now reads `unmanaged` in
-this paragraph, in D2's install-mode sentence, in §6's record of the accepted install-mode question and in
-§8's C12 row. Why: it is the industry's name for this mode — Salesforce's unmanaged packages and Power
-Platform's unmanaged solutions, both already in [ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md)'s
-comparison; `managed` and `unmanaged` are the two states of one property, whether the package stays the
-authority; and `template` already names other things in the code — the scaffold manifest
+「同意」, 2026-10-11) and, for the bullet label below, the maintainer's decision **B** on #22831 (record
+`6109891008`, 2026-10-11). This record was accepted spelling it `template`; the value now reads `unmanaged`
+in this paragraph, in the **Unmanaged** bullet label below, in D2's install-mode sentence, in §6's record of
+the accepted install-mode question and in §8's C12 row. Why: it is the industry's name for this mode —
+Salesforce's unmanaged packages and Power Platform's unmanaged solutions, both already in
+[ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md)'s comparison;
+`managed` and `unmanaged` are the two states of one property, whether the package stays the authority; and
+`template` already names other things in the code — the scaffold manifest
 (`TemplateManifestSchema`), the `email_template` metadata type and the `os init` templates. ⛔ Only the
 spelling moves: the copy-once import, full editability, no upgrade channel and the refusal on `group` /
-`isolated` stand as decided. The rest of this record's prose — the **Template** bullet below, "template
-package", "template import", "template install mode" — is kept as written and names this same mode.
+`isolated` stand as decided. The rest of this record's prose — "template package", "template import",
+"template install mode" — is kept as written and names this same mode.
 
 - **Managed** (default). The package is registered into the registry as code. **No door edits a managed
   definition** — not Setup, not Studio, not the data or metadata API; to change one, the vendor publishes a
@@ -409,7 +411,7 @@ package", "template import", "template install mode" — is kept as written and 
   - **E — extend** (`object`, `app`): fields, validations, navigation arrive as a package.
   Managed is the **only** mode a shared-DB multi-tenant deployment (`group` / `isolated`) accepts, and every
   regime there is environment-wide and operator-gated — a plant admin neither overlays, switches nor clones.
-- **Template.** The package's metadata is copied **once** into the environment definition ledger as
+- **Unmanaged.** The package's metadata is copied **once** into the environment definition ledger as
   environment-provenance items — from then on it is the environment's own metadata, editable in Studio like
   anything authored there, with no upgrade channel (a later version is a new import, refused where names
   collide; provenance recorded for information only). ⛔ **Refused on `group` / `isolated`** with a message
