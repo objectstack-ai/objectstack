@@ -18,6 +18,7 @@ import {
   exportContentDisposition,
   formatCellValue,
   buildFieldMetaMap,
+  referenceFieldNames,
   type ExportFieldMeta,
 } from './export-format';
 
@@ -294,5 +295,21 @@ describe('buildFieldMetaMap — presentation keys only (#6536)', () => {
       displayField: 'title',
       multiple: false,
     });
+  });
+});
+
+/**
+ * [#22785] The export expands a `user` field written without `reference` like a
+ * `Field.user` one: the map names its target through the spec's arbiter, so its
+ * cell renders the user's name instead of the stored id.
+ */
+describe('referenceFieldNames — the fields the export expands (#22785)', () => {
+  it('a user field without reference is expanded, as Field.user is; a non-reference type is not', () => {
+    const map = buildFieldMetaMap({ fields: {
+      owner: { type: 'user', label: 'Owner' },
+      assignee: { type: 'user', label: 'Assignee', reference: 'sys_user' },
+      amount: { type: 'number', label: 'Amount', reference: 'contracts' },
+    } });
+    expect(referenceFieldNames(map)).toEqual(['owner', 'assignee']);
   });
 });

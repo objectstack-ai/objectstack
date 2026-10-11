@@ -86,18 +86,25 @@ export const METADATA_ACTIVATION_TABLE = 'sys_metadata_activation';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
- * [ADR-0126 §4] One packaged artifact's install-level activation row.
+ * [ADR-0126 §4] One artifact's install-level activation row.
  *
  * The ledger's own columns are `metadata_type` / `name` / `package_id` /
  * `active`; `metadata_type` is fixed by the store, so it never reaches a
  * consumer's projection.
  */
 export interface MetadataActivationRow {
-    /** The packaged artifact's declarative machine name (ADR-0126 §4). */
+    /** The artifact's declarative machine name (ADR-0126 §4). */
     name: string;
-    /** The package that ships the base artifact. */
-    packageId: string;
-    /** Is the packaged artifact armed for this installation. */
+    /**
+     * The package that ships the artifact — ABSENT when no package does: a
+     * position or permission set the environment authored, which the security
+     * catalog's activation door switches as well as a packaged one. Absent is
+     * the only package-less spelling: the store writes no value for it and
+     * refuses `''` ({@link ObjectStoreMetadataActivationStore.setActive}), so
+     * no reader can take an environment item for a package named `''`.
+     */
+    packageId?: string;
+    /** Is the artifact armed for this installation. */
     active: boolean;
 }
 
@@ -190,7 +197,9 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
             if (typeof r.name !== 'string' || !r.name) continue;
             out.push({
                 name: r.name,
-                packageId: typeof r.package_id === 'string' ? r.package_id : '',
+                // A row with no package — an environment-authored item — reads
+                // back with `packageId` absent, the spelling it was written in.
+                ...(typeof r.package_id === 'string' && r.package_id !== '' ? { packageId: r.package_id } : {}),
                 // The column defaults to `true`; only an explicit `false`
                 // disarms. A driver that round-trips booleans as 0/1
                 // (SQLite/libsql) is read through the same `=== false || === 0`
@@ -216,8 +225,22 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      * out of the result, back when the table carried a reserved tenant column;
      * with no such column the set it was choosing from can no longer hold more
      * than one member.
+     *
+     * `packageId` absent writes NO package (`null`), the ledger's spelling for
+     * an item no package ships. An empty string is refused before anything is
+     * read or written: it is the placeholder a caller reaches for with
+     * `?? ''`, and a stored `''` would be one more spelling of "no package"
+     * beside the absent one — exactly the ambiguity the field's contract
+     * rules out.
      */
     async setActive(row: MetadataActivationRow): Promise<void> {
+        if (row.packageId === '') {
+            throw new TypeError(
+                `Activation row for ${this.metadataType} '${row.name}' names the empty string as its package. ` +
+                `Omit packageId for an item no package ships; an empty package id is not a package.`,
+            );
+        }
+        const packageId = row.packageId ?? null;
         const existing = await this.engine.find(METADATA_ACTIVATION_TABLE, {
             where: { metadata_type: this.metadataType, name: row.name },
             context: SYSTEM_CTX,
@@ -227,7 +250,7 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
         if (current && (current as { id?: unknown }).id != null) {
             await this.engine.update(
                 METADATA_ACTIVATION_TABLE,
-                { id: (current as { id: unknown }).id, active: row.active, package_id: row.packageId },
+                { id: (current as { id: unknown }).id, active: row.active, package_id: packageId },
                 { context: SYSTEM_CTX },
             );
             return;
@@ -238,7 +261,7 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
             {
                 metadata_type: this.metadataType,
                 name: row.name,
-                package_id: row.packageId,
+                package_id: packageId,
                 active: row.active,
             },
             { context: SYSTEM_CTX },
