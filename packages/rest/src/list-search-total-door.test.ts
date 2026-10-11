@@ -115,13 +115,14 @@ describe('[#22790] a paged search reports the counted total', () => {
     const unpaged = await list({ $search: 'Line' });
     expect(unpaged.records).toHaveLength(75);
 
+    // Soft, so a red run names every wrong number — the first page AND the last.
     const first = await list({ $top: '25', $search: 'Line' });
-    expect(first).toMatchObject({ total: 75, hasMore: true });
-    expect(first.records).toHaveLength(25);
+    expect.soft(first).toMatchObject({ total: 75, hasMore: true });
+    expect.soft(first.records).toHaveLength(25);
 
     const last = await list({ $top: '25', $skip: '50', $search: 'Line' });
-    expect(last).toMatchObject({ total: 75, hasMore: false });
-    expect(last.records).toHaveLength(25);
+    expect.soft(last).toMatchObject({ total: 75, hasMore: false });
+    expect.soft(last.records).toHaveLength(25);
   });
 
   it('POST …/query: the same, and a `searchFields` narrowing narrows the count with the rows', async () => {
