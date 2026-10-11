@@ -96,6 +96,7 @@ describe('[#22739] import reference resolution asks the target its declared expo
  * reads it, so its cell is resolved like a `Field.user` one. The widened
  * target is still asked its exposure first. A non-reference type declaring
  * `reference`, and a non-string carrier, name no target (and do not throw).
+ * The real import and export doors: `import-user-field-target.dogfood.test.ts`.
  */
 describe('[#22785] a user field without reference resolves through the arbiter target', () => {
   const EMAIL = 'ann@iuf.test';
@@ -105,36 +106,36 @@ describe('[#22785] a user field without reference resolves through the arbiter t
     amount: { type: 'number', label: 'Amount', reference: 'rx_target' },
     broken: { type: 'user', label: 'Broken', reference: { object: 'sys_user' } },
   };
-  const userProtocol = (enable?: unknown) => {
-    const findData = vi.fn(async (args: FindArgs) => (args.object === 'sys_user' && args.query!.where!.email === EMAIL ? [{ id: 'u_ann' }] : []));
+  const userProtocol = (rows: Array<Record<string, unknown>>, enable?: unknown) => {
+    const findData = vi.fn(async (args: FindArgs) => (args.object === 'sys_user' && (args.query!.where as Record<string, unknown>).email === EMAIL ? [{ id: 'u_ann' }] : []));
     const getMetaItem = vi.fn(async ({ name }: { type: string; name: string }) => ({ type: 'object', name, item: { name, ...(enable ? { enable } : {}) } }));
     const createData = vi.fn(async (a: { data: Record<string, unknown> }) => ({ id: 'new', ...a.data }));
     const p: ImportProtocolLike = { findData, getMetaItem, createData, updateData: vi.fn() };
-    const go = () => runImport({
+    const summary = runImport({
       p, objectName: 'rx_source', metaMap: buildFieldMetaMap({ fields }), writeMode: 'insert', matchFields: [], dryRun: false,
-      runAutomations: false, trimWhitespace: true, createMissingOptions: false, skipBlankMatchKey: false,
-      rows: [{ owner: EMAIL }, { assignee: EMAIL }],
+      runAutomations: false, trimWhitespace: true, createMissingOptions: false, skipBlankMatchKey: false, rows,
     });
-    return { go, findData, getMetaItem, createData };
+    return { summary, findData, getMetaItem, createData };
   };
+  const OK = { ok: true, code: undefined, field: undefined };
 
   it('names sys_user for both user fields, and no target for a non-reference type or a non-string carrier', () => {
     const meta = buildFieldMetaMap({ fields });
     expect(['owner', 'assignee', 'amount', 'broken'].map((f) => meta.get(f)!.reference)).toEqual(['sys_user', 'sys_user', undefined, undefined]);
   });
 
-  it('an email in the field without reference stores the user id; CONTROL Field.user does the same', async () => {
-    const { go, getMetaItem, createData } = userProtocol();
-    const summary = await go();
-    expect(summary.results.map(verdict)).toEqual([{ ok: true, code: undefined, field: undefined }, { ok: true, code: undefined, field: undefined }]);
-    expect(createData.mock.calls.map(([a]) => a.data)).toEqual([{ owner: 'u_ann' }, { assignee: 'u_ann' }]);
-    expect(getMetaItem.mock.calls.map(([r]) => r.name)).toEqual(['sys_user']);
-  });
+  for (const field of ['owner', 'assignee'] as const) {
+    it(`${field === 'owner' ? 'the field without reference' : 'CONTROL Field.user'}: an email stores the user id, sys_user asked once`, async () => {
+      const { summary, getMetaItem, createData } = userProtocol([{ [field]: EMAIL }]);
+      expect((await summary).results.map(verdict)).toEqual([OK]);
+      expect(createData.mock.calls.map(([a]) => a.data)).toEqual([{ [field]: 'u_ann' }]);
+      expect(getMetaItem.mock.calls.map(([r]) => r.name)).toEqual(['sys_user']);
+    });
+  }
 
   it('CONTROL — a sys_user the decision does not serve refuses both cells and is never read', async () => {
-    const { go, findData } = userProtocol({ apiEnabled: false });
-    const summary = await go();
-    expect(summary.results.map(verdict)).toEqual([{ ...NOT_FOUND, field: 'owner' }, { ...NOT_FOUND, field: 'assignee' }]);
+    const { summary, findData } = userProtocol([{ owner: EMAIL }, { assignee: EMAIL }], { apiEnabled: false });
+    expect((await summary).results.map(verdict)).toEqual([{ ...NOT_FOUND, field: 'owner' }, { ...NOT_FOUND, field: 'assignee' }]);
     expect(findData).not.toHaveBeenCalled();
   });
 });
