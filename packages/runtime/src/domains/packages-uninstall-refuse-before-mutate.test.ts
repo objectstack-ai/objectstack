@@ -46,6 +46,7 @@ import { join } from 'node:path';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
 const PKG = 'com.acme.crm';
 const ALPHA = 'org_alpha';
@@ -156,13 +157,13 @@ function rig(opts: { persistedHalf?: boolean } = {}): Rig {
     };
 
     const services: Record<string, unknown> = {
-        objectql: {
+        objectql: bindCatalogFromTables({
             registry,
             find: async (object: string, q: any = {}) => {
                 const found = (TABLES[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
                 return typeof q?.limit === 'number' ? found.slice(0, q.limit) : found;
             },
-        },
+        }, TABLES),
         auth: authService(),
         tenancy: { posture: 'isolated' },
         ...(opts.persistedHalf === false ? {} : { protocol }),

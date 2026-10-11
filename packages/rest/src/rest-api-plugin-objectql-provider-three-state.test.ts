@@ -69,6 +69,7 @@ import {
 import type { PluginContext } from '@objectstack/core';
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { registerPackageRoutes } from './package-routes.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const captured = vi.hoisted(() => ({ ctorArgs: [] as unknown[][] }));
 
@@ -257,7 +258,7 @@ const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_
  * `system_permissions`) — the healthy fixture
  * `package-door-execctx-fault-reachability.test.ts` established.
  */
-const engineGranting = () => ({
+const engineGranting = () => bindTestSecurityCatalog({
     find: async (object: string) => {
         if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' }];
         if (object === 'sys_permission_set') {
@@ -265,7 +266,7 @@ const engineGranting = () => ({
         }
         return [];
     },
-});
+}, { permissions: [{ name: 'pkg_admin', systemPermissions: ['manage_metadata', 'studio.access'] }] });
 
 /** A `RestServer` wired at its constructor seams — nothing private replaced. */
 function serverWith(objectQLProvider: EngineProvider | undefined): InstanceType<typeof RestServer> {

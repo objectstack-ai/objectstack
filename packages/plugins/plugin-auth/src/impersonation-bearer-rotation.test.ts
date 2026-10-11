@@ -32,6 +32,7 @@ import {
   ADMIN_SESSION_RECOVERY_REQUEST_HEADER,
   ADMIN_SESSION_RECOVERY_RESPONSE_HEADER,
 } from './impersonation-bearer-rotation';
+import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit';
 
 /**
  * In-memory IDataEngine — same fake as the #4785 session-of-record harness,
@@ -77,7 +78,8 @@ export const createMemoryEngine = () => {
     return out;
   };
   let seq = 0;
-  return {
+  // [ADR-0131 D3/D4] The security catalog the resolver reads, as the rows convert to it.
+  return bindTestSecurityCatalog({
     tables,
     async insert(name: string, data: any) {
       const row = { id: data.id ?? `row_${++seq}`, ...data };
@@ -128,7 +130,7 @@ export const createMemoryEngine = () => {
       tables.set(name, keep);
       return table.length - keep.length;
     },
-  };
+  }, () => catalogFromTables(Object.fromEntries(tables)));
 };
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';

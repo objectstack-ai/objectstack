@@ -5,30 +5,35 @@ import { definePermissionSet } from '@objectstack/spec/security';
 
 /**
  * Example positions — flat distribution groups for a small sales team
- * (positions carry no hierarchy — ADR-0090 D3).
+ * (positions carry no hierarchy — ADR-0090 D3). Each names the permission sets
+ * it distributes in `permissionSets` (ADR-0131 D3/D4), which is what the
+ * authorization resolver reads.
  */
 export const SalesRepPosition = definePosition({
   name: 'sales_rep',
   label: 'Sales Representative',
   description: 'Front-line sales representative.',
+  permissionSets: ['crm_sales_user'],
 });
 
 export const SalesManagerPosition = definePosition({
   name: 'sales_manager',
   label: 'Sales Manager',
   description: 'Manages a team of sales reps.',
+  permissionSets: ['crm_sales_user'],
 });
 
 /**
- * Registered in `objectstack.config.ts` (`positions`) and bound to the
- * `crm_sales_user` permission set by `bind-position-sets.ts`, alongside
- * `sales_rep` and `sales_manager`. This app models no approval flow; the
- * worked approval flows live in `examples/app-showcase/src/automation/flows/`.
+ * Registered in `objectstack.config.ts` (`positions`) and distributing the
+ * `crm_sales_user` permission set, alongside `sales_rep` and `sales_manager`.
+ * This app models no approval flow; the worked approval flows live in
+ * `examples/app-showcase/src/automation/flows/`.
  */
 export const FinanceApproverPosition = definePosition({
   name: 'finance_approver',
   label: 'Finance Approver',
   description: 'Finance team member authorised to approve discounts above 30%.',
+  permissionSets: ['crm_sales_user'],
 });
 
 /**

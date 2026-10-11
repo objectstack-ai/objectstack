@@ -47,6 +47,28 @@
  * sequential capture. The fixtures' grants carry the name the platform writers
  * store beside the id. The by-name read joins the `sys_position` read's leg, so
  * a principal whose sets are all held directly resolves in two legs, not three.
+ *
+ * ⚠️ A second recorded move ([ADR-0131] D3/D4, C3 stage 1): a position's sets
+ * are the `permissionSets` its catalog definition names, and every set body is
+ * its catalog definition. The recording double carries that catalog: the
+ * definitions the fixture's own rows convert to, the junction rows through the
+ * upgrade ceremony's `convertPositionBindingRows`. In the two fixtures whose
+ * positions bind sets (`position-derived-grants`, `tenant-admin-via-position`),
+ * the `sys_position_permission_set` read and the `sys_permission_set` read by
+ * the junction's ids are gone. Every `grants` envelope is byte-identical to the
+ * capture: the switch moved where a grant is read from, never what it grants.
+ *
+ * ⚠️ A third recorded move, in the same stage ([ADR-0049] as ADR-0131 D3 and
+ * ADR-0126 §4 place it): whether a position or a set is switched off is the
+ * activation ledger's answer, never the catalog row's `active` column. In
+ * every fixture the `sys_position` read, and every by-name `sys_permission_set`
+ * read, is replaced by ONE `sys_metadata_activation` read keyed by type
+ * (`position`, `permission`) and by every name the resolution may grant; its
+ * limit is two rows a name, the ledger being unique on (type, name). The
+ * recording double serves the ledger rows the fixture's `active: false` rows
+ * convert to (`convertDeactivatedCatalogRows`, the upgrade ceremony's), so the
+ * deactivated `retired` position and `dead_set` set still grant nothing. Every
+ * fixture now resolves in two legs.
  */
 
 import { readFileSync } from 'node:fs';
@@ -84,21 +106,18 @@ const GOLDEN: Record<string, Golden> = JSON.parse(
  * control, written out per fixture rather than derived, so a regression that
  * re-serialises one read shows up as a number rather than as a slower suite.
  *
- * Four is the floor, not three: wave 1 (every independent read) → wave 2
- * (`sys_position`, needs the position NAMES wave 1 produced) → wave 3
- * (`sys_position_permission_set`, needs the position IDS wave 2 produced) →
- * wave 4 (`sys_permission_set` by the junction's ids). The directly granted
- * sets are read by NAME in wave 2, beside `sys_position` ([ADR-0131] D4), so a
- * principal with no `sys_position` row backing any of its position names skips
- * waves 3 and 4 and lands in 2.
+ * Two is the floor: wave 1 (every independent read) → wave 2 (the activation
+ * ledger, which needs the position NAMES wave 1 produced, and the set names the
+ * grants and the positions' catalog definitions name — [ADR-0131] D3/D4). The
+ * definitions are read in-process, so no wave waits on a set row.
  */
 const BATCHED_LEGS: Record<string, number> = {
   'empty-principal': 2,
   'multi-org-membership': 2,
   'lapsed-own-membership-among-active-peers': 2,
-  'position-derived-grants': 4,
+  'position-derived-grants': 2,
   'permission-set-derived-grants': 2,
-  'tenant-admin-via-position': 4,
+  'tenant-admin-via-position': 2,
   'ai-seat-and-email-from-sys-user': 2,
   'ai-seat-denied': 2,
   'seeded-permissions-and-email': 2,
@@ -184,7 +203,7 @@ describe('[#10825] batched resolveUserAuthzGrants — equivalence with the seque
       expect(ql.calls[0]!.where).toEqual({ name: { $in: ['org_member', 'everyone'] } });
     });
 
-    it('records the real `sys_position` read without the `platform_admin` unshifted in afterwards', async () => {
+    it('records the real position read (the activation ledger) without the `platform_admin` unshifted in afterwards', async () => {
       const f = FIXTURES.find((x) => x.name === 'permission-set-derived-grants')!;
       const ql = makeRecordingQl(f.tables);
       const grants = (await resolveUserAuthzGrants(ql, f.userId, f.opts)) as { positions: string[] };
@@ -193,9 +212,14 @@ describe('[#10825] batched resolveUserAuthzGrants — equivalence with the seque
       expect(grants.positions[0]).toBe(BUILTIN_IDENTITY_PLATFORM_ADMIN);
       // The defect was recording that name into the QUERY, which was issued
       // before the unshift ran and therefore never carried it.
-      const positionReads = ql.calls.filter((c) => c.object === 'sys_position');
+      // [ADR-0131 D3] The held positions are read by name from the activation
+      // ledger now, beside the sets the resolution may grant.
+      const positionReads = ql.calls.filter((c) => c.object === 'sys_metadata_activation');
       expect(positionReads).toHaveLength(1);
-      expect(positionReads[0]!.where).toEqual({ name: { $in: ['org_member', 'everyone'] } });
+      expect(positionReads[0]!.where).toEqual({
+        metadata_type: { $in: ['position', 'permission'] },
+        name: { $in: ['org_member', 'everyone', 'admin_full_access', 'org_tools', 'dead_set'] },
+      });
       expect(JSON.stringify(positionReads[0]!.where)).not.toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
     });
   });
@@ -234,7 +258,7 @@ describe('[#10825] batched resolveUserAuthzGrants — equivalence with the seque
       expect(wave1).toEqual(
         asMultiset(GOLDEN[name].queries)
           .map((s) => JSON.parse(s) as RecordedCall)
-          .filter((c) => c.object !== 'sys_position' && c.object !== 'sys_position_permission_set' && c.object !== 'sys_permission_set')
+          .filter((c) => c.object !== 'sys_metadata_activation')
           .map((c) => c.object)
           .sort(),
       );

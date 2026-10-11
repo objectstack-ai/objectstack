@@ -5,9 +5,10 @@ description: "Positions are flat groups that hand permission sets to users — t
 ---
 
 A **position** (岗位) is a named, assignable distribution group: users hold
-positions (`sys_user_position` rows), positions bind permission sets
-(`sys_position_permission_set` rows), and a user's capability is the union of
-every set reached that way plus direct grants. Positions carry **no capability
+positions (`sys_user_position` rows), a position names the permission sets it
+distributes in `permissionSets` on its definition, and a user's capability is
+the union of every set reached that way plus direct grants. A
+`sys_position_permission_set` row grants nothing. Positions carry **no capability
 of their own** — they only decide *who gets which sets*.
 
 > **Formerly "roles".** ADR-0090 D3 renamed the concept in one step and
@@ -26,9 +27,9 @@ of their own** — they only decide *who gets which sets*.
 import type { Position } from '@objectstack/spec/identity';
 
 export const positions: Position[] = [
-  { name: 'sales_manager', label: 'Sales Manager' },
-  { name: 'sales_rep', label: 'Sales Representative' },
-  { name: 'service_agent', label: 'Service Agent' },
+  { name: 'sales_manager', label: 'Sales Manager', permissionSets: ['crm_sales_manager'] },
+  { name: 'sales_rep', label: 'Sales Representative', permissionSets: ['crm_sales_user'] },
+  { name: 'service_agent', label: 'Service Agent', permissionSets: ['service_agent_access'] },
 ];
 ```
 

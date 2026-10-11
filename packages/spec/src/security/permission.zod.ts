@@ -792,8 +792,8 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
       // ── Wrong-layer pointers for keys that are never authored on a set.
       profiles:
         '`profiles` is not a PermissionSet field (ADR-0090 D2: no Profile concept). ' +
-        'Distribution is a runtime binding — positions bind sets to people ' +
-        '(`sys_position_permission_set`), never the set itself.',
+        'Distribution is a position\'s job — a position names the sets it distributes ' +
+        'in its own `permissionSets`, never the set itself.',
       roles:
         '`roles` is not a PermissionSet field — ObjectStack has no role hierarchy: ' +
         'capability = permission sets (union-merged), distribution = positions, ' +
