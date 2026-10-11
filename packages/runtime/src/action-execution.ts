@@ -216,8 +216,8 @@ const RELATION_CONDITION_TARGET_OPERATION = DATA_ACTION_TO_API_OPERATION[RELATIO
  * `callData` must not give two answers depending on whether the deployment
  * registered the protocol slot (the #5138 rule this file already keeps).
  *
- * Callers skip it for a system context, exactly as they skip the addressed
- * gate: these flags govern API exposure, not the engine's own reads. A schema
+ * `callData` skips it for a system context on the one decision that skips the
+ * addressed gate: these flags govern API exposure, not the engine's own reads. A schema
  * that cannot be resolved finds no condition (the filtered object) or serves
  * (a target), the gate's own fail-open.
  */
@@ -287,7 +287,11 @@ export async function callData(deps: ActionExecutionDeps,
     // Honour the object's `apiEnabled` / `apiMethods` declarations for
     // external traffic. System/internal contexts bypass — these flags
     // govern API *exposure*, not internal engine self-writes.
-    if (!executionContext?.isSystem && params?.object) {
+    // [#22823] Decided ONCE, here: the same bypass covers each nested-relation
+    // condition's target, asked below on the two arms that hand the engine a
+    // caller's `where` ({@link refuseUnservedRelationTargets}).
+    const exposureGated = !executionContext?.isSystem;
+    if (exposureGated && params?.object) {
         let def: any;
         try {
             const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
@@ -491,7 +495,7 @@ export async function callData(deps: ActionExecutionDeps,
             // [#22823] …and each nested-relation condition's TARGET, before the
             // engine reads it — the protocol path asks the same of the same
             // sites (`refuseUnservedRelationTarget`).
-            if (!executionContext?.isSystem) {
+            if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId);
             }
             let all = await ql.find(params.object, findOpts(bag));
@@ -525,7 +529,7 @@ export async function callData(deps: ActionExecutionDeps,
             // is asked before the engine aggregates, as the query fallback asks
             // it (the engine lowers relation conditions in `where` only, never
             // in an aggregation's own `filter`).
-            if (!executionContext?.isSystem) {
+            if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
             }
             const rows = await engine.aggregate(
