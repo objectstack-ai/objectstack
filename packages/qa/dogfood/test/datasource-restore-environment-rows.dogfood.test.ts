@@ -1,33 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [#22835 · ADR-0131 D6] The datasource-admin plugin reads ENVIRONMENT rows
-// only — over the real showcase composition, across a restart.
+// only, over the real showcase composition across a restart. Its reads of
+// stored `datasource` rows carried no organization predicate, so a row stored
+// in a legacy organization's layer was restored, served by both doors and
+// pooled, while the boot report named it as served by no read.
 //
-// ## What was broken
-//
-// Every metadata read serves the environment's `sys_metadata` rows only, and
-// the boot report `[metadata_org_scoped_unserved]` names a row stored in a
-// legacy organization's layer as served by no read and loaded by no boot. The
-// datasource-admin plugin's own reads of stored `datasource` rows carried no
-// such predicate: its boot restore registered a legacy organization-scoped
-// row, and from there both the datasource-admin door and the metadata read
-// door served it, and a live pool was opened from it.
-//
-// ## What each case pins
-//
-//   - after a restart over a legacy organization-scoped row and an environment
-//     row, neither door serves the legacy row (`404`, absent from both lists)
-//     and no pool is opened from it; the environment row is served as before;
-//   - the boot report still names the legacy row, and the row is kept as it
-//     was — neither deleted nor rewritten;
-//   - the plugin's by-name reads behind its writes never reach the legacy row:
-//     an admin create and remove under its name write and remove an
-//     environment row of their own, and a `/meta` save under its name is what
-//     the admin door then serves.
-//
-// The verify harness composes the datasource-admin service but not its REST
-// routes, so this file mounts `registerDatasourceAdminRoutes` the way
-// `packages/cli/src/commands/serve.ts` does.
+// Pinned: neither door serves the legacy row and no pool opens from it; the
+// environment row is served; the boot report still names the legacy row, and
+// it stays at rest; the by-name reads behind the plugin's writes never reach
+// it. The routes are mounted the way `packages/cli/src/commands/serve.ts` does.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { registerDatasourceAdminRoutes } from '@objectstack/service-datasource';
