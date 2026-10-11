@@ -14,7 +14,8 @@ export const entry: SemanticMigration = {
   surface:
     'on a group or isolated deployment, a write of a position, permission set or capability by a '
     + 'caller below the platform operator: PUT, DELETE, publish and rollback of /meta/position, '
-    + '/meta/permission and /meta/capability on @objectstack/rest and the runtime dispatcher, and a '
+    + '/meta/permission and /meta/capability on @objectstack/rest and the runtime dispatcher, the '
+    + 'permission-set clone door (POST /security/permission-sets/:name/clone), and a '
     + 'data-door insert, update or delete on sys_position, sys_permission_set and sys_capability '
     + 'through @objectstack/plugin-security',
   replacement:
