@@ -48,7 +48,14 @@
  * targets are resolved inside `relationConditionSites` (`@objectstack/core`),
  * which is the caller classified below. The bridge asks each target the
  * decision for `list` (`enforceRelationTargetExposure`, #22777), held by its
- * own package's pin rather than by a row here. Nor, for the same reason, a
+ * own package's pin rather than by a row here. The runtime's `callData` is a
+ * third such door: its `query` fallback (no protocol service resolved) and its
+ * `aggregate` arm hand a caller's `where` to the same engine lowering, and
+ * `refuseUnservedRelationTargets` (`runtime/src/action-execution.ts`) asks each
+ * target the gate the addressed object is asked, for `list`, through the same
+ * walk (#22823, census row 10), held by its own package's pin
+ * (`runtime/src/action-execution-calldata-relation-target-exposure.test.ts`)
+ * rather than by a row here. Nor, for the same reason, a
  * door that drives `runImport` with a protocol of its own: plugin-auth's
  * identity import takes its cells' targets from the `import-field-meta.ts` map
  * classified below, and its run protocol carries the declaration reader the
@@ -178,9 +185,9 @@ const CALLERS: Record<string, Classification> = {
   'packages/core/src/utils/relation-condition-sites.ts': {
     kind: 'not-a-served-read',
     reason:
-      "finds a filter's nested-relation conditions and each one's target; reads no record. Both doors that call it ask " +
-      "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget` and the MCP " +
-      "stdio data bridge's `enforceRelationTargetExposure`",
+      "finds a filter's nested-relation conditions and each one's target; reads no record. Every door that calls it asks " +
+      "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget`, the MCP " +
+      "stdio data bridge's `enforceRelationTargetExposure` and the runtime `callData`'s `refuseUnservedRelationTargets`",
   },
   'packages/lint/src/object-graph.ts': {
     kind: 'not-a-served-read',
