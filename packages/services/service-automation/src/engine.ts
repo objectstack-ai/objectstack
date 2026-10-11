@@ -2233,8 +2233,15 @@ export interface FlowDispatchStore {
 export interface FlowActivationRow {
     /** The packaged flow's machine name. */
     name: string;
-    /** The package that ships the base artifact. */
-    packageId: string;
+    /**
+     * The package that ships the flow. Every flow row names one — the toggle
+     * refuses a flow no package ships before it writes — but the row type is
+     * the shared ledger's (`MetadataActivationRow`, `@objectstack/core`),
+     * where an absent package is the spelling of an environment-authored
+     * position or permission set, so it is optional here too. Nothing reads
+     * it back to decide anything.
+     */
+    packageId?: string;
     /** Is the packaged flow armed for this installation. */
     active: boolean;
 }

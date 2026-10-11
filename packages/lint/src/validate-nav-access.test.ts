@@ -1,7 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { validateNavAccess, NAV_OBJECT_UNGRANTED } from './validate-nav-access.js';
+import {
+  validateNavAccess as validateNavAccessUnrecorded,
+  NAV_OBJECT_UNGRANTED,
+} from './validate-nav-access.js';
+import { NAV_OBJECT_UNSERVABLE } from './validate-nav-object-servability.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain nav-object-ungranted`. Every direct call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — every firing variant this suite
+// exercises, not a chosen few. Run the whole file: those cases read what the
+// cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateNavAccess: typeof validateNavAccessUnrecorded = (...args) => {
+  const findings = validateNavAccessUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 const objects = [
   { name: 'crm_lead', fields: { name: { type: 'text' } } },
@@ -246,5 +264,65 @@ describe('validateNavAccess — gating keys are not read (#16065)', () => {
       permissions: [{ name: 'p', label: 'P', objects: { crm_forecast: { allowRead: true } } }],
     });
     expect(findings).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — nav-object-ungranted', () => {
+  it('reads as one sentence', () => {
+    const findings = validateNavAccess({
+      objects,
+      apps: navApp([objectNav('nav_forecast', 'crm_forecast')]),
+      permissions: [{ name: 'p', label: 'P', objects: { crm_lead: { allowRead: true } } }],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'navigation exposes object "crm_forecast", but no permission set this stack declares grants read on '
+        + 'it, so opening the entry fails permission-denied for everyone but a wildcard admin',
+    ]);
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(NAV_OBJECT_UNGRANTED);
+    expect(entry, 'no `os explain nav-object-ungranted` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'works when you browse as an administrator',
+      'ADR-0090 D6',
+      'wildcard grant',
+      'reported once',
+      '`requiredPermissions` or `visible`',
+      'another installed package',
+      'platform-provided object',
+      'declares no permission sets',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+    // The independent-conditions paragraph is one text under both object-entry ids.
+    const shared = (rule: string) => explainRule(rule)!.paragraphs.find((p) => p.includes('independent conditions'));
+    expect(shared(NAV_OBJECT_UNGRANTED)).toBeDefined();
+    expect(shared(NAV_OBJECT_UNGRANTED)).toBe(shared(NAV_OBJECT_UNSERVABLE));
+  });
+
+  it('the read bits the explanation names are the ones the rule folds', () => {
+    // The explanation module imports nothing, so its list is held to the rule
+    // by running the rule: each bit it names grants read and silences it.
+    const text = explainRule(NAV_OBJECT_UNGRANTED)!.paragraphs.join('\n');
+    for (const bit of ['allowRead', 'viewAllRecords', 'modifyAllRecords']) {
+      expect(text, bit).toContain(`\`${bit}\``);
+      expect(validateNavAccessUnrecorded({
+        objects,
+        apps: navApp([objectNav('nav_forecast', 'crm_forecast')]),
+        permissions: [{ name: 'p', label: 'P', objects: { crm_forecast: { [bit]: true } } }],
+      }), bit).toEqual([]);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === NAV_OBJECT_UNGRANTED);
+    // The coverage control first: the id fired, at the top level and nested.
+    expect(converted.length).toBeGreaterThan(0);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

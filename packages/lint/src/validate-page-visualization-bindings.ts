@@ -463,20 +463,17 @@ export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizat
         rule: PAGE_VISUALIZATION_WITHOUT_BINDING,
         where,
         path: `pages[${pi}].interfaceConfig.appearance.allowedVisualizations[${ai}]`,
+        // [#22161] One verdict sentence (`where` names the page; the `fix:`
+        // line says what the derivation looks for). The renderer's
+        // derivation, the two severities and the skips are
+        // `os explain page/visualization-without-binding`.
         message:
-          `page "${pageName}" whitelists the '${viz}' visualization, but nothing supplies its `
-          + `\`${predicate.binding}\`: the renderer derives that binding from "${objectName}"'s `
-          + `fields — it looks for ${describeSearch(predicate)} — and "${objectName}" has none`
+          `'${viz}' ${leading ? 'leads' : 'is in'} the whitelist, but its \`${predicate.binding}\` derives `
+          + `from no field of "${objectName}" and `
           + (sourceView
-            ? `, while the referenced view "${sourceView}" declares no \`${predicate.viewBlocks[0]}:\` block either.`
-            : ', and this page references no view that declares it.')
-          + ' '
-          + (leading
-            ? `'${viz}' LEADS \`allowedVisualizations\`, so it becomes the page's forced view type: `
-              + 'every visitor lands on the renderer\'s "configuration required" refusal screen.'
-            : `'${viz}' is filtered out of the visualization switcher SILENTLY — the switcher still `
-              + 'appears (it is shown on whitelist length), the type is simply never there, with no '
-              + 'message at build time or at run time.'),
+            ? `view "${sourceView}" has no \`${predicate.viewBlocks[0]}:\` block`
+            : 'no `sourceView` supplies it')
+          + (leading ? ', so every visitor lands on its refusal screen' : ', so the switcher SILENTLY drops it'),
         hint:
           `An interface page has no per-visualization binding key of its own — \`sourceView\` is the `
           + `one schema-legal channel. Point this page at a "${objectName}" list view that declares a `

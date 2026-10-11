@@ -5,8 +5,9 @@ import { describe, expect, it } from 'vitest';
 import { AUTHORING_RULES } from './authoring-rules.js';
 import {
   OBJECT_FIELD_REF_UNKNOWN,
-  validateObjectFieldRefs,
+  validateObjectFieldRefs as validateObjectFieldRefsUnrecorded,
 } from './validate-object-field-refs.js';
+import { explainRule } from './rule-explanations.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import { SEMANTIC_ROLE_FIELD_UNKNOWN, validateSemanticRoles } from './validate-semantic-roles.js';
 
@@ -23,6 +24,22 @@ const obj = (over: Record<string, unknown> = {}) => ({
 });
 
 const stackOf = (over: Record<string, unknown> = {}) => ({ objects: [obj(over)] });
+
+// [#22161] Each finding is one verdict sentence — the family's shared
+// field-path sentence; what the miss costs at each position is
+// `os explain object-field-ref-unknown`. Every direct call below records what
+// it fired, and the last cases in this file hold each recorded verdict to one
+// line of at most 200 characters — every firing variant this suite exercises,
+// not a chosen few. Run the whole file: those cases read what the cases above
+// fired.
+const fired: Array<{ rule: string; message: string; path: string }> = [];
+const validateObjectFieldRefs: typeof validateObjectFieldRefsUnrecorded = (...args) => {
+  const findings = validateObjectFieldRefsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+/** The position's consequence, as `os explain object-field-ref-unknown` writes it out. */
+const explained = () => explainRule(OBJECT_FIELD_REF_UNKNOWN)!.paragraphs.join('\n');
 
 describe('validateObjectFieldRefs — highlightFields', () => {
   it('REFUSES a dangling entry at `error`, naming the rule id and the offending path', () => {
@@ -157,9 +174,9 @@ describe('validateObjectFieldRefs — publicSharing.redactFields', () => {
       rule: OBJECT_FIELD_REF_UNKNOWN,
       path: 'objects[0].publicSharing.redactFields[0]',
     });
-    // The consequence sentence is the point of the position: it is not that
-    // the field renders short, it is that it is SERVED.
-    expect(findings[0]!.message).toMatch(/fails OPEN/i);
+    // The consequence is the point of the position: it is not that the field
+    // renders short, it is that it is SERVED. [#22161] It is the explanation's.
+    expect(explained()).toMatch(/redaction fails OPEN/);
     // A near-miss carries the suggestion.
     expect(findings[0]!.message).toContain('health_score');
   });
@@ -523,7 +540,7 @@ describe('validateObjectFieldRefs — dependsOn (the gate on the OWNER, the filt
       path: 'objects[0].fields.contact.dependsOn[0]',
     });
     expect(findings[0]!.message).toContain('"regoin" is not a field on object "crm_invoice"');
-    expect(findings[0]!.message).toContain('stays gated for good');
+    expect(explained()).toContain('stays gated for good');
   });
 
   it('passes a bare name that is a field on BOTH sides (the shorthand)', () => {
@@ -603,7 +620,7 @@ describe('validateObjectFieldRefs — indexes[].fields (verbatim physical column
     });
     expect(findings[0]!.message).toContain('"totl" is not a field on object "crm_invoice"');
     expect(findings[0]!.message).toContain('Did you mean "total"?');
-    expect(findings[0]!.message).toContain('`unique` index is then unenforced');
+    expect(explained()).toContain('`unique` index is then unenforced');
     expect(findings[0]!.hint).toContain('Fields on "crm_invoice":');
   });
 
@@ -664,5 +681,80 @@ describe('validateObjectFieldRefs — the runtime publish door judges the new po
     const refusal = write(['name', 'industy']).errors.find((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
     expect(refusal).toBeDefined();
     expect(refusal!.path).toBe('objects.crm_invoice.fields.account.lookupColumns[1]');
+  });
+});
+
+describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
+  it('reads as the shared field-path sentence, a dotted path\'s hop verdicts included', () => {
+    const findings = validateObjectFieldRefs({
+      objects: [
+        { name: 'crm_account', fields: { name: { type: 'text' }, status: { type: 'select' } } },
+        {
+          name: 'crm_invoice',
+          highlightFields: ['totl', 'status.label'],
+          fields: {
+            total: { type: 'number' },
+            status: { type: 'select' },
+            account: { type: 'lookup', reference: 'crm_account', lookupFilters: [{ field: 'status.label' }] },
+          },
+        },
+        {
+          name: 'crm_invoice_line',
+          fields: { invoice: { type: 'master_detail', reference: 'crm_invoice', relatedListColumns: ['acount.name'] } },
+        },
+      ],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'highlightFields[0] "totl" is not a field on object "crm_invoice". Did you mean "total"?',
+      'highlightFields[1] "status.label" traverses "status", which is a `select` field on object "crm_invoice" '
+        + 'and not a relationship — there is nothing to join through.',
+      'fields.account.lookupFilters[0].field "status.label" traverses "status", which is a `select` field on '
+        + 'object "crm_account" and not a relationship — there is nothing to join through.',
+      'fields.invoice.relatedListColumns[0] "acount.name" traverses "acount", which is not a field on object '
+        + '"crm_invoice_line".',
+    ]);
+  });
+
+  it('`os explain` carries what the verdict no longer says, per position', () => {
+    const entry = explainRule(OBJECT_FIELD_REF_UNKNOWN);
+    expect(entry, 'no `os explain object-field-ref-unknown` entry').toBeDefined();
+    const text = explained();
+    for (const fact of [
+      'ADR-0078',
+      '`highlightFields` (the default list columns, record cards, previews and the detail highlight strip',
+      '`publicSharing.redactFields` (the redaction fails OPEN',
+      '`indexes[].fields` (the SQL driver skips the WHOLE index at sync',
+      '`compactLayout`',
+      '`relatedListColumns` against the object that owns the field',
+      '`lookupColumns` and `lookupFilters[].field` against the REFERENCED object',
+      '`lookup`, `master_detail` and `user`',
+      'reported once, there',
+      'read verbatim',
+      '`ownership: \'none\'`',
+      '`searchable-field-unknown`',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
+    // The coverage control first: every position fired, each by its path.
+    for (const position of [
+      '.highlightFields[',
+      '.compactLayout[',
+      '.publicSharing.redactFields[',
+      '.indexes[',
+      '.relatedListColumns[',
+      '.lookupColumns[',
+      '.lookupFilters[',
+      '.dependsOn[',
+    ]) {
+      expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

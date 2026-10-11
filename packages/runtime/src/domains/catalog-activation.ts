@@ -33,7 +33,9 @@
  *
  * One `sys_metadata_activation` row through the shared
  * `ObjectStoreMetadataActivationStore` — the same row contract the flow and
- * action stores use. ⛔ No definition is touched, ⛔ no catalog row's `active`
+ * action stores use. Unlike theirs, this door's subjects need not be packaged:
+ * a position or permission set the environment authored is switched the same
+ * way (#22621 → A), and its row carries no package. ⛔ No definition is touched, ⛔ no catalog row's `active`
  * is written (ADR-0131 D3: that column is not the switch any more), ⛔ no clone
  * is authored. The write goes through the engine, so every hook on the ledger
  * runs: the last-admin guard refuses switching `admin_full_access` off
@@ -127,7 +129,8 @@ function ledgerUnregistered(ql: any): boolean {
  *     the resolver cannot disagree about which names exist. No reader bound,
  *     or a reader that cannot answer ⇒ 503 (an outage is not a verdict);
  *     unknown ⇒ 404.
- *  5. **The durable write**, through the engine.
+ *  5. **The durable write**, through the engine. A packaged item's row names
+ *     its package; an environment-authored item's row names none.
  */
 export async function handleCatalogActivationWrite(
     deps: DomainHandlerDeps,
@@ -249,21 +252,24 @@ export async function handleCatalogActivationWrite(
         };
     }
     try {
+        // [#22621 → A] The row carries the definition's package when it names
+        // one, and NO package when it does not — a position or permission set
+        // the environment authored through the metadata door. That item is
+        // switched exactly like a packaged one: the resolver keys the row by
+        // type and name, never by package.
         await new ObjectStoreMetadataActivationStore(ql, type).setActive({
             name: entry.name,
-            packageId: entry.packageId ?? '',
+            ...(entry.packageId !== undefined ? { packageId: entry.packageId } : {}),
             active: enabled,
         });
-    } catch (err: any) {
-        // A hook's refusal carries its own status and code (the last-admin
-        // guard: 403 PERMISSION_DENIED); anything else is a store failure, and
-        // a failed write must never read as a successful flip.
-        const status = typeof err?.status === 'number' ? err.status : 503;
-        const code = typeof err?.code === 'string' ? err.code : 'SERVICE_UNAVAILABLE';
-        return {
-            handled: true,
-            response: deps.error(err?.message ?? String(err), status, { code }),
-        };
+    } catch (err: unknown) {
+        // A failed write must never read as a successful flip, and its code and
+        // status must say the same thing (ADR-0112). The one shared rule
+        // decides both (`resolveThrownHttpError`): a hook's refusal keeps its
+        // own (the last-admin guard: 403 PERMISSION_DENIED), a record
+        // validation refusal is 400 VALIDATION_FAILED, and anything that
+        // declares no status is a store failure, 503 SERVICE_UNAVAILABLE.
+        return { handled: true, response: deps.errorFromThrown(err, 503) };
     }
     return { handled: true, response: deps.success({ type, name: entry.name, enabled }) };
 }

@@ -22,7 +22,7 @@
  * re-exports it from here. ⛔ Never a second copy beside a reader.
  */
 
-import { isSmsTransportProvider, SMS_TRANSPORT_PROVIDERS } from './transports/index.js';
+import { isSmsTransportProvider, smsProviderOptionsFrom, SMS_TRANSPORT_PROVIDERS } from './transports/index.js';
 
 /** Constructor options for `SmsServicePlugin`, as the capability loop builds them. */
 export interface SmsCapabilityArg {
@@ -65,6 +65,18 @@ export interface SmsCapabilityArg {
  *
  * `OS_SMS_PROVIDER=log` (the default) is how an environment says "this box does
  * not send SMS", which is what makes refusing the rest fair.
+ *
+ * Not demanding credentials is not the same as not reading them. The selected
+ * provider's credentials are merged into `providerOptions` per key, env over
+ * `config.sms.providerOptions` — the mail resolver's rule — from the variables
+ * the `sms` settings namespace is env-locked with (`OS_SMS_TWILIO_ACCOUNT_SID`,
+ * `OS_SMS_ALIYUN_ACCESS_KEY_ID`, … — `SMS_PROVIDER_SETTING_KEYS` lists them).
+ * Without that, a configured `provider: 'twilio'` with its keys in the
+ * environment but no `OS_SMS_PROVIDER` booted on `LogSmsTransport` with
+ * `isConfigured() === false`: the constructor got no credentials, and the
+ * namespace, naming no provider, rebuilt nothing. A configured provider whose
+ * credentials are missing everywhere still boots onto the plugin's logged
+ * fallback, as before.
  */
 export function resolveSmsCapabilityArg(
   cfgSms: Record<string, any> = {},
@@ -80,10 +92,18 @@ export function resolveSmsCapabilityArg(
       + 'OS_SMS_PROVIDER=log if this environment is not meant to send SMS.',
     );
   }
+  // Each credential env over config, as `resolveEmailCapabilityArg` merges
+  // `OS_EMAIL_SMTP_*` over `config.email.options`. The variables are the ones
+  // `SettingsService` locks the `sms` namespace with (`OS_SMS_` + the setting
+  // key), read through the table the plugin reads that namespace through.
+  const envCredentials = provider === 'log'
+    ? {}
+    : smsProviderOptionsFrom(provider, (settingKey) => env[`OS_SMS_${settingKey.toUpperCase()}`]);
+  const providerOptions = { ...(cfgSms.providerOptions ?? {}), ...envCredentials };
   return {
     options: {
       provider,
-      ...(cfgSms.providerOptions ? { providerOptions: cfgSms.providerOptions } : {}),
+      ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
       ...(cfgSms.retries != null ? { retries: cfgSms.retries } : {}),
     },
   };

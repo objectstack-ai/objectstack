@@ -137,15 +137,6 @@ export function validateNavObjectServability(stack: unknown): NavObjectServabili
             // whatever its whitelist says — so the report follows the same
             // order rather than describing a whitelist the 404 never reaches.
             const apiDisabled = enable.apiEnabled === false;
-            const condition = apiDisabled
-              ? '`enable.apiEnabled: false`'
-              : '`enable.apiMethods` does not grant `list`'
-                + (Array.isArray(enable.apiMethods)
-                  ? ` (declared: ${enable.apiMethods.length === 0 ? '[] — deny-all' : enable.apiMethods.map((m) => `\`${String(m)}\``).join(', ')})`
-                  : '');
-            const answer = apiDisabled
-              ? '404 `OBJECT_API_DISABLED`'
-              : '405 `OBJECT_API_METHOD_NOT_ALLOWED`';
             const offendingKey = apiDisabled
               ? `${declared.path}.apiEnabled`
               : `${declared.path}.apiMethods`;
@@ -158,14 +149,14 @@ export function validateNavObjectServability(stack: unknown): NavObjectServabili
               // key that condemns it is named in the message, because the fix
               // may belong at either end.
               path: `${navPath}.objectName`,
+              // [#22161] One verdict sentence naming the editable key; the two
+              // refusal envelopes, why no permission on the entry can rescue
+              // it and what the served `/meta` does with it is
+              // `os explain nav-object-unservable`.
               message:
-                `Navigation targets object "${target}", which cannot serve a list: ${condition} `
-                + `(\`${offendingKey}\`), so the list request answers ${answer} for EVERY user — `
-                + `platform administrators included, since that gate reads only the object's \`enable\` `
-                + `block and never the caller. The entry cannot be rescued with `
-                + `\`requiredPermissions\`: they are independent conditions. The server prunes this `
-                + `entry from the served \`/meta\` payload, so publishing it ships a menu row `
-                + `that silently is not there.`,
+                `Navigation targets object "${target}", which cannot serve a list `
+                + `(\`${offendingKey}\` ${apiDisabled ? 'is false' : 'lacks `list`'}), so the server prunes `
+                + `the entry: its list answers ${apiDisabled ? '404' : '405'} for every user`,
               hint:
                 `Remove the nav entry, or make "${target}" listable by setting \`enable.apiEnabled: true\` `
                 + `and granting \`list\` in \`enable.apiMethods\`. ⛔ Do NOT open the API on an object that `

@@ -55,6 +55,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Writers: the enable/disable actions (ADR-0126 L2/L3). Readers: each runtime's
  * own consult point.
  *
+ * Packaged and environment-authored: flows and actions reach this ledger only
+ * when a package ships them, but the security catalog's activation door
+ * (`POST /security/_activation/:type/:name`) switches every position and
+ * permission set the catalog holds, the environment's own included — so
+ * `package_id` is empty for those (see the field).
+ *
  * @namespace sys
  */
 export const SysMetadataActivation = ObjectSchema.create({
@@ -65,7 +71,7 @@ export const SysMetadataActivation = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description:
-    'Activation ledger for packaged metadata artifacts (ADR-0126 §4): one row per packaged artifact whose armed state has been changed from the packaged default. No row means the packaged default — active.',
+    'Activation ledger for metadata artifacts (ADR-0126 §4): one row per artifact whose armed state has been changed from its default. No row means the default — active. Packaged artifacts and positions or permission sets authored in this environment are both recorded here.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['metadata_type', 'name', 'package_id', 'active'],
@@ -124,22 +130,31 @@ export const SysMetadataActivation = ObjectSchema.create({
       required: true,
       searchable: true,
       maxLength: 255,
-      description: "The packaged artifact's machine name.",
+      description: "The artifact's machine name.",
       group: 'Identity',
     }),
 
+    // Not part of the row identity (the index below is `(metadata_type,
+    // name)`), and not read by any consumer to decide anything: every reader
+    // keys a row by type and name. It records provenance, and so it is empty
+    // exactly when there is no package to record — a position or permission
+    // set the environment authored through the metadata door, which the
+    // security catalog's activation door switches as well (#22621 → A). The
+    // writer (`ObjectStoreMetadataActivationStore`) stores NO value for such
+    // an item and refuses an empty string, so a package-less row has one
+    // spelling and can never be read as a package named ''.
     package_id: Field.text({
       label: 'Package',
-      required: true,
       maxLength: 255,
-      description: 'The package that ships the base artifact.',
+      description:
+        'The package that ships the artifact. Empty when no package ships it: an item authored in this environment.',
       group: 'Identity',
     }),
 
     active: Field.boolean({
       label: 'Active',
       defaultValue: true,
-      description: 'Is the packaged artifact armed for this scope.',
+      description: 'Is the artifact armed for this scope.',
       group: 'State',
     }),
   },

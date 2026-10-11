@@ -1,0 +1,103 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { z } from 'zod';
+import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+
+/**
+ * SMS Service Configuration — the stack definition's `sms` block.
+ *
+ * There was no SMS configuration schema in the spec before this file. The
+ * shape below is typed from what its one reader reads:
+ * `resolveSmsCapabilityArg` in `@objectstack/service-sms`, which
+ * `objectstack serve` and `bootStack` both construct `SmsServicePlugin`
+ * through. It reads three keys off `config.sms`, and only one of them can do
+ * from a stack definition what it says:
+ *
+ * | key | secret? | delivered from a stack? | here |
+ * |---|---|---|---|
+ * | `retries` | no | yes | admitted |
+ * | `provider` | no — a transport tag | NO, measured | refused by name |
+ * | `providerOptions` | YES — every non-`log` transport requires a credential inside it (Twilio `authToken`, Aliyun `accessKeySecret`) | — | refused by name |
+ *
+ * **`retries`** is the SMS service's own attempt budget. The service keeps it
+ * when the `sms` settings namespace swaps its transport at `kernel:ready`
+ * (`setTransport` replaces the transport and nothing else), so it applies to
+ * whichever transport ends up delivering. It has no environment or settings
+ * carrier, so this block is its only authoring door.
+ *
+ * **`provider`** cannot select a delivering transport from here. A stack is
+ * not allowed credentials (below), so the transport the plugin constructs from
+ * this tag falls back to its log transport, and the transport that DOES
+ * deliver is the one the settings namespace builds at `kernel:ready` from its
+ * own `provider` setting — it never reads this one. Measured through
+ * `bootStack`: `sms: { provider: 'twilio' }` with the Twilio credentials in the
+ * environment boots with `isConfigured() === false`; adding `OS_SMS_PROVIDER`
+ * makes it `true`. A declared key the runtime does not honour is refused rather
+ * than admitted, with the setting that does work as its prescription. It comes
+ * back, with a provider vocabulary, in the change that makes `SmsServicePlugin`
+ * honour it.
+ *
+ * **`providerOptions`** is refused WHOLE rather than narrowed to its non-secret
+ * members, and the difference from mail's `options` is measured, not a
+ * preference. The mail reader layers `OS_EMAIL_SMTP_*` over `config.email.options`
+ * per key, so a file carrying host and user composes with an environment
+ * carrying the password. The SMS reader hands `providerOptions` to the
+ * transport as written, and nothing merges an environment credential into it:
+ * a Twilio or Aliyun transport built from the non-secret members alone cannot
+ * be constructed, so the plugin falls back to its log transport.
+ *
+ * Why the credentials stop at this door at all: the stack definition is what
+ * `objectstack build` compiles into the artifact, and artifacts are published.
+ * SMS provider settings — the provider and its credentials — live in the `sms`
+ * settings namespace (Setup → Settings → SMS Delivery), whose every key
+ * accepts its `OS_SMS_*` environment override; every refusal here says so.
+ */
+
+/**
+ * The one prescription for SMS provider settings written into a stack
+ * definition — the provider tag, the key that carries the credentials, and the
+ * credential names an author might write flat on the block.
+ */
+const STACK_SMS_PROVIDER_SETTINGS_PRESCRIPTION =
+  'Not authorable here. The SMS provider and its credentials are chosen by the sms settings namespace, which '
+  + 'builds the delivering transport from its own settings, never from a stack definition (and a stack '
+  + 'definition, compiled into the published artifact, carries no credentials). Configure them in Setup → '
+  + 'Settings → SMS Delivery, or through that namespace\'s environment overrides: OS_SMS_PROVIDER plus '
+  + 'OS_SMS_TWILIO_ACCOUNT_SID / OS_SMS_TWILIO_AUTH_TOKEN / OS_SMS_TWILIO_FROM_NUMBER (Twilio) or '
+  + 'OS_SMS_ALIYUN_ACCESS_KEY_ID / OS_SMS_ALIYUN_ACCESS_KEY_SECRET / OS_SMS_ALIYUN_SIGN_NAME (Aliyun).';
+
+/**
+ * `sms` of a stack definition — the one member `resolveSmsCapabilityArg` reads
+ * off `config.sms` that a stack can deliver. See the file header for the census.
+ */
+export const StackSmsConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: 'the stack `sms` block',
+    history:
+      'This block is strict from birth — a stack definition carried no `sms` key before it, so an unknown '
+      + 'key here was never accepted.',
+    guidance: {
+      provider: STACK_SMS_PROVIDER_SETTINGS_PRESCRIPTION,
+      providerOptions: STACK_SMS_PROVIDER_SETTINGS_PRESCRIPTION,
+      authToken: STACK_SMS_PROVIDER_SETTINGS_PRESCRIPTION,
+      accessKeySecret: STACK_SMS_PROVIDER_SETTINGS_PRESCRIPTION,
+    },
+  },
+  {
+    /**
+     * Retry attempts on transport throw. Default 0. The SMS service keeps it
+     * across the settings namespace's transport swap, so it applies to the
+     * transport that delivers.
+     */
+    retries: z.number().int().min(0).optional()
+      .describe(
+        'Retry attempts on transport throw (default 0); applies to whichever transport the sms settings '
+        + 'namespace selects. The provider and its credentials are not authorable here: Setup → Settings → '
+        + 'SMS Delivery, or OS_SMS_PROVIDER and the other OS_SMS_* overrides',
+      ),
+  },
+));
+export type StackSmsConfig = z.input<typeof StackSmsConfigSchema>;
+/** Post-parse shape of {@link StackSmsConfig} — defaults applied, transforms run (ADR-0122). */
+export type StackSmsConfigParsed = z.infer<typeof StackSmsConfigSchema>;

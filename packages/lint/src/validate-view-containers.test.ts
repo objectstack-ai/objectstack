@@ -1,5 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { validateViewContainers, VIEW_CONTAINER_SHAPE } from './validate-view-containers.js';
+import { isViewContainerShaped, ViewSchema } from '@objectstack/spec/ui';
+import {
+  validateViewContainers as validateViewContainersUnrecorded,
+  VIEW_CONTAINER_SHAPE,
+} from './validate-view-containers.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain view-container-shape`. Every direct call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — every firing variant this suite
+// exercises, not a chosen few. Run the whole file: those cases read what the
+// cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateViewContainers: typeof validateViewContainersUnrecorded = (...args) => {
+  const findings = validateViewContainersUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 describe('validateViewContainers (defineView container shape guardrail)', () => {
   it('passes a proper container with a default list', () => {
@@ -114,5 +132,65 @@ describe('validateViewContainers (defineView container shape guardrail)', () => 
   it('ignores non-object entries and stacks without views', () => {
     expect(validateViewContainers({})).toHaveLength(0);
     expect(validateViewContainers({ views: [null, 42, 'x'] as unknown as [] })).toHaveLength(0);
+  });
+});
+
+describe('[#22161] one-line verdicts — view-container-shape', () => {
+  const viewItem = { name: 'task.pipeline', object: 'task', viewKind: 'list', config: { type: 'kanban', columns: ['title'] } };
+  const flat = { name: 'all_tasks', type: 'grid', data: { provider: 'object', object: 'task' }, columns: ['title'] };
+
+  it('reads as one sentence per arm', () => {
+    const findings = validateViewContainers({ views: [viewItem, flat, { listViews: {} }] });
+    expect(findings.map((f) => f.message)).toEqual([
+      'A ViewItem record (`viewKind`) is not a view container: `views:` carries containers only, so the stack '
+        + 'schema, this rule and the registration loop all refuse it.',
+      'Flat list-view object is not a view container: its single-view keys sit where the container slots '
+        + 'belong, so the stack schema and the registration loop refuse it.',
+      'View container defines no views — all of `list` / `form` / `listViews` / `formViews` are absent or '
+        + 'empty, so nothing registers.',
+    ]);
+  });
+
+  it('the refusals the verdicts name are the schema\'s and the registration loop\'s', () => {
+    // The flat arm used to say `ViewSchema` strips the keys to an EMPTY
+    // container. Held here to the two seams instead: the strict schema refuses
+    // both single-view shapes, and the loop's classifier
+    // (`isViewContainerShaped`) refuses both while it takes the empty container.
+    for (const [label, entry] of [['ViewItem', viewItem], ['flat', flat]] as const) {
+      expect(ViewSchema.safeParse(entry).success, label).toBe(false);
+      expect(isViewContainerShaped(entry), label).toBe(false);
+    }
+    expect(isViewContainerShaped({ listViews: {} })).toBe(true);
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const entry = explainRule(VIEW_CONTAINER_SHAPE);
+    expect(entry, 'no `os explain view-container-shape` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      '`{ list, form, listViews, formViews }`',
+      'no switcher entry',
+      '`ViewSchema` is strict',
+      '`isViewContainerShaped`, 422 `INVALID_METADATA`',
+      'one container-only contract',
+      '`os lint` on a raw config',
+      '`defineStack(config, { strict: false })`',
+      'machine-assembled channel',
+      '`PUT /api/v1/meta/view`',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === VIEW_CONTAINER_SHAPE);
+    // The coverage control first: all four arms fired.
+    for (const arm of ['A ViewItem record', '`viewItems` is', 'Flat list-view object', 'View container defines no views']) {
+      expect(converted.some((f) => f.message.startsWith(arm)), arm).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

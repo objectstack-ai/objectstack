@@ -58,7 +58,7 @@
  * budget reaches.
  *
  * So the provenance question is decided from the engine's SchemaRegistry — the
- * same source `readDeclared` / `permission-set-overlay-discard.ts` already use,
+ * same source `readDeclared` already uses,
  * an in-memory array with no page, no cap and no `$in`. Two controls prove the
  * immunity structurally rather than asserting it:
  *

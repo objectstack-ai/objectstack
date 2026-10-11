@@ -70,6 +70,16 @@
 //   metadata                             → the engine's `SchemaRegistry`.
 //   tenancy                              → the `tenancy` service AuthPlugin
 //     registered at boot.
+//   the lowered-body door                → NOT a method here. [#22301] What a
+//     deployment runs for a hook or an action is the `body` `objectstack
+//     build` lowered its function to, in the runtime's QuickJS sandbox. Which
+//     of the two runs is decided by the app the boot mounts, so the door is a
+//     boot option, `bootStack(config, { artifact })`: the compiled artifact is
+//     mounted as the app, and every door above then runs its bodies. The
+//     handle lowers nothing and runs no sandbox of its own.
+//     `harness.artifact-door.test.ts` pins the door, and
+//     `packages/qa/dogfood/test/lowered-body-door.dogfood.test.ts` pins a
+//     handler the build's real lowering turns into a body that refuses.
 //
 // ⛔ Design rule (hotcrm#1579 step 5a): if a method needs a semantic the
 // kernel does not expose, that is a kernel gap to FILE — never a semantic to

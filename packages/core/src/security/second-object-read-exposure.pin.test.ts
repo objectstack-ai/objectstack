@@ -11,9 +11,10 @@
  * The data routes judge the ADDRESSED object. A read that follows a lookup
  * reaches an object nobody addressed: the data door's `$expand` served the row
  * fields of a target every data route refuses, the dataset door's label
- * passes rendered its display names, and the import door matched cells against
- * it (#22739). Each read classified `decided` below now asks the target
- * (behaviour-pinned in its own package). This
+ * passes rendered its display names, the import door matched cells against
+ * it (#22739), and the data door's nested-relation filter condition evaluated
+ * a predicate on it (#22737). Each read classified `decided` below now asks the
+ * target (behaviour-pinned in its own package). This
  * file is the ENUMERATION: it names the census of such reads, holds each
  * decided one to the decision, and goes red when a new one appears without
  * being classified here.
@@ -137,12 +138,12 @@ const CALLERS: Record<string, Classification> = {
     pin: 'packages/core/src/utils/import-runner-reference-exposure.test.ts',
   },
   'packages/objectql/src/relation-filter-lowering.ts': {
-    kind: 'open',
-    read: "the data door's nested-relation filter condition (`ObjectQL.lowerRelationConditions` reads the related object to lower it)",
-    measured: 'evaluated for an unexposed target, for an administrator and a member: the source row comes back only when the related value matches',
-    carrier:
-      'a filter cannot be withheld, so its answer is a refusal in the data door\'s exposure codes, which needs a ' +
-      'provenance row for the door and touches a filter position; carried by a follow-up of #22661',
+    kind: 'decided',
+    read: "the data door's nested-relation filter condition (`ObjectQL.lowerRelationConditions` reads the related object to lower it), refused rather than withheld",
+    operation: 'list',
+    decision: { file: 'packages/metadata-protocol/src/protocol.ts', fn: 'refuseUnservedRelationTarget' },
+    wiring: { file: 'packages/metadata-protocol/src/protocol.ts', call: 'this.refuseUnservedRelationTarget(' },
+    pin: 'packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts',
   },
   'packages/plugins/plugin-approvals/src/approval-service.ts': {
     kind: 'decided',
@@ -289,6 +290,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
         (c): c is Extract<Classification, { kind: 'decided' }> => c.kind === 'decided',
       );
       expect(decided.map((d) => d.decision.fn).sort()).toEqual([
+        'refuseUnservedRelationTarget',
         'servesExpansionTarget',
         'servesLabelTarget',
         'servesPayloadDisplayTarget',

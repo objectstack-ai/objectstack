@@ -2,9 +2,23 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateCapabilityReferences,
+  validateCapabilityReferences as validateCapabilityReferencesUnrecorded,
   CAPABILITY_REFERENCE_UNKNOWN,
 } from './validate-capability-references';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain capability-reference-unknown`. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateCapabilityReferences: typeof validateCapabilityReferencesUnrecorded = (...args) => {
+  const findings = validateCapabilityReferencesUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 describe('validateCapabilityReferences (ADR-0066 ⑨)', () => {
   it('passes a reference to a built-in platform capability', () => {
@@ -171,5 +185,66 @@ describe('validateCapabilityReferences (ADR-0066 ⑨)', () => {
     expect(validateCapabilityReferences({})).toEqual([]);
     expect(validateCapabilityReferences(undefined as unknown as Record<string, unknown>)).toEqual([]);
     expect(validateCapabilityReferences({ objects: [null, 42, { name: 'x' }] as unknown })).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
+  it('reads as one sentence', () => {
+    const findings = validateCapabilityReferences({
+      objects: [{ name: 'sys_license', requiredPermissions: ['mange_users'] }],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'requiredPermissions names capability "mange_users", which no built-in, `defineCapability`, '
+        + '`systemPermissions` grant or `sys_capability` seed provides, so this gate fails closed',
+    ]);
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(CAPABILITY_REFERENCE_UNKNOWN);
+    expect(entry, 'no `os explain capability-reference-unknown` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'fails CLOSED',
+      'ADR-0066 D1',
+      'never reported: it is the declaration side',
+      'per-operation map',
+      '`navigation`, `areas`, `tabs`, `children` and `items`',
+      'each `listViews` entry',
+      'a dashboard',
+      'other installed packages',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('each source of the known set the explanation names silences the rule', () => {
+    // The explanation module imports nothing, so its four sources are held to
+    // the rule by running the rule: each one makes the same reference known.
+    const text = explainRule(CAPABILITY_REFERENCE_UNKNOWN)!.paragraphs.join('\n');
+    for (const named of ['built-in platform capability', '`defineCapability`', '`systemPermissions`', '`sys_capability` seed row']) {
+      expect(text, named).toContain(named);
+    }
+    const gated = { objects: [{ name: 'inv_invoice', requiredPermissions: ['approve_invoice'] }] };
+    expect(validateCapabilityReferencesUnrecorded(gated), 'lit control').toHaveLength(1);
+    for (const source of [
+      { capabilities: [{ name: 'approve_invoice', label: 'Approve', scope: 'org' }] },
+      { permissions: [{ name: 'p', systemPermissions: ['approve_invoice'] }] },
+      { data: [{ object: 'sys_capability', records: [{ name: 'approve_invoice' }] }] },
+    ]) {
+      expect(validateCapabilityReferencesUnrecorded({ ...gated, ...source }), JSON.stringify(source)).toEqual([]);
+    }
+    expect(validateCapabilityReferencesUnrecorded({
+      objects: [{ name: 'inv_invoice', requiredPermissions: ['manage_platform_settings'] }],
+    }), 'built-in').toEqual([]);
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === CAPABILITY_REFERENCE_UNKNOWN);
+    // The coverage control first: the id fired, at more than one position.
+    expect(converted.length).toBeGreaterThan(1);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

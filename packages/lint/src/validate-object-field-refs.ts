@@ -268,10 +268,12 @@ function asArray(v: unknown): AnyRec[] {
  *
  * Declarative for the same reason the list-view sibling's table is: the
  * failure this family exists to end is a position nobody remembered to walk,
- * and a table can be read against `ObjectSchema` key by key. `consequence` is
- * the sentence the author reads after the miss — what actually happens when
- * the reference resolves to nothing — and it differs per position, which is
- * why it is data here rather than one shared string.
+ * and a table can be read against `ObjectSchema` key by key. [#22161] What
+ * the platform does with a miss differs per position, and that account is
+ * `os explain object-field-ref-unknown`'s, written out per position: the
+ * verdict is the family's shared field-path sentence, as on the list-view
+ * sibling, so it stays one line on every position (a dotted path's hop
+ * verdicts included).
  */
 interface ListPosition {
   /** `''` = the object's own top level, else the nested block that holds `key`. */
@@ -284,8 +286,6 @@ interface ListPosition {
    * `lint` path, never an accepted spelling.
    */
   retiredAlias?: string;
-  /** What the platform does with an entry that resolves to nothing. */
-  consequence: string;
   /** The prescription half of the hint. */
   prescription: string;
 }
@@ -295,10 +295,6 @@ const LIST_POSITIONS: readonly ListPosition[] = [
     block: '',
     key: 'highlightFields',
     retiredAlias: 'compactLayout',
-    consequence:
-      'Every consumer silently skips the entry: it drives the object\'s default list columns, '
-      + 'record cards, previews and the detail highlight strip, and each of them renders one '
-      + 'field short with no error anywhere.',
     prescription:
       'Fix the field name, or drop the entry. `highlightFields` is ordered — the first entry '
       + 'wins where only one field fits (ADR-0085).',
@@ -306,10 +302,6 @@ const LIST_POSITIONS: readonly ListPosition[] = [
   {
     block: 'publicSharing',
     key: 'redactFields',
-    consequence:
-      'The redaction never applies, and it fails OPEN: records served through a share link '
-      + 'still carry the field to whoever holds the link. A mis-spelled entry is silently '
-      + 'indistinguishable from an entry that was never written.',
     prescription:
       'Fix the field name so the redaction binds, or drop the entry if the field is meant to '
       + 'be served through share links.',
@@ -324,10 +316,6 @@ const LIST_POSITIONS: readonly ListPosition[] = [
  * sync keeps.
  */
 const INDEX_POSITION = {
-  consequence:
-    'The SQL driver skips the WHOLE index at sync. It logs the skip at error and `os migrate plan` '
-    + 'reports the index as unbuildable, but the object keeps serving: a `unique` index is then '
-    + 'unenforced until the name is fixed.',
   prescription:
     'Fix the column name. An index column is a field of this object, or a column the platform '
     + 'injects on it (`created_at`, `organization_id`, …), spelled exactly — never a dotted path.',
@@ -375,8 +363,6 @@ interface FieldNameSlot {
   verbatim: boolean;
   /** Read this slot's name out of one entry, or `undefined` when it holds none. */
   read: (entry: unknown) => SlotRead | undefined;
-  /** What the platform does with a name that resolves to nothing. */
-  consequence: string;
   /** The prescription half of the hint. */
   prescription: string;
 }
@@ -403,9 +389,6 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'owner',
     verbatim: false,
     read: readString,
-    consequence:
-      'The related list the parent\'s detail page derives from this relationship asks the child '
-      + 'object for a column it does not have, and the miss surfaces only when that page opens.',
     prescription:
       'Fix the column name — a related-list column is a field of the object that declares this '
       + 'relationship (the child whose rows the list shows) — or drop the entry and let the '
@@ -416,9 +399,6 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'reference',
     verbatim: true,
     read: (entry) => readString(entry) ?? readMember(entry, 'field'),
-    consequence:
-      'The record picker renders that column empty for every candidate: a picker column is read '
-      + 'off each record of the referenced object, and nothing reports the miss.',
     prescription:
       'Fix the column name — a picker column is a field of the referenced object, not of the '
       + 'object that owns this field — or drop the entry and let the columns derive.',
@@ -428,9 +408,6 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'reference',
     verbatim: false,
     read: (entry) => readMember(entry, 'field'),
-    consequence:
-      'The picker applies this filter to its query on the referenced object, which names a field '
-      + 'that object does not have; the miss surfaces only when a user opens the picker.',
     prescription:
       'Fix `field` — a picker filter runs on the referenced object, so it names a field of that '
       + 'object, not of the object that owns this field.',
@@ -440,9 +417,6 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'owner',
     verbatim: true,
     read: (entry) => readString(entry) ?? readMember(entry, 'field'),
-    consequence:
-      'The form gates this field until that field has a value, and a field the record does not '
-      + 'have never gets one: this field stays gated for good.',
     prescription:
       'Fix the name — `dependsOn` names fields on the same record, i.e. of the object that owns '
       + 'this field — or drop the entry.',
@@ -455,10 +429,6 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'reference',
     verbatim: true,
     read: (entry) => readString(entry) ?? readMember(entry, 'param') ?? readMember(entry, 'field'),
-    consequence:
-      'The picker scopes its candidates by this key on the referenced object — a bare name is '
-      + 'the key on both sides — and that object has no such field; the miss surfaces only when '
-      + 'a user opens the picker.',
     prescription:
       'When the two sides are spelled differently, write the entry as '
       + '`{ field: \'this_record_field\', param: \'referenced_object_field\' }`; otherwise fix '
@@ -500,8 +470,8 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
   /**
    * Resolve one name and push the finding when it misses. `true` = reported.
    * Every position funnels through here, so the message shape — the verdict's
-   * account, then the position's consequence; the prescription, then the
-   * addressed object's field list — is one shape across the family.
+   * account; the prescription, then the addressed object's field list — is one
+   * shape across the family.
    */
   const judge = (at: {
     against: string;
@@ -510,7 +480,6 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
     subject: string;
     where: string;
     path: string;
-    consequence: string;
     prescription: string;
   }): boolean => {
     const verdict = resolveName(graph, at.against, at.name, at.verbatim);
@@ -522,7 +491,9 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
       rule: OBJECT_FIELD_REF_UNKNOWN,
       where: at.where,
       path: at.path,
-      message: `${account.message} ${at.consequence}`,
+      // [#22161] The shared field-path sentence alone; what the miss costs at
+      // each position is `os explain object-field-ref-unknown`.
+      message: account.message,
       hint: `${at.prescription} ${account.detail}`,
     });
     return true;
@@ -568,7 +539,6 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
           subject: `${written}[${i}]`,
           where: `${label} › ${written}`,
           path: `${hostPath}.${written}[${i}]`,
-          consequence: position.consequence,
           prescription: position.prescription,
         });
       });
@@ -588,7 +558,6 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
           subject: `indexes[${xi}].fields[${j}]`,
           where: `${label} › indexes[${xi}].fields`,
           path: `${objPath}.indexes[${xi}].fields[${j}]`,
-          consequence: INDEX_POSITION.consequence,
           prescription: INDEX_POSITION.prescription,
         });
       });
@@ -623,7 +592,6 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
             subject: `fields.${fieldName}.${at}${read.suffix}`,
             where: `${label} › fields.${fieldName}.${slot.key}`,
             path: `${objPath}.fields.${fieldName}.${at}${read.suffix}`,
-            consequence: slot.consequence,
             prescription: slot.prescription,
           });
           if (hit) reported.add(`${at}=${read.name}`);

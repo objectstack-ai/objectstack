@@ -418,13 +418,11 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'duplicate mount with the dispatcher /security domain' },
   { route: 'POST /api/v1/security/suggested-bindings/:id/dismiss', family: 'security', source: 'route-manager', disposition: 'sdk', client: 'security.suggestedBindings.dismiss',
     note: 'duplicate mount with the dispatcher /security domain' },
-  // [field report — rc→GA declared≠enforced surfacing] REST-only (no
-  // dispatcher twin, unlike the suggested-bindings family above): invoked by
-  // `sys_permission_set`'s "Discard Overlay" Setup action via a plain fetch
-  // to `target`, not through the typed SDK — see
-  // `permission-set-overlay-discard.ts`.
-  { route: 'POST /api/v1/security/permission-sets/:id/discard-overlay', family: 'security', source: 'route-manager', disposition: 'server-only',
-    note: 'Setup admin action only (sys_permission_set "Discard Overlay") — invoked via the declarative action target, not the SDK' },
+  // RETIRED (ADR-0131 cutover): `POST /api/v1/security/permission-sets/:id/
+  // discard-overlay` left with the "Discard Overlay" Setup action. No door
+  // creates an environment overlay of a packaged permission set any more, and
+  // a database holding one is refused at cold boot (ADR-0048), so the offline
+  // `os migrate security-catalog-overlays` is its remedy; no row, no route.
 
   // ── reports ── RETIRED (#20102): the eight saved-report rows left with
   // their routes and the SDK's `reports` namespace; no row, no route, no method.

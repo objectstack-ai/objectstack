@@ -64,8 +64,7 @@
  *    That is NOT the parallel-allowlist failure Prime Directive #8 exists to
  *    prevent: the lock does not re-derive `isArtifactBacked`, it reads the
  *    engine SchemaRegistry — the one source this plugin already calls
- *    "package-declared" ({@link readDeclaredBody} here,
- *    `permission-set-overlay-discard.ts`'s eligibility test, and
+ *    "package-declared" ({@link readDeclaredBody} here, and
  *    `permission-set-drift.ts`'s declared sweep). The `managed_by` column
  *    stays measurably NOT that fact and the lock still never reads it —
  *    `member_default`'s row is `managed_by:'admin'`, `twodoors_pkgset`'s is
@@ -1395,8 +1394,7 @@ export function createPermissionSetWriteThrough(
       // nothing an admin can act on. It is NOT a second copy of
       // `isArtifactBacked` (Prime Directive #8): it reads the engine
       // SchemaRegistry, the one source this plugin already calls
-      // "package-declared" in `permission-set-overlay-discard.ts` and
-      // `readDeclaredBody` above. See `packaged-permission-set-lock.ts`.
+      // "package-declared" in `readDeclaredBody` above. See `packaged-permission-set-lock.ts`.
       const layeredByName = new Map<string, unknown>();
       for (const row of targets) {
         const name = String(row.name);
