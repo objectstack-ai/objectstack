@@ -175,7 +175,7 @@ The largest single consumer — **17 of the 124 sites**.
 |:--|:---|:---|:---|:---|
 | 47 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `packages/runtime/src/action-execution.ts#callData` |
 | 48 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `packages/runtime/src/action-execution.ts#actionPermissionError` |
-| 49 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability — and, because REST's save door and the stored-version read doors ask one save verdict, an app's full stored version on `/layers`, `?layers=true` and `/diff`, whatever its entry gates withhold | `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner`, `packages/rest/src/rest-server.ts#metaSaveVerdict` |
+| 49 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability (the permission-set clone door's save included) — and, because REST's save door and the stored-version read doors ask one save verdict, an app's full stored version on `/layers`, `?layers=true` and `/diff`, whatever its entry gates withhold | `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner`, `packages/rest/src/rest-server.ts#metaSaveVerdict`, `packages/runtime/src/domains/permission-set-clone.ts#handlePermissionSetCloneWrite` |
 | 50 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 49's doors consult answers yes before any capability is examined | `packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict` |
 | 51 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `packages/runtime/src/domains/actions.ts#handleActionsRequest`, `packages/runtime/src/domains/ai.ts#handleAIRequest`, `packages/runtime/src/domains/automation.ts#handleAutomationRequest`, `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/runtime/src/domains/security.ts#handleSecurityRequest`, `packages/runtime/src/domains/packages.ts#handlePackagesRequest`, `packages/runtime/src/domains/analytics.ts#handleAnalyticsRequest`, `packages/runtime/src/domains/i18n.ts#handleI18nRequest`, `packages/rest/src/external-datasource-routes.ts#registerExternalDatasourceRoutes`, `packages/rest/src/package-routes.ts#refusePackageRequest` |
 | 52 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `packages/runtime/src/domains/mcp.ts#handleMcpRequest` |
@@ -368,7 +368,7 @@ still holds equal to the census on every pull request:
 | — behaviour-bearing (rows 1–61 above) | 121 | ✅ |
 | — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
 | Packages containing at least one elevation read | **20** | ✅ |
-| Files containing at least one elevation read | 57 | ✅ |
+| Files containing at least one elevation read | 58 | ✅ |
 | — the distinct symbols those reads live in — what this page anchors | 106 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
 
@@ -433,7 +433,7 @@ same resolver, and the same registration shape, that holds `docs/adr/**`.
 Renaming a symbol is now a loud red instead of a silent misdirection.
 
 ⚠️ **The precision that costs, priced here rather than buried.** A symbol anchor
-cannot say WHICH read inside a function it means, and **8** of the **57**
+cannot say WHICH read inside a function it means, and **8** of the **58**
 anchored files hold more than one read inside a single symbol. So the population
 check runs per file at symbol granularity: every file the census finds a read in
 must be anchored, and the set of symbols this page cites into that file must

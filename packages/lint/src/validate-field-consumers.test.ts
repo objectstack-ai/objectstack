@@ -17,7 +17,7 @@ import { explainRule } from './rule-explanations.js';
 // in this file hold each recorded verdict to one line of at most 200
 // characters — every firing variant this suite exercises, not a chosen few.
 // Run the whole file: those cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateFieldConsumers: typeof validateFieldConsumersUnrecorded = (...args) => {
   const findings = validateFieldConsumersUnrecorded(...args);
   fired.push(...findings);
@@ -1586,6 +1586,42 @@ describe('[#22161] one-line verdicts — field-no-consumers, the same-name claus
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line names the first carrier site and counts
+// the rest, the shape the verdict's same-name clause uses. It used to list every
+// site (16 of them, 629 characters, on the showcase's `showcase_account.website`).
+describe('[#22161] one-line fixes — field-no-consumers, the carrier sites bounded', () => {
+  /** One object whose `description` only seeds carry, `n` records deep. */
+  const seededOnly = (n: number): AnyRec => ({
+    objects: [{ name: 'obj_0', fields: { name: { type: 'text' }, description: { type: 'textarea' } } }],
+    views: [{ name: 'v', object: 'obj_0', list: { type: 'grid', data: { provider: 'object', object: 'obj_0' }, columns: ['name'] } }],
+    data: [{ object: 'obj_0', records: Array.from({ length: n }, (_, i) => ({ name: `r${i}`, description: `d${i}` })) }],
+  });
+
+  it('names the first carrier site and counts the rest, however many there are', () => {
+    const f = validateFieldConsumers(seededOnly(12)).find((x) => x.field === 'description');
+    expect(f?.verdict).toBe('carrier-only');
+    expect(f!.carriers.length).toBeGreaterThan(1);
+    expect(f!.hint).toBe(
+      'add it to a view column or a form section, or remove the declaration together with its ' +
+        `${f!.carriers.length} carrier site(s): ${f!.carriers[0]} (and ${f!.carriers.length - 1} more)`,
+    );
+    // The finding still holds every site for a programmatic caller.
+    expect(new Set(f!.carriers).size).toBe(f!.carriers.length);
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FIELD_NO_CONSUMERS);
+    // Coverage control: the inert fix, a one-site carrier fix and a counted one.
+    expect(converted.some((f) => f.hint === 'add it to a view column or a form section, or remove the declaration')).toBe(true);
+    expect(converted.some((f) => / 1 carrier site\(s\): \S+$/.test(f.hint))).toBe(true);
+    expect(converted.some((f) => / carrier site\(s\): \S+ \(and \d+ more\)$/.test(f.hint))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }
   });
 });

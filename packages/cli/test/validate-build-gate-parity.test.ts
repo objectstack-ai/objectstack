@@ -342,6 +342,11 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
     'isReportedError',
     'cleanupOldRuntimeBundles',
     'warningsSoFar',
+    // A type guard `compile.ts` hands to `.filter` to pick the refusal rows out
+    // of `lowerCallables`' own `bodylessCallables` (a gate above) for the
+    // build's warning count. It reads no stack and refuses nothing: every row
+    // it selects is one `lowerCallables` produced.
+    'isExtractionRefusal',
   ],
   // [commit 8b4890343] Reads a fact about the TOOLCHAIN, not about the input. The
   // ADR-0087 D4 `release` section is computed at publish time from the two

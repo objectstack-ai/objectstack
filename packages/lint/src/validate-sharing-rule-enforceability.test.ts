@@ -29,7 +29,7 @@ const SHARING_RULE_IDS: readonly string[] = [
   SHARING_RULE_OBJECT_NOT_SHAREABLE,
   SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT,
 ];
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateSharingRuleEnforceability: typeof validateSharingRuleEnforceabilityUnrecorded = (...args) => {
   const findings = validateSharingRuleEnforceabilityUnrecorded(...args);
   fired.push(...findings);
@@ -78,9 +78,10 @@ describe('validateSharingRuleEnforceability — the declared-but-never-read case
     // …and `os explain` says how.
     expect(explanationOf(SHARING_RULE_UNLOWERABLE_CONDITION)).toMatch(/the rule is SKIPPED/);
     expect(explanationOf(SHARING_RULE_UNLOWERABLE_CONDITION)).toMatch(/never written to `sys_sharing_rule`/);
-    // …and prescribe the fix that works on THIS surface.
+    // …and prescribe the fix that works on THIS surface: the `fix:` line in
+    // one line, and why `has()` is wrong here in the explanation (#22161).
     expect(findings[0].hint).toMatch(/record\.x != null/);
-    expect(findings[0].hint).toMatch(/INTERPRETED/);
+    expect(explanationOf(SHARING_RULE_UNLOWERABLE_CONDITION)).toMatch(/INTERPRETED/);
   });
 
   it.each([
@@ -101,8 +102,10 @@ describe('validateSharingRuleEnforceability — the declared-but-never-read case
       path: 'sharingRules[0].condition',
     });
     expect(findings[0].message).toMatch(/current_user\.id/);
-    // Points at the surface where `current_user.*` IS resolved.
-    expect(findings[0].hint).toMatch(/rowLevelSecurity\[\]\.using/);
+    // The `fix:` line names the route that holds on every sharing model; the
+    // explanation points at the surface where `current_user.*` IS resolved.
+    expect(findings[0].hint).toMatch(/`sharedWith`/);
+    expect(explanationOf(SHARING_RULE_RUNTIME_VARIABLE_CONDITION)).toMatch(/rowLevelSecurity\[\]\.using/);
   });
 
   it('reports the parsed tier identically — the envelope `ExpressionInputSchema` produces', () => {
@@ -463,9 +466,15 @@ describe('validateSharingRuleEnforceability — an anchor a gate WOULD consult s
 //     security boundary.
 //
 // These legs pin the split. The failure they exist to catch is a REGRESSION TO
-// ADVICE THAT CANNOT WORK, which is invisible to every other gate: the hint is
+// ADVICE THAT CANNOT WORK, which is invisible to every other gate: the text is
 // prose, so nothing else in CI reads a word of it.
-describe('SHARING_RULE_RUNTIME_VARIABLE_CONDITION — the hint qualifies its RLS remedy by sharing model', () => {
+//
+// [#22161] The split now lives in the id's `os explain` entry, and the hint is
+// one remedy line that holds on every model. So the legs read the explanation,
+// and the hint gets the guard that matters on a one-line `fix:`: it recommends
+// no RLS at all — every RLS sentence anywhere must name the models it holds
+// for, and the hint, which has no room to, names none.
+describe('SHARING_RULE_RUNTIME_VARIABLE_CONDITION — the explanation qualifies its RLS remedy by sharing model', () => {
   const hintOf = (): string => {
     const findings = validateSharingRuleEnforceability(
       ruleWith("record.visibility == 'manager' && record.owner_id == current_user.id"),
@@ -474,14 +483,12 @@ describe('SHARING_RULE_RUNTIME_VARIABLE_CONDITION — the hint qualifies its RLS
     expect(findings[0].rule).toBe(SHARING_RULE_RUNTIME_VARIABLE_CONDITION);
     return findings[0].hint;
   };
+  const explanation = (): string => explanationOf(SHARING_RULE_RUNTIME_VARIABLE_CONDITION);
 
-  it('keeps the WHY verbatim — the most useful part of the diagnostic', () => {
-    // Byte-exact. This sentence explains why the condition is refused at all,
-    // and it was correct before this card and after it.
-    expect(hintOf()).toContain(
-      'A criteria sharing rule is MATERIALISED: the seeder compiles ONE static `criteria_json` per ' +
-      'rule and the evaluator writes `sys_record_share` rows from it, so there is no "current user" ' +
-      'for the condition to read.',
+  it('keeps the WHY — the most useful part of the diagnostic — in the explanation', () => {
+    expect(explanation()).toContain(
+      'A criteria sharing rule is MATERIALISED: the seeder compiles one static `criteria_json` per rule and the ' +
+        'evaluator writes `sys_record_share` rows from it, so there is no "current user"',
     );
   });
 
@@ -489,7 +496,7 @@ describe('SHARING_RULE_RUNTIME_VARIABLE_CONDITION — the hint qualifies its RLS
     // The load-bearing leg. `rowLevelSecurity[].using` may still be
     // recommended, but only inside a sentence that says WHERE it works; the
     // shipped defect was exactly this recommendation with no model attached.
-    const sentences = hintOf().split(/(?<=\.)\s+/);
+    const sentences = explanation().split(/(?<=\.)\s+/);
     const rlsSentences = sentences.filter((s) => s.includes('rowLevelSecurity[].using'));
     expect(rlsSentences.length).toBeGreaterThan(0);
     rlsSentences.forEach((s) => {
@@ -497,78 +504,92 @@ describe('SHARING_RULE_RUNTIME_VARIABLE_CONDITION — the hint qualifies its RLS
     });
   });
 
-  it('states the `private` case: AND-composed layers mean RLS cannot widen', () => {
+  it('the one-line `fix:` recommends no RLS — it names the route that holds on every model', () => {
     const hint = hintOf();
-    expect(hint).toMatch(/AND-composed/);
-    expect(hint).toMatch(/can only REMOVE rows/);
+    expect(hint).not.toMatch(/rowLevelSecurity|\bRLS\b/);
+    expect(hint).toMatch(/`sharedWith`/);
+    expect(hint).toMatch(/sharingModel/);
+  });
+
+  it('states the `private` case: AND-composed layers mean RLS cannot widen', () => {
+    const text = explanation();
+    expect(text).toMatch(/AND-composed/);
+    expect(text).toMatch(/can only REMOVE rows/);
     // The consequence an author must be told, because it is silent.
-    expect(hint).toMatch(/lints clean/);
-    expect(hint).toMatch(/grants nothing/);
+    expect(text).toMatch(/lints clean/);
+    expect(text).toMatch(/grants nothing/);
   });
 
   it('names the doors that DO widen a private object, and what they key on', () => {
-    const hint = hintOf();
+    const text = explanation();
     // Widen by OWNER (ADR-0057 D1 depth) …
-    expect(hint).toMatch(/readScope/);
-    expect(hint).toMatch(/owner_id IN/);
+    expect(text).toMatch(/readScope/);
+    expect(text).toMatch(/owner_id IN/);
     // … or by an explicit share row, which only a criteria rule writes.
-    expect(hint).toMatch(/sys_record_share/);
+    expect(text).toMatch(/sys_record_share/);
     // And the property that makes both unusable as a per-record predicate.
-    expect(hint).toMatch(/never on a property of the record/);
+    expect(text).toMatch(/never on a property of the record/);
   });
 
   it('mentions `position` only as an over-broad-grant WARNING, never as the remedy', () => {
     // The neighbouring temptation is worse than doing nothing: `position`
     // shares every matched row with every holder of that position tenant-wide.
-    const hint = hintOf();
-    expect(hint).toMatch(/position/);
-    expect(hint).toMatch(/over-broad grant/);
-    expect(hint).toMatch(/EVERY holder/);
+    const text = explanation();
+    expect(text).toMatch(/position/);
+    expect(text).toMatch(/over-broad grant/);
+    expect(text).toMatch(/EVERY holder/);
+    expect(hintOf()).not.toMatch(/position/);
   });
 
   it('names the open capability gap rather than inventing a mechanism', () => {
-    const hint = hintOf();
+    const text = explanation();
     // Described in WORDS, never as a tracker id: this string reaches authors
     // and generated surfaces, and none of them can resolve `#NNNN`
     // (`check:doc-authoring`, maintainer ruling 2026-08-12). The `#14103`
     // anchor lives in an adjacent source comment instead.
-    expect(hint).toMatch(/known gap in the platform/);
-    expect(hint).toMatch(/leave the grant unauthored rather than widening it/);
-    expect(hint).not.toMatch(/#\d{3,}/);
+    expect(text).toMatch(/known gap in the platform/);
+    expect(text).toMatch(/leave the grant unauthored rather than widening it/);
+    expect(text).not.toMatch(/#\d{3,}/);
+    expect(hintOf()).not.toMatch(/#\d{3,}/);
   });
 });
 
-// The vocabulary leg. Without it the hint and its expectations above move
-// together under a rename and nothing goes red — the failure mode the doctor
-// tenancy-hint pin was written to close. Every model and depth the hint names
-// is checked against the SPEC-owned enum that declares it.
-describe('the hint names REAL sharing-model and depth vocabulary', () => {
-  const hint = (): string => {
-    const f = validateSharingRuleEnforceability(ruleWith('record.owner_id == current_user.id'));
-    return f[0].hint;
-  };
+// The vocabulary leg. Without it the explanation and its expectations above
+// move together under a rename and nothing goes red — the failure mode the
+// doctor tenancy-hint pin was written to close. Every model and depth the
+// explanation names is checked against the SPEC-owned enum that declares it.
+describe('the explanation names REAL sharing-model and depth vocabulary', () => {
+  const text = (): string => explanationOf(SHARING_RULE_RUNTIME_VARIABLE_CONDITION);
 
-  const MODELS_NAMED_BY_THE_HINT = ['private', 'public_read', 'public_read_write'] as const;
-  const DEPTHS_NAMED_BY_THE_HINT = ['own', 'own_and_reports', 'unit', 'unit_and_below', 'org'] as const;
+  const MODELS_NAMED_BY_THE_EXPLANATION = ['private', 'public_read', 'public_read_write'] as const;
+  const DEPTHS_NAMED_BY_THE_EXPLANATION = ['own', 'own_and_reports', 'unit', 'unit_and_below', 'org'] as const;
 
   it('every sharing model it names is an `OWDModel` value the spec still declares', () => {
     const declared = new Set<string>(OWDModel.options);
-    MODELS_NAMED_BY_THE_HINT.forEach((m) => {
+    MODELS_NAMED_BY_THE_EXPLANATION.forEach((m) => {
       expect(declared.has(m)).toBe(true);
-      expect(hint()).toContain(`\`${m}\``);
+      expect(text()).toContain(`\`${m}\``);
     });
   });
 
   it('every depth scope it names is an `ObjectAccessScope` value the spec still declares', () => {
     const declared = new Set<string>(ObjectAccessScopeSchema.options);
-    DEPTHS_NAMED_BY_THE_HINT.forEach((d) => {
+    DEPTHS_NAMED_BY_THE_EXPLANATION.forEach((d) => {
       expect(declared.has(d)).toBe(true);
-      expect(hint()).toContain(`\`${d}\``);
+      expect(text()).toContain(`\`${d}\``);
     });
   });
 
   it('`position` is a real `ShareRecipientType` — the warning is about a live trap', () => {
     expect(new Set<string>(ShareRecipientType.options).has('position')).toBe(true);
+  });
+
+  it('the one-line `fix:` names the `sharingModel` key the explanation splits on', () => {
+    // A one-line remedy cannot carry the vocabulary; it carries the pointer
+    // to it, and the key it points at is the spec's.
+    const f = validateSharingRuleEnforceability(ruleWith('record.owner_id == current_user.id'));
+    expect(f[0].hint).toContain('sharingModel');
+    expect(text()).toContain('`sharingModel`');
   });
 });
 
@@ -646,5 +667,66 @@ describe('[#22161] one-line verdicts — the four ids', () => {
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. The two condition ids' hints are one
+// remedy sentence each; what they stopped saying — the lowerable subset and its
+// two traps, the comparison classes with their types, which mechanism replaces
+// a `current_user` read on which sharing model — is the explanation's.
+// (`sharing-rule-object-not-shareable` and `-controlled-by-parent` keep their
+// longer hints: a later slice's.)
+describe('[#22161] one-line fixes — the two condition ids', () => {
+  const ONE_LINE_FIX_IDS: readonly string[] = [
+    SHARING_RULE_UNLOWERABLE_CONDITION,
+    SHARING_RULE_RUNTIME_VARIABLE_CONDITION,
+  ];
+
+  it('every `fix:` line of the two ids the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => ONE_LINE_FIX_IDS.includes(f.rule));
+    // Coverage control: both ids fired, so the bound below cannot pass over an
+    // empty record. The unlowerable id's list-holding and cross-class arms are
+    // fired, and their `fix:` lines bounded, by this file's two siblings
+    // (`*.list-holding-field.test.ts`, `*.cross-class-field.test.ts`).
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...ONE_LINE_FIX_IDS].sort());
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('each arm names its remedy in one line', () => {
+    const hintFor = (condition: string): string => validateSharingRuleEnforceability(ruleWith(condition))[0].hint;
+    expect(hintFor("has(record.owner_id) && record.stage == 'closed_won'")).toBe(
+      'Rewrite `condition` inside the lowerable subset: comparisons, `in`, `&&` `||` `!`, null tests and string ' +
+        'methods over single-column `record.<field>` paths; write `has(record.x)` as `record.x != null`',
+    );
+    expect(hintFor('record.owner_id == current_user.id')).toBe(
+      "Keep only the record's own properties in `condition` (e.g. `record.stage == 'closed_won'`) and name the " +
+        "audience in `sharedWith`; what replaces `current_user` depends on the object's sharingModel",
+    );
+  });
+
+  // What each `fix:` line stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [SHARING_RULE_UNLOWERABLE_CONDITION]: [
+      'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`',
+      '`startsWith` / `endsWith` / `contains`',
+      'denormalise the value onto this object (a formula/rollup field)',
+      'cannot test membership in a list another column holds',
+      'a number only with a number (`number`',
+      'or test a file field with `!= null`',
+    ],
+    [SHARING_RULE_RUNTIME_VARIABLE_CONDITION]: [
+      '`getReadFilter` = RLS AND controlled-by-parent AND sharing',
+      '`buildReadFilter` constrains `private` only',
+      'ADR-0090 D1',
+      'ADR-0057 D1 depth scopes',
+      'ask for record-relative sharing recipients',
+    ],
+  };
+
+  it.each([...ONE_LINE_FIX_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    for (const fact of MOVED_FROM_FIX[rule]) expect(explanationOf(rule), `${rule} explanation names ${fact}`).toContain(fact);
   });
 });
