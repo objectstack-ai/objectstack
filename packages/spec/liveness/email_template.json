@@ -12,14 +12,14 @@
     "label": {
       "status": "live",
       "verifiedAt": "2026-10-11",
-      "evidence": "objectui @0df67f23: packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns (the Studio metadata list's default `label` column — `email_template` registers no `listColumns` of its own, so every row of its list renders the authored label)",
-      "note": "Docs-shaped: shown to a human in the Studio metadata list, never by the send path. Until 2026-10-11 it was materialized into the `sys_email_template.label` column (the Setup record title); that projection retired with the rows (ADR-0131 D6/D10), and the Studio list read — measured at the `.objectui-sha` pin 0df67f23 — is the consumer now, under the designer-previews-count-as-consumers ruling (#7131).",
+      "evidence": "objectui @4997995022f8: packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns:838 (the Studio metadata list's default `label` column, which line 421 falls back to when a type registers no `listColumns`, and whose cell line 687 reads as `row.item[c.key]`); objectui @4997995022f8: packages/app-shell/src/views/metadata-admin/default-schemas.ts#registerDefaultMetadataSchemas:336 (`email_template` is registered with a `defaultSchema` and a `fieldOrder` and no `listColumns` of its own, so every row of its list renders the authored label)",
+      "note": "Docs-shaped: shown to a human in the Studio metadata list, never by the send path. Until 2026-10-11 it was materialized into the `sys_email_template.label` column (the Setup record title); that projection retired with the rows (ADR-0131 D6/D10), and the Studio list read — measured at the `.objectui-sha` pin 4997995022f8 — is the consumer now, under the designer-previews-count-as-consumers ruling (#7131).",
       "evidenceScope": "cross-repo"
     },
     "category": {
       "status": "dead",
       "verifiedAt": "2026-10-11",
-      "note": "DEAD since 2026-10-11 (ADR-0131 D6/D10, ruling C on §6 Q1): the key's only consumer was the row projection into `sys_email_template.category` (a Setup column and index), which retired with the rows. Measured: no reader in this repository (plugin-email, service-messaging, plugin-auth), and at the `.objectui-sha` pin 0df67f23 objectui reads it only as an editor input (`metadata-admin/default-schemas.ts`), never as the Studio list facet the schema's own doc promises (`ResourceListPage.tsx#defaultColumns` renders name/label/description). Tracked for enforce-or-remove (ADR-0049). ⚠️ The schema DEFAULTS it (`'custom'`), so presence is not authorship — the mapping precedent (`errorPolicy`/`batchSize`) is why removal, not a warning, is the channel that reaches an author."
+      "note": "DEAD since 2026-10-11 (ADR-0131 D6/D10, ruling C on §6 Q1): the key's only consumer was the row projection into `sys_email_template.category` (a Setup column and index), which retired with the rows. Measured: no reader in this repository (plugin-email, service-messaging, plugin-auth), and at the `.objectui-sha` pin 4997995022f8 objectui reads it only as an editor input (`metadata-admin/default-schemas.ts:310`, the `email_template` form's `category` enum), never as the Studio list facet the schema's own doc promises (`ResourceListPage.tsx#defaultColumns:835` renders name/label/description). Tracked for enforce-or-remove (ADR-0049). ⚠️ The schema DEFAULTS it (`'custom'`), so presence is not authorship — the mapping precedent (`errorPolicy`/`batchSize`) is why removal, not a warning, is the channel that reaches an author."
     },
     "locale": {
       "status": "live",
@@ -81,13 +81,13 @@
     "isSystem": {
       "status": "dead",
       "verifiedAt": "2026-10-11",
-      "note": "DEAD since 2026-10-11 (ADR-0131 D6/D10, ruling C on §6 Q1): its only consumers were the built-in seeder's stand-down (`EmailServicePlugin.upsertTemplate`: `if (existingRow.is_system === false) return;`) and the `sys_email_template.is_system` column, both retired with the rows. Measured: no reader in this repository, and at the `.objectui-sha` pin 0df67f23 objectui reads it only as an editor input (`metadata-admin/default-schemas.ts`). The schema's own claim — a system template \"SHOULD NOT be deleted by tenants\" — is enforced by nothing: the built-ins are code-declared items, so the metadata door can only discard an environment item over them, whatever this key says. Tracked for enforce-or-remove (ADR-0049)."
+      "note": "DEAD since 2026-10-11 (ADR-0131 D6/D10, ruling C on §6 Q1): its only consumers were the built-in seeder's stand-down (`EmailServicePlugin.upsertTemplate`: `if (existingRow.is_system === false) return;`) and the `sys_email_template.is_system` column, both retired with the rows. Measured: no reader in this repository, and at the `.objectui-sha` pin 4997995022f8 objectui reads it only as an editor input (`metadata-admin/default-schemas.ts:324`, the `email_template` form's `System Template` checkbox). The schema's own claim — a system template \"SHOULD NOT be deleted by tenants\" — is enforced by nothing: the built-ins are code-declared items, so the metadata door can only discard an environment item over them, whatever this key says. Tracked for enforce-or-remove (ADR-0049)."
     },
     "description": {
       "status": "live",
       "verifiedAt": "2026-10-11",
-      "evidence": "objectui @0df67f23: packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns (the Studio metadata list's default `description` column — `email_template` registers no `listColumns` of its own)",
-      "note": "Docs-shaped: read by humans in Studio, never by the send path. Until 2026-10-11 it was materialized into `sys_email_template.description`; that projection retired with the rows (ADR-0131 D6/D10), and the Studio list read — measured at the `.objectui-sha` pin 0df67f23 — is the consumer now (#7131).",
+      "evidence": "objectui @4997995022f8: packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx#defaultColumns:839 (the Studio metadata list's default `description` column, which line 421 falls back to when a type registers no `listColumns`, and whose cell line 687 reads as `row.item[c.key]`); objectui @4997995022f8: packages/app-shell/src/views/metadata-admin/default-schemas.ts#registerDefaultMetadataSchemas:336 (`email_template` is registered with a `defaultSchema` and a `fieldOrder` and no `listColumns` of its own)",
+      "note": "Docs-shaped: read by humans in Studio, never by the send path. Until 2026-10-11 it was materialized into `sys_email_template.description`; that projection retired with the rows (ADR-0131 D6/D10), and the Studio list read — measured at the `.objectui-sha` pin 4997995022f8 — is the consumer now (#7131).",
       "evidenceScope": "cross-repo"
     }
   }
