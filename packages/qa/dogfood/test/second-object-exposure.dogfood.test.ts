@@ -218,6 +218,29 @@ describe('[#22661] a second-object read serves only a target whose declared expo
         }
       });
 
+      // The refusal is about the TARGET, so its body names the target and
+      // carries the effective set exactly as the target's own route does.
+      it('nested-relation condition: the refusal body names the target, as the target\'s own route does', async () => {
+        for (const rel of Object.keys(REFUSED_CONDITION) as Rel[]) {
+          const own = await stack.apiAs(token[persona], 'GET', `/data/${TARGETS[rel].object}`);
+          const ownBody: any = await own.json();
+          for (const res of await conditionAnswers(rel, MARK[rel])) {
+            const body: any = await res.json();
+            expect({ status: res.status, code: body?.code, object: body?.object, allowed: body?.allowed }, rel)
+              .toEqual({ status: own.status, code: ownBody?.code, object: TARGETS[rel].object, allowed: ownBody?.allowed });
+          }
+        }
+      });
+
+      it('CONTROL: the target\'s own route refusal names the target and is unchanged', async () => {
+        for (const [rel, [status, code]] of Object.entries(REFUSED_CONDITION) as Array<[Rel, readonly [number, string]]>) {
+          const res = await stack.apiAs(token[persona], 'GET', `/data/${TARGETS[rel].object}`);
+          const body: any = await res.json();
+          expect({ status: res.status, code: body?.code, object: body?.object }, rel).toEqual({ status, code, object: TARGETS[rel].object });
+          expect(Array.isArray(body?.allowed), rel).toBe(status === 405);
+        }
+      });
+
       it('CONTROL nested-relation condition: a target that serves list is evaluated', async () => {
         for (const rel of ['listonly', 'open'] as const) {
           for (const [value, rows] of [[MARK[rel], 2], ['no-such-name', 0]] as const) {

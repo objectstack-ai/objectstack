@@ -462,6 +462,38 @@ const CASES: readonly Case[] = [
             },
         },
     },
+    {
+        // [#22737] The exposure arm: the error names an object other than the route's.
+        covers: ['OBJECT_API_DISABLED'],
+        what: "metadata-protocol's refuseUnservedRelationTarget (`code`/`status = 404`/`object` = the condition's target)",
+        error: () => Object.assign(new Error("Object 'contact' is not exposed via the API"), {
+            code: 'OBJECT_API_DISABLED', status: 404, object: 'contact',
+        }),
+        object: 'account',
+        restored: ['object'],
+        expect: {
+            status: 404,
+            body: { error: "Object 'contact' is not exposed via the API", code: 'OBJECT_API_DISABLED', object: 'contact' },
+        },
+    },
+    {
+        covers: ['OBJECT_API_METHOD_NOT_ALLOWED'],
+        what: "metadata-protocol's refuseUnservedRelationTarget (`status = 405`, `object` = the target, `allowed`)",
+        error: () => Object.assign(new Error("API operation 'list' is not allowed on object 'contact'"), {
+            code: 'OBJECT_API_METHOD_NOT_ALLOWED', status: 405, object: 'contact', allowed: ['get'],
+        }),
+        object: 'account',
+        restored: ['object', 'allowed'],
+        expect: {
+            status: 405,
+            body: {
+                error: "API operation 'list' is not allowed on object 'contact'",
+                code: 'OBJECT_API_METHOD_NOT_ALLOWED',
+                object: 'contact',
+                allowed: ['get'],
+            },
+        },
+    },
 ];
 
 describe('#14541 · structured arms are consulted by BOTH doors', () => {
