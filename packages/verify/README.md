@@ -195,6 +195,44 @@ await stack.stop();
   one module, under vitest `isolate: false`, and never `stop()` a stack other
   files still use.
 
+### What the build ships: boot the compiled artifact
+
+`objectstack build` lowers each inline hook `handler` and action `target` it
+can into a metadata-only `body`, and a deployment runs that body in the
+runtime's QuickJS sandbox, against the sandbox's `ctx`. A source boot runs the
+function in-process instead. To test what ships, boot the artifact:
+
+```ts
+// After `objectstack build` (the handle lowers nothing; build first).
+const shipped = await bootStack(myApp, { artifact: 'dist/objectstack.json' });
+
+// Every door now runs the lowered body. A handler that passes in-process can
+// refuse here: a body meets the sandbox's `ctx`, which has no
+// `ctx.dispatch.scope`, for one.
+await expect(shipped.hooks.run('crm_lead', 'insert', { last_name: 'Ada' }, { system: true }))
+  .rejects.toMatchObject({ name: 'SandboxError' });
+```
+
+- The artifact is read by the runtime's own artifact loader and mounted as the
+  app, in place of `config`; the rest of the stack is still composed from
+  `config` (its `requires`, its `plugins`, its default profile), as
+  `objectstack serve <config>` composes it. A relative path resolves against
+  `hostRoot`.
+- A refused body answers as the body-only path answers: the handle rejects with
+  the sandbox's `SandboxError`, which carries a `code` and `status` the body
+  declared on its throw; a body that crashes (a `TypeError`) has none, and REST
+  answers it `500` `INTERNAL_ERROR`.
+- A callable the build could not lower is bundled into
+  `objectstack-runtime.*.mjs`, which a local artifact boot merges, so it runs
+  in-process here as under `objectstack start`. `objectstack build
+  --strict-body` refuses it at build time instead, and its artifact is
+  body-only.
+- Refused before anything boots: an artifact that cannot be loaded
+  (`RESOURCE_NOT_FOUND` / 404; the boot never falls back to the source), one
+  built from another app (`RESOURCE_CONFLICT` / 409), and a configuration
+  carrying `onEnable`, which no artifact carries (`INVALID_REQUEST` / 400). A
+  stale artifact boots stale bodies: build before the run.
+
 ## Verdicts
 
 **Data fidelity** (`runCrudVerification`):
@@ -258,7 +296,8 @@ for owner-scoped fixtures), `multiTenant` (also what decides the posture
 `tenancy()` reports), `automation` (register the automation service so
 `flows.*` and `automation.evaluateCondition` have something to drive; an app
 that declares `requires: ['automation']` gets it without this), `orgContext`,
-`databaseFile`, `extraPlugins`.
+`databaseFile`, `extraPlugins`, `artifact` (boot the compiled artifact as the
+app, so hooks and actions run their lowered `body`).
 
 ## Known limitations
 

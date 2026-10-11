@@ -1,0 +1,7 @@
+{
+  "file": "packages/objectql/src/filter-comparand-shape.ts",
+  "adrs": [
+    "ADR-0139"
+  ],
+  "invariant": "The engine's binding of the comparand-shape door is the ONE caller that passes admitReadableIds (ADR-0139 D1): a branded ReadableIds leaf is admitted as the comparand of $in only where the engine is to compose it. Until the engine composes the leaf (ADR-0139 D2), refuseUncomposedReadableIds runs right after the door and refuses every branded leaf, at every position, with INTERNAL_ERROR / 500 before any driver is asked: no driver evaluates the leaf as written. Do not pass admitReadableIds at any other door, and do not drop the refusal without composing the leaf in its place."
+}

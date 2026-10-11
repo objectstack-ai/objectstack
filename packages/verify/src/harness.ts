@@ -23,7 +23,15 @@
 // `harnessCryptoProvider`).
 
 import { randomBytes } from 'node:crypto';
-import { ObjectKernel, AppPlugin, DefaultDatasourcePlugin, createDispatcherPlugin } from '@objectstack/runtime';
+import { resolve as resolvePath } from 'node:path';
+import {
+  ObjectKernel,
+  AppPlugin,
+  DefaultDatasourcePlugin,
+  createDispatcherPlugin,
+  isHttpUrl,
+  loadArtifactBundle,
+} from '@objectstack/runtime';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
@@ -351,6 +359,62 @@ export interface BootOptions {
    */
   hostRoot?: string;
   /**
+   * [#22301] Boot the app from its COMPILED artifact, the `objectstack.json`
+   * that `objectstack build` writes, instead of from the configuration's
+   * source. A path, resolved against {@link BootOptions.hostRoot} (so
+   * `'dist/objectstack.json'` names the app's own build), or an `http(s)://`
+   * URL.
+   *
+   * ## Why
+   *
+   * The build lowers each inline hook `handler` and action `target` it can
+   * into a metadata-only `body`, and the body is what a deployment runs: in
+   * the runtime's QuickJS sandbox, against the sandbox's `ctx`. A source boot
+   * runs the function in-process, against the host's `ctx`. The two can
+   * disagree: a handler can pass every in-process test and throw once lowered,
+   * or refuse with a different error. Only a boot of the artifact shows it.
+   * With this option every door on the stack (`hooks.run`, `actions.run`,
+   * `api`, …) runs what the build shipped, and a refusal is what the
+   * body-only path answers: the sandbox's `SandboxError`, not the function's
+   * own error.
+   *
+   * ## What it boots
+   *
+   * The artifact is read by the runtime's own artifact loader
+   * (`loadArtifactBundle`, `@objectstack/runtime`, with the options
+   * `createStandaloneStack` reads it with) and mounted as the app, the bundle
+   * `AppPlugin` binds, seeds and serves, in the slot the configuration takes
+   * on a source boot. `AppPlugin` binds a hook's `body` ahead of its
+   * `handler`, through the same sandbox runner on every artifact boot. A
+   * local artifact gets its `objectstack-runtime.*.mjs` merged, as every
+   * local artifact boot merges it, so a callable the build could NOT lower
+   * still runs in-process from it, as under `objectstack start`. A remote
+   * artifact never gets it. `objectstack build --strict-body` refuses such a
+   * callable at build time, which makes the artifact body-only.
+   *
+   * Everything else is still composed from `config`, by the one composition
+   * rule (see {@link bootStack}): its `requires`, its own `plugins`, its
+   * declared default profile, its datasources. `objectstack serve <config>`
+   * composes the same way, from the configuration module, with the compiled
+   * artifact as the app. So `config` is the configuration the artifact was
+   * built from, and the boot refuses an artifact that names another app
+   * (`RESOURCE_CONFLICT`, `status: 409`). An artifact that cannot be loaded
+   * is refused too (`RESOURCE_NOT_FOUND`, `status: 404`), never replaced by
+   * the source. A stale artifact boots stale bodies: build before the run.
+   *
+   * ⛔ Nothing is lowered here. The build's lowering lives in
+   * `@objectstack/cli`, which depends on this package, so the caller builds
+   * the artifact and this boot reads it.
+   *
+   * ⛔ An artifact carries no `onEnable`. For a configuration that mounts no
+   * plugin instance, `objectstack serve <config>` grafts the module's
+   * `onEnable` onto the artifact's bundle (a `@objectstack/cli` rule this
+   * package cannot import), and an artifact-only deployment has none. So a
+   * configuration carrying one is refused (`INVALID_REQUEST`, `status: 400`)
+   * rather than booted without it.
+   */
+  artifact?: string;
+  /**
    * Register `@objectstack/service-automation` so authored flows execute against
    * the real stack. The plugin seeds the built-in node executors and, at start(),
    * pulls every flow in the app config from the ObjectQL registry and registers
@@ -566,9 +630,81 @@ const LIVE_APP_PLUGINS = new WeakSet<object>();
 
 /** How a configuration names itself in a refusal: its manifest id, else its name. */
 function configurationLabel(config: unknown): string {
-  const c = config as { manifest?: { id?: unknown }; name?: unknown; id?: unknown } | null | undefined;
+  const id = appIdOf(config);
+  return id !== undefined ? `'${id}'` : '(no manifest id)';
+}
+
+/** The app id a configuration or an artifact names: its manifest id, else its id, else its name. */
+function appIdOf(stack: unknown): string | undefined {
+  const c = stack as { manifest?: { id?: unknown }; name?: unknown; id?: unknown } | null | undefined;
   const id = c?.manifest?.id ?? c?.id ?? c?.name;
-  return typeof id === 'string' && id !== '' ? `'${id}'` : '(no manifest id)';
+  return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
+/** A refusal of the boot call itself, in the ADR-0112 shape (`code` + `status`) a test asserts on. */
+function bootRefusal(message: string, code: string, status: number): Error {
+  return Object.assign(new Error(message), { code, status });
+}
+
+/**
+ * [#22301] The compiled artifact `BootOptions.artifact` names, as the
+ * runtime's own artifact loader hands it back: the bundle the boot mounts as
+ * the app in place of `config`. Refuses, before anything is booted, an
+ * artifact the loader cannot read, one that names another app than `config`,
+ * and a `config` carrying an `onEnable` no artifact carries (see
+ * BootOptions.artifact for each).
+ */
+async function loadCompiledArtifact(
+  artifact: unknown,
+  config: unknown,
+  hostRoot: string,
+): Promise<Record<string, unknown>> {
+  if (typeof artifact !== 'string' || artifact.trim() === '') {
+    throw bootRefusal(
+      `verify: BootOptions.artifact must name a compiled artifact (a path or an http(s):// URL), not ` +
+        `${JSON.stringify(artifact)}.`,
+      'INVALID_REQUEST',
+      400,
+    );
+  }
+  if (typeof (config as { onEnable?: unknown } | null | undefined)?.onEnable === 'function') {
+    throw bootRefusal(
+      `verify: configuration ${configurationLabel(config)} carries an \`onEnable\`, and BootOptions.artifact ` +
+        'boots the compiled artifact, which carries none. An artifact-only deployment never runs it, and ' +
+        '`objectstack serve <config>` grafts it from the configuration module, a rule this package cannot ' +
+        'import. Pass the configuration without `onEnable` to test what the artifact runs, or boot the ' +
+        'source configuration to test `onEnable`.',
+      'INVALID_REQUEST',
+      400,
+    );
+  }
+  // Every artifact boot reads it this way (`createStandaloneStack`): a local
+  // file has its runtime module merged, a remote one never does.
+  const location = isHttpUrl(artifact) ? artifact : resolvePath(hostRoot, artifact);
+  const bundle: unknown = await loadArtifactBundle(location, { tag: '[verify]', unwrapEnvelope: true });
+  if (bundle === null || typeof bundle !== 'object' || Array.isArray(bundle)) {
+    throw bootRefusal(
+      `verify: BootOptions.artifact names ${location}, and no compiled artifact could be loaded from it (the ` +
+        "loader's own line above says whether it is absent or unreadable). Build it first: `objectstack build` " +
+        "in the app's root writes dist/objectstack.json. A relative path resolves against BootOptions.hostRoot " +
+        `(${hostRoot}). The boot does not fall back to the source configuration.`,
+      'RESOURCE_NOT_FOUND',
+      404,
+    );
+  }
+  const want = appIdOf(config);
+  const got = appIdOf(bundle);
+  if (want !== undefined && got !== want) {
+    throw bootRefusal(
+      `verify: the artifact at ${location} is app ${got === undefined ? '(no manifest id)' : `'${got}'`}, and ` +
+        `the configuration it was handed with is app '${want}'. BootOptions.artifact boots the artifact built ` +
+        'from that configuration, which composes the rest of the stack. Build this configuration, or pass the ' +
+        'configuration this artifact was built from.',
+      'RESOURCE_CONFLICT',
+      409,
+    );
+  }
+  return bundle as Record<string, unknown>;
 }
 
 /**
@@ -680,6 +816,15 @@ function claimConfiguration(config: unknown): ConfigurationClaim {
  * the stack's locales). A suite that exercises either passes the provider in
  * {@link BootOptions.extraPlugins}.
  *
+ * ### The app: the configuration, or the artifact built from it
+ *
+ * By default the app this boot mounts is `config` itself, so a hook's inline
+ * `handler` runs in-process. {@link BootOptions.artifact} mounts the compiled
+ * artifact `objectstack build` wrote from `config` in its place, read by the
+ * runtime's own artifact loader, so each hook and action runs the `body` the
+ * build lowered it to, in the runtime's sandbox, as a deployment runs it. The
+ * composition above is read from `config` either way.
+ *
  * ### Offline CI: `OS_CLOUD_URL=off`
  *
  * An app whose `plugins` array wires marketplace-facing plugins (the
@@ -748,6 +893,17 @@ async function bootClaimed(
     );
   }
 
+  // The host app's root — where `multiTenant` resolves the enterprise package
+  // from, the `packageRoot` a required `automation` is handed, and what a
+  // relative `artifact` resolves against (#22301).
+  const hostRoot = opts.hostRoot ?? process.cwd();
+  // [#22301] The app this boot mounts: the configuration itself, or the
+  // artifact built from it (see BootOptions.artifact). Read before the posture
+  // is requested and the kernel is built, so a refused artifact leaves nothing
+  // to undo.
+  const appBundle: unknown =
+    opts.artifact === undefined ? config : await loadCompiledArtifact(opts.artifact, config, hostRoot);
+
   // [ADR-0105 D1] `multiTenant: true` REQUESTS the hard organization wall —
   // posture `isolated`, what `OS_MULTI_ORG_ENABLED=true` historically meant.
   // Since #3559 a walled posture is an explicit operator request resolved from
@@ -788,9 +944,6 @@ async function bootClaimed(
   };
 
   const kernel = new ObjectKernel();
-  // The host app's root — where `multiTenant` resolves the enterprise package
-  // from, and the `packageRoot` a required `automation` is handed (#22301).
-  const hostRoot = opts.hostRoot ?? process.cwd();
 
   // Data engine + in-memory SQLite (pure-JS WASM driver — no native build, CI-safe).
   // The default datasource is a DECLARED DEFINITION connected through the
@@ -815,8 +968,10 @@ async function bootClaimed(
   // hit the socket — requests are injected through the Hono app directly.
   await kernel.use(new HonoServerPlugin({ port: 0 }));
 
-  // The app under test (objects, datasets, cubes, flows, seed data).
-  await kernel.use(new AppPlugin(config));
+  // The app under test (objects, datasets, cubes, flows, seed data): the
+  // configuration, or [#22301] the compiled artifact `BootOptions.artifact`
+  // names, whose hook and action `body`s AppPlugin binds to the sandbox.
+  await kernel.use(new AppPlugin(appBundle));
 
   // Platform infrastructure `os serve` auto-injects into every served kernel:
   // the `sys_migration` flag ledger (#4243) and the `sys_secret` cipher store

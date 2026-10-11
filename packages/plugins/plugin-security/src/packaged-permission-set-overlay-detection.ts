@@ -14,9 +14,9 @@
  * ⛔ So this module READS. It has no write verb, takes no `update`/`delete`
  * path, and its test double deliberately exposes none either — a reap added
  * here would fail with a `TypeError` rather than pass quietly. The disposition
- * of an existing fork is the maintainer's call, and the sanctioned per-set
- * remedy already exists as an explicit, audited operator action
- * (`permission-set-overlay-discard.ts`), invoked one set at a time by a human.
+ * of an existing fork is the maintainer's call. A deployment upgraded onto
+ * ADR-0048's cold-boot check refuses to boot while it holds such a fork, and
+ * the offline `os migrate security-catalog-overlays` lists and deletes it.
  *
  * ## Why this is not `permission-set-drift.ts`
  *
@@ -161,9 +161,9 @@ export async function reportPackagedPermissionSetOverlays(
     `[security] ${reading.count} package-declared permission set(s) are being shadowed by an environment ` +
     'overlay — each one was forked from its package before the save door was locked, so its grants are ' +
     'frozen at the overlay and every future package upgrade of that set will be ignored, silently. ' +
-    'DETECTION ONLY: nothing was reaped, removed or changed by this reading. To resync one set to its ' +
-    'shipped artifact, use the audited "Discard Overlay" action on it; to keep the customization, clone the ' +
-    'set and reassign to the clone.',
+    'DETECTION ONLY: nothing was reaped, removed or changed by this reading. To resync a set to its ' +
+    'shipped artifact, delete its overlay row (`os migrate security-catalog-overlays` lists every such row ' +
+    'and deletes them with --apply); to keep the customization, clone the set and reassign to the clone.',
     { count: reading.count, names: reading.names, findings: reading.findings },
   );
   return reading;

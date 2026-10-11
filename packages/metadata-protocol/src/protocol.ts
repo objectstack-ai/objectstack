@@ -16628,8 +16628,9 @@ export class ObjectStackProtocolImplementation implements
      * ⛔ Except `permission`. A permission set a code package ships is guarded
      * by its own lock (ADR-0086 / ADR-0094, `packaged-permission-set-lock`),
      * and the forks stored before that lock existed have a maintainer ruling
-     * of their own: a detection reading and an operator's Discard Overlay
-     * action, "no automatic reap/merge … not a silent migration". Not serving
+     * of their own: a detection reading, "no automatic reap/merge … not a
+     * silent migration" (a cold boot now refuses such a fork, ADR-0048, and
+     * the offline `os migrate security-catalog-overlays` removes it). Not serving
      * such a fork would change the grants the deployment enforces without an
      * operator's act, so it keeps that ruling's disposition.
      */

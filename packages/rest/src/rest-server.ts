@@ -12353,8 +12353,8 @@ export class RestServer {
             // [#22719] A refusal the typed arm cannot read is asked of the
             // `/data` door's own classification before the 500 below relays
             // `.message`. A sandboxed hook's refusal carries no `statusCode`
-            // (the sandbox lifts `status` only), so `confirm`, `dismiss` and
-            // `discard-overlay` answered `500` with the QuickJS debug wrapper
+            // (the sandbox lifts `status` only), so `confirm` and `dismiss`
+            // answered `500` with the QuickJS debug wrapper
             // where every conforming write door answers the hook's own
             // sentence; a refusal declaring `status` + `code` is answered at
             // its own status too. The typed arm above is untouched, and the
@@ -12447,45 +12447,6 @@ export class RestServer {
                 } catch (err: any) { handleError(err, res, 'SUGGESTION_DISMISS_FAILED'); }
             },
             metadata: { summary: 'Dismiss a suggested audience binding', tags: ['security'] },
-        });
-
-        /**
-         * [field report — rc→GA declared≠enforced surfacing] The sanctioned,
-         * audited operator action: discard a stale `sys_metadata` overlay
-         * shadowing a package-declared `sys_permission_set` (the
-         * `overlay_shadow` diagnostic on the record — see
-         * `permission-set-drift.ts`). Bound to `sys_permission_set`'s
-         * "Discard Overlay" Setup action (`{id}` route param, same
-         * convention as `/data/sys_permission_set/{id}`). Refuses (403) on a
-         * set that is not currently package-declared — see
-         * `permission-set-overlay-discard.ts`'s eligibility note — and 409s
-         * when there is no active overlay to discard.
-         *
-         *   POST {basePath}/security/permission-sets/:id/discard-overlay
-         */
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/security/permission-sets/:id/discard-overlay`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc || typeof svc.discardPermissionSetOverlay !== 'function') return respond501(res);
-                    const result = await svc.discardPermissionSetOverlay(context ?? {}, String(req.params.id));
-                    res.json({ data: result });
-                // 'INTERNAL' (registered, generic — ADR-0112) is the default here
-                // deliberately, not a bespoke `..._FAILED` code: this route's typed
-                // errors (`PermissionSetNotFoundError` 404, `PermissionSetOverlayStateError`
-                // 409, `PermissionDeniedError` 403) already carry their own registered
-                // `code`, which `handleError`'s `status !== 500` arm reads ahead of this
-                // default — this string is reached only by a genuinely unexpected fault,
-                // and a NEW route-specific code for that arm is a `packages/spec` ledger
-                // entry this change deliberately does not make.
-                } catch (err: any) { handleError(err, res, 'INTERNAL'); }
-            },
-            metadata: { summary: 'Discard a stale environment overlay shadowing a package-declared permission set (ADR-0094)', tags: ['security'] },
         });
     }
 

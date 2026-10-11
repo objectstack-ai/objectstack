@@ -80,12 +80,11 @@ export type SeedLogger = {
  *
  * EXPORTED rather than module-private, for the reason its own doc gives — the
  * fallback "lives in {@link logSeedDurabilityFailure} so no site can forget
- * it". Two sites outside the catalog seed now report a refused write and owe
+ * it". One site outside the catalog seed reports a refused write and owes
  * the identical fallback: `permission-set-drift.ts` (a refused drift-diagnostic
- * write) and `permission-set-overlay-discard.ts` (a refused resync after a
- * sanctioned overlay discard). They reuse this spelling and NOT
- * {@link reportSeedWriteRefusals}, whose PROSE is catalog-seed-specific — see
- * the deviation note in each of those call sites. Deliberately absent from the
+ * write). It reuses this spelling and NOT {@link reportSeedWriteRefusals},
+ * whose PROSE is catalog-seed-specific — see the deviation note at that call
+ * site. Deliberately absent from the
  * package's `index.ts`: this is an intra-package helper, not public API.
  */
 export function logSeedDurabilityFailure(
