@@ -195,7 +195,7 @@ async function resolverByPrincipal(posture: Posture): Promise<Record<string, unk
   });
   await engine.insert(
     'sys_user_permission_set',
-    { user_id: 'usr_member', permission_set_id: (viewer as any).id },
+    { user_id: 'usr_member', permission_set: (viewer as any).name },
     {
       context: {
         userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG, accessible_org_ids: [ORG],
@@ -207,13 +207,13 @@ async function resolverByPrincipal(posture: Posture): Promise<Record<string, unk
   const setId = async (name: string) =>
     String(((await engine.find('sys_permission_set', { where: { name, organization_id: null }, context: SYS })) as any[])[0]?.id);
   await engine.insert('sys_user_permission_set', [
-    { id: 'ups_member_legacy', user_id: 'usr_member', permission_set_id: 'ps_legacy_reports', organization_id: ORG },
+    { id: 'ups_member_legacy', user_id: 'usr_member', permission_set: 'legacy_reports', organization_id: ORG },
     {
-      id: 'ups_agent_read', user_id: 'usr_agent', permission_set_id: await setId('mcp_agent_data_read'),
+      id: 'ups_agent_read', user_id: 'usr_agent', permission_set: 'mcp_agent_data_read',
       organization_id: ORG, valid_until: FUTURE,
     },
     {
-      id: 'ups_agent_write', user_id: 'usr_agent', permission_set_id: await setId('mcp_agent_data_write'),
+      id: 'ups_agent_write', user_id: 'usr_agent', permission_set: 'mcp_agent_data_write',
       organization_id: ORG, valid_until: EXPIRED,
     },
   ], { context: orgCtx } as any);
