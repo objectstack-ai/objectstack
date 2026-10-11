@@ -18,7 +18,8 @@
 //     carrying that read's attribution.
 //
 // "Can read" is the read door's own by-id read asked with the asker's context
-// (the question the write doors ask). A system asker reads every row.
+// (the question the write doors ask). A system asker is asked too, and the
+// read door returns it every row (the system asker's cells below).
 //
 // ## The rig
 //
@@ -408,11 +409,11 @@ describe('the read question, engine level: who it is asked of, and how often', (
     }
   });
 
-  it('a system asker reads every row: it is never asked, and gets the explained principal\'s story', async () => {
+  it('a system asker is asked like any other asker: there is no exemption beside the read door\'s own answer', async () => {
     for (const verb of VERBS) {
-      const question = door(SYSTEM_CONTEXT);
+      const question = door();
       const bySystem = await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, SYSTEM_CONTEXT);
-      expect(question.mock.calls.map((c) => c[2]), verb).not.toContain(SYSTEM_CONTEXT);
+      expect(question.mock.calls[0][2], verb).toBe(SYSTEM_CONTEXT);
       expect(bySystem.record, verb).toMatchObject({ recordId: STORED.id, visible: true });
     }
   });

@@ -2395,11 +2395,10 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, askerCo
     // answer an id no row carries gets: the record verdict and every layer's
     // `record`, all from the one missing-record path below. The question is
     // the read door's own (`recordAbsentToCaller`), asked with the asker's
-    // context, so there is one notion of "can read". A system asker reads
-    // every row, so it is never asked.
+    // context, so there is one notion of "can read" and no exemption beside
+    // it: a system asker is asked too, and the door returns it every row.
     const asker = askerContext ?? context;
     const askerCannotRead =
-      asker?.isSystem !== true &&
       readQuestion !== undefined &&
       (await readQuestion(object, recordId, asker));
     // [#21771] Ruling A on the write doors: a row the principal cannot READ is
