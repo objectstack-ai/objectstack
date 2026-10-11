@@ -428,8 +428,9 @@ describe('[ADR-0131 D4] a removed declaration is reported; re-adding it clears t
       { id: 'ps_auditor', name: AUDITOR.name, label: 'Auditor', system_permissions: AUDITOR.systemPermissions },
     ]);
     await insertRows(b, 'sys_position', [{ id: 'pos_field', name: FIELD_LEAD.name, label: 'Field lead' }]);
-    // The binding both ways the trees carry it: the junction row today, the
-    // definition's `permissionSets` once the resolver reads the catalog.
+    // A junction row beside the definition's `permissionSets`: the resolver
+    // reads only the definition, so this row grants nothing on its own — it is
+    // here to show that a row left behind keeps nothing alive.
     await insertRows(b, 'sys_position_permission_set', [
       { id: 'pps_field', position_id: 'pos_field', permission_set_id: 'ps_auditor' },
     ]);
@@ -466,14 +467,13 @@ describe('[ADR-0131 D4] a removed declaration is reported; re-adding it clears t
     expect(await reported(b)).toEqual({ grants: [], assignments: [] });
   });
 
-  // PENDING STAGE 1. The resolver half of the stage-plan pin ("a removed
-  // declaration fails closed and is reported; re-adding it clears both"). On
-  // this tree the authorization resolver still reads set bodies from
-  // `sys_permission_set` rows and position bindings from the junction, so a
-  // declaration removed while its row stays keeps granting: measured, this
-  // case fails on the tree it lands on. Enable it (`it.skip` → `it`) in the
-  // change that moves the resolver onto the catalog read.
-  it.skip('PENDING STAGE 1: the removed declaration fails closed at the resolver, and re-adding it restores the grant', async () => {
+  // The resolver half of the stage-plan pin ("a removed declaration fails
+  // closed and is reported; re-adding it clears both"). The authorization
+  // resolver reads set bodies and the position's `permissionSets` from the
+  // security catalog, so the rows `seedHolder` leaves behind — the set row and
+  // the junction row included — keep nothing granting once the declarations
+  // are gone.
+  it('the removed declaration fails closed at the resolver, and re-adding it restores the grant', async () => {
     const b = await boot();
     await seedHolder(b);
     const held = async () => {
