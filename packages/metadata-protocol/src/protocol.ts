@@ -3,7 +3,7 @@
 import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError } from '@objectstack/core';
+import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
 import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
@@ -4473,47 +4473,6 @@ const EXPANSION_TARGET_OPERATION = 'get';
  * `GET /data/{target}?filter=…` performs, and that route is judged `list`.
  */
 const RELATION_CONDITION_TARGET_OPERATION = 'list';
-
-/**
- * [#22646] The NESTED-RELATION conditions a filter holds — a key naming a
- * reference field of the object (`REFERENCE_VALUE_TYPES`) whose value is a
- * plain record carrying at least one non-`$` key, i.e. a condition on the
- * related object rather than an operator bag — with each site's target object.
- * Logical combinators (and any other `$` key) are walked as conditions, so a
- * site under `$or` / `$not` is found. Shared by the door's internal-field
- * refusal; the engine's own relation lowering is the authority on whether a
- * site RUNS, this only finds what a filter would evaluate on the related object.
- */
-function relationConditionSites(
-    fields: Record<string, any> | undefined,
-    root: unknown,
-): Array<{ field: string; target: string; condition: Record<string, unknown> }> {
-    const sites: Array<{ field: string; target: string; condition: Record<string, unknown> }> = [];
-    if (!fields || typeof fields !== 'object') return sites;
-    const seen = new WeakSet<object>();
-    const pending: unknown[] = [root];
-    while (pending.length > 0) {
-        const node = pending.pop();
-        if (node === null || typeof node !== 'object' || seen.has(node)) continue;
-        seen.add(node);
-        if (Array.isArray(node)) {
-            for (const member of node) pending.push(member);
-            continue;
-        }
-        for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-            if (key.startsWith('$')) {
-                pending.push(value);
-                continue;
-            }
-            const def = fields[key];
-            if (def == null || !REFERENCE_VALUE_TYPES.has(def.type) || !isPlainRecord(value)) continue;
-            if (!Object.keys(value).some((k) => !k.startsWith('$'))) continue;
-            const target = referenceTargetOf(def);
-            if (target) sites.push({ field: key, target, condition: value });
-        }
-    }
-    return sites;
-}
 
 /**
  * The walk {@link collectStoredMetadataFilterFields} runs over one filter
