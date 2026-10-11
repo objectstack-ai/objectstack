@@ -758,8 +758,9 @@ Principles the wrapper encodes (its own output is the authority on detail):
   a name, with accepted cases in the shrink-only, hand-edited
   `dual-source-exports.baseline.json`.
 
-Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
-their output is current; the wrapper reports that each run rather than staying silent.
+Three generators have **no** gate at all. Nothing verifies `gen:openapi` and `gen:sbom`
+are current, and `gen:migration-registry` writes gitignored output that install, build and
+test regenerate; the wrapper reports all three each run rather than staying silent.
 
 ---
 ## Context Routing — apply the right role per path
