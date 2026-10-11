@@ -534,7 +534,7 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
   describe('#5633 — descends into nested regions for the data-node evidence', () => {
     /** The canonical scheduled sweep: the write lives in the loop BODY. */
     const loopConfig = (bodyNodeType = 'update_record') => ({
-      collection: '{vars.rows}',
+      collection: { dialect: 'cel', source: 'vars.rows' },
       iteratorVariable: 'row',
       body: {
         nodes: [{
@@ -655,12 +655,12 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
             {
               id: 'loop_rows', type: 'loop',
               config: {
-                collection: '{vars.rows}', iteratorVariable: 'row',
+                collection: { dialect: 'cel', source: 'vars.rows' }, iteratorVariable: 'row',
                 body: {
                   nodes: [{
                     id: 'loop_children', type: 'loop', label: 'Loop Children',
                     config: {
-                      collection: '{row.children}', iteratorVariable: 'child',
+                      collection: { dialect: 'cel', source: 'row.children' }, iteratorVariable: 'child',
                       body: {
                         nodes: [{ id: 'touch', type: 'create_record', label: 'Create', config: { objectName: 'thing', fields: { a: 1 } } }],
                         edges: [],
@@ -1347,7 +1347,7 @@ describe('flow-inert-node-condition (#4414)', () => {
  * rather than a retyped copy that can drift away from it silently.
  */
 const loopLeadsConfig = (body: { nodes: unknown[]; edges: unknown[] }) => ({
-  collection: '{vars.leads}',
+  collection: { dialect: 'cel', source: 'vars.leads' },
   iteratorVariable: 'lead',
   body,
 });
@@ -1423,7 +1423,7 @@ describe('#5700 — the shared loop container is a shape an author can actually 
       nodes: [{
         id: 'loop_touchpoints', type: 'loop', label: 'Loop Touchpoints',
         config: {
-          collection: '{lead.touchpoints}', itemVar: 'tp',
+          collection: { dialect: 'cel', source: 'lead.touchpoints' }, itemVar: 'tp',
           body: { nodes: [{ id: 'reset', type: 'update_record', label: 'Reset', config: {} }], edges: [] },
         },
       }],
@@ -1433,7 +1433,7 @@ describe('#5700 — the shared loop container is a shape an author can actually 
 
     // …whereas the very same inner config, parsed as the container it is, is refused.
     expect(refusedKeys(LoopConfigSchema.safeParse({
-      collection: '{lead.touchpoints}', itemVar: 'tp',
+      collection: { dialect: 'cel', source: 'lead.touchpoints' }, itemVar: 'tp',
       body: { nodes: [{ id: 'reset', type: 'update_record', label: 'Reset', config: {} }], edges: [] },
     })).join(' ')).toMatch(/Unrecognized key\(s\) on this loop container config: `itemVar`/);
   });
@@ -1493,7 +1493,7 @@ describe('#5383 — flow-inert-node-condition descends into a loop body', () => 
    * declares `config` as an open record).
    */
   const nestedTouchpointsLoop = {
-    collection: '{lead.touchpoints}', iteratorVariable: 'tp',
+    collection: { dialect: 'cel', source: 'lead.touchpoints' }, iteratorVariable: 'tp',
     body: {
       nodes: [{ id: 'check_recent', type: 'decision', label: 'Check Recent', config: { condition: 'tp.age_days < 7' } }],
       edges: [],
@@ -1968,7 +1968,7 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
      * `FlowNodeSchema` declares `config` as an open record.
      */
     const nestedTouchpointsResetLoop = {
-      collection: '{lead.touchpoints}', iteratorVariable: 'tp',
+      collection: { dialect: 'cel', source: 'lead.touchpoints' }, iteratorVariable: 'tp',
       body: {
         nodes: [{
           id: 'reset', type: 'update_record', label: 'Reset Touchpoints',
@@ -2034,7 +2034,7 @@ describe('per-iteration containment (#13681 / #14394)', () => {
         {
           id: 'each', type: 'loop', label: 'For each breached case',
           config: {
-            collection: '{cases}', iteratorVariable: 'currentCase',
+            collection: { dialect: 'cel', source: 'cases' }, iteratorVariable: 'currentCase',
             body: { nodes: bodyNodes, edges: bodyEdges },
             ...loopExtra,
           },
@@ -2087,7 +2087,7 @@ describe('per-iteration containment (#13681 / #14394)', () => {
         { id: 'n7', type: 'connector_action', label: 'Connector', config: { connectorId: 'c', action: 'a' } },
         { id: 'n8', type: 'script', label: 'Script', config: { function: 'f' } },
         { id: 'n9', type: 'subflow', label: 'Subflow', config: { flowName: 'child' } },
-        { id: 'n10', type: 'map', label: 'Map', config: { collection: '{items}' } },
+        { id: 'n10', type: 'map', label: 'Map', config: { collection: { dialect: 'cel', source: 'items' } } },
         { id: 'n11', type: 'approval', label: 'Approval', config: { approvers: ['{$User.Id}'] } },
       ];
       const fnds = lintFlowPatterns(sweep(fallible)).filter((f) => f.rule === FLOW_LOOP_BODY_UNCONTAINED);
@@ -2124,7 +2124,7 @@ describe('per-iteration containment (#13681 / #14394)', () => {
           name: 'case_sla_monitor', label: 'Case SLA monitor', type: 'schedule', runAs: 'system',
           nodes: [
             { id: 'start', type: 'start', label: 'Start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
-            { id: 'each', type: 'loop', label: 'Loop', config: { collection: '{cases}', iteratorVariable: 'currentCase' } },
+            { id: 'each', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'cases' }, iteratorVariable: 'currentCase' } },
             { id: 'notify_owner', type: 'notify', label: 'Notify owner', config: { title: 'SLA breach' } },
           ],
           edges: [{ id: 'e1', source: 'start', target: 'each' }, { id: 'e2', source: 'each', target: 'notify_owner' }],
@@ -2170,7 +2170,7 @@ describe('per-iteration containment (#13681 / #14394)', () => {
       const fnds = lintFlowPatterns(sweep([{
         id: 'each_line', type: 'loop', label: 'For each line',
         config: {
-          collection: '{currentCase.lines}', iteratorVariable: 'line',
+          collection: { dialect: 'cel', source: 'currentCase.lines' }, iteratorVariable: 'line',
           body: { nodes: [notifyOwner], edges: [] },
         },
       }]));
@@ -2272,7 +2272,7 @@ describe('per-iteration containment (#13681 / #14394)', () => {
         {
           id: 'each_case', type: 'loop', label: 'For each breached case',
           config: {
-            collection: '{cases}',
+            collection: { dialect: 'cel', source: 'cases' },
             iteratorVariable: 'currentCase',
             body: {
               nodes: [{
@@ -2690,7 +2690,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         // [#19939] The maps a node hands to a callee joined the value slots:
         // the hint flips there by asking the judge, with no line of its own.
         ['$source.id', 'subflow', (v: unknown) => ({ flowName: 'child_flow', input: { v } })],
-        ['$User.Id', 'map', (v: unknown) => ({ flowName: 'child_flow', collection: '{rows}', input: { v } })],
+        ['$User.Id', 'map', (v: unknown) => ({ flowName: 'child_flow', collection: { dialect: 'cel', source: 'rows' }, input: { v } })],
         ['$error.message', 'script', (v: unknown) => ({ function: 'score', inputs: { v } })],
       ] as const)('`%s` in the %s value slot: each envelope it prescribes passes every judge with 0 refusals', (ref, type, configOf) => {
         const fnds = bareDollar(valueFlow(type, configOf(ref)));
@@ -2709,7 +2709,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       // gives at that position.
       it.each([
         ['subflow', 'subflow input value', { flowName: 'child_flow', input: { who: '$source.id' } }, "the child flow's input variable `who`"],
-        ['map', 'map item input value', { flowName: 'child_flow', collection: '{rows}', input: { who: '$source.id' } }, "each item's child flow's input variable `who`"],
+        ['map', 'map item input value', { flowName: 'child_flow', collection: { dialect: 'cel', source: 'rows' }, input: { who: '$source.id' } }, "each item's child flow's input variable `who`"],
         ['script', 'script input value', { function: 'score', inputs: { who: '$source.id' } }, "the function's `input.who`"],
       ] as const)('%s: names the CEL envelope and what the callee is handed, not `{source.id}`', (type, label, config, callee) => {
         const [f] = bareDollar(valueFlow(type, config));
@@ -2862,7 +2862,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       // envelope there too, by asking the judge — no line of its own.
       it.each([
         ['subflow', 'subflow input value', (v: unknown) => ({ flowName: 'child_flow', input: { subject: v } })],
-        ['map', 'map item input value', (v: unknown) => ({ flowName: 'child_flow', collection: '{rows}', input: { subject: v } })],
+        ['map', 'map item input value', (v: unknown) => ({ flowName: 'child_flow', collection: { dialect: 'cel', source: 'rows' }, input: { subject: v } })],
         ['script', 'script input value', (v: unknown) => ({ function: 'score', inputs: { subject: v } })],
       ] as const)('in a %s input: names the envelope for the hole it means', (type, label, configOf) => {
         const [f] = doubleBrace(valueFlow(type, configOf('Re: {{ record.title }}')));
@@ -3006,7 +3006,7 @@ describe('a non-record member of a flow `edges` list (#16910)', () => {
       name: 'crm_flow',
       nodes: [
         { id: 'start', type: 'start', config: {} },
-        { id: 'lp', type: 'loop', config: { collection: 'x', body: { nodes: ENDPOINTS, edges } } },
+        { id: 'lp', type: 'loop', config: { collection: { dialect: 'cel', source: 'x' }, body: { nodes: ENDPOINTS, edges } } },
       ],
       edges: [],
     }],
@@ -3105,7 +3105,7 @@ describe('decision `mode` (#15429)', () => {
         {
           id: 'each', type: 'loop', label: 'Each',
           config: {
-            collection: '{vars.rows}',
+            collection: { dialect: 'cel', source: 'vars.rows' },
             iteratorVariable: 'row',
             body: {
               nodes: [

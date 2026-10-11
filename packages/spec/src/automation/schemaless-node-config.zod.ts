@@ -460,7 +460,7 @@ export const DecisionConditionSchema = lazySchema(() => strictObject({
    *
    * `xExpression: 'expression'` is what carries that from a comment into the
    * machine-readable contract (#4439): it rides the `.meta()` → JSON-Schema
-   * channel (same as `loop.collection`'s `'template'` marker), so the
+   * channel (the channel every spec Zod contract's markers ride), so the
    * expression ledger can claim this slot even though `decision` publishes no
    * descriptor `configSchema`, and `registerFlow` / `objectstack validate` then
    * check it as the bare CEL it is. Before that the declaration was prose only:
@@ -666,7 +666,8 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
  * values its descriptor offers as unmarked inputs (the Studio form renders
  * them as it always did), so their markers ride `ScreenConfigSchema` too.
  * `map`'s other expression slot, `collection`, keeps arriving through its
- * descriptor (`xExpression: 'template'`), and so does `screen`'s
+ * descriptor (`xExpression: 'value'` since #19939 made it a value slot; it
+ * was `'template'`), and so does `screen`'s
  * `fields[].visibleWhen` (`xExpression: 'expression'`): the spec Zod carries no
  * marker there, so the two channels never declare one slot twice. Kept apart
  * from {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} on purpose: that map means

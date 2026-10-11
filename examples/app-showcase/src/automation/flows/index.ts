@@ -916,7 +916,7 @@ export const BatchRemindersFlow = defineFlow({
       type: 'loop',
       label: 'For each task',
       config: {
-        collection: '{tasks}',
+        collection: { dialect: 'cel', source: 'tasks' },
         iteratorVariable: 'task',
         indexVariable: 'taskIndex',
         maxIterations: 500,
@@ -1116,7 +1116,7 @@ export const NestedFanOutRemindersFlow = defineFlow({
       type: 'loop',
       label: 'For each task',
       config: {
-        collection: '{tasks}',
+        collection: { dialect: 'cel', source: 'tasks' },
         iteratorVariable: 'task',
         indexVariable: 'taskIndex',
         maxIterations: 500,
@@ -1541,7 +1541,7 @@ export const ReleaseSignoffFlow = defineFlow({
       type: 'map',
       label: 'Sign off each task',
       config: {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'task',
         flowName: 'showcase_one_task_signoff',
         itemObject: 'showcase_task',

@@ -886,7 +886,7 @@ function storedCalloutFlow() {
             {
                 id: 'each', type: 'loop', label: 'Each',
                 config: {
-                    collection: '{rows}',
+                    collection: { dialect: 'cel', source: 'rows' },
                     body: { nodes: [{ id: 'per_row', type: 'http', label: 'Per row', config: { url: 'https://a', durable: true, signingSecret: SIGNING } }], edges: [] },
                 },
             },

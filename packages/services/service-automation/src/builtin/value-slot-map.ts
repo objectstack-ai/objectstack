@@ -21,6 +21,9 @@ import { interpolate, type VariableMap } from './template.js';
  *    client (and, through {@link resolveValueSlot}, a field's `defaultValue`
  *    and an object form's `recordId`).
  *
+ * A `loop`'s and a `map`'s `collection` (#19939) is a value slot too, whose
+ * literal is a list: {@link resolveCollectionSlot}.
+ *
  * Per key, by SHAPE — the rule the ledger resolver and the spec contract
  * (`FlowValueSlotSchema`) draw with the same predicate, imported rather than
  * re-spelled, so "which values does the validator judge" and "which values
@@ -92,4 +95,50 @@ export function resolveValueSlot(
     return isExpressionEnvelopeShaped(value)
         ? engine.evaluateValueEnvelope(value, variables, where, context)
         : interpolate(value, variables, context);
+}
+
+/**
+ * Resolve a `loop`'s (with a `body`) or a `map`'s `collection` — the list the
+ * node iterates, a `value` slot whose literal is a list (#19939, the spec's
+ * `FlowCollectionSlotSchema`). The executor half of the same rule:
+ *
+ *  - an envelope-shaped value is a CEL value envelope, EVALUATED by
+ *    `AutomationEngine.evaluateValueEnvelope` in the run's scope and context,
+ *    like every value slot's — a malformed one, or one that faults on the live
+ *    variables (an absent variable, key or index), throws with its source;
+ *  - an inline array is the list AS WRITTEN — never handed to the
+ *    interpolator, whose recursion would resolve a `{…}` in a string the
+ *    executors never interpolated: an inline list's elements are data.
+ *
+ * Nothing else arrives: each executor's `parseNodeConfig` has refused a string
+ * — a `{…}` token of the retired dialect, and a variable's bare name, which the
+ * structured `loop` and `map` never read (the interpolator handed the name
+ * back, and every run failed at the node) — and every other value. The caller
+ * checks the result is a list ({@link collectionNotAList}).
+ */
+export function resolveCollectionSlot(
+    engine: AutomationEngine,
+    value: unknown,
+    variables: VariableMap,
+    context: AutomationContext,
+): unknown {
+    return isExpressionEnvelopeShaped(value)
+        ? engine.evaluateValueEnvelope(value, variables, 'collection', context)
+        : value;
+}
+
+/**
+ * Why an evaluated `collection` is no list — the returned failure a `loop` and
+ * a `map` fail the node with, naming what the envelope evaluated to and its
+ * source. A `null` lands here, the guarded form's answer for an absent list:
+ * it fails the node as an unresolved `{token}` did, and a guard answering `[]`
+ * iterates nothing instead.
+ */
+export function collectionNotAList(value: unknown, resolved: unknown): string {
+    const source = (value as { source?: unknown } | null)?.source;
+    const kind = resolved === null ? '`null`'
+        : resolved === undefined ? 'nothing'
+            : typeof resolved === 'object' ? 'a map'
+                : `a ${typeof resolved}`;
+    return `collection evaluated to ${kind}, not a list — source: \`${typeof source === 'string' ? source : ''}\``;
 }

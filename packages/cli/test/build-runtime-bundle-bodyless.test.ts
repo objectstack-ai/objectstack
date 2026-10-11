@@ -193,11 +193,11 @@ describe('os build writes the runtime module when a `functions` entry still need
     // The hook still ships its lowered body; the entry is what needs the module.
     expect(artifact.hooks[0].body?.language).toBe('js');
 
-    // Every `functions` entry the artifact declares resolves to a callable.
+    // The entry ships under its authored key, and that key runs the function
+    // (#22886: it used to be re-keyed to the hook's ref, `pb_tidy`).
+    expect(artifact.functions).toEqual({ pb_score: 'pb_score' });
     const loaded = await loadArtifactBundle(artifactPath(dirs['hook-and-function']));
-    const declared = Object.keys(artifact.functions as Record<string, unknown>);
-    expect(declared).toHaveLength(1);
-    for (const key of declared) expect(typeof loaded?.functions?.[key], key).toBe('function');
+    expect(typeof loaded?.functions?.pb_score, 'the module supplied no `pb_score`').toBe('function');
   }, SPAWN_TIMEOUT_MS);
 
   it.each(['all-body-only', 'all-body-only-two-level'] as const)(
