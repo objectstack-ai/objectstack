@@ -594,7 +594,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       currencyConfig: {
         label: "Configuración de moneda",
-        helpText: "En qué moneda está este campo. Sin definir: modo dynamic. En ambos modos el valor almacenado es un número sin más."
+        helpText: "En qué moneda está este campo: un campo de moneda, o una fórmula cuyo tipo de retorno es Moneda. Sin definir: modo dynamic. En ambos modos el valor es un número sin más."
       },
       "currencyConfig.currencyMode": {
         label: "Modo de moneda",
@@ -744,7 +744,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       returnType: {
         label: "Tipo de retorno",
-        helpText: "Tipo de valor declarado de la fórmula, registrado a partir del tipo CEL inferido. Los consumidores lo leen en vez de volver a analizar la expresión."
+        helpText: "Tipo de valor declarado de la fórmula, registrado a partir del tipo CEL inferido. Los consumidores lo leen en vez de volver a analizar la expresión. Moneda: un importe, en la moneda que declara la configuración de moneda de este campo (dynamic si no se define)."
       },
       summaryOperations: {
         label: "Operaciones de resumen",

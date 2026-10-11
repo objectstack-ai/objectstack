@@ -162,6 +162,7 @@
  */
 
 import type { FilterCondition } from './filter.zod';
+import type { Field } from './field.zod';
 import {
   BOOLEAN_VALUE_TYPES,
   CALENDAR_DATE_TYPES,
@@ -240,12 +241,17 @@ export const TEXT_OPERATOR_DOOR_PASSING_TYPES: ReadonlySet<string> = new Set([
  * judges it. Every value of `FieldSchema.returnType` IS a `FieldType` member,
  * so the map is the identity over that enum — spelled out so an enum value
  * added later is a loud pin failure rather than a silent `passes`.
+ *
+ * `currency` (#22727) is judged as the `currency` field it reads like: a member
+ * of the numeric class, so this door refuses a text operator on it and the
+ * number door judges its comparands, exactly as for a `currency` field.
  */
 export const FORMULA_RETURN_TYPE_AS_FIELD_TYPE: ReadonlyMap<string, string> = new Map([
   ['number', 'number'],
   ['text', 'text'],
   ['boolean', 'boolean'],
   ['date', 'date'],
+  ['currency', 'currency'],
 ]);
 
 /**
@@ -406,7 +412,7 @@ export interface TextOperatorDoorFixtureField {
   /** `formula` — a CEL expression, present so the field is a legal declaration. */
   readonly expression?: string;
   /** `formula` — the declared return type under test, or absent for the deferred row. */
-  readonly returnType?: 'number' | 'text' | 'boolean' | 'date';
+  readonly returnType?: NonNullable<Field['returnType']>;
   /** `summary` — a roll-up declaration, present so the field is a legal declaration. */
   readonly summaryOperations?: { readonly object: string; readonly field: string; readonly function: 'count' };
   /** Single-choice types (`select` / `radio`) — one option, present so the field is a legal declaration. */
@@ -446,7 +452,7 @@ export const TEXT_OPERATOR_DOOR_FIXTURE_FIELDS: readonly TextOperatorDoorFixture
     name: `f_formula_${returnType}`,
     type: 'formula',
     expression: '1',
-    returnType: returnType as 'number' | 'text' | 'boolean' | 'date',
+    returnType: returnType as NonNullable<Field['returnType']>,
   })),
   { name: 'f_formula_untyped', type: 'formula', expression: '1' },
 ];
