@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { HookContext } from '@objectstack/spec/data';
+import type { EnableLike, HookContext } from '@objectstack/spec/data';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 // [#6656] The read-mask CONTRACT, imported rather than re-typed. `SECRET_MASK`
 // is the exact string the engine's read path substitutes and
@@ -25,7 +25,9 @@ import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from 
 // heuristic here would be a second de-facto contract that disagrees with the
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
-import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+// [#22738] `canServeApiOperation` is the spec's one exposure decision (ADR-0049),
+// asked of a referenced object before its title is read into a summary.
+import { canServeApiOperation, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
 // [#22510] The acting user's object, named by the registry constant rather
 // than a literal — `sys_activity.actor_name` is resolved from its title.
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -492,6 +494,36 @@ function referenceTargetForSummary(field: any): string {
     return '';
   }
   return typeof target === 'string' ? target.trim() : '';
+}
+
+/**
+ * [#22738] May an activity summary carry a title read from `target`, the object
+ * a tracked reference points at? Asked of the spec's one exposure decision
+ * (ADR-0049) for `get`, the read `GET /data/{target}/{id}` performs and the
+ * operation the data door's `$expand` and the dataset door's labels ask of the
+ * same target. It takes no caller: the title is read under `api.sudo()`.
+ *
+ * A refused target is not read, so the summary names its records by their
+ * stored ids, the answer an unresolvable reference already gets. A declaration
+ * that cannot be read withholds too (fail-closed, at `warn`). Only rows written
+ * from now on change; a written row is a snapshot and is never rewritten.
+ */
+function servesSummaryTitleTarget(
+  target: string,
+  readDeclaration: (objectName: string) => { enable?: unknown } | null | undefined,
+  logger?: { warn?: (message: string) => void },
+): boolean {
+  let enable: EnableLike | null | undefined;
+  try {
+    enable = readDeclaration(target)?.enable as EnableLike | null | undefined;
+  } catch (err) {
+    logger?.warn?.(
+      `[audit] resolveLookupTitles: the API exposure declaration of "${target}" could not be read, so the ` +
+        `summary names its records by their stored ids (fail-closed): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+  return canServeApiOperation(enable, 'get');
 }
 
 /**
@@ -1345,7 +1377,9 @@ export function installAuditWriters(
    *
    * Best-effort throughout: an unregistered object, an unreadable row or a
    * failing driver leaves the id unresolved, and `displayFieldValue` renders the
-   * raw id exactly as it did before this branch existed.
+   * raw id exactly as it did before this branch existed. [#22738] So does a
+   * target whose declared exposure does not serve `get`
+   * ({@link servesSummaryTitleTarget}): it is not read at all.
    */
   const resolveLookupTitles = async (
     api: any,
@@ -1355,6 +1389,7 @@ export function installAuditWriters(
     const sys = api.sudo();
     const out = new Map<string, Map<string, string>>();
     for (const [objectName, idSet] of plan) {
+      if (!servesSummaryTitleTarget(objectName, (name) => (engine as any).getSchema?.(name), (engine as any).logger)) continue;
       const titleField = titleFieldOf(objectName);
       if (!titleField) continue;
       const ids = Array.from(idSet);

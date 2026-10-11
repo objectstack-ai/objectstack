@@ -93,7 +93,7 @@ const fixtureStack = defineStack({
   flows: [flow],
 });
 
-const crud = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+const crud = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false };
 const read = { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false };
 const memberSet = PermissionSetSchema.parse({
   name: 'lte_member', label: 'LTE member',
@@ -129,10 +129,14 @@ describe('[#22738] a lookup title is served only for a target whose declared exp
     token.member = await stack.signUp('lte-member@verify.test');
     token.submitter = await stack.signUp('lte-submitter@verify.test');
 
-    // Both personas approve: the slate resolves when the request opens.
-    await ql.insert('sys_position', { id: 'pos_lte', name: POSITION, label: 'Reviewer', active: true }, SYS);
-    for (const email of ['admin@objectos.ai', 'lte-member@verify.test']) {
-      await ql.insert('sys_user_position', { user_id: await userId(email), position: POSITION }, SYS);
+    // Both personas approve, in the organization the request opens in: the
+    // slate resolves when the request opens.
+    const memberId = await userId('lte-member@verify.test');
+    const org = (await ql.findOne('sys_member', { where: { user_id: memberId }, ...SYS }))?.organization_id;
+    expect(org, 'the member belongs to an organization').toBeTruthy();
+    await ql.insert('sys_position', { id: 'pos_lte', name: POSITION, label: 'Reviewer', active: true, organization_id: org }, SYS);
+    for (const id of [await userId('admin@objectos.ai'), memberId]) {
+      await ql.insert('sys_user_position', { user_id: id, position: POSITION, organization_id: org }, SYS);
     }
     for (const r of RELS) ids[r] = String((await ql.insert(TARGETS[r].object, { name: TARGETS[r].title }, SYS)).id);
     const refs = Object.fromEntries(RELS.map((r) => [r, ids[r]]));
