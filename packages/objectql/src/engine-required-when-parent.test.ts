@@ -334,20 +334,31 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
     // `resolveMasterDetailParents`), so that is what is counted here — the
     // `findOne`s on the same object belong to the #4441 reference guard and are
     // not this change's cost.
-    const reads: string[] = [];
+    //
+    // [#22519] The resolution is two reads, each ONE batched `find`: the
+    // caller's read door (under the caller's own context), then the elevated
+    // read for the headers it returned. The reference guard asks the read door
+    // too, one single-id `find` per supplied header, ahead of its `findOne`.
+    const reads: Array<{ object: string; ids: unknown; elevated: boolean }> = [];
     const original = (engine as any).find.bind(engine);
     (engine as any).find = async (name: string, q: any, o?: any) => {
-      reads.push(name);
+      reads.push({ object: name, ids: q?.where?.id?.$in, elevated: q?.context?.isSystem === true });
       return original(name, q, o);
     };
+    const headerReads = () => reads.filter((r) => r.object === 'showcase_invoice');
+    const naming = (n: number) => (r: { ids: unknown }) => Array.isArray(r.ids) && r.ids.length === n;
     // Two rows under the SAME master, and two more under another: N rows, M
-    // masters, ONE query.
+    // masters, ONE query per read.
     await engine.insert('showcase_invoice_line', [
       { invoice: 'INV-SENT', description: 'a', quantity: 1 },
       { invoice: 'INV-SENT', description: 'b', quantity: 1 },
       { invoice: 'INV-DRAFT', quantity: 1 },
     ] as any);
-    expect(reads.filter((r) => r === 'showcase_invoice')).toHaveLength(1);
+    expect(headerReads().filter((r) => r.elevated)).toHaveLength(1);
+    expect(headerReads().filter((r) => !r.elevated && naming(2)(r))).toHaveLength(1);
+    // The rest: the reference guard's read door, one per supplied header.
+    expect(headerReads().filter((r) => !r.elevated && naming(1)(r))).toHaveLength(3);
+    expect(headerReads()).toHaveLength(5);
 
     // An object with only record-scoped requirements pays nothing extra.
     engine.registry.registerObject({
@@ -360,7 +371,9 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
     } as any, 'test-package');
     reads.length = 0;
     await engine.insert('plain_line', { invoice: 'INV-SENT', quantity: 1 });
-    expect(reads.filter((r) => r === 'showcase_invoice')).toHaveLength(0);
+    // No header resolution: the one `find` is the reference guard's read door.
+    expect(headerReads().filter((r) => r.elevated)).toHaveLength(0);
+    expect(headerReads()).toHaveLength(1);
   });
 
   // ── #6457 — the header is TOTAL over the MASTER's declared fields ──────────
