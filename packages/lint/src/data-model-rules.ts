@@ -253,7 +253,22 @@ function refOf(def: any): string | undefined {
 // ─── R2 under controlled_by_parent ──────────────────────────────────
 
 /** The rule id R2 reports under, on both tiers. */
-const MASTER_DETAIL_REQUIRED = 'relationship/master-detail-required';
+export const RELATIONSHIP_MASTER_DETAIL_REQUIRED = 'relationship/master-detail-required';
+
+/** The rule id R3 reports under (`master_detail` without `deleteBehavior`). */
+export const RELATIONSHIP_DELETE_BEHAVIOR = 'relationship/delete-behavior';
+
+/** The rule id R13 reports under (a `min`/`max` roll-up over a non-numeric child). */
+export const ROLLUP_NON_NUMERIC_AGGREGAND = 'rollup/non-numeric-aggregand';
+
+/**
+ * [#22161] The consequence every `controlled_by_parent` arm of R2 ends with —
+ * one wording, so the three shapes cannot drift. Why such a record is
+ * readable by nobody, and why `readonly` / `system` skip the required check,
+ * is the `relationship/master-detail-required` explanation (`os explain`).
+ */
+const CBP_ORPHAN_CONSEQUENCE =
+  'a controlled_by_parent detail saved without its master is readable by nobody';
 
 /**
  * R2's `error` tier — a `master_detail` reference on a
@@ -326,23 +341,19 @@ function cbpMasterReferenceFinding(
   if (!missingRequired && flags.length === 0) return undefined;
 
   const subject = `master_detail "${objectName}.${fieldName}" → ${parent}`;
-  const derivation =
-    `"${objectName}" is controlled_by_parent, so its record access is derived through this ` +
-    `reference — a record saved without its master is readable by nobody (the derived read filter ` +
-    `never matches an empty master) and refused on every later write`;
-  const flagWords = flags.map((flag) => `\`${flag}: true\``).join(' and ');
+  // [#22161] One verdict per shape, ending in the one shared consequence; the
+  // derivation (why the record is unreadable, why the flags skip the check)
+  // is `os explain` text.
   const message = missingRequired
     ? flags.length === 0
-      ? `${subject} must be required: ${derivation}`
-      : `${subject} must be required and must not be ${flagWords}: ${derivation}; record validation ` +
-        `also skips readonly and system fields before its required check`
-    : `${subject} is required but also ${flagWords}: record validation skips readonly and system ` +
-      `fields before its required check, so \`required: true\` is never enforced on it — and ` +
-      `${derivation}`;
+      ? `${subject} must be required: ${CBP_ORPHAN_CONSEQUENCE}`
+      : `${subject} must be required and not marked ${flags.join(' or ')}: ${CBP_ORPHAN_CONSEQUENCE}`
+    : `${subject} is marked ${flags.join(' and ')}, which skips its required check: ` +
+      CBP_ORPHAN_CONSEQUENCE;
 
   return {
     severity: 'error',
-    rule: MASTER_DETAIL_REQUIRED,
+    rule: RELATIONSHIP_MASTER_DETAIL_REQUIRED,
     message,
     path: `${fieldPath}.${missingRequired ? 'required' : flags[0]}`,
     fix: [
@@ -447,11 +458,11 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] 
         severity: 'error',
         rule: UNIQUE_UNSCOPED_DECLARED_INDEX,
         where: indexWhere(obj, idx, j, colList),
+        // [#22161] One verdict; the two refusal channels and the stored-row
+        // conversion are `os explain` text.
         message:
-          `"${obj.name}" declares index${indexLabel} [${cols}] with bare \`unique: true\` — a unique index whose scope is ` +
-          `unstated (ADR-0120). Protocol 18 refuses this spelling on a declared index: it built the index over ` +
-          `exactly its \`fields\`, i.e. installation-wide, while reading like "unique per organization". ` +
-          `Stored metadata that still carries it converts to \`unique: 'global'\`, which builds the same physical index.`,
+          `"${obj.name}" index${indexLabel} [${cols}] has bare \`unique: true\`, an unstated scope protocol 18 ` +
+          `refuses (ADR-0120): it built the index installation-wide`,
         path: `objects[${i}].indexes[${j}]`,
         fix:
           `State the scope: \`unique: 'global'\` (installation-wide — the exact index bare \`true\` built) or ` +
@@ -530,15 +541,16 @@ export function lintUniqueDeclarations(objects: any[]): LocatedLintIssue[] {
       const fieldSpelling = `\`unique: ${typeof def.unique === 'string' ? `'${def.unique}'` : def.unique}\``;
       const indexSpelling = `\`unique: ${typeof idx.unique === 'string' ? `'${idx.unique}'` : idx.unique}\``;
 
+      // [#22161] One verdict per quadrant; the scope matrix itself is
+      // `os explain` text.
       let message: string;
       let fix: string;
       if (fScope === iScope) {
         // Same scope on both sides — the same index declared twice.
         const boundary = fScope === 'global' ? 'installation-wide' : 'per-organization';
         message =
-          `"${obj.name}.${name}" declares field-level ${fieldSpelling} AND a single-column unique index${indexLabel} ` +
-          `(${indexSpelling}) on the same column. Both ask for the same ${boundary} boundary — the same unique ` +
-          `index declared twice (ADR-0120 D5b). Redundant, not contradictory: drop one so the intent has a single home.`;
+          `"${obj.name}.${name}" field ${fieldSpelling} and index${indexLabel} ${indexSpelling} both ask ` +
+          `for ${boundary} uniqueness: the same index declared twice`;
         fix =
           fScope === 'global'
             ? `Keep ONE spelling of installation-wide uniqueness: \`unique: 'global'\` on '${name}', or the declared index — not both.`
@@ -546,13 +558,9 @@ export function lintUniqueDeclarations(objects: any[]): LocatedLintIssue[] {
       } else {
         // Different scopes — the installation-wide side is physically stricter
         // and wins; the per-organization intent is dead on arrival.
-        const globalSide = fScope === 'global' ? `field-level ${fieldSpelling}` : `declared index${indexLabel} (${indexSpelling})`;
-        const orgSide = fScope === 'global' ? `declared index${indexLabel} (${indexSpelling})` : `field-level ${fieldSpelling}`;
         message =
-          `"${obj.name}.${name}" declares an installation-wide unique (${globalSide}) AND a per-organization unique ` +
-          `(${orgSide}) on the same column — the two scopes CONTRADICT (ADR-0120 D5b). The installation-wide index is ` +
-          `physically stricter and wins; the per-organization constraint can never be tripped, so one of the two ` +
-          `intents you wrote is silently dead.`;
+          `"${obj.name}.${name}" field ${fieldSpelling} and index${indexLabel} ${indexSpelling} CONTRADICT: ` +
+          `the installation-wide one wins, so the per-organization intent is silently dead`;
         fix =
           `Pick ONE scope and say it once: for installation-wide uniqueness keep \`unique: 'global'\` and drop the ` +
           `per-organization declaration; for per-organization uniqueness set \`unique: 'organization'\` (field-level on ` +
@@ -624,18 +632,16 @@ export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIss
       if (!cols.includes(tenantColumn)) continue;
 
       const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
-      const spelling = `\`unique: ${typeof idx.unique === 'string' ? `'${idx.unique}'` : idx.unique}\``;
       const rest = cols.filter((c: string) => c !== tenantColumn);
       issues.push({
         severity: 'warning',
         rule: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
         where: indexWhere(obj, idx, j, cols),
+        // [#22161] One verdict; what the composite is, and what the
+        // respelling costs, is `os explain` text.
         message:
-          `"${obj.name}" declares index${indexLabel} [${cols.join(', ')}] with ${spelling} and lists the organization ` +
-          `column '${tenantColumn}' itself — the hand-written per-organization composite that predates the scope ` +
-          `vocabulary (ADR-0120 S6). It reads as "unique per organization" but materializes as a plain composite, and ` +
-          `SQL UNIQUE is NULL-distinct: on every row whose '${tenantColumn}' is NULL it enforces nothing — which ` +
-          `on a single-organization deployment is every row.`,
+          `"${obj.name}" index${indexLabel} [${cols.join(', ')}] lists the organization column, and SQL ` +
+          `UNIQUE is NULL-distinct: on every row whose '${tenantColumn}' is NULL it enforces nothing`,
         path: `objects[${i}].indexes[${j}]`,
         fix:
           `State the scope instead: \`unique: 'organization'\` on this index (keep \`fields\` exactly as they are — the ` +
@@ -818,14 +824,13 @@ export function lintDataModel(objects: any[]): LintIssue[] {
           if (typeof childType === 'string' && !summaryRollupAnswerFitsColumn(childType)) {
             issues.push({
               severity: 'error',
-              rule: 'rollup/non-numeric-aggregand',
+              rule: ROLLUP_NON_NUMERIC_AGGREGAND,
+              // [#22161] One verdict; the value contract and why the two
+              // aggregate tables differ is `os explain` text.
               message:
                 `summary field "${obj.name}.${fieldName}" rolls up ` +
-                `${fn}(${childName}.${childFieldName}), but "${childName}.${childFieldName}" is ` +
-                `a ${childType} field — ${fn} answers with a value of the CHILD field's own type, ` +
-                `while a summary field's value contract is a finite number (it is a member of the ` +
-                `spec's NUMERIC_VALUE_TYPES class), so the answer does not fit the column the ` +
-                `roll-up is stored in`,
+                `${fn}(${childName}.${childFieldName}), a ${childType} field: ${fn} answers in the ` +
+                `child field's own type, but a summary field stores a finite number`,
               path: `${fieldPath}.summaryOperations.field`,
               fix:
                 `Aggregate a numeric or boolean child field instead (min/max over those answer ` +
@@ -866,7 +871,7 @@ export function lintDataModel(objects: any[]): LintIssue[] {
         } else if (def.required !== true) {
           issues.push({
             severity: 'warning',
-            rule: MASTER_DETAIL_REQUIRED,
+            rule: RELATIONSHIP_MASTER_DETAIL_REQUIRED,
             message: `master_detail "${obj.name}.${fieldName}" → ${parent} should be required (a detail record cannot exist without its master)`,
             path: `${fieldPath}.required`,
             fix: 'required: true',
@@ -876,8 +881,10 @@ export function lintDataModel(objects: any[]): LintIssue[] {
         if (def.deleteBehavior === undefined) {
           issues.push({
             severity: 'suggestion',
-            rule: 'relationship/delete-behavior',
-            message: `master_detail "${obj.name}.${fieldName}" → ${parent} should declare deleteBehavior (cascade/restrict — set_null is not honored on master_detail; use a lookup field if children must survive the parent)`,
+            rule: RELATIONSHIP_DELETE_BEHAVIOR,
+            // [#22161] One verdict; why `set_null` is not a choice here and
+            // what to use when children must survive is `os explain` text.
+            message: `master_detail "${obj.name}.${fieldName}" → ${parent} should declare deleteBehavior (cascade/restrict): left unset, deleting the master deletes its details`,
             path: `${fieldPath}.deleteBehavior`,
             fix: "deleteBehavior: 'cascade'",
           });
