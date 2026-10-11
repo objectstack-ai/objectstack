@@ -58,6 +58,19 @@ import {
   valueSlotTemplateRefusals,
 } from './flow-value-slot-template';
 
+/**
+ * A node config holding `value` at a value-slot ledger path — under key `k`
+ * for a map (`fields.*`), as the first element's key for an array
+ * (`fields[].defaultValue`), at the key itself for a single value
+ * (`recordId`).
+ */
+function configAtEntry(path: string, value: unknown): Record<string, unknown> {
+  const [head, ...rest] = path.split('.');
+  if (rest.length === 0) return { [head!]: value };
+  if (head!.endsWith('[]')) return { [head!.slice(0, -2)]: [{ name: 'k', ...configAtEntry(rest.join('.'), value) }] };
+  return { [head!]: rest[0] === '*' ? { k: value } : configAtEntry(rest.join('.'), value) };
+}
+
 /** The one refusal a string draws, or a failure naming what came back. */
 function refusalOf(value: unknown): string {
   const refusals = valueSlotTemplateRefusals(value);
@@ -616,9 +629,9 @@ describe('a callee\'s input map: the refusal says what the guarded form hands th
     const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
     expect(valueEntries.filter((e) => CALLEE.has(`${e.nodeType} ${e.path}`))).toHaveLength(3);
     for (const entry of valueEntries) {
-      const map = entry.path.slice(0, -2);
-      const message = at(entry.nodeType, map, 'k', '{x}');
-      const carries = /is (the child flow|each item's child flow|the function)'s/.test(message);
+      const refusals = flowNodeValueTemplateRefusals(entry.nodeType, configAtEntry(entry.path, '{x}'));
+      expect(refusals, `${entry.nodeType} ${entry.path}`).toHaveLength(1);
+      const carries = /is (the child flow|each item's child flow|the function)'s/.test(refusals[0]!.message);
       expect(carries, `${entry.nodeType} ${entry.path}`).toBe(CALLEE.has(`${entry.nodeType} ${entry.path}`));
     }
   });
@@ -630,6 +643,101 @@ describe('a callee\'s input map: the refusal says what the guarded form hands th
     const viaDoor = at('subflow', 'input', 'ownerId', '{record.owner}', { flowName: 'child' });
     expect(viaDoor.startsWith(base)).toBe(true);
     expect(base).not.toContain('defaultValue');
+  });
+});
+
+/**
+ * [#19939, stage S2] A screen's three value slots hand their value to the
+ * CLIENT — an object form's `defaults.*`, a field's `defaultValue`, an object
+ * form's `recordId` — evaluated before the screen goes on the wire. Where the
+ * template resolved a whole token to nothing it served nothing there; the
+ * refusal at a top-level value says what the guarded form serves instead
+ * (measured through the engine in `service-automation`'s
+ * `screen-value-slots.test.ts`).
+ */
+describe('a screen\'s value slots: the refusal says what the client is served instead of nothing', () => {
+  const one = (config: Record<string, unknown>): { path: string; label: string; message: string } => {
+    const refusals = flowNodeValueTemplateRefusals('screen', config);
+    expect(refusals, JSON.stringify(config)).toHaveLength(1);
+    return refusals[0]!;
+  };
+
+  it('the three positions are judged, located and labelled by the ledger', () => {
+    expect(flowNodeValueTemplateRefusals('screen', {
+      objectName: 'account', mode: 'edit', recordId: '{record.id}',
+      defaults: { name: '{lead.company}', stage: 'new', tags: ['{lead.tag}'] },
+      fields: [{ name: 'a', defaultValue: 'plain' }, { name: 'b', defaultValue: '{lead.email}' }],
+      title: 'Edit {{ record.name }}',
+    }).map((r) => [r.path, r.label])).toEqual([
+      ['defaults.name', 'screen form default'],
+      ['defaults.tags[0]', 'screen form default'],
+      ['fields[1].defaultValue', 'screen field default value'],
+      ['recordId', 'screen record id'],
+    ]);
+  });
+
+  it('defaults: a path names the field, the object field\'s `defaultValue` and the `null` that opens it blank', () => {
+    const { message } = one({ objectName: 'opportunity', defaults: { account: '{account_id}' } });
+    expect(message).toContain("{ dialect: 'cel', source: 'account_id' }");
+    expect(message).toContain('`defaults.account` prefills the object form\'s `account` field.');
+    expect(message).toContain('the form seeded that field from the object\'s declared `defaultValue`');
+    expect(message).toContain('the guarded form prefills `null`, which the form keeps as a value and opens the field blank over that default');
+    expect(message).toContain('To keep the default, write it in the guard\'s `null` branch');
+    expect(message.indexOf('(the guarded form writes `null`)')).toBeLessThan(message.indexOf('prefills the object form'));
+  });
+
+  it('a field\'s defaultValue: the guarded form prefills `null`, a value submitted back', () => {
+    const { message } = one({ fields: [{ name: 'email', defaultValue: '{lead.email}' }] });
+    expect(message).toContain('`fields[0].defaultValue` prefills this screen field.');
+    expect(message).toContain('the guarded form prefills `null`, a value the field is seeded with and that is submitted back');
+    expect(message).toContain('write it in the guard\'s `null` branch');
+  });
+
+  it('recordId: it must evaluate to the id, a non-blank string — the guarded `null` fails the run, so route around', () => {
+    const { message } = one({ objectName: 'account', mode: 'edit', recordId: '{record.id}' });
+    expect(message).toContain("{ dialect: 'cel', source: 'record.id' }");
+    expect(message).toContain('`recordId` names the record an `edit` form opens, so the envelope must evaluate to that record\'s id, a non-blank string');
+    expect(message).toContain('the guarded form\'s `null` included — fails the run at this screen');
+    expect(message).toContain('route around the screen with a `decision`');
+  });
+
+  it('a `$User` path that never resolved served nothing in EVERY run', () => {
+    expect(one({ objectName: 'a', defaults: { email: '{$User.Email}' } }).message)
+      .toContain('which the template prefilled with nothing in every run, so the form seeded it from the object\'s declared `defaultValue`: leaving the key out of `defaults` keeps exactly that.');
+    expect(one({ fields: [{ name: 'e', defaultValue: '{$User.Email}' }] }).message)
+      .toContain('which the template prefilled with nothing in every run: leaving `defaultValue` out keeps exactly that.');
+    expect(one({ objectName: 'a', mode: 'edit', recordId: '{$User.Name}' }).message)
+      .toContain('the template served this screen with no record id in every run');
+  });
+
+  it('the run user\'s id and an expression carry it — each has an absent case', () => {
+    expect(one({ objectName: 'a', defaults: { owner: '{$User.Id}' } }).message).toContain('opens the field blank over that default');
+    expect(one({ fields: [{ name: 'n', defaultValue: '{count + 1}' }] }).message).toContain('submitted back');
+  });
+
+  it('no screen sentence where the remedy serves nothing new: text with holes, a date macro, braces that are neither', () => {
+    for (const value of ['Hi {name}', '{TODAY()}', '{#}']) {
+      for (const config of [{ defaults: { k: value } }, { fields: [{ name: 'k', defaultValue: value }] }, { recordId: value }]) {
+        expect(one(config).message, `${value} ${JSON.stringify(config)}`).not.toMatch(/prefills|names the record/);
+      }
+    }
+  });
+
+  it('no screen sentence inside a literal: the field takes the whole value, which the remedy builds', () => {
+    const { path, message } = one({ defaults: { meta: { owner: '{record.owner}' } } });
+    expect(path).toBe('defaults.meta.owner');
+    expect(message).not.toContain('prefills');
+  });
+
+  it('only the screen\'s value slots carry it — one list: the ledger', () => {
+    const SCREEN = new Set(['screen defaults.*', 'screen fields[].defaultValue', 'screen recordId']);
+    const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
+    expect(valueEntries.filter((e) => SCREEN.has(`${e.nodeType} ${e.path}`))).toHaveLength(3);
+    for (const entry of valueEntries) {
+      const [refusal] = flowNodeValueTemplateRefusals(entry.nodeType, configAtEntry(entry.path, '{x}'));
+      const carries = /prefills (the object form|this screen field)|names the record an `edit` form opens/.test(refusal!.message);
+      expect(carries, `${entry.nodeType} ${entry.path}`).toBe(SCREEN.has(`${entry.nodeType} ${entry.path}`));
+    }
   });
 });
 
