@@ -67,7 +67,12 @@ const LOCKED_PACKAGE = {
   version: '1.0.0',
   type: 'app',
   name: 'Lock probe',
-  objects: [{ name: 'lockprobe_item', label: 'Item', fields: { title: { type: 'text', label: 'Title' } } }],
+  objects: [{
+    name: 'lockprobe_item',
+    label: 'Item',
+    sharingModel: 'private',
+    fields: { title: { type: 'text', label: 'Title' } },
+  }],
   views: [{
     name: 'lockprobe_item_all',
     label: 'All items',
