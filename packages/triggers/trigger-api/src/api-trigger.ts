@@ -161,7 +161,8 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  * hook (URL path + the required HMAC secret from the start node's `config`)
  * and subscribes a queue consumer that runs the flow. The HTTP side
  * ({@link handleRequest}) validates and **enqueues** — it never executes the
- * flow in-band:
+ * flow in-band. It answers the same through the self-hosted mount and through
+ * the `trigger-api` service's `handleInboundHook` (#22774):
  *
  *   POST /api/v1/automation/hooks/:flowName/:hookId
  *     → 401 INVALID_SIGNATURE — every post that does not verify, one answer:
@@ -271,7 +272,10 @@ export class ApiTrigger implements FlowTrigger {
 
     /**
      * Handle one inbound request. Transport-agnostic: the plugin adapts this
-     * to the host HTTP server. Returns the response to send.
+     * to both faces of the door, the self-hosted raw-app mount and the
+     * `trigger-api` service's `handleInboundHook` (#22774), through one
+     * adapter, so both answer exactly what this returns. Returns the response
+     * to send.
      */
     async handleRequest(input: {
         flowName: string;

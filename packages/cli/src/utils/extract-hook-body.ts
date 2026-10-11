@@ -109,6 +109,13 @@
  * The action face is untouched by this: an action body runs as
  * `(async (input, ctx) => { SOURCE })`, a different binding list, and its
  * lowering is exactly what it was ({@link LoweringFace}).
+ *
+ * The body span (#22860). The statements are read off the same TypeScript
+ * parse of the handler as the parameter list — the block's own braces, or the
+ * arrow's expression — and never by counting braces through the text, which
+ * shipped a cut-off or wrong body at build exit 0 for a `}` in a string,
+ * template, regex or comment, a statement-level inner arrow, and a `function`
+ * handler with a pattern parameter. See {@link peelToBlockBody}. Both faces.
  */
 
 import { ts } from 'ts-morph';
@@ -580,8 +587,11 @@ export function extractLoweredBody(
 
   // Strip leading function/arrow header and trailing closing brace so the
   // result is a pure block body suitable for `new Function('ctx', body)`.
-  const block = peelToBlockBody(raw);
-  if (!block) {
+  // [#22860] Read off the TypeScript parse of the handler, the same node the
+  // parameter rebind below reads, never off a scan of the text.
+  const parsed = parseFunction(raw);
+  const block = parsed ? peelToBlockBody(parsed) : null;
+  if (!parsed || !block) {
     throw new HookBodyExtractionError(
       'unparseable',
       originLabel,
@@ -596,7 +606,7 @@ export function extractLoweredBody(
   // check below reads the REBOUND source, so a member destructured in the
   // parameter list (`({ input, submitted })`) meets the same refusal as one
   // destructured in the body.
-  const rebind = face === 'hook' ? planHookParameterRebind(raw, originLabel) : NO_REBIND;
+  const rebind = face === 'hook' ? planHookParameterRebind(parsed, raw, originLabel) : NO_REBIND;
   const source = rebind.prologue === ''
     ? block.source
     : rebind.prologue + (/^\s/.test(block.source) ? '' : ' ') + block.source;
@@ -769,9 +779,11 @@ function parameterRefusal(originLabel: string, raw: string, reason: string): Hoo
  * context. So a handler's ONE parameter is the context under the author's
  * name, and re-emitting it as `var <param> = ctx;` ahead of the body runs the
  * author's code as written. The parameter is read off the TypeScript parse of
- * the handler that {@link detectFreeIdentifiers} already performs (one parse,
- * so the free-identifier verdict and this rebind agree on what the parameter
- * binds), never off the regex peel.
+ * the handler ({@link parseFunction}, the function-node reading that
+ * {@link detectFreeIdentifiers} performs, so the free-identifier verdict and
+ * this rebind agree on what the parameter binds) — the same node
+ * {@link peelToBlockBody} reads the body off (#22860), so the prologue and the
+ * statements it precedes come from one reading of the handler.
  *
  * `var`, not `const`: a parameter is a mutable, function-scoped binding. A
  * handler may reassign it (`input = { ...input }` off a `({ input })`), which a
@@ -788,16 +800,11 @@ function parameterRefusal(originLabel: string, raw: string, reason: string): Hoo
  * inference cannot follow. A handler whose parameter is `ctx`, or that takes
  * none, gets no prologue: it lowers byte-identically to before.
  */
-function planHookParameterRebind(raw: string, originLabel: string): ParameterRebind {
-  const fn = parseFunction(raw);
-  if (!fn) {
-    throw new HookBodyExtractionError(
-      'unparseable',
-      originLabel,
-      `[hook-body-extract] could not read the parameter list of ${originLabel}; ` +
-        `please rewrite the handler as a single arrow function or named function expression`,
-    );
-  }
+function planHookParameterRebind(
+  fn: ts.FunctionLikeDeclarationBase,
+  raw: string,
+  originLabel: string,
+): ParameterRebind {
   const params = fn.parameters;
   if (params.length === 0) return NO_REBIND;
 
@@ -977,82 +984,51 @@ interface PeeledBody {
 }
 
 /**
- * Remove the parameter list and outermost braces from a function string,
- * yielding the bare statements (or expression for shorthand arrows).
+ * The handler's body as source text: the statements between its block's own
+ * braces, or, for an implicit-return arrow, its expression wrapped as
+ * `return (…);`.
+ *
+ * Read off the handler's function node — {@link parseFunction}, the parse the
+ * parameter rebind and {@link detectFreeIdentifiers} read — never off a scan
+ * of the text (#22860). The scan this replaces counted `{`/`}` and `(`/`)` with
+ * no idea of what a string, a template, a regex or a comment is, and took the
+ * first parenthesised `=>` anywhere as the handler's header. So ordinary code
+ * shipped a body that is not the handler's, at build exit 0:
+ *
+ *   - a `}` in a string, a template, a regex or a comment closed the body
+ *     early — `ctx.input.note = 'a}b'` shipped as `ctx.input.note = 'a`, a
+ *     SyntaxError on the body's first run;
+ *   - a statement-level inner arrow (`const f = (a) => a + '!'`) in a
+ *     `function` handler was read as the handler, and the body built around
+ *     it — a SyntaxError;
+ *   - a `function` handler whose parameter is a pattern (`function ({ input })
+ *     { … }`) shipped the PATTERN as its body — after the rebind,
+ *     `var { input } = ctx; input`, which runs, throws nothing and does none
+ *     of the handler's work;
+ *   - a `{` in a string left the scan unbalanced, so the handler was refused as
+ *     unparseable and bundled.
+ *
+ * The parser knows each of those tokens, so the class closes rather than the
+ * members. On every shape the scan read correctly the text is the same bytes:
+ * a block's inner text is everything between its braces, comments and layout
+ * included, and an expression is taken from the end of `=>` with its leading
+ * whitespace trimmed, as the scan took it.
+ *
+ * Returns `null` when the node has no body, or a block whose braces the parse
+ * had to invent (`String(fn)` of a real function never yields one) — the
+ * caller refuses that as `unparseable`.
  */
-function peelToBlockBody(raw: string): PeeledBody | null {
-  // Try arrow forms first since they're the dominant authoring style.
-  // Match the parameter list followed by `=>` and either `{...}` or expr.
-  // We rely on a manual brace scan rather than a single regex so braces
-  // inside string/template literals don't confuse us.
-  const arrowIdx = findTopLevelArrow(raw);
-  if (arrowIdx >= 0) {
-    const after = raw.slice(arrowIdx + 2).trimStart();
-    if (after.startsWith('{')) {
-      const body = sliceBalanced(after, '{', '}');
-      if (body) return { source: body.inner, isExpression: false };
-    } else {
-      // Implicit-return arrow — wrap as `return ...;`
-      const expr = after.replace(/[;\s]+$/g, '');
-      return { source: `return (${expr});`, isExpression: true };
-    }
+function peelToBlockBody(fn: ts.FunctionLikeDeclarationBase): PeeledBody | null {
+  const body = fn.body;
+  if (!body) return null;
+  const sf = body.getSourceFile();
+  const text = sf.text;
+  if (ts.isBlock(body)) {
+    const open = body.getStart(sf);
+    if (text[open] !== '{' || text[body.end - 1] !== '}') return null;
+    return { source: text.slice(open + 1, body.end - 1), isExpression: false };
   }
-
-  // function () { ... } / async function () { ... }
-  const fnIdx = raw.search(/\bfunction\b/);
-  if (fnIdx >= 0) {
-    const braceIdx = raw.indexOf('{', fnIdx);
-    if (braceIdx > 0) {
-      const body = sliceBalanced(raw.slice(braceIdx), '{', '}');
-      if (body) return { source: body.inner, isExpression: false };
-    }
-  }
-
-  // Method shorthand inside an object literal: `name(ctx) { ... }`.
-  const braceIdx = raw.indexOf('{');
-  if (braceIdx > 0) {
-    const body = sliceBalanced(raw.slice(braceIdx), '{', '}');
-    if (body) return { source: body.inner, isExpression: false };
-  }
-  return null;
-}
-
-function findTopLevelArrow(s: string): number {
-  // Skip past balanced parameter list `(...)` then expect `=>`.
-  // We scan looking for `(` not preceded by an identifier char and
-  // immediately matched by a balanced `)` then optional whitespace then `=>`.
-  let i = 0;
-  const len = s.length;
-  while (i < len) {
-    if (s[i] === '(') {
-      const closing = matchBalancedIndex(s, i, '(', ')');
-      if (closing < 0) return -1;
-      let j = closing + 1;
-      while (j < len && /\s/.test(s[j])) j++;
-      if (s[j] === '=' && s[j + 1] === '>') return j;
-      i = closing + 1;
-      continue;
-    }
-    i++;
-  }
-  return -1;
-}
-
-function matchBalancedIndex(s: string, start: number, open: string, close: string): number {
-  let depth = 0;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (c === open) depth++;
-    else if (c === close) {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-function sliceBalanced(s: string, open: string, close: string): { inner: string } | null {
-  const end = matchBalancedIndex(s, 0, open, close);
-  if (end < 0) return null;
-  return { inner: s.slice(1, end) };
+  // Implicit-return arrow — wrap as `return (...);`. `body.pos` is the end of
+  // the `=>` token, so leading comments survive the way the scan kept them.
+  return { source: `return (${text.slice(body.pos, body.end).trimStart()});`, isExpression: true };
 }
