@@ -86,6 +86,8 @@ import { AuthPlugin } from './auth-plugin.js';
 import { createTenancyService } from './tenancy-service.js';
 import type { PluginContext } from '@objectstack/core';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
+import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -185,7 +187,9 @@ async function bootEngine(): Promise<ObjectQL> {
   engine.registry.registerObject(sysPosition as never, '@objectstack/plugin-auth');
   engine.registry.registerObject(sysUserPosition as never, '@objectstack/plugin-auth');
   await engine.syncSchemas();
-  return engine;
+  // [ADR-0131 D3/D4] The platform's `admin_full_access` definition, which an
+  // org-less grant of it resolves through (no security plugin binds one here).
+  return bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES }] });
 }
 
 function makeManager(engine: ObjectQL): AuthManager {

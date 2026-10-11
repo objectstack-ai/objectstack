@@ -37,6 +37,7 @@ import { AuthPlugin } from './auth-plugin';
 import { runOrganizationAddMember } from './organization-add-member.js';
 import type { PluginContext } from '@objectstack/core';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -98,7 +99,8 @@ const createMemoryEngine = () => {
     return out;
   };
   let seq = 0;
-  return {
+  // [ADR-0131 D3/D4] The security catalog the resolver reads, as the rows convert to it.
+  return bindTestSecurityCatalog({
     tables,
     async insert(name: string, data: any) {
       const row = { id: data.id ?? `row_${++seq}`, ...data };
@@ -135,7 +137,7 @@ const createMemoryEngine = () => {
       tables.set(name, keep);
       return table.length - keep.length;
     },
-  };
+  }, () => catalogFromTables(Object.fromEntries(tables)));
 };
 
 type MemoryEngine = ReturnType<typeof createMemoryEngine>;

@@ -62,6 +62,7 @@ import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { createDispatcherPlugin } from '../dispatcher-plugin.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
 const PREFIX = '/api/v1';
 const PKG = 'com.acme.crm';
@@ -206,7 +207,7 @@ function makeQl() {
         return row[field] === cond;
     });
     const pkg = { manifest: { id: PKG, name: 'CRM', version: '1.0.0', scope: 'project' } };
-    return {
+    return bindCatalogFromTables({
         find: async (object: string, q: any = {}) => {
             const rows = (tables[object] ?? []).filter((row: any) => matches(row, q?.where));
             return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
@@ -219,7 +220,7 @@ function makeQl() {
             // subject here is the organization the protocol call carries.
             uninstallPackage: () => false,
         },
-    };
+    }, tables);
 }
 
 interface SessionRow { id: string; token: string; userId: string; activeOrganizationId: string }

@@ -32,6 +32,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUser, SysMember } from '@objectstack/platform-objects/identity';
+import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 import { SysPosition } from './objects/sys-position.object.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
@@ -120,7 +121,8 @@ async function boot(opts: { walled?: boolean } = {}) {
     scope: 'system',
     // `sys_member` is provisioned: an organization-scoped assignment must name
     // a member of its organization (`grant-holder-membership-refusal.ts`).
-    objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember, QA_INQUIRY],
+    // `sys_metadata_activation`: the ledger the resolver reads deactivation from (ADR-0131 D3).
+    objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember, SysMetadataActivation, QA_INQUIRY],
   } as any);
   await engine.syncSchemas();
   // [#21516] The authz resolver reads these on every grant resolution; in a
@@ -139,7 +141,10 @@ async function boot(opts: { walled?: boolean } = {}) {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ([MEMBER_DEFAULT, QA_ADMIN, QA_ORG_ADMIN_LIKE] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [MEMBER_DEFAULT, QA_ADMIN, QA_ORG_ADMIN_LIKE],
     },
     ...(opts.walled
@@ -186,11 +191,25 @@ async function boot(opts: { walled?: boolean } = {}) {
     { id: 'pps_auditor', position_id: AUDITOR_POSITION_ID, permission_set_id: 'ps_auditor' },
     { id: 'pps_retired', position_id: 'pos_retired', permission_set_id: 'ps_auditor' },
   ], { context: seed } as any);
+  // [ADR-0131 D3, ADR-0126 §4] The switch the resolver honours: the row's own
+  // `active: false` above is no longer read.
+  await engine.insert('sys_metadata_activation', {
+    metadata_type: 'position', name: 'qa_retired', package_id: 'com.objectstack.qa.position-catalog-refusal', active: false,
+  }, { context: seed } as any);
   await engine.insert('qa_inquiry', [
     { id: 'inq_1', subject: 'one' },
     { id: 'inq_2', subject: 'two' },
     { id: 'inq_3', subject: 'three' },
   ], { context: seed } as any);
+  // [ADR-0131 D3/D4] What the resolver reads: the set's definition, and each
+  // position's definition naming it — the junction rows above bind nothing.
+  const pkg = 'com.objectstack.qa.position-catalog-refusal';
+  engine.registry.registerItem('permission', {
+    name: 'qa_auditor_set', label: 'QA Auditor', objects: { qa_inquiry: { allowRead: true, viewAllRecords: true } },
+  } as any, 'name' as any, pkg);
+  for (const [name, label] of [['qa_auditor', 'Auditor'], ['qa_retired', 'Retired']]) {
+    engine.registry.registerItem('position', { name, label, permissionSets: ['qa_auditor_set'] } as any, 'name' as any, pkg);
+  }
 
   return { engine, warn };
 }

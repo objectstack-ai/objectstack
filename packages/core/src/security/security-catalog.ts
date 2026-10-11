@@ -10,9 +10,10 @@
  * code-declared packages and by environment metadata a metadata author saved
  * (`sys_metadata`, hydrated into the same registry by `loadMetaFromDb`) — and
  * D4 makes every reference to a catalog item a NAME that "resolution reads the
- * registry" for. This module is that read and nothing else. It is the seam the
- * later stages of the C2 execution card switch readers onto; on its own it
- * changes no grant, because nothing calls it yet.
+ * registry" for. This module is that read and nothing else. The authorization
+ * resolver (`resolve-authz-context.ts`) reads positions, their permission sets
+ * and the set bodies through it, from the reader the security plugin binds to
+ * its engine ({@link bindSecurityCatalogReader}).
  *
  * ## Two in-process readers, read in a fixed order
  *
@@ -73,8 +74,10 @@
  *    caller that drops the row flag because it now reads definitions would let
  *    a deactivated set grant again: the one widening this card must never
  *    open. Read the flag with `isRowActive` (`row-active.ts`) as before.
- *  - **The position → permission-set binding.** It stays on its junction rows
- *    until the position definition carries it.
+ *  - **The position → permission-set binding as a separate fact.** It is part
+ *    of the position definition (`PositionSchema.permissionSets`, ADR-0131
+ *    D3/D4); the resolver reads it from the entry this module answers, and no
+ *    junction row.
  *  - **Organization scope.** The catalog is environment-level (ADR-0131 D3);
  *    this read takes no organization and never filters by one.
  *
@@ -357,4 +360,43 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       return out;
     },
   };
+}
+
+/**
+ * The reader bound to each engine. Keyed by the engine AND by its registry, so
+ * a caller that hands the resolver the engine, or a view of it that exposes the
+ * same per-engine registry, finds the same reader.
+ */
+const boundReaders = new WeakMap<object, SecurityCatalogReader>();
+
+/**
+ * Bind the catalog read to an ObjectQL engine — the security plugin does it at
+ * `start()`, where it holds both the engine and the metadata service. Every
+ * authorization resolution over that engine then reads its catalog through
+ * `reader` ({@link securityCatalogReaderOf}).
+ *
+ * @returns whether anything was bound — `false` for a value that is not an
+ *   object, which the caller reports (absence is loud).
+ */
+export function bindSecurityCatalogReader(engine: unknown, reader: SecurityCatalogReader): boolean {
+  if (!engine || typeof engine !== 'object') return false;
+  boundReaders.set(engine, reader);
+  const registry = (engine as { registry?: unknown }).registry;
+  if (registry && typeof registry === 'object') boundReaders.set(registry, reader);
+  return true;
+}
+
+/**
+ * The catalog read bound to `engine`, or `undefined` when none was bound — an
+ * engine no security plugin started on. The resolver reads that as an empty
+ * catalog, exactly as it reads an engine with no permission tables
+ * provisioned: no position distributes a set and no set has a body, so nothing
+ * is granted through the catalog. It is never read as permission to grant.
+ */
+export function securityCatalogReaderOf(engine: unknown): SecurityCatalogReader | undefined {
+  if (!engine || typeof engine !== 'object') return undefined;
+  const own = boundReaders.get(engine);
+  if (own) return own;
+  const registry = (engine as { registry?: unknown }).registry;
+  return registry && typeof registry === 'object' ? boundReaders.get(registry) : undefined;
 }

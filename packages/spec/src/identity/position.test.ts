@@ -244,9 +244,7 @@ describe('unknown keys are rejected, not stripped', () => {
       .toContain('`notAKey`');
   });
 
-  it('points permissionSets/users/parent at the runtime binding or flatness rule', () => {
-    expect(unknownKeyIssue({ name: 'p', label: 'P', permissionSets: [] })!.message)
-      .toContain('sys_position_permission_set');
+  it('points users/parent at the runtime binding or flatness rule', () => {
     expect(unknownKeyIssue({ name: 'p', label: 'P', users: [] })!.message)
       .toContain('sys_user_position');
     expect(unknownKeyIssue({ name: 'p', label: 'P', parent: 'boss' })!.message)
@@ -259,8 +257,23 @@ describe('unknown keys are rejected, not stripped', () => {
     // prescription — the migrate-meta half is the semantic entry
     // `position-permissions-column-retired`.
     const msg = unknownKeyIssue({ name: 'p', label: 'P', permissions: '["x"]' })!.message;
-    expect(msg).toContain('sys_position_permission_set');
+    expect(msg).toContain('`permissionSets`');
     expect(msg).toContain('ADR-0049');
+  });
+
+  // [ADR-0131 D3/D4] `permissionSets` is the position → set binding: accepted,
+  // each entry a set NAME under the same grammar as a permission set's own name.
+  it('accepts `permissionSets` as a list of permission-set names', () => {
+    const parsed = PositionSchema.safeParse({ name: 'auditor', label: 'Auditor', permissionSets: ['read_all', 'audit_tools'] });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.permissionSets).toEqual(['read_all', 'audit_tools']);
+  });
+
+  it('refuses a `permissionSets` entry that is not a snake_case set name', () => {
+    const result = PositionSchema.safeParse({ name: 'auditor', label: 'Auditor', permissionSets: ['Read All'] });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => i.path.join('.') === 'permissionSets.0')).toBe(true);
+    expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(false);
   });
 
   it('round-trips the ADR-0010 runtime protection envelope', () => {

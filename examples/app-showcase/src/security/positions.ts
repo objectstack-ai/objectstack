@@ -9,6 +9,12 @@
  * src/data/seed/), and the manager chain is `sys_user.manager_id`
  * (ADR-0090 D3; the old `parent` field on positions never existed at runtime).
  *
+ * Each position names the permission sets it distributes in `permissionSets`
+ * (ADR-0131 D3/D4): the authorization resolver reads them from here, by name.
+ * `src/security/bind-position-sets.ts` still writes the same bindings as
+ * `sys_position_permission_set` rows, for the readers that have not moved off
+ * the junction yet; `test/inert-wirings.test.ts` holds the two equal.
+ *
  * Two positions are BUILT-IN and never declared by an app: `everyone`
  * (implicitly held by every authenticated member — the tenant baseline,
  * ADR-0090 D5) and `guest` (implicitly held by anonymous visitors,
@@ -23,6 +29,7 @@ export const ContributorPosition = definePosition({
   name: 'contributor',
   label: 'Contributor',
   description: 'Works tasks on their own projects.',
+  permissionSets: ['showcase_contributor'],
 });
 
 /** Runs a unit: depth-scoped visibility over the unit's private records. */
@@ -30,6 +37,7 @@ export const ManagerPosition = definePosition({
   name: 'manager',
   label: 'Project Manager',
   description: 'Manages projects and the contributors on them.',
+  permissionSets: ['showcase_manager'],
 });
 
 /** Org-wide read for reporting — depth-based (`readScope: org`), not VAMA. */
@@ -37,6 +45,7 @@ export const ExecPosition = definePosition({
   name: 'exec',
   label: 'Executive',
   description: 'Read-all visibility for reporting.',
+  permissionSets: ['showcase_executive'],
 });
 
 /** Compliance: View-All bypass (VAMA) — reads everything, changes nothing. */
@@ -44,6 +53,7 @@ export const AuditorPosition = definePosition({
   name: 'auditor',
   label: 'Auditor',
   description: 'Compliance read-only view across private records (viewAllRecords).',
+  permissionSets: ['showcase_auditor'],
 });
 
 /** Back-office: system permissions, Modify-All repairs, the Operations app. */
@@ -51,6 +61,7 @@ export const OpsPosition = definePosition({
   name: 'ops',
   label: 'Operations',
   description: 'Back-office operations — Setup access, announcement repairs, Operations app.',
+  permissionSets: ['showcase_ops'],
 });
 
 /**
@@ -62,6 +73,7 @@ export const FieldOpsDelegatePosition = definePosition({
   name: 'field_ops_delegate',
   label: 'Field Ops Delegate Admin',
   description: 'Scoped administration of the Field Operations business-unit subtree.',
+  permissionSets: ['showcase_field_ops_delegate'],
 });
 
 /**
@@ -74,6 +86,7 @@ export const ClientLiaisonPosition = definePosition({
   name: 'client_liaison',
   label: 'Client Liaison',
   description: 'Prepares and publishes client-facing project briefs; cannot see internal budget figures.',
+  permissionSets: ['showcase_client_liaison'],
 });
 
 /**
@@ -86,6 +99,7 @@ export const ClientPortalUserPosition = definePosition({
   name: 'client_portal_user',
   label: 'Client Portal User',
   description: 'External client admitted to the Client Portal.',
+  permissionSets: ['showcase_guest_portal'],
 });
 
 /**

@@ -3,10 +3,13 @@
 /**
  * [#2926 ②] Position ↔ permission-set bindings for the showcase personas.
  *
- * The permission model is record-authoritative (ADR-0090/0094): bindings live
- * only as `sys_position_permission_set` rows. A fresh deploy used to boot with
- * ZERO bindings — every persona silently degraded to the `everyone` baseline
- * until an admin hand-assigned all sets.
+ * [ADR-0131 D3/D4] The bindings are DECLARED on the positions
+ * (`permissionSets` in `positions.ts`), and that is what the authorization
+ * resolver reads. This binder still writes the same pairs as
+ * `sys_position_permission_set` rows for the readers that have not moved off
+ * the junction yet (the delegated-admin gate, the explainer, the sharing
+ * recipients); it is deleted with the last of them.
+ * `test/inert-wirings.test.ts` holds this list equal to the declarations.
  *
  * This cannot be a declarative SEED: the seed loader runs before the security
  * bootstrap creates the `sys_position` / `sys_permission_set` rows, so the name
@@ -30,11 +33,8 @@
  */
 
 /**
- * The persona bindings, exported because they are the only place that answers
- * "which permission sets does a position actually hold?" — the question a
- * sharing rule with a `position` recipient has to answer before its grant can
- * mean anything (a share row for a principal with no object-level `allowRead`
- * is never consulted). `inert-wirings.test.ts` §6 reads this list.
+ * The persona bindings as junction rows — the same pairs the position
+ * definitions declare (`inert-wirings.test.ts` pins the equality).
  */
 export const POSITION_PERMISSION_SET_BINDINGS: ReadonlyArray<readonly [position: string, permissionSet: string]> = [
   ['contributor', 'showcase_contributor'],

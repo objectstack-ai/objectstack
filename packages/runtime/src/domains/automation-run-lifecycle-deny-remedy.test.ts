@@ -45,6 +45,7 @@ import { PLATFORM_OWNER_EMAIL_ENV, resolveTenancyPosture } from '@objectstack/ty
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { resolveExecutionContext } from '../security/resolve-execution-context.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
 /**
  * The environment inputs the derivation reads: the two posture variables in
@@ -77,12 +78,12 @@ function makeQl(tables: Tables) {
             if (v === null) return (row[k] ?? null) === null;
             return row[k] === v;
         });
-    return {
+    return bindCatalogFromTables({
         async find(object: string, opts: any) {
             const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
             return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
         },
-    };
+    }, tables);
 }
 
 /** A verified `sys_user` row and nothing else — no membership, position or grant. */

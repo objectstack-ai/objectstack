@@ -45,6 +45,7 @@ import { join } from 'node:path';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
 const PKG = 'com.acme.crm';
 const ALPHA = 'org_alpha';
@@ -148,13 +149,13 @@ function rig() {
         },
     };
     const services: Record<string, unknown> = {
-        objectql: {
+        objectql: bindCatalogFromTables({
             registry,
             find: async (object: string, q: any = {}) => {
                 const found = (TABLES[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
                 return typeof q?.limit === 'number' ? found.slice(0, q.limit) : found;
             },
-        },
+        }, TABLES),
         auth: {
             api: {
                 getSession: async ({ headers }: any) => {
@@ -260,11 +261,14 @@ describe('[#20515] what the rule leaves unchanged', () => {
         expect(switchedOff(r)).toBe(true);
     });
 
-    it('CONTROL · the position-bound set: a current org_alpha member with org_alpha active passes: 200', async () => {
+    // [ADR-0131 D3/D4] A position's sets are the ones its catalog definition
+    // names; org_alpha's junction row on ITS copy of `org_member` binds nothing
+    // — for its current members as for the removed one (#15196 Q3 A).
+    it('the organization-scoped junction row binds nothing: a current org_alpha member holding org_member is refused: 403', async () => {
         const r = rig();
         const answer = await r.call('DELETE', 'posmember', `/packages/${PKG}`);
-        expect(answer.status).toBe(200);
-        expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
+        expect(answer.status).toBe(403);
+        expect(r.deleteRequests).toEqual([]);
     });
 
     it('a GLOBAL grant still passes the gate for the removed member — the uninstall proceeds, naming no organization', async () => {

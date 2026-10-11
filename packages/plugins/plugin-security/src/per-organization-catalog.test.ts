@@ -51,6 +51,7 @@ import { SysPositionPermissionSet } from './objects/sys-position-permission-set.
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const ORG_JIA = 'org_jia';
 const ORG_YI = 'org_yi';
@@ -299,7 +300,7 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
     expect(setAgain).toBe(setSnapshot);
   });
 
-  it('6. the cross-organization grant bleed is closed: the REAL resolver no longer collects another organization’s binding', async () => {
+  it('6. the cross-organization grant bleed is closed: the REAL resolver collects no organization’s junction binding', async () => {
     const engine = await boot();
     const { logger } = recordingLogger();
     for (const org of ORGS) await seedCatalog(engine, logger, org);
@@ -327,13 +328,25 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
     const yiGrants = await resolveUserAuthzGrants(engine as any, 'u_yi', { tenantId: ORG_YI });
     expect(yiGrants.permissions).not.toContain('jia_wide_grant');
 
-    // Positive control on the same resolver, from the same fixture: org_jia's
-    // own member DOES get it. Without this the assertion above would pass on a
-    // resolver that had simply stopped resolving anything.
+    // [ADR-0131 D3/D4] …and org_jia's own member does not get it either: the
+    // resolver reads a position's sets from its catalog definition, so a
+    // junction row binds nothing anywhere (#15196 Q3 A).
     await (engine as any).insert('sys_user_position',
       { id: 'up_jia', user_id: 'u_jia', position: 'everyone' },
       { context: { isSystem: true, tenantId: ORG_JIA } });
     const jiaGrants = await resolveUserAuthzGrants(engine as any, 'u_jia', { tenantId: ORG_JIA });
-    expect(jiaGrants.permissions).toContain('jia_wide_grant');
+    expect(jiaGrants.permissions).not.toContain('jia_wide_grant');
+
+    // Positive control on the same resolver, from the same fixture: a set the
+    // `everyone` DEFINITION names reaches both organizations' members. Without
+    // it the assertions above would pass on a resolver that had simply stopped
+    // resolving anything.
+    bindTestSecurityCatalog(engine, {
+      positions: [{ name: 'everyone', permissionSets: ['jia_wide_grant'] }],
+      permissions: [{ name: 'jia_wide_grant' }],
+    });
+    for (const [user, org] of [['u_yi', ORG_YI], ['u_jia', ORG_JIA]] as const) {
+      expect((await resolveUserAuthzGrants(engine as any, user, { tenantId: org })).permissions).toContain('jia_wide_grant');
+    }
   });
 });

@@ -35,6 +35,8 @@ vi.mock('better-auth/plugins/haveibeenpwned', () => ({
 }));
 
 import { betterAuth } from 'better-auth';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
+import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 
 describe('AuthManager', () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -3498,7 +3500,7 @@ describe('AuthManager', () => {
     // dataEngine stub: `adminLinks` controls whether the user resolves as a
     // platform admin (a sys_user_permission_set row pointing at the
     // admin_full_access permission set with no organization scope).
-    const makeDataEngine = (opts: { platformAdmin: boolean }) => ({
+    const makeDataEngine = (opts: { platformAdmin: boolean }) => bindTestSecurityCatalog({
       // Two parameters because the seam has two: `IDataEngine.find(objectName,
       // query?, options?)`, and every production read reaching this double goes
       // through `resolve-authz-context.ts` `tryFind`, which always calls
@@ -3516,7 +3518,7 @@ describe('AuthManager', () => {
         return [];
       }),
       findOne: vi.fn(),
-    });
+    }, { permissions: [{ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES }] });
 
     const getSessionCallback = async (dataEngine: any) => {
       let capturedConfig: any;
@@ -4795,7 +4797,7 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
    * criterion must now ignore entirely. `find` honours the `where` the judge
    * passes, so any org-scoping is the product's, not the fixture's.
    */
-  const makeEngine = (opts: { members?: any[]; platformAdmin?: boolean; throws?: boolean; orgScopedGrant?: boolean } = {}) => ({
+  const makeEngine = (opts: { members?: any[]; platformAdmin?: boolean; throws?: boolean; orgScopedGrant?: boolean } = {}) => bindTestSecurityCatalog({
     find: vi.fn(async (object: string, query?: any) => {
       if (opts.throws) throw new Error('db down');
       if (object === 'sys_user_permission_set') {
@@ -4813,7 +4815,7 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
       return [];
     }),
     findOne: vi.fn(),
-  });
+  }, { permissions: [{ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES }] });
 
   /** The criterion, invoked exactly as the `/sso/register` hook invokes it. */
   const judge = async (engine: any, userId = 'u-1'): Promise<boolean> => {

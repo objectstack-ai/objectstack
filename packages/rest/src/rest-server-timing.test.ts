@@ -15,6 +15,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
 import { runWithPerfDisclosure, type PerfDisclosureGate } from '@objectstack/observability';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const makeServer = () => ({
     get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(),
@@ -27,7 +28,7 @@ const makeServer = () => ({
  * PLATFORM_ADMIN) and a plain `member_default` grant for `member1` (→ MEMBER).
  * Every other object read resolves empty.
  */
-const makeQl = () => ({
+const makeQl = () => bindTestSecurityCatalog({
     find: async (object: string, opts: any) => {
         const where = opts?.where ?? {};
         if (object === 'sys_user') return [{ id: where.id, email: `${where.id}@example.com` }];
@@ -49,7 +50,7 @@ const makeQl = () => ({
         // sys_setting (localization) — nothing to contribute.
         return [];
     },
-});
+}, { permissions: [{ name: 'admin_full_access' }, { name: 'member_default' }] });
 
 /** A fake auth service whose session is keyed off the request's `cookie` header. */
 const makeAuth = () => ({

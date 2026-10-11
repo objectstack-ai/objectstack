@@ -3,10 +3,16 @@
 /**
  * [#8060] Position ↔ permission-set bindings for the CRM example.
  *
- * Mirrors `examples/app-showcase/src/security/bind-position-sets.ts` — see
- * that file for the full rationale. Short version: the permission model is
- * record-authoritative (ADR-0090/0094), bindings live only as
- * `sys_position_permission_set` rows, and this app declared three positions
+ * [ADR-0131 D3/D4] The bindings are DECLARED on the positions
+ * (`permissionSets` in `sales-positions.ts`), and that is what the
+ * authorization resolver reads. This binder still writes the same pairs as
+ * `sys_position_permission_set` rows for the readers that have not moved off
+ * the junction yet; it is deleted with the last of them, and
+ * `test/position-bindings.test.ts` holds its list equal to the declarations.
+ *
+ * Mirrors `examples/app-showcase/src/security/bind-position-sets.ts`. The
+ * history: bindings used to live only as `sys_position_permission_set` rows,
+ * and this app declared three positions
  * (`sales_rep`, `sales_manager`, `finance_approver`) and a `crm_sales_user`
  * permission set that never met — every persona silently degraded to the
  * `everyone` baseline (probe-blocked on every CRM object) until an admin
@@ -27,7 +33,7 @@
  * (ruling on #8060). Only the three declared positions get the set.
  */
 
-const BINDINGS: ReadonlyArray<readonly [position: string, permissionSet: string]> = [
+export const BINDINGS: ReadonlyArray<readonly [position: string, permissionSet: string]> = [
   ['sales_rep', 'crm_sales_user'],
   ['sales_manager', 'crm_sales_user'],
   ['finance_approver', 'crm_sales_user'],

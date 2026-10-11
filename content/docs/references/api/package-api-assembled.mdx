@@ -127,7 +127,7 @@ Installed package row whose manifest is the assembled package body
 | **emailTemplates** | `{ name: string; label: string; category?: Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>; locale?: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
 | **docs** | `{ name: string; label?: string; description?: string; content: string; … }[]` | optional | Package documentation — flat Markdown items compiled from src/docs/*.md (ADR-0046) |
 | **books** | `{ name: string; label?: string; description?: string; slug?: string; … }[]` | optional | Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6) |
-| **positions** | `{ name: string; label: string; description?: string; delegatable?: boolean; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
+| **positions** | `{ name: string; label: string; description?: string; permissionSets?: string[]; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
 | **sharingRules** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Record Sharing Rules |
 | **apis** | `{ name: string; path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; summary?: string; … }[]` | optional | API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121) |
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Outbound Webhooks |
@@ -371,7 +371,7 @@ Installed package row whose manifest is the assembled package body
 | **emailTemplates** | `{ name: string; label: string; category?: Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>; locale?: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
 | **docs** | `{ name: string; label?: string; description?: string; content: string; … }[]` | optional | Package documentation — flat Markdown items compiled from src/docs/*.md (ADR-0046) |
 | **books** | `{ name: string; label?: string; description?: string; slug?: string; … }[]` | optional | Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6) |
-| **positions** | `{ name: string; label: string; description?: string; delegatable?: boolean; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
+| **positions** | `{ name: string; label: string; description?: string; permissionSets?: string[]; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
 | **sharingRules** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Record Sharing Rules |
 | **apis** | `{ name: string; path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; summary?: string; … }[]` | optional | API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121) |
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Outbound Webhooks |

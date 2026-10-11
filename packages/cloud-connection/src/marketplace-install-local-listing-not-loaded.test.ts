@@ -43,7 +43,8 @@ import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
-import { installerGrantRows, INSTALLER_USER_ID } from './install-local-principal.fixtures.js';
+import { installerGrantRows, INSTALLER_USER_ID, INSTALLER_SET } from './install-local-principal.fixtures.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 type Handler = (c: any) => Promise<any>;
 type Row = Record<string, unknown> & { id: string };
@@ -88,6 +89,7 @@ const MEMBER_GRANTS: Record<string, unknown[]> = {
     sys_member: [],
     sys_user_position: [],
     sys_position: [],
+    sys_metadata_activation: [],
     sys_position_permission_set: [],
     sys_user_permission_set: [{ id: 'ups_member', user_id: MEMBER_ID, permission_set_id: 'ps_member', permission_set: 'organization_admin', organization_id: null }],
     sys_permission_set: [{ id: 'ps_member', name: 'organization_admin', system_permissions: ['setup.access', 'manage_org_users'] }],
@@ -111,7 +113,7 @@ async function restartWith(manifests: Array<{ id: string; version: string }>, di
     const reads: string[] = [];
     const caller = { as: 'operator' as 'operator' | 'member' };
     const grants = () => (caller.as === 'operator' ? installerGrantRows() : MEMBER_GRANTS);
-    const engine = {
+    const engine = bindTestSecurityCatalog({
         syncSchemas: vi.fn(async () => undefined),
         registry: { getAllPackages: () => [] },
         async find(object: string, query?: any): Promise<unknown[]> {
@@ -131,7 +133,7 @@ async function restartWith(manifests: Array<{ id: string; version: string }>, di
             }));
             return (typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows).map((row) => ({ ...row }));
         },
-    };
+    }, { permissions: [INSTALLER_SET, { name: 'organization_admin', systemPermissions: ['setup.access', 'manage_org_users'] }] });
     const register = vi.fn((m: any) => { for (const o of m?.objects ?? []) objects.set(o.name, o); });
     const services: Record<string, unknown> = {
         manifest: { register },

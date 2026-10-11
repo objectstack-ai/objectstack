@@ -51,7 +51,7 @@ import { ADMIN_STANDING_SURFACE, adminStandingTables } from '@objectstack/core';
 import {
   GRANT_STANDING_KEYS,
   MEMBER_STANDING_KEYS,
-  PERMISSION_SET_STANDING_KEYS,
+  ACTIVATION_LEDGER_STANDING_KEYS,
   STANDING_KEYS_BY_TABLE,
   STANDING_KEY_EXCLUSIONS,
 } from './last-admin-guard.js';
@@ -127,6 +127,8 @@ describe('[#8734] standing-key lists correspond to what resolveAuthzContext read
     // drift into a second copy that is checked while the guard uses another.
     expect(STANDING_KEYS_BY_TABLE.sys_member).toBe(MEMBER_STANDING_KEYS);
     expect(STANDING_KEYS_BY_TABLE.sys_user_permission_set).toBe(GRANT_STANDING_KEYS);
-    expect(STANDING_KEYS_BY_TABLE.sys_permission_set).toBe(PERMISSION_SET_STANDING_KEYS);
+    // [ADR-0131 D3] The resolver reads deactivation from the activation ledger,
+    // no longer from the `sys_permission_set` row (whose hooks stay registered).
+    expect(STANDING_KEYS_BY_TABLE.sys_metadata_activation).toBe(ACTIVATION_LEDGER_STANDING_KEYS);
   });
 });

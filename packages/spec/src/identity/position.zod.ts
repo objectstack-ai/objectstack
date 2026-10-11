@@ -11,9 +11,11 @@ import { strictObject } from '../shared/strict-object';
  *
  * A position (岗位, "job role" in NetSuite/Workday terms) is a **named,
  * assignable bundle of permission sets**: users hold positions
- * (`sys_user_position`), positions bind permission sets
- * (`sys_position_permission_set`), and a user's capability is the union of
- * every set reached that way plus direct grants.
+ * (`sys_user_position`), a position names the permission sets it distributes
+ * in {@link PositionSchema}'s `permissionSets` (ADR-0131 D3/D4: the binding is
+ * part of the definition, resolved by name in the environment catalog), and a
+ * user's capability is the union of every set reached that way plus direct
+ * grants.
  *
  * Positions are deliberately **flat** — no `parent`, no hierarchy. The
  * visibility hierarchy lives on the business-unit tree (`sys_business_unit`,
@@ -48,12 +50,6 @@ export const PositionSchema = lazySchema(() => strictObject(
     surface: 'this position',
     aliases: { title: 'label' },
     guidance: {
-      permissionSets:
-        '`permissionSets` is not a Position field — a position is only the named ' +
-        'distribution point (ADR-0090 D3); capability arrives via runtime bindings ' +
-        '(`sys_position_permission_set` rows, created in Setup or by an app\'s ' +
-        'kernel:ready binder). Packages SUGGEST bindings via `isDefault` on a ' +
-        'permission set, never by declaring them on the position.',
       users:
         '`users` is not a Position field — assignment is a runtime binding ' +
         '(`sys_user_position` rows), never authored on the position (ADR-0090).',
@@ -65,12 +61,11 @@ export const PositionSchema = lazySchema(() => strictObject(
       permissions:
         '`permissions` is not a Position field — there are no direct position-level ' +
         'permission strings anywhere on the platform: capability reaches a position ' +
-        'ONLY through permission-set bindings (`sys_position_permission_set` rows, ' +
-        'created in Setup or by an app\'s kernel:ready binder). The `sys_position` ' +
+        'ONLY through the permission sets it names in `permissionSets`. The `sys_position` ' +
         'row column of the same name — a "JSON-serialized array of permission ' +
         'strings" textarea no producer ever wrote and no runtime path ever read — ' +
         'was retired under ADR-0049 enforce-or-remove. Delete the key; to ' +
-        'grant capability, bind permission sets to the position instead.',
+        'grant capability, name permission sets in `permissionSets` instead.',
     },
     history:
       'Until this shape was closed, these were dropped silently — the position still parsed, so the ' +
@@ -91,6 +86,26 @@ export const PositionSchema = lazySchema(() => strictObject(
 
   /** Description */
   description: z.string().optional(),
+
+  /**
+   * [ADR-0131 D3/D4] The permission sets this position distributes, each by
+   * its NAME. A holder of the position holds every set named here, resolved
+   * by name in the environment catalog (code-declared packages and environment
+   * metadata) — the same by-name read a user's direct grant gets.
+   *
+   * This key replaced the `sys_position_permission_set` junction as the
+   * position → set binding: the authorization resolver reads this list and no
+   * junction row. A name that resolves to no permission set confers nothing.
+   * A set the catalog row deactivates confers nothing either: the `active`
+   * flag stays on the row until it gains a definition home.
+   *
+   * The built-in `everyone` anchor (ADR-0090 D5) is declared by the platform
+   * with the deployment's baseline sets; a package does not name it here, it
+   * marks its baseline with `isDefault` on the permission set.
+   */
+  permissionSets: z.array(SnakeCaseIdentifierSchema).optional().describe(
+    'ADR-0131 D3/D4: the permission sets this position distributes, by name (resolved in the environment catalog).',
+  ),
 
   /**
    * [ADR-0091 D3] Delegation of duty (职务代理). When true, a holder of this
