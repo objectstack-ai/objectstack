@@ -11,7 +11,13 @@
 // (`createData`) and the engine door (`hooks.run`), each read back through the
 // engine. The three controls are the triage's: `onError: 'log'` stores the
 // row; a caller-opened `transaction()` stays the caller's to decide; a throwing
-// `before*` hook refuses exactly as before.
+// `before*` hook refuses exactly as before. A plain `Error` from a function
+// hook answers REST's sanitised `500 INTERNAL_ERROR` (its terminal branch) on
+// both sides of the fix; what this file pins is what is STORED.
+//
+// One more case the unit made necessary: an `async: true` hook is started
+// inside the unit and writes after it commits. It used to inherit the finished
+// handle and lose its write ("Transaction query already complete", measured).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -43,6 +49,11 @@ const harStack = defineStack({
     { name: 'har_after_veto', object: CASE, events: ['afterInsert'], priority: 20, handler: veto('veto') },
     { name: 'har_before_veto', object: CASE, events: ['beforeInsert'], handler: veto('block') },
     { name: 'har_logged_veto', object: LOGGED, events: ['afterInsert'], onError: 'log', handler: veto('veto') },
+    { name: 'har_late_note', object: CASE, events: ['afterInsert'], async: true, onError: 'log',
+      handler: async (ctx: any) => {
+        await new Promise((r) => setTimeout(r, 40));
+        await ctx.api.object(NOTE).insert({ name: 'late', case_name: ctx.input.data.name });
+      } },
   ],
 } as never);
 
@@ -51,7 +62,8 @@ describe('an aborting afterInsert rolls the write back (#22782)', () => {
   let token: string;
   const uniq = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
   const stored = async (object: string, name: string) => (await stack.rows(object, { name })).length;
-  const notes = async (name: string) => (await stack.rows(NOTE, { case_name: name })).length;
+  const notes = async (name: string, note = 'note') => (await stack.rows(NOTE, { case_name: name, name: note })).length;
+  const refusal = async (res: Response) => ({ status: res.status, code: ((await res.json()) as any).code });
 
   beforeAll(async () => {
     stack = await bootStack(harStack);
@@ -61,9 +73,7 @@ describe('an aborting afterInsert rolls the write back (#22782)', () => {
 
   it('REST createData: the refused create leaves neither the row nor the hook chain\'s ctx.api write', async () => {
     const name = uniq('veto');
-    const res = await stack.apiAs(token, 'POST', `/data/${CASE}`, { name });
-    expect(res.status, await res.clone().text()).toBe(400);
-    expect((await res.json() as any).error).toBe('refused: veto');
+    expect(await refusal(await stack.apiAs(token, 'POST', `/data/${CASE}`, { name }))).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
     expect(await stored(CASE, name)).toBe(0);
     expect(await notes(name)).toBe(0);
   });
@@ -75,10 +85,12 @@ describe('an aborting afterInsert rolls the write back (#22782)', () => {
     expect(await notes(name)).toBe(0);
   });
 
-  it('positive control: an insert no hook refuses stores the row and the note', async () => {
+  it('positive control: an insert no hook refuses stores the row, the note, and the async hook\'s late note', async () => {
     const name = uniq('ok');
     expect((await stack.apiAs(token, 'POST', `/data/${CASE}`, { name })).status).toBe(201);
     expect([await stored(CASE, name), await notes(name)]).toEqual([1, 1]);
+    for (let i = 0; i < 40 && (await notes(name, 'late')) === 0; i++) await new Promise((r) => setTimeout(r, 50));
+    expect(await notes(name, 'late')).toBe(1);
   });
 
   it('CONTROL onError: \'log\' — the hook throws and the row is stored', async () => {
@@ -98,8 +110,7 @@ describe('an aborting afterInsert rolls the write back (#22782)', () => {
 
   it('CONTROL a throwing beforeInsert: refused, nothing stored', async () => {
     const name = uniq('block');
-    const res = await stack.apiAs(token, 'POST', `/data/${CASE}`, { name });
-    expect(res.status).toBe(400);
+    expect(await refusal(await stack.apiAs(token, 'POST', `/data/${CASE}`, { name }))).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
     expect(await stored(CASE, name)).toBe(0);
   });
 });

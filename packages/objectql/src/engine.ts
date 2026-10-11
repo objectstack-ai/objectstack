@@ -19522,13 +19522,18 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const trx = await drv.beginTransaction();
     const trxCtx = { ...(baseContext ?? {}), transaction: trx };
+    const ambientEntry: { transaction: unknown; scope?: TransactionScope } =
+      { transaction: trx, scope: this.newTransactionScope(driver!) };
     try {
       // Run the callback inside the ambient transaction store so internal
       // queries during writes reuse this transaction's connection (ADR-0034).
-      const result = await this.txStore.run(
-        { transaction: trx, scope: this.newTransactionScope(driver!) },
-        () => callback(trxCtx, { owned: true }),
-      );
+      // [#22782] The entry is CLOSED once the callback settles, before the
+      // commit: work it started and did not await (an `async: true` hook)
+      // inherits this store, and finding the handle there it ran on a finished
+      // transaction ("Transaction query already complete") and was lost. Closed,
+      // it runs on its own connection, as it would outside any unit.
+      const result = await this.txStore.run(ambientEntry, () => callback(trxCtx, { owned: true }))
+        .finally(() => { ambientEntry.transaction = undefined; ambientEntry.scope = undefined; });
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
