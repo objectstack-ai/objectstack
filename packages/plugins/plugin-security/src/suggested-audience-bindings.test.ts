@@ -17,7 +17,7 @@ import {
 } from './suggested-audience-bindings';
 import { declareEveryoneBaseline } from './builtin-positions';
 
-const SECURITY_PACKAGE = 'com.objectstack.security';
+const SECURITY_PACKAGE = 'com.objectstack.plugin-security';
 const BASELINE = ['member_default'];
 const DEFAULT_ORG = 'org_default';
 
