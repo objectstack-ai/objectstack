@@ -365,8 +365,8 @@ describe('locateCallables: the module finds each ref\'s callable by identity', (
       functions: { a: shared, b: { handler: own } },
     };
     expect(locateCallables({ h: shared, a: shared, b: own }, config)).toEqual({
-      h: ['hooks', 0, 'handler'],
-      a: ['hooks', 0, 'handler'],
+      h: ['functions', 'a'],
+      a: ['functions', 'a'],
       b: ['functions', 'b', 'handler'],
     });
   });
