@@ -113,7 +113,7 @@ describe('[ADR-0139 D1] the engine comparand door and a ReadableIds leaf', () =>
       refusalOf(engine.find('rid_child', { where })),
       refusalOf(engine.findOne('rid_child', { where })),
       refusalOf(engine.count('rid_child', { where })),
-      refusalOf(engine.aggregate('rid_child', { where, aggregations: [{ function: 'count', alias: 'n' }] } as any)),
+      refusalOf(engine.aggregate('rid_child', { where, aggregations: [{ function: 'count', alias: 'n' }] })),
     ]);
     for (const err of answers) expect(envelopeOf(err)).toEqual(INVALID_FILTER);
     expect(calls).toHaveLength(0);
@@ -138,10 +138,10 @@ describe('[ADR-0139 D1] the engine comparand door and a ReadableIds leaf', () =>
       ['find $and', () => engine.find('rid_child', { where: { $and: [{ object_name: 'rid_parent' }, { record_id: { $in: leaf() } }] } }), 'where.$and[1].record_id.$in'],
       ['findOne', () => engine.findOne('rid_child', { where: { record_id: { $in: leaf() } } }), 'where.record_id.$in'],
       ['count', () => engine.count('rid_child', { where: { record_id: { $in: leaf() } } }), 'where.record_id.$in'],
-      ['aggregate where', () => engine.aggregate('rid_child', { where: { record_id: { $in: leaf() } }, aggregations: [{ function: 'count', alias: 'n' }] } as any), 'where.record_id.$in'],
-      ['aggregate aggregation filter', () => engine.aggregate('rid_child', { aggregations: [{ function: 'count', alias: 'n', filter: { record_id: { $in: leaf() } } }] } as any), 'aggregations[0].filter.record_id.$in'],
-      ['update multi', () => engine.update('rid_child', { note: 'y' }, { where: { record_id: { $in: leaf() } }, multi: true } as any), 'where.record_id.$in'],
-      ['delete multi', () => engine.delete('rid_child', { where: { record_id: { $in: leaf() } }, multi: true } as any), 'where.record_id.$in'],
+      ['aggregate where', () => engine.aggregate('rid_child', { where: { record_id: { $in: leaf() } }, aggregations: [{ function: 'count', alias: 'n' }] }), 'where.record_id.$in'],
+      ['aggregate aggregation filter', () => engine.aggregate('rid_child', { aggregations: [{ function: 'count', alias: 'n', filter: { record_id: { $in: leaf() } } }] }), 'aggregations[0].filter.record_id.$in'],
+      ['update multi', () => engine.update('rid_child', { note: 'y' }, { where: { record_id: { $in: leaf() } }, multi: true }), 'where.record_id.$in'],
+      ['delete multi', () => engine.delete('rid_child', { where: { record_id: { $in: leaf() } }, multi: true }), 'where.record_id.$in'],
     ];
     for (const [label, run, at] of cases) {
       const err = await refusalOf(run());
