@@ -8,6 +8,7 @@ import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
 import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { resolveValueSlotMap } from './value-slot-map.js';
 
 /** Hard cap on map fan-out — turns a runaway collection into a clean error. */
 const MAX_MAP_ITEMS = 10_000;
@@ -79,7 +80,11 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
           // any form (online or offline) until now.
           indexVariable: { type: 'string', title: 'Index variable', description: 'Optional variable holding the current zero-based index.' },
           itemObject: { type: 'string', title: 'Item object', description: 'When items are records, the object they belong to (exposes each item as the child’s record).', xRef: { kind: 'object' } },
-          input: { type: 'object', additionalProperties: true, title: 'Item input', description: 'Params passed to each item’s subflow, interpolated per item (the item variable is in scope).' },
+          // [#19939] A value slot per key: the marker rides the spec Zod
+          // (`MapConfigSchema.input`, reaching the expression ledger through
+          // `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`), so this stays the open map
+          // the Studio keyValue editor renders, like the CRUD `fields`.
+          input: { type: 'object', additionalProperties: true, title: 'Item input', description: 'Params passed to each item’s subflow: each value a CEL value envelope evaluated per item (the item variable is in scope), or a literal.' },
           outputVariable: { type: 'string', title: 'Output variable', description: 'Each item’s subflow output, collected in order.' },
         },
         required: ['collection', 'flowName'],
@@ -167,8 +172,12 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         variables.set(iteratorVariable, item);
         if (indexVariable) variables.set(indexVariable, idx);
 
-        const rawInput = cfg.input ?? {};
-        const params = interpolate(rawInput, variables, context ?? ({} as AutomationContext)) as Record<string, unknown>;
+        // [#19939] `input.*` is a value slot (#11182 ruling D), resolved once
+        // per item with the item (and index) variable bound above: an envelope
+        // is evaluated in this scope and handed to the item's child flow as the
+        // raw value it computes; every other value is a literal (`parseNodeConfig`
+        // above has already refused a `{token}` of the retired dialect).
+        const params = resolveValueSlotMap(engine, cfg.input, variables, 'input', context ?? ({} as AutomationContext));
 
         // When the mapped item IS a record (has an id), expose it as the
         // child's `record` + `object` so a per-item `approval` / `update_record`

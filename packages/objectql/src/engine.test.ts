@@ -129,14 +129,17 @@ describe('ObjectQL Engine', () => {
             const manifest = {
                 id: 'com.example.app',
                 namespace: 'example',
+                version: '1.2.0',
                 objects: [
                     { name: 'task', fields: {} }
                 ]
             };
             
             engine.registerApp(manifest);
+            // The engine stamps the manifest's version before the registry sees
+            // the object; the registry's own signature is unchanged.
             expect(SchemaRegistry.registerObject).toHaveBeenCalledWith(
-                expect.objectContaining({ name: 'task' }), 
+                expect.objectContaining({ name: 'task', _packageId: 'com.example.app', _packageVersion: '1.2.0' }), 
                 'com.example.app',
                 'example',
                 'own'

@@ -185,6 +185,8 @@ describe('buildSchemaMigrationPlugins', () => {
     expect(out.notes).toEqual([]);
     expect(out.hostConfigPath).toBeNull();
     expect(out.hostConfigLoaded).toBe(false);
+    // [#22580] …and it says so: there is no deployment here to mirror.
+    expect(out.servedBoot).toEqual({ mirrored: false, reason: 'nothing-to-compose' });
   });
 
   it('composes the platform floor once an artifact app is present, and not twice', async () => {
@@ -468,7 +470,7 @@ describe('describeUnloadableHostConfig (#12953)', () => {
   function composition(over: Partial<SchemaMigrationComposition>): SchemaMigrationComposition {
     return {
       plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
-      notes: [], coverage: null, ...over,
+      servedBoot: { mirrored: false, reason: 'nothing-to-compose' }, notes: [], coverage: null, ...over,
     };
   }
 
@@ -537,7 +539,7 @@ describe('describeUnloadableHostConfig — the no-DDL notice (#13118)', () => {
   function composition(over: Partial<SchemaMigrationComposition>): SchemaMigrationComposition {
     return {
       plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
-      notes: [], coverage: null, ...over,
+      servedBoot: { mirrored: false, reason: 'nothing-to-compose' }, notes: [], coverage: null, ...over,
     };
   }
 
@@ -640,7 +642,7 @@ describe('measureComposedCoverage (#13028)', () => {
       sync: async (n) => { synced.push(n); },
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), driver, true);
+    const out = await measureComposedCoverage(kernelWith(engine), [driver], true);
 
     expect(synced).toEqual(['sys_position', 'sys_permission_set']);
     expect(out.coverage).toMatchObject({
@@ -664,7 +666,7 @@ describe('measureComposedCoverage (#13028)', () => {
       driverFor: (n) => (n === 'sys_notification' ? planned : elsewhere),
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+    const out = await measureComposedCoverage(kernelWith(engine), [planned], true);
 
     expect(out.coverage).toMatchObject({
       registeredObjects: 3,
@@ -681,6 +683,27 @@ describe('measureComposedCoverage (#13028)', () => {
     expect(said).toContain('UNMEASURED');
   });
 
+  it('[#22579] examines an object on ANY planned driver — the telemetry sibling is diffed, not "elsewhere"', async () => {
+    // A development boot keeps lifecycle-classed objects on the `telemetry`
+    // sibling; the plan diffs both, so neither half is a shortfall. A third
+    // driver the plan does not diff still is.
+    const primary = driverDouble('primary');
+    const telemetry = driverDouble('telemetry');
+    const elsewhere = driverDouble('tenant');
+    const synced: string[] = [];
+    const engine = engineDouble({
+      objects: [{ name: 'sys_position' }, { name: 'sys_audit_log' }, { name: 'tenant_row' }],
+      driverFor: (n) => (n === 'sys_position' ? primary : n === 'sys_audit_log' ? telemetry : elsewhere),
+      sync: async (n) => { synced.push(n); },
+    });
+
+    const out = await measureComposedCoverage(kernelWith(engine), [primary, telemetry], true);
+
+    expect(synced).toEqual(['sys_position', 'sys_audit_log']);
+    expect(out.coverage).toMatchObject({ registeredObjects: 3, examinedObjects: 2, unexaminedObjects: 1 });
+    expect(out.coverage.reasons.otherDriver).toBe(1);
+  });
+
   it('counts federated, unbound and unsupported objects apart from one another', async () => {
     const planned = driverDouble('control');
     const engine = engineDouble({
@@ -692,7 +715,7 @@ describe('measureComposedCoverage (#13028)', () => {
       driverFor: (n) => (n === 'sys_position' ? planned : undefined),
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+    const out = await measureComposedCoverage(kernelWith(engine), [planned], true);
 
     expect(out.coverage.reasons).toMatchObject({ federated: 1, unbound: 1, otherDriver: 0 });
     const said = out.notes.join(' ');
@@ -708,7 +731,7 @@ describe('measureComposedCoverage (#13028)', () => {
       sync: async () => { throw new Error('pool is closed'); },
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), planned, true);
+    const out = await measureComposedCoverage(kernelWith(engine), [planned], true);
 
     expect(out.coverage.examinedObjects).toBe(0);
     expect(out.coverage.reasons.failed).toBe(1);
@@ -721,7 +744,7 @@ describe('measureComposedCoverage (#13028)', () => {
     // #9285's contract, one layer out: "the registry holds nothing" and "the
     // registry could not be read" have opposite consequences, and only the
     // first is a truthful reason to report full coverage over an empty set.
-    const out = await measureComposedCoverage(kernelWith({ registry: {} }), driverDouble('control'), true);
+    const out = await measureComposedCoverage(kernelWith({ registry: {} }), [driverDouble('control')], true);
 
     expect(out.coverage.registeredObjects).toBe(0);
     const said = out.notes.join(' ');
@@ -741,7 +764,7 @@ describe('measureComposedCoverage (#13028)', () => {
       sync: async () => { synced++; },
     });
 
-    const out = await measureComposedCoverage(kernelWith(engine), planned, false);
+    const out = await measureComposedCoverage(kernelWith(engine), [planned], false);
 
     expect(synced).toBe(0);
     expect(out.notes.join(' ')).toContain('did not defer schema DDL');
@@ -896,6 +919,36 @@ describe('servedPlatform (#22506)', () => {
       'com.objectstack.platform-objects',
     ]);
   }, 60_000);
+
+  /**
+   * [#22580] The composition records, where it decides it, whether its set
+   * mirrors the served boot — the fact `os migrate plan`'s unmanaged-tables
+   * sweep gates on. Every shape a project can be in, each answer its own.
+   */
+  it('[#22580] records whether the set mirrors the served boot — per project shape, never from hostConfigLoaded', async () => {
+    // A compiled artifact and NO config: `hostConfigLoaded` is false, and the
+    // set IS the served boot's once the served platform is composed.
+    const artifactApp = { type: 'app', name: 'plugin.app.demo' };
+    const artifact = await buildSchemaMigrationPlugins({ basePlugins: [artifactApp], cwd: tempProject(), servedPlatform: {} });
+    expect(artifact.hostConfigLoaded).toBe(false);
+    expect(artifact.servedBoot).toEqual({ mirrored: true });
+
+    const config = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP), servedPlatform: {} });
+    expect(config.servedBoot).toEqual({ mirrored: true });
+
+    // The controls: each set that does NOT mirror the served boot, with its reason.
+    const stackOnly = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP) });
+    expect(stackOnly.servedBoot).toEqual({ mirrored: false, reason: 'stack-only' });
+
+    const unloadable = await buildSchemaMigrationPlugins({
+      basePlugins: [], cwd: project("throw new Error('fixture: os22580 unloadable');\n"), servedPlatform: {},
+    });
+    expect(unloadable.hostConfigLoaded).toBe(false);
+    expect(unloadable.servedBoot).toEqual({ mirrored: false, reason: 'config-unloadable' });
+
+    const nothing = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: tempProject(), servedPlatform: {} });
+    expect(nothing.servedBoot).toEqual({ mirrored: false, reason: 'nothing-to-compose' });
+  }, 120_000);
 });
 
 describe('composeProviderForDeclarations (#22506)', () => {

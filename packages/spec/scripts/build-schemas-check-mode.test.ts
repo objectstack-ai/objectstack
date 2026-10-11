@@ -3525,8 +3525,9 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
       // The prescription IS the contract: the entry FILE to add per key, named
       // by the generator's own rule, and the generator command. RETIRED_KEYS_BY_MAJOR
       // is generated from those files, so a remedy that pastes lines into
-      // src/migrations/registry.ts sends the author to an edit the next run
-      // reverts and check:migration-registry fails.
+      // src/migrations/registry.ts sends the author to an edit that is never
+      // committed (the file is generated whole and git-ignored) and the next run
+      // overwrites.
       const remedy = output.slice(output.indexOf(`2 ${CHECK_B}`));
       for (const key of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) {
         expect(remedy).toContain(entryFile('retired-keys', key));

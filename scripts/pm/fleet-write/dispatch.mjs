@@ -207,7 +207,14 @@
  *     executor polls the pull's head off `expected_head_sha`, or measures a
  *     422 as a no-op, before it calls the action landed — so a `success` run
  *     IS that confirmation; the seat reads the new head with one
- *     `GET /repos/{repo}/pulls/{n}` after, and this file reads nothing back.
+ *     `GET /repos/{repo}/pulls/{n}` after, and this file reads nothing back;
+ *   - a `pr_create` carrying `assignees` is read back at its body's locator
+ *     as before, and its row ALSO carries the pull's `assignees` as the
+ *     platform lists them (`assigneesReading`; `--json` carries them too) —
+ *     a READING for the seat's report, never a verdict: the leg's landing
+ *     was judged inside the run (the executor fails the action when the
+ *     answer lists fewer than sent), so a login sent and absent here is
+ *     another actor's later write, said on the row's line.
  *
  * ## The started run — the one outcome only the seat can name
  *
@@ -648,9 +655,22 @@ export function readBackTargets(payload) {
     if (!BODY_OPS.includes(a?.op) || typeof a.body !== 'string') return;
     const target = { action: i + 1, op: a.op, sent: a.body };
     for (const key of ['issue', 'comment_id', 'title', 'head']) if (key in a) target[key] = a[key];
+    if (Array.isArray(a.assignees)) target.assignees = [...a.assignees];
     out.push(target);
   });
   return out;
+}
+
+/**
+ * A `pr_create` row's assignees (header): what the pull lists, and which of
+ * the logins the action sent are not among them — a reading, never a
+ * verdict. Pure.
+ */
+export function assigneesReading(target, stored) {
+  const assignees = Array.isArray(stored?.assignees) ? stored.assignees.map((u) => (typeof u?.login === 'string' ? u.login : null)).filter(Boolean) : [];
+  const sent = Array.isArray(target?.assignees) ? target.assignees : [];
+  const assigneesMissing = sent.filter((login) => !assignees.some((l) => l.toLowerCase() === login.toLowerCase()));
+  return { assignees, assigneesMissing };
 }
 
 const replacementCount = (s) => (String(s ?? '').match(/\uFFFD/gu) ?? []).length;
@@ -698,10 +718,18 @@ export function strokeReadBackState(rows) {
 /** The transcript line for one read-back row. Pure. */
 export function readBackLine(row) {
   const head = `fleet-write: read-back action ${row.action} ${row.op}${row.where ? ` ${row.where}` : ''}`;
-  if (row.verdict === 'landed') return `${head}: ${row.sentBytes} byte(s) sent, ${row.storedBytes} stored — ${row.cls}; every byte sent is on the platform.`;
+  if (row.verdict === 'landed') return `${head}: ${row.sentBytes} byte(s) sent, ${row.storedBytes} stored — ${row.cls}; every byte sent is on the platform.${assigneesText(row)}`;
   if (row.verdict === 'unverified') return `${head}: ⚠️ UNVERIFIED — ${row.why ?? `the stored body could not be read (${row.cls})`}.`;
   const fffd = row.replacements > 0 ? ` The stored body carries ${row.replacements} U+FFFD replacement character(s) the sent one does not — the mark of a byte-level split upstream.` : '';
-  return `${head}: ✗ NOT STORED — sent ${row.sentBytes} byte(s), stored ${row.storedBytes}; first difference at byte ${row.offset}: sent ${row.sentContext} | stored ${row.storedContext}.${fffd}`;
+  return `${head}: ✗ NOT STORED — sent ${row.sentBytes} byte(s), stored ${row.storedBytes}; first difference at byte ${row.offset}: sent ${row.sentContext} | stored ${row.storedContext}.${fffd}${assigneesText(row)}`;
+}
+
+/** The assignees clause of a pr_create row's line (header): what the pull lists, and any login sent that is not among them — said, never judged. Pure. */
+export function assigneesText(row) {
+  if (!Array.isArray(row.assignees)) return '';
+  const listed = ` Assignees as the pull lists them: ${row.assignees.length ? row.assignees.join(', ') : 'none'}.`;
+  const missing = Array.isArray(row.assigneesMissing) && row.assigneesMissing.length ? ` ⚠️ sent ${row.assigneesMissing.join(', ')} not among them — the leg landed inside the run, so read the pull's timeline for the later write.` : '';
+  return `${listed}${missing}`;
 }
 
 /** What the CLI prints on a `failure` the read-back measured. */
@@ -991,7 +1019,7 @@ export async function readBackStroke(payload, { dispatchedAt, annotations = [] }
         continue;
       }
       taken.add(hit.id);
-      rows.push({ ...judged(`${repo}#${hit.number}`, hit.body), ...(isPr ? {} : { foundBy: 'list' }) });
+      rows.push({ ...judged(`${repo}#${hit.number}`, hit.body), ...(isPr ? assigneesReading(target, hit) : { foundBy: 'list' }) });
       continue;
     }
     // `comment`: only the body finds a new comment, so a body that matches nothing is unverified, never not-stored.
@@ -1239,10 +1267,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the dispatch: one paced POST to the board repo with event_type and client_payload; 204 is acceptance, anything else a refusal': 7,
   'the run-poller: the run named after the request id, its completion, its conclusion': 6,
   'the ceilings: no run in the start window, no completion in the ceiling — UNCONFIRMED, never retried': 7,
-  'the read-back targets: every op the table lets carry a body — derived, each with a locator — and no other op is read back': 7,
+  'the read-back targets: every op the table lets carry a body — derived, each with a locator — and no other op is read back': 8,
   "the verdict: post-stamped's own classifier, imported — declared normalisations land, a split, lost or truncated byte is NOT STORED at its first differing byte, an unreadable body is unverified, the PR-create footer forgiven on pr_create alone": 13,
   "the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's env text, the validator and the executor; a per-chunk decode is NOT STORED": 8,
-  'the read-back end to end: after a success run each body at its locator — a corrupted read-back exits 4 through the CLI, an unreadable or unfound one 6, a body-less stroke reads nothing, never a retry': 17,
+  'the read-back end to end: after a success run each body at its locator — a corrupted read-back exits 4 through the CLI, an unreadable or unfound one 6, a body-less stroke reads nothing, never a retry': 20,
   'the issue_create re-list: a list that lags the create reads back IDENTICAL on a bounded re-list; a real miss is still unfound (exit 6) after exactly the declared window; an unreadable re-list is unread; the create is never re-sent': 13,
   "the run's annotations: after a success run carrying an op that creates or moves a card its check-run annotations are read first — an issue_create they name read back AT that number with NO re-list; absent, unreadable, ignored or past the cap, the re-list as before; a stroke with no such op reads none": 14,
   'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 5,
@@ -1634,6 +1662,7 @@ export async function selfTest() {
       const mixed = { repo: 'objectstack-ai/objectstack', actions: [{ op: 'labels_add', issue: 1, labels: ['a'] }, { op: 'issue_patch', issue: 2, state: 'closed' }, { op: 'issue_patch', issue: 3, body: 'B' }, { op: 'pr_create', title: 'T', head: 'h', base: 'main' }, { op: 'pr_create', title: 'T', head: 'h2', base: 'main', body: 'P' }] };
       t('only an action that SENT a body is a target, numbered as the stroke numbers it', readBackTargets(mixed).map((x) => [x.action, x.op]), [[3, 'issue_patch'], [5, 'pr_create']]);
       t('…carrying the keys its locator needs', [readBackTargets(mixed)[0].issue, readBackTargets(mixed)[1].head, readBackTargets(mixed)[1].sent], [3, 'h2', 'P']);
+      t('a pr_create that sent assignees carries them on its target, for the row to compare against what the pull lists; one that sent none carries no such key', [readBackTargets({ repo: 'objectstack-ai/objectstack', actions: [{ op: 'pr_create', title: 'T', head: 'h', base: 'main', body: 'P', assignees: ['marchtian'] }] })[0].assignees, 'assignees' in readBackTargets(mixed)[1]], [['marchtian'], false]);
       t("pr_update_branch carries no body — not in BODY_OPS, no locator, no target: its confirmation is the executor's, inside the run", [BODY_OPS.includes('pr_update_branch'), 'pr_update_branch' in READ_BACK_LOCATORS, readBackTargets({ repo: 'objectstack-ai/objectstack', actions: [{ op: 'pr_update_branch', pull: 1, expected_head_sha: '1'.repeat(40) }] })], [false, false, []]);
       let fetched = 0;
       const none = await readBackStroke({ repo: 'objectstack-ai/objectstack', actions: [{ op: 'labels_add', issue: 1, labels: ['a'] }] }, { dispatchedAt: T0 }, {
@@ -1795,6 +1824,13 @@ export async function selfTest() {
       t("pr_create: found by owner:head; the platform's session-URL footer after every byte sent is success", [pr.state, pr.readBack?.rows?.[0]?.cls, pr.readBack?.rows?.[0]?.where], ['success', 'pr-create-footer-appended', 'objectstack-ai/objectstack#20600']);
       const noPr = await drive({ ...OK_RUN, store: { [PULLS]: { status: 200, json: [] } } }, { stroke: prStroke });
       t('…and a pull the head does not find is unverified, exit 6', [noPr.state, exitForResult(noPr)], ['unverified', EXIT_UNCONFIRMED]);
+      const prAssigned = strokeOf([{ op: 'pr_create', title: 'T', head: 'claude/issue-1-x', base: 'main', body: B, assignees: ['marchtian'] }]);
+      const pullListing = (assignees) => ({ [PULLS]: (q) => ({ status: 200, json: q.get('head') === 'objectstack-ai:claude/issue-1-x' ? [{ id: 31, number: 20600, created_at: at(4_000), body: `${B.replace(/\n+$/u, '')}${PR_TAIL}`, assignees }] : [] }) });
+      const withAssignee = await drive({ ...OK_RUN, store: pullListing([{ login: 'marchtian' }]) }, { stroke: prAssigned });
+      t("pr_create with assignees: the row carries the pull's assignees as the platform lists them, the line says so, and the verdict is the body's", [withAssignee.state, withAssignee.readBack?.rows?.[0]?.verdict, withAssignee.readBack?.rows?.[0]?.assignees, withAssignee.readBack?.rows?.[0]?.assigneesMissing, readBackLine(withAssignee.readBack.rows[0]).includes('lists them: marchtian')], ['success', 'landed', ['marchtian'], [], true]);
+      const unassigned = await drive({ ...OK_RUN, store: pullListing([]) }, { stroke: prAssigned });
+      t('…a login sent and absent on the pull is SAID on the line and in the row — the leg landed inside the run, so this is a reading, never a verdict', [unassigned.state, unassigned.readBack?.rows?.[0]?.verdict, unassigned.readBack?.rows?.[0]?.assigneesMissing, readBackLine(unassigned.readBack.rows[0]).includes('sent marchtian not among them')], ['success', 'landed', ['marchtian'], true]);
+      t('…and a pr_create that sent none carries the list the pull shows and nothing missing; an issue row carries neither', [pr.readBack?.rows?.[0]?.assignees, pr.readBack?.rows?.[0]?.assigneesMissing, 'assignees' in (good.readBack?.rows?.[0] ?? {})], [[], [], false]);
       const labels = await drive(OK_RUN, { stroke: strokeOf([{ op: 'labels_add', issue: 1, labels: ['a'] }]) });
       t('a stroke carrying no body reads nothing back: success, read-back none, no request beyond the dispatch and the run', [labels.state, labels.readBack?.state, labels.seen.filter((s) => !s.call.includes('/actions/runs') && s.call !== DISPATCH).length], ['success', 'none', 0]);
       t("the callers' one vocabulary: failure + notStored → 4, failure → 5, unverified → 6", [exitForResult({ state: 'failure', notStored: true }), exitForResult({ state: 'failure' }), exitForResult({ state: 'unverified' })], [EXIT_NOT_STORED, EXIT_PLATFORM_REFUSAL, EXIT_UNCONFIRMED]);
@@ -2366,7 +2402,7 @@ export async function main(argv, deps = {}) {
         not_stored: result.notStored === true,
         run: result.run,
         dispatched_at: new Date(result.dispatchedAt).toISOString(),
-        read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null, found_by: r.foundBy ?? null })),
+        read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null, found_by: r.foundBy ?? null, assignees: r.assignees ?? null, assignees_missing: r.assigneesMissing ?? null })),
         annotations: (result.annotations?.rows ?? []).map((a) => ({ action: a.action, op: a.op, number: a.number, url: a.url })),
         runs: (result.runs?.rows ?? []).map((r) => ({ action: r.action, op: r.op, workflow: r.workflow, verdict: r.verdict, class: r.cls, candidates: r.candidates ?? 0, run: r.run ? { id: r.run.id, url: r.run.url, status: r.run.status, conclusion: r.run.conclusion, created_at: r.run.created_at, actor: r.run.actor } : null })),
       }),

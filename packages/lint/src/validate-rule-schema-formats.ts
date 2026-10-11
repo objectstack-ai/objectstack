@@ -292,19 +292,19 @@ export function nearestRegisteredFormat(name: string, registered: readonly strin
 export function validateRuleSchemaFormats(stack: unknown): RuleSchemaFormatFinding[] {
   const findings: RuleSchemaFormatFinding[] = [];
 
-  const pending: Array<{ use: FormatUse; where: string; label: string; objectName: string; basePath: string }> = [];
-  for (const { rule, objectName, label, where, basePath } of walkObjectValidationRules(stack)) {
+  const pending: Array<{ use: FormatUse; where: string; basePath: string }> = [];
+  for (const { rule, where, basePath } of walkObjectValidationRules(stack)) {
     if (rule.type !== 'json_schema' || !isRec(rule.schema)) continue;
     const uses: FormatUse[] = [];
     collectFormatUses(rule.schema, '', uses, 0);
-    for (const use of uses) pending.push({ use, where, label, objectName, basePath });
+    for (const use of uses) pending.push({ use, where, basePath });
   }
   if (pending.length === 0) return findings;
 
   const registered = registeredFormatNames();
   const known = new Set(registered);
 
-  for (const { use, where, label, objectName, basePath } of pending) {
+  for (const { use, where, basePath } of pending) {
     if (known.has(use.name)) continue;
     const suggestion = nearestRegisteredFormat(use.name, registered);
     const pointer = `#${use.pointer}`;
@@ -313,13 +313,13 @@ export function validateRuleSchemaFormats(stack: unknown): RuleSchemaFormatFindi
       rule: VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT,
       where,
       path: `${basePath}.schema${pointer}`,
+      // [#22161] One verdict sentence. `where` names the rule and its object and
+      // `path` the JSON Pointer, so neither is echoed; what ajv does with an
+      // unknown name, on which doors, and why the gap is silent is
+      // `os explain validation-rule-json-schema-unknown-format`.
       message:
-        `\`json_schema\` validation ${label} on object '${objectName}' names \`format: '${use.name}'\` at ` +
-        `\`${pointer}\`, which is not a registered format. ajv logs \`unknown format "${use.name}" ignored\` ` +
-        `once at compile time and DROPS the keyword — in the write path (rule-validator.ts, ` +
-        `\`strict: false\`) and in the publish gate alike — so the schema compiles, the rule ships and runs ` +
-        `on every write, its \`type\`/\`required\` keywords are enforced, and this constraint is enforced ` +
-        `on no record, ever. The record is ACCEPTED, so nothing downstream reports the gap either.`,
+        `\`format: '${use.name}'\` is not a registered format, so ajv drops the keyword and the rule ` +
+        `enforces it on no record: every write is ACCEPTED`,
       hint:
         (suggestion ? `Did you mean \`format: '${suggestion}'\`? ` : '') +
         `The registered names are: ${registered.join(', ')} — the default \`ajv-formats\` set, the one ` +

@@ -1287,6 +1287,36 @@ export interface SchemaMigrationComposition {
    */
   hostConfigError: string | null;
   /**
+   * [#22580] Does the composed object set MIRROR what this deployment's
+   * `os serve` boot registers? Recorded once, by the code that decides it, so
+   * a consumer that needs the answer reads it here rather than re-deriving it.
+   *
+   * `mirrored: true` exactly when {@link composeServedPlatform} composed what
+   * `serve` mounts around a stack this boot could read: a host config that
+   * loaded, or a compiled artifact with no config. That is the set
+   * `commands/migrate/plan.boot-parity.integration.test.ts` holds equal to a
+   * real `os serve` boot's, per app shape. Otherwise `reason` says why not:
+   *
+   *  - `not-composed`: the boot did not ask for the host composition
+   *    (`composeHostStack` off), so the set is the data stack alone;
+   *  - `nothing-to-compose`: neither a host config nor a compiled artifact, so
+   *    there is no deployment here to mirror;
+   *  - `config-unloadable`: the host config exists and did not load (#12953);
+   *  - `stack-only`: the caller did not ask for what `serve` mounts around the
+   *    stack (`servedPlatform`), so its auth family and capability providers
+   *    are not in the set.
+   *
+   * ⛔ Not a second reading of {@link hostConfigLoaded}: that is `false` on a
+   * project with a compiled artifact and no config too, which mirrors the
+   * served boot once the served platform is composed (#22506).
+   */
+  servedBoot:
+    | { readonly mirrored: true }
+    | {
+        readonly mirrored: false;
+        readonly reason: 'not-composed' | 'nothing-to-compose' | 'config-unloadable' | 'stack-only';
+      };
+  /**
    * One line per thing this composition did or could not do, for the command to
    * print. Empty when nothing was composed, so a project with neither a config
    * nor an artifact produces byte-identical output to before this existed.
@@ -1333,6 +1363,7 @@ const NOTHING_COMPOSED: SchemaMigrationComposition = Object.freeze({
   hostConfigPath: null,
   hostConfigLoaded: false,
   hostConfigError: null,
+  servedBoot: { mirrored: false, reason: 'nothing-to-compose' },
   notes: [],
   coverage: null,
 }) as SchemaMigrationComposition;
@@ -1564,6 +1595,12 @@ export async function buildSchemaMigrationPlugins(opts: {
   const notes: string[] = [];
   let hostConfigLoaded = false;
   let hostConfigError: string | null = null;
+  // [#22580] Whether this set mirrors the served boot — set below where each
+  // answer is decided: the catch that finds the config unloadable, and the
+  // branch that composes what `serve` mounts around the stack.
+  let servedBoot: SchemaMigrationComposition['servedBoot'] = !hostConfigPath && !hasArtifactApp
+    ? { mirrored: false, reason: 'nothing-to-compose' }
+    : { mirrored: false, reason: 'stack-only' };
   // #21732 — the config's capability declarations, read off the same loaded
   // config the plugins came from. See {@link resolveRequiredProviders}.
   let loadedRequires: unknown;
@@ -1678,6 +1715,7 @@ export async function buildSchemaMigrationPlugins(opts: {
       console.warn(`[migrate] ⚠ ${line}`);
       notes.push(line);
       hostConfigError = message;
+      servedBoot = { mirrored: false, reason: 'config-unloadable' };
     }
   }
 
@@ -1713,6 +1751,9 @@ export async function buildSchemaMigrationPlugins(opts: {
       plugins.splice(1, 0, ...served.authFamily);
       plugins.push(...served.plugins);
       notes.push(...served.notes);
+      // [#22580] The stack this boot read, and what `serve` mounts around it:
+      // the set the boot-parity pin holds equal to `serve`'s.
+      if (hostConfigPath || hasArtifactApp) servedBoot = { mirrored: true };
     }
   // #21732 — `serve` step 5, narrowed to what this boot cannot start without:
   // a provider the config's `requires` supplies, that a composed plugin
@@ -1751,7 +1792,8 @@ export async function buildSchemaMigrationPlugins(opts: {
   }
 
   return {
-    plugins, hostConfigPath, hostConfigLoaded, hostConfigError, notes, coverage: null, writeGuard, lifecycle,
+    plugins, hostConfigPath, hostConfigLoaded, hostConfigError, servedBoot,
+    notes, coverage: null, writeGuard, lifecycle,
     ...(securityPlugin ? { securityPlugin } : {}),
   };
 }
@@ -1884,9 +1926,9 @@ async function materializeHostPlugins(
  *
  * `serve`'s flags (`--preset minimal` mounts no slate; `--dev` adds the
  * config's `devPlugins`); its tier-gated AI and i18n services and the rest of
- * its boot that is no shared rule; and the `telemetry` sibling datasource a
- * development boot provisions (ADR-0057 §3.6), so lifecycle-classed objects are
- * examined against the primary database here. The parity pin
+ * its boot that is no shared rule. (The `telemetry` sibling datasource a
+ * development boot provisions, ADR-0057 §3.6, is not a composition: the boot
+ * itself provisions it, `bootSchemaStack`, #22579.) The parity pin
  * (`commands/migrate/plan.boot-parity.integration.test.ts`) holds the object
  * set a plan examines equal to the one a real `os serve` boot registers, per
  * example app shape — so whatever this list misses fails one test instead of
@@ -2278,14 +2320,17 @@ export function refuseWhenHostConfigUnloadable(
  * (AGENTS.md → Route & surface ownership §2).
  *
  * @param kernel the booted kernel.
- * @param plannedDriver the driver whose managed set the plan will diff — the
- *   identity comparison that turns "bound somewhere" into "bound HERE".
+ * @param plannedDrivers the drivers whose managed sets the plan will diff — the
+ *   identity comparison that turns "bound somewhere" into "bound HERE". The
+ *   primary, and the `telemetry` sibling when the boot provisioned one
+ *   (#22579): an object routed to the sibling is examined there, not reported
+ *   as bound to a different datasource.
  * @param deferred whether this boot armed deferred DDL. `false` reports the
  *   coverage as UNMEASURED instead of syncing.
  */
 export async function measureComposedCoverage(
   kernel: unknown,
-  plannedDriver: unknown,
+  plannedDrivers: readonly unknown[],
   deferred: boolean,
 ): Promise<{ coverage: SchemaMigrationCoverage; notes: string[] }> {
   const notes: string[] = [];
@@ -2344,7 +2389,7 @@ export async function measureComposedCoverage(
     if (obj?.external != null) { federated++; continue; }
     const driver = engine.getDriverForObject(obj.name);
     if (!driver) { unbound++; continue; }
-    if (driver !== plannedDriver) { otherDriver++; continue; }
+    if (!plannedDrivers.includes(driver)) { otherDriver++; continue; }
     if (typeof (driver as { syncSchema?: unknown }).syncSchema !== 'function') { unsupported++; continue; }
     try {
       await engine.syncObjectSchema(obj.name);

@@ -14,7 +14,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
-import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 // [#17502] The served JSON Schema publishes what an author MAY write, so a
 // property no instance can satisfy — a `retiredKey()` tombstone, rendered
 // `{ not: {} }` — is dropped from it. See the module header for the channels
@@ -134,6 +134,7 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
     type SearchFieldMeta,
+    canServeApiOperation,
     classifyDottedFilterHead,
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
@@ -4435,6 +4436,55 @@ export function collectStoredMetadataFilterFields(object: string, query: unknown
 /** The head segment of a column name: `metadata.x` reads `metadata`. */
 function headSegment(name: string): string {
     return name.split('.')[0] as string;
+}
+
+/**
+ * [#22646] How deep the data door's `internal: true` walk follows nested
+ * relation conditions and `expand` levels — a backstop against a
+ * self-referential in-process value, well above anything the engine executes
+ * (one nested-relation hop; `expand` stops at its own depth cap).
+ */
+const INTERNAL_FIELD_WALK_DEPTH = 8;
+
+/**
+ * [#22646] The NESTED-RELATION conditions a filter holds — a key naming a
+ * reference field of the object (`REFERENCE_VALUE_TYPES`) whose value is a
+ * plain record carrying at least one non-`$` key, i.e. a condition on the
+ * related object rather than an operator bag — with each site's target object.
+ * Logical combinators (and any other `$` key) are walked as conditions, so a
+ * site under `$or` / `$not` is found. Shared by the door's internal-field
+ * refusal; the engine's own relation lowering is the authority on whether a
+ * site RUNS, this only finds what a filter would evaluate on the related object.
+ */
+function relationConditionSites(
+    fields: Record<string, any> | undefined,
+    root: unknown,
+): Array<{ field: string; target: string; condition: Record<string, unknown> }> {
+    const sites: Array<{ field: string; target: string; condition: Record<string, unknown> }> = [];
+    if (!fields || typeof fields !== 'object') return sites;
+    const seen = new WeakSet<object>();
+    const pending: unknown[] = [root];
+    while (pending.length > 0) {
+        const node = pending.pop();
+        if (node === null || typeof node !== 'object' || seen.has(node)) continue;
+        seen.add(node);
+        if (Array.isArray(node)) {
+            for (const member of node) pending.push(member);
+            continue;
+        }
+        for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+            if (key.startsWith('$')) {
+                pending.push(value);
+                continue;
+            }
+            const def = fields[key];
+            if (def == null || !REFERENCE_VALUE_TYPES.has(def.type) || !isPlainRecord(value)) continue;
+            if (!Object.keys(value).some((k) => !k.startsWith('$'))) continue;
+            const target = referenceTargetOf(def);
+            if (target) sites.push({ field: key, target, condition: value });
+        }
+    }
+    return sites;
 }
 
 /**
@@ -12027,6 +12077,37 @@ export class ObjectStackProtocolImplementation implements
         if (names.length === 0) return;
         const gate = this.resolveQueryFields(object);
         if (!gate) return;
+        // [#22646] A field declared `internal: true` is never a search target,
+        // refused FIRST and regardless of whether it resolves into the scanned
+        // set: a non-hidden internal text column (an auth digest, a token)
+        // enters the auto-default, so `$searchFields` naming one would be
+        // ACCEPTED here and a `$search` over it would confirm a guessed prefix
+        // of a withheld credential. The engine already drops internal fields
+        // from the auto-default set it scans (a withhold), but an EXPLICIT
+        // narrowing to one has to be a loud 400 rather than a silent widening
+        // back to the default set — the #4254 posture. Judged by the ONE flag
+        // reader (`@objectstack/core`'s cross-package twin of
+        // `collectInternalReadFields`), the same reader the evaluate refusal uses.
+        const internalSet = new Set(collectInternalWriteResponseFields(gate.schema));
+        const internalNamed = names.filter((n) => internalSet.has(n));
+        if (internalNamed.length > 0) {
+            const first = internalNamed[0] as string;
+            const err: any = new Error(
+                `Field '${first}' on object '${object}' is declared \`internal: true\` and cannot be searched`
+                + (internalNamed.length > 1 ? ` (also: ${internalNamed.slice(1).join(', ')})` : '')
+                + `. Its value is never returned on a generic data exit, so '${param}' may not name it — a `
+                + 'search over it would confirm a guessed value by whether the row comes back. Search '
+                + 'another column instead.',
+            );
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.httpStatus = 400;
+            err.field = first;
+            err.fields = internalNamed;
+            err.object = object;
+            err.param = param;
+            throw err;
+        }
         const { allowed, source } = resolveSearchFieldResolution({
             fields: gate.fields,
             searchableFields: gate.schema?.searchableFields,
@@ -12379,6 +12460,182 @@ export class ObjectStackProtocolImplementation implements
         err.fields = unknown;
         err.object = object;
         err.param = 'aggregations';
+        throw err;
+    }
+
+    /**
+     * [#22646] The data door's EVALUATE refusal for a field declared
+     * `internal: true` — "the value is never returned on a generic data exit"
+     * (#21197), extended from the row position (where it is a withhold — the
+     * engine OMITS the column from every row) to every position that would
+     * reveal the stored value by EVALUATING it. A filter or sort on such a
+     * column is a confirmation oracle — a predicate matches the row only when
+     * the guess is right, an order leaks the comparative value — so it is
+     * REFUSED rather than withheld, the posture this door already takes for the
+     * stored-metadata body/hash family ({@link storedMetadataBodyPredicateRefusal},
+     * {@link storedMetadataHashEvaluateRefusal}) and the analytics door for an
+     * internal member. `INVALID_FIELD` / 400, the family's envelope, located at
+     * the object, the field and the offending position.
+     *
+     * It binds EVERY caller of this generic door, administrators included
+     * (#21197): there is no caller carve-out, the same stance the stored-body
+     * family takes here. The engine's privileged internal consumers (the
+     * API-key verifier's `where: { key }`, the share-link / SCIM / approval-token
+     * lookups) call the engine directly and never reach this door, so the
+     * flag's one legitimate use — a `where` match the engine resolves without
+     * ever returning the value — is untouched, exactly as #7823 kept the engine's
+     * write results whole while the generic-data-path ingress stripped them.
+     *
+     * Positions, with the ONE flag reader ({@link collectInternalWriteResponseFields},
+     * `@objectstack/core`'s cross-package twin of objectql's
+     * `collectInternalReadFields` — identical rule, imported because this package
+     * sits below objectql, as the write-response strip and the analytics door do):
+     *
+     *  - `where` / `filter` and each `aggregations[i].filter` — every column a
+     *    filter READS, by the stricter collector that also walks a cross-field
+     *    `{ $field }` comparand ({@link collectFilterReads}).
+     *  - `orderBy` — the fields a sort names.
+     *  - `groupBy` and `aggregations[].field` — defence in depth; the engine's
+     *    `rejectCredentialAggregation` refuses these for every caller with the
+     *    same code, and this door answers first so the envelope is the door's.
+     *  - a NESTED-RELATION condition inside any of those filters
+     *    (`{ <lookup>: { <field of the related object>: … } }`), judged against
+     *    the RELATED object's own internal fields: the engine lowers it by
+     *    evaluating the condition on the related object
+     *    (`ObjectQL.lowerRelationConditions`) and keeps the rows whose related
+     *    record matched, so a related `internal` field there is the same
+     *    confirmation oracle one hop away. Judged here, at the door, rather than
+     *    in the engine's relation-site walk, so the engine's privileged callers
+     *    keep the #7823 split (none of them reaches this door).
+     *  - every `expand` entry's own `where` / `orderBy`, at EVERY depth of the
+     *    expand tree, judged against that level's TARGET object: the nested
+     *    sub-read's row strip already withholds the column, but a nested filter
+     *    is a presence oracle on the related record (the expanded object appears
+     *    only when the guess matches), and a deeper level's sub-read is one more
+     *    `engine.find` that answers the same way. Target OBJECT exposure is a
+     *    different axis, filed separately (#22661).
+     *
+     * Not judged here because the ingress already refuses them, measured: a
+     * DOTTED sort or group-by path crossing a relation (the sort gate's
+     * `dotted` verdict, `INVALID_SORT`; the group-by gate's unknown-field
+     * verdict, `INVALID_FIELD`), and a dotted filter key (the engine's dotted
+     * door). A dotted sort inside an `expand` entry is admitted but orders a
+     * batch the expansion re-keys by id with no `limit`, so it changes no answer.
+     */
+    private assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const internal = new Set(collectInternalWriteResponseFields(gate.schema));
+        // where + the `filter` alias a direct bag may still carry, each with its
+        // nested-relation conditions.
+        this.refuseInternalInFilter(object, options.where, 'filter', 0);
+        this.refuseInternalInFilter(object, options.filter, 'filter', 0);
+        this.refuseInternalNames(object, this.orderByFieldNames(options.orderBy), internal, 'sort');
+        this.refuseInternalNames(object, this.groupByFieldNames(options.groupBy), internal, 'groupBy');
+        if (Array.isArray(options.aggregations)) {
+            options.aggregations.forEach((agg: any, i: number) => {
+                const field = agg?.field;
+                if (typeof field === 'string' && field !== '*') {
+                    this.refuseInternalNames(object, [field], internal, `aggregations[${i}].field`);
+                }
+                this.refuseInternalInFilter(object, agg?.filter, `aggregations[${i}].filter`, 0);
+            });
+        }
+        // The whole expand tree, every level against its own target.
+        this.refuseInternalInExpand(object, options.expand, 'expand', 0);
+    }
+
+    /**
+     * One filter's internal-field judgement: every column it reads on `object`
+     * ({@link collectFilterReads}), then each nested-relation condition it holds,
+     * recursively, on the related object. `param` names the position, extended
+     * by the relation field at each hop (`filter.owner_id`).
+     */
+    private refuseInternalInFilter(object: string, where: unknown, param: string, depth: number): void {
+        if (where == null || depth > INTERNAL_FIELD_WALK_DEPTH) return;
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        const condition = isFilterAST(where) ? parseFilterAST(where) : where;
+        const internal = new Set(collectInternalWriteResponseFields(gate.schema));
+        if (internal.size > 0) {
+            const reads = new Set<string>();
+            collectFilterReads(condition, reads);
+            this.refuseInternalNames(object, [...reads], internal, param);
+        }
+        for (const site of relationConditionSites(gate.fields, condition)) {
+            this.refuseInternalInFilter(site.target, site.condition, `${param}.${site.field}`, depth + 1);
+        }
+    }
+
+    /**
+     * Every level of an `expand` tree: each entry's own `where` (with its
+     * nested-relation conditions) and `orderBy`, judged against that entry's
+     * target object, then the entry's own `expand` with the target as source.
+     */
+    private refuseInternalInExpand(source: string, expand: unknown, prefix: string, depth: number): void {
+        if (!isPlainRecord(expand) || depth > INTERNAL_FIELD_WALK_DEPTH) return;
+        const gate = this.resolveQueryFields(source);
+        if (!gate) return;
+        for (const [rel, entry] of Object.entries(expand)) {
+            if (!isPlainRecord(entry)) continue;
+            const sourceField = gate.fields?.[rel];
+            const target = sourceField != null && REFERENCE_VALUE_TYPES.has(sourceField.type)
+                ? referenceTargetOf(sourceField)
+                : undefined;
+            if (!target) continue;
+            const path = `${prefix}['${rel}']`;
+            this.refuseInternalInFilter(target, entry.where, `${path}.filter`, 0);
+            const targetGate = this.resolveQueryFields(target);
+            if (targetGate) {
+                const targetInternal = new Set(collectInternalWriteResponseFields(targetGate.schema));
+                this.refuseInternalNames(target, this.orderByFieldNames(entry.orderBy), targetInternal, `${path}.sort`);
+            }
+            this.refuseInternalInExpand(target, entry.expand, `${path}.expand`, depth + 1);
+        }
+    }
+
+    /** Field heads an `orderBy` names (string or `{ field }`), dotted head only. */
+    private orderByFieldNames(orderBy: unknown): string[] {
+        if (!Array.isArray(orderBy)) return [];
+        return orderBy
+            .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
+            .filter((f): f is string => typeof f === 'string' && f.length > 0)
+            .map((f) => f.split('.')[0] as string);
+    }
+
+    /** Field heads a `groupBy` names (string or `{ field }`), dotted head only. */
+    private groupByFieldNames(groupBy: unknown): string[] {
+        if (!Array.isArray(groupBy)) return [];
+        return groupBy
+            .map((e) => (typeof e === 'string' ? e : (e as { field?: unknown })?.field))
+            .filter((f): f is string => typeof f === 'string' && f.length > 0)
+            .map((f) => f.split('.')[0] as string);
+    }
+
+    /** Refuse when any of `names` is an internal field of `object`. */
+    private refuseInternalNames(object: string, names: readonly string[], internal: ReadonlySet<string>, param: string): void {
+        const hit = names.filter((n) => internal.has(n));
+        if (hit.length === 0) return;
+        const first = hit[0] as string;
+        const verb = param.endsWith('sort') ? 'sort' : param === 'groupBy' ? 'group' : param.includes('filter') ? 'filter' : 'query';
+        const err: any = new Error(
+            `Cannot ${verb} '${object}' by '${first}' (${param}): the query was not run. The ${first} field `
+            + 'is declared `internal: true`, so its value is never returned on a generic data exit — the engine '
+            + 'omits it from every row. '
+            + (verb === 'sort'
+                ? 'A sort on it orders by that withheld value'
+                : verb === 'group'
+                    ? 'A group key would be the withheld value, served as the key'
+                    : 'A filter on it confirms a guessed value by whether the row comes back')
+            + ', so it is refused rather than evaluated. Use another field.',
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.httpStatus = 400;
+        err.field = first;
+        err.fields = hit;
+        err.object = object;
+        err.param = param;
         throw err;
     }
 
@@ -12805,6 +13062,20 @@ export class ObjectStackProtocolImplementation implements
         });
         if (hashEvaluateRefusal) throw hashEvaluateRefusal;
 
+        // [#22646] A field declared `internal: true` is withheld from every
+        // generic exit (#21197) — the engine omits it from every row. The
+        // EVALUATE positions do not follow that by omission: a filter, sort,
+        // group-by, aggregate operand, per-aggregation filter or a one-level
+        // expand's own filter/sort on such a column reveals the stored value by
+        // evaluating it (a filter is a confirmation oracle, a sort leaks order).
+        // So they are refused here, at the generic data door, after the
+        // existence gates and before the engine — the same shape, envelope and
+        // caller-independence as the stored-metadata body/hash family above.
+        // Internal fields in a `$search` set are handled on their own axes: the
+        // auto-default never scans one (engine), an explicit `$searchFields`
+        // naming one is refused (the gate above, #4254 posture).
+        this.assertNoInternalFieldEvaluated(request.object, options);
+
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
         // this branch a spec-shape aggregate request would silently return
@@ -12924,7 +13195,20 @@ export class ObjectStackProtocolImplementation implements
         // reproduced by it, so for those we skip the count and fall back to a
         // page-local estimate (a full page implies there may be more) rather than
         // reporting a wrong total.
-        const pageLimit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : undefined;
+        //
+        // [#22588] `limit: 0` IS a limit. It asks for no rows (objectstack#6485,
+        // the drivers' pagination conformance), so `records.length` is 0 and was
+        // reported as the total: `?$top=0` answered `total: 0` while `?$top=1`
+        // answered the true count, and the Console's footer probe — which sends
+        // exactly `$top: 0` to read the total and nothing else — showed `0` on
+        // every list page. Gated `> 0`, a zero-row page fell into the "no limit,
+        // the full set is the total" arm, which is true of every limit except
+        // this one. So `>= 0`: a zero-row request is a paged request like any
+        // other, and the three arms below keep their meaning for it — the count
+        // runs (`total` is the filtered count, whatever the page size), `$count=false`
+        // still omits `total` instead of reporting the page's 0, and `search`
+        // still reports its page-local estimate rather than a count.
+        const pageLimit = typeof options.limit === 'number' && options.limit >= 0 ? options.limit : undefined;
         const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
         let total: number | undefined = records.length;
         let hasMore = false;
@@ -13611,6 +13895,22 @@ export class ObjectStackProtocolImplementation implements
      * RBAC/RLS is enforced by forwarding the caller's `context` to
      * `engine.find` so users only see records they are entitled to read.
      *
+     * ## [#22640] An object whose declared exposure refuses `search` is outside the sweep
+     *
+     * Which objects this door may serve at all is not decided here. It is the
+     * spec's one exposure decision, `canServeApiOperation(enable, 'search')`
+     * (`@objectstack/spec/data`), the same one the REST data routes, the
+     * dispatcher, MCP and the analytics door turn into their refusals. It
+     * judges `apiEnabled: false` first, then the `apiMethods` whitelist, where
+     * `search` derives from `list`. The sweep used to spell its own
+     * predicate and read only the off switch, so an object whose whitelist
+     * withholds `list` was still swept. A refused object leaves nothing
+     * behind, exactly like an unreadable one below. The decision takes no
+     * caller, so the answer is the same for every persona.
+     *
+     * `searchable: false` stays as its own skip, because the decision answers
+     * an object with no whitelist without reading that flag.
+     *
      * ## An object the caller may not READ is outside the sweep
      *
      * The REST door checks authentication only, so the object-level read
@@ -13765,10 +14065,18 @@ export class ObjectStackProtocolImplementation implements
             if (!obj?.name) continue;
             if (objectsFilter && !objectsFilter.has(obj.name)) continue;
 
-            // Skip platform/system tables and opt-outs
-            const enable = obj.enable ?? {};
-            if (enable.searchable === false) continue;
-            if (enable.apiEnabled === false) continue;
+            // [#22640] The object's declared exposure, asked of the ONE decision
+            // every door judges (`canServeApiOperation`, ADR-0049) for the
+            // `search` operation. See the method doc. Asked first, so a refused
+            // object is never queried, named or counted.
+            if (!canServeApiOperation(obj.enable, 'search')) continue;
+            // `searchable: false` keeps its own meaning beside the decision, and
+            // only because the decision does not cover it everywhere: it answers
+            // an object with NO whitelist (`unrestricted`) without reading the
+            // flag, which the derivation table folds into `search` only under a
+            // whitelist. So this is the opt-out for such an object, not a second
+            // exposure rule.
+            if (obj.enable?.searchable === false) continue;
             // Skip noisy system tables by name prefix
             if (obj.name.startsWith('sys_audit_log')
                 || obj.name.startsWith('sys_activity')

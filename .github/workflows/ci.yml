@@ -1360,18 +1360,29 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # `actions: read` + `checks: read` (#22653) pay for ONE question, asked
+    # only when the test matrix reads `cancelled` AFTER at least one shard
+    # attested: was each shard that did not attest KILLED by its own
+    # `timeout-minutes`, or SUPERSEDED by a newer push? The aggregate word is
+    # `cancelled` either way, so the verdict reads the cause the platform
+    # records on each such shard's own check run (this attempt's jobs list,
+    # then that check run's annotations). Both are reads; an unspecified
+    # permission is `none`, so neither is reachable without naming it here.
     permissions:
       contents: read
+      actions: read
+      checks: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # Same-run artifact download needs no permission beyond the `contents:
-      # read` above (`actions: read` is for cross-run/cross-repo only), so this
-      # gate's permission block is unchanged. continue-on-error: a legitimate
-      # filter-skipped run has zero artifacts to match, and an artifact-service
-      # fault must reach the verdict as "credentials missing" — fail-closed,
-      # with the step's own outcome printed — instead of an opaque red.
+      # Same-run artifact download needs no permission beyond `contents: read`
+      # (`actions: read` is for cross-run/cross-repo only); the two read scopes
+      # above are for the cancel-cause read, not for this. continue-on-error:
+      # a legitimate filter-skipped run has zero artifacts to match, and an
+      # artifact-service fault must reach the verdict as "credentials
+      # missing" — fail-closed, with the step's own outcome printed — instead
+      # of an opaque red.
       - name: Download test shard attestations
         id: attestations
         continue-on-error: true
@@ -1387,6 +1398,10 @@ jobs:
           OS_TEST_RESULT: ${{ needs.test.result }}
           OS_FILTER_RESULT: ${{ needs.filter.result }}
           OS_DOWNLOAD_OUTCOME: ${{ steps.attestations.outcome }}
+          # Read ONLY on the partially-attested-cancelled path above, never
+          # otherwise; without it that path fails closed (red, naming the
+          # missing token).
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           node scripts/check-shard-attestation.mjs --verify \
             --gate 'Test Core' \

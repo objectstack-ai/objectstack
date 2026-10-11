@@ -26,6 +26,9 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
+// [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
+// envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
+import { StandardErrorCode } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 import type { FileRefusedValue } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
@@ -125,6 +128,10 @@ import {
   // write, so it is projected through the same rule — see
   // {@link projectEventRecordBody}.
   omitInternalFieldsFromWriteResponse,
+  // [#22637] The caller's envelope, stripped of the operation-private `__`
+  // keys, before file-field hydration forwards it to the download door's
+  // field-owned verdict — see `readParentDerivedFiles`.
+  withoutOperationPrivateKeys,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -243,7 +250,7 @@ import {
 } from './secret-fields.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
-import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
+import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
@@ -728,6 +735,32 @@ function writeFailureLogMeta(
 function isReadRefusal(error: unknown): boolean {
   return (error as { code?: unknown } | null | undefined)?.code === 'PERMISSION_DENIED';
 }
+
+/**
+ * A servable `sys_file` row's expanded read form (`FileValueSchema`):
+ * `{ id, name, size, mimeType, url }`, `url` derived from the stable
+ * `/files/:fileId` resolver and never stored. ONE spelling for both arms of
+ * `resolveFileReferences` — the caller's own `sys_file` read and the
+ * parent-derived read a refused caller is served (#22637) — so the two can
+ * never hand the same row out in two shapes.
+ */
+function toFileValue(row: any): Record<string, unknown> {
+  return {
+    id: String(row.id),
+    ...(row.name != null ? { name: row.name } : {}),
+    ...(row.size != null ? { size: row.size } : {}),
+    ...(row.mime_type != null ? { mimeType: row.mime_type } : {}),
+    url: `/api/v1/storage/files/${row.id}`,
+  };
+}
+
+/**
+ * [#22637] The `sys_file` columns the parent-derived read takes — the
+ * ownership pair it matches on, the status the servability rule reads, and
+ * the metadata `toFileValue` serves. Nothing else is read under the system
+ * context that read runs in.
+ */
+const PARENT_DERIVED_FILE_COLUMNS = ['id', 'name', 'size', 'mime_type', 'status', 'ref_object', 'ref_id'];
 
 /**
  * Read the counter out of ONE stored autonumber value, under #6468's anchoring
@@ -3316,6 +3349,28 @@ export type HeldFileResolver = (
 ) => Promise<Set<string>>;
 
 /**
+ * "Of these `ownerObject` records, whose field-owned files may this caller
+ * read?" — the download door's field-owned verdict (ADR-0104 D3; #22637,
+ * maintainer ruling B on #22624).
+ *
+ * Takes every owner record id one hydration needs judged and returns the
+ * subset whose files the caller may read, as stringified ids. Batched for the
+ * same reason as {@link HeldFileResolver}: one call per read, never one per
+ * row.
+ *
+ * The engine declares this shape but never implements it. The verdict — a
+ * declared `fileAccessDelegate` asked and failing closed, otherwise the
+ * caller's read of the owner record — has one definition, the field-owned arm
+ * of the storage package's download authorizer, and a copy here would be a
+ * second predicate for one file. See `ObjectQL.registerFieldOwnedFileReadAuthorizer`.
+ */
+export type FieldOwnedFileReadAuthorizer = (
+  ownerObject: string,
+  ownerIds: string[],
+  context: ExecutionContext,
+) => Promise<Set<string>>;
+
+/**
  * The stack collections the engine decomposes into individual registry items —
  * ONE list, read by the ONE body both registration seams run
  * (`registerMetadataCollections()`, called from the manifest seam in
@@ -4012,6 +4067,32 @@ function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unkn
   if (ids.has(key)) return false;
   ids.add(key);
   return true;
+}
+
+/**
+ * [ADR-0010 §3.7] Stamp a manifest item with its owning package's
+ * `(packageId, packageVersion)` before the registry stores it: the call the
+ * artifact loader makes (`metadata/plugin.ts`), so both load paths serve one
+ * envelope. The registry's own `applyProtection` knows the id only, and
+ * `applyProtection` stamps a key only while it is unset, so the version
+ * stamped here is the one the item keeps. With no version this does nothing:
+ * the registry stamps the id, exactly as before.
+ */
+function stampPackage<T>(item: T, packageId: string, packageVersion: string | undefined): T {
+  if (packageVersion !== undefined) applyProtection(item as any, { packageId, packageVersion });
+  return item;
+}
+
+/**
+ * {@link stampPackage} for an authored OBJECT definition, on a shallow copy.
+ * The registry stamps an object schema on its own copy (`applySystemFields`
+ * and friends run first), so `registerApp` leaves the caller's definition
+ * unstamped, and a manifest registered twice, or recorded by a second install,
+ * shows the same objects both times. `applyProtection` writes top-level keys
+ * only, so a shallow copy holds every key it touches.
+ */
+function stampObjectPackage(def: ServiceObject, packageId: string, packageVersion: string | undefined): ServiceObject {
+  return packageVersion === undefined ? def : stampPackage({ ...def }, packageId, packageVersion);
 }
 
 export class ObjectQL implements IObjectQLEngine {
@@ -5162,6 +5243,34 @@ export class ObjectQL implements IObjectQLEngine {
   registerHeldFileResolver(fn: HeldFileResolver): void {
     this._heldFileResolver = fn;
     this.logger.debug('Registered held-file resolver for sys_file hydration');
+  }
+
+  /**
+   * "May this caller read the files these records' fields own?" (#22637) —
+   * supplied by the storage plugin, never decided here.
+   *
+   * Asked only by file-field hydration, and only when the caller's own
+   * `sys_file` read was refused: a field's metadata then follows the same
+   * parent-derived verdict the download door applies to the bytes (ADR-0104
+   * D3, maintainer ruling B on #22624). That verdict has exactly one
+   * definition — the field-owned arm of `@objectstack/service-storage`'s
+   * download authorizer, which consults a declared `fileAccessDelegate` and
+   * otherwise the caller's read of the owner record — and it lives in a package
+   * this one does not and must not depend on. So the engine declares the seam
+   * and the storage plugin fills it, the same handover as
+   * {@link registerHeldFileResolver}.
+   */
+  private _fieldOwnedFileReadAuthorizer?: FieldOwnedFileReadAuthorizer;
+
+  /**
+   * Wire the field-owned file read verdict (#22637). Last registration wins;
+   * leaving it unwired keeps every id a refused caller holds marked
+   * `{ id, metadataRefused: true }`, which is what this engine did before the
+   * seam existed.
+   */
+  registerFieldOwnedFileReadAuthorizer(fn: FieldOwnedFileReadAuthorizer): void {
+    this._fieldOwnedFileReadAuthorizer = fn;
+    this.logger.debug('Registered field-owned file read authorizer for refused sys_file hydration');
   }
 
   /**
@@ -7212,6 +7321,9 @@ export class ObjectQL implements IObjectQLEngine {
   registerApp(manifest: any, scope?: ArtifactInstallScope) {
       const id = manifest.id || manifest.name;
       const namespace = manifest.namespace as string | undefined;
+      // Stamped beside `id` on every item below ({@link stampPackage}), so an
+      // item served from this path tells an upgrade's new item from its old one.
+      const version = manifest.version as string | undefined;
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
       this.logger.debug('Registering package manifest', { id, namespace });
 
@@ -7246,7 +7358,7 @@ export class ObjectQL implements IObjectQLEngine {
           if (Array.isArray(manifest.objects)) {
              this.logger.debug('Registering objects from manifest (Array)', { id, objectCount: manifest.objects.length });
              for (const objDef of manifest.objects) {
-                const fqn = this._registry.registerObject(objDef, id, namespace, 'own');
+                const fqn = this._registry.registerObject(stampObjectPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           } else {
@@ -7259,7 +7371,7 @@ export class ObjectQL implements IObjectQLEngine {
              for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
                 objDef.name = name;
-                const fqn = this._registry.registerObject(objDef, id, namespace, 'own');
+                const fqn = this._registry.registerObject(stampObjectPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           }
@@ -7282,7 +7394,7 @@ export class ObjectQL implements IObjectQLEngine {
                   indexes: ext.indexes,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              this._registry.registerObject(extDef, id, undefined, 'extend', priority);
+              this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);
               this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
           }
       }
@@ -7296,7 +7408,7 @@ export class ObjectQL implements IObjectQLEngine {
               const appName = app.name || app.id;
               if (appName) {
                   const resolved = namespace ? this.resolveNavObjectNames(app, namespace) : app;
-                  this._registry.registerApp(resolved, id);
+                  this._registry.registerApp(stampPackage(resolved, id, version), id);
                   this.logger.debug('Registered App', { app: appName, from: id });
               }
           }
@@ -7306,7 +7418,7 @@ export class ObjectQL implements IObjectQLEngine {
       //    This handles the case where the manifest IS the app definition (legacy/simple packages)
       if (manifest.name && manifest.navigation && !manifest.apps?.length) {
           const resolved = namespace ? this.resolveNavObjectNames(manifest, namespace) : manifest;
-          this._registry.registerApp(resolved, id);
+          this._registry.registerApp(stampPackage(resolved, id, version), id);
           this.logger.debug('Registered manifest-as-app', { app: manifest.name, from: id });
       }
 
@@ -7327,7 +7439,7 @@ export class ObjectQL implements IObjectQLEngine {
       // 5. Register all other metadata types generically — the SAME seam the
       //    nested-plugin path uses (`registerMetadataCollections`), so the two
       //    entry points cannot answer differently for one collection (#7163).
-      this.registerMetadataCollections(manifest, id, 'manifest');
+      this.registerMetadataCollections(manifest, id, 'manifest', version);
 
       // 6. Register seed data as metadata (keyed by target object name)
       const seedData = (manifest as any).data;
@@ -7335,7 +7447,7 @@ export class ObjectQL implements IObjectQLEngine {
           this.logger.debug('Registering seed data datasets', { id, count: seedData.length });
           for (const dataset of seedData) {
               if (dataset.object) {
-                  this._registry.registerItem('data', dataset, 'object' as any, id);
+                  this._registry.registerItem('data', stampPackage(dataset, id, version), 'object' as any, id);
               }
           }
       }
@@ -7366,7 +7478,7 @@ export class ObjectQL implements IObjectQLEngine {
               if (plugin && typeof plugin === 'object') {
                   const pluginName = plugin.name || plugin.id || 'unnamed-plugin';
                   this.logger.debug('Registering nested plugin', { pluginName, parentId: id });
-                  this.registerPlugin(plugin, id, namespace);
+                  this.registerPlugin(plugin, id, namespace, version);
               }
           }
       }
@@ -7406,7 +7518,8 @@ export class ObjectQL implements IObjectQLEngine {
    * @param parentId - The parent package ID (for ownership tracking)
    * @param parentNamespace - The parent package's namespace (for FQN resolution)
    */
-  private registerPlugin(plugin: any, parentId: string, parentNamespace?: string) {
+  private registerPlugin(plugin: any, parentId: string, parentNamespace?: string, parentVersion?: string) {
+      // `parentVersion` is the owning package's version, stamped like `parentId`.
       const pluginName = plugin.name || plugin.id || 'unnamed';
       const pluginNamespace = plugin.namespace || parentNamespace;
 
@@ -7421,7 +7534,7 @@ export class ObjectQL implements IObjectQLEngine {
               if (Array.isArray(plugin.objects)) {
                   this.logger.debug('Registering plugin objects (Array)', { pluginName, count: plugin.objects.length });
                   for (const objDef of plugin.objects) {
-                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own');
+                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               } else {
@@ -7431,7 +7544,7 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
                   for (const [name, objDef] of entries) {
                       objDef.name = name;
-                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own');
+                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               }
@@ -7444,7 +7557,7 @@ export class ObjectQL implements IObjectQLEngine {
       if (plugin.name && plugin.navigation) {
           try {
               const resolved = pluginNamespace ? this.resolveNavObjectNames(plugin, pluginNamespace) : plugin;
-              this._registry.registerApp(resolved, ownerId);
+              this._registry.registerApp(stampPackage(resolved, ownerId, parentVersion), ownerId);
               this.logger.debug('Registered plugin-as-app', { app: plugin.name, from: pluginName });
           } catch (err: any) {
               this.logger.warn('Failed to register plugin as app', { pluginName, error: err.message });
@@ -7460,7 +7573,7 @@ export class ObjectQL implements IObjectQLEngine {
       // list is no longer copied here to be patched one name at a time; the
       // aggregated-view expansion, #7163, for why the loop BODY is no longer
       // copied here either).
-      this.registerMetadataCollections(plugin, ownerId, 'nested plugin');
+      this.registerMetadataCollections(plugin, ownerId, 'nested plugin', parentVersion);
   }
 
   /**
@@ -7505,7 +7618,8 @@ export class ObjectQL implements IObjectQLEngine {
    * @param ownerId  The owning package id — stamped as ADR-0010 provenance.
    * @param sourceLabel Human-readable source name for the `debug` line.
    */
-  private registerMetadataCollections(source: any, ownerId: string, sourceLabel: string) {
+  private registerMetadataCollections(source: any, ownerId: string, sourceLabel: string, ownerVersion?: string) {
+      // `ownerVersion` is the owning package's version, stamped like `ownerId`.
       for (const key of METADATA_ARRAY_KEYS) {
           const items = (source as any)?.[key];
           if (!Array.isArray(items) || items.length === 0) continue;
@@ -7602,7 +7716,7 @@ export class ObjectQL implements IObjectQLEngine {
                   err.httpStatus = 422;
                   throw err;
               }
-              this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, ownerId);
+              this._registry.registerItem(pluralToSingular(key), stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
               // "Object has-many View" (ADR-0017): a `defineView` document
               // aggregates an object's views. Register the container under the
               // bare <object> key (above, back-compat) AND expand it into
@@ -7614,7 +7728,7 @@ export class ObjectQL implements IObjectQLEngine {
                       for (const w of vi._diagnostics?.warnings ?? []) {
                           this.logger.warn(`View expansion warning for '${vi.name}': ${w.message}`, { from: ownerId });
                       }
-                      this._registry.registerItem('view', vi, 'name' as any, ownerId);
+                      this._registry.registerItem('view', stampPackage(vi, ownerId, ownerVersion), 'name' as any, ownerId);
                   }
               }
           }
@@ -7657,7 +7771,7 @@ export class ObjectQL implements IObjectQLEngine {
                   continue;
               }
               const toRegister = body.name === itemName ? body : { ...body, name: itemName };
-              this._registry.registerItem('view', toRegister, 'name' as any, ownerId);
+              this._registry.registerItem('view', stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
           }
       }
   }
@@ -11947,9 +12061,18 @@ export class ObjectQL implements IObjectQLEngine {
    * each id becomes `{ id, metadataRefused: true }` (`FileRefusedValueSchema`)
    * rather than staying a bare id — see the `catch` below.
    *
-   * Batched: at most one `sys_file` `id $in […]` read per call (no N+1); and
-   * zero reads when no field holds a string value (the blob-only case), so the
-   * step is free for objects that have not adopted references.
+   * PARENT-DERIVED (#22637, maintainer ruling B on #22624): that refusal is
+   * about `sys_file` as an object, not about the files a record owns. A file
+   * whose `ref_object` / `ref_id` name the record being read is judged by the
+   * download door's own field-owned verdict (ADR-0104 D3) — the declared
+   * `fileAccessDelegate` where the object names one, else the caller's read of
+   * that record — and hydrates when it allows. Every other id keeps the
+   * refused marker. See {@link readParentDerivedFiles}.
+   *
+   * Batched: at most one `sys_file` `id $in […]` read per call (no N+1) — and,
+   * on the refused arm only, one more system read plus one verdict call; zero
+   * reads when no field holds a string value (the blob-only case), so the step
+   * is free for objects that have not adopted references.
    */
   private async resolveFileReferences(
     objectName: string,
@@ -12037,21 +12160,45 @@ export class ObjectQL implements IObjectQLEngine {
       // storage remedy that cannot fix a permission. ⛔ Only the declared
       // refusal code takes this arm: a database-level ACL fault (`42501`) is
       // the deployment's outage, not this caller's verdict, and stays below.
+      //
+      // [#22637] PARENT-DERIVED: the refusal answers "may this caller read
+      // `sys_file`?", which is not the question ADR-0104 D3 asks of a file a
+      // record OWNS. The download door already answers that one from the
+      // owning record (maintainer ruling B on #22624: "a file field's metadata
+      // follows the parent-derived verdict the download door already
+      // applies"), so before marking anything the ids this result's own
+      // records own are put to that verdict — `readParentDerivedFiles` — and
+      // the ones it allows hydrate exactly as a `sys_file` reader would see
+      // them. The marker stays on everything else: an id another record owns
+      // (copied in), an attachment-only or unclaimed file, an id with no row,
+      // and every id when the verdict is unwired or cannot be asked.
       if (isReadRefusal(error)) {
+        const owned = await this.readParentDerivedFiles(objectName, records, uniqueIds, execCtx);
         this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
           object: objectName,
           fields: fileFields,
           refusedIds: uniqueIds.length,
+          parentDerivedIds: owned.size,
         });
         const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
+        // Judged per ELEMENT and per RECORD: the verdict covers a file only on
+        // the record whose field owns it, so the same id copied into a second
+        // record is still refused there. An owned, allowed id with no servable
+        // row reads as the bare id — what a `sys_file` reader gets for it.
+        const valueFor = (record: any, v: unknown): unknown => {
+          if (!isFileIdToken(v)) return v;
+          const hit = owned.get(v);
+          if (!hit || record?.id == null || hit.ownerId !== String(record.id)) return refused(v);
+          return hit.row ? toFileValue(hit.row) : v;
+        };
         for (const record of records) {
           for (const fieldName of fileFields) {
             const val = record[fieldName];
             if (val == null) continue;
             if (Array.isArray(val)) {
-              record[fieldName] = val.map((v: unknown) => (isFileIdToken(v) ? refused(v) : v));
-            } else if (isFileIdToken(val)) {
-              record[fieldName] = refused(val);
+              record[fieldName] = val.map((v: unknown) => valueFor(record, v));
+            } else {
+              record[fieldName] = valueFor(record, val);
             }
           }
         }
@@ -12082,6 +12229,32 @@ export class ObjectQL implements IObjectQLEngine {
       return records; // fail-open: leave ids as-is
     }
 
+    // Servability (committed, or a tombstone something still holds) is one
+    // rule for both arms — see {@link servableFileRows}.
+    const fileMap = await this.servableFileRows(objectName, fileRows);
+    if (fileMap.size === 0) return records;
+
+    for (const record of records) {
+      for (const fieldName of fileFields) {
+        const val = record[fieldName];
+        if (val == null) continue;
+        if (Array.isArray(val)) {
+          record[fieldName] = val.map((v: any) =>
+            typeof v === 'string' && fileMap.has(v) ? toFileValue(fileMap.get(v)) : v);
+        } else if (typeof val === 'string' && fileMap.has(val)) {
+          record[fieldName] = toFileValue(fileMap.get(val));
+        }
+      }
+    }
+    return records;
+  }
+
+  /**
+   * The servable subset of some `sys_file` rows, keyed by id — the rule both
+   * arms of {@link resolveFileReferences} serve by, so a row hydrates under
+   * the same condition whichever read found it.
+   */
+  private async servableFileRows(objectName: string, rows: any[]): Promise<Map<string, any>> {
     const fileMap = new Map<string, any>();
     // [commit c3c72a4bc] `committed` is servable and always was. A TOMBSTONE
     // (`status: 'deleted'` + `deleted_at`) is recoverable state, not a delete:
@@ -12103,7 +12276,7 @@ export class ObjectQL implements IObjectQLEngine {
     // kernel, no storage plugin, tests): tombstones stay hidden, exactly as
     // before this existed.
     const tombstoned: any[] = [];
-    for (const row of fileRows) {
+    for (const row of rows) {
       if (row?.id == null) continue;
       if (row.status === 'committed') fileMap.set(String(row.id), row);
       else if (row.status === 'deleted') tombstoned.push(row);
@@ -12122,37 +12295,123 @@ export class ObjectQL implements IObjectQLEngine {
         // un-hydrated — the answer this pass gave before commit c3c72a4bc, and the same
         // direction the download path fails in (`isServableForDownload`) and
         // the reap guard fails in (it vetoes rather than reaps when it cannot
-        // tell). Distinct from the #6116 catch above, which covers the
-        // `sys_file` read itself and is untouched.
+        // tell). Distinct from the #6116 catch in `resolveFileReferences`,
+        // which covers the `sys_file` read itself and is untouched.
         this.logger.warn(
           'sys_file holder check failed; tombstoned file fields keep their raw ids for this read',
           { object: objectName, tombstonedIds: tombstoned.length, error: (error as Error)?.message },
         );
       }
     }
-    if (fileMap.size === 0) return records;
+    return fileMap;
+  }
 
-    const toValue = (row: any) => ({
-      id: String(row.id),
-      ...(row.name != null ? { name: row.name } : {}),
-      ...(row.size != null ? { size: row.size } : {}),
-      ...(row.mime_type != null ? { mimeType: row.mime_type } : {}),
-      url: `/api/v1/storage/files/${row.id}`,
-    });
+  /**
+   * [#22637] The parent-derived half of a REFUSED `sys_file` hydration: which
+   * of the ids this result holds are field-owned by a record in it, and does
+   * the download door's verdict let this caller read them?
+   *
+   * Maintainer ruling B on #22624, verbatim as the card records it: "A file
+   * field's metadata follows the parent-derived verdict the download door
+   * already applies (ADR-0104 D3, `buildFileReadAuthorizer`): when the
+   * caller's `sys_file` read is refused, `resolveFileReferences` still
+   * hydrates a file whose `ref_object` / `ref_id` name the record being read
+   * (the delegate consulted where the owner object declares a
+   * `fileAccessDelegate`); a referenced id that does not point at that record
+   * keeps PR #22620's refused marker; direct `sys_file` queries and
+   * `public_read` are unchanged."
+   *
+   * Two reads, both narrow:
+   *
+   *  1. **Which ids does a record in this result own?** One `sys_file` read
+   *     under a `sudo()`-shaped context (`{ ...caller, isSystem: true }`: the
+   *     caller's tenant wall and transaction ride along). The `where` itself
+   *     asks for the ownership pair — `ref_object` this object, `ref_id` one
+   *     of these records — so a file that is not field-owned here is never
+   *     read at all, and only {@link PARENT_DERIVED_FILE_COLUMNS} leave the
+   *     driver. It is the same posture the download door reads a file in (by
+   *     id, under the system context, never the caller's `sys_file` grant).
+   *     `sys_file`'s own read rule is untouched: this read serves only the ids
+   *     a record the caller just read holds, and the caller's own `sys_file`
+   *     queries are refused exactly as before.
+   *  2. **May this caller read those owners' files?** The registered
+   *     {@link FieldOwnedFileReadAuthorizer} — the door's own field-owned arm,
+   *     handed over by the storage plugin, never re-derived here — asked ONCE
+   *     with every owner id, under the caller's envelope minus its
+   *     operation-private `__` keys (`withoutOperationPrivateKeys`: the
+   *     verdict judges the caller, not this sub-read). It consults the
+   *     owner object's `fileAccessDelegate` where one is declared, so a
+   *     delegate-governed object gets the delegate's answer and not the raw
+   *     record read.
+   *
+   * Narrower than the door, by the ruling: the door also serves a file's
+   * uploader and a file reachable through any `sys_attachment` parent; this
+   * serves only a file owned by the record it is read in.
+   *
+   * Returns, per allowed file id, the owning record's id and its servable row
+   * — `null` when the row is owned and allowed but not servable, which the
+   * caller reads as the bare id a `sys_file` reader would see. An id absent
+   * from the map keeps the refused marker. Unwired, no record ids (a
+   * projection that left out `id`), or a failure: an empty map — every id
+   * stays refused, the answer before this existed.
+   */
+  private async readParentDerivedFiles(
+    objectName: string,
+    records: any[],
+    uniqueIds: string[],
+    execCtx?: ExecutionContext,
+  ): Promise<Map<string, { ownerId: string; row: any | null }>> {
+    const owned = new Map<string, { ownerId: string; row: any | null }>();
+    const authorize = this._fieldOwnedFileReadAuthorizer;
+    if (!authorize) return owned;
+    const recordIds = [
+      ...new Set(records.map((r) => r?.id).filter((id) => id != null && id !== '').map(String)),
+    ];
+    if (recordIds.length === 0) return owned;
 
-    for (const record of records) {
-      for (const fieldName of fileFields) {
-        const val = record[fieldName];
-        if (val == null) continue;
-        if (Array.isArray(val)) {
-          record[fieldName] = val.map((v: any) =>
-            typeof v === 'string' && fileMap.has(v) ? toValue(fileMap.get(v)) : v);
-        } else if (typeof val === 'string' && fileMap.has(val)) {
-          record[fieldName] = toValue(fileMap.get(val));
-        }
+    const caller = withoutOperationPrivateKeys((execCtx ?? {}) as Record<string, unknown>);
+    try {
+      const rows: any[] = (await this.find('sys_file', {
+        where: { id: { $in: uniqueIds }, ref_object: objectName, ref_id: { $in: recordIds } },
+        fields: [...PARENT_DERIVED_FILE_COLUMNS],
+        context: { ...caller, isSystem: true } as ExecutionContext,
+      })) ?? [];
+      // The ownership pair, read off the row this answer serves: the `where`
+      // narrows the read; this is the condition the ruling serves by.
+      const candidates = rows.filter((row) =>
+        row?.id != null && row.ref_object === objectName && row.ref_id != null
+        && recordIds.includes(String(row.ref_id)));
+      if (candidates.length === 0) return owned;
+
+      const ownerIds = [...new Set(candidates.map((row) => String(row.ref_id)))];
+      const readable = await authorize(objectName, ownerIds, caller);
+      const allowed = candidates.filter((row) => readable?.has(String(row.ref_id)));
+      if (allowed.length === 0) return owned;
+
+      const servable = await this.servableFileRows(objectName, allowed);
+      for (const row of allowed) {
+        owned.set(String(row.id), { ownerId: String(row.ref_id), row: servable.get(String(row.id)) ?? null });
       }
+      return owned;
+    } catch (error) {
+      // The widening could not be judged, so it is not served: every id keeps
+      // the refused marker, which is still true — this caller's `sys_file`
+      // read WAS refused. The record read that asked still succeeds
+      // (fail-open, #6116). `warn`, per AGENTS "Degradation log levels": the
+      // loss is FUNCTIONAL and scoped to this response — a reader the door
+      // would serve sees "details refused" — and nothing here claims to have
+      // persisted anything.
+      this.logger.warn(
+        'sys_file parent-derived check failed; file fields keep the refused marker for this read — '
+          + 'check storage/database availability, then re-read to hydrate',
+        {
+          object: objectName,
+          refusedIds: uniqueIds.length,
+          error: (error as Error)?.message,
+        },
+      );
+      return new Map();
     }
-    return records;
   }
 
   // ============================================
@@ -12380,8 +12639,31 @@ export class ObjectQL implements IObjectQLEngine {
     if (raw != null && schema?.fields) {
       const requestedFields = (ast as any).searchFields
         ?? (typeof raw === 'object' ? raw?.fields : undefined);
+      // [#22646] A `search` never scans an `internal: true` column. The flag's
+      // promise ("the value is never returned on a generic data exit") is a
+      // withhold on the read path (the row strip) and a refusal everywhere the
+      // value would be revealed by evaluation; `$search` is such a position —
+      // a cross-field `$icontains` that confirms a guessed prefix of a withheld
+      // credential, matching the row only when the guess is right. The field is
+      // dropped from the set the expansion resolves over (a WITHHOLD, like the
+      // auto-default's `hidden`/credential-type exclusions one layer down), so
+      // the default set never scans it, for every verb that reaches here
+      // (`find` / `findOne` / `aggregate`, and `searchAll` through them). An
+      // EXPLICIT `$searchFields` naming one is refused loudly at the generic
+      // data door instead (`assertSearchFieldsAreSearchable`,
+      // `@objectstack/metadata-protocol`), the #4254 posture — an unhonoured
+      // narrowing must be a 400, not a silent widening. A direct engine caller
+      // naming one has it intersected away here, the engine's existing tolerant
+      // posture for an unknown requested search field.
+      const internalFields = collectInternalReadFields(schema);
+      const scanFields = internalFields.length === 0
+        ? (schema.fields as any)
+        : Object.fromEntries(
+            Object.entries(schema.fields as Record<string, unknown>)
+              .filter(([name]) => !internalFields.includes(name)),
+          );
       const searchFilter = expandSearchToFilter(raw, {
-        fields: schema.fields as any,
+        fields: scanFields,
         searchableFields: (schema as any).searchableFields,
         requestedFields,
         // [ADR-0079] `nameField` is the canonical primary-title pointer;
@@ -18486,6 +18768,16 @@ export class ObjectQL implements IObjectQLEngine {
    * Only the two output-bearing positions on `EngineAggregateOptions` carry
    * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
    * `groupBy[]` (a string, or a `{ field }` bucket object).
+   *
+   * The refusal carries the ADR-0112 envelope — `INVALID_FIELD` / 400, located
+   * at the object and the field(s) named. It used to be a bare `Error` with no
+   * `code` or `status`, so a 400-class author refusal reached the data door
+   * 500-shaped (`INTERNAL_ERROR`, an undeclared fault). The code matches the
+   * analytics door's own refusal of an `internal: true` member and the engine's
+   * structured-JSON group-by refusal: the verdict is about the NAME being a
+   * field that is never returned on a generic data exit, which `INVALID_FIELD`
+   * is the catalog member for. The envelope now binds the `secret` / `password`
+   * case too, which shared the bare `Error`.
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
     const schema = this._registry.getObject(object);
@@ -18508,13 +18800,23 @@ export class ObjectQL implements IObjectQLEngine {
 
     const hit = protectedFields.filter((f) => referenced.has(f));
     if (hit.length > 0) {
-      throw new Error(
+      const err = new Error(
         `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
           + 'secret/password fields are masked on read and `internal: true` fields are omitted '
           + 'outright, so the value never leaves the engine on the generic data path; aggregating '
           + 'them (group-by, min/max, array_agg, …) would surface it. '
           + 'Refusing (fail-closed) — see ADR-0100.',
-      );
+      ) as Error & { code?: string; status?: number; httpStatus?: number; field?: string; fields?: string[]; object?: string };
+      // ADR-0112 envelope, the same number under D5's two spellings — `status`
+      // for the HTTP doors, `httpStatus` for a consumer holding the thrown
+      // error (the CLI `--json` envelope).
+      err.code = StandardErrorCode.enum.INVALID_FIELD;
+      err.status = 400;
+      err.httpStatus = 400;
+      err.field = hit[0];
+      err.fields = hit;
+      err.object = object;
+      throw err;
     }
   }
 
