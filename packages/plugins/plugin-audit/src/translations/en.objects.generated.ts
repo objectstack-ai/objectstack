@@ -217,10 +217,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Mentions",
         help: "JSON array of the user ids @mentioned in the comment"
       },
-      reactions: {
-        label: "Reactions",
-        help: "JSON object mapping each emoji to the list of user ids who reacted"
-      },
       is_edited: {
         label: "Edited"
       },
