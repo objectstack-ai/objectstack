@@ -140,6 +140,7 @@ import {
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
     type QueryAliasConflict,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
+    type ValidationAdvisoryEvent,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
@@ -13527,7 +13528,14 @@ export class ObjectStackProtocolImplementation implements
         //    payload diff can be: a `beforeInsert` hook's own stamp is not a
         //    caller forgery (#5591/#14259), and the ingress ran before the hooks.
         const dropped: DroppedFieldsEvent[] = [];
-        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
+        // [#22726] The advisory rule hits of THIS write, answered as `warnings`
+        // — the engine reports them through the write's own options, so a
+        // nested write a hook makes inside this one never adds to them.
+        const warnings: ValidationAdvisoryEvent[] = [];
+        const opts: any = {
+            onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+            onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
+        };
         if (request.context !== undefined) opts.context = request.context;
         const result = await this.engine.insert(request.object, request.data, opts);
         // [#7823] The 201 body is a GENERIC-DATA-PATH surface: strip
@@ -13543,6 +13551,7 @@ export class ObjectStackProtocolImplementation implements
             id: result.id,
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
+            ...(warnings.length > 0 ? { warnings } : {}),
         };
     }
 
@@ -13621,7 +13630,13 @@ export class ObjectStackProtocolImplementation implements
         // ruling 2026-09-08 (option 1); `CloneDataResponseSchema` declares the
         // member in the same change, because that schema is declared AS PRODUCED.
         const dropped: DroppedFieldsEvent[] = [];
-        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
+        // [#22726] A clone is a create: its advisory rule hits are answered as
+        // `warnings`, the same listener `createData` wires.
+        const warnings: ValidationAdvisoryEvent[] = [];
+        const opts: any = {
+            onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+            onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
+        };
         if (ctx !== undefined) opts.context = ctx;
         const result = await this.engine.insert(request.object, data, opts);
         // [#7823] Same ingress strip as `createData` — a clone's 201 body is
@@ -13636,6 +13651,7 @@ export class ObjectStackProtocolImplementation implements
             sourceId: request.id,
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
+            ...(warnings.length > 0 ? { warnings } : {}),
         };
     }
 
@@ -13680,6 +13696,10 @@ export class ObjectStackProtocolImplementation implements
         // listener never breaks the write (the engine catches + logs).
         const dropped: DroppedFieldsEvent[] = [];
         opts.onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push(e); };
+        // [#22726] The advisory rule hits of THIS write, answered as `warnings`
+        // (see `createData`).
+        const warnings: ValidationAdvisoryEvent[] = [];
+        opts.onValidationAdvisory = (e: ValidationAdvisoryEvent) => { warnings.push(e); };
         // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
         // the path `:id` — and nothing in the payload gets to move it.
         //
@@ -13755,6 +13775,7 @@ export class ObjectStackProtocolImplementation implements
             id: request.id,
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
+            ...(warnings.length > 0 ? { warnings } : {}),
         };
     }
 
