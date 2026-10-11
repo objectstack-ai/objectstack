@@ -74,7 +74,8 @@ describe('[ADR-0131 D3] a Setup create or rename into a held position name answe
   it('PRECONDITION: single posture; the showcase package holds the name, and the metadata door refuses a save of it', async () => {
     expect(stack!.tenancy().requestedPosture).toBe('single');
     expect((ql.registry.getArtifactItem('position', HELD) as any)?._packageId).toBe('com.example.showcase');
-    expect(await rowIds(HELD), 'the seeded row').toHaveLength(1);
+    // [ADR-0131 D2] The package's declaration is the name's one home; the boot writes no row for it.
+    expect(await rowIds(HELD), 'no row is seeded').toEqual([]);
     const put = await call('PUT', `/meta/position/${HELD}`, { name: HELD, label: 'Mine' });
     expect(outcome(put), JSON.stringify(put.json)).toEqual(DOOR_REFUSAL);
   });

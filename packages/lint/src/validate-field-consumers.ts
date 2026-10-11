@@ -1299,14 +1299,17 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
     // `os explain field-no-consumers` prints and the CLI's `rule:` line names.
     // Only what is specific to THIS field stays here: the verdict, the carrier
     // sites a removal must clean, and the other objects whose consumers of the
-    // same name do not count.
+    // same name do not count — the first one named and the rest counted, since
+    // a field name common to every object (`description`, `name`) would
+    // otherwise list them all on one line.
     const verdictTag =
       verdict === 'carrier-only'
         ? `carrier-only: ${carriers.length} site(s) name it without reading it`
         : 'inert';
     const sharedClause =
       sharedWith.length > 0
-        ? `; a consumer of the same name on ${sharedWith.map((o) => `"${o}"`).join(', ')} does not count`
+        ? `; a consumer of the same name on "${sharedWith[0]}"` +
+          `${sharedWith.length > 1 ? ` (and ${sharedWith.length - 1} more)` : ''} does not count`
         : '';
 
     findings.push({

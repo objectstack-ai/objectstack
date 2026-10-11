@@ -53,9 +53,9 @@
  * The seed insert stamps `managed_by: 'platform'` **explicitly**, so a fresh
  * install's default sets are platform-owned and `os meta resync` reconciles
  * them — which is what #2705 built the resync flag for. This also puts the
- * seeder in line with its two siblings in this package,
- * `bootstrap-builtin-positions.ts` and `bootstrap-system-capabilities.ts`,
- * which have always stamped `'platform'` rather than inheriting a default.
+ * seeder in line with its two siblings this package had (the built-in position
+ * and system capability seeders, both since retired by ADR-0131), which always
+ * stamped `'platform'` rather than inheriting a default.
  *
  * ⚠️ **Installs created BEFORE that ruling carry `'admin'` on these rows.**
  * The pre-ruling insert omitted `managed_by` altogether, so the value came from
@@ -880,8 +880,8 @@ export async function bootstrapPlatformAdmin(
       // default sets are stored indistinguishably from admin-authored ones, so
       // `os meta resync` skips every single one of them (measured in commit db923a3a8:
       // resynced 0 / resyncSkipped 8) -- the exact inverse of what #2705 built
-      // the flag for. Matches `bootstrap-builtin-positions.ts` and
-      // `bootstrap-system-capabilities.ts`, which already stamp `'platform'`.
+      // the flag for. Matched the built-in position and system capability
+      // seeders (both since retired by ADR-0131), which stamped `'platform'`.
       managed_by: 'platform',
     }, refusals);
     if (created?.id) seeded[ps.name] = created.id;

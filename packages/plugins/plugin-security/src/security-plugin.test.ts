@@ -4414,6 +4414,8 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
    * beside the platform's own curated declarations. That registry is a declared
    * capability's one home (ADR-0131 D3), and no `sys_capability` row is written
    * for it.
+   * [Stage 6a] The `everyone` baseline is the anchor's declared
+   * `permissionSets`; the boot writes no junction row for it.
    */
   async function boot(token: string, declaredCapabilities: any[]) {
     const tables: Record<string, any[]> = {
@@ -4507,28 +4509,19 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
       ctx.logger.info.mock.calls.filter((c: any[]) => String(c[0]).includes('platform bootstrap complete')),
     ).toHaveLength(1);
 
-    const refusals = ctx.logger.warn.mock.calls.filter((c: any[]) =>
-      String(c[0]).includes('refusing to bind fallback set to everyone'),
-    );
     const bindings = inserts.filter((i) => i.object === 'sys_position_permission_set');
     const declaredRefusals = ctx.logger.warn.mock.calls.filter((c: any[]) =>
       String(c[0]).includes('the everyone anchor does not name a baseline set'),
     );
     const everyoneSets = registry.getItem('position', 'everyone')?.permissionSets;
-    return { plugin, ql, ctx, bindings, refusals, declaredRefusals, everyoneSets };
+    return { plugin, ql, ctx, bindings, declaredRefusals, everyoneSets };
   }
 
-  it('binds the isDefault set when the stack declares its systemPermissions token', async () => {
-    const { bindings, refusals } = await boot('crm.export_pipeline', [
-      { name: 'crm.export_pipeline', label: 'Export Pipeline' },
-    ]);
-    expect(refusals).toHaveLength(0);
-    expect(bindings).toHaveLength(1);
-    expect(bindings[0].data).toMatchObject({ position_id: 'pos_everyone', permission_set_id: 'ps_app' });
-  });
-
-  // [ADR-0131 D3/D4] The `everyone` definition names the same baseline the
-  // binding above writes, judged by the same check against the same context.
+  // [ADR-0131 D3/D4] The `everyone` definition names the baseline, judged by
+  // the high-privilege check against the stack's declared capabilities. The
+  // undeclared leg is the control: declarations exist and name a DIFFERENT
+  // capability — it is MEMBERSHIP that excuses a token, not the presence of a
+  // declaration list.
   it('the everyone definition names the isDefault set when the stack declares its token, and not when it does not', async () => {
     const declared = await boot('crm.export_pipeline', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
     expect(declared.declaredRefusals).toHaveLength(0);
@@ -4539,21 +4532,19 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
     expect(undeclared.everyoneSets).toEqual(['member_default']);
   });
 
-  it('still refuses an UNDECLARED token — the control for the case above', async () => {
-    // Declarations exist and name a DIFFERENT capability: it is MEMBERSHIP that
-    // excuses a token, not the presence of a declaration list.
-    const { bindings, refusals } = await boot('crm.settle_ledger', [
-      { name: 'crm.export_pipeline', label: 'Export Pipeline' },
-    ]);
-    expect(bindings).toHaveLength(0);
-    expect(refusals).toHaveLength(1);
-    expect(refusals[0][1]).toMatchObject({ set: 'app_member_default', offending: 'system permissions' });
+  it('still refuses a PLATFORM capability the stack declares a same-named capability for', async () => {
+    const { declaredRefusals, everyoneSets } = await boot('manage_users', [{ name: 'manage_users', label: 'Not Yours' }]);
+    expect(declaredRefusals).toHaveLength(1);
+    expect(everyoneSets).toEqual(['member_default']);
   });
 
-  it('still refuses a PLATFORM capability the stack declares a same-named capability for', async () => {
-    const { bindings, refusals } = await boot('manage_users', [{ name: 'manage_users', label: 'Not Yours' }]);
-    expect(bindings).toHaveLength(0);
-    expect(refusals).toHaveLength(1);
+  // [Stage 6a] The baseline junction writer is retired: no boot writes a
+  // `sys_position_permission_set` row, declared token or not.
+  it('writes no junction row for the baseline', async () => {
+    for (const token of ['crm.export_pipeline', 'crm.settle_ledger']) {
+      const { bindings } = await boot(token, [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+      expect(bindings).toEqual([]);
+    }
   });
 
   // ── The engine-side write gate (`sys_position_permission_set` insert) ──

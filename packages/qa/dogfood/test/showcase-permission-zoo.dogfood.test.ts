@@ -129,13 +129,26 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     expect(names, 'the granting set is attributed').toContain('showcase_auditor');
   });
 
+  /**
+   * [ADR-0131 D2] No boot writes a `sys_position` row. The junction-write
+   * gates below judge a write naming a ROW, so each case reads the row an
+   * existing database holds — what the retired seeders wrote — and stages it
+   * when this (shared) stack has none yet.
+   */
+  const existingPositionRow = async (name: string, managedBy: 'platform' | 'package') => {
+    const found = await ql.findOne('sys_position', { where: { name }, context: SYS });
+    if (found) return found;
+    await ql.insert('sys_position', { id: `pos_zoo_${name}`, name, label: name, managed_by: managedBy }, { context: SYS });
+    return ql.findOne('sys_position', { where: { name }, context: SYS });
+  };
+
   // ── ADR-0090 D12: the delegated-admin gate, positive and negative ────────
   it('a delegate assigns an allowlisted position inside their subtree', async () => {
     // Bind contributor → showcase_contributor first (admin action; the
     // delegate has manageBindings: false and must NOT be able to do this).
-    const pos = await ql.findOne('sys_position', { where: { name: 'contributor' }, context: SYS });
+    const pos = await existingPositionRow('contributor', 'package');
     const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_contributor' }, context: SYS });
-    expect(pos?.id && ps?.id, 'contributor position + set seeded').toBeTruthy();
+    expect(pos?.id && ps?.id, 'contributor position + set rows').toBeTruthy();
     const bind = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: pos.id,
       permission_set_id: ps.id,
@@ -176,7 +189,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   });
 
   it('the delegate cannot re-compose positions (manageBindings: false)', async () => {
-    const pos = await ql.findOne('sys_position', { where: { name: 'contributor' }, context: SYS });
+    const pos = await existingPositionRow('contributor', 'package');
     const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_manager' }, context: SYS });
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_position_permission_set', {
       position_id: pos.id,
@@ -187,8 +200,8 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
 
   // ── ADR-0090 D5/D9: the audience-anchor binding gate ─────────────────────
   it('binding a high-privilege set to an anchor is rejected even for the admin', async () => {
-    const everyone = await ql.findOne('sys_position', { where: { name: 'everyone' }, context: SYS });
-    expect(everyone, 'built-in everyone position seeded').toBeTruthy();
+    const everyone = await existingPositionRow('everyone', 'platform');
+    expect(everyone, 'built-in everyone position row').toBeTruthy();
     const auditor = await ql.findOne('sys_permission_set', { where: { name: 'showcase_auditor' }, context: SYS });
     const r = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: everyone.id,
@@ -198,8 +211,8 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   });
 
   it('binding the guest-safe set to the guest anchor is accepted', async () => {
-    const guest = await ql.findOne('sys_position', { where: { name: 'guest' }, context: SYS });
-    expect(guest, 'built-in guest position seeded').toBeTruthy();
+    const guest = await existingPositionRow('guest', 'platform');
+    expect(guest, 'built-in guest position row').toBeTruthy();
     const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_guest_portal' }, context: SYS });
     const r = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: guest.id,

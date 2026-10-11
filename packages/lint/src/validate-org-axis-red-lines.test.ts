@@ -15,10 +15,24 @@ import {
 } from '@objectstack/spec/security';
 
 import {
-  validateOrgAxisRedLines,
+  validateOrgAxisRedLines as validateOrgAxisRedLinesUnrecorded,
   ORG_AXIS_PERMISSION_INHERITANCE,
   ORG_AXIS_CROSS_ORG_BU_GRANT,
 } from './validate-org-axis-red-lines.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each `org-axis-cross-org-bu-grant` finding is one verdict sentence;
+// the reasoning it used to carry is `os explain org-axis-cross-org-bu-grant`.
+// Every direct call below records what it fired, and the last cases in this
+// file hold each recorded verdict of that id to one line of at most 200
+// characters — every firing variant this suite exercises, not a chosen few.
+// Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateOrgAxisRedLines: typeof validateOrgAxisRedLinesUnrecorded = (...args) => {
+  const findings = validateOrgAxisRedLinesUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 const rules = (stack: unknown) => validateOrgAxisRedLines(stack).map((f) => f.rule);
 
@@ -861,5 +875,78 @@ describe('validateOrgAxisRedLines — input tolerance', () => {
         },
       }),
     ).toEqual([ORG_AXIS_PERMISSION_INHERITANCE]);
+  });
+});
+
+describe('[#22161] one-line verdicts — org-axis-cross-org-bu-grant', () => {
+  const stackFor = (recipientType: string) => ({
+    objects: [objectFixture({ name: 'material_catalog', tenancy: { enabled: false } })],
+    sharingRules: [
+      sharingRule({
+        name: 'catalog_to_plant',
+        type: 'criteria',
+        object: 'material_catalog',
+        sharedWith: { type: recipientType, value: 'bu_plant_a' },
+        condition: 'true',
+      } as unknown as SharingRule),
+    ],
+  });
+
+  it('reads as one sentence per recipient, the object left to `where`', () => {
+    const [narrow] = validateOrgAxisRedLines(stackFor('business_unit'));
+    expect(narrow.where).toBe('sharing rule "catalog_to_plant" on object "material_catalog"');
+    expect(narrow.message).toBe(
+      'Recipient `business_unit` (a business unit) on an object that opted out of tenancy spans EVERY '
+        + 'organization: a cross-org business-unit grant ADR-0105 D6 forbids',
+    );
+    const [wide] = validateOrgAxisRedLines(stackFor('unit_and_subordinates'));
+    expect(wide.message).toBe(
+      'Recipient `unit_and_subordinates` (a business unit AND every descendant unit) on an object that opted '
+        + 'out of tenancy spans EVERY organization: a cross-org business-unit grant ADR-0105 D6 forbids',
+    );
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(ORG_AXIS_CROSS_ORG_BU_GRANT);
+    expect(entry, 'no `os explain org-axis-cross-org-bu-grant` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'ADR-0105',
+      'reporting and grouping dimension, never a permission hierarchy',
+      '`org-axis-permission-inheritance`',
+      '`sys_business_unit` is org-scoped',
+      '`tenancy.enabled: false`, or `systemFields.tenant: false`',
+      'no organization column to scope against',
+      '`public_read`',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('the recipients the explanation names are the partition the rule enforces', () => {
+    // The explanation module imports nothing, so its two recipient halves are
+    // held to `ShareRecipientType` (through the partition the cases above pin)
+    // and each to the rule by running it.
+    const text = explainRule(ORG_AXIS_CROSS_ORG_BU_GRANT)!.paragraphs.join('\n');
+    for (const recipient of BU_TREE_RECIPIENTS) {
+      expect(text, recipient).toContain(`\`${recipient}\``);
+      expect(validateOrgAxisRedLinesUnrecorded(stackFor(recipient)).map((f) => f.rule), recipient).toEqual([
+        ORG_AXIS_CROSS_ORG_BU_GRANT,
+      ]);
+    }
+    for (const recipient of FLAT_RECIPIENTS) {
+      expect(text, recipient).toContain(`\`${recipient}\``);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === ORG_AXIS_CROSS_ORG_BU_GRANT);
+    // The coverage control first: both recipients fired.
+    expect(converted.some((f) => f.message.includes('`business_unit`'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('`unit_and_subordinates`'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });
