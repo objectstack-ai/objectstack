@@ -27,12 +27,13 @@
  *    named downstream must really have been called, so a row answered by some
  *    earlier refusal (a validation 400, a capability 403) cannot pass.
  *  - {@link ANSWERS_THE_WRAPPER} — driven the same way and MEASURED to answer
- *    the debug wrapper. Each is pinned at that answer, so a repair flips it red
- *    and moves it to the first map. These are hand-built error arms that relay
- *    `.message`; each family's service writes platform objects (`sys_*`)
- *    through the engine, so a sandboxed hook reaches them only when it is bound
- *    to `*` or to such an object. They are this card's findings, not its
- *    scope: the repair is a per-family envelope decision.
+ *    the debug wrapper. [#22719] EMPTY, and §3 holds it empty: its twenty rows
+ *    — hand-built error arms that relayed `.message` (sharing rules, suggested
+ *    bindings and the overlay discard, approvals, `packages/publish`, external
+ *    datasources) — each read the hook's sentence through the shared read now
+ *    and sit in the first map, pinned at the status and code they answer. A
+ *    write door found answering the wrapper is a defect to repair, never a row
+ *    to add back here.
  *  - {@link NO_REFUSAL_REACHES_THE_ANSWER} — not driven, with the reason.
  *
  * The refusal is the shape `runtime/src/sandbox/quickjs-runner.ts` produces
@@ -196,6 +197,11 @@ function sentenceOf(body: any): unknown {
     return body?.message;
 }
 
+/** The machine-readable code of a body, in whichever envelope the door answers. */
+function codeOf(body: any): unknown {
+    return typeof body?.error === 'object' && body.error !== null ? body.error.code : body?.code;
+}
+
 async function drive(b: Booted, route: string, body: unknown) {
     const res = makeRes();
     await b.handlerOf(route)({ method: route.split(' ')[0], params: paramsOf(route), query: {}, headers: {}, body }, res);
@@ -232,11 +238,24 @@ interface Driver {
     protocol?: (error: () => Error) => Record<string, Fn>;
     /** Where the answer's sentence lives, when it is not the response body's own. */
     answer?: (res: any, b: Booted) => Promise<unknown> | unknown;
+    /**
+     * [#22719] The status and code the door answers, pinned on the rows that
+     * moved here from {@link ANSWERS_THE_WRAPPER} so the move itself is legible:
+     * the rows that answered `500` now answer the `400` every conforming door
+     * gives an undeclared refusal.
+     */
+    answers?: { status: number; code: string };
 }
 
 const IMPORT_BODY = { format: 'json', rows: [{ name: 'x' }] };
 const importRow = (res: any) => res.body?.results?.[0]?.error;
 const jobRow = async (_res: any, b: Booted) => (await terminalJobPatch(b)).results?.items?.[0]?.error;
+
+/**
+ * [#22719] An undeclared refusal re-dressed in the nested envelope: the code
+ * the classification leaves out is the catalog's own floor for `400`.
+ */
+const REFUSED_400 = { status: 400, code: 'VALIDATION_ERROR' } as const;
 
 /**
  * Rows that answer a refusal in the hook's own words. ⛔ The two import rows
@@ -296,48 +315,62 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     'POST /api/v1/data/:object/createMany': { called: 'protocol.createManyData', body: [{ name: 'x' }] },
     'POST /api/v1/data/:object/updateMany': { called: 'protocol.updateManyData', body: { records: [{ id: 'r1', data: { name: 'x' } }] } },
     'POST /api/v1/data/:object/deleteMany': { called: 'protocol.deleteManyData', body: { ids: ['r1'] } },
-};
 
-interface WrapperDoor extends Driver {
-    /** The status the door answers today. */
-    status: number;
-}
-
-/**
- * MEASURED, NOT REPAIRED: a refusal from the downstream reaches the caller as
- * the debug wrapper. Pinned at today's answer so a repair goes red here and
- * moves the row to {@link ANSWERS_THE_SENTENCE}.
- */
-const ANSWERS_THE_WRAPPER: Record<string, WrapperDoor> = {
-    // Sharing rules: the 500 arm of `handleError` relays `.message`.
-    'POST /api/v1/sharing/rules': { called: 'sharingRules.defineRule', status: 500, body: {} },
-    'DELETE /api/v1/sharing/rules/:idOrName': { called: 'sharingRules.deleteRule', status: 500 },
-    'POST /api/v1/sharing/rules/:idOrName/evaluate': { called: 'sharingRules.evaluateRule', status: 500 },
-    // Suggested bindings and the overlay discard: the 500 arm relays `.message`.
-    'POST /api/v1/security/suggested-bindings/:id/confirm': { called: 'security.confirmAudienceBindingSuggestion', status: 500 },
-    'POST /api/v1/security/suggested-bindings/:id/dismiss': { called: 'security.dismissAudienceBindingSuggestion', status: 500 },
-    'POST /api/v1/security/permission-sets/:id/discard-overlay': { called: 'security.discardPermissionSetOverlay', status: 500 },
-    // Approvals: no `handleApprovalError` prefix matches, so the outer 500 relays `.message`.
-    'POST /api/v1/approvals/requests/:id/approve': { called: 'approvals.decide', status: 500, body: {} },
-    'POST /api/v1/approvals/requests/:id/reject': { called: 'approvals.decide', status: 500, body: {} },
-    'POST /api/v1/approvals/requests/:id/recall': { called: 'approvals.recall', status: 500, body: {} },
-    'POST /api/v1/approvals/requests/:id/revise': { called: 'approvals.sendBack', status: 500, body: {} },
-    'POST /api/v1/approvals/requests/:id/resubmit': { called: 'approvals.resubmit', status: 500, body: {} },
-    'POST /api/v1/approvals/requests/:id/reassign': { called: 'approvals.reassign', status: 500, body: {} },
-    'POST /api/v1/approvals/requests/:id/remind': { called: 'approvals.remind', status: 500, body: {} },
-    'POST /api/v1/approvals/requests/:id/request-info': { called: 'approvals.requestInfo', status: 500, body: {} },
-    'POST /api/v1/approvals/requests/:id/comment': { called: 'approvals.comment', status: 500, body: {} },
-    // Package publish: `sendThrownError` withholds only prose that looks like a leak.
+    // ── [#22719] Moved from ANSWERS_THE_WRAPPER ─────────────────────────────
+    // Sharing rules, suggested bindings / the overlay discard, approvals: each
+    // family asks `classifiedRefusalAnswer` before its 500 arm relays
+    // `.message`, and emits the answer in the nested envelope. Was `500` with
+    // the family's own code (`RULE_*_FAILED`, `SUGGESTION_*_FAILED` /
+    // `INTERNAL`, `APPROVAL_*_FAILED`).
+    'POST /api/v1/sharing/rules': { called: 'sharingRules.defineRule', body: {}, answers: REFUSED_400 },
+    'DELETE /api/v1/sharing/rules/:idOrName': { called: 'sharingRules.deleteRule', answers: REFUSED_400 },
+    'POST /api/v1/sharing/rules/:idOrName/evaluate': { called: 'sharingRules.evaluateRule', answers: REFUSED_400 },
+    'POST /api/v1/security/suggested-bindings/:id/confirm': { called: 'security.confirmAudienceBindingSuggestion', answers: REFUSED_400 },
+    'POST /api/v1/security/suggested-bindings/:id/dismiss': { called: 'security.dismissAudienceBindingSuggestion', answers: REFUSED_400 },
+    'POST /api/v1/security/permission-sets/:id/discard-overlay': { called: 'security.discardPermissionSetOverlay', answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/approve': { called: 'approvals.decide', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/reject': { called: 'approvals.decide', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/recall': { called: 'approvals.recall', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/revise': { called: 'approvals.sendBack', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/resubmit': { called: 'approvals.resubmit', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/reassign': { called: 'approvals.reassign', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/remind': { called: 'approvals.remind', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/request-info': { called: 'approvals.requestInfo', body: {}, answers: REFUSED_400 },
+    'POST /api/v1/approvals/requests/:id/comment': { called: 'approvals.comment', body: {}, answers: REFUSED_400 },
+    // Package publish: the classification decides the status the door falls
+    // back to, the shared read the sentence. Was `500 INTERNAL_ERROR`.
     'POST /api/v1/packages/publish': {
-        called: 'service:package.publish', status: 500,
+        called: 'service:package.publish', answers: REFUSED_400,
         body: { manifest: { id: 'p1', version: '1.0.0' }, metadata: {} },
     },
-    // External datasources: the catch arm sends `err.message` at 400.
-    'POST /api/v1/datasources/:name/external/tables/:remote/draft': { called: 'service:external-datasource.generateObjectDraft', status: 400, body: {} },
-    'POST /api/v1/datasources/:name/external/tables/:remote/import': { called: 'service:external-datasource.importObject', status: 400, body: {} },
-    'POST /api/v1/datasources/:name/external/refresh-catalog': { called: 'service:external-datasource.refreshCatalog', status: 400, body: {} },
-    'POST /api/v1/datasources/:name/external/validate': { called: 'service:external-datasource.validateDatasource', status: 400, body: {} },
+    // External datasources: the shared read only, so status and code are this
+    // family's own and unmoved.
+    'POST /api/v1/datasources/:name/external/tables/:remote/draft': {
+        called: 'service:external-datasource.generateObjectDraft', body: {},
+        answers: { status: 400, code: 'EXTERNAL_DATASOURCE_ERROR' },
+    },
+    'POST /api/v1/datasources/:name/external/tables/:remote/import': {
+        called: 'service:external-datasource.importObject', body: {},
+        answers: { status: 400, code: 'EXTERNAL_IMPORT_ERROR' },
+    },
+    'POST /api/v1/datasources/:name/external/refresh-catalog': {
+        called: 'service:external-datasource.refreshCatalog', body: {},
+        answers: { status: 400, code: 'EXTERNAL_DATASOURCE_ERROR' },
+    },
+    'POST /api/v1/datasources/:name/external/validate': {
+        called: 'service:external-datasource.validateDatasource', body: {},
+        answers: { status: 400, code: 'EXTERNAL_DATASOURCE_ERROR' },
+    },
 };
+
+/**
+ * [#22719] EMPTY. It held the twenty rows a sandboxed refusal reached as the
+ * debug wrapper; each now reads the hook's sentence and sits in
+ * {@link ANSWERS_THE_SENTENCE}. §3 holds it empty — the disposition stays
+ * declared so §1 still names three, and a door found answering the wrapper is
+ * repaired rather than ledgered here.
+ */
+const ANSWERS_THE_WRAPPER: Record<string, Driver> = {};
 
 /** Write rows no hook refusal can reach the answer of, with the reason. Closed. */
 const NO_REFUSAL_REACHES_THE_ANSWER: ReadonlyMap<string, string> = new Map([
@@ -373,21 +406,18 @@ describe('[#22694] §2 a refusal reaches the caller in the hook\'s words', () =>
             expect(b.calls, `${driver.called} was never called`).toContain(driver.called);
             expect(answer).toBe(SENTENCE);
             expect(JSON.stringify(res.body ?? null)).not.toMatch(WRAPPER_RE);
+            if (driver.answers) {
+                expect(res.statusCode).toBe(driver.answers.status);
+                expect(codeOf(res.body)).toBe(driver.answers.code);
+            }
         }, 60_000);
     }
 });
 
-describe('[#22694] §3 MEASURED, NOT REPAIRED: these doors answer the debug wrapper', () => {
-    for (const [route, door] of Object.entries(ANSWERS_THE_WRAPPER)) {
-        it(`${route} answers ${door.status} + the wrapper`, async () => {
-            const b = boot(sandboxRefusal);
-            const res = await drive(b, route, door.body ?? {});
-
-            expect(b.calls, `${door.called} was never called`).toContain(door.called);
-            expect(res.statusCode).toBe(door.status);
-            expect(sentenceOf(res.body)).toBe(WRAPPER);
-        }, 60_000);
-    }
+describe('[#22719] §3 CLOSED: no write door answers the debug wrapper', () => {
+    it('the disposition that held the wrapper rows is empty', () => {
+        expect(Object.keys(ANSWERS_THE_WRAPPER)).toEqual([]);
+    });
 });
 
 /** A refusal that DECLARED a server-band status: the doors keep the status and withhold the prose. */

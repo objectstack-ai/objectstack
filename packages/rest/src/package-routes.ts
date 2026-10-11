@@ -14,8 +14,10 @@ import {
   resolveThrownHttpError,
   demotedDeclaredCode,
   looksLikeInternalErrorLeak,
+  sandboxBusinessMessage,
   INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
+import { classifiedRefusalAnswer } from './error-response.js';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 
 /**
@@ -175,13 +177,39 @@ async function refusePackageRequest(
  * client-facing messages at all — which is a separate card. Pinned on the
  * publish route in `package-door-5xx-message-sanitization.test.ts` so it goes
  * red the day either lands.
+ *
+ * ## [#22719] …and a sandboxed hook's refusal answers in the hook's words
+ *
+ * A hook body refusing a write `packageService.publish` makes (`throw new
+ * Error('…')`) arrives as a `SandboxError` whose `.message` is the QuickJS
+ * debug wrapper and whose `.innerMessage` is the sentence. This door read
+ * neither: it declared no status, so it fell to the 500 above, and its message
+ * was the wrapper — `500 INTERNAL_ERROR` with `hook '<name>' threw: Error: …`,
+ * where every conforming write door answers `400` with the hook's own
+ * sentence. Two shared reads now close it, and nothing else moves:
+ *
+ *  - the STATUS the door falls back to is the `/data` door's classification
+ *    ({@link classifiedRefusalAnswer}) when it has one. It answers only a
+ *    refusal that declared an envelope — whose own status outranks any
+ *    fallback here anyway — or a sandboxed refusal, so an undeclared sandbox
+ *    refusal takes its `400` and every other undeclared throw keeps the `500`;
+ *  - the SENTENCE is {@link sandboxBusinessMessage}, the read every
+ *    conforming door makes, so a refusal that declared its own status keeps it
+ *    and loses only the wrapper. The leak predicate still reads the RAW
+ *    message, the input it was calibrated on.
+ *
+ * `code`, `declaredCode`, `userMessage` and `details` stay this door's own
+ * mapping, which is why the classification's body is not re-dressed here the
+ * way the hand-built families in `rest-server.ts` re-dress it: their 500 arm
+ * read nothing, this door already reads everything but the sandbox.
  */
 function sendThrownError(res: any, error: unknown): void {
-  const thrown = resolveThrownHttpError(error);
-  // The dispatcher twin's expression, byte for byte — one rule, two doors.
+  const thrown = resolveThrownHttpError(error, classifiedRefusalAnswer(error)?.status ?? 500);
+  // The dispatcher twin's withhold, byte for byte — one rule, two doors. Its
+  // other limb is the shared sandbox read (#22719), not the raw message.
   const message = thrown.status >= 500 && looksLikeInternalErrorLeak(thrown.message)
     ? INTERNAL_ERROR_MESSAGE
-    : thrown.message;
+    : sandboxBusinessMessage(error) ?? thrown.message;
   // [#12405] The producer's OWN spelling, when the closed vocabulary did not
   // admit it — the same demote the dispatcher twin serving this very path has
   // emitted since #9106 (`errorFromThrown` in
