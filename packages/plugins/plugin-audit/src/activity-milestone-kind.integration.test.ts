@@ -84,7 +84,7 @@ const itemObject = {
 };
 
 type Row = Record<string, any>;
-const meta = (r: Row | undefined) => (typeof r?.metadata === 'string' ? JSON.parse(r.metadata) : null);
+const meta = (r: Row | null | undefined) => (typeof r?.metadata === 'string' ? JSON.parse(r.metadata) : null);
 
 describe('[#22771] a fired milestone is served with metadata.kind, judged like the text it rides beside', () => {
   let kernel: ObjectKernel;
