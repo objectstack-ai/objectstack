@@ -579,9 +579,6 @@
     "packages/plugins/plugin-pinyin-search/src/companion-projection.test.ts": {
       "unjudged": 1
     },
-    "packages/plugins/plugin-security/src/audience-anchors.test.ts": {
-      "blind": 1
-    },
     "packages/plugins/plugin-security/src/auto-org-admin-grant.test.ts": {
       "unjudged": 1
     },

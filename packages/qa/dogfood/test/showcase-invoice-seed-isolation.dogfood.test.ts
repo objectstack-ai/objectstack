@@ -80,7 +80,6 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
   const token = new Map<string, string>();
   const userId = new Map<string, string>();
   let setId: string;
-  let positionId: string;
 
   const invoice = async (name: string) => {
     const inv = await ql.findOne('showcase_invoice', { where: { name }, context: SYS });
@@ -101,25 +100,10 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
     const set = await ql.findOne('sys_permission_set', { where: { name: SET }, context: SYS });
     expect(set?.id, `the app's ${SET} set is seeded by the security bootstrap`).toBeTruthy();
     setId = set.id;
-    const position = await ql.findOne('sys_position', { where: { name: POSITION }, context: SYS });
-    expect(position?.id, `the app's ${POSITION} position is seeded`).toBeTruthy();
-    positionId = position.id;
-
-    // The position → set edge. The app writes it on `kernel:bootstrapped` from
-    // its `onEnable` (bind-position-sets.ts); the verify harness boots the stack
-    // object, which carries no `onEnable`, so the same idempotent write is made
-    // here — the pair is exactly the app's `contributor → showcase_contributor`.
-    const bound = await ql.findOne('sys_position_permission_set', {
-      where: { position_id: positionId, permission_set_id: setId },
-      context: SYS,
-    });
-    if (!bound) {
-      await ql.insert(
-        'sys_position_permission_set',
-        { position_id: positionId, permission_set_id: setId },
-        { context: SYS },
-      );
-    }
+    // [ADR-0131 D2/D3] The position → set edge is the app's own declaration —
+    // `contributor` names `showcase_contributor` in its `permissionSets` — and
+    // the resolver reads it there. No `sys_position` row and no junction row
+    // is involved: the boot writes neither.
 
     for (const p of PERSONAS) {
       token.set(p.email, await stack.signUp(p.email, 'Member-Pass-123'));

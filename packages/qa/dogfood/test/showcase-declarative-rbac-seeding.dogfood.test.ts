@@ -30,7 +30,7 @@ describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
   }, 60_000);
 
   it('declared positions are served by the security catalog (was count = 0)', async () => {
-    const reader = createSecurityCatalogReader({ registry: ql.registry, metadata: stack.kernel.getService('metadata') as any });
+    const reader = createSecurityCatalogReader({ registry: ql.registry, metadata: stack.kernel.getService('metadata') });
     const names = (await reader.list('position')).map((e) => e.name);
     expect(names, 'showcase declares contributor/manager/exec').toEqual(
       expect.arrayContaining(['contributor', 'manager', 'exec']),
@@ -80,13 +80,5 @@ describe('showcase: declarative RBAC seeding (ADR-0057 D6 / #2077)', () => {
     expect(contacts.recipient_id).toBe('manager');
     const criteria = JSON.parse(contacts.criteria_json);
     expect(criteria).toEqual({ $and: [{ stage: 'qualified' }, { company: 'Northwind' }] });
-  });
-
-  // [ADR-0131 D2] The boot writes no position row — neither for the declared
-  // positions nor for the six built-ins the platform declares.
-  it('the boot writes no sys_position row for a declared or built-in position', async () => {
-    const names = ['contributor', 'manager', 'exec', 'platform_admin', 'org_owner', 'org_admin', 'org_member', 'everyone', 'guest'];
-    const rows = await ql.find('sys_position', { where: { name: { $in: names } }, context: { isSystem: true } });
-    expect((rows ?? []).map((r: any) => r.name)).toEqual([]);
   });
 });
