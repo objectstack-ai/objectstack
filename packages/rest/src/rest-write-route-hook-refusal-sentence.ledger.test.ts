@@ -460,3 +460,93 @@ describe('[#22718] §4 a sandboxed body the doors answer as a fault reads as tha
         }
     }, 60_000);
 });
+
+// ─── [#22719] what else the repair moved, and what it did not ───────────────
+
+/**
+ * The fault terminal each repaired row keeps: the code its own arm answers a
+ * throw that is NOT a refusal. External datasources answer every throw at
+ * `400` with their own code and are listed with that answer.
+ */
+const OWN_TERMINAL: Record<string, { status: number; code: string }> = {
+    'POST /api/v1/sharing/rules': { status: 500, code: 'RULE_DEFINE_FAILED' },
+    'DELETE /api/v1/sharing/rules/:idOrName': { status: 500, code: 'RULE_DELETE_FAILED' },
+    'POST /api/v1/sharing/rules/:idOrName/evaluate': { status: 500, code: 'RULE_EVALUATE_FAILED' },
+    'POST /api/v1/security/suggested-bindings/:id/confirm': { status: 500, code: 'SUGGESTION_CONFIRM_FAILED' },
+    'POST /api/v1/security/suggested-bindings/:id/dismiss': { status: 500, code: 'SUGGESTION_DISMISS_FAILED' },
+    'POST /api/v1/security/permission-sets/:id/discard-overlay': { status: 500, code: 'INTERNAL' },
+    'POST /api/v1/approvals/requests/:id/approve': { status: 500, code: 'APPROVAL_APPROVE_FAILED' },
+    'POST /api/v1/approvals/requests/:id/reject': { status: 500, code: 'APPROVAL_REJECT_FAILED' },
+    'POST /api/v1/approvals/requests/:id/recall': { status: 500, code: 'APPROVAL_RECALL_FAILED' },
+    'POST /api/v1/approvals/requests/:id/revise': { status: 500, code: 'APPROVAL_REVISE_FAILED' },
+    'POST /api/v1/approvals/requests/:id/resubmit': { status: 500, code: 'APPROVAL_RESUBMIT_FAILED' },
+    'POST /api/v1/approvals/requests/:id/reassign': { status: 500, code: 'APPROVAL_REASSIGN_FAILED' },
+    'POST /api/v1/approvals/requests/:id/remind': { status: 500, code: 'APPROVAL_REMIND_FAILED' },
+    'POST /api/v1/approvals/requests/:id/request-info': { status: 500, code: 'APPROVAL_REQUEST_INFO_FAILED' },
+    'POST /api/v1/approvals/requests/:id/comment': { status: 500, code: 'APPROVAL_COMMENT_FAILED' },
+    'POST /api/v1/packages/publish': { status: 500, code: 'INTERNAL_ERROR' },
+    'POST /api/v1/datasources/:name/external/tables/:remote/draft': { status: 400, code: 'EXTERNAL_DATASOURCE_ERROR' },
+    'POST /api/v1/datasources/:name/external/tables/:remote/import': { status: 400, code: 'EXTERNAL_IMPORT_ERROR' },
+    'POST /api/v1/datasources/:name/external/refresh-catalog': { status: 400, code: 'EXTERNAL_DATASOURCE_ERROR' },
+    'POST /api/v1/datasources/:name/external/validate': { status: 400, code: 'EXTERNAL_DATASOURCE_ERROR' },
+};
+
+const EXTERNAL = /\/external\//;
+
+/** A plain fault: no sandbox, no declaration. */
+const plainFault = () => new Error('The connection pool is exhausted.');
+
+/** A refusal that declared its own ADR-0112 envelope, outside any sandbox. */
+const declaredConflict = () => Object.assign(new Error('The rule is being evaluated.'), { status: 409, code: 'RESOURCE_CONFLICT' });
+
+/** A sandboxed refusal carrying an unregistered code and a marked user sentence. */
+const markedSandboxRefusal = () => Object.assign(sandboxRefusal(), { code: 'MZ_LOCKED', userMessage: 'Ask an administrator to unlock it.' });
+
+describe('[#22719] §5 the repaired rows: a fault keeps its own terminal, a refusal its own status', () => {
+    it('names exactly the twenty repaired rows', () => {
+        expect(Object.keys(OWN_TERMINAL)).toHaveLength(20);
+        for (const route of Object.keys(OWN_TERMINAL)) expect(ANSWERS_THE_SENTENCE[route]?.answers, route).toBeDefined();
+    });
+
+    for (const [route, terminal] of Object.entries(OWN_TERMINAL)) {
+        const driver = ANSWERS_THE_SENTENCE[route]!;
+
+        it(`${route}: a plain fault keeps ${terminal.status} ${terminal.code} and its own words`, async () => {
+            const b = boot(plainFault);
+            const res = await drive(b, route, driver.body ?? {});
+
+            expect(b.calls, `${driver.called} was never called`).toContain(driver.called);
+            expect(res.statusCode).toBe(terminal.status);
+            expect(codeOf(res.body)).toBe(terminal.code);
+            expect(sentenceOf(res.body)).toBe('The connection pool is exhausted.');
+        }, 60_000);
+
+        // The classification answers a declared envelope at its own status —
+        // the ride-along on the rows whose 500 arm used to answer it. External
+        // datasources do not ask it: their status and code are their own.
+        const declared = EXTERNAL.test(route) ? terminal : { status: 409, code: 'RESOURCE_CONFLICT' };
+        it(`${route}: a declared 409 refusal answers ${declared.status} ${declared.code}`, async () => {
+            const b = boot(declaredConflict);
+            const res = await drive(b, route, driver.body ?? {});
+
+            expect(b.calls, `${driver.called} was never called`).toContain(driver.called);
+            expect(res.statusCode).toBe(declared.status);
+            expect(codeOf(res.body)).toBe(declared.code);
+            expect(sentenceOf(res.body)).toBe('The rule is being evaluated.');
+        }, 60_000);
+
+        if (EXTERNAL.test(route)) continue;
+        it(`${route}: a sandboxed refusal's declared channels ride the nested envelope`, async () => {
+            const b = boot(markedSandboxRefusal);
+            const res = await drive(b, route, driver.body ?? {});
+
+            expect(res.statusCode).toBe(400);
+            expect(res.body?.error).toMatchObject({
+                code: 'VALIDATION_ERROR',
+                message: SENTENCE,
+                declaredCode: 'MZ_LOCKED',
+                userMessage: 'Ask an administrator to unlock it.',
+            });
+        }, 60_000);
+    }
+});
