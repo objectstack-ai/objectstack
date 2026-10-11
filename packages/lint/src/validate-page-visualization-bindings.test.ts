@@ -39,11 +39,25 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
 import {
-  validatePageVisualizationBindings,
+  validatePageVisualizationBindings as validatePageVisualizationBindingsUnrecorded,
   PAGE_VISUALIZATION_WITHOUT_BINDING,
   OBJECTUI_DERIVATION_PREDICATES,
 } from './validate-page-visualization-bindings.js';
 import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain page/visualization-without-binding`. Every direct call
+// below records what it fired, and the last cases in this file hold each
+// recorded verdict to one line of at most 200 characters — every firing
+// variant this suite exercises, the shipped showcase pages included, not a
+// chosen few. Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string; severity: string }> = [];
+const validatePageVisualizationBindings: typeof validatePageVisualizationBindingsUnrecorded = (...args) => {
+  const findings = validatePageVisualizationBindingsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -238,12 +252,14 @@ describe('severity tracks what the visitor sees', () => {
     expect(findings[0].rule).toBe(PAGE_VISUALIZATION_WITHOUT_BINDING);
     expect(findings[0].where).toBe('page "note_calendar" · interfaceConfig.appearance');
     expect(findings[0].path).toBe('pages[0].interfaceConfig.appearance.allowedVisualizations[0]');
-    // The message names the page, the visualization, and what was looked for.
-    expect(findings[0].message).toContain('note_calendar');
+    // The message names the visualization and its binding (the `where` above
+    // names the page); [#22161] what was looked for is on the `fix:` line.
     expect(findings[0].message).toContain("'calendar'");
     expect(findings[0].message).toContain('startDateField');
-    expect(findings[0].message).toContain('a field typed date / datetime / time');
-    expect(findings[0].message).toContain('forced view type');
+    expect(findings[0].hint).toContain('a field typed date / datetime / time');
+    // [#22161] Why it lands there — the forced view type — is the explanation's.
+    expect(findings[0].message).toContain('every visitor lands on its refusal screen');
+    expect(explainRule(PAGE_VISUALIZATION_WITHOUT_BINDING)!.paragraphs.join('\n')).toContain('forced view type');
     // …and the hint names `sourceView` as the remedy on this door.
     expect(findings[0].hint).toContain('sourceView');
   });
@@ -323,7 +339,7 @@ describe('`sourceView` is the remedy, and the rule honours it', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].message).toContain("'kanban'");
-    expect(findings[0].message).toContain('the referenced view "schedule" declares no `kanban:` block');
+    expect(findings[0].message).toContain('view "schedule" has no `kanban:` block');
   });
 
   it('accepts a `calendar:` block as the TIMELINE axis (resolveTimelineDateBinding)', () => {
@@ -487,8 +503,92 @@ describe('suite wiring', () => {
       (r) => r.name === 'validatePageVisualizationBindings',
     );
     expect(member).toBeDefined();
-    expect(member?.run).toBe(validatePageVisualizationBindings);
+    expect(member?.run).toBe(validatePageVisualizationBindingsUnrecorded);
     // Frozen `flow` default: the per-write `view` snapshot carries no pages.
     expect(member?.runtimeTypes).toBeUndefined();
+  });
+});
+
+describe('[#22161] one-line verdicts — page/visualization-without-binding', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // Every visualization with a deriver, leading and not, on the dateless
+    // object, recorded like every case above.
+    const VIZ = OBJECTUI_DERIVATION_PREDICATES.map((p) => p.visualization);
+    validatePageVisualizationBindings({
+      objects: [DATELESS],
+      pages: [
+        ...VIZ.map((viz) => listPage(`note_${viz}`, { source: 'crm_note', appearance: { allowedVisualizations: [viz] } })),
+        listPage('note_every', { source: 'crm_note', appearance: { allowedVisualizations: ['grid', ...VIZ] } }),
+      ],
+    });
+    const converted = fired.filter((f) => f.rule === PAGE_VISUALIZATION_WITHOUT_BINDING);
+    // The coverage control first: both severities, both remedy arms, and
+    // every visualization with a deriver.
+    expect(converted.some((f) => f.severity === 'error')).toBe(true);
+    expect(converted.some((f) => f.severity === 'warning')).toBe(true);
+    expect(converted.some((f) => f.message.includes('no `sourceView` supplies it'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('has no `kanban:` block'))).toBe(true);
+    for (const viz of VIZ) {
+      expect(converted.some((f) => f.message.startsWith(`'${viz}' leads `)), viz).toBe(true);
+      expect(converted.some((f) => f.message.startsWith(`'${viz}' is in `)), viz).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence per arm', () => {
+    const findings = validatePageVisualizationBindings({
+      objects: [DATELESS],
+      views: [{ name: 'crm_note_views', objectName: 'crm_note', listViews: { schedule: { type: 'grid', columns: ['title'] } } }],
+      pages: [
+        listPage('note_gantt', { source: 'crm_note', appearance: { allowedVisualizations: ['gantt', 'map'] } }),
+        listPage('note_board', { source: 'crm_note', sourceView: 'schedule', appearance: { allowedVisualizations: ['kanban'] } }),
+      ],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      "'gantt' leads the whitelist, but its `startDateField + endDateField` derives from no field of \"crm_note\" "
+        + 'and no `sourceView` supplies it, so every visitor lands on its refusal screen',
+      "'map' is in the whitelist, but its `locationField` derives from no field of \"crm_note\" and no "
+        + '`sourceView` supplies it, so the switcher SILENTLY drops it',
+      "'kanban' leads the whitelist, but its `groupByField` derives from no field of \"crm_note\" and view "
+        + '"schedule" has no `kanban:` block, so every visitor lands on its refusal screen',
+    ]);
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const entry = explainRule(PAGE_VISUALIZATION_WITHOUT_BINDING);
+    expect(entry, 'no `os explain page/visualization-without-binding` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'closed shape with no per-visualization binding key',
+      'ADR-0047',
+      '`interfaceConfig.sourceView`',
+      'hidden and system fields skipped',
+      '"configuration required" refusal screen',
+      'shown on the whitelist\'s length',
+      '`grid`, which needs no binding',
+      '`chart`, `tree`',
+      'hand-carried mirror',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('the derivation the explanation writes out is the mirrored table', () => {
+    // The explanation module imports nothing, so its derivation paragraph is
+    // held to `OBJECTUI_DERIVATION_PREDICATES` here: every type list and name
+    // pattern of every row appears, spelled as the table spells it.
+    const text = explainRule(PAGE_VISUALIZATION_WITHOUT_BINDING)!.paragraphs.join('\n');
+    for (const row of OBJECTUI_DERIVATION_PREDICATES) {
+      expect(text, row.visualization).toContain(row.visualization);
+      expect(text, `${row.visualization} types`).toContain(row.types.join(' / '));
+      if (row.namePattern !== null) expect(text, `${row.visualization} name`).toContain(`/${row.namePattern}/i`);
+      if (row.binding.includes(' + ')) continue; // gantt: "two distinct … fields, a start and an end"
+      expect(text, `${row.visualization} binding`).toContain(`\`${row.binding}\``);
+    }
+    expect(text).toContain('two distinct date / datetime / time fields, a start and an end');
+    expect(text).toContain('a view\'s `calendar:` block also binds the timeline');
   });
 });

@@ -2,11 +2,28 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateObjectReferences,
+  validateObjectReferences as validateObjectReferencesUnrecorded,
   OBJECT_REFERENCE_UNKNOWN,
   OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
 } from './validate-object-references.js';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
+import { PLATFORM_OBJECT_PREFIXES } from '@objectstack/spec/system';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each `object-reference-unregistered-platform` finding is one
+// verdict sentence; the reasoning it used to carry is
+// `os explain object-reference-unregistered-platform`. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired. (`object-reference-unknown` already prints one
+// sentence of at most 175 characters here and is not converted.)
+const fired: Array<{ rule: string; message: string }> = [];
+const validateObjectReferences: typeof validateObjectReferencesUnrecorded = (...args) => {
+  const findings = validateObjectReferencesUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /** Minimal stack with one own object, mirroring the HotCRM shape. */
 const baseStack = () => ({
@@ -803,4 +820,81 @@ describe('[#20216] a dangling view container `object` gates every CLI command', 
       expect(hits(command, 'my_app_order_line')).toEqual([]);
     });
   }
+});
+
+describe('[#22161] one-line verdicts — object-reference-unregistered-platform', () => {
+  /** Every site the rule resolves, each naming the same platform-shaped miss. */
+  const everySite = (name: string) => ({
+    objects: [
+      {
+        name: 'crm_lead',
+        fields: {
+          approval: { type: 'lookup', reference: name },
+          parent_approval: { type: 'master_detail', reference: name },
+        },
+        actions: [{ name: 'route', params: [{ name: 'target', type: 'lookup', reference: name }] }],
+      },
+    ],
+    views: [{ object: name, list: { type: 'grid', columns: ['name'] } }],
+    actions: [{ name: 'mass_route', params: [{ name: 'p', field: 'status', objectOverride: name }] }],
+    dashboards: [{ name: 'd', globalFilters: [{ name: 'f', optionsFrom: { object: name } }] }],
+    datasets: [{ name: 'm', object: name, dimensions: [], measures: [] }],
+    apps: [{ name: 'a', navigation: [{ id: 'n', type: 'object', objectName: name, requiresObject: name }] }],
+  });
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    validateObjectReferences(everySite('sys_approval_process'));
+    const converted = fired.filter((f) => f.rule === OBJECT_REFERENCE_UNREGISTERED_PLATFORM);
+    // The coverage control first: every site fired (the case just above, run
+    // through the recorder like every case in this file).
+    for (const subject of [
+      'lookup target',
+      'master_detail target',
+      'view container object',
+      'record-picker target',
+      'field-backed param object',
+      'filter options source',
+      'dataset base object',
+      'capability gate object',
+      'navigation target',
+    ]) {
+      expect(converted.some((f) => f.message.startsWith(`${subject} "`)), subject).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence, with the nearest platform name when one is close', () => {
+    const findings = validateObjectReferencesUnrecorded({
+      ...baseStack(),
+      datasets: [{ name: 'm', object: 'sys_approval_process', dimensions: [], measures: [] }],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'dataset base object "sys_approval_process" has a platform prefix, but no known package registers it '
+        + 'and this stack does not define it, so it likely resolves to nothing. Did you mean "sys_app"?',
+    ]);
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(OBJECT_REFERENCE_UNREGISTERED_PLATFORM);
+    expect(entry, 'no `os explain object-reference-unregistered-platform` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      '`PLATFORM_PROVIDED_OBJECT_NAMES`',
+      'official plugins and cloud runtime',
+      '`packages[]`, ADR-0130 D4',
+      '`object-reference-unknown`, an error',
+      'third-party package still might',
+      'fails silently',
+      '`sys_approval_process`',
+      'ADR-0019',
+      'Interpolated names',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+    // The prefixes it names are the ones the ladder reads.
+    expect(text).toContain(PLATFORM_OBJECT_PREFIXES.map((p) => `\`${p}\``).join(', '));
+  });
 });

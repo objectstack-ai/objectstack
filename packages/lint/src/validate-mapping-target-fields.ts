@@ -173,8 +173,8 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
           // refuses, is `os explain mapping-target-field-unknown`.
           message:
             `The compound field "${miss.target.slice(0, dot)}" is mapped both whole (${miss.wholeAt}) and by ` +
-            `its part "${miss.target.slice(dot + 1)}" (${miss.path}), so the two collide and the import ` +
-            `endpoint refuses this mapping (INVALID_FIELD).`,
+            `its part "${miss.target.slice(dot + 1)}", so the two collide and the import endpoint refuses ` +
+            'this mapping (INVALID_FIELD).',
           hint:
             'Map the field whole or by its parts, not both. A declared part of a compound field is ' +
             `written field.part (${compoundParts}).`,

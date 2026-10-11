@@ -137,12 +137,11 @@ export function validateNavTargetRefs(stack: unknown): NavTargetRefFinding[] {
             // for when the collection is empty, and why it is advisory, is
             // `os explain nav-target-unresolved`.
             message:
-              `Navigation targets ${noun} '${target}', which this stack does not declare in `
-              + `\`${collection}\``
+              `Navigation targets ${noun} '${target}', which \`${collection}\` does not declare`
               + (emptyCollection
-                ? ` (it declares NO ${collection} at all, so \`defineStack\` skipped this entry)`
+                ? ` (there are NO ${collection} at all, so \`defineStack\` skipped the entry)`
                 : '')
-              + ', so the entry renders and resolves to nothing when clicked',
+              + ', so the entry resolves to nothing when clicked',
             hint:
               `Declare the ${noun} in \`${collection}\`, correct the name, or remove the nav entry `
               + `if the ${noun} is gone.`,

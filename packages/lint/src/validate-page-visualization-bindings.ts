@@ -468,14 +468,12 @@ export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizat
         // derivation, the two severities and the skips are
         // `os explain page/visualization-without-binding`.
         message:
-          `'${viz}' ${leading ? 'leads' : 'is in'} \`allowedVisualizations\` with no \`${predicate.binding}\`: `
-          + `"${objectName}" has no field it derives from and `
+          `'${viz}' ${leading ? 'leads' : 'is in'} the whitelist, but its \`${predicate.binding}\` derives `
+          + `from no field of "${objectName}" and `
           + (sourceView
             ? `view "${sourceView}" has no \`${predicate.viewBlocks[0]}:\` block`
-            : 'the page names no `sourceView`')
-          + (leading
-            ? ', so it is the forced view type and every visitor lands on a refusal screen'
-            : ', so it is SILENTLY missing from the visualization switcher'),
+            : 'no `sourceView` supplies it')
+          + (leading ? ', so every visitor lands on its refusal screen' : ', so the switcher SILENTLY drops it'),
         hint:
           `An interface page has no per-visualization binding key of its own — \`sourceView\` is the `
           + `one schema-legal channel. Point this page at a "${objectName}" list view that declares a `

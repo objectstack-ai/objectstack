@@ -392,10 +392,10 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
           // most three places, then a count); why the list reads only its
           // related object's actions is `os explain action-name-undefined`.
           message:
-            `Related-list actions names action "${id}", which related object "${child}" does not define ` +
+            `Related-list actions names action "${id}", not an action of related object "${child}" ` +
             (owners.length > 0
-              ? `(it is defined ${atMostThree(owners, ' and ')} only)`
-              : '(no action in this stack defines it)') +
+              ? `(defined only ${atMostThree(owners, ' and ')})`
+              : '(defined nowhere in this stack)') +
             ', so the list draws no button for it.' +
             suggestName(id, childNames),
           hint:

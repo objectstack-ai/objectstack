@@ -4,8 +4,22 @@ import { describe, it, expect } from 'vitest';
 
 import {
   MAPPING_TARGET_FIELD_UNKNOWN,
-  validateMappingTargetFields,
+  validateMappingTargetFields as validateMappingTargetFieldsUnrecorded,
 } from './validate-mapping-target-fields.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain mapping-target-field-unknown`. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateMappingTargetFields: typeof validateMappingTargetFieldsUnrecorded = (...args) => {
+  const findings = validateMappingTargetFieldsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 // [#20150] The author-time half of the import door's refusal: a mapping target
 // that names no field of its object is red at `os validate`, and a mapping
@@ -69,18 +83,17 @@ describe('validateMappingTargetFields', () => {
     })).toEqual([]);
   });
 
-  it('refuses a part the address value does not declare, naming every part it does', () => {
+  it('refuses a part the address value does not declare, naming every part it does on the fix line', () => {
     const findings = validateMappingTargetFields({
       objects: [contact],
       mappings: [mapping([{ source: 'Street', target: 'mailing_address.stret' }])],
     });
     expect(findings.map((f) => f.path)).toEqual(['mappings[0].fieldMapping[0].target']);
     expect(findings[0].rule).toBe(MAPPING_TARGET_FIELD_UNKNOWN);
-    expect(findings[0].message).toContain(
-      '"stret" is not a part of the address field "mailing_address": the parts a target may name on it are '
-      + 'street, city, state, postalCode, country, countryCode, formatted.',
+    expect(findings[0].message).toBe(
+      'Target "mailing_address.stret" names no part of the address field "mailing_address", so the import '
+      + 'endpoint refuses this mapping (INVALID_FIELD). Did you mean "street"?',
     );
-    expect(findings[0].message).toContain('Did you mean "street"?');
     expect(findings[0].hint).toContain(
       'or at a declared part of a compound field as field.part (mailing_address: street, city, state, postalCode, country, countryCode, formatted)',
     );
@@ -98,9 +111,9 @@ describe('validateMappingTargetFields', () => {
       'mappings[0].fieldMapping[0].target',
       'mappings[0].fieldMapping[1].target',
     ]);
-    expect(findings[0].message).toContain('The text field "full_name" is a field of "crm_contact" with no parts');
-    expect(findings[1].message).toContain('The lookup field "account" is a field of "crm_contact" with no parts');
-    expect(findings[1].message).toContain('Map the column to "account" with transform "lookup"');
+    expect(findings[0].message).toContain('but the text field "full_name" has no parts');
+    expect(findings[1].message).toContain('cannot traverse the lookup field "account"');
+    expect(findings[1].message).toContain('map the column to "account" with transform "lookup"');
     // The part list rides along either way, so the author sees what IS a part.
     expect(findings[0].hint).toContain('mailing_address: street, city');
   });
@@ -122,8 +135,8 @@ describe('validateMappingTargetFields', () => {
         + 'field.part (mailing_address: street, city, state, postalCode, country, countryCode, formatted).',
     });
     expect(findings[0].message).toContain(
-      'writes the compound field "mailing_address" of object "crm_contact" both whole (fieldMapping[0].target) '
-      + 'and by its part "street" (fieldMapping[1].target)',
+      'The compound field "mailing_address" is mapped both whole (fieldMapping[0].target) '
+      + 'and by its part "street"',
     );
   });
 
@@ -230,5 +243,70 @@ describe('validateMappingTargetFields', () => {
   it('returns nothing for a stack without mappings, and survives junk entries', () => {
     expect(validateMappingTargetFields({ objects: [contact] })).toEqual([]);
     expect(() => validateMappingTargetFields({ objects: [null, contact], mappings: [null, 7] } as never)).not.toThrow();
+  });
+});
+
+describe('[#22161] one-line verdicts — mapping-target-field-unknown', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === MAPPING_TARGET_FIELD_UNKNOWN);
+    // The coverage control first: every arm fired — a name that is no field,
+    // an undeclared part, a dotted target on a scalar field and on a reference
+    // field, and a part colliding with the whole field.
+    const arms = ['names no field of', 'names no part of', 'has no parts (only', 'cannot traverse', 'mapped both whole'];
+    for (const arm of arms) expect(converted.some((f) => f.message.includes(arm)), arm).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence per arm', () => {
+    const findings = validateMappingTargetFields({
+      objects: [{ ...contact, fields: { ...contact.fields, account: { type: 'lookup', reference: 'crm_account' } } }],
+      mappings: [mapping([
+        { source: 'Mail', target: 'emial' },
+        { source: 'First', target: 'full_name.first' },
+        { source: 'Account', target: 'account.name' },
+        { source: 'Address JSON', target: 'mailing_address' },
+        { source: 'Street', target: 'mailing_address.street' },
+      ])],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'Target "emial" names no field of "crm_contact", so the import endpoint refuses this mapping '
+        + '(INVALID_FIELD) and it imports nothing. Did you mean "email"?',
+      'Target "full_name.first" is dotted, but the text field "full_name" has no parts (only a compound '
+        + 'field does), so the import endpoint refuses this mapping (INVALID_FIELD).',
+      'Target "account.name" cannot traverse the lookup field "account", so the import endpoint refuses '
+        + 'this mapping (INVALID_FIELD); map the column to "account" with transform "lookup".',
+      'The compound field "mailing_address" is mapped both whole (fieldMapping[3].target) and by its part '
+        + '"street", so the two collide and the import endpoint refuses this mapping (INVALID_FIELD).',
+    ]);
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const entry = explainRule(MAPPING_TARGET_FIELD_UNKNOWN);
+    expect(entry, 'no `os explain mapping-target-field-unknown` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'before any row, on the dry run and the commit alike',
+      '`unknownImportMappingTargets`',
+      '`objectExtensions`',
+      '`owner_id`, `organization_id`',
+      'declared PART of a compound field',
+      'transform `lookup`',
+      'one row carries one value',
+      'does not define',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('the provisioned columns the explanation names are ones the rule accepts', () => {
+    // The explanation module imports nothing, so its list is held to the rule
+    // by running the rule: each provisioned column it names is a legal target.
+    expect(validateMappingTargetFieldsUnrecorded({
+      objects: [contact],
+      mappings: [mapping(['id', 'owner_id', 'organization_id'].map((target) => ({ source: target, target })))],
+    })).toEqual([]);
   });
 });

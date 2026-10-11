@@ -2765,14 +2765,15 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'still carry the field, and a misspelled entry is indistinguishable from one never written); ' +
       'and `indexes[].fields` (the SQL driver skips the WHOLE index at sync, logged at error, ' +
       '`os migrate plan` reports it unbuildable, and the object keeps serving, so a `unique` index ' +
-      'is unenforced until the name is fixed). The retired `compactLayout` spelling is read at the ' +
+      'is then unenforced until the name is fixed). The retired `compactLayout` spelling is read at the ' +
       '`highlightFields` position on the raw `os lint` path; the parse refuses it.',
     'Field-level, each against the object its reader addresses: `relatedListColumns` against the ' +
       'object that owns the field (the related list on the parent\'s detail page lists that ' +
       'object\'s rows); `lookupColumns` and `lookupFilters[].field` against the REFERENCED object ' +
       '(the record picker\'s columns and the filter on its query); `dependsOn` against the owning ' +
-      'object (the form gates this field until that one has a value, so a name the record does not ' +
-      'have gates it for good) and, through `param` or the bare name, against the referenced object ' +
+      'object (the form gates this field until that one has a value, and a field the record does ' +
+      'not have never gets one, so it stays gated for good) and, through `param` or the bare name, ' +
+      'against the referenced object ' +
       '(the picker scopes its candidates by that key). The referenced object is judged only on ' +
       '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
       '`dependsOn` name that misses on the owning object is reported once, there.',
