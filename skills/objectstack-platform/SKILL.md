@@ -49,7 +49,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
-`devHint`, `devLogins`, `requires`, `tiers`, `onEnable`.
+`devHint`, `devLogins`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is authored as a flow with Approval nodes (ADR-0019), and record
@@ -81,8 +81,7 @@ keeping straight:
 For the exact Zod shape — including which keys are optional and what types
 the collection items take — read
 `node_modules/@objectstack/spec/src/stack.zod.ts`
-(`ObjectStackDefinitionSchema`; the input type is
-`ObjectStackDefinitionInput`). Each collection's item shape lives in
+(`ObjectStackDefinitionSchema`). Each collection's item shape lives in
 its own domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
 
 → Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Map Format (Key → Name) · § Barrel Import Pattern.

@@ -1,0 +1,77 @@
+---
+title: Sms Config schema — System Protocol reference
+navTitle: Sms Config
+description: "SMS Service Configuration — the stack definition's sms block. There was no SMS configuration schema in the spec before this file."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+SMS Service Configuration — the stack definition's `sms` block.
+
+There was no SMS configuration schema in the spec before this file. The
+shape below is typed from what its one reader reads:
+`resolveSmsCapabilityArg` in `@objectstack/service-sms`, which
+`objectstack serve` and `bootStack` both construct `SmsServicePlugin`
+through. It reads three keys off `config.sms`:
+
+| key | secret? | here |
+|---|---|---|
+| `provider` | no — a transport tag | admitted (`SmsProviderSchema`); `OS_SMS_PROVIDER` wins |
+| `retries` | no | admitted |
+| `providerOptions` | YES — every non-`log` transport requires a credential inside it (Twilio `authToken`, Aliyun `accessKeySecret`) | refused by name |
+
+`providerOptions` is refused WHOLE rather than narrowed to its non-secret
+members, and the difference from mail's `options` is measured, not a
+preference. The mail reader layers `OS_EMAIL_SMTP_*` over `config.email.options`
+per key, so a file carrying host and user composes with an environment
+carrying the password. The SMS reader hands `providerOptions` to the
+transport as written, and nothing merges an environment credential into it:
+a Twilio or Aliyun transport built from the non-secret members alone cannot
+be constructed, so the plugin falls back to its log transport. A narrowed
+`providerOptions` would therefore be a declared key no deployment could ever
+deliver through. SMS provider settings — credentials included — live in the
+`sms` settings namespace (Setup → Settings → SMS Delivery), whose every key
+accepts its `OS_SMS_*` environment override, and the refusal says so.
+
+Why the credentials stop at this door at all: the stack definition is what
+`objectstack build` compiles into the artifact, and artifacts are published.
+
+<Callout type="info">
+**Source:** `packages/spec/src/system/sms-config.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { SmsProviderSchema, StackSmsConfigSchema } from '@objectstack/spec/system';
+import type { SmsProvider, StackSmsConfig } from '@objectstack/spec/system';
+
+// Validate data
+const result = SmsProviderSchema.parse(data);
+```
+
+---
+
+## SmsProvider
+
+### Allowed Values
+
+* `log`
+* `aliyun`
+* `twilio`
+
+
+---
+
+## StackSmsConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `Enum<'log' \| 'aliyun' \| 'twilio'>` | optional | SMS transport tag (OS_SMS_PROVIDER env wins). Default log. Credentials never come from the stack: the delivering aliyun / twilio transport is built at kernel:ready from the sms settings namespace (Setup → Settings → SMS Delivery, or its OS_SMS_* env overrides), whose own provider setting decides |
+| **retries** | `integer` | optional | Retry attempts on transport throw (default 0) |
+
+
+---
+
