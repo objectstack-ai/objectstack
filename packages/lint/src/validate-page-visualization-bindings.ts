@@ -463,20 +463,19 @@ export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizat
         rule: PAGE_VISUALIZATION_WITHOUT_BINDING,
         where,
         path: `pages[${pi}].interfaceConfig.appearance.allowedVisualizations[${ai}]`,
+        // [#22161] One verdict sentence (`where` names the page; the `fix:`
+        // line says what the derivation looks for). The renderer's
+        // derivation, the two severities and the skips are
+        // `os explain page/visualization-without-binding`.
         message:
-          `page "${pageName}" whitelists the '${viz}' visualization, but nothing supplies its `
-          + `\`${predicate.binding}\`: the renderer derives that binding from "${objectName}"'s `
-          + `fields — it looks for ${describeSearch(predicate)} — and "${objectName}" has none`
+          `'${viz}' ${leading ? 'leads' : 'is in'} \`allowedVisualizations\` with no \`${predicate.binding}\`: `
+          + `"${objectName}" has no field it derives from and `
           + (sourceView
-            ? `, while the referenced view "${sourceView}" declares no \`${predicate.viewBlocks[0]}:\` block either.`
-            : ', and this page references no view that declares it.')
-          + ' '
+            ? `view "${sourceView}" has no \`${predicate.viewBlocks[0]}:\` block`
+            : 'the page names no `sourceView`')
           + (leading
-            ? `'${viz}' LEADS \`allowedVisualizations\`, so it becomes the page's forced view type: `
-              + 'every visitor lands on the renderer\'s "configuration required" refusal screen.'
-            : `'${viz}' is filtered out of the visualization switcher SILENTLY — the switcher still `
-              + 'appears (it is shown on whitelist length), the type is simply never there, with no '
-              + 'message at build time or at run time.'),
+            ? ', so it is the forced view type and every visitor lands on a refusal screen'
+            : ', so it is SILENTLY missing from the visualization switcher'),
         hint:
           `An interface page has no per-visualization binding key of its own — \`sourceView\` is the `
           + `one schema-legal channel. Point this page at a "${objectName}" list view that declares a `

@@ -197,6 +197,16 @@ function actionOwners(stack: AnyRec, name: string): string[] {
 }
 
 /**
+ * At most three entries of a list, then `(and N more)` — so a verdict that
+ * names where an id is defined, or what an action declares, stays one line
+ * however long the list grows.
+ */
+function atMostThree(items: readonly string[], separator: string): string {
+  const shown = items.slice(0, 3).join(separator);
+  return items.length > 3 ? `${shown} (and ${items.length - 3} more)` : shown;
+}
+
+/**
  * Validate every name-bound action reference in a stack. Returns findings
  * (empty = clean).
  */
@@ -222,12 +232,13 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
      */
     placement = 'with the location this surface needs',
     /**
-     * What the author will SEE. Most surfaces draw the button and dispatch
-     * nothing; a surface that resolves the id before drawing (the alert's
-     * call-to-action, the page header) draws no button at all — one sentence
-     * for both would describe a failure the author cannot find.
+     * What the author will SEE, as the clause that ends the verdict. Most
+     * surfaces draw the button and dispatch nothing; a surface that resolves
+     * the id before drawing (the alert's call-to-action, the page header)
+     * draws no button at all — one clause for both would describe a failure
+     * the author cannot find.
      */
-    consequence = 'The button renders and does nothing when clicked — a dead affordance the runtime cannot dispatch.',
+    consequence = 'the button does nothing when clicked',
   ) => {
     if (known.has(name)) return;
     findings.push({
@@ -235,9 +246,11 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
       rule: ACTION_NAME_UNDEFINED,
       where,
       path,
+      // [#22161] One verdict sentence; every surface walked, what an action
+      // name resolves against and the related-list exception is
+      // `os explain action-name-undefined`.
       message:
-        `${surface} names action "${name}", which is defined by no action in this stack ` +
-        `(neither \`stack.actions\` nor any object's \`actions\`). ${consequence}` +
+        `${surface} names action "${name}", which no action in this stack defines, so ${consequence}.` +
         suggestName(name, known),
       hint:
         `Define an action named "${name}" (in \`stack.actions\` or the object's \`actions\`) ` +
@@ -375,15 +388,15 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
           rule: ACTION_NAME_UNDEFINED,
           where,
           path: idPath,
+          // [#22161] One verdict sentence, naming where the id IS defined (at
+          // most three places, then a count); why the list reads only its
+          // related object's actions is `os explain action-name-undefined`.
           message:
-            `Related-list actions names action "${id}", which is not an action of the related object ` +
-            `"${child}"` +
+            `Related-list actions names action "${id}", which related object "${child}" does not define ` +
             (owners.length > 0
-              ? ` (it is defined in this stack ${owners.join(' and ')}, which this list never reads)`
-              : ' (no action in this stack defines it)') +
-            ". The list resolves each id against its related object's own actions only — not the " +
-            "page's object, not a global action — so it draws no button for this one, only a refusal " +
-            'notice naming it above the list.' +
+              ? `(it is defined ${atMostThree(owners, ' and ')} only)`
+              : '(no action in this stack defines it)') +
+            ', so the list draws no button for it.' +
             suggestName(id, childNames),
           hint:
             `Define "${id}" on "${child}" — in that object's \`actions\`, or in \`stack.actions\` with ` +
@@ -403,14 +416,16 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
         rule: ACTION_NAME_UNDEFINED,
         where,
         path: idPath,
+        // [#22161] One verdict sentence; the locations a related list draws
+        // are on the `fix:` line, and why naming the action is not a
+        // placement is `os explain action-name-undefined`.
         message:
-          `Related-list actions names action "${id}", an action of the related object "${child}" ` +
+          `Related-list actions names action "${id}" of "${child}", ` +
           (declared === undefined
-            ? 'that declares no `locations`, so it is placed at none'
-            : `whose \`locations\` (${declared.length > 0 ? declared.join(', ') : 'empty'}) include none`) +
-          ` of the locations a related list draws (${RELATED_LIST_LOCATIONS.join(', ')}). The list ` +
-          'places an authored action by its own `locations` — naming it here is not a placement — so ' +
-          'it draws no button for it, only a refusal notice naming it above the list.',
+            ? 'which declares no `locations`'
+            : `whose \`locations\` (${declared.length > 0 ? atMostThree(declared, ', ') : 'empty'}) include none ` +
+              'a related list draws') +
+          ', so the list draws no button for it.',
         hint:
           `Add one of ${RELATED_LIST_PLACEMENTS} to the \`locations\` of "${id}" on "${child}", ` +
           'or remove the reference.',
@@ -465,7 +480,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
             `${path}.properties.action.actionName`,
             'Alert call-to-action',
             '(no `locations` entry needed — the alert renders its call-to-action by name)',
-            'The banner renders with no call-to-action button: the id resolves to nothing and the renderer drops it without a word.',
+            'the banner renders without its call-to-action button',
           );
         }
       }
@@ -487,7 +502,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
             `${path}.properties.actions[${hi}]`,
             'Page-header actions',
             'with `record_header` or `record_more` in its `locations` (the header draws only actions placed at one of the two)',
-            'The header draws no button for it: the id resolves to nothing and is dropped, with only a browser-console warning no author reads.',
+            'the header draws no button for it',
           );
         }
       }

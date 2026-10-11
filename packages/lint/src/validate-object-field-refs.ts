@@ -271,7 +271,9 @@ function asArray(v: unknown): AnyRec[] {
  * and a table can be read against `ObjectSchema` key by key. `consequence` is
  * the sentence the author reads after the miss — what actually happens when
  * the reference resolves to nothing — and it differs per position, which is
- * why it is data here rather than one shared string.
+ * why it is data here rather than one shared string. [#22161] One clause
+ * each: the longer account of every position (who reads it, when the miss
+ * surfaces) is `os explain object-field-ref-unknown`.
  */
 interface ListPosition {
   /** `''` = the object's own top level, else the nested block that holds `key`. */
@@ -296,9 +298,7 @@ const LIST_POSITIONS: readonly ListPosition[] = [
     key: 'highlightFields',
     retiredAlias: 'compactLayout',
     consequence:
-      'Every consumer silently skips the entry: it drives the object\'s default list columns, '
-      + 'record cards, previews and the detail highlight strip, and each of them renders one '
-      + 'field short with no error anywhere.',
+      'Every consumer silently skips it, so lists, cards and the highlight strip show one field short.',
     prescription:
       'Fix the field name, or drop the entry. `highlightFields` is ordered — the first entry '
       + 'wins where only one field fits (ADR-0085).',
@@ -306,10 +306,7 @@ const LIST_POSITIONS: readonly ListPosition[] = [
   {
     block: 'publicSharing',
     key: 'redactFields',
-    consequence:
-      'The redaction never applies, and it fails OPEN: records served through a share link '
-      + 'still carry the field to whoever holds the link. A mis-spelled entry is silently '
-      + 'indistinguishable from an entry that was never written.',
+    consequence: 'The redaction never applies and fails OPEN: a share link still serves the field.',
     prescription:
       'Fix the field name so the redaction binds, or drop the entry if the field is meant to '
       + 'be served through share links.',
@@ -324,10 +321,7 @@ const LIST_POSITIONS: readonly ListPosition[] = [
  * sync keeps.
  */
 const INDEX_POSITION = {
-  consequence:
-    'The SQL driver skips the WHOLE index at sync. It logs the skip at error and `os migrate plan` '
-    + 'reports the index as unbuildable, but the object keeps serving: a `unique` index is then '
-    + 'unenforced until the name is fixed.',
+  consequence: 'The SQL driver skips the whole index at sync, so a `unique` index is then unenforced.',
   prescription:
     'Fix the column name. An index column is a field of this object, or a column the platform '
     + 'injects on it (`created_at`, `organization_id`, …), spelled exactly — never a dotted path.',
@@ -403,9 +397,7 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'owner',
     verbatim: false,
     read: readString,
-    consequence:
-      'The related list the parent\'s detail page derives from this relationship asks the child '
-      + 'object for a column it does not have, and the miss surfaces only when that page opens.',
+    consequence: 'The parent\'s derived related list asks the child for a column it does not have.',
     prescription:
       'Fix the column name — a related-list column is a field of the object that declares this '
       + 'relationship (the child whose rows the list shows) — or drop the entry and let the '
@@ -416,9 +408,7 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'reference',
     verbatim: true,
     read: (entry) => readString(entry) ?? readMember(entry, 'field'),
-    consequence:
-      'The record picker renders that column empty for every candidate: a picker column is read '
-      + 'off each record of the referenced object, and nothing reports the miss.',
+    consequence: 'The record picker renders that column empty for every candidate.',
     prescription:
       'Fix the column name — a picker column is a field of the referenced object, not of the '
       + 'object that owns this field — or drop the entry and let the columns derive.',
@@ -428,9 +418,7 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'reference',
     verbatim: false,
     read: (entry) => readMember(entry, 'field'),
-    consequence:
-      'The picker applies this filter to its query on the referenced object, which names a field '
-      + 'that object does not have; the miss surfaces only when a user opens the picker.',
+    consequence: 'The picker filters its query on a field the referenced object does not have.',
     prescription:
       'Fix `field` — a picker filter runs on the referenced object, so it names a field of that '
       + 'object, not of the object that owns this field.',
@@ -440,9 +428,7 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'owner',
     verbatim: true,
     read: (entry) => readString(entry) ?? readMember(entry, 'field'),
-    consequence:
-      'The form gates this field until that field has a value, and a field the record does not '
-      + 'have never gets one: this field stays gated for good.',
+    consequence: 'The form gates this field until that one has a value, so it stays gated for good.',
     prescription:
       'Fix the name — `dependsOn` names fields on the same record, i.e. of the object that owns '
       + 'this field — or drop the entry.',
@@ -455,10 +441,7 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     address: 'reference',
     verbatim: true,
     read: (entry) => readString(entry) ?? readMember(entry, 'param') ?? readMember(entry, 'field'),
-    consequence:
-      'The picker scopes its candidates by this key on the referenced object — a bare name is '
-      + 'the key on both sides — and that object has no such field; the miss surfaces only when '
-      + 'a user opens the picker.',
+    consequence: 'The picker scopes its candidates by a key the referenced object does not have.',
     prescription:
       'When the two sides are spelled differently, write the entry as '
       + '`{ field: \'this_record_field\', param: \'referenced_object_field\' }`; otherwise fix '

@@ -169,12 +169,12 @@ export function validateNavAccess(stack: AnyRec): NavAccessFinding[] {
       rule: NAV_OBJECT_UNGRANTED,
       where: exposure.where,
       path: exposure.path,
+      // [#22161] One verdict sentence; which grants count, why it is a warning
+      // and what does not clear it is `os explain nav-object-ungranted`.
       message:
         `navigation exposes object "${objectName}", but no permission set this stack ` +
-        `declares grants read on it — the entry renders, and opening it fails ` +
-        `permission-denied for every principal except one holding the platform's ` +
-        `built-in wildcard admin set. It works when you browse as an administrator ` +
-        `and breaks for the users the app ships permission sets for.`,
+        `declares grants read on it, so opening the entry fails permission-denied for ` +
+        `everyone but a wildcard admin`,
       hint:
         `Add "${objectName}" to a permission set's \`objects\` with \`allowRead: true\` ` +
         `(or \`viewAllRecords\`), or drop the entry. Gating it with \`requiredPermissions\`/` +

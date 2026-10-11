@@ -168,11 +168,13 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
           rule: MAPPING_TARGET_FIELD_UNKNOWN,
           where,
           path: `mappings[${mi}].${miss.path}`,
+          // [#22161] One verdict sentence (`where` names the mapping and the
+          // object); how parts assemble into one value, and what the door
+          // refuses, is `os explain mapping-target-field-unknown`.
           message:
-            `Import mapping "${mappingName}" writes the compound field "${miss.target.slice(0, dot)}" of object ` +
-            `"${objectName}" both whole (${miss.wholeAt}) and by its part "${miss.target.slice(dot + 1)}" ` +
-            `(${miss.path}). One row carries one value for a field, so the two collide, and the import endpoint ` +
-            `refuses this mapping before any row, on the dry run and the commit alike (INVALID_FIELD).`,
+            `The compound field "${miss.target.slice(0, dot)}" is mapped both whole (${miss.wholeAt}) and by ` +
+            `its part "${miss.target.slice(dot + 1)}" (${miss.path}), so the two collide and the import ` +
+            `endpoint refuses this mapping (INVALID_FIELD).`,
           hint:
             'Map the field whole or by its parts, not both. A declared part of a compound field is ' +
             `written field.part (${compoundParts}).`,
@@ -184,11 +186,13 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
         rule: MAPPING_TARGET_FIELD_UNKNOWN,
         where,
         path: `mappings[${mi}].${miss.path}`,
-        message:
-          `Import mapping "${mappingName}" writes target "${miss.target}", which names no field of ` +
-          `object "${objectName}". The import endpoint refuses this mapping before any row, on the dry ` +
-          `run and the commit alike (INVALID_FIELD), so it can import nothing.` +
-          (miss.head?.field ? dottedReason(miss.head, miss.target, objectName) : suggestName(miss.target, known)),
+        // [#22161] One verdict sentence (`where` names the mapping and the
+        // object); what a target may name, and the one verdict both doors
+        // share, is `os explain mapping-target-field-unknown`.
+        message: miss.head?.field
+          ? dottedVerdict(miss.head, miss.target)
+          : `Target "${miss.target}" names no field of "${objectName}", so the import endpoint refuses ` +
+            `this mapping (INVALID_FIELD) and it imports nothing.` + suggestName(miss.target, known),
         hint:
           `Point the target at a field "${objectName}" declares, or at a column the platform provisions ` +
           `on it` +
@@ -201,32 +205,23 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
 }
 
 /**
- * Why a dotted target whose head names a field of the object is still no
- * target (#20149): its part is not one the field's value declares, or the
- * field has no parts at all.
+ * The verdict on a dotted target whose head names a field of the object but
+ * which is still no target (#20149): its part is not one the field's value
+ * declares, or the field has no parts at all. [#22161] One sentence; the
+ * parts a compound field declares are on the `fix:` line.
  */
-function dottedReason(head: ImportMappingTargetHead, target: string, objectName: string): string {
+function dottedVerdict(head: ImportMappingTargetHead, target: string): string {
   const field = head.type ? `the ${head.type} field "${head.name}"` : `"${head.name}"`;
+  const refused = 'so the import endpoint refuses this mapping (INVALID_FIELD)';
   if (head.parts) {
     const part = target.slice(head.name.length + 1);
-    return (
-      ` "${part}" is not a part of ${field}: the parts a target may name on it are ` +
-      `${head.parts.join(', ')}.` + suggestName(part, head.parts)
-    );
+    return `Target "${target}" names no part of ${field}, ${refused}.` + suggestName(part, head.parts);
   }
   if (head.type && REFERENCE_VALUE_TYPES.has(head.type)) {
     return (
-      ` ${capitalize(field)} is a field of "${objectName}" with no parts: a dotted target never ` +
-      `traverses a reference. Map the column to "${head.name}" with transform "lookup", which resolves ` +
-      `the cell's display text to a record id.`
+      `Target "${target}" cannot traverse ${field}, ${refused}; map the column to "${head.name}" ` +
+      'with transform "lookup".'
     );
   }
-  return (
-    ` ${capitalize(field)} is a field of "${objectName}" with no parts: only a compound field ` +
-    `(one whose value declares parts, such as an address) takes a part target.`
-  );
-}
-
-function capitalize(text: string): string {
-  return text.length > 0 ? text[0].toUpperCase() + text.slice(1) : text;
+  return `Target "${target}" is dotted, but ${field} has no parts (only a compound field does), ${refused}.`;
 }

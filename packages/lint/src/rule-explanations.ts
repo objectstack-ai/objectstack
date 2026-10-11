@@ -2652,6 +2652,324 @@ const TRANSLATION_SECTION_NAME_MISSING_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── App navigation (`validate-nav-access.ts`, `validate-nav-object-servability.ts`, `validate-nav-target-refs.ts`) ──
+
+/**
+ * Why an object nav entry's grant and its servability are two findings (both
+ * object-entry ids write it out).
+ */
+const NAV_INDEPENDENT_CONDITIONS =
+  'Whether anyone is GRANTED read on a nav entry\'s object (`nav-object-ungranted`) and whether the ' +
+  'object can SERVE a list at all (`nav-object-unservable`) are independent conditions, so each has ' +
+  'its own finding: no permission on the entry or the object makes an API-disabled object listable, ' +
+  'and an object that serves lists still refuses a caller no permission set grants read. Gating the ' +
+  'entry with `requiredPermissions` or `visible` answers neither: those gate whether the entry is ' +
+  'shown, not the object\'s grant or its `enable` block.';
+
+const NAV_OBJECT_UNGRANTED_EXPLANATION: RuleExplanation = {
+  rule: 'nav-object-ungranted',
+  covers: 'which grants count, and why it only warns',
+  paragraphs: [
+    'Navigation and permissions are separate metadata, each valid on its own, so an app can put an ' +
+      'object in its navigation that no permission set grants read on. The entry renders, and ' +
+      'opening it fails permission-denied for every principal except one holding the platform\'s ' +
+      'built-in wildcard admin set: it works when you browse as an administrator and breaks for the ' +
+      'users the app ships permission sets for.',
+    // The read bits and the walked containers are held to the rule by its test.
+    'Read is judged through the stack\'s access matrix (ADR-0090 D6), folded across `allowRead`, ' +
+      '`viewAllRecords` and `modifyAllRecords`; a wildcard grant (`objects: { \'*\': { allowRead: ' +
+      'true } }`, the shape the platform\'s own admin set uses) covers every object. Walked: every ' +
+      '`type: \'object\'` entry of each app\'s `navigation` and each area\'s `navigation`, nested ' +
+      '`children` included. An object several entries expose is reported once.',
+    NAV_INDEPENDENT_CONDITIONS,
+    'A warning, not an error: a grant can legitimately live outside this stack — a permission set ' +
+      'another installed package ships, a platform default, or an org-level assignment made after ' +
+      'install. Not judged: a platform-provided object (`sys_user`, …), whose package ships its own ' +
+      'permission sets; an object this stack does not define, whose grants are not this stack\'s to ' +
+      'make; and a stack that declares no permission sets at all, whose permissions are managed ' +
+      'elsewhere.',
+  ],
+};
+
+const NAV_OBJECT_UNSERVABLE_EXPLANATION: RuleExplanation = {
+  rule: 'nav-object-unservable',
+  covers: 'why the entry cannot serve a list to anyone',
+  paragraphs: [
+    'An object nav entry opens a list of the object it names, and that object\'s own `enable` block ' +
+      'decides whether the REST surface answers a `list` at all: `enable.apiEnabled: false` answers ' +
+      '404 `OBJECT_API_DISABLED`, and an `enable.apiMethods` whitelist that does not grant `list` (an ' +
+      'empty one denies everything) answers 405 `OBJECT_API_METHOD_NOT_ALLOWED`. `apiEnabled` is ' +
+      'judged first, whatever the whitelist says. Both are pure functions of `enable` ' +
+      '(`canServeApiOperation` in `@objectstack/spec/data`) with no user and no request in them, so ' +
+      'the entry is dead for every user, platform administrators included.',
+    'The server prunes such an entry from the served `/meta` payload, so a user never sees a menu ' +
+      'row that cannot work, and without this rule the author would watch the entry vanish from the ' +
+      'running app with no signal anywhere. The verdict names the `enable` key that condemns the ' +
+      'entry, because the fix may belong at either end: remove the entry, or make the object ' +
+      'listable, unless it is API-disabled on purpose (several platform objects hold credential ' +
+      'material), in which case the entry is the mistake.',
+    NAV_INDEPENDENT_CONDITIONS,
+    // The walked containers are held to the rule by its test.
+    'An error, unlike `nav-object-ungranted`: `enable` is declared on the object, in this stack, and ' +
+      'only objects this stack declares are judged, so when the rule fires it has read the whole of ' +
+      'the evidence. Walked: every `type: \'object\'` entry of each app\'s `navigation` and each ' +
+      'area\'s `items` and `navigation`, nested `children` included. Not judged: an object this stack ' +
+      'does not declare (its `enable` block is not visible from here), an interpolated target ' +
+      '(`${…}`), whether the object exists at all, and an entry of any other type.',
+  ],
+};
+
+const NAV_TARGET_UNRESOLVED_EXPLANATION: RuleExplanation = {
+  rule: 'nav-target-unresolved',
+  covers: 'which check this stands in for, and why it only warns',
+  paragraphs: [
+    // The three entry types and their collections are held to the rule by its test.
+    'A `page`, `report` or `dashboard` nav entry names its target in `pageName`, `reportName` or ' +
+      '`dashboardName`, resolved against the stack\'s `pages`, `reports` or `dashboards`. ' +
+      '`defineStack`\'s own cross-reference check validates the same three, but each only when its ' +
+      'collection is non-empty (`pageNames.size > 0`, `reportNames.size > 0`, ' +
+      '`dashboardNames.size > 0`), so a stack that declares none of a kind has that check switched ' +
+      'off: precisely the state of a stack where the target was never written. When the collection ' +
+      'is non-empty, `defineStack` refuses the name first; this rule is what speaks when that check ' +
+      'switched itself off, and the verdict says so.',
+    'The entry renders in the sidebar and resolves to nothing when clicked. A warning, not an ' +
+      'error: an object name resolves against a curated registry of platform objects, but no such ' +
+      'registry exists for pages, reports or dashboards, so "unresolved" cannot be told apart from ' +
+      '"provided by a package this stack cannot see". If another package provides the target, the ' +
+      'warning is expected.',
+    'Walked: each app\'s `navigation` and each area\'s `items` and `navigation`, nested `children` ' +
+      'included; an interpolated target (`${…}`) resolves at render time and is skipped. Not ' +
+      'judged: an `action` entry (`action-name-undefined` owns it), a `component` entry (an ' +
+      'unregistered one renders its own named diagnostic at run time), a `url` entry (external by ' +
+      'definition) and an `object` entry (`defineStack` refuses an unknown one unless it carries ' +
+      '`requiresObject`).',
+  ],
+};
+
+// ── Object field-name lists (`validate-object-field-refs.ts`) ──────────────
+
+const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'object-field-ref-unknown',
+  covers: 'which field-name lists are judged, against which object',
+  paragraphs: [
+    'Every field name an object writes in one of its own field-name lists, and every name one of ' +
+      'its fields writes in a field-level list, must name a field of the object that list ' +
+      'addresses. The schema cannot judge one (each is a bare string) and every consumer degrades ' +
+      'quietly, so a miss surfaced only when a user opened a page or a picker, or never. An error, ' +
+      'on the CLI and at the runtime publish gate alike: the reference is parsed, unmarked and ' +
+      'silently inert (ADR-0078), and a misspelling is refused loudly at authoring.',
+    // The positions are held to the rule by its test, each fired.
+    'Object-level: `highlightFields` (the default list columns, record cards, previews and the ' +
+      'detail highlight strip each skip the entry and render one field short); ' +
+      '`publicSharing.redactFields` (the redaction fails OPEN: records served through a share link ' +
+      'still carry the field, and a misspelled entry is indistinguishable from one never written); ' +
+      'and `indexes[].fields` (the SQL driver skips the WHOLE index at sync, logged at error, ' +
+      '`os migrate plan` reports it unbuildable, and the object keeps serving, so a `unique` index ' +
+      'is unenforced until the name is fixed). The retired `compactLayout` spelling is read at the ' +
+      '`highlightFields` position on the raw `os lint` path; the parse refuses it.',
+    'Field-level, each against the object its reader addresses: `relatedListColumns` against the ' +
+      'object that owns the field (the related list on the parent\'s detail page lists that ' +
+      'object\'s rows); `lookupColumns` and `lookupFilters[].field` against the REFERENCED object ' +
+      '(the record picker\'s columns and the filter on its query); `dependsOn` against the owning ' +
+      'object (the form gates this field until that one has a value, so a name the record does not ' +
+      'have gates it for good) and, through `param` or the bare name, against the referenced object ' +
+      '(the picker scopes its candidates by that key). The referenced object is judged only on ' +
+      '`lookup`, `master_detail` and `user` fields, the types that render the picker, and a bare ' +
+      '`dependsOn` name that misses on the owning object is reported once, there.',
+    '`lookupColumns`, `dependsOn` and `indexes[].fields` are read verbatim (a picker column key, a ' +
+      'record key, a physical column), so a dotted name there is one name no field carries; the ' +
+      'other positions resolve a relationship path. Not judged: an object this stack does not ' +
+      'define, an object with no readable field map (`external`, an introspected schema), a ' +
+      'registry-injected system column (resolved per object, so `owner_id` resolves on an owned ' +
+      'object and misses under `ownership: \'none\'`), and the positions other rules own: ' +
+      '`searchableFields` (`searchable-field-unknown`), list views (the list-view rules) and the ' +
+      'scalar role pointers.',
+  ],
+};
+
+// ── Object-name references (`validate-object-references.ts`) ────────────────
+
+const OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION: RuleExplanation = {
+  rule: 'object-reference-unregistered-platform',
+  covers: 'how an object name resolves, and why this rung only warns',
+  paragraphs: [
+    // The sites are held to the rule by its test, each fired.
+    'Judged: the object names no other rule resolves, each a plain string the schema ships as ' +
+      'written: a `lookup`, `master_detail` or `user` field\'s `reference`; a view container\'s own ' +
+      '`object`; an action param\'s `reference` and `objectOverride`; a dashboard global filter\'s ' +
+      '`optionsFrom.object`; a dataset\'s base `object`; and a nav entry\'s `requiresObject`, with ' +
+      'the `objectName` of an entry that carries one. Interpolated names (`${…}`) resolve at render ' +
+      'time and are skipped.',
+    // The prefixes are held to `PLATFORM_OBJECT_PREFIXES` by the rule's test.
+    'Each name climbs one ladder: it resolves when this stack, or a package in the same artifact ' +
+      '(`packages[]`, ADR-0130 D4), defines it, or when it is a known platform object ' +
+      '(`PLATFORM_PROVIDED_OBJECT_NAMES` in `@objectstack/spec/system`, the objects the platform\'s ' +
+      'packages, official plugins and cloud runtime register). An unresolved name with no platform ' +
+      'prefix is `object-reference-unknown`, an error. An unresolved name WITH a platform prefix ' +
+      '(`sys_`, `cloud_`, `ai_`) is this rule: no package we know of registers it, but a ' +
+      'third-party package still might, so a warning is the honest ceiling.',
+    'If nothing provides the name at run time, the reference resolves to nothing and fails ' +
+      'silently: a record picker with no object to query, a view container whose views are never ' +
+      'found, a filter dropdown that stays empty, a dataset whose reports query nothing, a nav entry ' +
+      'hidden for good. A guess by prefix alone cannot tell `sys_user` (real) from ' +
+      '`sys_approval_process` (removed when approval became a flow node, ADR-0019), which is why the ' +
+      'ladder reads the registry.',
+  ],
+};
+
+// ── Capability references (`validate-capability-references.ts`) ───────────
+
+const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'capability-reference-unknown',
+  covers: 'where a capability may come from, and why it only warns',
+  paragraphs: [
+    'A `requiredPermissions` entry names a capability the caller must hold. It is a free string, so ' +
+      'a typo (`mange_users` for `manage_users`) parses and fails CLOSED at run time: the gate denies ' +
+      'its callers, the safe direction, and nothing tells the author the capability exists nowhere.',
+    // The four sources are held to the rule by its test, each one silencing it.
+    'A capability is known when it is a built-in platform capability, when the stack declares it ' +
+      'with `defineCapability` (`stack.capabilities`, ADR-0066 D1), when a permission set in the ' +
+      'stack grants it through `systemPermissions` (granting declares it), or when a ' +
+      '`sys_capability` seed row ships it. `systemPermissions` itself is never reported: it is the ' +
+      'declaration side.',
+    // The positions are held to the rule by its test, each fired.
+    'Judged at every position the key is declared: an object\'s `requiredPermissions` (the array ' +
+      'form, or each operation of the per-operation map), each field\'s, each object action\'s and ' +
+      'each top-level action\'s, an app\'s and each of its nav entries (through `navigation`, ' +
+      '`areas`, `tabs`, `children` and `items`), a view\'s (its own, its `config`\'s, its default ' +
+      '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
+    'A warning, not an error: one package\'s lint cannot see the capabilities other installed ' +
+      'packages declare, and the reference fails closed anyway, so a dangling one is almost ' +
+      'certainly a typo to surface, not a build to break.',
+  ],
+};
+
+// ── Name-bound action references (`validate-action-name-refs.ts`) ──────────
+
+const ACTION_NAME_UNDEFINED_EXPLANATION: RuleExplanation = {
+  rule: 'action-name-undefined',
+  covers: 'which surfaces bind an action by name, and how it resolves',
+  paragraphs: [
+    // The surfaces are held to the rule by its test, each fired.
+    'These surfaces bind an action by NAME rather than by its `locations`, each through a plain ' +
+      'string the schema cannot check: a list view\'s `rowActions`, `bulkActions` and each ' +
+      '`bulkActionDefs` entry with `execution: \'aggregate\'` (on a view\'s default `list`, each ' +
+      '`listViews` entry, and an object\'s own `listViews`); a `record:quick_actions` component\'s ' +
+      '`actionNames`; a `record:alert` call-to-action (`action.actionName`); a `page:header`\'s ' +
+      '`actions`; a `record:related_list`\'s `actions`; an `action` nav entry\'s ' +
+      '`actionDef.actionName`; and an `object` nav entry\'s deep-link `runAction`.',
+    'A name resolves when any action in the stack carries it: a `stack.actions` entry or an entry ' +
+      'of any object\'s `actions`. The runtime ships no built-in action names (`list_toolbar` and ' +
+      '`list_item` are locations, not actions), so a name that resolves nowhere is dead: most ' +
+      'surfaces draw a button that does nothing when clicked, the alert drops its call-to-action ' +
+      'without a word, and the header draws no button, with only a browser-console warning. An ' +
+      'error: there is no cross-package escape to soften it with, and an action another installed ' +
+      'package contributes is the one legitimate miss.',
+    // The drawn locations are held to the rule by its test, over every location.
+    'A `record:related_list` is the exception, and resolves the way its renderer does: against the ' +
+      'RELATED object\'s own actions (written on it, or a `stack.actions` entry bound to it by ' +
+      '`objectName`), never the page\'s object or a global action, and only an action placed at a ' +
+      'location the list draws (`list_toolbar` as a header button, `list_item` and `record_related` ' +
+      'as a row-menu item): naming it in `actions` is not a placement. An id that misses either test ' +
+      'draws no button, only a refusal notice above the list. A related object this stack does not ' +
+      'define is not judged: its actions live in another package.',
+    'Not judged elsewhere: whether a view\'s action belongs to the view\'s own object, and whether ' +
+      'it declares the location the surface filters on. Both are real but distinct questions, and ' +
+      'only the related list answers them itself.',
+  ],
+};
+
+// ── Import mapping targets (`validate-mapping-target-fields.ts`) ───────────
+
+const MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'mapping-target-field-unknown',
+  covers: 'what an import mapping target may name',
+  paragraphs: [
+    'An import mapping\'s `fieldMapping[].target` names the field of its `targetObject` a column ' +
+      'is written into. The import endpoint refuses a mapping with a target it cannot write before ' +
+      'any row, on the dry run and the commit alike (`INVALID_FIELD`), so the mapping imports ' +
+      'nothing; this rule reports the same target when the mapping is written, so the author meets ' +
+      'the refusal at `os validate` rather than at the first import. An error: no reading of the ' +
+      'mapping behaves as written.',
+    'One verdict, two doors: what a target may name is decided by `unknownImportMappingTargets` ' +
+      '(`@objectstack/spec/data`), which the import endpoint calls too, so the two never disagree ' +
+      'about a name. A target may name a field the object declares (fields an `objectExtensions` ' +
+      'entry merges into it included, from this stack or a sibling package of the same artifact), a ' +
+      'column the platform provisions on it (`id`, `owner_id`, `organization_id`, the audit ' +
+      'family), or a declared PART of a compound field (`mailing_address.street`): the endpoint ' +
+      'assembles the parts one row maps into the field\'s one value.',
+    'Refused besides a name that is no field: a part the field\'s value does not declare, a dotted ' +
+      'target on a field with no parts (a dotted target never traverses a reference: map the column ' +
+      'to the reference field with transform `lookup`, which resolves the cell\'s display text to a ' +
+      'record id), and a part of a field the same mapping also writes whole (one row carries one ' +
+      'value for a field, so the two collide). Not judged: a mapping whose `targetObject` this ' +
+      'stack does not define, an object with no readable field map, and fields plugin code injects ' +
+      'at run time, which the import endpoint still judges.',
+  ],
+};
+
+// ── View container shape (`validate-view-containers.ts`) ───────────────────
+
+const VIEW_CONTAINER_SHAPE_EXPLANATION: RuleExplanation = {
+  rule: 'view-container-shape',
+  covers: 'what the stack views collection carries',
+  paragraphs: [
+    'The stack\'s `views:` collection carries view CONTAINERS (`defineView`): `{ list, form, ' +
+      'listViews, formViews }`, every slot optional. A container with none of them set is ' +
+      'schema-valid, the loader expands no view from it, and the Console renders nothing for it ' +
+      '(no switcher entry).',
+    'A flat list-view object (`{ name, type, columns, data }` where the slots belong) and a ViewItem ' +
+      'record (`viewKind` with `config`) are single views, not containers. `ViewSchema` is strict, ' +
+      'so `defineStack` refuses either by name, and the registration loop refuses them too ' +
+      '(`isViewContainerShaped`, 422 `INVALID_METADATA`): the stack schema, this rule and the loop ' +
+      'hold `views:` to one container-only contract. This rule needs no parsed stack, so it speaks ' +
+      'on the doors the parse never reaches: `os lint` on a raw config, ' +
+      '`defineStack(config, { strict: false })` and direct API callers.',
+    '`viewItems:` is the machine-assembled channel for non-container view artifacts in a ' +
+      'runtime-assembled manifest (a package export, an environment artifact), never an authoring ' +
+      'surface: the stack schema types it `never`, and a hand-authored one is reported here for the ' +
+      'doors that do not parse. A standalone view is authored through the metadata door (Studio or ' +
+      '`PUT /api/v1/meta/view`), not in stack source.',
+  ],
+};
+
+// ── Interface page visualizations (`validate-page-visualization-bindings.ts`) ──
+
+const PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
+  rule: 'page/visualization-without-binding',
+  covers: 'how a list page binds each visualization it allows',
+  paragraphs: [
+    'An interface `list` page whitelists visualizations in `appearance.allowedVisualizations`, and ' +
+      'its config is a closed shape with no per-visualization binding key: it cannot say which field ' +
+      'supplies a calendar\'s date (ADR-0047 leaves those bindings on the object\'s view). So the ' +
+      'renderer takes the binding from the view `interfaceConfig.sourceView` names (its `calendar:` ' +
+      'block, say), else DERIVES it from the source object\'s fields, and this rule asks the same ' +
+      'question at authoring time. `sourceView` is the one schema-legal channel for a binding on this ' +
+      'door.',
+    // Held to `OBJECTUI_DERIVATION_PREDICATES` by the rule's test.
+    'The derivation, first matching field in declaration order, hidden and system fields skipped: ' +
+      'kanban `groupByField` from a field typed select / multiselect / radio / enum / boolean, then ' +
+      'a name matching /status|stage|state|priority|category|kind/i; calendar and timeline ' +
+      '`startDateField` from a field typed date / datetime / time, then a name matching ' +
+      '/date|due|start|end|deadline|schedule/i (a view\'s `calendar:` block also binds the ' +
+      'timeline); gallery `coverField` from a field typed image / file / attachment / avatar / ' +
+      'photo; gantt from two distinct date / datetime / time fields, a start and an end; map ' +
+      '`locationField` from a field typed location / geo / geolocation / geopoint / point, then a ' +
+      'name matching /location|address|geo|coords?|place|venue/i.',
+    'An error when the unbound visualization LEADS `allowedVisualizations`: it becomes the page\'s ' +
+      'forced view type, so every visitor lands on the renderer\'s "configuration required" refusal ' +
+      'screen. A warning otherwise: the type is filtered out of the visualization switcher SILENTLY, ' +
+      'while the switcher still appears (it is shown on the whitelist\'s length), with no message at ' +
+      'build time or at run time.',
+    'Not judged: a page that is not `type: \'list\'` or carries no `interfaceConfig`; an object this ' +
+      'stack does not define, or one with no readable field map; `grid`, which needs no binding, and ' +
+      '`chart`, `tree` and any other value the renderer derives nothing for; and a `sourceView` ' +
+      'naming no view this stack declares, which the runtime may still hydrate from a stored body. ' +
+      'The derivation is a hand-carried mirror of the renderer\'s, so a change on the renderer\'s ' +
+      'side can make this rule wrong in either direction until the mirror follows it.',
+  ],
+};
+
 /**
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
@@ -2768,6 +3086,16 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [TRANSLATION_TARGET_UNKNOWN_EXPLANATION.rule]: TRANSLATION_TARGET_UNKNOWN_EXPLANATION,
   [TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION.rule]: TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION,
   [TRANSLATION_SECTION_NAME_MISSING_EXPLANATION.rule]: TRANSLATION_SECTION_NAME_MISSING_EXPLANATION,
+  [NAV_OBJECT_UNGRANTED_EXPLANATION.rule]: NAV_OBJECT_UNGRANTED_EXPLANATION,
+  [NAV_OBJECT_UNSERVABLE_EXPLANATION.rule]: NAV_OBJECT_UNSERVABLE_EXPLANATION,
+  [NAV_TARGET_UNRESOLVED_EXPLANATION.rule]: NAV_TARGET_UNRESOLVED_EXPLANATION,
+  [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
+  [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
+  [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
+  [ACTION_NAME_UNDEFINED_EXPLANATION.rule]: ACTION_NAME_UNDEFINED_EXPLANATION,
+  [MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION.rule]: MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION,
+  [VIEW_CONTAINER_SHAPE_EXPLANATION.rule]: VIEW_CONTAINER_SHAPE_EXPLANATION,
+  [PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION.rule]: PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

@@ -133,17 +133,16 @@ export function validateNavTargetRefs(stack: unknown): NavTargetRefFinding[] {
             rule: NAV_TARGET_UNRESOLVED,
             where: `app "${appName}" · nav "${strName(nav.id) ?? strName(nav.label) ?? `#${ni}`}"`,
             path: `${navPath}.${prop}`,
+            // [#22161] One verdict sentence; which check this rule stands in
+            // for when the collection is empty, and why it is advisory, is
+            // `os explain nav-target-unresolved`.
             message:
               `Navigation targets ${noun} '${target}', which this stack does not declare in `
-              + `\`${collection}\`. `
+              + `\`${collection}\``
               + (emptyCollection
-                ? `The stack declares NO ${collection} at all, so \`defineStack\`'s own `
-                  + `cross-reference check skipped this entry entirely (it is gated on `
-                  + `\`${collection === 'pages' ? 'pageNames' : collection === 'reports' ? 'reportNames' : 'dashboardNames'}.size > 0\`) — `
-                  + `nothing else will report it. `
+                ? ` (it declares NO ${collection} at all, so \`defineStack\` skipped this entry)`
                 : '')
-              + `The entry renders in the sidebar and resolves to nothing when clicked. If another `
-              + `package provides this ${noun}, this is expected and advisory only.`,
+              + ', so the entry renders and resolves to nothing when clicked',
             hint:
               `Declare the ${noun} in \`${collection}\`, correct the name, or remove the nav entry `
               + `if the ${noun} is gone.`,
