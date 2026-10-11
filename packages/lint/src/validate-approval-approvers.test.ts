@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec';
 import {
-  validateApprovalApprovers,
+  validateApprovalApprovers as validateApprovalApproversUnrecorded,
   APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
   APPROVAL_APPROVER_TYPE_DEPRECATED,
   APPROVAL_APPROVER_TYPE_UNKNOWN,
@@ -14,6 +15,20 @@ import {
   APPROVAL_DECISION_OUTPUTS_RESERVED,
   APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
 } from './validate-approval-approvers.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the two converted ids is one verdict sentence; the
+// reasoning it used to carry is the id's `os explain` entry. Every call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict of those ids to one line of at most 200 characters — so the pin
+// covers every firing variant this suite exercises, not a chosen few. Run the
+// whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateApprovalApprovers: typeof validateApprovalApproversUnrecorded = (...args) => {
+  const findings = validateApprovalApproversUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 function stackWithApprovers(approvers: unknown[]): Record<string, unknown> {
   return {
@@ -348,8 +363,12 @@ describe('unset-manager dead-end (#16748)', () => {
 
   it('does not claim a runtime fact it did not read', () => {
     const [finding] = validateApprovalApprovers(managerOnly());
-    expect(finding.message).toContain('a static check cannot read that column');
-    expect(finding.message).toContain('does not assert the slate IS empty');
+    // [#22161] The verdict is CONDITIONAL — it says what happens where the
+    // column is unset, never that it is — and the explanation states the limit.
+    expect(finding.message).toContain('where sys_user.manager_id is unset');
+    const text = explainRule(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY)!.paragraphs.join('\n');
+    expect(text).toContain('a static check cannot read that column');
+    expect(text).toContain('does not assert the slate IS empty');
   });
 
   it("names the node-level escape — onEmptyApprovers: 'fallback' with fallbackApprovers", () => {
@@ -691,5 +710,77 @@ describe('nested regions', () => {
       nestedApproval('try_catch', { try: { nodes: [badApproval], edges: [] } }),
     );
     expect(findings.some((f) => f.rule === APPROVAL_APPROVER_TYPE_UNKNOWN)).toBe(true);
+  });
+});
+
+describe('[#22161] one-line verdicts — approval-approvers-may-resolve-empty, approval-approver-not-membership-tier', () => {
+  const CONVERTED = [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY, APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER];
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => CONVERTED.includes(f.rule));
+    // The coverage control first: both ids fired, and both arms of the
+    // empty-slate id with and without the lock clause, so the shape assertion
+    // below cannot pass over an empty or partial record.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...CONVERTED].sort());
+    const emptySlate = converted.filter((f) => f.rule === APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+    expect(emptySlate.some((f) => f.message.includes('routes to a group'))).toBe(true);
+    expect(emptySlate.some((f) => f.message.includes("{ type: 'manager' }"))).toBe(true);
+    expect(emptySlate.some((f) => f.message.includes('locked'))).toBe(true);
+    expect(emptySlate.some((f) => !f.message.includes('locked'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the two empty-slate arms read as one sentence each, sharing the lock clause', () => {
+    const [group] = validateApprovalApprovers(stackWithApprovers([{ type: 'position', value: 'exec' }]));
+    expect(group.message).toBe(
+      'every approver on this node routes to a group (position/team/department), so if none is ' +
+        'staffed the request opens on an empty slate and waits forever, and (lockRecord) the record ' +
+        'stays locked',
+    );
+    const [manager] = validateApprovalApprovers(stackWithApprovers([{ type: 'manager' }]));
+    expect(manager.message).toBe(
+      "every approver on this node is { type: 'manager' }, so where sys_user.manager_id is unset the " +
+        'request opens on an empty slate and waits forever, and (lockRecord) the record stays locked',
+    );
+  });
+
+  it('the membership-tier verdict names the tiers from the spec, so it cannot contradict them', () => {
+    const [finding] = validateApprovalApprovers(
+      stackWithApprovers([{ type: 'org_membership_level', value: 'sales_manager' }]),
+    );
+    expect(finding.message).toBe(
+      "approver { type: 'org_membership_level', value: 'sales_manager' } names no org-membership tier " +
+        `(${BUILTIN_MEMBERSHIP_ROLES.join('/')}), so it matches nobody and the request stalls`,
+    );
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY]: [
+        '`pending_approvers`',
+        'no in-product recovery',
+        '`sys_user.manager_id`',
+        'a seed row of `sys_user`',
+        "`onEmptyApprovers: 'fallback'` does not silence it",
+        'The runtime publish gate carries no seeds',
+      ],
+      [APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER]: [
+        '`sys_member.role`',
+        'ADR-0108',
+        '`BUILTIN_MEMBERSHIP_ROLES`',
+        'ADR-0090 D3',
+        '`sys_user_position`',
+        '`approval-approver-type-deprecated`',
+      ],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
   });
 });

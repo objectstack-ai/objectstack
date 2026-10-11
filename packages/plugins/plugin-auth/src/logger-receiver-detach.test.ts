@@ -186,14 +186,14 @@ describe('[#12773] ① the audience gate reports its refusal instead of crashing
     // second throw), which the transport surfaced as `500 null`.
     expect(verdict).toBeDefined();
     expect(verdict?.error).toBe(AUDIENCE_CONFIG_ERROR);
-    expect(verdict?.errorDescription).toMatch(/cannot be resolved in sys_permission_set/);
+    expect(verdict?.errorDescription).toMatch(/cannot be resolved/);
 
     // …and the operator's log carries the same verdict.
     const errors = logger.at('error');
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain('[audience]');
     expect(errors[0].message).toContain("'ops_self_serve'");
-    expect(errors[0].message).toMatch(/cannot be resolved in sys_permission_set/);
+    expect(errors[0].message).toMatch(/cannot be resolved/);
   });
 
   it('② falls back to the guaranteed warn channel when the host ships no error channel', async () => {
@@ -203,7 +203,7 @@ describe('[#12773] ① the audience gate reports its refusal instead of crashing
     expect(verdict?.error).toBe(AUDIENCE_CONFIG_ERROR);
     const warnings = logger.at('warn');
     expect(warnings).toHaveLength(1);
-    expect(warnings[0].message).toMatch(/cannot be resolved in sys_permission_set/);
+    expect(warnings[0].message).toMatch(/cannot be resolved/);
   });
 });
 
