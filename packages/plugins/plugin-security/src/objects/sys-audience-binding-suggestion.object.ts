@@ -4,17 +4,24 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
  * sys_audience_binding_suggestion — a package's install-time SUGGESTION to
- * bind one of its permission sets to an audience anchor (ADR-0090 D5/D9).
+ * give one of its permission sets to every signed-in member through the
+ * `everyone` audience anchor (ADR-0090 D5/D9), and the deployment's decision
+ * on it.
  *
- * A package declaring `isDefault: true` on a permission set is asking the
- * admin: "bind this set to the `everyone` position so authenticated users
- * get it by default". It is NEVER auto-bound — installing a package must not
- * silently widen every tenant user's access. This table is the queryable
- * surface between the two moments: rows are produced (pending) when the
- * declaration is observed — boot seeding, package-door publish, or the
- * suggested-bindings list endpoint syncing against installed manifests — and
- * resolved when a tenant admin confirms (the binding row is created under
- * the D5/D9 anchor gate + D12 delegated-admin gate) or dismisses.
+ * A package declaring `isDefault: true` on a permission set is asking: "give
+ * this set to everyone who signs in". It is NEVER auto-bound — installing a
+ * package must not silently widen every user's access. Rows are produced
+ * (pending) when the declaration is observed — boot, package-door publish, or
+ * the suggested-bindings list endpoint — and resolved when a caller holding
+ * `manage_metadata` (under a wall, the platform operator) accepts or dismisses
+ * it. An acceptance is ONE decision for the whole deployment and it takes
+ * effect: the security plugin derives the `everyone` anchor's definition as
+ * the baseline plus every accepted set (#22801 → A).
+ *
+ * The record is deployment-level, so every row is owned by the Default
+ * Organization (ADR-0131 D3/D5); a row another organization owns was a tenant
+ * administrator's per-organization answer before the acceptance was
+ * deployment-level, and is not read.
  *
  * Rows are system-managed: the API surface is read-only (get/list); state
  * changes flow exclusively through the `security` service confirm/dismiss
@@ -29,7 +36,7 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
   icon: 'shield-question',
   isSystem: true,
   managedBy: 'engine-owned',
-  description: 'Package-suggested audience-anchor binding awaiting admin confirmation (ADR-0090 D5/D9).',
+  description: 'Package-suggested everyone-anchor grant and the deployment-level decision on it (ADR-0090 D5/D9).',
   titleFormat: '{package_id}: {permission_set_name} → {anchor}',
   highlightFields: ['package_id', 'permission_set_name', 'anchor', 'status'],
 
@@ -49,14 +56,11 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
     // `ER_BLOB_KEY_WITHOUT_LENGTH`, and the object landed registered-but-broken
     // — the per-tenant uniqueness this table depends on silently absent.
     //
-    // The transitivity is not an analogy here, it is the confirm path itself:
-    // `confirmAudienceBindingSuggestion` resolves the row by
-    // `find('sys_permission_set', { name: row.permission_set_name })` and, when
-    // that misses, materializes it via `upsertPackagePermissionSet(ql,
-    // declared.set, row.package_id)` — which writes these two values into
-    // `sys_permission_set.name` and `sys_permission_set.package_id`. So a
-    // suggestion is confirmable exactly when its two key values fit the columns
-    // `sys_permission_set` declares, and those columns are what bound these.
+    // The bounds were derived when the confirm path materialized the set into
+    // `sys_permission_set` (its `name` and `package_id` columns). The confirm
+    // now reads the set from the security catalog instead; the bounds stand,
+    // because the same values still name a package and a set there, and no
+    // stored row exceeds them.
 
     package_id: Field.text({
       label: 'Package',
@@ -95,11 +99,9 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
       //   len 101 → ValidationError: API Name must be ≤ 100 characters (got 101)
       //   len 120 / 255 / 256 / 300 → the same refusal
       // (`objectql`'s `record-validator.ts` `max_length` check). So no
-      // permission set whose name exceeds 100 characters can exist, and a
-      // suggestion naming one could never be confirmed:
-      // `confirmAudienceBindingSuggestion` answers `SuggestionStateError`
-      // ("Permission set '…' is not materialized in sys_permission_set").
-      // Bounding at 100 therefore refuses nothing that is storable today.
+      // permission set whose name exceeds 100 characters could be materialized,
+      // so no suggestion naming one was ever confirmable. Bounding at 100
+      // therefore refused nothing that was storable.
       //
       // 100 and not the 255 its `package_id` sibling takes: the two columns
       // reference DIFFERENT columns and inherit their widths independently.
@@ -133,7 +135,7 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
       label: 'Status',
       required: true,
       defaultValue: 'pending',
-      description: 'pending = awaiting admin decision; confirmed = binding exists; dismissed = admin declined.',
+      description: 'pending = awaiting a decision; confirmed = the everyone definition carries the set (accepted, or observed in the baseline); dismissed = declined or revoked.',
       options: [
         { value: 'pending', label: 'Pending' },
         { value: 'confirmed', label: 'Confirmed' },
@@ -141,10 +143,18 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
       ],
     }),
 
+    deployment_decision: Field.boolean({
+      label: 'Deployment Decision',
+      required: false,
+      defaultValue: false,
+      readonly: true,
+      description: 'True when a manage_metadata holder accepted or dismissed the suggestion for the whole deployment. Only an accepted row with this flag widens the everyone anchor; a row resolved without it was observed, or decided by a tenant administrator before the acceptance was deployment-level, and is re-opened unless the baseline already names the set.',
+    }),
+
     resolved_by: Field.lookup('sys_user', {
       label: 'Resolved By',
       required: false,
-      description: 'Admin who confirmed/dismissed. Empty on a confirmed row means the binding was observed (e.g. bound at boot or by hand), not confirmed through the prompt.',
+      description: 'Who accepted or dismissed. Empty on a confirmed row means the set was observed in the everyone definition (the deployment baseline), not accepted through the prompt.',
     }),
 
     resolved_at: Field.datetime({
@@ -199,6 +209,11 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
     // the shipped path writes ONE organization-less row every tenant reads —
     // measured, and filed as #8617. Until that lands, this respelling is what
     // makes a per-organization row possible, not what produces one.
+    //
+    // Since #22801 → A every row is the Default Organization's (the record is
+    // deployment-level), so within the rows this surface reads the key is
+    // unique per deployment; another organization's rows are earlier
+    // per-organization answers, kept unread.
     { fields: ['package_id', 'permission_set_name', 'anchor'], unique: 'organization' },
     { fields: ['status'] },
     { fields: ['package_id'] },

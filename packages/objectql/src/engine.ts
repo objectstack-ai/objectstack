@@ -400,12 +400,16 @@ export interface AdmittedValueShapeViolationTally {
  * push a handler's own `ctx.api` writes outside the transaction the write ran
  * in, and an in-engine audit hook depends on landing inside it.
  *
- * Three ordinary paths open such a unit around the dispatch:
+ * Four ordinary paths open such a unit around the dispatch:
+ *   - the write door itself, when the object has a blocking metadata-bound
+ *     `after*` hook whose `onError` is `abort` — so that abort rolls the row
+ *     back as `HookSchema.onError` says (#22782, `opensAfterAbortUnit`);
  *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
  *     dependent's own `afterDelete` fires inside the wrap the parent opened,
  *     and the parent's row removal can still refuse afterwards (#7413). The
- *     PARENT's `afterDelete` is outside that wrap by construction, so it is
- *     unaffected; the cascaded CHILDREN's are not;
+ *     PARENT's `afterDelete` is outside that wrap by construction (inside the
+ *     door's own unit when the first path opened one); the cascaded
+ *     CHILDREN's are not;
  *   - `runAtomicBatch` in `@objectstack/metadata-protocol` —
  *     `batchData`/`deleteManyData` with `atomic: true` runs every member's
  *     `after*` inside one transaction that aborts on the first failure
@@ -4675,6 +4679,52 @@ export class ObjectQL implements IObjectQLEngine {
     const entries = this.hooks.get(event);
     if (!entries || entries.length === 0) return false;
     return entries.some((entry) => hookMatchesObject(entry, object));
+  }
+
+  /**
+   * [#22782] Does this write need its own unit of work? Yes when its `after*`
+   * dispatch can ABORT and no unit is open, so the abort rolls back what
+   * `HookSchema.onError` says: the row and every `ctx.api` write the chain made. "Can abort"
+   * is a metadata-bound hook (`meta` — the only entries with a declared
+   * `onError`) on `event` for `object`, blocking (not `async`), `onError`
+   * `abort` (the default), automations not skipped. Hook count and order are
+   * untouched (#7413); only the boundary around them moves.
+   *
+   * No unit — the pre-#22782 path — when one is open (ambient or threaded: the
+   * caller's unit decides), when `object` is off the default driver
+   * (`transaction()` covers that one alone and would refuse the write), or when
+   * that driver has no transactions (ADR-0119 D1; asking would only warn).
+   * `SummaryRecomputeError` means "the records WERE written": it is rethrown
+   * after the commit, never through the rollback.
+   */
+  private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
+    if (context?.transaction !== undefined || this.txStore.getStore()?.transaction !== undefined) return false;
+    if ((context as { skipAutomations?: unknown } | undefined)?.skipAutomations) return false;
+    const aborting = (this.hooks.get(event) ?? []).some((entry) =>
+      entry.meta && !entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort' && hookMatchesObject(entry, object));
+    if (!aborting) return false;
+    const defaultDriver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
+    try {
+      return this.getDriver(object) === defaultDriver && driverSupportsTransactions(defaultDriver);
+    } catch {
+      return false; // the write itself reports an unroutable object
+    }
+  }
+
+  /** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
+  private async inAfterAbortUnit<T>(write: () => Promise<T>): Promise<T> {
+    let written: SummaryRecomputeError | undefined;
+    const result = await this.transaction(async () => {
+      try {
+        return await write();
+      } catch (e) {
+        if (!(e instanceof SummaryRecomputeError)) throw e;
+        written = e;
+        return undefined as T;
+      }
+    });
+    if (written) throw written;
+    return result;
   }
 
   /**
@@ -13990,6 +14040,10 @@ export class ObjectQL implements IObjectQLEngine {
    */
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
+    // [#22782] An aborting `afterInsert` rolls this write back — see `opensAfterAbortUnit`.
+    if (this.opensAfterAbortUnit('afterInsert', object, options?.context)) {
+      return this.inAfterAbortUnit(() => this.insert(object, data, options));
+    }
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
     // [#8844] The organization set is about to change. Dropped BEFORE the write
@@ -15165,6 +15219,10 @@ export class ObjectQL implements IObjectQLEngine {
    */
   async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
      object = this.resolveObjectName(object);
+     // [#22782] An aborting `afterUpdate` rolls this write back — see `opensAfterAbortUnit`.
+     if (this.opensAfterAbortUnit('afterUpdate', object, options?.context)) {
+       return this.inAfterAbortUnit(() => this.update(object, data, options));
+     }
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      // [#8844] See the insert face — an organization row that changes identity
@@ -18144,6 +18202,10 @@ export class ObjectQL implements IObjectQLEngine {
 
   async delete(object: string, options?: EngineDeleteOptions): Promise<boolean | number> {
     object = this.resolveObjectName(object);
+    // [#22782] An aborting `afterDelete` rolls this write back — see `opensAfterAbortUnit`.
+    if (this.opensAfterAbortUnit('afterDelete', object, options?.context)) {
+      return this.inAfterAbortUnit(() => this.delete(object, options));
+    }
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     // [#8844] See the insert face — deleting the install's only organization
@@ -19451,13 +19513,16 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const trx = await drv.beginTransaction();
     const trxCtx = { ...(baseContext ?? {}), transaction: trx };
+    const ambientEntry: { transaction: unknown; scope?: TransactionScope } =
+      { transaction: trx, scope: this.newTransactionScope(driver!) };
     try {
       // Run the callback inside the ambient transaction store so internal
       // queries during writes reuse this transaction's connection (ADR-0034).
-      const result = await this.txStore.run(
-        { transaction: trx, scope: this.newTransactionScope(driver!) },
-        () => callback(trxCtx, { owned: true }),
-      );
+      // [#22782] CLOSED once the callback settles, before the commit: work it
+      // started and did not await (an `async: true` hook) inherits this store,
+      // ran on the finished handle and lost its write. Now it runs unenrolled.
+      const result = await this.txStore.run(ambientEntry, () => callback(trxCtx, { owned: true }))
+        .finally(() => { ambientEntry.transaction = undefined; ambientEntry.scope = undefined; });
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;

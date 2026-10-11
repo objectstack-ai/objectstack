@@ -990,6 +990,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       'dispatcher-domain:route-ledger.ts:/mcp',
       'dispatcher-domain:route-ledger.ts:/meta',
       'dispatcher-domain:route-ledger.ts:/packages',
+      // [#22755] classified by `webhook-redeliver-session`.
+      'dispatcher-domain:route-ledger.ts:/webhooks/redeliver',
       'rest-family:rest-route-ledger.ts:metadata',
       // [#22430] classified by `anonymous-deny-api-description`.
       'rest-family:rest-route-ledger.ts:openapi',

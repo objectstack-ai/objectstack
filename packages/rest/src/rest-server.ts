@@ -12242,12 +12242,12 @@ export class RestServer {
     /**
      * Register the security admin endpoints (ADR-0090 D5/D9) — suggested
      * audience bindings. A package permission set declaring `isDefault: true`
-     * is an install-time SUGGESTION to bind it to the `everyone` position;
-     * these routes surface pending suggestions and let a tenant admin resolve
-     * them. The `security` service (plugin-security) does the real gating:
-     * tenant-admin pre-check on all three, and confirm writes the binding
-     * with the caller's execution context so the audience-anchor and
-     * delegated-admin gates enforce it — never auto-bound, never system.
+     * is an install-time SUGGESTION to give it to every signed-in member;
+     * these routes surface the suggestions and let a `manage_metadata` holder
+     * (under a wall, the platform operator) decide each once for the whole
+     * deployment. The `security` service (plugin-security) does the real
+     * gating on all three, and an accept takes effect: the `everyone` anchor's
+     * definition is re-derived with the set (#22801 → A) — never auto-bound.
      *
      *   GET  {basePath}/security/suggested-bindings?status=&packageId=
      *   POST {basePath}/security/suggested-bindings/:id/confirm
@@ -12372,7 +12372,7 @@ export class RestServer {
             metadata: { summary: 'List suggested audience bindings (ADR-0090 D5/D9)', tags: ['security'] },
         });
 
-        // CONFIRM — creates the anchor binding as the caller (gated write)
+        // CONFIRM — the deployment-level acceptance; `everyone` is re-derived
         this.routeManager.register({
             method: 'POST',
             path: `${dataPath}/security/suggested-bindings/:id/confirm`,
@@ -12387,10 +12387,10 @@ export class RestServer {
                     res.json({ data: result });
                 } catch (err: any) { handleError(err, res, 'SUGGESTION_CONFIRM_FAILED'); }
             },
-            metadata: { summary: 'Confirm a suggested audience binding (creates the everyone/guest binding)', tags: ['security'] },
+            metadata: { summary: 'Accept a suggested audience binding for the deployment (everyone carries the set)', tags: ['security'] },
         });
 
-        // DISMISS — records the admin's decline; nothing is bound
+        // DISMISS — declines a pending suggestion, or revokes an accepted one
         this.routeManager.register({
             method: 'POST',
             path: `${dataPath}/security/suggested-bindings/:id/dismiss`,
@@ -12405,7 +12405,7 @@ export class RestServer {
                     res.json({ data: result });
                 } catch (err: any) { handleError(err, res, 'SUGGESTION_DISMISS_FAILED'); }
             },
-            metadata: { summary: 'Dismiss a suggested audience binding', tags: ['security'] },
+            metadata: { summary: 'Dismiss a suggested audience binding, or revoke an accepted one', tags: ['security'] },
         });
     }
 

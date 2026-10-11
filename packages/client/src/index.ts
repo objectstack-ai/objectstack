@@ -6067,7 +6067,7 @@ export class ObjectStackClient {
               return this.unwrapResponse(res);
           },
 
-          /** Confirm a suggestion — creates the anchor binding. */
+          /** Accept a suggestion for the whole deployment — the `everyone` anchor carries the set (needs `manage_metadata`). */
           confirm: async (id: string): Promise<{ suggestion: AudienceBindingSuggestion; bindingCreated: boolean }> => {
               const res = await this.fetch(
                   `${this.baseUrl}/api/v1/security/suggested-bindings/${encodeURIComponent(id)}/confirm`,
@@ -6076,7 +6076,7 @@ export class ObjectStackClient {
               return this.unwrapResponse(res);
           },
 
-          /** Dismiss (decline) a suggestion. */
+          /** Dismiss (decline) a pending suggestion, or revoke an accepted one. */
           dismiss: async (id: string): Promise<{ suggestion: AudienceBindingSuggestion }> => {
               const res = await this.fetch(
                   `${this.baseUrl}/api/v1/security/suggested-bindings/${encodeURIComponent(id)}/dismiss`,
