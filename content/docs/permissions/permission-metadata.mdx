@@ -220,7 +220,7 @@ The built-in context variables available in RLS `using`/`check` clauses include
 (ADR-0068). `positions` is a **string array** — the canonical assignment field
 (D3 reserves the word "role"; there is no `current_user.roles`) — so test
 membership with CEL: `'org_admin' in current_user.positions` or
-`current_user.positions.exists(p, p == 'sales_manager')`. The framework-seeded
+`current_user.positions.exists(p, p == 'sales_manager')`. The framework-declared
 built-in position names are `platform_admin`, `org_owner`, `org_admin`, and
 `org_member`; `everyone`/`guest` are the implicit audience anchors (ADR-0090 D9).
 (`current_user.isPlatformAdmin` is the `PLATFORM_ADMIN` standing of

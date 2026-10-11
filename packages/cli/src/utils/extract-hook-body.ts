@@ -15,13 +15,14 @@
  * extracted body — full TypeScript AST analysis is deferred to v2. Anything
  * the regex rejects (top-level `import`, `require(` / esbuild's `__require(`,
  * `fetch(`, `process.*`, `globalThis.*`, `eval`, `new Function`, `.sudo(`,
- * `.create(`) makes extraction **throw**.
+ * `.create(`, `ctx.dispatch.scope`, `ctx.submitted`) makes extraction **throw**.
  *
- * The last two are one family: a member that is REAL on the host
- * `ScopedContext`/`ObjectRepository` and absent from the VM's `ctx.api`, so the
- * same handler source passes an in-process test and TypeErrors the moment the
- * build lowers it into a body. `.create(` carries one wrinkle `.sudo(` does not
- * — see its entry in `FORBIDDEN_PATTERNS`.
+ * The last four are one family: a member that is REAL on the host context
+ * (`ScopedContext`/`ObjectRepository` for the first two, the engine's
+ * `HookContext` for the last two) and absent from what the VM hands a body, so
+ * the same handler source passes an in-process test and fails the moment the
+ * build lowers it into a body. `.create(` and `dispatch.scope` each carry a
+ * wrinkle `.sudo(` does not — see their entries in `FORBIDDEN_PATTERNS`.
  *
  * ⚠️ What that throw costs the BUILD depends on the flag, and the two outcomes
  * are not the same one. This header used to claim only the second (#10678):
@@ -173,6 +174,52 @@ export class HookBodyExtractionError extends Error {
   }
 }
 
+/**
+ * A member read off a ROOT identifier — `ctx` itself, or any local name a
+ * handler bound (`const c = ctx`, `const d = ctx.dispatch`) — as opposed to a
+ * member reached through another member (`ctx.input.<field>`).
+ *
+ * The `.sudo(` / `.create(` reach (receiver-loose) restated for a member whose
+ * NAME is not distinctive. `sudo` names nothing but the host method, so any
+ * receiver may be refused; `scope` and `submitted` are also ordinary field
+ * names, and a field read through a record image the body DOES receive
+ * (`ctx.input.scope`, `ctx.previous.submitted`) is working, lowerable code —
+ * refusing it would be the false refusal `.create(` carves `Object` out for.
+ * A root receiver is what both an alias and the context itself look like; a
+ * record image never is. What it still over-refuses — a root-bound ROW with a
+ * field of that name (`const row = ctx.input; row.submitted`), and the same
+ * token inside a string literal — is listed at the two entries below.
+ */
+const ROOT_RECEIVER = String.raw`(?<![\w$]|\.\s*)[A-Za-z_$][\w$]*`;
+
+/** `ctx.dispatch.scope` in any spelling below — gated on the body naming `dispatch` at all. */
+const DISPATCH_SCOPE_RX = new RegExp(
+  String.raw`^(?=[\s\S]*\bdispatch\b)[\s\S]*?(?:` +
+    [
+      // `ctx.dispatch.scope`, `ctx?.dispatch?.scope`, a destructured
+      // `dispatch.scope`, and an alias of the marker (`d.scope`).
+      String.raw`(?:\bdispatch|${ROOT_RECEIVER})\s*\??\.\s*scope\b`,
+      // The same receivers, bracket-spelled: `ctx.dispatch['scope']`.
+      String.raw`(?:\bdispatch|${ROOT_RECEIVER})\s*(?:\?\.)?\s*\[\s*(['"\x60])scope\1\s*\]`,
+      // Destructured: `const { scope } = ctx.dispatch`, `const { dispatch: { scope } } = ctx`.
+      String.raw`\{[^{}]*\bscope\b[^{}]*\}\s*=(?![=>])`,
+      String.raw`\bdispatch\s*:\s*\{[^{}]*\bscope\b`,
+    ].join('|') +
+    ')',
+);
+
+/** `ctx.submitted` in any spelling below. */
+const SUBMITTED_RX = new RegExp(
+  [
+    // `ctx.submitted`, `ctx?.submitted`, and a context alias (`c.submitted`).
+    String.raw`${ROOT_RECEIVER}\s*\??\.\s*submitted\b`,
+    // Bracket-spelled: `ctx['submitted']`.
+    String.raw`${ROOT_RECEIVER}\s*(?:\?\.)?\s*\[\s*(['"\x60])submitted\1\s*\]`,
+    // Destructured: `const { input, submitted } = ctx`.
+    String.raw`\{[^{}]*\bsubmitted\b[^{}]*\}\s*=(?![=>])`,
+  ].join('|'),
+);
+
 const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
   { rx: /\bimport\s*[\(\*\{]/, reason: 'dynamic `import()` and ES imports are not allowed in hook/action bodies — declare a Connector recipe instead' },
   // Both spellings, one reason (#10678). A TypeScript config is loaded through
@@ -261,6 +308,76 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
       + 'actually has and the only insert verb the spec contract declares; `Object.create()` is unaffected. '
       + 'Alternatively leave this handler bundled so it runs in-process, where the host repository\'s '
       + '`create()` alias exists',
+  },
+  // [#22810] Same family as `.sudo(` / `.create(`, one surface over: not a
+  // member of `ctx.api` but of the context itself. The omission is the DECLARED
+  // contract — `HookContextSchema.dispatch` (packages/spec/src/data/hook.zod.ts)
+  // says the body face carries `{ mode, index }` "and not `scope`", and
+  // `buildSandboxContext` (runtime/src/sandbox/body-runner.ts) copies exactly
+  // those two: `scope`'s contract is shared object identity across every
+  // dispatch of one write, which a JSON copy into the VM heap cannot keep. So a
+  // body writing `ctx.dispatch.scope.<key>` is `TypeError: cannot set property
+  // … of undefined` on its first run — measured through `bootStack`'s artifact
+  // door as a `SandboxError` with no code, and `500 INTERNAL_ERROR` over REST,
+  // where the in-process handler stores the row.
+  //
+  // ⛔ Marshalling `scope` instead is a second published body contract, not a
+  // fix (the spec text: "a body needing it is the signal to raise that
+  // question, not to add it silently").
+  //
+  // Reach, and the one wrinkle: `scope` is an ordinary field name (platform
+  // objects declare it), so a bare receiver-loose `.scope` would refuse
+  // `ctx.input.scope` — working code. Two narrowings keep the alias reach
+  // without that: the body must name `dispatch` somewhere, and the member must
+  // hang off `dispatch` or a ROOT identifier (see `ROOT_RECEIVER`). Caught:
+  // `ctx.dispatch.scope`, `?.`, brackets, `const d = ctx.dispatch; d.scope`,
+  // `const { dispatch } = ctx; dispatch.scope`, `const { scope } =
+  // ctx.dispatch`, `const { dispatch: { scope } } = ctx`. Over-refused (the
+  // safe direction — the handler is bundled and runs): a dispatch-naming body
+  // that also reads `.scope` off a root-bound row, or spells `x.scope` inside a
+  // string. Knowingly NOT caught: a computed key (`ctx.dispatch[k]`),
+  // `Reflect.get(ctx.dispatch, 'scope')`, a parenthesised or indexed receiver
+  // (`(ctx.dispatch).scope`), and a handler that destructures `dispatch` in its
+  // PARAMETER list — the lowering drops the parameter list entirely, so that
+  // handler fails once lowered whatever it touches.
+  {
+    rx: DISPATCH_SCOPE_RX,
+    reason:
+      '`ctx.dispatch.scope` is not reachable from a sandboxed body — the VM\'s `ctx.dispatch` carries '
+      + 'only `mode` and `index` (`scope` is shared object identity across every dispatch of one write, '
+      + 'which a copy into the sandbox cannot keep), so writing through it is a TypeError at run time '
+      + '(and under a hook\'s default `onError: \'abort\'` that aborts the triggering write) and a '
+      + 'guarded read sees `undefined`. Do the batch-scoped work once, at `ctx.dispatch.index === 0`, '
+      + 'or keep cross-dispatch state in the record itself through `ctx.api`; `ctx.dispatch.mode` and '
+      + '`ctx.dispatch.index` are unaffected. Alternatively leave this handler bundled so it runs '
+      + 'in-process, where the engine\'s shared `scope` exists',
+  },
+  // [#22810] The sibling: `HookContextSchema.submitted` is "NOT marshalled into
+  // the sandboxed `body` face, for the same reason `dispatch.scope` is not",
+  // and `buildSandboxContext` assembles the face key by key without it. A
+  // lowered body reads `undefined` — measured: `typeof ctx.submitted` is
+  // `'object'` in-process on an update and `'undefined'` from the artifact —
+  // so a guard written on it evaluates as if nothing were submitted, with no
+  // error at all. The silent half of this family, which is why it is refused
+  // rather than left to fail at run time.
+  //
+  // Reach: `ROOT_RECEIVER`, ungated — no `dispatch`-style anchor exists for a
+  // top-level context member. `ctx.input.submitted` / `ctx.previous.submitted`
+  // (a field of that name, read through a record image) are NOT refused.
+  // Over-refused: `.submitted` off a root-bound row (`row.submitted`), a
+  // destructured field of that name (`const { submitted } = ctx.input`), and
+  // `x.submitted` inside a string. Knowingly NOT caught: computed keys,
+  // `Reflect.get`, a parenthesised receiver, and parameter-list destructuring
+  // (the same parameter-list gap as above).
+  {
+    rx: SUBMITTED_RX,
+    reason:
+      '`ctx.submitted` is not reachable from a sandboxed body — the VM\'s `ctx` is assembled key by key '
+      + 'and does not carry the caller\'s submission, so it reads `undefined` there: a guard written on it '
+      + 'evaluates as if nothing were submitted, and reaching into it is a TypeError at run time. To '
+      + 'derive a value from a read-only field, read the stored row on `ctx.previous`, which is the '
+      + 'correct source either way. Alternatively leave this handler bundled so it runs in-process, '
+      + 'where `ctx.submitted` carries the caller\'s submission on update',
   },
 ];
 

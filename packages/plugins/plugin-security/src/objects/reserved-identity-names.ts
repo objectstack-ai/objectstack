@@ -7,10 +7,11 @@
  * They are a normalized PROJECTION into `current_user.positions`, and their
  * sources of truth are elsewhere: the unscoped `admin_full_access` grant for
  * `platform_admin`, `sys_member.role` for the `org_*` trio. Nothing in the
- * platform ever writes one of these names into a tenant-authored row —
- * `bootstrapBuiltinRoles` seeds the `sys_position` CATALOG rows (stamped
- * `managed_by = 'platform'`) and no writer anywhere creates a
- * `sys_user_position` assignment spelling one.
+ * platform ever writes one of these names into a tenant-authored row — the
+ * retired built-in seeder wrote the `sys_position` CATALOG rows an existing
+ * database still holds (stamped `managed_by = 'platform'`; since ADR-0131 D2 the
+ * names are declared metadata and no boot writes a row), and no writer anywhere
+ * creates a `sys_user_position` assignment spelling one.
  *
  * ## Why this file exists at all
  *

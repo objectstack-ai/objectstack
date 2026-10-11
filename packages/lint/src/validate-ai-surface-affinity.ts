@@ -97,11 +97,13 @@ export function validateAiSurfaceAffinity(stack: AnyRec): AiSurfaceAffinityFindi
         rule: AI_SKILL_SURFACE_MISMATCH,
         where: `agent "${agentName}" · skills`,
         path: `agents[${ai}].skills[${si}]`,
+        // [#22161] One verdict sentence; the affinity contract, the defaults
+        // and why an unresolved skill name is skipped are
+        // `os explain ai-skill-surface-mismatch`.
         message:
-          `Agent "${agentName}" (surface: '${agentSurface}') references skill "${ref}" ` +
-          `(surface: '${skillSurface}') — incompatible affinity (ADR-0064 §3). The runtime ` +
-          `refuses this binding with a load error, so chatting with this agent fails at ` +
-          `request time even though the stack parses and validates cleanly.`,
+          `Agent "${agentName}" (surface '${agentSurface}') references skill "${ref}" ` +
+          `(surface '${skillSurface}'), so the runtime refuses the binding and chatting with ` +
+          `this agent fails at request time`,
         hint:
           `A skill may only attach to an agent whose surface it matches. Move "${ref}" to a ` +
           `'${skillSurface}'-surface agent, change its \`surface\` to '${agentSurface}', or — ` +

@@ -207,6 +207,63 @@ describe('checkHookBodyLowering', () => {
     expect(checkHookBodyLowering({ hooks: [selfContainedHook] })).toEqual([]);
   });
 
+  // [#22810] The context members a body face does not carry — `dispatch.scope`
+  // and `submitted` — are refused by the same `extractHookBody` the build
+  // calls, so lint reports them on the same rule `.sudo(` / `.create(` land on:
+  // the structural class, a warning, because the bundle is where the handler
+  // still works. `--strict-body` is what makes them fatal at build time.
+  describe('a body reaching a context member the sandbox does not marshal (#22810)', () => {
+    const scopeHook = {
+      name: 'stash_total',
+      object: 'order',
+      events: ['beforeInsert'],
+      handler: (ctx: any) => {
+        ctx.dispatch.scope.total = Number(ctx.input.amount);
+      },
+    };
+    const submittedHook = {
+      name: 'guard_rename',
+      object: 'order',
+      events: ['beforeUpdate'],
+      handler: (ctx: any) => {
+        if (ctx.submitted?.name) ctx.input.note = 'renamed';
+      },
+    };
+    const modeHook = {
+      name: 'batch_once',
+      object: 'order',
+      events: ['beforeUpdate'],
+      handler: (ctx: any) => {
+        if (ctx.dispatch?.mode === 'per-row' && ctx.dispatch.index === 0) ctx.input.note = 'first';
+      },
+    };
+
+    it('reports each on the bundled-fallback rule, naming the hook, its path and the member', () => {
+      const issues = checkHookBodyLowering({ hooks: [scopeHook, submittedHook] });
+      expect(issues.map((i) => [i.rule, i.severity, i.path])).toEqual([
+        [BUNDLED_FALLBACK_RULE, 'warning', 'hooks[0].handler'],
+        [BUNDLED_FALLBACK_RULE, 'warning', 'hooks[1].handler'],
+      ]);
+      expect(issues[0].message).toContain("hook 'stash_total'");
+      expect(issues[0].message).toContain('`ctx.dispatch.scope`');
+      expect(issues[1].message).toContain("hook 'guard_rename'");
+      expect(issues[1].message).toContain('`ctx.submitted`');
+    });
+
+    it('CONTROL: says nothing about `ctx.dispatch.mode` / `ctx.dispatch.index`', () => {
+      expect(checkHookBodyLowering({ hooks: [modeHook] })).toEqual([]);
+    });
+
+    it('agrees with what the build records for the same hooks', () => {
+      const lowering = lowerCallables({ hooks: [{ ...scopeHook }, { ...submittedHook }, { ...modeHook }] });
+      expect(lowering.bodyExtractionWarnings.map((w) => `${w.origin}|${w.kind}`)).toEqual([
+        "hook 'stash_total'|forbidden-token",
+        "hook 'guard_rename'|forbidden-token",
+      ]);
+      expect(lowering.bodyExtracted).toBe(1);
+    });
+  });
+
   it('truncates the multi-line offending-source dump to one line', () => {
     const [issue] = checkHookBodyLowering({ hooks: [forbiddenTokenHook] });
     expect(issue.message).not.toContain('--- offending body source ---');

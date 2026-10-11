@@ -45,7 +45,6 @@ import {
   reservedIdentityNamesCelList,
   reservedIdentityNameMessage,
 } from './reserved-identity-names.js';
-import { bootstrapBuiltinRoles } from '../bootstrap-builtin-positions.js';
 import { DelegatedAdminGate } from '../delegated-admin-gate.js';
 
 const engines: ObjectQL[] = [];
@@ -208,19 +207,27 @@ describe('#15972 sys_position — the object layer refuses the reserved names on
     expect(err.code).toBe(VALIDATION_FAILED_CODE);
   });
 
-  it("the PLATFORM's own catalog seed is unaffected — all four names still seed", async () => {
+  it("a PLATFORM-provenance row spelling a reserved name still writes — the exemption's one holder", async () => {
     const engine = await boot();
-    // The exemption exists for exactly this writer. If it regressed, the seed
-    // would report zero rows and the built-in role catalog would vanish — so
-    // this leg is what keeps the guard from being a boot-breaking change.
-    const result = await bootstrapBuiltinRoles(engine as any);
-    expect(result.seeded).toBe(BUILTIN_IDENTITY_NAMES.length + 2); // + everyone / guest
+    // [ADR-0131 D2] The built-in seeder that wrote these rows is retired: the
+    // six built-ins are declared metadata and the boot writes no row. Rows it
+    // wrote stay on existing databases (C7 owns their removal), stamped
+    // `managed_by: 'platform'` under an `isSystem` context, and the exemption
+    // keeps them writable — an insert of that shape, and the UPDATE leg over a
+    // row that already spells a reserved name, must not start refusing.
+    for (const name of BUILTIN_IDENTITY_NAMES) {
+      await (engine as any).insert(
+        'sys_position',
+        { id: `pos_${name}`, name, label: name, managed_by: 'platform', active: true, is_default: false },
+        { context: { isSystem: true } },
+      );
+    }
     const rows = await (engine as any).find('sys_position', { where: {}, context: { isSystem: true } });
-    const seeded = rows.map((r: any) => r.name);
-    for (const name of BUILTIN_IDENTITY_NAMES) expect(seeded).toContain(name);
-    // Re-running is the idempotent upsert path, i.e. the UPDATE leg over rows
-    // that already spell reserved names. It must not start refusing itself.
-    await expect(bootstrapBuiltinRoles(engine as any)).resolves.toBeTruthy();
+    const written = rows.map((r: any) => r.name);
+    for (const name of BUILTIN_IDENTITY_NAMES) expect(written).toContain(name);
+    await expect((engine as any).update(
+      'sys_position', { id: 'pos_org_admin', label: 'Organization Admin' }, { context: { isSystem: true } },
+    )).resolves.toBeTruthy();
   });
 });
 

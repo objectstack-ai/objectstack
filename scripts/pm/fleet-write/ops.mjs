@@ -91,10 +91,21 @@
  * "Resource not accessible by integration" — and those two rows are the ONLY
  * spenders of it: the table has no contents op (no direct file, ref or branch
  * write; `pr_update_branch` is the platform's own merge, `pull_requests: write`
- * in that ledger); the one workflow-run dispatch (`workflow_dispatch`, below)
+ * in that ledger); arming auto-merge on a pull that changes
+ * `.github/workflows/**` also requires `workflows: write` — measured: the
+ * relay's `automerge_enable` on such a pull answered "refusing to allow a
+ * GitHub App to create or update workflow … without `workflows` permission" —
+ * so that row spends it (`alsoSpends`), the one row that does; it is a
+ * literal grant on every stroke, and a seat may enqueue a pull that changes a
+ * workflow file. The human floor of pm-dispatch `SKILL.md` (security and
+ * permission boundaries stay a human's) is lowered for this ONE boundary by
+ * the maintainer's own ruling, comment 6104822731 (「22708 A」), so this grant
+ * is not a drift. The grant also reaches workflow-file writes through
+ * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
+ * row. The one workflow-run dispatch (`workflow_dispatch`, below)
  * is `actions: write`, the one row spending it; the sender gate's
  * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
- * `PERMISSIONS` is that set and nothing wider. The workflow declares the four
+ * `PERMISSIONS` is that set and nothing wider. The workflow declares the five
  * grants every stroke gets as literal `permission-*` inputs on
  * `actions/create-github-app-token`, and the one grant a stroke gets only when
  * it spends it (`STROKE_SCOPED_PERMISSIONS`) as an input read from the
@@ -130,7 +141,7 @@
  * endpoint) needs `issues: write` on the repository the card is in AND on the
  * one it moves to, so a transfer stroke's token is minted for both. That is
  * the only widening of the token's repository reach the relay makes (the one
- * widening of its permissions is the next section), and it is fenced four ways: the target is
+ * per-stroke widening of its permissions is `workflow_dispatch`'s, above), and it is fenced four ways: the target is
  * a closed enum — `TRANSFER_TARGETS`, the fleet's governed-repository roster
  * reused from `check-governed-merges.mjs`, never a second roster and never
  * free text; the target is never the source; a stroke carrying a transfer
@@ -284,14 +295,18 @@ export const FIELDS = Object.freeze({
 
 /**
  * The App permissions the relay token is narrowed to — the union of every
- * row's `permission`, plus the sender gate's read. `contents: write` is spent
- * by the two auto-merge rows alone (GitHub's requirement for those mutations);
- * no row writes a file, a ref or a branch itself — `pr_update_branch`'s merge
- * is the platform's, under `pull-requests`. `actions: write` is spent by the
- * `workflow_dispatch` row alone, and minted only for a stroke carrying it
- * (`STROKE_SCOPED_PERMISSIONS`).
+ * row's `permission` and `alsoSpends`, plus the sender gate's read.
+ * `contents: write` is spent by the two auto-merge rows alone (GitHub's
+ * requirement for those mutations); no row writes a file, a ref or a branch
+ * itself — `pr_update_branch`'s merge is the platform's, under
+ * `pull-requests`. `workflows: write` is spent by the `automerge_enable` row
+ * alone (`alsoSpends`: a pull changing `.github/workflows/**` is enqueued only
+ * by a token carrying it), a literal grant on every stroke by the
+ * maintainer's ruling, comment 6104822731 (header). `actions: write` is spent
+ * by the `workflow_dispatch` row alone, and minted only for a stroke carrying
+ * it (`STROKE_SCOPED_PERMISSIONS`).
  */
-export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read', actions: 'write' });
+export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write' });
 
 /**
  * The permissions minted ONLY for a stroke carrying an op that spends them —
@@ -406,10 +421,11 @@ export function transferRemedy(source, target) {
  *                 must reach — `transfer`'s alone (header above);
  *   `alone`       (optional) true for a row whose stroke carries exactly that
  *                 one action — `workflow_dispatch`'s alone (header above);
- *   `alsoSpends`  (optional) grants a LATER request of the row spends beside
- *                 `permission` — each a literal mint input, never a
- *                 stroke-scoped one (`validate.mjs --self-test` pins it) —
- *                 `pr_create`'s assignees leg alone (header above);
+ *   `alsoSpends`  (optional) grants the row spends beside `permission` —
+ *                 each a literal mint input, never a stroke-scoped one
+ *                 (`validate.mjs --self-test` pins it): `pr_create`'s
+ *                 assignees leg, a LATER request, and `automerge_enable` on
+ *                 a pull that changes `.github/workflows/**` (header above);
  *   `requests`    the request descriptors the executor issues, in order:
  *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, fromAnswer?, assigned? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
@@ -537,8 +553,11 @@ export const OPS = Object.freeze({
   }),
   // The two auto-merge mutations spend `contents` — GitHub requires `contents: write`
   // on the token for enable/disablePullRequestAutoMerge, over and above `pull-requests`.
+  // A pull changing `.github/workflows/**` needs `workflows: write` on the enqueuing token
+  // too — a literal grant on every stroke, by the maintainer's ruling (comment 6104822731).
   automerge_enable: Object.freeze({
     permission: 'contents',
+    alsoSpends: Object.freeze(['workflows']),
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_enable, pull: a.pull, landed: PR_LANDED_STATE.automerge_enable } }],

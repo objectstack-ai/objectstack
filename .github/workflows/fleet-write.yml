@@ -20,10 +20,11 @@
 # alone, that transfer's one target too: `transferIssue` needs issues write on
 # both ends) and to the permissions the op table declares (`issues: write`,
 # `pull-requests: write`, the `contents: write` GitHub's auto-merge mutations
-# require, and the `metadata: read` the sender gate's permission read needs;
+# require, the `workflows: write` that arming auto-merge on a pull changing a
+# workflow file requires, and the `metadata: read` the sender gate's permission read needs;
 # plus, for a `workflow_dispatch` stroke ALONE, the `actions: write` the
 # dispatch endpoint needs — minted from the validator's per-stroke output, so
-# every other run's token is exactly the four grants above)
+# every other run's token is exactly the five grants above)
 # — and revoked by that action's post step. The workflow's own `GITHUB_TOKEN` gets nothing
 # (`permissions: {}` below); the job grants it `contents: read` for the
 # checkout and nothing else, so the run's ONLY write path is the App token,
@@ -123,13 +124,20 @@ jobs:
           # The op table in `scripts/pm/fleet-write/ops.mjs` has NO contents op — no file, ref
           # or branch write — so this grant is spent only by those two mutations.
           permission-contents: write
+          # ONE consumer: `automerge_enable` on a pull that changes `.github/workflows/**` —
+          # GitHub refuses to enqueue such a pull for an App token without `workflows` (measured:
+          # "refusing to allow a GitHub App to create or update workflow … without `workflows`
+          # permission"). Literal on every stroke by the maintainer's ruling (comment 6104822731).
+          # It also reaches workflow-file writes through contents and git endpoints; the op table
+          # has no row for either, and `validate.mjs --self-test` pins that none is reachable.
+          permission-workflows: write
           permission-metadata: read
           # ONE consumer: the `workflow_dispatch` row — `POST .../actions/workflows/{file}/dispatches`
           # on an allowlisted file at `main`. Minted ONLY for a stroke carrying that op: the validator
           # writes `permission_actions=write` for such a stroke and an EMPTY value for every other,
           # and `actions/create-github-app-token` skips an empty `permission-*` input (its
           # `lib/get-permissions-from-inputs.js`: an empty value leaves the set unchanged, measured
-          # at the v3 tag), so every other run keeps exactly the four grants above. `actions: write`
+          # at the v3 tag), so every other run keeps exactly the five grants above. `actions: write`
           # also reaches cancel, re-run, delete, cache and artifact endpoints; the op table has no
           # row for any of them, and `validate.mjs --self-test` pins that none is reachable.
           permission-actions: ${{ steps.validate.outputs.permission_actions }}

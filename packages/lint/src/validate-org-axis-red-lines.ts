@@ -290,11 +290,13 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
       rule: ORG_AXIS_CROSS_ORG_BU_GRANT,
       where: `sharing rule "${str(rule.name) || rIndex}" on object "${target}"`,
       path: `sharingRules[${rIndex}].sharedWith`,
+      // [#22161] One verdict sentence; `where` names the object. Why a
+      // platform-global object has no organization to resolve a business-unit
+      // tree in, and which recipients are sanctioned instead, are
+      // `os explain org-axis-cross-org-bu-grant`.
       message:
-        `Sharing rule recipient \`${recipientType}\` (${reach}) targets "${target}", which opted out of ` +
-        `tenancy (\`tenancy.enabled: false\`). Platform-global objects carry no organization column, so ` +
-        `this grant spans EVERY organization — a cross-organization business-unit grant, which ADR-0105 ` +
-        `D6 forbids (BU trees are org-internal).`,
+        `Recipient \`${recipientType}\` (${reach}) on an object that opted out of tenancy spans ` +
+        `EVERY organization: a cross-org business-unit grant ADR-0105 D6 forbids`,
       hint:
         `Either scope the object to organizations (drop \`tenancy.enabled: false\` so Layer 0 walls it), ` +
         `or share it to a \`user\` / \`team\` / \`position\` audience instead — those expand flat, with no ` +

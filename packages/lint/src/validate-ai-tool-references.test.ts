@@ -2,9 +2,23 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateAiToolReferences,
+  validateAiToolReferences as validateAiToolReferencesUnrecorded,
   AI_SKILL_TOOL_UNRESOLVED,
 } from './validate-ai-tool-references.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain ai-skill-tool-unresolved`. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateAiToolReferences: typeof validateAiToolReferencesUnrecorded = (...args) => {
+  const findings = validateAiToolReferencesUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 describe('validate-ai-tool-references', () => {
   // ── The motivating corpus, measured per branch (#3806 / #3820 §3) ─────────
@@ -27,7 +41,7 @@ describe('validate-ai-tool-references', () => {
     expect(findings).toHaveLength(10);
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
     expect(findings.every((f) => f.rule === AI_SKILL_TOOL_UNRESOLVED)).toBe(true);
-    const flagged = findings.map((f) => f.message.match(/references tool "([a-z_]+)"/)?.[1]);
+    const flagged = findings.map((f) => f.message.match(/^Tool "([a-z_]+)"/)?.[1]);
     expect(flagged).toEqual([
       'triage_case',
       'generate_email_copy',
@@ -151,7 +165,7 @@ describe('validate-ai-tool-references', () => {
     const withoutActions = { skills: [{ name: 's', tools: ['crm_*'] }] };
     const findings = validateAiToolReferences(withoutActions);
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('tool family "crm_*"');
+    expect(findings[0].message).toContain('Tool family "crm_*"');
   });
 
   it('resolves platform registry names without any stack declarations', () => {
@@ -237,5 +251,81 @@ describe('validate-ai-tool-references', () => {
     });
     expect(control).toHaveLength(1);
     expect(control[0].path).toBe('skills[0].tools[0]');
+  });
+});
+
+describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
+  it('reads as one sentence per arm', () => {
+    const family = validateAiToolReferences({ skills: [{ name: 's', tools: ['crm_*'] }] });
+    expect(family.map((f) => f.message)).toEqual([
+      'Tool family "crm_*" matches no tool this stack can resolve, so the subscription contributes zero tools '
+        + 'at runtime',
+    ]);
+    const unexposed = validateAiToolReferences({
+      actions: [{ name: 'send_invoice', label: 'Send', type: 'script', target: 'send_invoice' }],
+      skills: [{ name: 's', tools: ['action_send_invoice'] }],
+    });
+    expect(unexposed.map((f) => f.message)).toEqual([
+      'Tool "action_send_invoice" names action "send_invoice", which does not become an AI tool (it needs '
+        + '`ai.exposed` and a headless path), so the runtime drops the reference',
+    ]);
+    const fictional = validateAiToolReferences({ skills: [{ name: 's', tools: ['nope_tool'] }] });
+    expect(fictional.map((f) => f.message)).toEqual([
+      'Tool "nope_tool" resolves to no stack, platform or materialised action tool, so the runtime drops it '
+        + 'and the agent cannot call it.',
+    ]);
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(AI_SKILL_TOOL_UNRESOLVED);
+    expect(entry, 'no `os explain ai-skill-tool-unresolved` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    // The three sources, the wildcard, the opt-in and the headless paths are
+    // each held to the rule by the cases above and the one below.
+    for (const fact of [
+      '`stack.tools`',
+      '`PLATFORM_PROVIDED_TOOL_NAMES`',
+      '`stack.actions` or any object\'s `actions`',
+      'trailing-wildcard',
+      '`ai.exposed: true` with an `ai.description` (ADR-0011)',
+      '`operation: \'update\'`',
+      'a `script` action with a target or a body',
+      'an `api` or `flow` action with a target',
+      '`url`, `modal` or `form` action is UI-only',
+      'advisory-first ratchet',
+      'never at the runtime publish gate',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('each headless path the explanation names materialises a tool', () => {
+    const description = 'A sufficiently long LLM-facing description of the action.';
+    for (const action of [
+      { name: 'a', type: 'script', target: 'a' },
+      { name: 'a', type: 'script', body: 'return 1;' },
+      { name: 'a', type: 'api', target: '/x' },
+      { name: 'a', type: 'flow', target: 'f' },
+    ]) {
+      const stack = { actions: [{ ...action, ai: { exposed: true, description } }], skills: [{ name: 's', tools: ['action_a'] }] };
+      expect(validateAiToolReferencesUnrecorded(stack), JSON.stringify(action)).toEqual([]);
+    }
+    // The control: the same action without its opt-in is reported.
+    expect(validateAiToolReferencesUnrecorded({
+      actions: [{ name: 'a', type: 'api', target: '/x' }],
+      skills: [{ name: 's', tools: ['action_a'] }],
+    })).toHaveLength(1);
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === AI_SKILL_TOOL_UNRESOLVED);
+    // The coverage control first: all three arms fired.
+    expect(converted.some((f) => f.message.startsWith('Tool family '))).toBe(true);
+    expect(converted.some((f) => f.message.includes('does not become an AI tool'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('resolves to no stack, platform or materialised action tool'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });
