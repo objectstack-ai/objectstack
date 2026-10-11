@@ -47,7 +47,7 @@
  * separately to confirm it goes red on its own defect.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { createMemoryI18n } from '@objectstack/core';
 import { installAuditWriters } from './audit-writers.js';
@@ -518,5 +518,83 @@ describe('[#7230] the resolution is batched per target object, and free when unu
     // Old id and new id are one `id: { $in: [...] }`, not two point reads.
     expect((reads.findOn['crm_account'] ?? 0) - before).toBe(1);
     expect(lastSummary(storeFor)).toBe('Account: Acme Corp → Globex');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. [#22738] Exposure — a title is read only from a target that serves `get`
+// ---------------------------------------------------------------------------
+
+/**
+ * One target per shape the spec's exposure decision tells apart (ADR-0049):
+ * the off switch, a whitelist without `get`, a deny-all whitelist, and a
+ * whitelist that grants `get`; `crm_account` (no `enable` block) is the open
+ * control. `lte_deal` tracks a lookup into each, keyed by the target's name.
+ */
+const exposureTarget = (name: string, enable: Record<string, unknown>) => ({
+  name, label: name, enable,
+  fields: { id: f('id', 'text', { primaryKey: true }), name: f('name', 'text') },
+});
+const REFUSED = ['lte_hidden', 'lte_listonly', 'lte_denyall'] as const;
+const exposureTargets = [
+  exposureTarget('lte_hidden', { apiEnabled: false }),
+  exposureTarget('lte_listonly', { apiMethods: ['list'] }),
+  exposureTarget('lte_denyall', { apiMethods: [] }),
+  exposureTarget('lte_getonly', { apiMethods: ['get'] }),
+];
+const lteDeal = {
+  name: 'lte_deal', label: 'Deal',
+  fields: {
+    id: f('id', 'text', { primaryKey: true }),
+    title: f('title', 'text'),
+    ...Object.fromEntries([...exposureTargets.map((t) => t.name), 'crm_account'].map((t) => [
+      t, f(t, 'lookup', { label: t, reference: t, trackHistory: true }),
+    ])),
+  },
+};
+
+async function bootExposure() {
+  const booted = await boot();
+  for (const o of [...exposureTargets, lteDeal]) booted.engine.registry.registerObject(o as any, OWNER_PACKAGE);
+  await booted.engine.insert('crm_account', { id: 'acc_1', name: 'Acme Corp' });
+  for (const t of exposureTargets) await booted.engine.insert(t.name, { id: `${t.name}_1`, name: `${t.name} title` });
+  await booted.engine.insert('lte_deal', { id: 'd1', title: 'Deal' });
+  return booted;
+}
+
+describe('[#22738] a tracked reference into a target whose exposure refuses `get` is named by its stored id', () => {
+  it('reads and titles only the targets that serve `get`; a refused target is not read', async () => {
+    const { engine, reads, storeFor } = await bootExposure();
+    const before = { ...reads.findOn };
+    await engine.update(
+      'lte_deal',
+      Object.fromEntries([...exposureTargets.map((t) => [t.name, `${t.name}_1`]), ['crm_account', 'acc_1']]),
+      { where: { id: 'd1' } } as any,
+    );
+
+    const summary = String(lastSummary(storeFor));
+    for (const t of REFUSED) {
+      expect(summary).toContain(`${t}: ∅ → ${t}_1`);
+      expect(summary).not.toContain(`${t} title`);
+      expect((reads.findOn[t] ?? 0) - (before[t] ?? 0), `${t} was read`).toBe(0);
+    }
+    expect(summary).toContain('lte_getonly: ∅ → lte_getonly title');
+    expect(summary).toContain('crm_account: ∅ → Acme Corp');
+  });
+
+  it('withholds a target whose declaration cannot be read (fail-closed), and says so at warn', async () => {
+    const { engine, reads, storeFor } = await bootExposure();
+    const getSchema = engine.getSchema.bind(engine);
+    (engine as any).getSchema = (name: string) => {
+      if (name === 'crm_account') throw new Error('declaration unavailable');
+      return getSchema(name);
+    };
+    const warn = vi.spyOn((engine as any).logger, 'warn');
+    const before = reads.findOn['crm_account'] ?? 0;
+    await engine.update('lte_deal', { crm_account: 'acc_1' }, { where: { id: 'd1' } } as any);
+
+    expect(lastSummary(storeFor)).toBe('crm_account: ∅ → acc_1');
+    expect((reads.findOn['crm_account'] ?? 0) - before).toBe(0);
+    expect(warn.mock.calls.some(([message]) => String(message).includes('"crm_account"'))).toBe(true);
   });
 });

@@ -495,6 +495,7 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **sourceId** | `string` | ✅ | The ID of the record the clone was copied from. |
 | **record** | `Record<string, any>` | ✅ | The created clone, including server-generated fields. Engine-owned values (injected system/audit columns, autonumbers, computed formula/summary fields) are re-derived by the insert path rather than copied from the source; caller-supplied `overrides` win over copied values. |
 | **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: fields that were LEGALLY stripped before the clone was written — a non-system clone cannot seed a static `readonly` column, whether the value was COPIED from the source row or supplied through `overrides` (the strip runs inside `engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated, exactly as on `createData`), so those keys are dropped and the field re-derives its default. Present ONLY when ≥1 field was dropped; the clone still succeeded without them (status/success semantics unchanged). Carried in the 201 body only — this route relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. Optional — omit-when-empty keeps the shape backward-compatible for existing clients. |
+| **warnings** | `{ field: string; code: string; message: string; rule?: string; … }[]` | optional | The advisory validation-rule hits of THIS write: each `severity: 'warning'` or `'info'` rule whose verdict on the written record was "violated", with its `rule` name, `severity`, `field`, `code` and author-written `message` — the same element the validate-only preview reports in a row's `warnings`. Advisory rules never block, so the write succeeded; this is the advisory to show the person who made it. Present ONLY when at least one advisory rule hit; a write with no hit omits the key. Hits of a nested write a hook or a flow made inside this one are not included, and a rule that could not be evaluated is not a hit. |
 
 ### Nested Shape: `CloneDataResponse.droppedFields[number]`
 
@@ -505,6 +506,16 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
 | **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
+
+### Nested Shape: `CloneDataResponse.warnings[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The field the finding is about (`_record` for an object-level rule). |
+| **code** | `string` | ✅ | Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`. |
+| **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
+| **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
+| **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
 
 
 ---
@@ -544,6 +555,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **id** | `string` | ✅ | The ID of the newly created record. |
 | **record** | `Record<string, any>` | ✅ | The created record, including server-generated fields (created_at, owner). |
 | **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields that were LEGALLY stripped before the record was written — a non-system create cannot seed a static `readonly` column (the strip runs inside `engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated), so those keys are dropped and the field re-derives its default. Present ONLY when ≥1 field was dropped; the create still succeeded without them (status/success semantics unchanged). REST additionally surfaces this as the `X-ObjectStack-Dropped-Fields` response header. Optional — omit-when-empty keeps the shape backward-compatible for existing clients. |
+| **warnings** | `{ field: string; code: string; message: string; rule?: string; … }[]` | optional | The advisory validation-rule hits of THIS write: each `severity: 'warning'` or `'info'` rule whose verdict on the written record was "violated", with its `rule` name, `severity`, `field`, `code` and author-written `message` — the same element the validate-only preview reports in a row's `warnings`. Advisory rules never block, so the write succeeded; this is the advisory to show the person who made it. Present ONLY when at least one advisory rule hit; a write with no hit omits the key. Hits of a nested write a hook or a flow made inside this one are not included, and a rule that could not be evaluated is not a hit. |
 
 ### Nested Shape: `CreateDataResponse.droppedFields[number]`
 
@@ -554,6 +566,16 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
 | **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
+
+### Nested Shape: `CreateDataResponse.warnings[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The field the finding is about (`_record` for an object-level rule). |
+| **code** | `string` | ✅ | Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`. |
+| **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
+| **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
+| **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
 
 
 ---
@@ -2819,6 +2841,7 @@ Uninstall package response
 | **id** | `string` | ✅ | Updated record ID |
 | **record** | `Record<string, any>` | ✅ | Updated record |
 | **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability: caller-supplied fields the engine LEGALLY stripped from the write before persisting — static `readonly` or a TRUE `readonlyWhen` predicate. Present ONLY when ≥1 field was dropped; the update still succeeded without them (status/success semantics unchanged — stripping is legitimate, not an error). REST additionally surfaces this as the `X-ObjectStack-Dropped-Fields` response header. Optional — omit-when-empty keeps the shape backward-compatible for existing clients that only read `record`. |
+| **warnings** | `{ field: string; code: string; message: string; rule?: string; … }[]` | optional | The advisory validation-rule hits of THIS write: each `severity: 'warning'` or `'info'` rule whose verdict on the written record was "violated", with its `rule` name, `severity`, `field`, `code` and author-written `message` — the same element the validate-only preview reports in a row's `warnings`. Advisory rules never block, so the write succeeded; this is the advisory to show the person who made it. Present ONLY when at least one advisory rule hit; a write with no hit omits the key. Hits of a nested write a hook or a flow made inside this one are not included, and a rule that could not be evaluated is not a hit. |
 
 ### Nested Shape: `UpdateDataResponse.droppedFields[number]`
 
@@ -2829,6 +2852,16 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
 | **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
+
+### Nested Shape: `UpdateDataResponse.warnings[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The field the finding is about (`_record` for an object-level rule). |
+| **code** | `string` | ✅ | Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`. |
+| **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
+| **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
+| **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
 
 
 ---
@@ -2965,6 +2998,8 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **field** | `string` | ✅ | The field the finding is about (`_record` for an object-level rule). |
 | **code** | `string` | ✅ | Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`. |
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
+| **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
+| **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
 
 
 ---
@@ -2999,8 +3034,8 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **valid** | `boolean` | ✅ | True when this row would be accepted by the write path. |
-| **errors** | `{ field: string; code: string; message: string }[]` | ✅ | Findings that would REJECT this row. Empty when valid. |
-| **warnings** | `{ field: string; code: string; message: string }[]` | ✅ | Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a warn-first posture. The row is valid; the write would store it and log the same complaint. |
+| **errors** | `{ field: string; code: string; message: string; rule?: string; … }[]` | ✅ | Findings that would REJECT this row. Empty when valid. |
+| **warnings** | `{ field: string; code: string; message: string; rule?: string; … }[]` | ✅ | Findings the target deployment ADMITS rather than rejects; the row is valid, and the write would store it. Two populations, in this order: ADR-0104 value shapes admitted under a warn-first posture (the write logs the same complaint), then the hits of ADVISORY validation rules (`severity: 'warning'` or `'info'`), each naming its `rule` and `severity` — the same elements the write answers as its own `warnings`. An advisory hit is reported only on a row the verdict accepts, as on the write, which answers a refused row with its error. |
 | **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability for the preview: caller-supplied fields the write would LEGALLY strip from THIS row, one event per reason, in the shape and reason vocabulary the write itself reports. A strip is not a finding: `valid` is unaffected, and the fields appear in neither `errors` nor `warnings`. Present only when at least one field would be dropped. A server that does not produce this report omits the key too, so an absent key alone does not prove nothing would be dropped. |
 
 ### Nested Shape: `ValidateDataResponse.posture`

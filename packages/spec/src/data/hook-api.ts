@@ -190,8 +190,9 @@ export type HookUpdateDoc = HookDoc;
  *
  * `EngineUpdateOptions` minus the injected `context` and the `upsert`
  * tombstone, plus {@link WriteObservabilityOptions} (`onFieldsDropped`,
- * `strictReadonlyWrites` — contract-declared, deliberately outside the
- * serializable schema) and the driver pass-through keys.
+ * `onValidationAdvisory`, `strictReadonlyWrites` — contract-declared,
+ * deliberately outside the serializable schema) and the driver pass-through
+ * keys.
  *
  * The bulk form is `update(data, { where, multi: true })`; there is no
  * `updateMany`.
