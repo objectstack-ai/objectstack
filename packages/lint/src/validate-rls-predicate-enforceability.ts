@@ -336,10 +336,12 @@ function str(v: unknown): string {
  * at most 200 characters, and what the hints used to enumerate — the lowerable
  * subset and its three traps, the rule each holding breaks with the other
  * rewrites a site admits, the comparison classes with their types, the four
- * ways to shrink an oversized predicate, the declared fields of the object —
- * is each id's `os explain` entry (`rule-explanations.ts`), held to its source
- * by this file's tests. A predicate with several faulty sites gets the first
- * site's rewrite and a count of the rest.
+ * ways to shrink an oversized predicate, the declared fields of the object,
+ * what each kernel key holds and how an app stages a membership set, the
+ * legacy SQL bridge's reach and the subquery route — is each id's
+ * `os explain` entry (`rule-explanations.ts`), held to its source by this
+ * file's tests. A predicate with several faulty sites gets the first site's
+ * rewrite and a count of the rest.
  */
 
 /** Rewrite into the lowerable subset — the shape arm of `rls-predicate-unenforceable`. */
@@ -356,6 +358,14 @@ const COMPARAND_REWRITE =
 const OVER_BUDGET_FIX =
   'Make the predicate smaller: collapse an `||` chain into `field in [a, b, …]`, test a membership key ' +
   '`field in current_user.<key>`, or split a top-level `||` across policies (never a top-level `&&`)';
+
+/**
+ * `rls-predicate-unparseable`: the SQL-to-CEL translations in one line. What the
+ * legacy bridge covers, and why a subquery has no CEL spelling, are the explanation's.
+ */
+const UNPARSEABLE_FIX =
+  'Author the predicate in canonical CEL: `&&` / `||` for AND / OR, `!` for NOT, `startsWith` / `endsWith` / ' +
+  '`contains` for LIKE; pre-resolve a subquery into a membership key';
 
 /** `rls-predicate-unknown-field`: the verdict's "Did you mean" names the nearest declared column. */
 const UNKNOWN_FIELD_FIX =
@@ -1343,15 +1353,12 @@ function referenceFindings(
       message:
         `RLS ${clause} reads \`${variablePath}\`, which nothing pre-resolves, in a scalar position no request ` +
         `can ever fill, ${droppedClause(clause)}`,
+      // [#22161] One remedy line, naming only the fixed key set and the
+      // nearest key, so no author text can lengthen it. What each key holds,
+      // and how an app stages a membership set, are the explanation's.
       hint:
-        `Use one of the pre-resolved context values (${listNames(PRERESOLVED_USER_KEYS)})${suggestName(
-          key,
-          PRERESOLVED_USER_KEYS,
-        )} — \`current_user.organization_id\` is the tenant, \`current_user.id\` the acting user, ` +
-        `\`current_user.email\` their unique address. If "${key}" is meant to be an app-resolved set, it ` +
-        `must be staged into \`ExecutionContext.rlsMembership\` by an \`IRlsMembershipResolver\` that ` +
-        `DECLARES the key, and it can then only be tested with \`in\` (\`<field> in ${variablePath}\`), ` +
-        `never compared with \`==\`: the runtime stages membership sets as arrays and never as scalars.`,
+        `Read a pre-resolved key (${listNames(PRERESOLVED_USER_KEYS)}), or test an app-staged membership ` +
+        `set with \`in\`, never \`==\`.${suggestName(key, PRERESOLVED_USER_KEYS)}`,
     });
   }
 
@@ -1555,13 +1562,7 @@ export function validateRlsPredicateEnforceability(
             message:
               `RLS ${clause} does not parse as CEL, even after the legacy SQL bridge (${detail}), ` +
               droppedClause(clause),
-            hint:
-              'Author the predicate in canonical CEL (ADR-0058 D1). The bridge covers only the historic ' +
-              'SQL subset — a bare `=` and `IN` — so everything else must already be CEL: combine with ' +
-              '`&&` / `||` rather than SQL `AND` / `OR`, negate with `!`, and use `startsWith` / ' +
-              '`endsWith` / `contains` rather than `LIKE`. A subquery has no CEL spelling at all: RLS ' +
-              'cannot join (ADR-0055), so pre-resolve the set into a membership key the runtime exposes ' +
-              '(`field in current_user.<key>`, ADR-0105 D11) or denormalise the value onto this object.',
+            hint: UNPARSEABLE_FIX,
           });
           continue;
         }

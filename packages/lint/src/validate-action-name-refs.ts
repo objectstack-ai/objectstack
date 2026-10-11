@@ -251,11 +251,13 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
       message:
         `${surface} names action "${name}", which no action in this stack defines, so ${consequence}.` +
         suggestName(name, known),
+      // [#22161] One remedy line. The verdict's "Did you mean" names the
+      // nearest defined action, so the stack's whole action list is not
+      // echoed; that another installed package may contribute it is
+      // `os explain action-name-undefined`.
       hint:
         `Define an action named "${name}" (in \`stack.actions\` or the object's \`actions\`) ` +
-        `${placement}, remove the reference, or ignore this if the ` +
-        `action is contributed by another installed package.` +
-        (known.size > 0 ? ` Defined actions: ${[...known].sort().join(', ')}.` : ''),
+        `${placement}, or remove the reference`,
     });
   };
 
@@ -397,12 +399,14 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
               : '(defined nowhere in this stack)') +
             ', so the list draws no button for it.' +
             suggestName(id, childNames),
+          // [#22161] One remedy line. The verdict's "Did you mean" names the
+          // nearest of the related object's actions, so their list is not
+          // echoed; how an action is bound to the related object, the
+          // locations a related list draws and the other-package exception
+          // are `os explain action-name-undefined`.
           hint:
-            `Define "${id}" on "${child}" — in that object's \`actions\`, or in \`stack.actions\` with ` +
-            `\`objectName: '${child}'\` — with one of ${RELATED_LIST_PLACEMENTS} in its \`locations\`; ` +
-            `or name one of "${child}"'s own actions; or remove the reference. Ignore this only if ` +
-            `another installed package binds the action to "${child}".` +
-            ` Actions of "${child}": ${childNames.length > 0 ? childNames.join(', ') : '(none)'}.`,
+            `Define "${id}" on "${child}" at a location a related list draws, name one of "${child}"'s ` +
+            'own actions instead, or remove the reference',
         });
         continue;
       }

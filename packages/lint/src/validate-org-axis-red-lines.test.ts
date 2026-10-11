@@ -27,7 +27,7 @@ import { explainRule } from './rule-explanations.js';
 // file hold each recorded verdict of that id to one line of at most 200
 // characters — every firing variant this suite exercises, not a chosen few.
 // Run the whole file: those cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateOrgAxisRedLines: typeof validateOrgAxisRedLinesUnrecorded = (...args) => {
   const findings = validateOrgAxisRedLinesUnrecorded(...args);
   fired.push(...findings);
@@ -947,6 +947,42 @@ describe('[#22161] one-line verdicts — org-axis-cross-org-bu-grant', () => {
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line, both ids. One remedy line each; why
+// membership is the only cross-organization route, why Layer 1 cannot widen
+// Layer 0, the business-unit tree for an in-organization hierarchy and the
+// `public_read` catalog route are the explanations' (the first id gains one).
+describe('[#22161] one-line fixes — the two org-axis ids', () => {
+  const IDS = [ORG_AXIS_PERMISSION_INHERITANCE, ORG_AXIS_CROSS_ORG_BU_GRANT];
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => IDS.includes(f.rule));
+    // Coverage control: both ids fired.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const facts: Record<string, readonly string[]> = {
+      [ORG_AXIS_PERMISSION_INHERITANCE]: [
+        'Cross-organization visibility comes from MEMBERSHIP',
+        '`organization_id IN accessible_org_ids`',
+        'a Layer-1 policy cannot widen the engine\'s Layer 0 wall',
+        '`unit_and_subordinates` sharing, or a depth scope anchored on `sys_user_position`',
+      ],
+      [ORG_AXIS_CROSS_ORG_BU_GRANT]: ['wants an organization-wide default of `public_read`, not a business-unit grant'],
+    };
+    for (const rule of IDS) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of facts[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
     }
   });
 });

@@ -14,7 +14,7 @@ import { explainRule } from './rule-explanations.js';
 // one line of at most 200 characters — every firing variant this suite
 // exercises, not a chosen few. Run the whole file: those cases read what the
 // cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateActionNameRefs: typeof validateActionNameRefsUnrecorded = (...args) => {
   const findings = validateActionNameRefsUnrecorded(...args);
   fired.push(...findings);
@@ -802,5 +802,33 @@ describe('[#22161] one-line verdicts — action-name-undefined', () => {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line. Each arm names its remedy in one line;
+// the verdict's "Did you mean" names the nearest action, so neither the stack's
+// action list nor the related object's is echoed, and the binding, the drawn
+// locations and the other-package exception are the explanation's.
+describe('[#22161] one-line fixes — action-name-undefined', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === ACTION_NAME_UNDEFINED);
+    // Coverage control: the generic arm with both placements, and the two
+    // related-list arms (not an action of the related object; not placed).
+    expect(converted.some((f) => f.hint.includes('with the location this surface needs'))).toBe(true);
+    expect(converted.some((f) => f.hint.includes('the selection bar places it by name'))).toBe(true);
+    expect(converted.some((f) => f.hint.includes('at a location a related list draws'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Add one of '))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, 'no action list is echoed').not.toMatch(/Defined actions:|Actions of "/);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const text = explainRule(ACTION_NAME_UNDEFINED)!.paragraphs.join('\n');
+    expect(text).toContain('in `stack.actions` with `objectName` naming it');
+    expect(text).toContain('ignore the error only if another installed package binds the action to that object');
+    expect(text).toContain('an action another installed package contributes is the one legitimate miss');
   });
 });

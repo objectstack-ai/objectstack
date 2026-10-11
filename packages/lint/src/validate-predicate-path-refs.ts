@@ -656,10 +656,13 @@ function checkPredicate(
           message:
             `predicate references \`${full}\`, but \`${segment}\` is not a key of \`${container}\`, `
             + FAILS_OPEN,
+          // [#22161] One remedy line: the nearest declared key, or what the
+          // container declares. That every reference must resolve against
+          // the edited schema, and where the walk stops, is
+          // `os explain predicate-path-unresolved`.
           hint:
-            `${formatSuggestion(findClosestMatches(segment, step.declared))
-            || `\`${container}\` declares: ${step.declared.slice(0, 12).sort().join(', ')}`}`
-            + ` Every reference must resolve against the schema the form edits.`,
+            formatSuggestion(findClosestMatches(segment, step.declared))
+            || `Reference a key \`${container}\` declares: ${step.declared.slice(0, 12).sort().join(', ')}`,
         });
         break;
       }
@@ -695,10 +698,11 @@ function checkPredicate(
         message:
           `predicate names \`${id}\` bare, but it is a key of the edited schema with its \`${ROOT}.\` `
           + `root dropped, ${FAILS_OPEN}`,
+        // [#22161] One remedy line; why the row is spelled `data` at every
+        // depth is `os explain predicate-path-unrooted`.
         hint:
-          `Write \`${ROOT}.${id}\` instead of \`${id}\`. A metadata-editing form binds the row under `
-          + `edit as \`${ROOT}\` at every depth — inside a repeater \`${ROOT}\` is the ROW, but it is `
-          + `still spelled \`${ROOT}\` (there is no implicit row scope).`,
+          `Write \`${ROOT}.${id}\` instead of \`${id}\`: the form binds the row under edit as `
+          + `\`${ROOT}\` at every depth, a repeater's row included`,
       });
     }
   }
@@ -732,20 +736,15 @@ function checkPredicate(
         : `predicate compares against the unquoted word \`${text}\` on the RIGHT of \`${op}\`, `
           + `which reads as a literal today but is outside the declared subset and breaks under `
           + `the real CEL evaluator`,
+      // [#22161] One remedy line per arm: both spellings, and (for the bare
+      // word) the in-place rooting it must not become. The supported subset,
+      // why two paths cannot be compared, and why quoting changes nothing
+      // today are `os explain predicate-rhs-path-shaped`.
       hint: dotted
-        ? `Two sanctioned spellings. (1) If you meant the TEXT, quote it: \`${op} '${text}'\`. `
-          + `(2) If you meant the PATH, restructure so the path is on the LEFT and a literal is on `
-          + `the right — comparing one path against another is outside the subset this surface `
-          + `renders, which is \`path == 'literal'\` / \`path != 'literal'\` and nothing wider. There `
-          + `is no third spelling that compares two paths here.`
-        : `Two sanctioned spellings, and you must pick — they are not the same predicate. `
-          + `(1) If you meant the TEXT \`${text}\`, quote it: \`${op} '${text}'\`. That is what this `
-          + `renders as today, so it changes no behaviour and is the fix unless you know otherwise. `
-          + `(2) If you meant the FIELD \`${ROOT}.${text}\`, move it to the LEFT and put a literal on `
-          + `the right, e.g. \`${ROOT}.${text} == 'yes'\`. ⛔ Do NOT simply add the root in place: `
-          + `\`${op} ${ROOT}.${text}\` is a path on the RIGHT, which this surface parses as the `
-          + `literal string "${ROOT}.${text}" — it is refused by this same rule at \`error\`, and it `
-          + `is FALSE on every row. The subset here is \`path == 'literal'\` and nothing wider.`,
+        ? `If you meant the text, quote it: \`${op} '${text}'\`; if you meant the path, put it on the `
+          + `LEFT with a literal on the right (two paths cannot be compared here)`
+        : `If you meant the text, quote it: \`${op} '${text}'\` (what it does today); if you meant the `
+          + `field, write \`${ROOT}.${text} == 'yes'\`, path on the LEFT, and do NOT simply add the root in place`,
     });
   }
 }
