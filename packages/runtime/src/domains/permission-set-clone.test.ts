@@ -67,7 +67,6 @@ function boot(opts: BootOptions = {}) {
     const engine: any = {
         registry: { getObject: () => undefined },
         find: async (object: string) => { throw new Error(`the clone door read a ${object} row`); },
-        findOne: async (object: string) => { throw new Error(`the clone door read a ${object} row`); },
     };
     if (opts.catalogError) {
         bindTestSecurityCatalog(engine, () => { throw opts.catalogError; });
