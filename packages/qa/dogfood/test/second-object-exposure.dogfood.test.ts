@@ -212,7 +212,7 @@ describe('[#22661] a second-object read serves only a target whose declared expo
           for (const value of [MARK[rel], 'no-such-name']) {
             for (const res of await conditionAnswers(rel, value)) {
               const body: any = await res.json();
-              expect({ status: res.status, code: body?.error?.code }, rel).toEqual({ status, code });
+              expect({ status: res.status, code: body?.code }, rel).toEqual({ status, code });
             }
           }
         }
@@ -245,6 +245,6 @@ describe('[#22661] a second-object read serves only a target whose declared expo
 
   it('PRECEDENT — a nested-relation condition on a related object the member may not read is refused, unchanged', async () => {
     const res = await stack.apiAs(token.member, 'POST', '/data/sox_source/query', { where: { private: { name: MARK.private } } });
-    expect(res.status, await res.clone().text()).toBe(403);
+    expect({ status: res.status, code: ((await res.json()) as any)?.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
   });
 });
