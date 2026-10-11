@@ -160,7 +160,7 @@ silently. Reach for the keyed read wherever the set you are assembling is
 addressed by key.
 
 <Callout type="warn">
-Not to be confused with the **org customization overlay**, which is ADR-0005's
+Not to be confused with the **customization overlay**, which is ADR-0005's
 `sys_metadata` mechanism described under "Overlay Management" below — a
 different thing entirely.
 </Callout>
@@ -409,10 +409,11 @@ View customization rides ADR-0005's metadata overlay (opt-in per type via
 `code` / `overlay` / `effective` for it. Since ADR-0131 D6 the per-organization
 overlay axis is retired: the doors carry no organization, so the overlay is
 **environment-wide** (`organization_id` NULL) and served to every organization
-of the deployment, whatever the author's active organization. An overlay row an
-earlier release stored under an organization is not served by any `/meta` read
-until the promotion ceremony (ADR-0131 C7) carries it to the environment layer.
-Public forms are the exception: until that ceremony the anonymous form doors
+of the deployment, whatever the author's active organization. Every protocol
+read is environment → code, whatever organization a caller names. An overlay
+row an earlier release stored under an organization is served by no read:
+boot names it, and the v18 migration ceremony (ADR-0131 C7) carries it to the
+environment layer. Public forms are the exception: until that ceremony the anonymous form doors
 read a form `view` in the Default Organization and prefer its overlay for the
 form's body, while a withdrawal in either layer closes the form, fail-closed.
 So a legacy organization overlay of a public form keeps serving its body there:

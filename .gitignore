@@ -62,6 +62,12 @@ packages/*/*.tsbuildinfo
 # Generated JSON Schema (rebuilt by `pnpm gen:schema` during build)
 packages/spec/json-schema/
 
+# Generated migration registry (rebuilt by `pnpm gen:migration-registry` on
+# install and as the first step of build, from registry.ts.template + entries/),
+# and the staging file its atomic write renames into place.
+packages/spec/src/migrations/registry.ts
+packages/spec/src/migrations/registry.ts.*.tmp
+
 # Generated bundle size reports
 packages/spec/bundle-size-report.json
 
@@ -136,3 +142,9 @@ examples/app-crm/storage/
 # The release lane's scratch space: the previously published tarball it unpacks
 # and the artifact it packs to verify the ADR-0087 D4 per-release section.
 .release-spec-changes/
+# The two ADR-0087 D4 projections `@objectstack/spec` ships: generated INTO the
+# package by that lane (`scripts/release-spec-changes.sh --prepare` / `--generate`)
+# right before the tarball is packed, and by `gen:spec-changes` locally. Never
+# committed (#22449 B′, #22485); `files[]` ships whatever the lane wrote.
+packages/spec/spec-changes.json
+packages/spec/protocol-upgrade-guide.md

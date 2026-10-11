@@ -262,16 +262,20 @@ const strName = (v: unknown): string | undefined =>
   typeof v === 'string' && v.length > 0 ? v : undefined;
 
 /**
- * The table as a Map, built once — for the MESSAGE only.
+ * The table as a Map, built once — for the vocabulary skip (skip 5) and the
+ * words only.
  *
  * A Map rather than property access on the frozen record because a
  * property-key lookup also answers for `Object.prototype` members, so an
  * author's `aggregate: 'toString'` would read as a declared row. The VERDICT
  * is never taken from here: it is
  * {@link isAggregateCompatibleWithFieldType}'s, which is fail-closed on both
- * vocabulary and shape. This Map only PRESENTS the same table — the accepted
- * set for the refused aggregate, and the aggregates that would accept this
- * field — so the message cannot name a set the verdict was not taken from.
+ * vocabulary and shape. This Map only PRESENTS the same table — the
+ * aggregates that would accept this field, in the hint — so the words cannot
+ * name a set the verdict was not taken from. [#22161] The accepted set for
+ * the refused aggregate moved out of the message: `os explain
+ * measure-aggregate-field-type-refused` writes the table's rows out, and this
+ * rule's test holds them to `AGGREGATE_FIELD_TYPE_COMPATIBILITY`.
  */
 const ACCEPTED_TYPES_BY_AGGREGATE: ReadonlyMap<string, readonly string[]> = new Map(
   Object.entries(AGGREGATE_FIELD_TYPE_COMPATIBILITY).map(
@@ -311,15 +315,14 @@ function shapeOf(verdict: Extract<FieldPathVerdict, { kind: 'ok' }>, fieldType: 
   return { type: fieldType, multiple: verdict.meta?.multiple === true };
 }
 
-/** Which object the words say declares the leaf: the dataset's (or cube's) own, or the joined one. */
-function declarerOf(
-  verdict: Extract<FieldPathVerdict, { kind: 'ok' }>,
-  baseObject: string,
-  owner: 'dataset' | 'cube',
-): string {
-  return verdict.object === baseObject
-    ? `object "${baseObject}"`
-    : `object "${verdict.object}" (reached through this ${owner}'s join chain)`;
+/**
+ * Which object the words say declares the leaf: the dataset's (or cube's) own,
+ * or the one its join chain reaches. [#22161] One word marks the second
+ * ("joined"), so the verdict stays one line; the walk itself is
+ * `os explain`'s.
+ */
+function declarerOf(verdict: Extract<FieldPathVerdict, { kind: 'ok' }>, baseObject: string): string {
+  return verdict.object === baseObject ? `object "${baseObject}"` : `joined object "${verdict.object}"`;
 }
 
 /**
@@ -341,8 +344,6 @@ interface MemberSite {
   where: string;
   /** The finding's `path`. */
   path: string;
-  /** The member's name, as the words say it. */
-  name: string;
   /** The column reference the author wrote: a dataset member's `field`, a cube member's `sql`. */
   column: string;
   /** Who declares the resolved column, as the words say it ({@link declarerOf}). */
@@ -365,38 +366,26 @@ const CUBE_QUERY_DOOR =
 /**
  * [#20890] The finding for a dimension that groups by a JSON-stored column,
  * in one set of words for a dataset dimension and a cube dimension alike.
- * `selector` names who selects the dimension: a dataset's reports and
- * dashboards, a cube's queries.
+ *
+ * [#22161] One verdict sentence: the column, its declaration, its class and
+ * the refusal. `where` names the dimension; why a JSON value is no group key
+ * and which door refuses it is `os explain dimension-json-stored-field-refused`.
  */
 function jsonStoredDimensionFinding(
   site: MemberSite,
   leaf: Extract<FieldPathVerdict, { kind: 'ok' }>,
   shape: ValueShapeFieldDef,
   cls: 'structured-json' | 'multi-value',
-  selector: string,
 ): DatasetMeasureAggregateFinding {
-  const head =
-    `dimension "${site.name}" groups by field "${site.column}", which ` +
-    `${site.declarer} declares as ${declaredAs(shape)} — `;
-  const door =
-    'The analytics door refuses every query that groups by this dimension with ' +
-    `\`400 INVALID_FIELD\` before any SQL is built, so ${selector} that selects it gets ` +
-    'that refusal instead of an answer.';
   return {
     severity: 'error',
     rule: DIMENSION_JSON_STORED_FIELD_REFUSED,
     where: site.where,
     path: site.path,
     message:
-      cls === 'structured-json'
-        ? head +
-          'a structured-JSON value, which analytics does not group by. A JSON document is no ' +
-          'group key the SQL dialects share: one groups each serialized document apart, ' +
-          `another refuses the statement. ${door}`
-        : head +
-          'a multi-value field, which analytics does not group by. A list of values is no ' +
-          'group key the SQL dialects share: one groups each serialized list apart, another ' +
-          `refuses the statement. ${door}`,
+      `groups by field "${site.column}" (${declaredAs(shape)} on ${site.declarer}), ` +
+      `${cls === 'structured-json' ? 'a structured-JSON value' : 'a multi-value field'}, ` +
+      'so every query grouping by it is refused (400 INVALID_FIELD)',
     hint:
       cls === 'structured-json'
         ? 'Group by a field that stores one scalar value: store the part of the document you ' +
@@ -414,11 +403,15 @@ function jsonStoredDimensionFinding(
  * carry ({@link acceptsDeclaration} said no), in one set of words for a
  * dataset measure and a cube measure alike. `door` is the hint's last
  * sentence ({@link DATASET_COMPILE_DOOR} or {@link CUBE_QUERY_DOOR}).
+ *
+ * [#22161] One verdict sentence: the pair, the declaration and why it is
+ * refused. `where` names the measure; how backends answer the pair, and each
+ * aggregate's accepted types (the table's rows, written out), are
+ * `os explain measure-aggregate-field-type-refused`.
  */
 function refusedMeasureFinding(
   site: MemberSite,
   aggregate: string,
-  accepted: readonly string[],
   fieldType: string,
   shape: ValueShapeFieldDef,
   door: string,
@@ -426,24 +419,19 @@ function refusedMeasureFinding(
   // [#20890] The row accepts the TYPE and the declaration is what refuses:
   // a multi-capable field flagged `multiple: true` under `count_distinct`.
   const flaggedList = isAggregateCompatibleWithFieldType(aggregate, fieldType);
+  // The declaration as the verdict needs it: the flag where it is what refuses
+  // the pair, the type alone where the table's row does.
+  const pair = (declaration: string) =>
+    `aggregate "${aggregate}" over field "${site.column}" (${declaration} on ${site.declarer})`;
   return {
     severity: 'error',
     rule: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
     where: site.where,
     path: site.path,
     message: flaggedList
-      ? `measure "${site.name}" applies aggregate "${aggregate}" to field "${site.column}", which ` +
-        `${site.declarer} declares as ${declaredAs(shape)} — a list of values ` +
-        `stored as JSON. "${aggregate}" COMPARES the stored values for equality, and no two ` +
-        `backends compare a JSON-stored value alike: one counts every row apart, one compares ` +
-        `the serialized text, another has no equality for the type and fails at query time. ` +
-        `"${aggregate}" accepts: ${accepted.join(', ')}, none of them with \`multiple: true\`.`
-      : `measure "${site.name}" applies aggregate "${aggregate}" to field "${site.column}", which ` +
-        `${site.declarer} declares as \`${fieldType}\`. That pair is refused by the aggregate × ` +
-        `field-type compatibility table in @objectstack/spec, so the number a backend returns ` +
-        `for it is a property of the SQL dialect rather than of the data — one coerces the ` +
-        `stored form and answers something plausible, another has no such function and fails ` +
-        `at query time. "${aggregate}" accepts: ${accepted.join(', ')}.`,
+      ? `${pair(declaredAs(shape))} is refused: a list stored as JSON, which no two backends compare alike`
+      : `${pair(`\`${fieldType}\``)} is refused by the aggregate × field-type table: the number would depend ` +
+        'on the SQL dialect',
     hint:
       `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
       `"${site.column}" with one its ${declaredAs(shape)} ${shape.multiple === true ? 'declaration' : 'type'} accepts: ` +
@@ -534,14 +522,12 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
         {
           where: `cube "${cubeName}" › dimension "${name}"`,
           path: `${path}.sql`,
-          name,
           column: sql,
-          declarer: declarerOf(column.verdict, object, 'cube'),
+          declarer: declarerOf(column.verdict, object),
         },
         column.verdict,
         column.shape,
         cls,
-        'a query',
       ),
     );
   }
@@ -568,12 +554,10 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
         {
           where: `cube "${cubeName}" › measure "${name}"`,
           path: `${path}.type`,
-          name,
           column: sql,
-          declarer: declarerOf(column.verdict, object, 'cube'),
+          declarer: declarerOf(column.verdict, object),
         },
         aggregate,
-        accepted,
         column.fieldType,
         column.shape,
         CUBE_QUERY_DOOR,
@@ -637,14 +621,12 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
           {
             where: `dataset "${dsName}" › dimension "${dimensionName}"`,
             path: `datasets[${di}].dimensions[${k}].field`,
-            name: dimensionName,
             column: field,
-            declarer: declarerOf(verdict, object, 'dataset'),
+            declarer: declarerOf(verdict, object),
           },
           verdict,
           shape,
           cls,
-          'a report or dashboard',
         ),
       );
     });
@@ -676,12 +658,10 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
           {
             where: `dataset "${dsName}" › measure "${measureName}"`,
             path: `datasets[${di}].measures[${k}].aggregate`,
-            name: measureName,
             column: field,
-            declarer: declarerOf(verdict, object, 'dataset'),
+            declarer: declarerOf(verdict, object),
           },
           aggregate,
-          accepted,
           fieldType,
           shape,
           DATASET_COMPILE_DOOR,

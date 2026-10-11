@@ -71,6 +71,7 @@
     "data/ObjectAccessConfig:default = \"public\"",
     "data/ObjectCapabilities:activities = true",
     "data/ObjectCapabilities:apiEnabled = true",
+    "data/ObjectCapabilities:approvalsVisibleToReaders = false",
     "data/ObjectCapabilities:clone = true",
     "data/ObjectCapabilities:feeds = true",
     "data/ObjectCapabilities:files = false",

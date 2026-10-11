@@ -144,7 +144,10 @@ const MAP_NODE = {
         flowName: 'cell_flow',
         collection: '{cells}',
         iteratorVariable: 'cell',
-        input: { row: '{row}', cell: '{cell}' },
+        // [#19939] `input.*` is a value slot. `row` is the enclosing loop's
+        // iterator, and the `parallel` parent binds none, so it is guarded —
+        // the template handed nothing there; CEL would fail the run.
+        input: { row: { dialect: 'cel', source: 'has(vars.row) ? vars.row : null' }, cell: { dialect: 'cel', source: 'cell' } },
         outputVariable: 'cellResults',
     },
 } as const;

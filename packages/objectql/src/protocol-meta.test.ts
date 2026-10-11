@@ -61,128 +61,46 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
     // ADR-0005 (revised 2026-05): per-organization overlay isolation
     // ═══════════════════════════════════════════════════════════════
 
-    describe('per-organization overlay isolation', () => {
-        // [commit d5cbb44f3] Re-spelled from `app` to `view`, and its sibling below with
-        // it. The CLAIM is unchanged — an org row and an env-wide row of the
-        // same `(type, name)` both exist, and the org row is the one SERVED,
-        // whole, by precedence rather than a merge. It just has to be measured
-        // on a type that HAS an org partition to have precedence over.
-        //
-        // `getMetaItem` now resolves its own read scope through
-        // `organizationIdForMetaRead` — the read-side twin of the predicate
-        // `saveMetaItem` already gates on — so on `app`, which rolled back to
-        // `allowOrgOverride: false` in commit ee58392e1, `organizationId` is gated to
-        // `undefined` and the org partition is never queried. On `app` this
-        // case was pinning the phantom read commit d5cbb44f3 removed: a pre-#6190
-        // org-scoped row served INSTEAD OF the live env-wide document. `view`
-        // is the whitelisted specimen — the same re-spelling #6190 made one
-        // case up and commit 96326040f made one case down.
-        it('getMetaItem returns org-specific overlay when both org and env-wide rows exist', async () => {
-            // findOverlay calls: first attempts org=org_alpha (returns row),
-            // env-wide fallback should be skipped.
-            mockEngine.findOne.mockImplementation((_table: string, opts: any) => {
-                if (opts?.where?.organization_id === 'org_alpha') {
-                    return Promise.resolve({
-                        type: 'view', name: 'test_grid', state: 'active',
-                        metadata: JSON.stringify({ ...sampleView, label: 'Org Alpha' }),
-                    });
-                }
-                if (opts?.where?.organization_id === null) {
-                    return Promise.resolve({
-                        type: 'view', name: 'test_grid', state: 'active',
-                        metadata: JSON.stringify({ ...sampleView, label: 'Env Default' }),
-                    });
-                }
-                return Promise.resolve(null);
-            });
+    describe('[ADR-0131 D6] no read serves a legacy organization row', () => {
+        // The per-organization overlay axis is retired: every metadata read is
+        // environment → code. A legacy organization-scoped row of the same
+        // `(type, name)` as an environment row is not read at all — not even
+        // when a caller still names its organization.
+        const orgOrEnv = (orgBody: unknown, envBody: unknown) => (_table: string, opts: any) => {
+            if (opts?.where?.organization_id === 'org_alpha') return Promise.resolve(orgBody);
+            if (opts?.where?.organization_id === null) return Promise.resolve(envBody);
+            return Promise.resolve(Array.isArray(envBody) ? [] : null);
+        };
 
+        it('getMetaItem serves the environment row, and never asks for the organization\'s', async () => {
+            mockEngine.findOne.mockImplementation(orgOrEnv(
+                { type: 'view', name: 'test_grid', state: 'active', metadata: JSON.stringify({ ...sampleView, label: 'Org Alpha' }) },
+                { type: 'view', name: 'test_grid', state: 'active', metadata: JSON.stringify({ ...sampleView, label: 'Env Default' }) },
+            ));
             const result = await protocol.getMetaItem({
                 type: 'view', name: 'test_grid', organizationId: 'org_alpha',
-            });
-            expect((result.item as any).label).toBe('Org Alpha');
-            // ADR-0005 resolution order: overlay WINS, it does not merge. The
-            // env-wide partition is never reached once the org row answers —
-            // the assertion the prose above used to make in a comment only.
-            expect(mockEngine.findOne).not.toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'view', name: 'test_grid', state: 'active', organization_id: null },
-            });
-        });
-
-        it('getMetaItem falls through to env-wide overlay when no org-specific row exists', async () => {
-            mockEngine.findOne.mockImplementation((_table: string, opts: any) => {
-                if (opts?.where?.organization_id === null) {
-                    return Promise.resolve({
-                        type: 'view', name: 'test_grid', state: 'active',
-                        metadata: JSON.stringify({ ...sampleView, label: 'Env Default' }),
-                    });
-                }
-                return Promise.resolve(null);
-            });
-            const result = await protocol.getMetaItem({
-                type: 'view', name: 'test_grid', organizationId: 'org_alpha',
-            });
+            } as { type: string; name: string });
             expect((result.item as any).label).toBe('Env Default');
-            // ⚠️ NON-VACUITY, and the reason this case had to move too. A
-            // fall-through only states something if the org partition was
-            // actually read FIRST. Left on `app` this case kept passing after
-            // commit d5cbb44f3 while measuring nothing at all: the gate resolves `app` to
-            // `undefined`, so the only read ever issued was the env-wide one and
-            // the assertion could no longer fail.
-            expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'view', name: 'test_grid', state: 'active', organization_id: 'org_alpha' },
-                // [#21911] The platform store read carries the explicit system opt-in.
-                context: { isSystem: true },
-            });
+            for (const [table, query] of mockEngine.findOne.mock.calls) {
+                if (table === 'sys_metadata') expect((query as any)?.where?.organization_id ?? null).toBeNull();
+            }
         });
 
-        // [commit 96326040f] Re-spelled from `app` to `view`, the READ-side twin of the
-        // `[#6190]` re-spelling three cases up — same reason, one verb over.
-        // `getMetaItems` now resolves its own read scope through
-        // `organizationIdForMetaRead`, so an `organizationId` handed in for a
-        // type the registry declares NON-overridable is gated to `undefined`
-        // and the org partition is never queried. `app` rolled back to
-        // `allowOrgOverride: false` in commit ee58392e1, so on `app` this case was
-        // asserting a union the platform must NOT perform: the org rows it
-        // seeded are the pre-#6190 phantoms `loadMetaFromDb` walks past, and
-        // reading them back is the resurrection commit 96326040f closed.
-        //
-        // The CLAIM is unchanged and is what this case still pins — env-wide
-        // and org rows union, org winning on collision. It just has to be
-        // measured on a type that has an org partition to union.
-        //
-        // ⚠️ SUPERSEDED, 2026-09-03 (commit d5cbb44f3). This paragraph used to read "Its
-        // two `getMetaItem` (SINGULAR) siblings above keep `app` deliberately:
-        // that verb is untouched here." That was true when commit 96326040f landed and is
-        // the sentence commit d5cbb44f3 falsified: the singular verb now gates too, so
-        // both siblings moved to `view` in the same edit. The reasoning it gave
-        // — a singular caller CAN be right about its scope, and its REST door
-        // already gates — held for the DOOR and not for the VERB: commit d5cbb44f3
-        // measured four runtime callers that reach the verb with a raw active
-        // organization, and on a `??` precedence read an ungated organization
-        // does not merely ADD a row, it SUBSTITUTES the served document.
-        it('getMetaItems unions env-wide and org-specific rows (org wins on collision)', async () => {
-            mockEngine.find.mockImplementation((_table: string, opts: any) => {
-                if (opts?.where?.organization_id === 'org_alpha') {
-                    return Promise.resolve([
-                        { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Org Alpha' }) },
-                        { type: 'view', name: 'alpha_only', state: 'active', metadata: JSON.stringify({ name: 'alpha_only', label: 'Alpha Only' }) },
-                    ]);
-                }
-                if (opts?.where?.organization_id === null) {
-                    return Promise.resolve([
-                        { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Env Default' }) },
-                        { type: 'view', name: 'env_only', state: 'active', metadata: JSON.stringify({ name: 'env_only', label: 'Env Only' }) },
-                    ]);
-                }
-                return Promise.resolve([]);
-            });
-            const result = await protocol.getMetaItems({
-                type: 'view', organizationId: 'org_alpha',
-            });
+        it('getMetaItems lists the environment rows only, whatever organization the caller names', async () => {
+            mockEngine.find.mockImplementation(orgOrEnv(
+                [
+                    { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Org Alpha' }) },
+                    { type: 'view', name: 'alpha_only', state: 'active', metadata: JSON.stringify({ name: 'alpha_only', label: 'Alpha Only' }) },
+                ],
+                [
+                    { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Env Default' }) },
+                    { type: 'view', name: 'env_only', state: 'active', metadata: JSON.stringify({ name: 'env_only', label: 'Env Only' }) },
+                ],
+            ));
+            const result = await protocol.getMetaItems({ type: 'view', organizationId: 'org_alpha' } as { type: string });
             const names = (result.items as any[]).map((i) => i.name).sort();
-            expect(names).toEqual(['alpha_only', 'env_only', 'shared']);
-            const shared = (result.items as any[]).find((i) => i.name === 'shared');
-            expect(shared.label).toBe('Org Alpha');
+            expect(names).toEqual(['env_only', 'shared']);
+            expect((result.items as any[]).find((i) => i.name === 'shared').label).toBe('Env Default');
         });
     });
 
@@ -1051,18 +969,20 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         });
 
         it('keeps both colliding rows when EACH package has its own sys_metadata overlay (ADR-0048 #1828)', async () => {
+            // [ADR-0131 D6] `dashboard`, a regime-O type: an environment overlay of a
+            // packaged `page` is sealed content now, which no read serves.
             // The #1828 gap: two installed packages ship `page/home` AND each has
             // a package-scoped sys_metadata overlay. The DB-overlay merge deduped
             // by bare `name`, collapsing the two rows to one (last-write-wins).
             // Each overlay must merge onto its OWN package's entry → two rows.
-            registry.registerItem('page', { name: 'home', label: 'Acme (artifact)' }, 'name', 'com.acme.crm');
-            registry.registerItem('page', { name: 'home', label: 'Globex (artifact)' }, 'name', 'com.globex.crm');
+            registry.registerItem('dashboard', { name: 'home', label: 'Acme (artifact)' }, 'name', 'com.acme.crm');
+            registry.registerItem('dashboard', { name: 'home', label: 'Globex (artifact)' }, 'name', 'com.globex.crm');
             mockEngine.find.mockResolvedValue([
-                { type: 'page', name: 'home', state: 'active', package_id: 'com.acme.crm', metadata: JSON.stringify({ name: 'home', label: 'Acme (overlay)' }) },
-                { type: 'page', name: 'home', state: 'active', package_id: 'com.globex.crm', metadata: JSON.stringify({ name: 'home', label: 'Globex (overlay)' }) },
+                { type: 'dashboard', name: 'home', state: 'active', package_id: 'com.acme.crm', metadata: JSON.stringify({ name: 'home', label: 'Acme (overlay)' }) },
+                { type: 'dashboard', name: 'home', state: 'active', package_id: 'com.globex.crm', metadata: JSON.stringify({ name: 'home', label: 'Globex (overlay)' }) },
             ]);
 
-            const result = await protocol.getMetaItems({ type: 'page' });
+            const result = await protocol.getMetaItems({ type: 'dashboard' });
             const homes = (result.items as any[]).filter((i) => i.name === 'home');
 
             expect(homes).toHaveLength(2);
@@ -1097,15 +1017,17 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         });
 
         it('single-package env-wide (package-less) overlay still overlays the artifact (ADR-0005 unchanged, #1828)', async () => {
+            // [ADR-0131 D6] `dashboard`, a regime-O type: an environment overlay of a
+            // packaged `page` is sealed content now, which no read serves.
             // A package-less overlay (package_id IS NULL) must still WIN over the
             // one artifact it customizes and stay a single row — the package-aware
             // merge must not split a global overlay off from its lone artifact.
-            registry.registerItem('page', { name: 'home', label: 'Artifact' }, 'name', 'com.acme.crm');
+            registry.registerItem('dashboard', { name: 'home', label: 'Artifact' }, 'name', 'com.acme.crm');
             mockEngine.find.mockResolvedValue([
-                { type: 'page', name: 'home', state: 'active', package_id: null, metadata: JSON.stringify({ name: 'home', label: 'Customized' }) },
+                { type: 'dashboard', name: 'home', state: 'active', package_id: null, metadata: JSON.stringify({ name: 'home', label: 'Customized' }) },
             ]);
 
-            const result = await protocol.getMetaItems({ type: 'page' });
+            const result = await protocol.getMetaItems({ type: 'dashboard' });
             const homes = (result.items as any[]).filter((i) => i.name === 'home');
 
             expect(homes).toHaveLength(1);

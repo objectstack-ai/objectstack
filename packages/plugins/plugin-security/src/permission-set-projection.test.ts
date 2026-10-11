@@ -611,7 +611,7 @@ describe('package-owned set customization lifecycle (ADR-0094 D5-R)', () => {
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
     seedLegacyOverlay(ql, 'organization_admin', envBody({ systemPermissions: ['legacy.overlay'] }));
 
-    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'organization_admin', state: 'active', organizationId: null });
+    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'organization_admin', state: 'active' });
     expect(JSON.parse(ql.permRows[0].system_permissions), 'the legacy overlay still wins at read time').toEqual(['legacy.overlay']);
 
     await protocol.deleteMetaItem({ type: 'permission', name: 'organization_admin' });
@@ -808,7 +808,7 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     // name (ADR-0094 D5-R). The invariant under test is unchanged: the record
     // is projected from the overlay, and the data-door delete resets it.
     seedLegacyOverlay(ql, 'organization_admin', envBody({ systemPermissions: ['overlaid'] }));
-    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'organization_admin', state: 'active', organizationId: null });
+    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'organization_admin', state: 'active' });
     expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['overlaid']);
     const mw = makeMiddleware(ql, protocol);
     const nextCalled = await run(mw, {
@@ -936,7 +936,7 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     // The invariant under test is untouched: "delete" lifts the overlay and
     // the record resets to the shipped declaration.
     seedLegacyOverlay(ql, 'crm_rep', envBody({ name: 'crm_rep', systemPermissions: ['customized'] }));
-    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'crm_rep', state: 'active', organizationId: null });
+    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'crm_rep', state: 'active' });
     expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['customized']);
     // "delete" = reset
     const nextCalled = await run(mw, { object: 'sys_permission_set', operation: 'delete', options: { where: { id: 'ps_pkg' } }, context: userCtx });
@@ -990,7 +990,7 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
       package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]',
     });
     seedLegacyOverlay(pkgQl, 'crm_rep', envBody({ name: 'crm_rep', systemPermissions: ['customized'] }));
-    await projectPermissionMutation(pkgProtocol, { ql: pkgQl }, { type: 'permission', name: 'crm_rep', state: 'active', organizationId: null });
+    await projectPermissionMutation(pkgProtocol, { ql: pkgQl }, { type: 'permission', name: 'crm_rep', state: 'active' });
     const pkgCtx: any = {
       object: 'sys_permission_set',
       operation: 'delete',

@@ -982,6 +982,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
     expect(classified.sort()).toEqual([
       'dispatcher-domain:route-ledger.ts:/actions',
       'dispatcher-domain:route-ledger.ts:/analytics',
+      // [#22576] classified by `approval-action-token`.
+      'dispatcher-domain:route-ledger.ts:/approvals/act',
       'dispatcher-domain:route-ledger.ts:/automation',
       // [#22432] classified by `anonymous-deny-i18n`.
       'dispatcher-domain:route-ledger.ts:/i18n',

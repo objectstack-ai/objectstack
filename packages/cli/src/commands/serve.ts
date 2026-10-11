@@ -178,7 +178,9 @@ import {
   createRuntimeAssetsPlugin,
   type ConsoleShaDrift,
 } from '../utils/console.js';
-import dotenvFlow from 'dotenv-flow';
+// [#22579] The project's `.env*` files, loaded by the one function `os migrate`'s
+// boot (`bootSchemaStack`) loads them through too.
+import { loadProjectEnvFiles } from '../utils/schema-migrate.js';
 // Metric NAMES and the metrics-service name, from the package that owns both.
 // `buildServeObservability()` below reaches the same package through a dynamic
 // `import()` with a "not installed — silently skip" catch; this STATIC import
@@ -2145,11 +2147,12 @@ export default class Serve extends Command {
       this.exit(1);
     }
 
-    // Load .env files following Vite/Next.js convention
-    const mode = flags.dev ? 'development'
-      : (process.env.NODE_ENV === 'test' ? 'test'
-        : (process.env.NODE_ENV || 'production'));
-    dotenvFlow.config({ node_env: mode, silent: true });
+    // Load .env files following Vite/Next.js convention: dotenv-flow, mode
+    // `development` under `--dev`, else `NODE_ENV` (`production` when unset).
+    // [#22579] Through `loadProjectEnvFiles`, the load `os migrate`'s one-shot
+    // boot runs, so the two boots cannot read different files for one project;
+    // `utils/boot-preparation-parity.test.ts` holds every preparation step to that.
+    loadProjectEnvFiles(process.cwd(), { dev: flags.dev });
 
     // ── Tenancy-posture boot gate (#5359) ────────────────────────────
     // Resolve the posture ONCE, here, and refuse an unrecognized value
@@ -2179,7 +2182,7 @@ export default class Serve extends Command {
     // swallowing catch below turns back into a warning.
     //
     // Placement is load-bearing twice over:
-    //   • AFTER `dotenvFlow.config()` — OS_TENANCY_POSTURE is routinely set in
+    //   • AFTER the `.env` load above — OS_TENANCY_POSTURE is routinely set in
     //     a `.env` file, and a gate above that load would read it as unset,
     //     pass, and hand the invalid value straight back to the swallowing path.
     //   • OUTSIDE every `try` in this method, so nothing can demote it.
@@ -2556,12 +2559,19 @@ export default class Serve extends Command {
       //
       // [#22405] WHERE the flat set lands is `placeCollectedDocs`'s decision,
       // the one `os build` makes: on a multi-package config it rides the body
-      // of the package whose id is the stack's `manifest.id`, because this boot
-      // registers package bodies and never the top level of such a config, so a
-      // flat doc left there is served by nothing and warned about by nothing.
-      // With no owner (no `packages[]`, or a `manifest.id` naming no single
-      // entry) it stays on the top level, exactly as before. Inline top-level
-      // docs never move; the name dedupe below runs only over what stays.
+      // of the package whose id is the stack's `manifest.id`. With no owner (no
+      // `packages[]`, or a `manifest.id` naming no single entry) it stays on the
+      // top level, exactly as `os build` keeps it. Inline top-level docs never
+      // move; the name dedupe below runs only over what stays.
+      //
+      // [#22521] This is PLACEMENT, not the residual rule, and it stays: what
+      // remains on the top level of a multi-package config is registered under
+      // `manifest.id` with a warning by the metadata door's one residual rule
+      // (`AppPlugin` → `MetadataPlugin.registerUnclaimedTopLevel`). Measured
+      // with this placement withheld, the flat pages of a stack whose
+      // `manifest.id` names one package are still served under that id, but as
+      // a residual, so the config boot warns where the artifact boot of the same
+      // project — whose `os build` placed them on the body — does not.
       if (!useArtifactFallback) {
         try {
           const { collectDocsFromSrc, placeCollectedDocs } = await import('../utils/collect-docs.js');

@@ -30,9 +30,10 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { childEnv, randomPort, runServe, type ServeRun } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -122,6 +123,43 @@ let root: string;
 let scaffold: { code: number; output: string };
 let boot: ServeRun | undefined;
 
+/**
+ * Align the scaffold's `engines.protocol` with the protocol of the runtime this
+ * file boots: the WORKSPACE `@objectstack/spec`, whose `PROTOCOL_MAJOR` this
+ * reads.
+ *
+ * The template stamps the protocol of the packages a real project INSTALLS,
+ * which is the published line (`create-objectstack`'s own major). That is
+ * right for users: the Scaffold E2E gate installs from the registry and refuses
+ * any other range. This file installs nothing — the project resolves the
+ * workspace copies — so in a Changesets pre-mode window, where
+ * `PROTOCOL_VERSION` moves ahead of the version pass (packages at 17.x beside
+ * protocol 18), the pair it boots is one no user has: a published-line scaffold
+ * on a next-major runtime. The handshake refuses that pair before a single boot
+ * diagnostic is printed, and this file goes red on the setup rather than the
+ * budget (review 6099406666 on #22622). So the setup aligns the pair it boots.
+ *
+ * Only the major's digits are rewritten. Outside such a window the template
+ * already stamps `'^PROTOCOL_MAJOR'`, and the file is left byte-for-byte as
+ * scaffolded.
+ *
+ * A direct rewrite of this one key, not `objectstack migrate meta --from N
+ * --write`, the step the refusal prescribes: that codemod refuses to edit any
+ * file under a `node_modules` path segment, and this project lives under this
+ * package's `node_modules` so that its imports resolve. Measured on a scaffold
+ * there: exit 0, "not written [outside-project]", config unchanged.
+ */
+function alignProtocolRange(configPath: string): void {
+  const source = readFileSync(configPath, 'utf8');
+  const stamp = /engines:\s*\{\s*protocol:\s*'\^(\d+)'\s*\}/;
+  if (!stamp.test(source)) {
+    throw new Error(`${configPath} declares no engines.protocol stamp, so the pair this file boots cannot be aligned`);
+  }
+  const aligned = source.replace(stamp, (literal, major: string) =>
+    literal.replace(`'^${major}'`, `'^${PROTOCOL_MAJOR}'`));
+  if (aligned !== source) writeFileSync(configPath, aligned);
+}
+
 function scaffoldProject(cwd: string): Promise<{ code: number; output: string }> {
   return new Promise((resolveRun) => {
     execFile(
@@ -141,6 +179,7 @@ beforeAll(async () => {
   scaffold = await scaffoldProject(root);
   if (scaffold.code !== 0) return;
   const dir = join(root, PROJECT);
+  alignProtocolRange(join(dir, 'objectstack.config.ts'));
   writeFileSync(join(dir, 'src', 'objects', 'ticket.object.ts'), TICKET_OBJECT);
   appendFileSync(join(dir, 'src', 'objects', 'index.ts'), "export { Ticket } from './ticket.object.js';\n");
   writeFileSync(join(dir, 'src', 'actions', 'ticket.actions.ts'), TICKET_ACTIONS);

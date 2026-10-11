@@ -180,8 +180,6 @@ Three pieces author it:
   id: 'manager_review', type: 'approval', label: 'Manager Review',
   config: { approvers: [{ type: 'position', value: 'manager' }], lockRecord: true, maxRevisions: 2 },
 },
-// No config and no `waitEventConfig`: the window ends on the submitter's
-// explicit resubmit, not on a signal or a timer.
 { id: 'wait_revision', type: 'approval_revise', label: 'Awaiting Revision' },
 // …among the approval's edges…
 { id: 'rev',  source: 'manager_review', target: 'wait_revision',  label: 'revise' },
@@ -379,5 +377,7 @@ These are wired on the **graph**, not in node config:
    edits while pending — otherwise approvers chase a moving target.
 4. **Model rejection as a visible branch** — a back-edge to revise, or an `end`
    node to terminate. The path is on the diagram, not hidden in config.
-5. **Notify from downstream nodes** wired to the `approve` / `reject` edges
-   rather than expecting the node to send mail itself.
+5. **Notify the submitter from downstream nodes** wired to the `approve` /
+   `reject` edges. Opening already tells each resolved approver
+   (`approval.requested`); ⛔ no `notify` node for the opening: it tells
+   them twice.

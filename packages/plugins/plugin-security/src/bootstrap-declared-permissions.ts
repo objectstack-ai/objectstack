@@ -62,12 +62,14 @@ import {
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import {
   createSeedWriteRefusals,
+  reportSeedWriteRefusals,
+  type SeedWriteRefusals,
+} from './write-refusals.js';
+import {
   resolveOwnOrganizationRow,
   seedCtx,
   warnOrganizationLessRows,
-  reportSeedWriteRefusals,
-  type SeedWriteRefusals,
-} from './per-organization-catalog.js';
+} from './organization-scope.js';
 import {
   permissionSetNameCollisionDiagnostic,
   permissionSetNameIsForeign,

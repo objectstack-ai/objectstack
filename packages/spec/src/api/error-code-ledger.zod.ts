@@ -1118,8 +1118,27 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/service-analytics': [
     'CUBE_NOT_FOUND',
     'DATASET_INVALID',             // [#5367] dataset/selection refusal raised by `dataset-refusal.ts`
+    // [#22634] The generic-exit gate (`api-exposure-door.ts`) stamps the data
+    // door's two exposure codes. Measured on the wire: `/analytics/query` and
+    // `/analytics/sql` through the runtime dispatcher, `/analytics/dataset/query`
+    // through rest. `@objectstack/rest` keeps its own rows for the data door.
+    'OBJECT_API_DISABLED',
+    'OBJECT_API_METHOD_NOT_ALLOWED',
     'RAW_SQL_UNSUPPORTED',
     'READ_SCOPE_COMPILE_FAILED',   // [#5367] RLS read-scope lowering failed fail-closed — a SERVER fault (500), never the caller's
+  ],
+  '@objectstack/mcp': [
+    // [#22664] The stdio data bridge's exposure gate (`stdio-data-bridge.ts`,
+    // `enforceApiExposure`) stamps the data door's two exposure codes onto the
+    // thrown `McpExposureError.code` — 404 for `apiEnabled: false`, 405 with
+    // `allowedOperations` for a whitelist that does not grant the verb — before
+    // every stdio data verb and the ADR-0101 record resource. The stdio data
+    // tools flatten the throw to its message (`errorResult(messageOf(err))`),
+    // so no MCP result carries the code today: a `door: 'none'` row under the
+    // "door or no door" ruling above. `@objectstack/rest` keeps its own rows
+    // for the data door.
+    'OBJECT_API_DISABLED',
+    'OBJECT_API_METHOD_NOT_ALLOWED',
   ],
   '@objectstack/service-datasource': [
     'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service
@@ -1864,6 +1883,16 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       'BOTH doors recognise one shape and answer it 400 with its `fields[]`, never 500; the ' +
       'throws are served under the emitting doors\' own registrations (runtime\'s ' +
       'dispatcher exits, rest\'s `mapDataError` — both packages list the code).',
+  },
+  {
+    package: '@objectstack/types',
+    code: 'UNIQUE_SCOPE_CONFIRMATION_REQUIRED',
+    registeredUnder: '@objectstack/cloud-connection',
+    reason: 'Shared constant one package over: `GLOBAL_UNIQUE_CONFIRMATION_REQUIRED` ' +
+      '(unique-scope-install-gate.ts) spells the string beside the ADR-0120 D5e posture ' +
+      'gate it names, and the one stamp is the marketplace install seam\'s 409 ' +
+      '(`marketplace-install-local-plugin.ts`), which answers it on the plugin\'s own Hono ' +
+      'route — the cloud-connection row records that door. Types ships no door.',
   },
   {
     package: '@objectstack/core',

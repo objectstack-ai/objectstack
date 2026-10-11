@@ -122,6 +122,9 @@ export const GRANTS_CACHE_WATCHED_OBJECTS: ReadonlySet<string> = new Set([
   'sys_position_permission_set',
   'sys_permission_set',
   'sys_user',
+  // [ADR-0131 D3, ADR-0126 §4] The activation ledger: a position or permission
+  // set switched off there stops granting (`readDisabledCatalogNames`).
+  'sys_metadata_activation',
 ]);
 
 interface GrantsCacheEntry {

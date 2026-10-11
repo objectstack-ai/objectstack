@@ -45,13 +45,17 @@
 import { securityBuiltinPositions } from './builtin-positions.js';
 import {
   createSeedWriteRefusals,
-  resolveOwnOrganizationRow,
-  rowMatchesDeclaration,
-  seedCtx,
-  warnOrganizationLessRows,
   reportSeedWriteRefusals,
   type SeedLogger,
   type SeedWriteRefusals,
+} from './write-refusals.js';
+import {
+  resolveOwnOrganizationRow,
+  seedCtx,
+  warnOrganizationLessRows,
+} from './organization-scope.js';
+import {
+  rowMatchesDeclaration,
 } from './per-organization-catalog.js';
 
 function genId(prefix: string): string {

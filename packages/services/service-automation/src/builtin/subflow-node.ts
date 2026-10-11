@@ -5,7 +5,7 @@ import { defineActionDescriptor, SubflowConfigSchema } from '@objectstack/spec/a
 import type { SubflowConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
-import { interpolate } from './template.js';
+import { resolveValueSlotMap } from './value-slot-map.js';
 import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 
@@ -15,8 +15,9 @@ const MAX_SUBFLOW_DEPTH = 16;
 /**
  * `subflow` built-in node — invoke another flow as a step (reuse / DRY).
  *
- * Resolves `config.input` (a `{token}` mapping) against the parent's variables,
- * runs `config.flowName` via the engine, and writes the child's output back to
+ * Resolves `config.input` — a value-slot map (#19939): each value a CEL value
+ * envelope evaluated against the parent's variables, or a literal — runs
+ * `config.flowName` via the engine, and writes the child's output back to
  * the parent — under `${nodeId}.output`, and under `config.outputVariable` as a
  * bare variable when given.
  *
@@ -83,8 +84,14 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
         );
       }
 
-      // Map inputs (resolve `{var}` against the parent's variables/context).
-      const params = interpolate(cfg.input ?? {}, variables, context ?? ({} as AutomationContext)) as Record<string, unknown>;
+      // [#19939] Map inputs — `input.*` is a value slot (#11182 ruling D): an
+      // envelope is evaluated in the PARENT's scope and handed over as the raw
+      // value it computes (a list stays a list); every other value is a
+      // literal. `parseNodeConfig` above has already refused a `{token}` of the
+      // retired template dialect. A key handed over is SUPPLIED — `null`
+      // included — so it wins over the child variable's `defaultValue`; a key
+      // left out lets the default apply (`seedDeclaredVariables`).
+      const params = resolveValueSlotMap(engine, cfg.input, variables, 'input', context ?? ({} as AutomationContext));
 
       const outVar = cfg.outputVariable || undefined;
 

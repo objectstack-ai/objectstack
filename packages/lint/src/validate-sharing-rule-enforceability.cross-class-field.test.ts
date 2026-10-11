@@ -19,10 +19,23 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  validateSharingRuleEnforceability,
+  validateSharingRuleEnforceability as validateSharingRuleEnforceabilityUnrecorded,
   SHARING_RULE_UNLOWERABLE_CONDITION,
 } from './validate-sharing-rule-enforceability.js';
 import { runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is the id's `os explain` entry. Every call below records what it
+// fired, and the last case in this file holds each recorded verdict to one
+// line of at most 200 characters. Run the whole file: that case reads what the
+// cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateSharingRuleEnforceability: typeof validateSharingRuleEnforceabilityUnrecorded = (...args) => {
+  const findings = validateSharingRuleEnforceabilityUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 const deal = {
   name: 'deal',
@@ -70,15 +83,16 @@ const OPERATORS: ReadonlyArray<{ op: string; spell: (a: string, b: string) => st
   { op: '<=', spell: (a, b) => `record.${a} <= record.${b}`, quoted: '<=' },
 ];
 
+/** How the finding names each cell's column: its class, or why it has none. */
 const CELLS = [
-  { cell: 'text vs number', field: 'amount', names: ["`status` is declared `type: 'text'`, compared as text", "`amount` is declared `type: 'number'`, compared as a number"] },
-  { cell: 'text vs a single image', field: 'photo', names: ["`photo` is declared `type: 'image'`, a file field"] },
-  { cell: 'text vs a formula field', field: 'is_open', names: ["`is_open` is declared `type: 'formula'`, a formula field"] },
+  { cell: 'text vs number', field: 'amount', side: 'a number' },
+  { cell: 'text vs a single image', field: 'photo', side: 'a file field' },
+  { cell: 'text vs a formula field', field: 'is_open', side: 'a formula field' },
 ] as const;
 
 describe('validateSharingRuleEnforceability — a field compared with a field of another class is REFUSED (#20347)', () => {
   for (const { op, spell, quoted } of OPERATORS) {
-    for (const { cell, field, names } of CELLS) {
+    for (const { cell, field, side } of CELLS) {
       for (const order of ['text first', 'text second'] as const) {
         const [left, right] = order === 'text first' ? ['status', field] : [field, 'status'];
         const condition = spell(left, right);
@@ -89,12 +103,11 @@ describe('validateSharingRuleEnforceability — a field compared with a field of
           ]);
           const [finding] = findings;
           expect(finding.where).toBe('sharing rule "deal_desk_share" on object "deal"');
-          expect(finding.message).toContain(
-            `Sharing-rule condition \`${condition}\` lowers, but compares two fields that share no comparison ` +
-              `class: \`record.${left} ${quoted} record.${right}\`, where `,
+          const why = order === 'text first' ? `text vs ${side}` : `${side} vs text`;
+          expect(finding.message).toBe(
+            `condition compares \`record.${left} ${quoted} record.${right}\`, which no comparison class spans ` +
+              `(${why}), so its criteria query is refused (INVALID_FILTER / 400) and it grants nothing`,
           );
-          for (const name of names) expect(finding.message).toContain(name);
-          expect(finding.message).toContain('The rule is declared and grants nothing.');
           expect(finding.hint).toMatch(/^Compare a field only with a field of the same comparison class: /);
         });
       }
@@ -126,14 +139,16 @@ describe('validateSharingRuleEnforceability — one comparison, one finding (#20
     const findings = validateSharingRuleEnforceability(stackWith('record.photo != record.tags'));
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain('holds a list or an object');
-    expect(findings[0].message).not.toContain('share no comparison class');
+    expect(findings[0].message).not.toContain('which no comparison class spans');
   });
 
   it('two defects in one condition — a list and a class mismatch — earn one finding each', () => {
     const findings = validateSharingRuleEnforceability(stackWith('record.status != record.tags && record.close_date < record.signed_at'));
     expect(findings.map((f) => f.rule)).toEqual([SHARING_RULE_UNLOWERABLE_CONDITION, SHARING_RULE_UNLOWERABLE_CONDITION]);
     expect(findings[0].message).toContain('holds a list or an object');
-    expect(findings[1].message).toContain('share no comparison class: `record.close_date < record.signed_at`');
+    expect(findings[1].message).toContain(
+      'compares `record.close_date < record.signed_at`, which no comparison class spans (a date vs a datetime)',
+    );
   });
 
   it('judges nothing the graph cannot answer: an anchor outside the stack, a field map it cannot read', () => {
@@ -147,5 +162,24 @@ describe('validateSharingRuleEnforceability — one comparison, one finding (#20
     expect(cli.map((f) => ({ rule: f.rule, path: f.path }))).toEqual([
       { rule: SHARING_RULE_UNLOWERABLE_CONDITION, path: 'sharingRules[0].condition' },
     ]);
+  });
+});
+
+describe('[#22161] one-line verdicts', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: the cases above fired the cross-class
+    // verdict, so the shape assertion cannot pass over an empty record.
+    expect(fired.some((f) => f.message.includes('which no comparison class spans'))).toBe(true);
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries the class rule and the seeded-but-refused consequence the verdict no longer states', () => {
+    const text = explainRule(SHARING_RULE_UNLOWERABLE_CONDITION)?.paragraphs.join('\n') ?? '';
+    expect(text).toContain('Two columns are compared only within one comparison class');
+    expect(text).toContain('so the rule IS seeded into `sys_sharing_rule`, but every criteria query it runs is refused');
+    expect(text).toContain('The rule is declared and grants nothing.');
   });
 });

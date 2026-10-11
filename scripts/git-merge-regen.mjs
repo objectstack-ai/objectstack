@@ -20,7 +20,8 @@
  * The obvious implementation — "on conflict, run the generator" — is wrong, and
  * measurably so. Git invokes merge drivers **while** it is merging, in index
  * order, and the worktree still holds the pre-merge sources at that moment.
- * `packages/spec/spec-changes.json` sorts before `packages/spec/src/...`
+ * `packages/spec/spec-changes.json` (routed when this was measured; #22485
+ * deleted that committed copy and its route) sorts before `packages/spec/src/...`
  * (`'p' < 'r'`), so a driver that shelled out to `gen:spec-changes` would read a
  * `src/migrations/registry.ts` with the incoming side's retirements MISSING and
  * write a confidently wrong artifact. Verified directly:
@@ -639,7 +640,7 @@ function fail(msg) {
  *     x merge=os-regenX     \b: false   token: false    git: os-regenX
  *
  * Latent rather than live: no sibling driver with this prefix exists today, so
- * on the current file both spellings return the same 18 paths. It is worth
+ * on the current file both spellings return the same 16 paths. It is worth
  * anchoring anyway because `merge=os-regen-v2` is exactly how a second
  * generation of this driver would be introduced beside the first — and that is
  * the day `reconcileAttributes` reads the sibling's row as its own and reds
@@ -700,7 +701,7 @@ function reconcileAttributes() {
  *
  * `reconcileAttributes` above reads the LIVE `.gitattributes`, and no row in it
  * is routed to a sibling driver — there is no such driver yet. So the loose
- * predicate and the anchored one return the same 18 paths on this tree and
+ * predicate and the anchored one return the same 16 paths on this tree and
  * every assertion up there passes either way: the case that DISCRIMINATES them
  * cannot be built from the live file, only from a fixture. Same reason
  * `reconcileOwnership` exists beside `reconcileScripts`.
@@ -833,7 +834,7 @@ function reconcileScripts() {
  *
  * `reconcileScripts` above no longer rests on a single manifest. Rows that declare
  * no owner default to `DEFAULT_OWNER`; rows that declare `ROOT_OWNER` send the
- * lookup to the root manifest instead (measured on this tree: 18 rows — 16
+ * lookup to the root manifest instead (measured on this tree: 16 rows — 14
  * defaulted, 2 root-owned, none naming `DEFAULT_OWNER` explicitly). The four
  * `gen:`/`check:` names those two root-owned rows carry exist ONLY in the root
  * manifest, so reverting #13585's loosening would now turn that reconciliation RED

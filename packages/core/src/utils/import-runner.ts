@@ -8,7 +8,7 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
-import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError } from '@objectstack/types';
+import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -442,6 +442,27 @@ export function sanitizeRowError(raw: unknown): string {
  * the row: the door's `hint`, `object` and `developerMessage` are not keys of
  * `ImportRowResultSchema`. A finding on the thrown error still wins over the
  * door, as it does for `code` above.
+ *
+ * ## A sandboxed hook's refusal reads in the hook's words (#22694)
+ *
+ * A QuickJS hook body that refuses a row throws a `SandboxError` whose
+ * `.message` is the `hook '<name>' threw: Error: <sentence>` debug wrapper,
+ * written for the server log, and whose `.innerMessage` is the sentence the
+ * author addressed to the caller. The row used to be built from `.message`,
+ * so an import answered the wrapper where `POST /data/:object`, `/createMany`
+ * and every other door answer the sentence. The sentence is read through
+ * {@link sandboxBusinessMessage}, the one read those doors make (#11588) —
+ * ⛔ never a pattern-strip of the wrapper off `.message`, which would also
+ * rewrite a plain error whose own text happens to contain `threw:`.
+ *
+ * The sentence is taken whole, as the create door answers it, and is NOT
+ * passed through {@link sanitizeRowError}. That function cleans DRIVER text,
+ * and an author's sentence fed to it is paraphrased: one that opens with an
+ * SQL verb ("Update the cost centre first.") reads as a leaked statement and
+ * comes back as the generic database sentence. A body that CRASHED is not a
+ * refusal: {@link sandboxBusinessMessage} declines it, so its row is built
+ * exactly as before, from `.message` through {@link sanitizeRowError}. A
+ * `code` the body declared still rides, read from the error as it always was.
  */
 function toFailedResult(rowNo: number, err: unknown, objectName: string): ImportRowResult {
   const e = err as { code?: unknown; message?: unknown; fields?: unknown; field?: unknown } | null | undefined;
@@ -453,7 +474,7 @@ function toFailedResult(rowNo: number, err: unknown, objectName: string): Import
   const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
   const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
   const field = first?.field != null && first.field !== '' ? first.field : e?.field;
-  const message = sanitizeRowError(e?.message);
+  const message = sandboxBusinessMessage(err) ?? sanitizeRowError(e?.message);
   return {
     row: rowNo, ok: false, action: 'failed', error: message, code: String(code),
     ...(field != null && field !== '' ? { field: String(field) } : {}),

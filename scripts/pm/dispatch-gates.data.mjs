@@ -8,8 +8,9 @@
  * gate scripts' own sources, on every run of the engine beside this file. What IS hand-written is
  * below: the marker grammar vocabularies, the ledgers (whole-tree residue, compound anchors, governed
  * reads, escapable literals), the change-kind roster (convention-triggered gates, named by the KIND
- * of change rather than by a path), the model-tier globs and the tier ladder words. Each table keeps
- * the docblock that governs it; a row's reason is part of the row.
+ * of change rather than by a path), the model-tier globs, the tier ladder words and the generated-module
+ * sources (a git-ignored module's committed inputs). Each table keeps the docblock that governs it; a
+ * row's reason is part of the row.
  *
  * ⛔ No logic. A row that needs a function names it — a predicate by its key (`matches`, `except`),
  * a tier by its name (`tier`) — and the engine resolves the name at load, refusing one it does not
@@ -1256,3 +1257,43 @@ export const TIER_DEFAULT = 'opus';
  * — so the green above it is measured rather than vacuous.
  */
 export const RETIRED_TIER_WORDS = Object.freeze([]);
+
+/**
+ * ## A GENERATED, git-ignored module is reached through its committed SOURCES (#22554)
+ *
+ * `packages/spec/src/migrations/registry.ts` left git under ruling B on #22554:
+ * it is generated whole, on install and at build, from `registry.ts.template`
+ * and the per-entry files under `entries/`, and git never sees it. So the hint a
+ * gate's import yields — `packages/spec/src/migrations/registry`, or the
+ * module's full path where a gate spells it — names a file no card can touch.
+ * A card that changes what the module CONTAINS edits its sources instead, and
+ * with nothing here such a card derived none of the families that import the
+ * registry: the silent under-derivation #12514 repaired, back by another door.
+ *
+ * Each row names a generated module and its committed sources. The module's
+ * hint, spelled with or without a `MODULE_SPECIFIER_EXTENSIONS` extension,
+ * covers a source FILE or anything under a source DIRECTORY, and nothing more:
+ * not a sibling, not the generator, not the package manifest. The engine's
+ * `generatedModuleSources` finds a row and `hintCovers` applies it; the rows
+ * themselves are data, here, like every other declared table the engine reads.
+ *
+ * DECLARED rather than derived, and why. That a module is generated and
+ * git-ignored IS derivable from the tree (an untracked path `git check-ignore`
+ * covers). WHICH files it is generated from is written in one place only, its
+ * turbo task's `inputs` — and those also name the package manifest and the
+ * generator script, so reading them would hand every card that touches the spec
+ * manifest the registry's families: a widening this file prices per pair, and
+ * not the mapping ruled. So the sources are a declared row, and the self-test
+ * proves every row against the tree on each run — the module untracked and
+ * ignored by a TRACKED ignore file, every source tracked — so a row that stops
+ * being true reds instead of quietly matching nothing.
+ */
+export const GENERATED_MODULE_SOURCES = Object.freeze([
+  Object.freeze({
+    module: 'packages/spec/src/migrations/registry.ts',
+    sources: Object.freeze([
+      'packages/spec/src/migrations/registry.ts.template',
+      'packages/spec/src/migrations/entries',
+    ]),
+  }),
+]);

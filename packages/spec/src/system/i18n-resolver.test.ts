@@ -1605,7 +1605,7 @@ describe('translatePage', () => {
           { type: 'page:card', id: 'quick_create', properties: { title: 'Quick Create', icon: 'plus' } },
           { type: 'element:kpi', id: 'kpi_revenue_won', properties: { label: 'Revenue (Won)', value: 42 } },
           { type: 'page:card', id: 'ai_briefing', properties: { title: 'Ask the AI Assistant', description: 'Open the assistant panel from the right edge…' } },
-          { type: 'element:record_picker', id: 'lead_picker', properties: { object: 'lead', placeholder: 'Search leads…', emptyText: 'No records' } },
+          { type: 'element:record_picker', id: 'lead_picker', dataSource: { object: 'lead' }, properties: { placeholder: 'Search leads…', emptyText: 'No records' } },
           // Was `element:form` until #9249 retired that element whole, then a
           // bespoke type carrying the `submitLabel` pin until commit d173125fb, whose
           // ruling retired the key from the copy face, so the node now pins
@@ -1658,7 +1658,8 @@ describe('translatePage', () => {
       const out = translatePage(homePage(), homeBundle, { locale: 'zh-CN' });
       expect(byId(out, 'quick_create').properties.icon).toBe('plus');
       expect(byId(out, 'kpi_revenue_won').properties.value).toBe(42);
-      expect(byId(out, 'lead_picker').properties.object).toBe('lead');
+      // The picker's object is its node-level binding since v18 (#11509) — kept too.
+      expect(byId(out, 'lead_picker').dataSource.object).toBe('lead');
     });
 
     it('leaves a component with no entry — and one with no id — untouched', () => {

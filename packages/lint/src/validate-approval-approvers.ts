@@ -136,11 +136,23 @@ const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
  *     `packages/plugins` or `packages/runtime` projects it onto the column:
  *     measured 0, against a control (`SysScimGroup`) the same scan does find,
  *     so the scan discriminates.
- *   - Admin bulk import — NOT here, re-measured and unchanged.
- *     `admin-import-users.ts` matches `manager_id` 0 times against a control of
- *     `phone_number` 8, and `SYS_USER_IMPORT_UPDATE_FIELDS` is
- *     `{name, image, locale}` plus `phone_number` and `role`. Admitting the
- *     column to the import tier is ruled but is a separate change.
+ *   - Admin bulk import — AVAILABLE HERE, and the grade this block used to
+ *     give it ("NOT here") went stale when the import tier admitted the column.
+ *     `POST /api/v1/auth/admin/import-users` (`admin-import-users.ts`) reads a
+ *     `manager_id` column (`MANAGER_COLUMN`) whose cell holds the MANAGER'S
+ *     identity key — an email, or a phone number where the phone plugin is
+ *     wired — strips it from the row before the identity write, and links it in
+ *     a SECOND pass once every row of the batch exists, through
+ *     `applyUserManagerLink`, the derivation `set-user-manager` itself runs.
+ *     So it carries the endpoint's refusals (self-assignment, cycle, depth cap,
+ *     cross-organization, directory-owned identity); a link it cannot make is
+ *     reported on that row's `manager` result and never fails the user it
+ *     imported. `SYS_USER_IMPORT_UPDATE_FIELDS` is unchanged — the column rides
+ *     the second pass, ⛔ not the upsert patch. Measured by
+ *     `admin-import-users-manager-pass.test.ts`: a link to a manager created by
+ *     a LATER row lands, with a control where the manager does not exist yet.
+ *     It is the route to name for a whole file; a remedy that said otherwise
+ *     sent the author away from a supported path.
  *
  * ⇒ SCIM and directory sync stay NAMED, because a deployment running a real
  * one may well populate the column through it — but named as something the
@@ -182,7 +194,8 @@ const MANAGER_ONLY_REMEDY =
   `sys_user.manager_id is not a profile column — the data API's managed-update whitelist is ` +
   `{name, image, locale} and the column is readonly on the user form, so it is never populated by ` +
   `editing the user in the Console. It has a dedicated admin operation instead: a platform admin ` +
-  `POSTs { userId, managerId } to /api/v1/auth/admin/set-user-manager, with managerId set to null ` +
+  `uses Set Manager (Setup → Users, from the user's row menu or record header) or POSTs ` +
+  `{ userId, managerId } to /api/v1/auth/admin/set-user-manager, with managerId set to null ` +
   `to clear the link.`;
 
 /**
@@ -192,13 +205,18 @@ const MANAGER_ONLY_REMEDY =
 const MANAGER_ONLY_ROUTES =
   `That endpoint is the route this platform gives you, and it refuses a link that would make a ` +
   `user their own manager, close a cycle, run past the chain depth cap, or point across an ` +
-  `organization boundary. The column is also written by a seed, or by any other system-context ` +
+  `organization boundary. For many users at once, the admin bulk import ` +
+  `(POST /api/v1/auth/admin/import-users) reads a manager_id column holding the manager's ` +
+  `email address, or phone number where phone sign-in is enabled — someone in the same file or ` +
+  `an existing user — and links each row once every row in the file exists, through those same ` +
+  `refusals; a link it cannot make is reported on that row's manager result and never fails the ` +
+  `user it imported. The column is also written by a seed, or by any other system-context ` +
   `write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ` +
   `populate it too, but only through a provisioning path your own deployment supplies: this ` +
-  `platform declares the SCIM 'manager' attribute without projecting it onto the column, and its ` +
-  `admin bulk import does not write it either — and where an identity carries ` +
-  `source 'idp_provisioned' the admin operation refuses, leaving that directory the one surface ` +
-  `that authors its manager. Or declare onEmptyApprovers: 'fallback' on the node, with a ` +
+  `platform declares the SCIM 'manager' attribute without projecting it onto the column — and ` +
+  `where an identity carries source 'idp_provisioned' the admin operation refuses, the import's ` +
+  `manager_id column included, leaving that directory the one surface that authors its ` +
+  `manager. Or declare onEmptyApprovers: 'fallback' on the node, with a ` +
   `fallbackApprovers list: an empty manager rung then opens the request on those people instead ` +
   `of on a slot nobody can act on, which needs no write to the column at all.`;
 

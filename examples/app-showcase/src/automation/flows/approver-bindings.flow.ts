@@ -6,12 +6,15 @@ import { defineFlow } from '@objectstack/spec';
  * #3508 dogfood: one node per RECORD-BACKED approver kind.
  *
  * The designer's Approvers → Value control used to query the metadata registry
- * (`GET /api/v1/meta/:type`) for every kind. `user` / `team` / `department` /
- * `position` are DATA rows in the platform's directory objects, not registry
- * entries, so candidates came back empty and the control degraded to a free-text
- * box — the author could only hand-type a userid. `APPROVER_VALUE_BINDINGS`
- * now publishes the data contract per kind (`xRef.sources`), and the designer
- * renders a real record lookup off it.
+ * (`GET /api/v1/meta/:type`) for every kind. `user` / `team` / `department` are
+ * DATA rows in the platform's directory objects, not registry entries, so
+ * candidates came back empty and the control degraded to a free-text box — the
+ * author could only hand-type a userid. `position` is a registry binding
+ * (ADR-0131 D4): its candidates come from the position registry
+ * (`GET /api/v1/meta/position`), and the value committed is the position's
+ * machine name. `APPROVER_VALUE_BINDINGS` now publishes the data contract per
+ * kind (`xRef.sources`) — a record lookup for the directory kinds, the registry
+ * for `position` — for the designer to source each picker from.
  *
  * This flow is the authoring specimen for that surface: every kind whose control
  * changed gets a node, so opening it in the flow designer exercises each one.

@@ -169,9 +169,10 @@ export interface FlowNodeTextSlot {
  * single-brace dialect: a value-like position whose single token hands its
  * resolved value over with its TYPE (`recipients`, `actionUrl`, `sourceId`,
  * `payload`, `templateData`, a screen's `recordId` / `defaults` / field
- * `defaultValue`, `subflow.input`, `script.inputs`, `map.input`, `http`, the
- * `loop` / `map` `collection`, a `filter`) is not a text template, and the
- * value slots (`fields.*`, `assignments.*`) are CEL's (#19939).
+ * `defaultValue`, `http`, the `loop` / `map` `collection`, a `filter`) is not
+ * a text template, and the value slots (`fields.*`, `assignments.*`, and the
+ * callee maps `subflow.input.*`, `map.input.*`, `script.inputs.*`) are CEL's
+ * (#19939).
  */
 export const FLOW_NODE_TEXT_SLOTS: readonly FlowNodeTextSlot[] = [
   { nodeType: 'notify', key: 'title', label: 'notify title' },

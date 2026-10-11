@@ -758,6 +758,8 @@
     "UploadChunkResponseSchema": "api/UploadChunkResponse",
     "UploadProgress": "api/UploadProgress",
     "UploadProgressSchema": "api/UploadProgress",
+    "UploadScope": "api/UploadScope",
+    "UploadScopeSchema": "api/UploadScope",
     "UserProfileResponse": "api/UserProfileResponse",
     "UserProfileResponseSchema": "api/UserProfileResponse",
     "ValidateDataIssue": "api/ValidateDataIssue",

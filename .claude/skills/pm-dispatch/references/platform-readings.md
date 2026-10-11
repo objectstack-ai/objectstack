@@ -1,6 +1,6 @@
 # 平台读数事实表
 
-见 reading-discipline.md;本表是 GitHub API 与工具行为的读数事实,操作时查阅。
+见 reading-discipline.md;工具先行、文本其次:读数先落工具或自测行,工具守不住的才留本表。
 
 ## 队列成员资格与 auto-merge
 
@@ -88,7 +88,6 @@
 - `mergeable_state` 未落定时挂上的是经典 auto-merge、不入队,落定后再挂才入队。
 - `behind` 的 PR 照常入队:落后于 main 不是入队否决,⛔ 不为它先发 `pr_update_branch`。
 - `check_suite.completed` 会命名过期 head,check-run 也只属最后一次 push ⇒ 用前先重读当前 head。
-- 落地相邻的写侧一则:GitHub 标签描述上限 100 字符,超长写回 422,133 字的原文即不可存。
 
 ## API 配额
 
@@ -101,10 +100,7 @@
 - perPage 按预期 population 取,⛔ 不按习惯取 100:点数 ≈ 请求节点数除以 100。
 - 只要 `totalCount` 的健康指标取 perPage=1;只要最近 N 张就取 N。
 - 小时池之外还有分钟级二级限流:GraphQL 端点 2,000 点/分、并发 ≤100。
-- 官方指引:变更类请求间停 ~1 秒,mutation 按 5 倍计;批量写因此 ~1 秒一发。
-- 批量重分诊这类把写挤在同一秒的扫动,会在小时池仍绿时撞上分钟墙。
 - 中继读数:dispatch 后 5 s 建 run、17 s 起 job、22 s 评论落地、墙钟 31 s;上限 90 s / 5 min 不动。
-- `write-pace` 把一次 dispatch 记作那一笔写(40/时不变);`close-cards` 每步一次 dispatch。
 - REST 可达性是会话属性(GitHub App 会话门),⛔ 不是端点或席位类型的属性。
 - 开轮探一次、按班存档;探针必须是一条真 repo-scoped 读。
 - 门关着时 repo-scoped 路径整类回 403 `GitHub access is not enabled for this session`。
@@ -119,7 +115,6 @@
 - 调用方自带的 `Authorization` 头被代理覆盖;`HTTPS_PROXY` 端口打死也不切断网络。
 - ⇒ 容器内得出的 token 作用域结论 ⛔ 不迁移到出口未经代理的会话。
 - REST 写侧经出口代理必带 `Content-Type: application/json`,否则代理回 415 且一个字节都没写。
-- 判别式:该 415 的 `documentation_url` 指 Claude Code 不指 GitHub ⇒ 代理拒,不是 GitHub;四端点实测。
 - 两通道的信封在配额、权限、传输三样上都不同 ⇒ 任一侧的拒绝只是那一侧的读数。
 - 403 与传输失败要试过另一侧才说得出我没手段;限流先比身份,同 ID 的他侧不是手段。
 - 读数:`POST /actions/runs/{id}/rerun-failed-jobs` REST 回 403 而 MCP 回 201。
@@ -229,7 +224,6 @@
 - 隔轮旧读数是无效快照,按其回写静默剥别的标签;真追加走 REST `POST /issues/{n}/labels`。
 - `issue_write` 还清空每个未传字段(assignees 在内)⇒ 单字段更新必须把现值带齐重写。
 - 追加端点同样先过探针:403 会话没有真追加通道,只能整组替换。
-- 摘标签也没有加法端点:`finding` 定级这类只能整组写,carve-out 保留;写后照纪律回读。
 - PR 标签走 issue 形通道的三条读腿全盲、两条静默,PR 原生端点见腿 ④。
 - 腿 ①:`issue_read get_labels` 传 PR 号回 Could not resolve to an Issue。
 - REST 的 PR 也是 issue 惯例在此方法不成立;响亮失败即路由信号,改走腿 ③。
@@ -356,8 +350,6 @@
 - 调用不带 `body` 参数则页脚状态不动:`draft` 或 `title` 单字段更新既不删也不合成。
 - 正文把 harness 两行块叠在页脚之上,存回是三条署名块;单块形态才复现成一条。
 - ⇒ 形态随动作与送出体尾部变,改侧还随通道变;⛔ 不由任一条推其余,写后必回读。
-- 平台在尾部 `---` 前后正反两向归一空行:比对正文只按首个差异偏移,⛔ 不按长度。
-- 送全块即触发该归一 ⇒ `post-stamped` 的 `body` 档把这点空白判 `mutated`,净零字节良性告警。
 - 评论创建两通道都追加 58 字节 ⇒ 严格解析 `os-dev-report` 必须停在最后一个右花括号。
 - 评论 `PATCH` 重送含尾部页脚块的存储体是幂等的:逐字节一条页脚,与创建的追加相反。
 - PR 正文的 `Check Changeset` 门读 clause-② 声明宽容:其失败文案自述 `- `、`> `、`**` 前缀照读。
@@ -416,7 +408,6 @@
 - 无横线的裸页脚不算页脚:它被保留而整块另追加,总数二 ⇒ 恒一条只对上行两输入成立。
 - 该格两空:MCP 送裸页脚、`title`/`labels` 单字段 `issue_write` 是否动页脚,均未实测。
 - issue `PATCH` 同体带 `labels` 与 `type` 回 500 且零写入;拆两次写各 200,已带 type 的卡未实测。
-- 内联双引号 JSON 建卡:标题反引号标识符被 shell 以 root 展开,正文完好 —— 内容被执行。
 - heredoc 定界符不加引号会展开正文里每个反引号 ⇒ 请求体永不过会展开的 shell 上下文。
 - `cmd | tail; echo $?` 读到的是 `tail` 的状态 ⇒ 退出码在任何管道之前捕获。
 - CI job 的失败 step 不必与 job 名一致 ⇒ ⛔ 不由 job 名推原因,先读 step 名再下结论。

@@ -66,6 +66,7 @@ import {
   DEFAULT_BASE_REF,
   DEFAULT_BASE_REMOTE,
   ESCAPABLE_LITERAL_LEDGER,
+  GENERATED_MODULE_SOURCES,
   HARVEST_SNIPPET,
   INHERITED_POPULATION_MARKER,
   MANDATORY_TIER_GLOBS,
@@ -158,6 +159,7 @@ import {
   firstPartyImportTargets,
   followCompositeActions,
   gateFamilyFiles,
+  generatedModuleSources,
   globCarriesLiteralSuffix,
   globInNonFinalSegment,
   governedReadCensus,
@@ -165,6 +167,7 @@ import {
   hashCommentProgram,
   hintCovers,
   hintReachesTree,
+  ignoreVerdicts,
   i18nBundlePackageDirs,
   importBindsNoPopulation,
   isGateScriptPath,
@@ -2917,7 +2920,14 @@ export function selfTest({ tier = 'full' } = {}) {
   // Both `looseTarget` and `extensionlessModuleTarget` already refuse a hint
   // whose collapsed form the tree HAS as a path, so widening the population
   // adds no candidate; measured, it still selects the same 38.
-  const agreeCandidates = [...agreeHints];
+  //
+  // A hint on a GENERATED, git-ignored module (#22554) is out of this population
+  // by construction: the module is not a tracked file, so the strict rule names
+  // nothing, while the loose one names the tracked `registry.ts.template` beside
+  // it — not a module, and not what the import means. Such a hint reaches the
+  // tree through its declared committed sources (`GENERATED_MODULE_SOURCES`),
+  // pinned in its own case below, never through an extension.
+  const agreeCandidates = [...agreeHints].filter((h) => generatedModuleSources(collapseHint(h)) === null);
   const strictOf = (h) => extensionlessModuleTarget(h, agreeFileSet, agreePrefixes);
   const refusedByNarrowing = agreeCandidates.filter((h) => !strictOf(h) && looseTarget(h));
   t(
@@ -2985,6 +2995,50 @@ export function selfTest({ tier = 'full' } = {}) {
   // have taken back. Pinned here as well as above, because this card is the one
   // that would have broken it: `.base.json` is not a module extension.
   t('the sibling-file refusal survives the extension follow', !hintCovers('packages/spec/authorable-surface', 'packages/spec/authorable-surface.base.json'));
+
+  // ── A GENERATED, git-ignored module is reached through its SOURCES (#22554) ──
+  //
+  // The migration registry left git: its hint names a file no card can touch,
+  // and a card that changes what it contains edits the template or an entry.
+  // ARRIVAL pins on both kinds of source and both spellings of the hint; the
+  // CONTROL is the same hint against a migrations sibling and a lookalike of the
+  // source directory, and a NON-generated module's hint against an entry — the
+  // mapping belongs to the declared row and to nothing else.
+  const genHint = 'packages/spec/src/migrations/registry';
+  t(
+    "a generated module's hint reaches its committed sources: the template, and a file under entries/, by either spelling",
+    hintCovers(genHint, 'packages/spec/src/migrations/registry.ts.template') &&
+      hintCovers(genHint, 'packages/spec/src/migrations/entries/semantic/18.x.ts') &&
+      hintCovers(`${genHint}.ts`, 'packages/spec/src/migrations/entries/retired-keys/17.x.ts'),
+  );
+  t(
+    "CONTROL: and nothing else — not a sibling module, not a lookalike of the source directory, not another module's hint",
+    !hintCovers(genHint, 'packages/spec/src/migrations/chain.ts') &&
+      !hintCovers(genHint, 'packages/spec/src/migrations/entries-notes/x.ts') &&
+      !hintCovers('packages/spec/src/migrations/chain', 'packages/spec/src/migrations/entries/semantic/18.x.ts'),
+  );
+  // The row is DECLARED, so it is proven against the real tree on every run:
+  // the module untracked and ignored by a TRACKED ignore file, every source
+  // tracked. Committing the module again, or moving a source, reds here.
+  {
+    const genFiles = trackedFiles();
+    const genTracked = new Set(genFiles);
+    const genPrefixes = trackedPrefixes(genFiles);
+    const genIgnored = ignoreVerdicts(GENERATED_MODULE_SOURCES.map((row) => row.module));
+    const genBroken = GENERATED_MODULE_SOURCES.filter((row) => {
+      const verdict = genIgnored.get(row.module);
+      return (
+        genTracked.has(row.module) ||
+        verdict?.covered !== true ||
+        !genTracked.has(verdict.source) ||
+        !row.sources.every((source) => genPrefixes.has(source))
+      );
+    });
+    t(
+      `every GENERATED_MODULE_SOURCES row holds in this tree: module untracked and ignored by a tracked ignore file, each source tracked (broken: ${genBroken.map((row) => row.module).join(', ') || 'none'})`,
+      GENERATED_MODULE_SOURCES.length > 0 && genBroken.length === 0,
+    );
+  }
 
   // COHERENCE: the matcher and the residue cannot disagree about a file the
   // tree HAS. `extensionlessModuleTarget` exists to say "the tree has this
@@ -7236,7 +7290,7 @@ export function selfTest({ tier = 'full' } = {}) {
       'scripts/check-issue-citations.mjs:204 local-env',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
       'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
-      'scripts/pm/dispatch-gates.mjs:734 inherited-population',
+      'scripts/pm/dispatch-gates.mjs:736 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
   );

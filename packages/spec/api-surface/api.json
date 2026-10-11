@@ -1035,6 +1035,8 @@
     "UploadProgress (type)",
     "UploadProgressParsed (type)",
     "UploadProgressSchema (const)",
+    "UploadScope (type)",
+    "UploadScopeSchema (const)",
     "UserProfileResponse (type)",
     "UserProfileResponseParsed (type)",
     "UserProfileResponseSchema (const)",

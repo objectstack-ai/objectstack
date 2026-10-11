@@ -38,7 +38,7 @@ import {
   type QuickJSDeferredPromise,
   type QuickJSHandle,
 } from 'quickjs-emscripten';
-import { isNativeErrorName, resolveSandboxTimeoutMs } from '@objectstack/types';
+import { resolveSandboxTimeoutMs, sandboxBusinessMessage } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import type {
   ScriptContext,
@@ -303,6 +303,9 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // additive side-channel carrying the structured bits
       // (SANDBOX_ERROR_PASSTHROUGH) that the flattening discards, so a record
       // `ValidationError` keeps its `fields[]` on the way back out to the host.
+      // [#22588] `__errorRefusal` is the third channel, and as additive as the
+      // second: a NESTED refusal's sentence, relayed only when the body
+      // re-threw that error unchanged (see SANDBOX_REFUSAL_PROP).
       const REJECT_HANDLER =
         `function(e){
               globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
@@ -311,17 +314,22 @@ export class QuickJSScriptRunner implements ScriptRunner {
                   ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
+              try {
+                globalThis.__errorRefusal = (e && typeof e['${SANDBOX_REFUSAL_PROP}'] === 'string' && e.message === e['${SANDBOX_REFUSAL_OF_PROP}'])
+                  ? e['${SANDBOX_REFUSAL_PROP}']
+                  : undefined;
+              } catch (_) { globalThis.__errorRefusal = undefined; }
             }`;
       // A job body takes the hook's `(ctx)` wrapper (#21489): it has no input to
       // hand in as a first parameter, and `JobSchema.body` documents `ctx` as
       // the whole surface. Only an action body is `(input, ctx)`.
       const wrapped = args.origin.kind !== 'action'
-        ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined;
+        ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined;
             (async (ctx) => { ${args.source} })(globalThis.__ctx).then(
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
             );`
-        : `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined;
+        : `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined;
             (async (input, ctx) => { ${args.source} })(globalThis.__input, globalThis.__ctx).then(
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
@@ -429,11 +437,17 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // inner `SandboxError: ` token by the same rule the fault branch above
           // applies: the VM's name prefix is a debug artefact and never reached
           // the wire before a nested refusal stopped being classified as a
-          // fault, so this repair moves the STATUS and leaves the sentence a
-          // caller receives byte-identical to what it was.
+          // fault.
+          //
+          // [#22588] …and the client-facing sentence of a NESTED refusal is
+          // the nested body's own sentence, relayed across the hop
+          // (SANDBOX_REFUSAL_PROP) — never the `hook 'g' threw: Error: …`
+          // wrapper the VM error carried, which #17265 left in place on
+          // purpose ("moves the STATUS, not the sentence") and which every
+          // door then served verbatim as the author's words.
           throw new SandboxError(
             `${args.origin.kind} '${args.origin.name}' threw: ${errStr}`,
-            userFacingMessage(withoutSandboxErrorPrefix(String(errStr))),
+            readRelayedRefusal(vm) ?? userFacingMessage(withoutSandboxErrorPrefix(String(errStr))),
             info,
           );
         }
@@ -1294,9 +1308,8 @@ const SANDBOX_ERROR_PASSTHROUGH = ['code', 'fields', 'status', 'userMessage'] as
  */
 function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
   const e = err as { name?: string; message?: string; code?: unknown; fields?: unknown; status?: unknown; userMessage?: unknown };
-  const errH = err instanceof Error
-    ? vm.newError({ name: e.name || 'Error', message: e.message ?? '' })
-    : vm.newError({ name: 'Error', message: String(err) });
+  const vmMessage = err instanceof Error ? (e.message ?? '') : String(err);
+  const errH = vm.newError({ name: err instanceof Error ? (e.name || 'Error') : 'Error', message: vmMessage });
   // Best-effort: a malformed `fields` must never turn an ordinary rejection
   // into a marshalling failure, which would replace the body's real error.
   try {
@@ -1340,9 +1353,26 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
     // `500 INTERNAL_ERROR` for a refusal `/data` has answered `400` with the
     // sentence verbatim since #11588. {@link sandboxRefusalMessage} is that
     // door's own question, so the two doors answer one refusal once.
-    if (err instanceof SandboxError && sandboxRefusalMessage(err) === undefined) {
+    const refusal = sandboxRefusalMessage(err);
+    if (err instanceof SandboxError && refusal === undefined) {
       const h = vm.true;
       vm.setProp(errH, SANDBOX_FAULT_PROP, h);
+    }
+    // [#22588] …and the refusal's SENTENCE travels beside it. The VM error's
+    // `.message` stays the nested body's debug wrapper — that is what a body
+    // that catches the error has always read, and what keeps the whole chain
+    // in this body's own log-only `.message` — so without this the pump loop
+    // could only build the outer `innerMessage` from that wrapper, and the
+    // caller was handed `hook 'g' threw: Error: <sentence>` as the sentence.
+    // The wrapper it was marshalled with rides too, so the relay holds only
+    // while the body re-throws this error UNCHANGED: see the reject handler.
+    if (refusal !== undefined) {
+      const sentence = vm.newString(refusal);
+      vm.setProp(errH, SANDBOX_REFUSAL_PROP, sentence);
+      sentence.dispose();
+      const of = vm.newString(vmMessage);
+      vm.setProp(errH, SANDBOX_REFUSAL_OF_PROP, of);
+      of.dispose();
     }
   } catch {
     /* keep the bare name/message error */
@@ -1395,13 +1425,59 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
 const SANDBOX_FAULT_PROP = '__objectstackSandboxFault';
 
 /**
+ * [#22588] The caller-addressed sentence of a NESTED sandboxed refusal, carried
+ * THROUGH the VM on the marshalled error — the refusal counterpart of
+ * {@link SANDBOX_FAULT_PROP}.
+ *
+ * ## The defect it closes
+ *
+ * A script action's body writes through `ctx.api`, and a sandboxed
+ * `beforeUpdate` hook refuses that write. The hook's runner builds
+ * `SandboxError("hook 'g' threw: Error: <sentence>", "<sentence>")`, and
+ * {@link hostErrorToVm} hands it to the ACTION's VM — but a VM error carries
+ * only `name` and `message`, so the sentence was left behind on the host and
+ * the wrapper crossed in its place. When the body let it escape, the pump loop
+ * built the outer `innerMessage` — the field every door serves as the caller's
+ * sentence — from that wrapper. `POST /actions/:object/:action/:id` answered
+ * `hook 'g' threw: Error: <sentence>`, and so did `/data` when the write came
+ * from a hook rather than an action body (a hook that writes another object
+ * through `ctx.api`). Each door was reading the right field; the producer had
+ * filled it with the wrong text, one VM hop before any door saw it.
+ *
+ * ## Why a relay and not a different VM `message`
+ *
+ * Marshalling the sentence AS the VM error's `.message` would also fix the
+ * wire, and would silently change what every body that catches a host error
+ * reads, and drop the inner frame (`hook 'g' threw:`) from the outer error's
+ * log-only `.message`, which keeps the whole chain on purpose (#17265). The
+ * relay changes neither: it is read only when the error leaves the body, and
+ * only while {@link SANDBOX_REFUSAL_OF_PROP} still equals the VM error's
+ * `.message` — a body that rewrote the message before re-throwing is speaking
+ * for itself, and its own words are what it threw.
+ *
+ * ⛔ The sentence is `sandboxBusinessMessage`'s answer, never a pattern-strip of
+ * the wrapper: a nested CRASH has no sentence, so it carries no relay and stays
+ * the sandbox fault {@link SANDBOX_FAULT_PROP} marks it as.
+ */
+const SANDBOX_REFUSAL_PROP = '__objectstackRefusalSentence';
+
+/**
+ * [#22588] The VM `message` a relayed refusal was marshalled with — the
+ * "re-thrown unchanged" test {@link SANDBOX_REFUSAL_PROP} is gated on.
+ */
+const SANDBOX_REFUSAL_OF_PROP = '__objectstackRefusalOf';
+
+/**
  * [#17265] The caller-addressed BUSINESS sentence a sandboxed body threw, or
  * `undefined` when this error is not a body's deliberate refusal.
  *
- * This is `packages/rest`'s `sandboxBusinessMessage` (#11588) — the read the
- * `/data` door and, since #11684, the `/analytics/dataset/query` door both make
- * instead of open-coding a local opinion. Both of its conditions travel, in the
- * same order, because both are load-bearing HERE:
+ * This IS `sandboxBusinessMessage` (`@objectstack/types`, #11588) — the read
+ * the `/data` door and, since #11684, the `/analytics/dataset/query` door both
+ * make instead of open-coding a local opinion. [#22588] It is now that function
+ * itself rather than a re-statement of its two conditions, and it is asked at a
+ * second point in this file: {@link hostErrorToVm} relays the answer across the
+ * VM hop ({@link SANDBOX_REFUSAL_PROP}). Both of its conditions are
+ * load-bearing HERE:
  *
  *  - a non-empty string `.innerMessage` — the sandbox's own mark for "user code
  *    threw this deliberately", and by {@link SandboxError}'s contract the thing
@@ -1426,10 +1502,7 @@ const SANDBOX_FAULT_PROP = '__objectstackSandboxFault';
  * rewritten.
  */
 function sandboxRefusalMessage(error: unknown): string | undefined {
-  const inner = (error as { innerMessage?: unknown } | null | undefined)?.innerMessage;
-  if (typeof inner !== 'string' || !inner) return undefined;
-  if (isNativeErrorName(inner.trim())) return undefined;
-  return inner;
+  return sandboxBusinessMessage(error);
 }
 
 /**
@@ -1684,6 +1757,29 @@ export interface SandboxErrorInfo {
    * no innerMessage → 500" holds for in-VM host-call denials too.
    */
   sandboxFault?: boolean;
+}
+
+/**
+ * [#22588] Read the `__errorRefusal` side-channel the wrapper's reject handler
+ * writes: a NESTED refusal's sentence, present only when the body re-threw the
+ * marshalled error unchanged ({@link SANDBOX_REFUSAL_PROP}). `undefined` for
+ * every error the body authored itself — the common case, which keeps the
+ * `innerMessage` built from the body's own throw.
+ *
+ * Kept off {@link SandboxErrorInfo} deliberately: that shape is the exported
+ * constructor argument of {@link SandboxError}, and this is a fact about the
+ * hop, not a field a caller may hand the error.
+ */
+function readRelayedRefusal(vm: QuickJSContext): string | undefined {
+  let raw: unknown;
+  try {
+    const h = vm.getProp(vm.global, '__errorRefusal');
+    raw = vm.dump(h);
+    h.dispose();
+  } catch {
+    return undefined;
+  }
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
 }
 
 /**

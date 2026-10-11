@@ -3,6 +3,9 @@
 import { randomUUID } from 'node:crypto';
 import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
+// [#22470] The ONE upload-scope list — the upload requests' `scope` and the
+// `sys_file.scope` select read it too. A value import: the doors ask it.
+import { UploadScopeSchema } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
@@ -122,35 +125,55 @@ const INCOMPLETE_UPLOAD_STATUS = 409;
 const INCOMPLETE_UPLOAD_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 
 /**
- * [#22443] The answer both upload-starting doors (presigned, chunked) give a
- * request naming `scope: 'public'` — before the size check, before any row is
- * written and before any URL or backend upload is started.
+ * [#22470] The answer both upload-starting doors (presigned, chunked) give a
+ * request naming a scope outside the upload-scope vocabulary — before the size
+ * check, before any row is written and before any URL or backend upload is
+ * started.
  *
- * The scope never made a file public. Since #22431 the download doors judge a
- * file by `acl: 'public_read'`, the attachments scope and field ownership
- * alone, so a `public`-scoped upload was stored as a private file, with no
- * word to its caller, under a name promising what the runtime does not do.
- * ADR-0104 makes `acl: 'public_read'` the one opt-in for anonymous download;
- * the scope is refused rather than enforced, because enforcing it would hand
- * every uploader a second door to anonymity (the triage ruling on #22443).
- * The spec retires the same member from `StorageScopeSchema`.
+ * The vocabulary is `UploadScopeSchema` (`@objectstack/spec/api`), the one list
+ * the upload requests' `scope` and the `sys_file.scope` select read too, and
+ * the message names its values read off that enum. Without this gate a value
+ * outside it reached the `sys_file` insert, which the data engine refused as an
+ * invalid option, and the door answered that caller error as `500 INTERNAL`
+ * telling the operator to restore the data engine. The `500` path stays for a
+ * real engine fault. An omitted scope is the default `user`, as in the request
+ * schemas; an explicit `null` is not a scope and is refused.
+ *
+ * [#22443] `public` is one such value and its refusal keeps its remedy. The
+ * scope never made a file public: since #22431 the download doors judge a file
+ * by `acl: 'public_read'`, the attachments scope and field ownership alone, so
+ * a `public`-scoped upload was stored as a private file under a name promising
+ * what the runtime does not do. ADR-0104 makes `acl: 'public_read'` the one
+ * opt-in for anonymous download; the scope is refused rather than enforced,
+ * because enforcing it would hand every uploader a second door to anonymity
+ * (the triage ruling on #22443). So its message also says where the opt-in
+ * lives — on the stored file record, because the upload request carries no
+ * `acl` (every upload is stored `acl: 'private'`), so a caller adding one to
+ * this request would get a private file again.
  *
  * `400` / `INVALID_REQUEST`: the code these doors already answer a request
  * they cannot take with, registered under this package in the ADR-0112
- * ledger. The message carries the remedy and where it lives — on the stored
- * file record, because the upload request carries no `acl` (every upload is
- * stored `acl: 'private'`), so a caller adding one to this request would get
- * a private file again.
+ * ledger. One gate, one status, one code for every off-vocabulary scope.
  */
-const RETIRED_UPLOAD_SCOPE = 'public';
-const RETIRED_UPLOAD_SCOPE_STATUS = 400;
-const RETIRED_UPLOAD_SCOPE_CODE: RegisteredErrorCode = 'INVALID_REQUEST';
-const RETIRED_UPLOAD_SCOPE_MESSAGE =
-  "scope 'public' is not accepted: a storage scope never made a file publicly readable. " +
-  "A file is served without sign-in only when its stored file record carries acl 'public_read' (ADR-0104). " +
-  "Upload with another scope, or omit scope for the default 'user', then set acl 'public_read' on the stored " +
-  'file record of each file that must be readable before sign-in. The upload request carries no acl: every ' +
-  'upload is stored private.';
+const UPLOAD_SCOPE_REFUSED_STATUS = 400;
+const UPLOAD_SCOPE_REFUSED_CODE: RegisteredErrorCode = 'INVALID_REQUEST';
+const RETIRED_PUBLIC_SCOPE = 'public';
+
+function uploadScopeRefusalMessage(scope: unknown): string {
+  const named = typeof scope === 'string' ? `'${scope}'` : String(JSON.stringify(scope));
+  const allowed =
+    `The upload scopes are ${UploadScopeSchema.options.join(', ')}: name one of them, ` +
+    "or omit scope for the default 'user'.";
+  if (scope === RETIRED_PUBLIC_SCOPE) {
+    return (
+      `scope ${named} is not accepted: a storage scope never made a file publicly readable. ${allowed} ` +
+      "A file is served without sign-in only when its stored file record carries acl 'public_read' (ADR-0104): " +
+      'set it on the stored file record of each file that must be readable before sign-in. The upload request ' +
+      'carries no acl: every upload is stored private.'
+    );
+  }
+  return `scope ${named} is not accepted: it is not an upload scope. ${allowed}`;
+}
 
 /**
  * [#22332] How many times the chunk door tries to record a stored chunk in the
@@ -382,11 +405,13 @@ export function registerStorageRoutes(
     return false;
   };
 
-  // [#22443] The scope gate the two upload-starting doors ask before the size
-  // gate. `false` ⇒ the 400 was already sent and the handler must stop.
+  // [#22470] The scope gate the two upload-starting doors ask before the size
+  // gate: an omitted scope (the default `user`) or a member of the spec's
+  // upload-scope enum, judged by that enum itself. `false` ⇒ the 400 was
+  // already sent and the handler must stop.
   const requireAcceptedUploadScope = (scope: unknown, res: IHttpResponse): boolean => {
-    if (scope !== RETIRED_UPLOAD_SCOPE) return true;
-    sendError(res, RETIRED_UPLOAD_SCOPE_STATUS, RETIRED_UPLOAD_SCOPE_CODE, RETIRED_UPLOAD_SCOPE_MESSAGE);
+    if (scope === undefined || UploadScopeSchema.safeParse(scope).success) return true;
+    sendError(res, UPLOAD_SCOPE_REFUSED_STATUS, UPLOAD_SCOPE_REFUSED_CODE, uploadScopeRefusalMessage(scope));
     return false;
   };
 
@@ -762,7 +787,8 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and size are required');
         return;
       }
-      // [#22443] A retired scope is refused before anything is stored or minted.
+      // [#22470] A scope outside the upload vocabulary is refused before
+      // anything is stored or minted.
       if (!requireAcceptedUploadScope(scope, res)) return;
       // [#22283] The declared size against the saved limit — before the
       // pending row and before any URL is minted. On the local adapter the
@@ -894,7 +920,7 @@ export function registerStorageRoutes(
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and totalSize are required');
         return;
       }
-      // [#22443] Same scope gate as the presigned door — before the file row,
+      // [#22470] Same scope gate as the presigned door — before the file row,
       // the backend multipart and the session row.
       if (!requireAcceptedUploadScope(scope, res)) return;
       // [#22283] The declared total against the saved limit — before the file

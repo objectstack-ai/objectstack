@@ -450,6 +450,24 @@ export class StorageServicePlugin implements Plugin {
             (rows: Array<Record<string, unknown>>) => findHeldFiles(engine as any, rows),
           );
         }
+        // "May this caller read the files these records own?" for RECORD
+        // FILE-FIELD HYDRATION (#22637, maintainer ruling B on #22624): when a
+        // caller's own `sys_file` read is refused, a file field's metadata
+        // follows the parent-derived verdict the download door applies to its
+        // bytes. Handed over rather than re-derived — the door's own
+        // field-owned arm, `readableFieldOwners`, the one function both ask —
+        // so a delegate-governed object gets its delegate's verdict on both
+        // surfaces. The registry is the live one, so a delegate service that
+        // registers after this hook is still found at read time. Duck-typed
+        // so an older engine without the seam simply keeps the refused marker.
+        if (typeof (engine as any).registerFieldOwnedFileReadAuthorizer === 'function') {
+          const gateRegistry = toGateRegistry(ctx);
+          const dataEngine = engine;
+          (engine as any).registerFieldOwnedFileReadAuthorizer(
+            (ownerObject: string, ownerIds: string[], context: unknown) =>
+              readableFieldOwners(gateRegistry, dataEngine, ownerObject, ownerIds, context),
+          );
+        }
         try {
           const lifecycle = ctx.getService<any>('lifecycle');
           if (lifecycle && typeof lifecycle.registerReapGuard === 'function') {
@@ -1234,39 +1252,13 @@ function buildFileReadAuthorizer(
 
       // Field-owned (ADR-0104 D3 wave 2): exactly ONE record's field holds
       // this file, so access is that record's READ access — never a union.
+      // The verdict is `readableFieldOwners`, asked for this one owner: the
+      // same function record file-field hydration asks (#22637), so the bytes
+      // and the metadata of a field-owned file have one authority.
       if (file.ref_object && file.ref_id != null && file.ref_id !== '') {
-        const ownerObject = String(file.ref_object);
         const ownerId = String(file.ref_id);
-
-        // An object whose access is MEDIATED BY A SERVICE rather than by row
-        // permissions names that service in `fileAccessDelegate`. Asking the
-        // row directly would be asking the wrong authority: `sys_approval_action`
-        // is deliberately unreadable to ordinary approver positions, so a raw
-        // read denies the very approver the attachment is for. Fails closed —
-        // a declared delegate that is missing or incomplete denies rather than
-        // silently reverting to the raw read it was declared to replace.
-        const delegateName = (engine as any).getObject?.(ownerObject)?.fileAccessDelegate;
-        if (typeof delegateName === 'string' && delegateName) {
-          try {
-            const delegate = registry.getService<IFileAccessDelegate>(delegateName);
-            if (!delegate || typeof delegate.authorizeFileRead !== 'function') return 'deny';
-            return (await delegate.authorizeFileRead(ownerId, authz)) ? 'allow' : 'deny';
-          } catch {
-            return 'deny';
-          }
-        }
-
-        try {
-          const visible = (await (engine as any).find(ownerObject, {
-            where: { id: file.ref_id },
-            fields: ['id'],
-            limit: 1,
-            context: authz,
-          })) as Array<Record<string, unknown>>;
-          return visible?.length ? 'allow' : 'deny';
-        } catch {
-          return 'deny'; // unknown/failing owner object — fail closed
-        }
+        const readable = await readableFieldOwners(registry, engine, String(file.ref_object), [ownerId], authz);
+        return readable.has(ownerId) ? 'allow' : 'deny';
       }
 
       // Otherwise: readable via any parent record this file is attached to.
@@ -1310,6 +1302,96 @@ function buildFileReadAuthorizer(
       return 'deny'; // fail closed
     }
   };
+}
+
+/**
+ * The field-owned verdict of ADR-0104 D3 — "may this caller read the files
+ * these `ownerObject` records' fields own?" — answered as the subset of
+ * `ownerIds` that may (stringified). Module-private, and never on the
+ * package's surface (see {@link composeStorageRoutes}): it has exactly two
+ * callers, both bound in this file.
+ *
+ *  - The download door ({@link buildFileReadAuthorizer}) asks it for the ONE
+ *    record that owns the file being fetched, under the authorization context
+ *    it resolved from the request.
+ *  - Record file-field hydration asks it, through the engine seam
+ *    `registerFieldOwnedFileReadAuthorizer` wired in `start()`, when the
+ *    caller's own `sys_file` read is refused (#22637, maintainer ruling B on
+ *    #22624: "a file field's metadata follows the parent-derived verdict the
+ *    download door already applies"). The engine passes the caller's own
+ *    execution context, and only records whose field owns the file.
+ *
+ * One function so the bytes and the metadata of a field-owned file can never
+ * be judged by two predicates. Its two arms are the door's, unchanged:
+ *
+ *  1. An object whose access is MEDIATED BY A SERVICE rather than by row
+ *     permissions names that service in `fileAccessDelegate`. Asking the row
+ *     directly would be asking the wrong authority: `sys_approval_action` is
+ *     deliberately unreadable to ordinary approver positions, so a raw read
+ *     denies the very approver the attachment is for. Fails closed — a
+ *     declared delegate that is missing or incomplete denies rather than
+ *     silently reverting to the raw read it was declared to replace; a
+ *     delegate that throws denies that owner.
+ *  2. Otherwise the caller's READ of the owner record decides. One owner is
+ *     read exactly as the door always read it (`where: { id }`, `limit: 1`,
+ *     any row allows); several are read in ONE `id $in […]` query, each
+ *     returned row allowing its own id. Fails closed — an unknown or failing
+ *     owner object denies them all.
+ *
+ * A context with no `userId` is no one's reader: the door refuses such a
+ * caller before asking (its `'unauthenticated'` verdict), so this arm only
+ * changes anything for the hydration caller, which must not serve an
+ * anonymous read the metadata of a file the door would refuse it.
+ */
+async function readableFieldOwners(
+  registry: StorageGateRegistry,
+  engine: IDataEngine,
+  ownerObject: string,
+  ownerIds: readonly string[],
+  authz: unknown,
+): Promise<Set<string>> {
+  const readable = new Set<string>();
+  if (ownerIds.length === 0 || !(authz as { userId?: unknown } | null | undefined)?.userId) return readable;
+
+  const delegateName = (engine as any).getObject?.(ownerObject)?.fileAccessDelegate;
+  if (typeof delegateName === 'string' && delegateName) {
+    let delegate: IFileAccessDelegate | undefined;
+    try {
+      delegate = registry.getService<IFileAccessDelegate>(delegateName);
+    } catch {
+      return readable;
+    }
+    if (!delegate || typeof delegate.authorizeFileRead !== 'function') return readable;
+    for (const ownerId of ownerIds) {
+      try {
+        if (await delegate.authorizeFileRead(ownerId, authz)) readable.add(ownerId);
+      } catch {
+        // denied — fail closed for this owner
+      }
+    }
+    return readable;
+  }
+
+  try {
+    const single = ownerIds.length === 1;
+    const visible = (await (engine as any).find(ownerObject, {
+      where: { id: single ? ownerIds[0] : { $in: [...ownerIds] } },
+      fields: ['id'],
+      limit: ownerIds.length,
+      context: authz,
+    })) as Array<Record<string, unknown>>;
+    if (single) {
+      if (visible?.length) readable.add(ownerIds[0]);
+    } else {
+      const asked = new Set(ownerIds);
+      for (const row of visible ?? []) {
+        if (row?.id != null && asked.has(String(row.id))) readable.add(String(row.id));
+      }
+    }
+  } catch {
+    // unknown/failing owner object — fail closed
+  }
+  return readable;
 }
 
 function extractOverrides(payload: unknown): Record<string, unknown> {

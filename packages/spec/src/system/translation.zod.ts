@@ -52,6 +52,35 @@ const BULK_PARAM_NO_OPTIONS =
   + 'options, which ARE translatable under `objects.<object>.fields.<field>.options`), or accept the '
   + 'authored option labels.';
 
+/**
+ * A translated flow TEXT SLOT — the one leaf every `{{ }}` template the flow
+ * engine picks from the `flows` group is spelled with: a screen's `title` and
+ * `description`, and a refusing `end` node's `message`.
+ *
+ * The engine picks each of them in the run's locale and renders it through
+ * `renderTextSlot` (maintainer ruling A on #22507), so a translation is the
+ * same text slot as the template it translates, and the one text-slot judge
+ * (`textSlotTemplateRefusal`) refuses here exactly what `ScreenConfigSchema`
+ * and `EndConfigSchema` refuse on the source: a single-brace `{token}`, which
+ * would render as literal text, and a hole over a `$` root the engine does not
+ * bind. One leaf for the three, so a slot cannot be judged in one place and
+ * drawn literally in the slot beside it (#22627).
+ *
+ * No `.min(1)`, like every sibling leaf: an empty string is the untranslated
+ * slot `os i18n extract` writes into a skeleton, the judge finds no token in
+ * it, and the engine reads it as no translation (the authored template
+ * renders). A factory rather than one shared instance, so each slot keeps a
+ * schema node of its own, as it had before the three were folded into one
+ * definition. ⛔ Package-internal: the judge's public answer is
+ * `textSlotTemplateRefusal`, and an exported copy of this leaf would be a
+ * second one.
+ */
+const flowTextSlotTranslation = () =>
+  z.string().superRefine((value, ctx) => {
+    const refusal = textSlotTemplateRefusal(value);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', message: refusal });
+  });
+
 // ────────────────────────────────────────────────────────────────────────────
 // Object-level Translation (per-object file)
 // ────────────────────────────────────────────────────────────────────────────
@@ -1335,15 +1364,15 @@ const appTranslationDataShape = () => ({
    *   before.
    * - **`description`** is translated only where the screen authors one. A
    *   bundle cannot add body text the author did not write; `objectstack
-   *   validate` refuses such a key. It is judged as the text slot it
-   *   translates: the one text-slot judge (`textSlotTemplateRefusal`) refuses
-   *   a single-brace `{token}` here exactly as `ScreenConfigSchema` refuses it
-   *   on the source.
-   * - ⚠️ A `title` translation is not judged by that judge yet. The key
-   *   predates the engine pick, and refusing a token in it narrows what the
-   *   face accepts, which is a change of its own. A single-brace token in a
-   *   translated heading renders as literal text, as it did when the console
-   *   overlaid the heading.
+   *   validate` refuses such a key.
+   * - **Both are judged as the text slot they translate** (#22627). The one
+   *   text-slot judge (`textSlotTemplateRefusal`) refuses a single-brace
+   *   `{token}` in either exactly as `ScreenConfigSchema` refuses it on the
+   *   source, through the one leaf the refusing `end` node's `message` uses
+   *   too (`flowTextSlotTranslation`). A translated heading is a template even
+   *   where it stands in for the node label, which is plain text: the engine
+   *   renders whatever it picks through `renderTextSlot`, so a `{name}` there
+   *   would be drawn literally. The refusal names the `{{ name }}` spelling.
    */
   flows: z.record(z.string(), strictObject({
     surface: 'this flow translation',
@@ -1380,22 +1409,16 @@ const appTranslationDataShape = () => ({
       // shows its node `label` instead (`ScreenConfigSchema.title`, "falls back
       // to the node label"), so this one key covers whichever of the two the
       // screen shows — the same one-string-one-spelling rule
-      // `pages.<name>.title` follows over `label`.
-      title: z.string().optional().describe(
+      // `pages.<name>.title` follows over `label`. Judged as the text slot it
+      // translates, like `description` below (#22627).
+      title: flowTextSlotTranslation().optional().describe(
         'Translated screen heading — a `{{ }}` template like the heading it translates, picked by the engine in the '
         + "run's locale and rendered in place of `config.title` (or the node label when the screen declares none)",
       ),
-      // [#22507] The screen's body text, picked the same way. No `.min(1)`,
-      // like every sibling leaf: an empty string is the untranslated slot
-      // `os i18n extract` writes into a skeleton, and the engine reads it as no
-      // translation (the authored body text renders).
-      description: z.string()
-        // The one text-slot judge, applied to the translation exactly as
-        // `ScreenConfigSchema` applies it to the body text it translates.
-        .superRefine((value, ctx) => {
-          const refusal = textSlotTemplateRefusal(value);
-          if (refusal !== undefined) ctx.addIssue({ code: 'custom', message: refusal });
-        })
+      // [#22507] The screen's body text, picked the same way, and judged by the
+      // one text-slot judge exactly as `ScreenConfigSchema` judges the body
+      // text it translates; an empty string is the untranslated skeleton slot.
+      description: flowTextSlotTranslation()
         .optional()
         .describe(
           'Translated screen body text — a `{{ }}` template like the `config.description` it translates, picked by '
@@ -1437,16 +1460,10 @@ const appTranslationDataShape = () => ({
           + 'label. Translate `message`; a `title` belongs to a screen (`screens.<node_id>.title`).',
       },
     }, {
-      // No `.min(1)`, like every sibling leaf: an empty string is the
-      // untranslated slot `os i18n extract` writes into a skeleton, and the
-      // engine reads it as no translation (the authored message renders).
-      message: z.string()
-        // The one text-slot judge, applied to the translation exactly as
-        // `EndConfigSchema` applies it to the message it translates.
-        .superRefine((value, ctx) => {
-          const refusal = textSlotTemplateRefusal(value);
-          if (refusal !== undefined) ctx.addIssue({ code: 'custom', message: refusal });
-        })
+      // The one text-slot judge, applied to the translation exactly as
+      // `EndConfigSchema` applies it to the message it translates; an empty
+      // string is the untranslated skeleton slot (the authored message renders).
+      message: flowTextSlotTranslation()
         .optional()
         .describe(
           "Translated refusal message of an `end` node declaring `outcome: 'refused'` — a `{{ }}` template like "

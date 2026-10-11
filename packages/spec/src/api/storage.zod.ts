@@ -18,8 +18,37 @@ import { FileMetadataSchema } from '../system/object-storage.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
 
+/**
+ * Upload Scope Enum
+ *
+ * The storage scope a new uploaded file is filed under — the ONE list the two
+ * upload requests below, the `scope` select of the `sys_file` object
+ * (`@objectstack/service-storage`, which builds its options from this enum)
+ * and the two upload-starting doors share (#22470). The doors refuse any other
+ * value with `400 INVALID_REQUEST`, naming these values, before a file record,
+ * an upload URL or a backend upload exists.
+ *
+ * `attachments` files the upload under the record attachments surface, whose
+ * join rows are its only referrers. `public` is not a member: it never made a
+ * file publicly readable and was retired (#22443) — anonymous download is a
+ * stored file record's `acl: 'public_read'` (ADR-0104).
+ *
+ * Distinct from `StorageScopeSchema` (`system/object-storage.zod.ts`), which
+ * classifies a storage configuration's area and is not read by any upload.
+ */
+export const UploadScopeSchema = lazySchema(() => z.enum([
+  'user',
+  'tenant',
+  'private',
+  'temp',
+  'attachments',
+]).describe('Storage scope an uploaded file is filed under'));
+
+export type UploadScope = z.input<typeof UploadScopeSchema>;
+
 // The upload requests' `scope` — the scope a new `sys_file` row is filed under
-// (`service-storage` stores it and prefixes the storage key with it).
+// (`service-storage` stores it and prefixes the storage key with it), closed to
+// `UploadScopeSchema` (#22470).
 //
 // Not an access setting, and it never was (#22443): the download doors judge a
 // file by its `acl`, the `attachments` scope and field ownership alone, so the
@@ -38,7 +67,7 @@ export const GetPresignedUrlRequestSchema = lazySchema(() => z.object({
   filename: z.string().describe('Original filename'),
   mimeType: z.string().describe('File MIME type'),
   size: z.number().describe('File size in bytes'),
-  scope: z.string().default('user').describe(UPLOAD_SCOPE_DESCRIPTION),
+  scope: UploadScopeSchema.default('user').describe(UPLOAD_SCOPE_DESCRIPTION),
   bucket: z.string().optional().describe('Specific bucket override (admin only)'),
 }));
 
@@ -165,7 +194,7 @@ export const InitiateChunkedUploadRequestSchema = lazySchema(() => z.object({
   totalSize: z.number().int().min(1).describe('Total file size in bytes'),
   chunkSize: z.number().int().min(5242880).default(5242880)
     .describe('Size of each chunk in bytes (minimum 5MB per S3 spec)'),
-  scope: z.string().default('user').describe(UPLOAD_SCOPE_DESCRIPTION),
+  scope: UploadScopeSchema.default('user').describe(UPLOAD_SCOPE_DESCRIPTION),
   bucket: z.string().optional().describe('Specific bucket override (admin only)'),
   metadata: z.record(z.string(), z.string()).optional().describe('Custom metadata key-value pairs'),
 }));

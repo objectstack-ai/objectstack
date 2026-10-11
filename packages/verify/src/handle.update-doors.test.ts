@@ -321,24 +321,18 @@ describe("item 2 — hooks.run(object, 'update', input, { system: true })", () =
     expect((await stack.rows(CASE, { id: kase.id }))[0].priority).toBe(4);
   });
 
-  it('the system is accepted on update only, and never beside a token — refused before the engine is touched', async () => {
-    const name = uniq('case');
-    const [kase] = await stack.seed(CASE, [{ name, status: 'open', priority: 1 }]);
-    const asSystem = { system: true } as never;
-
-    const insert = await refusalOf(stack.hooks.run(CASE, 'insert', { name: `${name}-x` }, asSystem));
-    expect(envelope(insert)).toEqual({ code: 'INVALID_REQUEST', status: 400 });
-    expect(await stack.rows(CASE, { name: `${name}-x` })).toEqual([]);
-
-    const del = await refusalOf(stack.hooks.run(CASE, 'delete', { id: kase.id }, asSystem));
-    expect(envelope(del)).toEqual({ code: 'INVALID_REQUEST', status: 400 });
+  it('the system is never named beside a token — refused before the engine is touched', async () => {
+    // [#22301 item 5] A system insert and a system delete are doors now, and
+    // `handle.system-insert-delete.test.ts` pins them; the two-caller refusal
+    // holds on every operation.
+    const [kase] = await stack.seed(CASE, [{ name: uniq('case'), status: 'open', priority: 1 }]);
 
     const both = await refusalOf(
       stack.hooks.run(CASE, 'update', { id: kase.id, status: 'closed' }, { as: admin, system: true } as never),
     );
     expect(envelope(both)).toEqual({ code: 'INVALID_REQUEST', status: 400 });
 
-    expect((await stack.rows(CASE, { id: kase.id }))[0].status, 'none of the three wrote').toBe('open');
+    expect((await stack.rows(CASE, { id: kase.id }))[0].status, 'the refused update did not write').toBe('open');
     expect(seenFor(kase.id), 'and no hook was dispatched').toEqual([]);
   });
 });

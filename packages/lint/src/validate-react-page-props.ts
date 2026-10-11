@@ -62,14 +62,17 @@ import {
 } from './validate-page-field-bindings.js';
 // #5020's zod-rejection renderer, shared with the SDUI component-props gate
 // since #5068 — see `zod-issue-format.ts` for why one copy matters here.
-import { describeIssue } from './zod-issue-format.js';
+import { describeIssue, type LintZodIssue } from './zod-issue-format.js';
 import { createSourceFileChecked, describeParseFailure, PARSE_FAILURE_HINT } from './checked-parse.js';
+// [#22161] The verdict half of a forwarded `@objectstack/spec` refusal — one
+// cut for every rule that forwards the same producer's words.
+import { schemaRefusalHead } from './validate-flow-trigger-readiness.js';
 
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
-  unprovisionedAnchorCause,
   unprovisionedAnchorHint,
+  unprovisionedAnchorVerdict,
 } from './system-fields.js';
 import { collectionEntries } from './collection-entries.js';
 
@@ -370,7 +373,10 @@ function checkChartDrillDown(
     push(
       'error',
       REACT_CHART_DRILLDOWN_INVALID,
-      `${at}: ${issue.message}`,
+      // [#22161] The schema's refusal to its verdict: which key or value, and
+      // its rename. What the schema adds after that is
+      // `os explain react-chart-drilldown-invalid`'s.
+      `${at}: ${schemaRefusalHead(issue.message)}`,
       'The drill config is declared by ChartDrillDownSchema (@objectstack/spec/ui) — the rejection above carries the fix.',
     );
   }
@@ -471,10 +477,42 @@ function checkChartAggregate(
     push(
       'error',
       REACT_CHART_AGGREGATE_INVALID,
-      `${at}: ${describeIssue(issue, raw)}`,
+      // [#22161] One verdict line: the schema's refusal cut to its verdict, and
+      // a union's arms to the ones that speak to the value's content.
+      issue.code === 'invalid_union'
+        ? `${at} matches no accepted form: ${unionRefusal(issue as LintZodIssue, raw)}`
+        : `${at}: ${schemaRefusalHead(describeIssue(issue, raw))}`,
       'The aggregate is declared by ChartAggregateSchema (@objectstack/spec/ui) — the rejection above carries the fix.',
     );
   }
+}
+
+/**
+ * [#22161] A union's refusal, as the verdict quotes it. `describeIssue` lists
+ * every arm's complaint after "no accepted form matched"; the verdict keeps
+ * the arms that speak to the value's CONTENT and drops an arm whose one
+ * complaint is that the whole value is another type — the bare-field-name
+ * arm's `expected string, received object`, for an object — unless every arm
+ * says only that. Each kept complaint is rendered the way `describeIssue`
+ * renders an arm's (its path, then the issue), cut to its verdict
+ * ({@link schemaRefusalHead}).
+ */
+function unionRefusal(issue: LintZodIssue, raw: unknown): string {
+  const arms = (issue.errors ?? []).filter((arm) => arm.length > 0);
+  const wholeValueType = (arm: ReadonlyArray<LintZodIssue>) =>
+    arm.length === 1 && arm[0]!.code === 'invalid_type' && arm[0]!.path.length === 0;
+  const content = arms.filter((arm) => !wholeValueType(arm));
+  const kept = content.length > 0 ? content : arms;
+  const texts = kept.map((arm) =>
+    arm
+      .map((inner) => {
+        const where = inner.path.length ? `${inner.path.join('.')} — ` : '';
+        return `${where}${schemaRefusalHead(describeIssue(inner, raw, 1))}`;
+      })
+      .join('; '),
+  );
+  if (texts.length === 0) return schemaRefusalHead(describeIssue(issue, raw));
+  return texts.length === 1 ? texts[0]! : texts.map((text, i) => `(${i + 1}) ${text}`).join(' ');
 }
 
 const isRec = (v: unknown): v is Record<string, unknown> =>
@@ -557,13 +595,14 @@ function checkObjectChart(
         // or grouping by one returns a single empty bucket rather than an
         // error, so the chart renders and says nothing true.
         if (anchors?.has(name)) {
+          // [#22161] One verdict sentence, in the shared short form of the
+          // anchor cause; ADR-0015's federation and why the query does not fail
+          // are `os explain react-chart-field-unprovisioned`.
           push(
             'warning',
             REACT_CHART_FIELD_UNPROVISIONED,
-            `aggregate.${prop} "${name}" resolves on object "${objectName}", but ` +
-              `${unprovisionedAnchorCause(objectName, name)} — the aggregate query reads a column ` +
-              `that is empty on every row, so the chart ${prop === 'groupBy' ? 'groups everything into one empty bucket' : 'aggregates nothing'} ` +
-              `instead of failing.`,
+            `aggregate.${prop} "${name}": ${unprovisionedAnchorVerdict(objectName, name)}, so the chart ` +
+              (prop === 'groupBy' ? 'groups everything into one empty bucket' : 'aggregates nothing'),
             unprovisionedAnchorHint(objectName, name),
           );
         }
@@ -1013,10 +1052,11 @@ function recordContextFinding(
     rule: REACT_BLOCK_NEEDS_RECORD_CONTEXT,
     where,
     path,
+    // [#22161] One verdict sentence; why binding the block does not help is
+    // `os explain react-block-needs-record-context`.
     message:
-      `<${tag}> renders "${schemaType}", which reads its record from the record context a ` +
-      `record page mounts — a kind:'react' page never mounts one, so the block renders empty ` +
-      `no matter how it is bound (its objectName/recordId are not read by the renderer).`,
+      `<${tag}> renders "${schemaType}", which reads its record from a record page's context; a ` +
+      `kind:'react' page mounts none, so the block renders empty`,
     hint:
       `On a react page bind the record yourself: ` +
       `${REACT_RECORD_BLOCK_ALTERNATIVES[schemaType] ?? RECORD_BLOCK_GENERIC_FIX}`,
@@ -1088,9 +1128,11 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
         rule: REACT_PAGE_SOURCE_UNPARSEABLE,
         where: `page "${name}"`,
         path: `${pagePath}.source`,
+        // [#22161] One verdict sentence; what a partially recovered tree means
+        // for the checks is `os explain react-page-source-unparseable`.
         message:
-          `kind:'react' source did not parse (${describeParseFailure(failure)}), so the component-contract ` +
-          `checks read a partially recovered tree and may have missed real problems.`,
+          `kind:'react' source did not parse (${describeParseFailure(failure)}), so the ` +
+          `component-contract checks may have missed problems in it`,
         hint: PARSE_FAILURE_HINT,
       });
     }

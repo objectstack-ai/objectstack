@@ -49,7 +49,8 @@ const sweepFlow = (name: string, fn: string): Flow => ({
       label: 'Select invoices',
       config: { objectName: 'fxn_invoice', filter: { status: 'open' }, outputVariable: 'invoices' },
     },
-    { id: 'run', type: 'script', label: 'Run', config: { function: fn, inputs: { count: '{invoices}' } } },
+    // `inputs.*` is a value slot (#19939): the selected list, as a CEL envelope.
+    { id: 'run', type: 'script', label: 'Run', config: { function: fn, inputs: { count: { dialect: 'cel', source: 'invoices' } } } },
     { id: 'end', type: 'end', label: 'End' },
   ],
   edges: [

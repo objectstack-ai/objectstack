@@ -68,21 +68,17 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
     expect(names).not.toContain('live');
   });
 
-  it('returns both org-scoped and env-wide drafts for a non-null org, excluding other orgs', async () => {
+  it('[ADR-0131 D6] lists the environment\'s drafts only — no organization\'s, whichever repository asks', async () => {
     const rows = [
-      { type: 'object', name: 'env_wide', state: 'draft', package_id: 'p', organization_id: null, updated_at: 't1' },
-      { type: 'object', name: 'org_scoped', state: 'draft', package_id: 'p', organization_id: 'org_acme', updated_at: 't2' },
-      { type: 'object', name: 'other_org', state: 'draft', package_id: 'p', organization_id: 'org_other', updated_at: 't3' },
+      { type: 'object', name: 'env_wide', state: 'draft', package_id: 'p', organization_id: null, updated_at: 't1', updated_by: 'u' },
+      { type: 'object', name: 'org_scoped', state: 'draft', package_id: 'p', organization_id: 'org_acme', updated_at: 't2', updated_by: 'u' },
+      { type: 'object', name: 'other_org', state: 'draft', package_id: 'p', organization_id: 'org_other', updated_at: 't3', updated_by: 'u' },
     ];
     const { repo } = makeRepo(rows, 'org_acme');
     const out = await repo.listDrafts();
-    expect(out.map((d) => d.name).sort()).toEqual(['env_wide', 'org_scoped']);
-    // Each draft is projected with the scope it actually lives in, so the
-    // publish/discard paths can promote/delete it in THAT scope rather than the
-    // caller's active org — otherwise the env-wide row 404s as `no_draft`
-    // (#3115). This projection is the contract those callers depend on.
-    expect(out.find((d) => d.name === 'env_wide')?.organizationId).toBeNull();
-    expect(out.find((d) => d.name === 'org_scoped')?.organizationId).toBe('org_acme');
+    expect(out.map((d) => d.name)).toEqual(['env_wide']);
+    // The header carries no organization: every draft listed is the environment's.
+    expect(Object.keys(out[0]!)).not.toContain('organizationId');
   });
 
   it('filters by type', async () => {
@@ -166,11 +162,10 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
     const { repo } = makeRepo(rows as any);
     const out = await repo.listDrafts({ type: 'object' });
 
-    // Exactly the seven header keys — no `item`, no `body`, no `fields`.
+    // Exactly the six header keys — no `item`, no `body`, no `fields`.
     expect(Object.keys(out[0]).sort()).toEqual([
       'label',
       'name',
-      'organizationId',
       'packageId',
       'type',
       'updatedAt',

@@ -152,36 +152,37 @@ interface PropsSchema {
 const PROPS_SCHEMAS = ComponentPropsMap as unknown as Record<string, PropsSchema>;
 
 /**
- * The one prop whose absence this rule does NOT report when the component
- * carries a per-element `dataSource`.
+ * The elements whose query is the node-level `dataSource` binding ONLY — the
+ * three whose flat binding keys (`object` and `filter`, and on two of them
+ * `sort` / `limit`) retired in v18 (#11509, ruling A-narrow). The spec keeps
+ * its own list of them private (publishing it would widen a retirement that
+ * only narrows), so this copy is pinned instead:
+ * `validate-component-props.test.ts` derives the set from `ComponentPropsMap`
+ * — every row whose flat `object` is a tombstone pointing at
+ * `dataSource.object` — and holds this one equal to it.
  *
- * `ElementDataSourceSchema` is declared on the component node as the binding
- * that "overrides page-level object context", and objectui's element renderers
- * read it FIRST (`const object = ds.object ?? props.object`) — the same
- * precedence `page-walk.ts` encodes for every rule built on it. The props
- * schemas declare `object` as required because it is the flat shorthand; a
- * component that binds through the richer sibling has not omitted anything.
- * Reporting it would be the rule judging one half of a two-key contract, which
- * is a wrong verdict rather than a strict one — the showcase's
- * `element:record_picker` (`dataSource: { object: 'showcase_project', limit: 50 }`)
- * is the live specimen.
+ * Until that retirement this rule WAIVED the props schema's required flat
+ * `object` whenever `dataSource.object` was present — for every component
+ * type alike, on the reading that the element renderers resolve
+ * `dataSource.object` first. The waiver was type-blind, and on
+ * `element:repeater`, whose renderer read the flat keys alone, it passed a
+ * list bound only through `dataSource` that queried nothing and drew "No
+ * records". The retirement turns the waiver into a refusal on the binding the
+ * renderers actually read: one of these elements with no `dataSource.object`
+ * is a `component-props-invalid` finding at that path — the same rule id and
+ * tier as every other value verdict here, not a new gate. A flat `object`
+ * beside it is the tombstone's own finding (the parse below), with its
+ * prescription.
  */
-const DATASOURCE_SUPPLIED_PROP = 'object';
+export const DATA_SOURCE_BOUND_ELEMENT_TYPES: ReadonlySet<string> = new Set([
+  'element:record_picker',
+  'element:number',
+  'element:repeater',
+]);
 
-/**
- * Is this issue "the required `object` prop is missing", on a component whose
- * `dataSource` supplies it?
- */
-function suppliedByDataSource(issue: LintZodIssue, component: AnyRec): boolean {
-  if (issue.path.length !== 1 || issue.path[0] !== DATASOURCE_SUPPLIED_PROP) return false;
-  const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
-  if (strName(dataSource?.object) === undefined) return false;
-  // "Missing" is read off the component, never off the issue: the path alone
-  // also matches a PRESENT value the row rejects (`object: 7`, `object: null`),
-  // and the binding supplies nothing there — the author wrote that value and
-  // the row's own verdict on it stands. Only no key, or `undefined`, is waived.
-  const props = isRec(component.properties) ? component.properties : undefined;
-  return props?.[DATASOURCE_SUPPLIED_PROP] === undefined;
+/** The object this component's node-level binding names, if it names one. */
+function boundObject(component: AnyRec): string | undefined {
+  return isRec(component.dataSource) ? strName(component.dataSource.object) : undefined;
 }
 
 /**
@@ -257,9 +258,31 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           : isRec(component.properties)
             ? component.properties
             : undefined;
+      const where = `page "${pageName}" · ${type}`;
+
+      // ── The binding an element reads ─────────────────────────────────
+      // Judged before the props bag, and whatever the bag holds: the binding
+      // is a key of the NODE, so a malformed bag does not excuse a missing one.
+      if (DATA_SOURCE_BOUND_ELEMENT_TYPES.has(type) && boundObject(component) === undefined) {
+        findings.push({
+          severity: 'warning',
+          rule: COMPONENT_PROPS_INVALID,
+          where,
+          path: `${path}.dataSource.object`,
+          message:
+            `dataSource.object: \`${type}\` reads its records from the node-level \`dataSource\` binding ` +
+            'only, and this node names no object there, so it queries nothing and draws its empty state ' +
+            'as if the object had no rows — nothing refuses it today, so the renderer receives the node ' +
+            'as written',
+          hint:
+            `Name the object on the component node — \`dataSource: { object: '<object name>' }\`, a ` +
+            'sibling of `type`, not a key inside `properties`, where a flat `object` is retired and read ' +
+            'by nothing.',
+        });
+      }
+
       if (!props) continue;
 
-      const where = `page "${pageName}" · ${type}`;
       const base = `${path}.properties`;
 
       // ── Undeclared keys ──────────────────────────────────────────────
@@ -292,7 +315,6 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
       const parsed = schema.safeParse(props);
       if (parsed.success) continue;
       for (const issue of parsed.error?.issues ?? []) {
-        if (suppliedByDataSource(issue, component)) continue;
         const at = issue.path.length ? `${base}.${issue.path.join('.')}` : base;
         // A strict UNION ARM reports the same fact one layer in — see
         // `unrecognizedKeysFromUnionArm`. Routed to the unknown-key rule id

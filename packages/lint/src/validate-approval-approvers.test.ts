@@ -267,6 +267,10 @@ describe('unset-manager dead-end (#16748)', () => {
     expect(finding.hint).toContain('/api/v1/auth/admin/set-user-manager');
     expect(finding.hint).toContain('{ userId, managerId }');
     expect(finding.hint).toContain('managerId set to null');
+    // The in-product door onto the same endpoint (the `set_user_manager` action
+    // on `sys_user`, label "Set Manager") — an admin reading this in a terminal
+    // is looking for the button, not the HTTP call.
+    expect(finding.hint).toContain('Set Manager');
     expect(finding.hint).toContain('SCIM');
     expect(finding.hint).toContain('import');
     expect(finding.hint).toContain('directory sync');
@@ -306,19 +310,40 @@ describe('unset-manager dead-end (#16748)', () => {
     expect(finding.hint).toContain('written by a seed, or by any other system-context write');
     expect(finding.hint).toContain('bypasses the managed-update whitelist');
 
-    // ⛔ The two that are NOT this repo's to offer must be marked as the
+    // The bulk route also WORKS HERE, so it is graded beside the endpoint and
+    // ⛔ never among the routes the deployment must supply: the admin import
+    // admits a `manager_id` column whose cell is the manager's identity key and
+    // links it in a second pass, once every row of the file exists, through the
+    // endpoint's own derivation. The clause this replaces told the author the
+    // import does not write the column — away from the one supported way to
+    // link a whole file. It must be gone from the string, not merely
+    // contradicted further down it.
+    expect(finding.hint).toContain('/api/v1/auth/admin/import-users');
+    expect(finding.hint).toContain('reads a manager_id column');
+    expect(finding.hint).toContain('once every row in the file exists');
+    expect(finding.hint).toContain("reported on that row's manager result");
+    expect(finding.hint).not.toMatch(/does not write it/);
+    // Placement is the grade: ahead of the clause that hands the remaining
+    // routes to the deployment.
+    const importAt = finding.hint.indexOf('/api/v1/auth/admin/import-users');
+    const deploymentAt = finding.hint.indexOf('a provisioning path your own deployment supplies');
+    expect(importAt).toBeGreaterThan(-1);
+    expect(deploymentAt).toBeGreaterThan(importAt);
+
+    // ⛔ The one that is NOT this repo's to offer must be marked as the
     // deployment's own, and the hint must say WHY rather than merely hedging.
     expect(finding.hint).toContain('a provisioning path your own deployment supplies');
     expect(finding.hint).toContain("declares the SCIM 'manager' attribute without projecting it");
-    expect(finding.hint).toContain('admin bulk import does not write it either');
 
     // ⛔ And they must not be deleted: a deployment running a real directory
     // sync may well populate the column, and the defect was presenting all
     // three as equally available, never naming them at all. They now also take
-    // PRECEDENCE — the endpoint refuses an `idp_provisioned` identity — so the
-    // hint must not read as "use the endpoint instead of your directory".
+    // PRECEDENCE — the endpoint refuses an `idp_provisioned` identity, and so
+    // does the import's `manager_id` column, which runs the same derivation —
+    // so the hint must not read as "use the endpoint instead of your directory".
     expect(finding.hint).toContain('SCIM provisioning and directory sync can populate it');
     expect(finding.hint).toContain("source 'idp_provisioned' the admin operation refuses");
+    expect(finding.hint).toContain("the import's manager_id column included");
   });
 
   it('does not claim a runtime fact it did not read', () => {

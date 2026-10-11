@@ -83,7 +83,8 @@ import {
     anonymousFormIntakeUnavailableMessage,
     anonymousFormObjectName,
     anonymousFormSharingPath,
-    // [#21476] The ADR-0106 fingerprint the admin read folds the reason into.
+    // [#21476] The ADR-0106 fingerprint the admin read folds the reason into
+    // — and [#22639] the list views the read gate withheld.
     objectFieldVisibilityFingerprint,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
@@ -290,6 +291,18 @@ export type RestProtocol = DataProtocol & MetadataProtocol;
  * literals is now a compile error instead of a cast-and-hope.
  */
 type TransportScopedMetaRequest<R> = R & { environmentId?: string };
+
+/**
+ * [ADR-0131 D6, triage ruling Q3 A] The anonymous form doors' `view` list
+ * read: the one metadata read left that reaches a legacy organization's rows.
+ * `legacyFormOrganizationId` is not a key of the spec's `GetMetaItemsRequest`
+ * — every other read is environment → code — and the protocol honours it for
+ * `view` alone: the Default Organization's legacy body is preferred, and a
+ * withdrawal in either layer closes the form, fail-closed until the v18
+ * migration ceremony (ADR-0131 C7) carries those rows into the environment
+ * layer and deletes this read with them.
+ */
+type LegacyFormViewsRequest = TransportScopedMetaRequest<GetMetaItemsRequest> & { legacyFormOrganizationId?: string };
 
 /**
  * [#15866] The DATA doors' sibling of {@link TransportScopedMetaRequest}, and
@@ -3353,6 +3366,8 @@ export class RestServer {
      *  - `app-permission` — the ADR-0112 standard envelope through the shared
      *    `sendError` (`@objectstack/types`), `{ success: false, error: { code,
      *    message } }`, the `body.error.code` objectui#4252 branches on (#8013);
+     *  - `audience-permission` — [#22639] a list view's or a dashboard's own
+     *    `requiredPermissions`: the app's whole refusal, so the same emitter;
      *  - `docs-audience` — {@link sendDeclaredFault}, `401 UNAUTHENTICATED` /
      *    `403 PERMISSION_DENIED` (ADR-0046 §6.7).
      */
@@ -3362,6 +3377,7 @@ export class RestServer {
                 sendMetaItemAbsent(res);
                 return;
             case 'app-permission':
+            case 'audience-permission':
                 sendEnvelopeError(res, refusal.status, refusal.code, refusal.message);
                 return;
             case 'docs-audience':
@@ -3557,13 +3573,31 @@ export class RestServer {
      * [#20156] Does {@link metaItemReadGate} judge this type per caller? The
      * question a door serving no document of its own asks before it fetches the
      * current one — a type the answer is no for costs that door no extra read
-     * and no new failure mode. `dashboard` is never judged per caller (its gate
-     * answers per deployment). `app` always is: an app the plain read refuses
+     * and no new failure mode. `app` always is: an app the plain read refuses
      * WHOLE is refused on every door, to an author as to anyone (ruling
      * 5856774816), and a non-author is served it pruned.
+     *
+     * [#22639] So are `view` and `dashboard`, for the same reason: a list view
+     * or a dashboard whose own `requiredPermissions` the caller does not all
+     * hold is refused whole on every door, author or not, and a view
+     * container is served pruned. (A dashboard's widget gate still answers per
+     * deployment and stays off these doors.) `object` is not here: its
+     * per-caller arm never refuses, and every door this question serves is an
+     * authoring door, open only to callers ADR-0106 D4 serves the schema whole.
      */
     private static gatesPerCaller(metaType: string): boolean {
-        return metaType === 'book' || metaType === 'doc' || metaType === 'app';
+        return metaType === 'book' || metaType === 'doc' || metaType === 'app'
+            || RestServer.gatesOnItsOwnKey(metaType);
+    }
+
+    /**
+     * [#22639] The types whose per-caller gate reads nothing but the item's own
+     * `requiredPermissions` — a list view and a dashboard (ruling 6095014058,
+     * letter A). `/diff` judges them when a current document exists, and with
+     * none serves the diff as before, the event doors' rule.
+     */
+    private static gatesOnItsOwnKey(metaType: string): boolean {
+        return metaType === 'view' || metaType === 'dashboard';
     }
 
     /**
@@ -5949,7 +5983,7 @@ export class RestServer {
                         // [commit 2a29caa53] Typed against the spec request shape plus the
                         // transport-level `environmentId` — the `as any` this
                         // literal used to carry is retired now that the spec
-                        // declares `previewDrafts` (and `organizationId`, #9726).
+                        // declares `previewDrafts`.
                         const listRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                             type: req.params.type,
                             packageId,
@@ -6469,8 +6503,17 @@ export class RestServer {
                             // the folded ETag is byte-identical, so a view's
                             // `304` answers exactly as before.
                             const intakeFolds = metaType === 'view';
+                            // [#22639] And for the two types this arm serves that
+                            // the per-caller read gate judges — a list view (one
+                            // refused whole, a container pruned) and an object
+                            // (its own `listViews` pruned): the body varies per
+                            // caller by what the gate withheld, which the
+                            // protocol's validator does not hash. Nothing
+                            // withheld folds nothing, so the `304` answers as
+                            // before.
+                            const audienceFolds = metaType === 'view' || metaType === 'object';
                             const cacheRequest = {
-                                ifNoneMatch: (maskApplies || intakeFolds) ? undefined : (req.headers['if-none-match'] as string),
+                                ifNoneMatch: (maskApplies || intakeFolds || audienceFolds) ? undefined : (req.headers['if-none-match'] as string),
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
                             };
 
@@ -6514,6 +6557,30 @@ export class RestServer {
                             // in the key — and what varies per caller is this
                             // projection plus the validator below.
                             let cachedDocument: any = result.data;
+                            // [#22639] THE per-caller read gate, before the mask —
+                            // the item chain's order (`createMetaItemAnswer`: gate,
+                            // then mask). This arm serves `view` and `object`, the
+                            // two types it judges here: a list view the caller
+                            // does not hold is refused whole, a container and an
+                            // object are served minus the list views withheld.
+                            // The same judge every other door asks — ⛔ no
+                            // decision of its own here. What it withheld is
+                            // folded into the validator below.
+                            let audienceFingerprint = '';
+                            if (audienceFolds) {
+                                const verdict = await this.metaItemReadGate(
+                                    environmentId, req, p, metaType, req.params.name, [cachedDocument],
+                                    { arms: 'all', app: 'gate' },
+                                )(cachedDocument);
+                                if (verdict.kind === 'refuse') {
+                                    verdict.send(res);
+                                    return;
+                                }
+                                audienceFingerprint = objectFieldVisibilityFingerprint(
+                                    metaReadGate.withheldListViewNames(cachedDocument, verdict.document),
+                                );
+                                cachedDocument = verdict.document;
+                            }
                             let visibilityFingerprint = '';
                             if (maskPosture.kind === 'project') {
                                 // [#21884] Related to the fetched document: its `objectOverride` params name other objects.
@@ -6566,18 +6633,25 @@ export class RestServer {
                                 // the runtime view's: a D4-exempt caller whose
                                 // permission withholds a field is served a
                                 // different `sortability`, never a 304 for another's.
+                                // [#22639] …and so does what the read gate
+                                // withheld: a caller who no longer holds a list
+                                // view's capability is never answered a `304`
+                                // for the body that carried it.
                                 const value = foldVisibilityFingerprintIntoEtag(
                                     foldVisibilityFingerprintIntoEtag(
-                                        foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
-                                        runtimeView.fingerprint,
+                                        foldVisibilityFingerprintIntoEtag(
+                                            foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                            runtimeView.fingerprint,
+                                        ),
+                                        intakeFingerprint,
                                     ),
-                                    intakeFingerprint,
+                                    audienceFingerprint,
                                 );
                                 const etagValue = result.etag.weak
                                     ? `W/"${value}"`
                                     : `"${value}"`;
                                 res.header('ETag', etagValue);
-                                if ((maskApplies || intakeFolds) && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
+                                if ((maskApplies || intakeFolds || audienceFolds) && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
                                     res.status(304).send();
                                     return;
                                 }
@@ -6642,7 +6716,7 @@ export class RestServer {
                             // [commit 2a29caa53] Typed against the spec request shape —
                             // the `as any` this literal used to carry is
                             // retired now that the spec declares `state` and
-                            // `previewDrafts` (and `organizationId`, #9726).
+                            // `previewDrafts`.
                             // No transport envelope: this door does not thread
                             // `environmentId` (the kernel was already resolved
                             // above), so the plain declared shape suffices.
@@ -7239,10 +7313,10 @@ export class RestServer {
                     // [#13406 · ADR-0131 D6] The ENV partition, stated by
                     // omission: `sys_metadata_history` is filtered by strict
                     // equality on `organization_id`, and since the
-                    // per-organization overlay axis retired every `/meta` write
-                    // logs there (`organizationId ?? null` in
-                    // `historyMetaItem`). A legacy organization-scoped log is
-                    // not served; its promotion is ADR-0131 C7's.
+                    // per-organization overlay axis retired every write logs
+                    // there and `historyMetaItem` reads no other partition. A
+                    // legacy organization-scoped log is not served; its
+                    // promotion is ADR-0131 C7's.
                     //
                     // Typed through `TransportScopedMetaRequest` like the
                     // reset door above, NOT as a plain `HistoryMetaItemRequest`
@@ -7418,7 +7492,6 @@ export class RestServer {
                     const auditRequest: AuditMetaItemRequest = {
                         type: req.params.type,
                         name: req.params.name,
-                        organizationId: null,
                         // Already finite or absent — the declared parse above
                         // refuses anything else.
                         ...(limit !== undefined ? { limit } : {}),
@@ -7797,14 +7870,22 @@ export class RestServer {
                     const diffCurrent = diffGated
                         ? await this.fetchCurrentMetaDocument(req, p)
                         : undefined;
-                    if (diffGated && diffCurrent == null) {
+                    // [#22639] A list view's and a dashboard's per-caller gate
+                    // is the item's OWN `requiredPermissions`. With no
+                    // published row there is no current document to judge, so
+                    // — as the event doors answer for every gated type — the
+                    // diff is served as before, and a never-published view or
+                    // dashboard keeps its builder's diff whether or not it
+                    // names a capability: no key, no change. Its draft is
+                    // judged where it is served whole (`?state=draft`,
+                    // `/layers`).
+                    if (diffGated && diffCurrent == null && !RestServer.gatesOnItsOwnKey(diffMetaType)) {
                         sendMetaItemAbsent(res);
                         return;
                     }
                     // [#13406 · ADR-0131 D6] The ENV partition, stated by
                     // omission, as on the history twin: `diffMetaItem` reads
-                    // `sys_metadata_history` by strict equality on
-                    // `organization_id` (`request.organizationId ?? null`), and
+                    // the environment's `sys_metadata_history` rows, and
                     // `version` is a per-(org, type, name) lineage counter, so
                     // the environment lineage is the one every `/meta` write
                     // now extends.
@@ -7827,7 +7908,7 @@ export class RestServer {
                     // reads each side pruned, exactly as the plain read prunes
                     // it ({@link diffEmittedFrom}).
                     let served: any = result;
-                    if (diffGated) {
+                    if (diffGated && diffCurrent != null) {
                         const { from, to } = RestServer.diffSides(diffCurrent, result);
                         const judge = this.metaItemReadGate(
                             environmentId, req, p, diffMetaType, req.params.name, [diffCurrent, from, to],
@@ -10183,19 +10264,17 @@ export class RestServer {
     }
 
     /**
-     * The object schemas an anonymous form request reads, in the organization
-     * the form itself was resolved in (#21331). They carry the columns the
-     * registry injects, `organization_id` among them.
+     * The object schemas an anonymous form request reads (#21331): the
+     * environment's, as every object read is (ADR-0131 D6). They carry the
+     * columns the registry injects, `organization_id` among them.
      */
     private async readFormObjectDefinitions(
         p: RestProtocol,
         environmentId: string | undefined,
-        organizationId: string | undefined,
     ): Promise<any[]> {
         const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
             type: 'object',
             ...(environmentId ? { environmentId } : {}),
-            ...(organizationId ? { organizationId } : {}),
         };
         const r: any = await p.getMetaItems(objectsRequest);
         return Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
@@ -10221,8 +10300,7 @@ export class RestServer {
         const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
         const posture = anonymousFormIntakePosture(tenancy);
         let objects: Promise<any[]> | undefined;
-        const readObjects = (): Promise<any[]> => (objects ??= anonymousFormOrganization(tenancy)
-            .then((organizationId) => this.readFormObjectDefinitions(p, environmentId, organizationId)));
+        const readObjects = (): Promise<any[]> => (objects ??= this.readFormObjectDefinitions(p, environmentId));
         const warnings: Array<{ path: string; message: string }> = [];
         for (const candidate of candidates) {
             const object = anonymousFormObjectName(view, candidate.form);
@@ -10310,13 +10388,14 @@ export class RestServer {
         };
 
         // [#21331] WHICH organization's metadata an anonymous form request
-        // reads. A public-form request carries no session, so it carries no
-        // active organization, and `getMetaItems` without one merges only the
-        // env-wide overlays. An administrator's edit of a packaged form is
-        // saved as an overlay of THEIR organization, so that read missed every
-        // such edit, including the one that withdraws the form from anonymous
-        // intake. The editor showed the form closed while both doors kept
-        // serving and accepting it.
+        // reads. Before ADR-0131 D6 an administrator's edit of a packaged
+        // form was saved as an overlay of THEIR organization, and an org-less
+        // read missed every such edit, including the one that withdraws the
+        // form from anonymous intake. Since D6 no write lands
+        // organization-scoped and no other read serves such a row; this
+        // `view` read alone keeps the Default Organization's legacy layer
+        // (`legacyFormOrganizationId`, triage ruling Q3 A), fail-closed, until
+        // the v18 migration ceremony (ADR-0131 C7) carries those rows.
         //
         // The answer is the tenancy service's `defaultOrgId()`: the
         // organization a single-posture deployment binds every principal to.
@@ -10344,15 +10423,15 @@ export class RestServer {
             environmentId: string | undefined,
             req: any,
             slug: string,
-        ): Promise<{ view: any; form: any; object: string; organizationId: string | undefined } | null> => {
+        ): Promise<{ view: any; form: any; object: string } | null> => {
             const p = await this.resolveProtocol(environmentId, req);
             if (typeof (p as any).getMetaItems !== 'function') return null;
             const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
             const organizationId = await anonymousFormOrganization(tenancy);
-            const viewsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
+            const viewsRequest: LegacyFormViewsRequest = {
                 type: 'view',
                 ...(environmentId ? { environmentId } : {}),
-                ...(organizationId ? { organizationId } : {}),
+                ...(organizationId ? { legacyFormOrganizationId: organizationId } : {}),
             };
             const listOf = (result: any): any[] => (Array.isArray(result?.items)
                 ? result.items
@@ -10383,10 +10462,10 @@ export class RestServer {
             const unavailable = await anonymousFormIntakeUnavailability(
                 match.object,
                 anonymousFormIntakePosture(tenancy),
-                async () => (await this.readFormObjectDefinitions(p, environmentId, organizationId))
+                async () => (await this.readFormObjectDefinitions(p, environmentId))
                     .find((o: any) => o?.name === match.object),
             );
-            return unavailable ? null : { ...match, organizationId };
+            return unavailable ? null : match;
         };
 
         // GET /forms/:slug — resolve and return the public form spec
@@ -10441,13 +10520,11 @@ export class RestServer {
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).getMetaItems === 'function') {
-                            // [#21331] The same organization the form itself
-                            // was resolved in, so the published field schema
-                            // matches the form the caller was served.
+                            // [#21331] The environment's object schema, as
+                            // every object read is (ADR-0131 D6).
                             const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
                                 ...(environmentId ? { environmentId } : {}),
-                                ...(match.organizationId ? { organizationId: match.organizationId } : {}),
                             };
                             const r: any = await p.getMetaItems(objectsRequest);
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];

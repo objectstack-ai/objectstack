@@ -426,6 +426,11 @@ export const objectForm = defineForm({
             { field: 'feeds', type: 'boolean' },
             { field: 'activities', type: 'boolean' },
             { field: 'clone', type: 'boolean' },
+            {
+              field: 'approvalsVisibleToReaders',
+              type: 'boolean',
+              helpText: 'Readers of a record see its approval requests and history, read-only, with no approval action',
+            },
           ],
         },
       ],
@@ -682,7 +687,7 @@ export const objectForm = defineForm({
           { label: 'Modal — edit form as a dialog over the current view', value: 'modal' },
           { label: 'Page — navigate to a dedicated full-page edit route', value: 'page' },
         ] },
-        { field: 'fileAccessDelegate', type: 'text', helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed." },
+        { field: 'fileAccessDelegate', type: 'text', helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, and decides whether a reader who may not read sys_file sees their name, size and type in a record read of this object (asked once per owning record on each such read), instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed." },
         {
           field: 'lifecycle',
           type: 'composite',

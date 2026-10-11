@@ -1597,16 +1597,12 @@ import {
   GetMetaItemLayeredRequestSchema,
 } from './protocol.zod';
 
-describe('meta-read request schemas declare organizationId (declared = enforced)', () => {
-  // The implementation (`@objectstack/metadata-protocol`) accepts and HONOURS
-  // `organizationId` on all four read verbs: it selects the org partition in
-  // the ADR-0005 overlay read order, i.e. it decides which tenant's row is
-  // served. These pins hold the DECLARED surface to that enforced shape.
-  //
-  // Why the accept-pin asserts the parsed VALUE, not just `success`: these are
-  // non-strict objects, so before #9726 a request carrying `organizationId`
-  // still parsed green — the member was silently STRIPPED. Presence in the
-  // parse OUTPUT is the observable that actually changed.
+describe('[ADR-0131 D6] meta-read request schemas declare no organizationId (declared = enforced)', () => {
+  // Every metadata read is environment → code: the implementation
+  // (`@objectstack/metadata-protocol`) reads no organization on any read
+  // verb, so the declared shape carries none. These are non-strict objects,
+  // so a request still carrying the retired key parses green with the member
+  // STRIPPED — absence from the parse OUTPUT is the observable.
   const cases = [
     ['GetMetaItemsRequestSchema', GetMetaItemsRequestSchema, { type: 'object' }],
     ['GetMetaItemRequestSchema', GetMetaItemRequestSchema, { type: 'view', name: 'account_list' }],
@@ -1614,37 +1610,27 @@ describe('meta-read request schemas declare organizationId (declared = enforced)
     ['GetMetaItemLayeredRequestSchema', GetMetaItemLayeredRequestSchema, { type: 'view', name: 'account_list' }],
   ] as const;
 
-  it.each(cases)('%s accepts organizationId and PRESERVES it through parse', (_n, schema, base) => {
+  it.each(cases)('%s strips a retired organizationId at parse', (_n, schema, base) => {
     const result = schema.safeParse({ ...base, organizationId: 'org_alpha' });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect((result.data as { organizationId?: string }).organizationId).toBe('org_alpha');
-    }
-  });
-
-  it.each(cases)('%s keeps organizationId OPTIONAL — an env-wide (org-less) read stays valid', (_n, schema, base) => {
-    const result = schema.safeParse(base);
     expect(result.success).toBe(true);
     if (result.success) {
       expect('organizationId' in (result.data as object)).toBe(false);
     }
   });
 
-  it.each(cases)('%s rejects a non-string organizationId — the scope key is a value, not a bag', (_n, schema, base) => {
-    expect(schema.safeParse({ ...base, organizationId: 42 }).success).toBe(false);
-    expect(schema.safeParse({ ...base, organizationId: { id: 'org_alpha' } }).success).toBe(false);
+  it.each(cases)('%s declares no organizationId member', (_n, schema) => {
+    expect('organizationId' in (schema as unknown as { shape: object }).shape).toBe(false);
   });
 
   it('GetMetaItemLayeredRequestSchema mirrors the implementation inline type member for member', () => {
-    // `{ type, name, packageId?, organizationId? }` — the exact parameter type
-    // of `getMetaItemLayered` in metadata-protocol. packageId scopes the code
+    // `{ type, name, packageId? }` — the exact parameter type of
+    // `getMetaItemLayered` in metadata-protocol. packageId scopes the code
     // layer (ADR-0048); nothing else is declared because nothing else is
     // enforced.
     const full = GetMetaItemLayeredRequestSchema.safeParse({
       type: 'view',
       name: 'account_list',
       packageId: 'pkg_crm',
-      organizationId: 'org_alpha',
     });
     expect(full.success).toBe(true);
     expect(GetMetaItemLayeredRequestSchema.safeParse({ type: 'view' }).success).toBe(false);
@@ -1944,8 +1930,8 @@ describe('AuditMetaItemRequestSchema mirrors the implementation parameter type',
   // commit cccbe51bf): NEITHER side was declared, and the REST call site reached the
   // verb through `(p as any)` twice (guard + call). The measure is the
   // implementation's parameter type in `@objectstack/metadata-protocol` —
-  // `{ type, name, organizationId?: string | null, limit?: number }` — and the
-  // REST door's actual sends; nothing else is declared because nothing else is
+  // `{ type, name, limit?: number }` (ADR-0131 D6 retired `organizationId`) —
+  // and the REST door's actual sends; nothing else is declared because nothing else is
   // enforced. As in the #9726 / commit 2a29caa53 / commit cccbe51bf blocks above,
   // accept-pins assert the parsed VALUE: this is a non-strict object, so
   // `success` alone is exactly the silent-strip state this family of cards closes.
@@ -1953,7 +1939,7 @@ describe('AuditMetaItemRequestSchema mirrors the implementation parameter type',
   const base = { type: 'view', name: 'account_list' } as const;
 
   it('accepts the full request and PRESERVES every member through parse', () => {
-    const full = { ...base, organizationId: 'org_alpha', limit: 50 };
+    const full = { ...base, limit: 50 };
     const result = AuditMetaItemRequestSchema.safeParse(full);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -1967,18 +1953,12 @@ describe('AuditMetaItemRequestSchema mirrors the implementation parameter type',
     expect(AuditMetaItemRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
   });
 
-  it('organizationId accepts null AND preserves it — the REST door always sends it, possibly null', () => {
-    // The door sends `ctx?.tenantId ?? null` unconditionally (#8747's
-    // fail-closed scoping), so `null` must be a declared spelling for the
-    // literal to compile at all. Semantically `null` and absent are the same
-    // env-wide read; the pin is that the parse neither refuses nor strips it.
-    const withNull = AuditMetaItemRequestSchema.safeParse({ ...base, organizationId: null });
-    expect(withNull.success).toBe(true);
-    if (withNull.success) {
-      expect('organizationId' in (withNull.data as object)).toBe(true);
-      expect((withNull.data as { organizationId?: string | null }).organizationId).toBeNull();
+  it('[ADR-0131 D6] a retired organizationId is STRIPPED at parse — the trail is the environment\'s', () => {
+    for (const organizationId of ['org_alpha', null]) {
+      const result = AuditMetaItemRequestSchema.safeParse({ ...base, organizationId });
+      expect(result.success).toBe(true);
+      if (result.success) expect('organizationId' in (result.data as object)).toBe(false);
     }
-    expect(AuditMetaItemRequestSchema.safeParse({ ...base, organizationId: 42 }).success).toBe(false);
   });
 
   it('limit is an optional number — values, not bags', () => {
@@ -2076,8 +2056,11 @@ describe('MetadataProtocol declares auditMetaItem', () => {
   });
 
   it('refuses an undeclared key at the member call shape', () => {
-    const good: AuditMetaItemRequest = { type: 'view', name: 'account_list', organizationId: null };
+    const good: AuditMetaItemRequest = { type: 'view', name: 'account_list', limit: 5 };
     expect(good.type).toBe('view');
+    // @ts-expect-error `organizationId` is retired (ADR-0131 D6): no metadata read is organization-scoped.
+    const withOrg: AuditMetaItemRequest = { type: 'view', name: 'account_list', organizationId: null };
+    expect(withOrg.name).toBe('account_list');
     // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member (and #8747 removed it from this door's wire payload entirely).
     const withEnv: AuditMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
     expect(withEnv.name).toBe('account_list');
@@ -2097,8 +2080,8 @@ describe('HistoryMetaItemRequestSchema mirrors the implementation parameter type
   // declared, the REST call site reaching the verb through `(p as any)` twice
   // (guard + call). The measure is the implementation's parameter type in
   // `@objectstack/metadata-protocol` —
-  // `{ type, name, organizationId?: string, sinceSeq?: number, limit?: number }`
-  // — and the REST door's actual sends; nothing else is declared because
+  // `{ type, name, sinceSeq?: number, limit?: number }` (ADR-0131 D6 retired
+  // `organizationId`) — and the REST door's actual sends; nothing else is declared because
   // nothing else is enforced. As in the #11678 block above, accept-pins
   // assert the parsed VALUE: this is a non-strict object, so `success` alone
   // is exactly the silent-strip state this family of cards closes.
@@ -2106,7 +2089,7 @@ describe('HistoryMetaItemRequestSchema mirrors the implementation parameter type
   const base = { type: 'view', name: 'account_list' } as const;
 
   it('accepts the full request and PRESERVES every member through parse', () => {
-    const full = { ...base, organizationId: 'org_alpha', sinceSeq: 3, limit: 50 };
+    const full = { ...base, sinceSeq: 3, limit: 50 };
     const result = HistoryMetaItemRequestSchema.safeParse(full);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -2120,21 +2103,10 @@ describe('HistoryMetaItemRequestSchema mirrors the implementation parameter type
     expect(HistoryMetaItemRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
   });
 
-  it('organizationId is an optional string — the implementation\'s declared type, not the audit twin\'s nullable', () => {
-    // The audit twin declares `string | null` because ITS implementation
-    // does and its door always sends `ctx?.tenantId ?? null`. This
-    // implementation declares plain `organizationId?: string`, and this door
-    // sends no organization at all — so the mirror is `.optional()` without
-    // `.nullable()`. (Whether the door SHOULD send one is the #8747-family
-    // measurement the card fences to a future issue, deliberately not
-    // answered by this declaration.)
+  it('[ADR-0131 D6] a retired organizationId is STRIPPED at parse — the change log is the environment\'s', () => {
     const withOrg = HistoryMetaItemRequestSchema.safeParse({ ...base, organizationId: 'org_alpha' });
     expect(withOrg.success).toBe(true);
-    if (withOrg.success) {
-      expect((withOrg.data as { organizationId?: string }).organizationId).toBe('org_alpha');
-    }
-    expect(HistoryMetaItemRequestSchema.safeParse(base).success).toBe(true);
-    expect(HistoryMetaItemRequestSchema.safeParse({ ...base, organizationId: 42 }).success).toBe(false);
+    if (withOrg.success) expect('organizationId' in (withOrg.data as object)).toBe(false);
   });
 
   it('sinceSeq and limit are optional numbers — values, not bags', () => {
@@ -2620,7 +2592,6 @@ describe('ListDraftsResponseSchema declares the pending-drafts body', () => {
         type: 'view',
         name: 'account_pipeline',
         label: 'Account Pipeline',
-        organizationId: 'org_01',
         packageId: 'com.example.crm',
         updatedAt: '2026-08-27T09:12:44.000Z',
         updatedBy: 'admin@objectos.ai',
@@ -2629,7 +2600,6 @@ describe('ListDraftsResponseSchema declares the pending-drafts body', () => {
         type: 'app',
         name: 'field_service',
         label: { en: 'Field Service', 'zh-CN': '现场服务' },
-        organizationId: null,
         packageId: 'com.example.fsm',
         updatedAt: '2026-08-27T09:13:02.000Z',
         updatedBy: 'admin@objectos.ai',
@@ -2638,7 +2608,6 @@ describe('ListDraftsResponseSchema declares the pending-drafts body', () => {
         type: 'object',
         name: 'lead_source',
         label: null,
-        organizationId: null,
         packageId: null,
         updatedAt: null,
         updatedBy: null,

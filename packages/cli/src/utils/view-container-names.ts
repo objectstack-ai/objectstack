@@ -29,17 +29,31 @@
  * `resolveArtifactPackageOrder` returns that payload itself when it carries no
  * `packages` key and each `packages[i].manifest` body otherwise (ADR-0130 D4);
  * `ObjectQL.registerApp(body)` then runs `registerMetadataCollections(body,
- * body.id || body.name, 'manifest')`. So:
+ * body.id || body.name, 'manifest')`. On a stack that carries `packages[]`,
+ * `AppPlugin` then registers the RESIDUAL — the top-level items no package
+ * body declares — through the metadata package's one residual rule
+ * (`MetadataPlugin.registerUnclaimedTopLevel`), which refuses a divergent
+ * residual container in the same words, from `manifest` and under the stack's
+ * own manifest id. So:
  *
  *   - no `packages[]` → the top-level `views`, owned by the manifest's id;
  *   - `packages[]`    → each body's own `views`, owned by that package's id,
- *     and ⛔ NOT the top level, which the load path does not register from.
+ *     THEN the top-level `views` the residual rule registers, owned by the
+ *     stack's manifest id. ⛔ Never a top-level container a body already
+ *     declares: the residual rule skips it, so judging it here would refuse
+ *     the same document twice.
+ *
+ * WHICH top-level entries are residual, and their owner id, is
+ * `@objectstack/metadata`'s `unclaimedTopLevel` — the answer the boot
+ * registers from. ⛔ Never re-derived here: a second spelling of "which top
+ * level does boot read" is how this walk and the boot came to disagree once.
  *
  * The package id is read through the owners that already exist for it: the
  * runtime's `artifactPackageId` (`@objectstack/core` — "every seam that has to
  * name a package reads the id through THIS function") for the one-package
- * payload, and this package's `artifactPackages` for `packages[]`, the reader
- * both `os build` and `os validate` already walk with.
+ * payload, this package's `artifactPackages` for `packages[]`, the reader
+ * both `os build` and `os validate` already walk with, and `unclaimedTopLevel`
+ * for the residual.
  *
  * ⚠️ Bound, stated rather than hidden: a nested `plugins[]` entry's `views` is
  * registered by boot too (label `nested plugin`), and is NOT walked here. The
@@ -52,6 +66,7 @@
  */
 
 import { artifactPackageId } from '@objectstack/core';
+import { unclaimedTopLevel } from '@objectstack/metadata';
 import { viewContainerNameRefusal } from '@objectstack/objectql';
 
 import { artifactPackages } from './artifact-packages.js';
@@ -80,13 +95,22 @@ const asRec = (v: unknown): AnyRec | undefined =>
  * Returns `[]` for a stack the boot registrar accepts on this axis.
  */
 export function findViewContainerNameRefusals(parsed: AnyRec): ViewContainerNameRefusalRow[] {
-  const bodies: Array<{ at: string; ownerId: string | undefined; views: unknown }> = [];
+  // `located`: `at` already names the one entry `views` holds.
+  const bodies: Array<{ at: string; ownerId: string | undefined; views: unknown; located?: boolean }> = [];
   // The resolver's own branch test (`declared === undefined`). On the PARSED
   // stack a present `packages` is an array — `ArtifactPackageSchema[]`,
   // `.optional()`, so `null` and every non-array were refused at the parse.
   if (parsed.packages !== undefined) {
     for (const pkg of artifactPackages(parsed)) {
       bodies.push({ at: `packages[${pkg.index}].manifest.views`, ownerId: pkg.id, views: pkg.body.views });
+    }
+    // The residual, after the bodies — the order boot registers them in. Each
+    // unclaimed `view` entry is located at its own top-level index; the judge
+    // refuses only a container, exactly as the residual registration does.
+    const residual = unclaimedTopLevel(parsed);
+    for (const { field, index, type, item } of residual?.items ?? []) {
+      if (type !== 'view') continue;
+      bodies.push({ at: `${field}[${index}]`, ownerId: residual?.ownerId, views: [item], located: true });
     }
   } else {
     const manifest = asRec(parsed.manifest);
@@ -95,13 +119,13 @@ export function findViewContainerNameRefusals(parsed: AnyRec): ViewContainerName
   }
 
   const rows: ViewContainerNameRefusalRow[] = [];
-  for (const { at, ownerId, views } of bodies) {
+  for (const { at, ownerId, views, located } of bodies) {
     if (!Array.isArray(views)) continue;
     views.forEach((entry, index) => {
       const refusal = viewContainerNameRefusal(entry, 'manifest', ownerId);
       if (!refusal) return;
       rows.push({
-        path: `${at}[${index}]`,
+        path: located ? at : `${at}[${index}]`,
         code: refusal.code,
         httpStatus: refusal.httpStatus,
         message: refusal.message,

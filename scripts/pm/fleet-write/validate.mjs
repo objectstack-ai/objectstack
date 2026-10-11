@@ -43,7 +43,12 @@
  *     (the row's `alone`): its token carries `actions: write`, and that grant
  *     serves one request and nothing beside it. `workflow` is judged against
  *     the closed allowlist and `ref` against the one ref, as enums — an
- *     off-list file, a path, a glob or another ref is refused by name.
+ *     off-list file, a path, a glob or another ref is refused by name;
+ *   - a `pr_create` may carry `assignees`, the typed list `assign` takes —
+ *     judged here as every list is — and the op table turns it into a second
+ *     request of the SAME action, sent by the executor at the number the
+ *     create answered (`ops.mjs`, its header), so no separate assign write
+ *     exists for anything to refuse.
  *
  * ## The token list and the token's grants — where a stroke widens either
  *
@@ -102,6 +107,7 @@ import {
   WORKFLOW_DISPATCH_ALLOWLIST,
   WORKFLOW_DISPATCH_PATH_SHAPE,
   WORKFLOW_DISPATCH_REF,
+  answerPlaceholder,
 } from './ops.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -446,9 +452,9 @@ export async function main(argv, deps = {}) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the envelope: four keys, every one required, nothing else admitted': 9,
   'the fields: request_id shape and cap, the one organization, the session id': 8,
-  'the actions: count, the closed op list, closed keys per op, typed values': 26,
+  'the actions: count, the closed op list, closed keys per op, typed values': 30,
   'the platform ceilings: ten top-level properties and under 64KB, pinned with their source': 6,
-  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 15,
+  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 20,
   'the normalised payload: only judged keys travel': 3,
   'the CLI: a file, the environment, GitHub outputs, and the exit ladder': 10,
   'the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created': 12,
@@ -558,6 +564,12 @@ export async function selfTest() {
     t('…and so are an uppercase, a non-hex and a 41-character spelling', [SHA.toUpperCase(), 'g'.repeat(40), `${SHA}0`].map((sha) => refuses(one({ op: 'pr_update_branch', pull: 1, expected_head_sha: sha }), 'full 40-hex commit sha')), [true, true, true]);
     t('…a missing expected_head_sha is refused — required, never defaulted to the current head', refuses(one({ op: 'pr_update_branch', pull: 1 }), 'actions[0].expected_head_sha is required'));
     t('…and the accepted shape is pull plus the full sha and nothing else', [validatePayload(one({ op: 'pr_update_branch', pull: 22002, expected_head_sha: SHA })).ok, refuses(one({ op: 'pr_update_branch', pull: 1, expected_head_sha: SHA, body: 'x' }), 'actions[0].body is not a key `pr_update_branch` takes')], [true, true]);
+    // pr_create with assignees: the same typed list `assign` takes, judged HERE — never left to the platform.
+    const opened = (assignees) => one({ op: 'pr_create', title: 't', head: 'h', base: 'main', assignees });
+    t('pr_create: assignees that is not an array of strings is refused, naming the shape', [refuses(opened('u'), 'actions[0].assignees must be an array of strings'), refuses(opened({ login: 'u' }), 'actions[0].assignees must be an array of strings')], [true, true]);
+    t('…and so is one carrying a non-string login, an empty list, a login named twice, or eleven logins', [[1], [], ['u', 'u'], Array.from({ length: 11 }, (_, i) => `u${i}`)].map((assignees) => refuses(opened(assignees), 'actions[0].assignees')), [true, true, true, true]);
+    t('…a login over 39 characters is refused per item, at the platform\'s own cap', refuses(opened(['x'.repeat(40)]), 'per-item cap of 39'));
+    t('…and the accepted shape is the create plus a list of logins, body optional either way', [validatePayload(opened(['marchtian'])).ok, validatePayload(one({ op: 'pr_create', title: 't', head: 'h', base: 'main', body: 'b', assignees: ['a', 'b'] })).ok], [true, true]);
     // Every op's minimal valid shape is accepted — the table and the validator agree.
     const minimal = {
       comment: { issue: 1, body: 'b' },
@@ -568,7 +580,7 @@ export async function selfTest() {
       unassign: { issue: 1, assignees: ['u'] },
       issue_patch: { issue: 1, state: 'closed', state_reason: 'completed' },
       issue_create: { title: 't', body: 'b', labels: ['l'], assignees: ['u'] },
-      pr_create: { title: 't', head: 'h', base: 'main', body: 'b' },
+      pr_create: { title: 't', head: 'h', base: 'main', body: 'b', assignees: ['u'] },
       pr_request_reviewers: { pull: 1, reviewers: ['u'] },
       pr_update_branch: { pull: 1, expected_head_sha: SHA },
       pr_ready: { pull: 1 },
@@ -616,6 +628,13 @@ export async function selfTest() {
     t('pr_update_branch spends pull-requests — where GitHub\'s ledger lists update-branch, server-to-server, no additional permission — and carries the sha in its body', [OPS.pr_update_branch.permission, OPS.pr_update_branch.requests({ op: 'pr_update_branch', pull: 7, expected_head_sha: SHA }, 'o/r')[0].body], ['pull-requests', { expected_head_sha: SHA }]);
     t('every GraphQL descriptor names an allowed mutation and its query spells that name', everyRequest.filter((r) => r.graphql).every((r) => ALLOWED_MUTATIONS.includes(r.graphql.mutation) && r.graphql.query.includes(r.graphql.mutation)));
     t('pr_create forces draft: true whatever the action said', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r')[0].body.draft, true);
+    // The one leg that reads an earlier answer — pr_create's assignees (the ops.mjs header): pinned to that one descriptor.
+    const legs = everyRequest.filter((r) => r.fromAnswer !== undefined);
+    t("⛔ exactly ONE descriptor reads an earlier answer — pr_create's assignees leg: a POST to the created pull's issue-assignees path at the placeholder the executor fills from the create's number, carrying the logins the answer must list", legs.map((r) => [r.op, r.verb, r.path, r.fromAnswer, r.body, r.assigned]), [['pr_create', 'POST', `/repos/${TARGET_OWNER}/objectstack/issues/${answerPlaceholder('number')}/assignees`, 'number', { assignees: ['u'] }, ['u']]]);
+    t('…and it is never the FIRST request of its action — the answer it reads exists before it is sent', OP_NAMES.filter((op) => { const a = { op }; for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = sample[k]; return OPS[op].requests(a, 'o/r')[0].fromAnswer !== undefined; }), []);
+    t('…its placeholder is the one spelling the executor fills, spelled once, and no path without fromAnswer carries a brace', [answerPlaceholder('number'), everyRequest.filter((r) => r.fromAnswer === undefined && /[{}]/.test(r.path)).map((r) => `${r.op} ${r.path}`)], ['{number}', []]);
+    t('every grant a row ALSO spends is a literal mint input of PERMISSIONS, never a stroke-scoped one — so the mint widens nothing for it; pr_create\'s issues write is the one such row', [OP_NAMES.flatMap((op) => OPS[op].alsoSpends ?? []).every((name) => name in PERMISSIONS && !STROKE_SCOPED_PERMISSIONS.includes(name)), OP_NAMES.filter((op) => OPS[op].alsoSpends).map((op) => [op, [...OPS[op].alsoSpends]])], [true, [['pr_create', ['issues']]]]);
+    t('pr_create without assignees is the one create request it always was — no second leg', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r').length, 1);
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);
     t('every op names a permission the token is narrowed to', OP_NAMES.every((op) => OPS[op].permission in PERMISSIONS));
     // The permission map, pinned entry by entry: the auto-merge mutations need `contents: write` on the

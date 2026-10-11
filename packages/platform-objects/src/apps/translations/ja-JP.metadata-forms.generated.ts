@@ -293,6 +293,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "enable.clone": {
         label: "クローン"
       },
+      "enable.approvalsVisibleToReaders": {
+        label: "閲覧者に承認を表示",
+        helpText: "レコードを閲覧できるユーザーが、その承認リクエストと履歴を読み取り専用で参照できます。承認アクションは提供されません"
+      },
       validations: {
         label: "検証ルール",
         helpText: "オブジェクトレベルの検証ルール — ルールオブジェクトの配列。例: [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。ステートマシンの遷移テーブルもここで宣言します（ADR-0020）"
@@ -419,7 +423,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fileAccessDelegate: {
         label: "ファイルアクセス委譲サービス",
-        helpText: "このオブジェクトのメディア項目が持つファイルのダウンロードを認可するカーネルサービス。指定すると「呼び出し元がそのレコードを読めるか」では判定しなくなります。アクセスがサービスによって仲介されるオブジェクト向けで、判定できない場合は拒否します。"
+        helpText: "このオブジェクトのメディア項目が持つファイルのダウンロードを認可し、sys_file を読めない読者がこのオブジェクトのレコードを読んだときにそのファイルの名前・サイズ・種類を見られるかも判定するカーネルサービス（そうした読み取りのたびに、ファイルを持つレコードごとに一度問い合わせます）。指定すると「呼び出し元がそのレコードを読めるか」では判定しなくなります。アクセスがサービスによって仲介されるオブジェクト向けで、判定できない場合は拒否します。"
       },
       lifecycle: {
         label: "データライフサイクル",
@@ -2360,6 +2364,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "説明"
+      },
+      permissionSets: {
+        label: "権限セット",
+        helpText: "この役職が配布する権限セット（名前で指定、snake_case）。"
       },
       delegatable: {
         label: "セルフ委任を許可",

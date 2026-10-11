@@ -37,6 +37,14 @@
 // `bridged` host below, live on `main`; and a stored row saved from a folded
 // read), so `foldObjectExtendersOnto` was made idempotent instead. The
 // `prefolded` and `bridged` hosts here are what hold that.
+//
+// [ADR-0131 D6, triage ruling Q1 → C] The host object here is one a package
+// ships, so a stored row of it is an overlay of SEALED managed content: no
+// read serves it any more — the package's definition, with its extenders
+// folded on, is the object. The layered read still REPORTS the row as its
+// `overlay` layer. What the cases below pin is therefore the fold on the
+// package's definition whatever row is stored, and that the row is reported,
+// not served.
 
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry, assertEngineFindOnePredicate } from '@objectstack/objectql';
@@ -306,12 +314,11 @@ async function measure(opts: {
         layerCode: layeredBody?.code,
         layerOverlay: layeredBody?.overlay,
         layerEffective: layeredBody?.effective,
-        // D9.2 applied to THIS host's base: the overlay row when one exists,
-        // else the owner's declaration. This is the definition the served body
-        // is checked against — never the other route.
-        registryResolved: registry.foldObjectExtendersOnto(
-            objectName, clone(storedBody ?? declaration),
-        ),
+        // D9.2 applied to THIS host's base: [ADR-0131 D6] the owner's
+        // declaration — a stored row of a packaged object is a sealed overlay
+        // no read serves. This is the definition the served body is checked
+        // against — never the other route.
+        registryResolved: registry.foldObjectExtendersOnto(objectName, clone(declaration)),
         storedRow: storedBody,
     };
 }
@@ -333,11 +340,10 @@ describe('[#8027] an object overlay row is a base layer, not the resolved schema
         expect(declaredFieldsOf(host.byName)).toEqual(declaredFieldsOf(host.registryResolved));
         expect(declaredFieldsOf(host.listed)).toEqual(declaredFieldsOf(host.registryResolved));
 
-        // The customisation itself still wins where it actually speaks. A fold
-        // that resolved the object by discarding the overlay would satisfy every
-        // field assertion above and be a worse bug than the one being fixed.
-        expect((host.byName as { label?: string }).label).toBe('Customer');
-        expect((host.listed as { label?: string }).label).toBe('Customer');
+        // [ADR-0131 D6] The sealed row's customisation is not served: the
+        // package's own label is.
+        expect((host.byName as { label?: string }).label).toBe('Account');
+        expect((host.listed as { label?: string }).label).toBe('Account');
     });
 
     it('resolves `layers.effective`, and leaves `layers.overlay` the tenant\'s own row', async () => {
@@ -442,8 +448,8 @@ describe('[#8027] an object overlay row is a base layer, not the resolved schema
             expect(entryNames(host.byName, 'validations')).toEqual(['task_rule']);
             expect(entryNames(host.byName, 'indexes')).toEqual(['task_idx']);
         }
-        // The row still customises what it customises.
-        expect((withRow.byName as { label?: string }).label).toBe('Customer');
+        // [ADR-0131 D6] The sealed row is not served, row or no row.
+        expect((withRow.byName as { label?: string }).label).toBe('Task');
         expect((withoutRow.byName as { label?: string }).label).toBe('Task');
     });
 
@@ -487,9 +493,11 @@ describe('[#8027] an object overlay row is a base layer, not the resolved schema
         expect(fieldNamesOf(none.byName)).not.toEqual(fieldNamesOf(unextended.byName));
         expect(fieldNamesOf(unextended.byName)).not.toContain('loyalty_tier');
 
-        // 5. The customised row really does change something, so "the overlay
-        //    still wins" is not vacuous either.
-        expect((artifact.byName as { label?: string }).label).toBe('Customer');
+        // 5. The customised row really does change something — the layered
+        //    read reports it — so "the package's label is served" is not
+        //    vacuous either.
+        expect((artifact.layerOverlay as { label?: string }).label).toBe('Customer');
+        expect((artifact.byName as { label?: string }).label).toBe('Account');
         expect((none.byName as { label?: string }).label).toBe('Account');
     });
 });

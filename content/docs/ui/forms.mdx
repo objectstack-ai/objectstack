@@ -355,7 +355,7 @@ formViews: {
 | `kind` | Renderer behavior |
 |---|---|
 | `thank-you` | Replace the form with a confirmation panel (`title`, `message`). |
-| `redirect` | `window.location.assign(url)` after `delayMs` (defaults to 0). |
+| `redirect` | Navigate in-app to `url`, its `{{record.…}}` tokens substituted and URL-escaped, after `delayMs` (defaults to 0) — see below. |
 | `continue` | Re-read prefill values and reset state — user can submit another response without reload. |
 | `next-record` | Stub for queue contexts; falls back to thank-you when no queue is wired. |
 
@@ -382,7 +382,7 @@ submitBehavior: { kind: 'redirect', url: '/u/{{os.user.id}}' }           // not 
 
 Widening this — an allowlist of absolute origins, say — waits for measured demand; the ruling took the narrowest shape deliberately.
 
-> **Current renderer status (2026-08-11).** The console shipping at the pinned `.objectui-sha` redirects **verbatim** on this value: it does not yet substitute `{{record.…}}` tokens or escape them. The three rules above are the contract, and the consumer half is tracked in [objectui#4190](https://github.com/objectstack-ai/objectui/issues/4190). Until it lands, a token would reach the browser literally — so write a plain path unless you are following that issue.
+The Console applies the three rules at submit time: it resolves each `{{record.…}}` token from the record the submit just wrote, URL-escapes the value, and navigates to the resolved path inside the console shell after `delayMs`; a `url` the schema refuses is never followed — the submit is still confirmed and the refusal is shown on screen.
 
 ### The default is mode-aware
 

@@ -37,6 +37,7 @@ import {
   CompleteChunkedUploadRequest,
   CompleteChunkedUploadResponse,
   UploadProgress,
+  UploadScope,
   ListNotificationsResponse,
   MarkNotificationsReadResponse,
   MarkAllNotificationsReadResponse,
@@ -5189,7 +5190,7 @@ export class ObjectStackClient {
    * Storage Services
    */
   storage = {
-    upload: async (file: any, scope: string = 'user'): Promise<FileUploadResponse> => {
+    upload: async (file: any, scope: UploadScope = 'user'): Promise<FileUploadResponse> => {
         // 1. Get Presigned URL
         const presignedReq: GetPresignedUrlRequest = {
             filename: file.name,

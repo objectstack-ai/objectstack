@@ -57,6 +57,7 @@ import type {
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
+import type { ObjectCapabilitiesParsed } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
@@ -1271,8 +1272,12 @@ export interface ApprovalServiceOptions {
   /**
    * [#8652] Objects on which a user holding READ access to the target business
    * record may also see that record's approval requests and action history —
-   * read-only. Empty or absent (the default) leaves visibility exactly as it
-   * was. See {@link ApprovalService.recordReaderVisibleIds} for the rule and
+   * read-only. This is the HOST's half of the opt-in; the other half is the
+   * object's own declaration, `enable.approvalsVisibleToReaders: true`, which
+   * the service reads from the live registry on every call (#22560). Either
+   * source turns the tier on for an object. Empty or absent here, with no
+   * object declaring the flag (the default), leaves visibility exactly as it
+   * was. See {@link ApprovalService.addRecordReaderVisibleIds} for the rule and
    * its boundaries.
    */
   recordReaderVisibleObjects?: string[];
@@ -1371,9 +1376,11 @@ export class ApprovalService implements IApprovalService {
   /** [#11993] Lazily-resolved deployment i18n lookup for refusal copy. */
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
   /**
-   * [#8652] The enabled object set for the record-reader visibility tier.
-   * EMPTY means the tier is off — the default, and the shape every existing
-   * deployment gets on upgrade.
+   * [#8652] The HOST-named object set for the record-reader visibility tier
+   * (the constructor option). EMPTY is the default, and the tier is then off
+   * for every object that does not declare it itself — see
+   * {@link ApprovalService.recordReaderTierOn}, the one place both sources are
+   * asked.
    */
   private readonly recordReaderVisibleObjects: ReadonlySet<string>;
   /**
@@ -6989,13 +6996,16 @@ export class ApprovalService implements IApprovalService {
     tenantOrg: string | null,
     target?: { object?: string | null; recordId?: string | null },
   ): Promise<void> {
-    // Default OFF: a deployment that declares nothing must see no behaviour
-    // change at all — not even a probe whose answer is discarded.
-    if (this.recordReaderVisibleObjects.size === 0) return;
     const object = String(target?.object ?? '').trim();
     const recordId = String(target?.recordId ?? '').trim();
     if (!object || !recordId) return;
-    if (!this.recordReaderVisibleObjects.has(object)) return;
+    // Default OFF: a deployment that declares nothing must see no behaviour
+    // change at all — not even a probe whose answer is discarded. What it pays
+    // is one in-memory registry lookup on a read that names a record.
+    // ⛔ No `recordReaderVisibleObjects.size === 0` early return above this
+    // line: with the host's set empty, an object that DECLARES the flag must
+    // still widen (#22560).
+    if (!this.recordReaderTierOn(object)) return;
     // [#22559] An approval request is never the anchor, even when the opt-in
     // names its object: the anchor read below runs as the caller, so on this
     // object it passes through the generic door's read gate, which asks this
@@ -7034,6 +7044,48 @@ export class ApprovalService implements IApprovalService {
         object, error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  /**
+   * [#8652 / #22560] Is the record-reader tier on for `object`? Two sources,
+   * and either one suffices:
+   *
+   *  - the HOST's set, the constructor option
+   *    {@link ApprovalServiceOptions.recordReaderVisibleObjects}, for a host
+   *    that builds the plugin itself;
+   *  - the object's OWN declaration, `enable.approvalsVisibleToReaders: true`
+   *    in its live registered definition — what a config-driven app, whose
+   *    host builds the plugin with no options, can write.
+   *
+   * ## Why the declaration is read here, on every call
+   *
+   * Never collected once at `start()`: the registry is still filling then.
+   * Objects from installed packages arrive on `kernel:ready`, Studio edits and
+   * dev reloads re-register an object at any later moment, and a set frozen at
+   * start would leave such a declaration inert — and, worse, keep a REMOVED one
+   * in force until restart, an exposure its author believes is closed
+   * (AGENTS.md "Startup registry reads", cure 1: resolve where the value is
+   * used). `getSchema` answers the registry as it is at the call.
+   *
+   * ## Fails closed
+   *
+   * An engine with no `getSchema`, a name the registry does not hold, a lookup
+   * that throws, or any value but literal `true` reads as "not declared". The
+   * spec default is `false`, so an absent block or flag is the default, not a
+   * gap.
+   */
+  private recordReaderTierOn(object: string): boolean {
+    if (this.recordReaderVisibleObjects.has(object)) return true;
+    let schema: { enable?: Partial<ObjectCapabilitiesParsed> | null } | null | undefined;
+    try {
+      schema = this.engine.getSchema?.(object) as typeof schema;
+    } catch (err) {
+      this.logger?.debug?.('[approvals] record-reader opt-in lookup failed; the tier stays off', {
+        object, error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+    return schema?.enable?.approvalsVisibleToReaders === true;
   }
 
   /** Intersect an existing `where.id` constraint with the participant set. */

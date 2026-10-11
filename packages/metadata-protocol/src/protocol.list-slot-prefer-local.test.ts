@@ -15,8 +15,9 @@
  * the by-name read (organization first, ADR-0005) never does.
  *
  * Both now take one order, `servedOverlayRowCandidates` in `protocol.ts`:
- * scope (the organization's rows, then env-wide), then spelling, then the
- * package's own row before the package-less row. `findServedOverlayRow` reads
+ * scope (the environment's rows — since ADR-0131 D6 no read reaches a legacy
+ * organization row), then spelling, then the package's own row before the
+ * package-less row. `findServedOverlayRow` reads
  * it from the store; the list reads it over the rows it already holds.
  *
  *  1. The generated pin: every subset of five stored rows (env-wide and
@@ -27,9 +28,9 @@
  *     that package serves the same row.
  *  2. Named: package A's row and the package-less row, both env-wide, both
  *     orders, with and without A's packaged artifact. The slot is A's row.
- *  3. Named, organization scope: the organization's package-less row beats an
- *     env-wide row of A; the organization's row of A beats the env-wide
- *     package-less row. Both orders.
+ *  3. Named, a request from an organization (ADR-0131 D6): the
+ *     organization's legacy rows are served by no read; the environment's
+ *     rows are. Both orders.
  *  4. Control: only the package-less row is stored, under A's artifact. The
  *     slot still falls back to it (stamped as A's), as the by-name read does.
  *  5. The draft preview: A's draft and a package-less draft, both orders. The
@@ -163,13 +164,13 @@ function subsets<T>(xs: readonly T[]): T[][] {
 }
 
 /**
- * The oracle, written from the rule: the scopes the request reaches
- * (ADR-0005: the organization's, then env-wide), and within one scope the
- * package's own row before the package-less row (ADR-0048), never another
- * package's. The first row found is the served row.
+ * The oracle, written from the rule: the environment's rows (ADR-0131 D6 —
+ * the request's organization reaches no row), the package's own row before
+ * the package-less row (ADR-0048), never another package's. The first row
+ * found is the served row.
  */
-function servedLabel(rows: readonly RowKey[], packageId: string, organizationId: string | undefined): string | undefined {
-    const scopes: Scope[] = organizationId ? ['org-scoped', 'env-wide'] : ['env-wide'];
+function servedLabel(rows: readonly RowKey[], packageId: string, _organizationId: string | undefined): string | undefined {
+    const scopes: Scope[] = ['env-wide'];
     for (const scope of scopes) {
         for (const candidate of [packageId, null]) {
             const hit = rows.find((key) => ROWS[key].scope === scope && ROWS[key].packageId === candidate);
@@ -227,7 +228,7 @@ describe('pin 1 (generated) — every package slot in the list serves the row ge
                 for (const packageId of [PKG_A, PKG_B]) {
                     const expected = servedLabel(order, packageId, organizationId);
                     const inScope = order.some((key) => ROWS[key].packageId === packageId
-                        && (ROWS[key].scope === 'env-wide' || organizationId !== undefined));
+                        && ROWS[key].scope === 'env-wide');
                     const slots = await listSlots(protocol, packageId, scope);
                     if (!inScope) {
                         // No row of the package in scope and no artifact: the
@@ -265,21 +266,21 @@ describe('pin 2 — the package\'s row beside the package-less row (one scope, e
     }
 });
 
-describe('pin 3 — organization scope (ADR-0005): the organization\'s rows before the env-wide rows, then the package\'s own row', () => {
+describe('pin 3 — [ADR-0131 D6] a request from an organization: its legacy rows are served by no read', () => {
     for (const order of orders<RowKey>(['orgPackageless', 'envA', 'envPackageless'])) {
-        it(`the organization's package-less row over an env-wide row of A · row order ${order.join(', ')}`, async () => {
+        it(`the organization's legacy package-less row is not served over an env-wide row of A · row order ${order.join(', ')}`, async () => {
             const protocol = harness(order.map((key) => stored(key)));
             const slots = await listSlots(protocol, PKG_A, { organizationId: ORG });
-            expect(slots.map((s) => s.label)).toEqual([ROWS.orgPackageless.label]);
-            expect((await byName(protocol, PKG_A, { organizationId: ORG }))?.label).toBe(ROWS.orgPackageless.label);
+            expect(slots.map((s) => s.label)).toEqual([ROWS.envA.label]);
+            expect((await byName(protocol, PKG_A, { organizationId: ORG }))?.label).toBe(ROWS.envA.label);
         });
     }
     for (const order of orders<RowKey>(['orgA', 'envPackageless'])) {
-        it(`the organization's row of A over the env-wide package-less row · row order ${order.join(', ')}`, async () => {
+        it(`the organization's legacy row of A is not served; A has no slot, and by name A is served the env-wide package-less row · row order ${order.join(', ')}`, async () => {
             const protocol = harness(order.map((key) => stored(key)));
             const slots = await listSlots(protocol, PKG_A, { organizationId: ORG });
-            expect(slots.map((s) => s.label)).toEqual([ROWS.orgA.label]);
-            expect((await byName(protocol, PKG_A, { organizationId: ORG }))?.label).toBe(ROWS.orgA.label);
+            expect(slots).toEqual([]);
+            expect((await byName(protocol, PKG_A, { organizationId: ORG }))?.label).toBe(ROWS.envPackageless.label);
         });
     }
 });

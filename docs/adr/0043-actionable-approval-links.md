@@ -1,6 +1,6 @@
 # ADR-0043: Actionable approval links — single-use tokens with a session-less confirm page
 
-**Status**: Accepted — implemented (proposed 2026-06-12 · calibrated 2026-06-12)
+**Status**: Accepted — implemented (proposed 2026-06-12 · calibrated 2026-06-12) · **Amended** (2026-10-10, #22631 — open-time notification is the approvals service's own `approval.requested` topic, not a flow-authored `notify` node; see the Issue bullet under Mechanics. One-tap links stay `remind()`-only; the token table and every decision below are unchanged)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0042](./0042-approval-sla-escalation.md) (reserved system actors, audit-first discipline), thread interactions (#1740), [ADR-0012/0030](./0030-notification-platform-convergence.md) (messaging + outbox)
 **Closes**: [#1743](https://github.com/objectstack-ai/objectstack/issues/1743)
@@ -37,9 +37,11 @@ GET-executes design gets requests approved by robots.
 - **Issue** (`issueActionTokens`): 256-bit random raw tokens, returned
   once, hashes stored. Wired into `remind()` — each pending approver with
   a concrete identity (not `role:*` literals) gets their **own**
-  notification carrying their own approve/reject links. (Open-time
-  notification remains the flow author's `notify` node; templates there
-  can adopt the same links later.)
+  notification carrying their own approve/reject links. (Amended
+  2026-10-10, #22631: open-time notification is the approvals service's
+  `approval.requested` topic, published by `openNodeRequest` to each
+  concrete approver on the slate the request opens on — PR #22625; it
+  carries no links, and one-tap links remain `remind()`-only.)
 - **Confirm page** (`GET /api/v1/approvals/act?token=…`): session-less
   minimal HTML rendered by the plugin on the host Hono app — request
   summary (flow label, record title, action) + a POST form. Invalid /

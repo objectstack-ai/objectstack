@@ -208,8 +208,7 @@ describe('RLS read-scope admission at authoring time — fifteen classes, two do
       if (row.engineCode) {
         // The engine's own verdict, quoted with its code — never withheld at
         // authoring time, where the text is the author's own.
-        expect(cli[0].message).toContain(`(${row.engineCode} / 400): `);
-        expect(cli[0].message).toContain('lowers, but the engine refuses to run the lowered filter on "deal"');
+        expect(cli[0].message.startsWith(`RLS using (${row.engineCode} / 400): `)).toBe(true);
       }
     });
   }
@@ -276,7 +275,7 @@ describe('a field compared with a json / multiple field is refused at both doors
       expect(cli.map((f) => ({ severity: f.severity, rule: f.rule, path: f.path }))).toEqual([
         { severity: 'error', rule: UNENFORCEABLE, path: `permissions[0].rowLevelSecurity[0].${row.clause}` },
       ]);
-      expect(cli[0].message).toContain('lowers, but compares a field with a field that holds a list or an object');
+      expect(cli[0].message).toContain('holds a list or an object, so ');
 
       expect(saved.accepted).toBe(false);
       expect({ code: saved.code, status: saved.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
@@ -333,7 +332,7 @@ describe('a field compared with a field of another comparison class is refused a
       expect(cli.map((f) => ({ severity: f.severity, rule: f.rule, path: f.path }))).toEqual([
         { severity: 'error', rule: UNENFORCEABLE, path: `permissions[0].rowLevelSecurity[0].${row.clause}` },
       ]);
-      expect(cli[0].message).toContain('lowers, but compares two fields that share no comparison class');
+      expect(cli[0].message).toContain('which no comparison class spans (');
 
       expect(saved.accepted).toBe(false);
       expect({ code: saved.code, status: saved.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });

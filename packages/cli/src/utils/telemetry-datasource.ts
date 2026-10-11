@@ -45,6 +45,14 @@ export function resolveTelemetryDbPath(opts: {
   return `${primary}.telemetry.db`;
 }
 
+/**
+ * The name the sibling's driver is registered under — `driver.telemetry` — and
+ * the datasource lifecycle-classed objects route to when it exists (ObjectQL's
+ * `LIFECYCLE_DATASOURCE`). One spelling for the provision that names the
+ * driver and the one-shot boot that finds it again.
+ */
+export const TELEMETRY_DATASOURCE = 'telemetry';
+
 /** What {@link provisionTelemetryDatasource} needs from the boot that calls it. */
 export interface ProvisionTelemetryDatasourceOptions {
   /**
@@ -54,12 +62,33 @@ export interface ProvisionTelemetryDatasourceOptions {
    */
   primaryPath: string | undefined;
   env: Record<string, string | undefined>;
-  /** The host's dev declaration — the same value its primary datasource was built under. */
+  /**
+   * The SERVING boot's dev declaration — the same value its primary datasource
+   * was built under. It decides whether and where the sibling exists
+   * ({@link resolveTelemetryDbPath}), so a one-shot boot passes the reading of
+   * the serving boot it mirrors (`isDevelopmentBoot`), never a value of its own.
+   */
   dev: boolean;
   /** Register a plugin with the booting kernel (`kernel.use`). */
   use: (plugin: unknown) => unknown;
   /** Where the sqlite step-down's own warnings go. */
   warn: (message: string) => void;
+  /**
+   * [#22579] Set by a ONE-SHOT command boot (`bootSchemaStack`), which provisions
+   * the sibling exactly when the serving boot would, and opens it the way it
+   * opens its primary:
+   *
+   *  - never under the dev self-heal, whatever {@link dev} says — a one-shot boot
+   *    applies only what its operator confirmed (`devAutoMigrateConfig`'s own
+   *    rule, #21733);
+   *  - with `readOnlyProbe`, an absent sibling file opens as an empty in-memory
+   *    database instead of being created (#6743) — a dry run brings no telemetry
+   *    file into existence, as it brings no primary one.
+   *
+   * Omitted by the serving boots: the dev self-heal on a dev boot, and SQLite's
+   * own create-if-absent.
+   */
+  oneShot?: { readonly readOnlyProbe: boolean };
 }
 
 /**
@@ -73,12 +102,18 @@ export interface ProvisionTelemetryDatasourceOptions {
  * Best-effort by design: a failed telemetry provision must never block boot —
  * the lifecycle-classed objects simply stay on the primary datasource.
  *
- * Two boots call it (#21733): the config-load fallback (`resolveStorageDefinition`'s
- * `sqliteFilePath`) and the standalone stack every plain `os dev` / `os serve`
- * / `os start` composes (its resolved `default` database). It used to live
- * inline in the first of them, so a plain `os dev` never got a telemetry
- * sibling while `content/docs/deployment/cli.mdx` promised one for every dev
- * boot on a file-backed SQLite database.
+ * Two serving boots call it (#21733): the config-load fallback
+ * (`resolveStorageDefinition`'s `sqliteFilePath`) and the standalone stack every
+ * plain `os dev` / `os serve` / `os start` composes (its resolved `default`
+ * database). It used to live inline in the first of them, so a plain `os dev`
+ * never got a telemetry sibling while `content/docs/deployment/cli.mdx`
+ * promised one for every dev boot on a file-backed SQLite database.
+ *
+ * And the one-shot boot `os migrate` runs (`bootSchemaStack`, #22579), keyed on
+ * its standalone primary ({@link standaloneTelemetryPrimary}) and opened under
+ * {@link ProvisionTelemetryDatasourceOptions.oneShot}. Without it, `os migrate
+ * plan` / `apply` planned every lifecycle-classed object against the primary
+ * and created it there — an orphan table beside the one the served boot uses.
  *
  * The telemetry driver stays a pre-built `DriverPlugin` — the documented escape
  * hatch for named auxiliary drivers (ADR-0062): the engine keys datasources by
@@ -99,13 +134,16 @@ export async function provisionTelemetryDatasource(
     const telemetry = await resolveSqliteDriver({
       filename: telemetryPath,
       dev: opts.dev,
-      ...devAutoMigrateConfig('sqlite', opts.dev),
+      // A one-shot boot is never a self-healing one (`devAutoMigrateConfig`'s
+      // own `dev` contract), so it asks the one decision with `false`.
+      ...devAutoMigrateConfig('sqlite', opts.oneShot ? false : opts.dev),
+      ...(opts.oneShot?.readOnlyProbe ? { sqliteAbsentFile: 'empty-in-memory' as const } : {}),
       warn: opts.warn,
     });
     // The ABI-broken step-down case: separating one in-memory store into
     // another has no reclamation value, and would lose telemetry on restart.
     if (telemetry.engine === 'memory') return undefined;
-    Object.defineProperty(telemetry.driver, 'name', { value: 'telemetry' });
+    Object.defineProperty(telemetry.driver, 'name', { value: TELEMETRY_DATASOURCE });
     await opts.use(new DriverPlugin(telemetry.driver));
     return telemetryPath;
   } catch {

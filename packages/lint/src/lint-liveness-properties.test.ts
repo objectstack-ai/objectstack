@@ -830,6 +830,62 @@ describe('lintLivenessProperties', () => {
     });
   });
 
+  // ── #22611 → #22639: a list view's and a dashboard's audience gate shipped
+  // spec-first, `planned` + `authorWarn`, and the `/meta` read gate now applies
+  // it (#22639), so both rows are `live`, citing the gate, with `authorWarn`
+  // and `authorHint` dropped. REAL LEDGER: contract tests on the two shipped
+  // rows. The two warn pins below turned red at that flip ON PURPOSE and are
+  // re-subjected to the silence — a `live` row never warns. Each authors the
+  // flipped key beside a property that IS still `authorWarn`
+  // (`object.externalSharingModel`) in the SAME call: one ledger load, one
+  // warning, so the silence is a reading and not a lint that stopped loading
+  // ledgers (which also answers []).
+  describe('list-view and dashboard audience gate (#22611 → #22639 — live, enforced by the /meta read gate)', () => {
+    const GATE = ['clm_legal_workbench.view'];
+    const LIT = { objects: [{ name: 'widget', externalSharingModel: 'read' }] };
+    const viewWith = (list: Record<string, unknown>) =>
+      ({ object: 'clm_contract', list: { type: 'grid', columns: ['name'], ...list } });
+    const boardWith = (extra: Record<string, unknown>) =>
+      ({ name: 'legal_workbench', label: 'Legal Workbench', widgets: [], ...extra });
+    const shippedRow = (type: 'view' | 'dashboard') => {
+      const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), `${type}.json`), 'utf8'));
+      return type === 'view' ? ledger.props.list.children.requiredPermissions : ledger.props.requiredPermissions;
+    };
+    const lit = (findings: { message: string; rule: string }[]) =>
+      expect(ruleOf(findings, 'externalSharingModel')).toBe('liveness-planned-property');
+
+    for (const [type, path, stack] of [
+      ['view', 'list.requiredPermissions', { views: [viewWith({ requiredPermissions: GATE })] }],
+      ['dashboard', 'requiredPermissions', { dashboards: [boardWith({ requiredPermissions: GATE })] }],
+    ] as const) {
+      it(`is silent on an authored \`${path}\` (${type}) — the row is \`live\`, cites the gate, and carries no author warning`, () => {
+        const findings = lintLivenessProperties({ ...LIT, ...stack });
+        lit(findings);
+        expect(ruleOf(findings, path)).toBeUndefined();
+        const row = shippedRow(type);
+        // Anti-vacuity: the row is the shape this pin now exists for.
+        expect(row.status).toBe('live');
+        expect(row).not.toHaveProperty('authorWarn');
+        expect(row).not.toHaveProperty('authorHint');
+        expect(row.evidence).toContain('packages/rest/src/meta-item-read-gate.ts#holdsRequiredPermissions');
+      });
+    }
+
+    it('stays silent on a view and a dashboard that author no gate — in a call that still warns', () => {
+      // Authored or not, the key warns nobody now; the lit control is what
+      // makes each silence a reading.
+      const viewQuiet = lintLivenessProperties({ ...LIT, views: [viewWith({})], dashboards: [boardWith({ requiredPermissions: GATE })] });
+      lit(viewQuiet);
+      expect(ruleOf(viewQuiet, 'list.requiredPermissions')).toBeUndefined();
+      expect(ruleOf(viewQuiet, 'requiredPermissions')).toBeUndefined();
+
+      const boardQuiet = lintLivenessProperties({ ...LIT, views: [viewWith({ requiredPermissions: GATE })], dashboards: [boardWith({})] });
+      lit(boardQuiet);
+      expect(ruleOf(boardQuiet, 'list.requiredPermissions')).toBeUndefined();
+      expect(ruleOf(boardQuiet, 'requiredPermissions')).toBeUndefined();
+    });
+  });
+
   // ── #11288: `stack.translations` is a locale-keyed BUNDLE, not an item ──────
   //
   // Every other collection in `TYPE_COLLECTIONS` is a flat array of items whose

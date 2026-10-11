@@ -30,6 +30,7 @@
  */
 
 import type { ResolveUserAuthzGrantsOptions } from '../resolve-authz-context.js';
+import { bindCatalogFromTables, ledgerFromTables } from './security-catalog.testkit.js';
 
 // ── Recording ObjectQL double ───────────────────────────────────────────────
 
@@ -48,6 +49,12 @@ export interface RecordedCall { object: string; where: unknown; limit: unknown; 
  * while another is in flight JOINS the open leg. Sequential awaits therefore
  * count one leg each, and a `Promise.all` of any width counts one — which is
  * exactly the definition cloud#1539 measured latency against.
+ *
+ * [ADR-0131 D3/D4] The double also carries the security catalog the resolver
+ * reads positions, their sets and the set bodies from: the definitions the
+ * fixture's catalog rows convert to (`catalogFromTables` — the junction rows
+ * through the upgrade ceremony's own conversion). The catalog is in-process,
+ * so it adds no read and no leg.
  */
 export function makeRecordingQl(tables: Record<string, unknown[]>) {
   const calls: RecordedCall[] = [];
@@ -62,7 +69,7 @@ export function makeRecordingQl(tables: Record<string, unknown[]>) {
       if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
-  return {
+  return bindCatalogFromTables({
     calls,
     legOf,
     get legs() { return legs; },
@@ -97,13 +104,16 @@ export function makeRecordingQl(tables: Record<string, unknown[]>) {
       });
       try {
         await new Promise((r) => setTimeout(r, 0));
-        const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
+        // [ADR-0131 D3] A fixture's deactivated catalog rows reach the resolver as
+        // the activation-ledger rows the upgrade ceremony converts them to.
+        const stored = object === 'sys_metadata_activation' && !tables[object] ? ledgerFromTables(tables) : tables[object];
+        const rows = (stored ?? []).filter((r) => matches(r, opts?.where));
         return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
       } finally {
         inFlight -= 1;
       }
     },
-  };
+  }, tables);
 }
 
 // ── Fixture matrix — one entry per shape the eight reads discriminate on ────

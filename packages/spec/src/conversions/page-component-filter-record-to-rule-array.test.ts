@@ -163,25 +163,58 @@ describe('§1 the ruled subset converts to the exact rule array', () => {
     expect(gridFilter({}).value).toEqual([]);
   });
 
-  it('every door kind: the binding on any component, the block `filter`, the grid `defaultFilters`', () => {
+  it('every door kind: the binding on any component, and the block `filter`', () => {
     const { stack, notices } = convert(
       pageWith({
         type: 'object-grid',
         dataSource: { object: 'deal', filter: { stage: 'open' } },
-        properties: { objectName: 'deal', defaultFilters: { owner_id: 'u1' } },
+        properties: { objectName: 'deal', filter: { owner_id: 'u1' } },
       }),
     );
     const component = componentOf(stack);
     expect((component.dataSource as Dict).filter).toEqual([
       { field: 'stage', operator: 'equals', value: 'open' },
     ]);
-    expect((component.properties as Dict).defaultFilters).toEqual([
+    expect((component.properties as Dict).filter).toEqual([
       { field: 'owner_id', operator: 'equals', value: 'u1' },
     ]);
     expect(notices.map((n) => n.path)).toEqual([
       'pages[0].regions[0].components[0].dataSource.filter',
-      'pages[0].regions[0].components[0].properties.defaultFilters',
+      'pages[0].regions[0].components[0].properties.filter',
     ]);
+  });
+
+  /**
+   * The two doors that left this entry with #11509 (v18): `object-grid`'s
+   * `defaultFilters` and the elements' flat `filter`. Their retirements run
+   * BEFORE this entry and move a value onto the door it now lives at, so a
+   * record form there still reaches this entry — at the new door, converted
+   * exactly as any other filter there, each step with its own notice.
+   */
+  it('a record form at a retired door reaches this entry at the door it moved to', () => {
+    const grid = convert(pageWith({ type: 'object-grid', properties: { objectName: 'deal', defaultFilters: { owner_id: 'u1' } } }));
+    expect(componentOf(grid.stack).properties).toEqual({
+      objectName: 'deal',
+      filter: [{ field: 'owner_id', operator: 'equals', value: 'u1' }],
+    });
+    expect(grid.notices.map((n) => [n.conversionId, n.path])).toEqual([
+      ['object-grid-default-filters-removed', 'pages[0].regions[0].components[0].properties.filter'],
+      [ID, 'pages[0].regions[0].components[0].properties.filter'],
+    ]);
+
+    const element = convert(pageWith({ type: 'element:number', properties: { object: 'deal', aggregate: 'count', filter: { stage: 'won' } } }));
+    expect(componentOf(element.stack)).toEqual({
+      type: 'element:number',
+      properties: { aggregate: 'count' },
+      dataSource: { object: 'deal', filter: [{ field: 'stage', operator: 'equals', value: 'won' }] },
+    });
+    expect(element.notices.map((n) => [n.conversionId, n.path])).toEqual([
+      ['element-flat-data-binding-to-data-source', 'pages[0].regions[0].components[0].dataSource.object'],
+      ['element-flat-data-binding-to-data-source', 'pages[0].regions[0].components[0].dataSource.filter'],
+      [ID, 'pages[0].regions[0].components[0].dataSource.filter'],
+    ]);
+    expect(grid.todos).toEqual([]);
+    expect(element.todos).toEqual([]);
   });
 
   it('reaches slots and nested containers, as every page-component conversion does', () => {
@@ -250,19 +283,6 @@ describe('§1 the ruled subset converts to the exact rule array', () => {
         'pages[0].regions[0].components[0].properties.filter',
       ]);
       // Nothing left as stored, so nothing reported.
-      expect(todos).toEqual([]);
-    });
-
-    it('`defaultFilters` on an inline-row grid converts too', () => {
-      const { value, notices, todos } = (() => {
-        const { stack, notices: n, todos: t } = convert(pageWith({
-          type: 'object-grid',
-          properties: { data: { provider: 'value', items: [] }, defaultFilters: { stage: 'open' } },
-        }));
-        return { value: (componentOf(stack).properties as Dict).defaultFilters, notices: n, todos: t };
-      })();
-      expect(value).toEqual([{ field: 'stage', operator: 'equals', value: 'open' }]);
-      expect(notices.map((n) => n.path)).toEqual(['pages[0].regions[0].components[0].properties.defaultFilters']);
       expect(todos).toEqual([]);
     });
 
@@ -373,7 +393,7 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
     expect(todos).toEqual([]);
   });
 
-  it('`defaultFilters` is converted on the grid only', () => {
+  it('`defaultFilters` on a block other than the grid is no door of this entry — nor of any', () => {
     const { stack, notices, todos } = convert(
       pageWith({ type: 'object-kanban', properties: { objectName: 'deal', defaultFilters: { a: 1 } } }),
     );
@@ -526,12 +546,28 @@ describe('§6 the reach is the family, read off the schema', () => {
 
   const TYPES = Object.keys(ComponentPropsMap) as Array<keyof typeof ComponentPropsMap>;
 
-  it.each(['filter', 'defaultFilters'])('`properties.%s`: converted exactly where the door refuses the record', (key) => {
-    const doors = TYPES.filter((t) => refusesRecordWithPrescription(ComponentPropsMap[t], key)).sort();
-    const reached = TYPES.filter((t) => converts(t, key)).sort();
+  it('`properties.filter`: converted exactly where the door refuses the record', () => {
+    const doors = TYPES.filter((t) => refusesRecordWithPrescription(ComponentPropsMap[t], 'filter')).sort();
+    const reached = TYPES.filter((t) => converts(t, 'filter')).sort();
     // Lit control: the schema walk really found the family.
     expect(doors.length).toBeGreaterThan(0);
     expect(reached).toEqual(doors);
+  });
+
+  it('`properties.defaultFilters` is a door of no block since v18 — retired, so this entry reaches it nowhere', () => {
+    // #11509 retired `object-grid.defaultFilters` (the one block that had it):
+    // the row answers every value with its removal prescription, never the
+    // rule-array one, and no block keeps a record form there after the chain.
+    // (Its tombstone quotes the rule form as the value to move, so the probe
+    // is the removal sentence, not the rule-array prescription's form text.)
+    const retired = TYPES.filter((t) => {
+      const parse = (ComponentPropsMap[t] as unknown as { safeParse: (v: unknown) => { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } }).safeParse;
+      const r = parse.call(ComponentPropsMap[t], { defaultFilters: { status: 'active' } });
+      return !r.success && r.error!.issues.some((i) => i.path[0] === 'defaultFilters' && i.message.includes('was removed'));
+    });
+    expect(retired).toEqual(['object-grid']);
+    expect(TYPES.filter((t) => refusesRecordWithPrescription(ComponentPropsMap[t], 'defaultFilters') && !retired.includes(t))).toEqual([]);
+    expect(TYPES.filter((t) => converts(t, 'defaultFilters'))).toEqual([]);
   });
 
   it('the binding door is on every component, so the binding converts on any type', () => {
@@ -754,9 +790,9 @@ describe('§8 the TODO channel — every site left as stored is reported (ruling
     const entry = ALL_CONVERSIONS.find((c) => c.id === ID)!;
     const { notices, todos } = convert(entry.fixture.before);
     expect(todos.map((t) => [t.path, t.reason.slice(0, 40)])).toEqual([
-      ['pages[0].regions[0].components[1].properties.filter', 'On the `object-kanban` block, this filte'],
+      ['pages[0].regions[0].components[2].properties.filter', 'On the `object-kanban` block, this filte'],
     ]);
-    expect(notices.map((n) => n.path)).toContain('pages[0].regions[0].components[2].properties.filter');
+    expect(notices.map((n) => n.path)).toContain('pages[0].regions[0].components[3].properties.filter');
   });
 
   it('reporting writes nothing: every decline yields the same stack with or without a sink', () => {

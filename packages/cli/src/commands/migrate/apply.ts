@@ -18,6 +18,7 @@ import {
 import {
   bootSchemaStack,
   describeDatabaseSource,
+  describeTelemetryDatabase,
   renderPlan,
   renderPendingSchemaWork,
   summarize,
@@ -202,7 +203,13 @@ export default class MigrateApply extends Command {
       // [#22581] The database this run reconciles and who named it, on every
       // payload below — the in-sync and refusal paths included, since "nothing
       // to apply" is only as good as the database it was read from.
-      const target = { database: stack.dbLabel, databaseSource: stack.dbSource };
+      // [#22579] …and the `telemetry` sibling lifecycle-classed objects are
+      // reconciled in, when the serving boot keeps one.
+      const target = {
+        database: stack.dbLabel,
+        databaseSource: stack.dbSource,
+        ...(stack.telemetryDatabase !== null ? { telemetryDatabase: stack.telemetryDatabase } : {}),
+      };
 
       // What the object set was composed from (#12938) — printed BEFORE the
       // in-sync early return below, not with the plan. "Already in sync" over a
@@ -212,11 +219,14 @@ export default class MigrateApply extends Command {
       // above it for the same reason.
       if (!flags.json) {
         printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
+        if (stack.telemetryDatabase !== null) printInfo(describeTelemetryDatabase(stack.telemetryDatabase));
         for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
         console.log('');
       }
 
-      const drift = await stack.driver.detectManagedDrift();
+      // [#22579] Over every datasource this run reconciles: the primary and the
+      // `telemetry` sibling, each entry applied where it was found.
+      const drift = await stack.detectManagedDrift();
       const grouped = groupByCategory(drift);
       // Additive work the boot sync was held back from doing. Not drift — it
       // is what `initObjects` does on its own — but it IS a change to the
@@ -422,7 +432,10 @@ export default class MigrateApply extends Command {
           printWarning('Confirmation required. Re-run with --yes to apply, or use "os migrate plan" to preview.');
           return;
         }
-        const ok = await confirm(chalk.bold(`\nApply ${totalIntended} change(s) to ${stack.dbLabel}? [y/N] `));
+        const targets = stack.telemetryDatabase !== null
+          ? `${stack.dbLabel} and its telemetry database ${stack.telemetryDatabase}`
+          : stack.dbLabel;
+        const ok = await confirm(chalk.bold(`\nApply ${totalIntended} change(s) to ${targets}? [y/N] `));
         if (!ok) { printInfo('Aborted — no changes made.'); return; }
       }
 
@@ -431,7 +444,7 @@ export default class MigrateApply extends Command {
       // just-created table matches metadata by construction, so the two sets
       // never overlap.
       const created = await stack.flushSchemaDdl();
-      const { applied, skipped } = await stack.driver.applyMigrationEntries(drift, { allowDestructive });
+      const { applied, skipped } = await stack.applyMigrationEntries(drift, { allowDestructive });
 
       if (flags.json) {
         await emitJson({

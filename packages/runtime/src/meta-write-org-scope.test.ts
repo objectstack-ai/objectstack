@@ -72,15 +72,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     assertEngineDeleteDispatch,
     assertEngineUpdateDispatch,
-    // [#8805] The predicate moved here from `../meta-write-org-scope.js` so the
-    // REST `/meta` write doors share it. This suite still drives the DISPATCHER
-    // through the real stack — that is why it stays in this package.
-    declaresOrgOverride,
     assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import * as metadataCore from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 // [commit 67ceb9aef] The URL spelling contract itself — the map storage folds through,
 // and the fold the transport was missing. Imported so the sweep below is
 // quantified over the CONTRACT rather than over a hand-copied specimen list
@@ -359,23 +354,12 @@ describe('#7018 — the registry decides whether a metadata write carries the se
 
     // ── the predicate itself ──────────────────────────────────────────────
 
-    it('is derived from the registry, not a parallel allowlist (PD #8)', () => {
-        // Deliberately recomputed from `DEFAULT_METADATA_TYPE_REGISTRY` rather
-        // than spelled out: a hand-written list here would agree with a
-        // hand-written list there and pin nothing. Flipping any registry entry
-        // moves both sides of this assertion together.
-        for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-            expect(declaresOrgOverride(entry.type)).toBe(entry.allowOrgOverride);
+    it('[ADR-0131 D6] the organization-scope predicates are gone: no door and no read asks them', () => {
+        // The write-side predicate retired with the doors' organization (S3);
+        // the read-side pair retired with the protocol's read narrowing (S5).
+        for (const retired of ['organizationIdForMetaWrite', 'organizationIdForMetaRead', 'declaresOrgOverride']) {
+            expect(retired in metadataCore, retired).toBe(false);
         }
-        // Plural URL spellings are judged identically (`/meta/views/...`).
-        expect(declaresOrgOverride('views')).toBe(declaresOrgOverride('view'));
-        expect(declaresOrgOverride('flows')).toBe(declaresOrgOverride('flow'));
-        // A runtime-registered type with no registry entry has no per-org read
-        // channel either, so it is env-wide too. (`webhook` took this slot
-        // from `theme` at commit 35ad101bc — the retired kind left the contract.)
-        expect(declaresOrgOverride('webhook')).toBe(false);
-        // [ADR-0131 D6] The write-side predicate is gone: no door asks it.
-        expect('organizationIdForMetaWrite' in metadataCore).toBe(false);
     });
 
     // ── PUT /meta/:type/:name — the dispatcher's metadata write ───────────

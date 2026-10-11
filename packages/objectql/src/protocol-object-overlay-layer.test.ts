@@ -58,6 +58,16 @@ import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
  * cases below that drove the delete under the hatch are pinned REFUSED, the
  * layer and the data plane intact; the subtraction itself stays reachable where
  * the row leaves by another route (a replica converging on a removal).
+ *
+ * ## [ADR-0131 D6, triage ruling Q1 → C] …and the boot no longer LAYERS it
+ *
+ * An environment overlay of an object a managed package ships sits in no regime
+ * D6 recognises: the package definition wins. So boot hydration no longer
+ * registers the stored row as an `overlay` layer — the packaged definition is
+ * the object, the row stays at rest untouched, and the boot names it
+ * (`[metadata_sealed_overlay_unserved]`) with its remedies. The D9 layer
+ * mechanics (owner first, the row's package as provenance) are what the cases
+ * below still pin for the packaged owner; the layer itself is never added.
  */
 
 const APP_PKG = 'app.myapp';
@@ -261,41 +271,51 @@ async function bootWithPackage(seed: any[], opts: { controlPlane?: boolean; inst
 const kinds = (registry: SchemaRegistry, name: string) =>
     registry.getObjectContributors(name).map((c) => c.ownership);
 
-describe('ADR-0029 D9 — the boot replay LAYERS the tenant row instead of destroying the package', () => {
+describe('ADR-0029 D9 · ADR-0131 D6 — the boot replay neither destroys the package nor layers the sealed row over it', () => {
     /**
      * The direct inversion of this file's old premise test, which asserted
      * `getArtifactItem(...)` was `undefined` and `packaged_only` was gone. Both
-     * flip here, and that flip is the whole card.
+     * stay flipped; [ADR-0131 D6] and the tenant row is not layered either.
      */
-    it('after hydration the packaged definition is still there, underneath', async () => {
+    it('after hydration the packaged definition is the object, and the sealed row is reported, not layered', async () => {
         const seed = await persistOverlayRow('myapp_invoice', APP_PKG);
-        const { registry, res } = await bootWithPackage(seed);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        let booted: Awaited<ReturnType<typeof bootWithPackage>>;
+        let warned: string[];
+        try {
+            booted = await bootWithPackage(seed);
+        } finally {
+            warned = warn.mock.calls.map((c) => String(c[0]));
+            warn.mockRestore();
+        }
+        const { registry, res, rows } = booted;
 
-        expect(res).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+        expect(res).toMatchObject({ loaded: 0, errors: 0, invalid: 0 });
 
-        // Two layers, not one — and the owner is the package, not the tenant.
-        expect(kinds(registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
+        // One layer: the package's own definition, and it is what resolves.
+        expect(kinds(registry, 'myapp_invoice')).toEqual(['own']);
         expect(ownerPackageId(registry, 'myapp_invoice')).toBe(APP_PKG);
-        const owner = registry.getObjectOwner('myapp_invoice')!;
-        expect(Object.keys((owner.definition as any).fields)).toContain('packaged_only');
-        expect((owner.definition as any)._provenance).toBe('package');
-
-        // The RESOLVED object does not move: still the tenant's body, still
-        // stamped `org`. Bit-for-bit what the splice used to produce.
-        expect(fieldNames(registry, 'myapp_invoice')).toContain('overlay_only');
-        expect(fieldNames(registry, 'myapp_invoice')).not.toContain('packaged_only');
-        expect((registry.getObject('myapp_invoice') as any)._provenance).toBe('org');
-
-        // …and the predicate both gates read is honest again.
+        expect(fieldNames(registry, 'myapp_invoice')).toContain('packaged_only');
+        expect(fieldNames(registry, 'myapp_invoice')).not.toContain('overlay_only');
         expect(registry.getArtifactItem('object', 'myapp_invoice')).toBeDefined();
+
+        // The row is kept at rest, untouched, and named at boot.
+        expect(storedRows(rows, 'myapp_invoice')).toHaveLength(1);
+        const line = warned.find((m) => m.includes('[metadata_sealed_overlay_unserved]'));
+        expect(line).toContain('object×1 (myapp_invoice)');
     });
 
-    it('the hydration is idempotent across boots — one layer, not a stack', async () => {
+    it('the hydration is idempotent across boots — never a layer', async () => {
         const seed = await persistOverlayRow('myapp_invoice', APP_PKG);
-        const { protocol, registry } = await bootWithPackage(seed);
-        await protocol.loadMetaFromDb();
-        await protocol.loadMetaFromDb();
-        expect(kinds(registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const { protocol, registry } = await bootWithPackage(seed);
+            await protocol.loadMetaFromDb();
+            await protocol.loadMetaFromDb();
+            expect(kinds(registry, 'myapp_invoice')).toEqual(['own']);
+        } finally {
+            warn.mockRestore();
+        }
     });
 });
 
@@ -322,7 +342,7 @@ describe('ADR-0029 D9.6 — the declared contract, enforced consistently', () =>
 
         // The refusal costs the packaged definition nothing.
         expect(registry.getArtifactItem('object', 'myapp_invoice')).toBeDefined();
-        expect(kinds(registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
+        expect(kinds(registry, 'myapp_invoice')).toEqual(['own']);
     });
 
     /**
@@ -390,7 +410,7 @@ describe('ADR-0029 D9.7 — the delete is a SUBTRACTION, and #7012\'s guard is r
         }
 
         expect(storedRows(rows, 'myapp_invoice')).toHaveLength(1);
-        expect(kinds(registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
+        expect(kinds(registry, 'myapp_invoice')).toEqual(['own']);
         expect(ownerPackageId(registry, 'myapp_invoice')).toBe(APP_PKG);
         expect((await protocol.createData({ object: 'myapp_invoice', data: { name: 'INV-2' } })).id).toBeTruthy();
         expect(dataRows).toHaveLength(2);
@@ -422,7 +442,7 @@ describe('ADR-0029 D9.7 — the delete is a SUBTRACTION, and #7012\'s guard is r
         expect(refusedOpen).toBeInstanceOf(Error);
         expect(refusedOpen.code).toBe('NOT_OVERRIDABLE');
         expect(refusedOpen.status).toBe(403);
-        expect(kinds(b.registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
+        expect(kinds(b.registry, 'myapp_invoice')).toEqual(['own']);
     });
 
     /**
@@ -489,8 +509,11 @@ describe('ADR-0029 D9.7 — the delete is a SUBTRACTION, and #7012\'s guard is r
 });
 
 describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never an ownership claim', () => {
-    /** `P == O`: the normal case. One overlay layer over the owner's object. */
-    it('same package — a normal layer, no error, no warning', async () => {
+    /**
+     * `P == O`: the normal case. [ADR-0131 D6] No error and no hydration
+     * warning — the one line naming it is the sealed-overlay report.
+     */
+    it('same package — no error, and only the sealed-overlay report names it', async () => {
         const seed = await persistOverlayRow('myapp_invoice', APP_PKG);
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         let warned: string[] = [];
@@ -501,8 +524,9 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
             warned = warn.mock.calls.map((c) => String(c[0]));
             warn.mockRestore();
         }
-        expect(res).toMatchObject({ loaded: 1, errors: 0 });
-        expect(warned.filter((m) => m.includes('myapp_invoice'))).toEqual([]);
+        expect(res).toMatchObject({ loaded: 0, errors: 0 });
+        expect(warned.filter((m) => m.includes('myapp_invoice')).map((m) => m.slice(0, 50)))
+            .toEqual(['[Protocol] [metadata_sealed_overlay_unserved] 1 ac']);
     });
 
     /**
@@ -513,17 +537,22 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
      * ADR-0005's platform-global shape: the row addresses the object by name
      * and the registry knows who owns it.
      */
-    it('package-LESS row over a packaged object — accepted as the layer, not refused', async () => {
+    it('package-LESS row over a packaged object — not refused at boot; [ADR-0131 D6] not layered either', async () => {
         const seed = await persistOverlayRow('myapp_invoice');
-        const { registry, res } = await bootWithPackage(seed);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        let booted: Awaited<ReturnType<typeof bootWithPackage>>;
+        try {
+            booted = await bootWithPackage(seed);
+        } finally {
+            warn.mockRestore();
+        }
+        const { registry, res } = booted;
 
-        expect(res).toMatchObject({ loaded: 1, errors: 0 });
-        expect(kinds(registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
-        // The layer carries the sentinel as its own provenance; ownership is
-        // untouched, and still the package's.
-        expect(registry.getObjectContributors('myapp_invoice')[1].packageId).toBe(SENTINEL);
+        expect(res).toMatchObject({ loaded: 0, errors: 0 });
+        expect(kinds(registry, 'myapp_invoice')).toEqual(['own']);
         expect(ownerPackageId(registry, 'myapp_invoice')).toBe(APP_PKG);
-        expect(fieldNames(registry, 'myapp_invoice')).toContain('overlay_only');
+        expect(fieldNames(registry, 'myapp_invoice')).not.toContain('overlay_only');
+        expect(SENTINEL).toBe('sys_metadata');
     });
 
     /**
@@ -554,8 +583,8 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
 
         // No success receipt, and no row for the mis-bound package.
         expect(storedRows(rows, 'myapp_invoice').filter((r) => r.package_id === OTHER_PKG)).toHaveLength(0);
-        // The registry is untouched: one owner, one layer, still the right ones.
-        expect(kinds(registry, 'myapp_invoice')).toEqual(['own', 'overlay']);
+        // The registry is untouched: the packaged owner alone (ADR-0131 D6).
+        expect(kinds(registry, 'myapp_invoice')).toEqual(['own']);
         expect(ownerPackageId(registry, 'myapp_invoice')).toBe(APP_PKG);
     });
 
@@ -564,7 +593,7 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
      * counted in `loadMetaFromDb`'s per-record `errors` with its reason, which
      * is why #6995 is a write-path divergence and not a boot-path one.
      */
-    it('different package — the BOOT counts it in `errors` and leaves the package alone', async () => {
+    it('different package — [ADR-0131 D6] the BOOT reports it as a sealed overlay and leaves the package alone', async () => {
         const seed = await persistOverlayRow('myapp_invoice', OTHER_PKG);
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         let warned: string[] = [];
@@ -576,10 +605,12 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
             warn.mockRestore();
         }
 
-        expect(booted.res).toMatchObject({ loaded: 0, errors: 1 });
-        // A log line has no envelope, so the boot warning names the declared
-        // code itself rather than inheriting it from the refusal prose.
-        expect(warned.join('\n')).toContain('code=OBJECT_OVERLAY_PACKAGE_MISMATCH');
+        // The row overlays an object a managed package ships, so it is a
+        // sealed overlay before it is a mis-bound one: never layered, so the
+        // D9.9 mismatch refusal is not reached, and the boot names it.
+        expect(booted.res).toMatchObject({ loaded: 0, errors: 0 });
+        expect(warned.join('\n')).toContain('[metadata_sealed_overlay_unserved]');
+        expect(warned.join('\n')).not.toContain('code=OBJECT_OVERLAY_PACKAGE_MISMATCH');
 
         // The packaged definition is served, untouched — no half-applied layer.
         expect(kinds(booted.registry, 'myapp_invoice')).toEqual(['own']);

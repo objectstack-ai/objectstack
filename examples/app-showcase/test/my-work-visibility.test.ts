@@ -77,10 +77,12 @@ const workQueueGrid = () => allComponents().find((c) => c.type === 'object-grid'
  *  - **`filters` is DEAD.** Zero read points in the renderer on any ref, so it
  *    is accepted at authoring time and dropped before the wire. That is the
  *    #7750 defect itself.
- *  - **`defaultFilters` is ALIVE.** `ObjectGrid.tsx` reads it and lowers it to
- *    `params.$filter` — the legacy path `object-grid` still honors. It is
- *    pinned absent because this page authors the CURRENT key, NOT because the
- *    legacy one is inert.
+ *  - **`defaultFilters` was ALIVE, and is RETIRED.** `ObjectGrid.tsx` read it
+ *    and lowered it to `params.$filter` when `filter` lowered to nothing — the
+ *    legacy second spelling of `filter`, which v18 retires (objectstack#11509):
+ *    the spec refuses it with the prescription, and its conversion moves the
+ *    rules onto an empty `filter`. It is pinned absent because this page
+ *    authors the CURRENT key, NOT because the legacy one was inert.
  *
  * That distinction is the whole point of the card, so getting it wrong here
  * would reproduce the defect one level up: a future author debugging a filter
@@ -94,7 +96,7 @@ const NON_CANONICAL_FILTER_SPELLINGS: ReadonlyArray<{ key: string; why: string }
   },
   {
     key: 'defaultFilters',
-    why: 'is the LEGACY key `object-grid` still reads and lowers to `$filter` — it works, but it is not the key this page declares',
+    why: 'is the LEGACY second spelling of `filter`, read only when `filter` lowered to nothing and retired in v18 — not the key this page declares',
   },
 ];
 

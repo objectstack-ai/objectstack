@@ -993,6 +993,8 @@
     "UploadProgress": "src/api/storage.zod.ts#UploadProgress (type)",
     "UploadProgressParsed": "src/api/storage.zod.ts#UploadProgressParsed (type)",
     "UploadProgressSchema": "src/api/storage.zod.ts#UploadProgressSchema (const)",
+    "UploadScope": "src/api/storage.zod.ts#UploadScope (type)",
+    "UploadScopeSchema": "src/api/storage.zod.ts#UploadScopeSchema (const)",
     "UserProfileResponse": "src/api/auth.zod.ts#UserProfileResponse (type)",
     "UserProfileResponseParsed": "src/api/auth.zod.ts#UserProfileResponseParsed (type)",
     "UserProfileResponseSchema": "src/api/auth.zod.ts#UserProfileResponseSchema (const)",

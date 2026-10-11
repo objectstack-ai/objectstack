@@ -45,7 +45,7 @@ const LAYERED = {
     name: 'customer',
     code: { name: 'customer', label: 'Customer' },
     overlay: { label: 'Client' },
-    overlayScope: 'org',
+    overlayScope: 'env',
     effective: { name: 'customer', label: 'Client' },
     _diagnostics: { valid: true },
     lock: 'none',
@@ -159,7 +159,7 @@ describe('#5882 GET /meta/:type/:name/layers — the declared layered resource',
         expect(body.code).toEqual({ name: 'customer', label: 'Customer' });
         expect(body.overlay).toEqual({ label: 'Client' });
         expect(body.effective).toEqual({ name: 'customer', label: 'Client' });
-        expect(body.overlayScope).toBe('org');
+        expect(body.overlayScope).toBe('env');
         expect(body.code).not.toEqual(body.effective);
         // And it is NOT the ordinary envelope.
         expect(body.item).toBeUndefined();

@@ -159,6 +159,40 @@ You cannot take a platform name. A declaration whose `name` collides with a
 curated platform capability (`manage_users`, `manage_metadata`,
 `setup.access`, …) is refused loudly at boot — those are platform-owned.
 
+## "Or" is one capability, granted twice
+
+`requiredPermissions` is the one way to require a capability on an entry — an
+app, a navigation item, an action, a record block, and a list view or a
+dashboard — and everywhere it means the same thing: a list of names the user
+must **all** hold. There is no any-of form. To show an entry to two audiences —
+the legal team **or** an administrator — declare one capability for the entry
+and grant it to both permission sets:
+
+```typescript
+capabilities: [
+  defineCapability({ name: 'clm_legal_workbench.view', label: 'Open the legal workbench' }),
+],
+permissions: [
+  { name: 'clm_legal', systemPermissions: ['clm_legal_workbench.view'] },
+  { name: 'clm_admin', systemPermissions: ['clm_legal_workbench.view'] },
+],
+// …and on the entry itself:  requiredPermissions: ['clm_legal_workbench.view']
+```
+
+Listing each audience's own capability instead —
+`requiredPermissions: ['clm_legal.access', 'clm_admin.access']` — requires both,
+so it shuts out everyone who holds only one of them.
+
+<Callout type="info">
+**A list view's and a dashboard's `requiredPermissions` are enforced by the
+server.** A user who does not hold every capability listed is not served the
+view or the dashboard: it is left out of their lists — the view switcher
+included — and opening it by name or by its direct URL is refused. The named
+list views of a view container, and an object's own list views, are left out
+the same way; a user who may edit the object still reads all of its list views,
+so a save of what they loaded keeps them.
+</Callout>
+
 ## What the seeder does, and what it refuses
 
 `bootstrapDeclaredCapabilities` runs on `kernel:ready` and is idempotent: it

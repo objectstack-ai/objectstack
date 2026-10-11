@@ -314,6 +314,24 @@ const DECISIONS: readonly Decision[] = [
       '⛔ NO AUTHORED TWIN FOR "clone" OR "cloning" IN EITHER CATALOG — stated, not borrowed. The nearest thing either catalog holds is object.fields["fields.unique"].helpText ("Disallow duplicate values") 不允许重复值 / 重複値を許可しない / No permite valores duplicados, and that 重复 / 重複 / duplicado is the "repeated value" sense, ⛔ not the "make a copy of this record" sense the schema means ("Allow record deep cloning"). ⇒ composed: 克隆 / クローン / Clonación. ⚠️ es takes the NOUN (Clonación) rather than the infinitive, following its own siblings on this panel, which are nominal or adjectival throughout (Archivos, Actividades, Buscable, Seguimiento de historial) — and unlike enable.label above, which copies a twin that is itself an action label.',
   },
   {
+    section: 'capabilities',
+    path: 'enable.approvalsVisibleToReaders',
+    prop: 'label',
+    en: 'Approvals Visible To Readers',
+    verdict: ALL_TRANSLATE,
+    reason:
+      'ARRIVED WITH THE FLAG ITSELF (the per-object opt-in for the read-only record-reader approval tier), so all three leaves were authored by the card that added the row, never left as fills. The English is the extractor humanize of the key (objectForm declares no label, asserted by the third leg), decided against the CONCEPT: who sees what. "Approvals" takes the approvals plugin\'s own authored head noun, sys_approval_request.label 审批请求 / 承認リクエスト / Solicitud de aprobación ⇒ 审批 / 承認 / Aprobaciones. "Readers" takes the reader twin on the view panel, the visibility section description ("who can see it") 谁可以查看 / 閲覧可能者 / quién puede verla ⇒ 读者 / 閲覧者 / lectores. ⇒ 审批对读者可见 / 閲覧者に承認を表示 / Aprobaciones visibles para lectores. ⛔ NOT 只读 / 読み取り専用 / Solo lectura in the label: that is the read-only BOUNDARY, which the helpText below states, and this catalog spends those words on the readonly field row.',
+  },
+  {
+    section: 'capabilities',
+    path: 'enable.approvalsVisibleToReaders',
+    prop: 'helpText',
+    en: 'Readers of a record see its approval requests and history, read-only, with no approval action',
+    verdict: ALL_TRANSLATE,
+    reason:
+      'EVERY NOUN HAS AN AUTHORED TWIN and the row names each, because this sentence states what a security-relevant switch grants and a loose word would widen it. "approval requests": sys_approval_request.pluralLabel 审批请求 / 承認リクエスト / Solicitudes de aprobación. "approval action": sys_approval_action.pluralLabel 审批动作 / 承認アクション / Acciones de aprobación, so the leaf names the same rows the tier refuses to act on. "read-only": fields.readonly.label 只读 / 読み取り専用 / Solo lectura. "history": the 历史 / 履歴 / historial of enable.trackHistory\'s twin. "can read a record": 读取 / 閲覧 / leer, the record-read the tier anchors on. ⇒ 能读取记录的用户可只读查看该记录的审批请求与历史，不提供任何审批动作 / レコードを閲覧できるユーザーが、その承認リクエストと履歴を読み取り専用で参照できます。承認アクションは提供されません / Quien puede leer un registro ve sus solicitudes de aprobación y su historial, en solo lectura y sin ninguna acción de aprobación. ⚠️ zh and ja name the grantee as the user who can read the record rather than "readers", so the sentence cannot be read as granting anything to a reader of the approval tables themselves.',
+  },
+  {
     section: 'advanced',
     path: 'validations',
     prop: 'label',
@@ -487,9 +505,10 @@ const MINIMAL_OBJECT = { name: 'acct', label: 'Acct', fields: { id: { type: 'tex
 
 describe('#19403 round 8 — the ledger itself (controls before verdicts)', () => {
   it('decides every string leaf of the two keys this round takes, and nothing else', () => {
-    // Lit — the ledger is the size it claims: 9 form rows, 11 leaves, three
-    // locales, 33 decisions.
-    expect(DECISIONS.length).toBe(11);
+    // Lit — the ledger is the size it claims: 10 form rows, 13 leaves, three
+    // locales, 39 decisions (the opt-in flag's row brought one form row, two
+    // leaves and six decisions).
+    expect(DECISIONS.length).toBe(13);
     expect(new Set(DECISIONS.map((d) => d.path))).toEqual(
       new Set([
         'enable',
@@ -500,12 +519,13 @@ describe('#19403 round 8 — the ledger itself (controls before verdicts)', () =
         'enable.feeds',
         'enable.activities',
         'enable.clone',
+        'enable.approvalsVisibleToReaders',
         'validations',
       ]),
     );
-    expect(DECISIONS.filter((d) => d.prop === 'label').length).toBe(9);
-    expect(DECISIONS.filter((d) => d.prop === 'helpText').length).toBe(2);
-    expect(DECISIONS.flatMap((d) => Object.keys(d.verdict)).length).toBe(33);
+    expect(DECISIONS.filter((d) => d.prop === 'label').length).toBe(10);
+    expect(DECISIONS.filter((d) => d.prop === 'helpText').length).toBe(3);
+    expect(DECISIONS.flatMap((d) => Object.keys(d.verdict)).length).toBe(39);
     for (const d of DECISIONS) {
       expect(Object.keys(d.verdict).sort(), `${idOf(d)} names every translated locale`).toEqual([
         'es-ES',
@@ -685,7 +705,7 @@ describe('#19403 round 8 — ADR-0020 and the validations schema, asserted AT TH
     // The class-(c) question, answered at the schema rather than assumed: could
     // translating these labels produce metadata the runtime rejects? No — the
     // labels name keys whose values are booleans, and the block is strict.
-    for (const key of ['trackHistory', 'searchable', 'apiEnabled', 'files', 'feeds', 'activities', 'clone']) {
+    for (const key of ['trackHistory', 'searchable', 'apiEnabled', 'files', 'feeds', 'activities', 'clone', 'approvalsVisibleToReaders']) {
       expect(ObjectCapabilities.safeParse({ [key]: true }).success, `${key} is a declared capability`).toBe(true);
       expect(
         ObjectCapabilities.safeParse({ [key]: 'Clone' }).success,
@@ -918,9 +938,13 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // a label and a help text each, thirty-six leaves, all hundred and eight
     // translated leaves authored by the same flight. `advanced` reads 60 → 96;
     // `capabilities` is untouched.
-    expect(PANEL_LEAVES.length).toBe(105);
+    // 107 since the record-reader approval opt-in gave `capabilities` its
+    // `enable.approvalsVisibleToReaders` toggle — a label and a help text, two
+    // leaves, all six translated leaves authored by the same card, decided in
+    // the two rows above. `capabilities` reads 9 → 11; `advanced` is untouched.
+    expect(PANEL_LEAVES.length).toBe(107);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(9);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(11);
     expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(96);
   });
 
@@ -1063,14 +1087,14 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     expect(flagged.length).toBe(PANEL_LEAVES.length);
   });
 
-  it('⭐ the capability block is now DONE — zero of its 9 leaves echoes in any locale', () => {
+  it('⭐ the capability block is now DONE — zero of its 11 leaves echoes in any locale', () => {
     const capability = PANEL_LEAVES.filter((l) => l.section === 'capabilities');
     const echoing = capability.filter((l) =>
       TRANSLATED_LOCALES.some(([, forms]) => catalogLeaf(forms, l.path, l.prop) === l.en),
     );
     expect(echoing.map((l) => `${l.path}.${l.prop}`)).toEqual([]);
     // Lit — and it really walked the section, which a zero alone would not show.
-    expect(capability.length).toBe(9);
+    expect(capability.length).toBe(11);
   });
 });
 

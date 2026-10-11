@@ -208,8 +208,8 @@ const CAPABILITIES_HISTORY =
  *
  * Opt-out flags (`feeds`, `activities`, `clone`, `searchable`, `apiEnabled`)
  * default to `true`: absent block/flag = enabled, and consumers gate on
- * explicit `false` only. Opt-in flags (`trackHistory`, `files`) default to
- * `false`.
+ * explicit `false` only. Opt-in flags (`trackHistory`, `files`,
+ * `approvalsVisibleToReaders`) default to `false`.
  *
  * `.strict()`: unknown keys (incl. the retired `trash` / `mru`, #2377) are
  * rejected with guidance, not stripped (#1535).
@@ -308,6 +308,31 @@ export const ObjectCapabilities = strictObject({
 
   /** Allow cloning records */
   clone: z.boolean().default(true).describe('Allow record deep cloning'),
+
+  /**
+   * Record-reader approval visibility — opt-in, default OFF (#8652).
+   *
+   * Contract: `true` lets a caller who can READ a record of this object see
+   * that record's approval requests and their full action history, READ-ONLY.
+   * Readability is the object's own CRUD, sharing and RLS, asked as the
+   * caller; no new permission is granted. It holds on the approvals API and on
+   * the generic data API alike (`sys_approval_request`, `sys_approval_action`
+   * and `sys_approval_approver` answer by one visibility rule), and only on a
+   * read that names the record — the inbox is not widened. No approval action
+   * is offered: approve, reject, reassign, recall and comment keep authorizing
+   * on the pending approver slate, the submitter, or administrator override.
+   * What becomes visible: the request row (with its snapshot of the record at
+   * submission) and each action's actor, decision, time, comment text and
+   * attachments.
+   *
+   * Read by `@objectstack/plugin-approvals` on every such read, from the
+   * object's live registered definition: an object registered or edited after
+   * boot takes effect, and removing the flag turns the tier off, with no
+   * restart. A host that builds the plugin itself may also name objects in
+   * `ApprovalsPluginOptions.recordReaderVisibleObjects`; either source turns
+   * the tier on for an object.
+   */
+  approvalsVisibleToReaders: z.boolean().default(false).describe('Opt-in: true lets a caller who can read a record of this object see that record\'s approval requests and full action history (comments and attachments included), read-only, on the approvals API and the generic data API alike, on a read that names the record. No approval action is offered. Default false: only the request\'s participants (submitter, approvers, past actors) and administrators see it'),
 });
 
 /**
@@ -2317,8 +2342,9 @@ const ObjectSchemaBase = strictObject(
   lifecycle: LifecycleSchema.optional().describe('Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService.'),
 
   /**
-   * Who answers "may this caller download a file owned by this object's media
-   * fields?" (ADR-0104 D3 wave 2).
+   * Who answers "may this caller read a file owned by this object's media
+   * fields?" (ADR-0104 D3 wave 2) — its bytes at the download door, and its
+   * metadata in a record read by a reader who may not read `sys_file`.
    *
    * By default the storage service asks the question directly — can the caller
    * READ the owning row? That is right for ordinary business objects, where
@@ -2331,12 +2357,27 @@ const ObjectSchemaBase = strictObject(
    *
    * Naming a kernel service here delegates the question to it. The service
    * must implement `authorizeFileRead(recordId, context) => boolean` (see
-   * `IFileAccessDelegate`). Fails CLOSED: a declared service that is missing
-   * or does not implement the method denies the download rather than falling
-   * back to the raw read.
+   * `IFileAccessDelegate`). Its verdict is asked on two paths:
+   *
+   *  - **Download.** The download door asks it for the record that owns the
+   *    file (the file's `ref_object` / `ref_id`), unless the caller uploaded
+   *    the file.
+   *  - **Record read.** When a reader's own `sys_file` read is refused, the
+   *    engine asks it once per record in the result that owns a file the
+   *    result holds, on every such read. A file the verdict allows is served
+   *    as a `sys_file` reader sees it (`name`, `size`, `mimeType`, `url`); a
+   *    file it refuses keeps the refused marker `{ id, metadataRefused: true }`
+   *    (`FileRefusedValueSchema`). A reader who may read `sys_file` never
+   *    reaches the delegate on this path.
+   *
+   * Fails CLOSED on both paths: a declared service that is missing, does not
+   * implement the method, or throws denies the download and keeps the refused
+   * marker, rather than falling back to the raw read.
    */
   fileAccessDelegate: z.string().optional().describe(
     'Kernel service that authorizes downloads of files owned by this object\'s media fields, '
+    + 'and decides whether a reader who may not read sys_file sees their name, size and type '
+    + 'in a record read of this object (asked once per owning record on each such read), '
     + 'instead of testing whether the caller can read the owning row. For objects whose access '
     + 'is mediated by a service (e.g. sys_approval_action → approvals). Fails closed.',
   ),

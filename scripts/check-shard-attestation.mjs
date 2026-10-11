@@ -58,9 +58,10 @@
  * not clobber" merge behaviour would repeat the exact mistake #6082 is about:
  * resting a merge decision on an unspecified runner detail. Same-run artifact
  * download needs no permission beyond the job's existing `contents: read`
- * (`actions: read` is required only for cross-run/cross-repo downloads), so the
- * gates keep their permission block. `actions/cache` was the other per-leg
- * channel and is rejected on this repo's own grounds: the 10 GB pool is
+ * (`actions: read` is required only for cross-run/cross-repo downloads); the
+ * `actions: read` + `checks: read` both gates carry pay for the cancel-cause
+ * read below (#22606, #22653), not for the download. `actions/cache` was the
+ * other per-leg channel and is rejected on this repo's own grounds: the 10 GB pool is
  * carefully rationed (see "Restore Turbo cache" in ci.yml — PR-side saves
  * evicting main's turbo seeds is a measured incident).
  *
@@ -81,9 +82,43 @@
  *     `in_progress`, five siblings attested, and the required check went
  *     green two seconds later over the shard's untested packages). So the
  *     count splits `cancelled`: with AT LEAST ONE attestation of the leg
- *     present, the matrix ran, the declared roster is knowable, and it is
- *     REQUIRED — every missing shard is named and the gate is red. Only the
- *     zero-attestation shape keeps the pass; `judge()` carries both.
+ *     present, the matrix ran and the declared roster is knowable. Only the
+ *     zero-attestation shape keeps the pass without a question; `judge()`
+ *     carries both.
+ *     ⛔ "A sibling shard attested ⇒ the matrix was not superseded" is a
+ *     PROXY, and it was measured true 1 time in 157 (#22653): a newer push
+ *     cancels whatever is still running, and the fast shards have usually
+ *     attested by then (run 38036705318: `Test Core (5/6)` attested, the
+ *     other five cancelled by `Canceling since a higher priority waiting
+ *     request for ci-CI-pull_request-22644 exists`, required check red on a
+ *     dead SHA). So the ruling on #22653 amends #16157's: on the partially
+ *     attested path every UNATTESTED shard is asked for the cause the
+ *     platform recorded on its own check run. The leg passes only when every
+ *     one of them records a supersession; a shard killed by its own job
+ *     timeout is red naming that shard; any other cause (a manual cancel
+ *     included) or an unreadable one is red. #16157's purpose stands — a
+ *     shard killed mid-suite never turns the required check green — and a
+ *     GitHub wording change degrades to its reading (red), never to green.
+ *     The zero-attestation matrix keeps #3668's count-based pass with NO
+ *     cause read: ruled not extended on #22653.
+ *     ⛔ For a SINGLE-leg roster, zero attestations alone do not show the leg
+ *     was superseded (#22606). Run 38021470264 shows it: `dogfood-verify` (1/1)
+ *     was killed by its 20-minute job timeout while the dogfood matrix attested
+ *     3/3. A single leg has no sibling shard that could show it ran. A sibling
+ *     LEG cannot settle it either, because a newer push can supersede the run
+ *     after that sibling finished. Run 37984828810 had the same results and the
+ *     same credentials, and it was superseded. "Another leg attested ⇒ not
+ *     superseded" was measured false, so it is not the discriminator. When a
+ *     single leg reads `cancelled` with zero attestations beside an attested
+ *     sibling leg, `--verify` reads the cause the platform recorded on that
+ *     leg's own check run. A recorded supersession keeps this pass. A
+ *     recorded timeout makes the roster REQUIRED, and the gate goes red
+ *     naming the leg. Any other cause, a manual cancel included, or an
+ *     unreadable one is red: the gate fails closed.
+ *     Both questions are ONE question asked per shard
+ *     (`shardsNeedingCancelCause`, `readCancelCauses`): a single leg is a
+ *     1-shard roster, and its answer is keyed by its attestation id exactly
+ *     as a matrix shard's is.
  *   - `skipped` still passes ONLY when the `filter` job itself succeeded
  *     (#4928). `skipped` alone cannot separate "the path filter said no core
  *     paths changed" from "the path filter exploded and took every downstream
@@ -242,6 +277,98 @@ function parseAttempt(value) {
   return Number.isInteger(attempt) && attempt > 0 ? attempt : undefined;
 }
 
+// ── A cancelled shard: the cause the platform recorded (#22606, #22653) ─────
+
+/**
+ * The annotation GitHub writes on a job's check run when the job outlived its
+ * own `timeout-minutes` (measured: job 114123251343, `Dogfood Verify CLI` of run
+ * 38021470264 — `The job has exceeded the maximum execution time of 20m0s`).
+ */
+export const CANCEL_CAUSE_TIMEOUT = 'The job has exceeded the maximum execution time';
+
+/**
+ * The annotation GitHub writes when `cancel-in-progress` cancels a job because
+ * a newer run of the same concurrency group exists (measured: job 114005072147
+ * of run 37984828810 — `Canceling since a higher priority waiting request for
+ * ci-CI-push-refs/heads/main exists`; job 114173074639 of run 38038213421, the
+ * same text for `ci-CI-pull_request-22645`).
+ */
+export const CANCEL_CAUSE_SUPERSEDED = 'Canceling since a higher priority waiting request for';
+
+/**
+ * The shards whose cancel CAUSE decides the verdict (#22606, #22653) — pure,
+ * and shared by `judge()` and `--verify`, so the question `--verify` asks the
+ * API is exactly the one `judge()` decides on.
+ *
+ * Only a leg whose aggregate result is `cancelled` asks anything, and only
+ * about its UNATTESTED shards — a shard that attested and was cancelled
+ * afterwards is counted as attested, as it always was. Two shapes ask:
+ *
+ *   - a MATRIX leg (`total` > 1) with at least one credential of its own
+ *     present: every shard of it with no credential (#22653, amending
+ *     #16157). The sibling that attested shows the matrix ran; it does not
+ *     show the rest were killed rather than superseded — measured true 1 time
+ *     in 157 — so each unattested shard's own record decides;
+ *   - a SINGLE-leg roster (`total` 1) with no credential while ANOTHER leg of
+ *     the same gate has one (#22606). A single leg has no sibling shard to
+ *     show it ran, and a sibling LEG cannot settle it either.
+ *
+ * A matrix leg with ZERO credentials asks nothing, whatever its siblings did:
+ * that is #3668's whole-matrix supersession, which keeps its count-based pass
+ * — ruled not extended on #22653. So does a single leg with no attested
+ * sibling leg (every leg cancelled with nothing attested).
+ *
+ * Why the cause is the question and not the answer: `cancelled` is the same
+ * word for a shard killed by its own `timeout-minutes` (no verdict at all —
+ * runs 34007386254 and 38021470264) and for one cancelled because a newer push
+ * superseded the run (#3668 — runs 38036705318 and 37984828810). The count
+ * cannot tell them apart; the platform's record on the shard's check run can.
+ *
+ * @param {{ job: string, total: number, result: string }[]} legs
+ * @param {Map<string, unknown>} present
+ * @returns {{ id: string, job: string, shard: number, total: number }[]} the
+ *   qualifying shards, keyed by attestation id — the key `cancelCauses` uses
+ */
+export function shardsNeedingCancelCause(legs, present) {
+  const attestedAny = (leg) => rosterFor(leg.job, leg.total).some((id) => present.has(id));
+  const asked = [];
+  for (const leg of legs) {
+    if (leg.result !== 'cancelled' || !Number.isInteger(leg.total) || leg.total < 1) continue;
+    const askable =
+      leg.total > 1 ? attestedAny(leg) : !attestedAny(leg) && legs.some((other) => other.job !== leg.job && attestedAny(other));
+    if (!askable) continue;
+    for (let shard = 1; shard <= leg.total; shard += 1) {
+      const id = attestationId(leg.job, shard, leg.total);
+      if (!present.has(id)) asked.push({ id, job: leg.job, shard, total: leg.total });
+    }
+  }
+  return asked;
+}
+
+/**
+ * A cancelled job's check-run annotations, read as a cause (#22606, #22653). Pure.
+ *
+ * `timeout` wins over `superseded` if both ever appear: it is the red answer,
+ * and with two contradictory records the gate fails closed. Anything else — a
+ * manual cancel (`The run was canceled by …`), no annotation at all, a message
+ * GitHub has not written before — is `other`, which the verdict also treats as
+ * red: only a recorded supersession buys #3668's pass on this path.
+ *
+ * @param {unknown} annotations the `GET …/check-runs/{id}/annotations` array
+ * @returns {{ kind: 'timeout' | 'superseded' | 'other', detail: string }}
+ */
+export function classifyCancelAnnotations(annotations) {
+  const list = Array.isArray(annotations) ? annotations : [];
+  const messages = list.map((a) => String(a?.message ?? '').trim()).filter(Boolean);
+  const timeout = messages.find((m) => m.startsWith(CANCEL_CAUSE_TIMEOUT));
+  if (timeout) return { kind: 'timeout', detail: timeout };
+  const superseded = messages.find((m) => m.startsWith(CANCEL_CAUSE_SUPERSEDED));
+  if (superseded) return { kind: 'superseded', detail: superseded };
+  const failures = list.filter((a) => a?.annotation_level === 'failure').map((a) => String(a?.message ?? '').trim()).filter(Boolean);
+  const shown = failures.length > 0 ? failures : messages;
+  return { kind: 'other', detail: shown.length > 0 ? shown.join(' | ') : 'the check run carries no annotation at all' };
+}
+
 // ── The verdict, as a pure function ─────────────────────────────────────────
 
 /**
@@ -258,15 +385,32 @@ function parseAttempt(value) {
  *   runId: string,
  *   runAttempt?: string,
  *   downloadOutcome?: string,
- * }} input
+ *   cancelCauses?: Map<string, { kind: 'timeout' | 'superseded' | 'other' | 'unreadable', detail: string }>,
+ * }} input `cancelCauses` answers `shardsNeedingCancelCause()` per attestation
+ *   id (#22606, #22653); a qualifying shard with no entry is judged as an
+ *   unreadable cause.
  * @returns {{ ok: boolean, log: string[], errors: string[] }}
  */
-export function judge({ gate, legs, filterResult, present, runId, runAttempt, downloadOutcome }) {
+export function judge({ gate, legs, filterResult, present, runId, runAttempt, downloadOutcome, cancelCauses }) {
   const log = [];
   const errors = [];
   const allowed = new Set();
   let counted = 0;
   const thisAttempt = parseAttempt(runAttempt);
+  const needsCause = new Set(shardsNeedingCancelCause(legs, present).map((asked) => asked.id));
+  const causeOf = (id) => cancelCauses?.get(id) ?? { kind: 'unreadable', detail: 'no cancel cause was read for this shard' };
+  /** Asked shards whose cancel cause is NOT a recorded supersession, with that cause (#22606, #22653). */
+  const killedShards = new Map();
+  /** Asked shards whose own check run records a supersession, with that cause (#22606, #22653). */
+  const supersededShards = new Map();
+  let attestedBeforeSupersession = 0;
+  /** How a missing shard's recorded cause reads in a sentence. */
+  const causeWords = (cause) =>
+    cause.kind === 'timeout'
+      ? `killed by its own job timeout ("${cause.detail}")`
+      : cause.kind === 'superseded'
+        ? `superseded ("${cause.detail}")`
+        : `cancel cause ${cause.kind === 'other' ? 'not a recorded supersession' : 'unreadable'} (${cause.detail})`;
 
   /**
    * Was this credential published by an EARLIER attempt of THIS run (#11998)?
@@ -310,31 +454,73 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
     log.push(`  leg ${label} — aggregate result: ${leg.result}`);
 
     if (leg.result === 'cancelled') {
-      // A run-lifecycle state, not a shard verdict — and it arrives in two
-      // shapes that the count tells apart (#16157):
+      // A run-lifecycle state, not a shard verdict — and it arrives in shapes
+      // the count alone cannot all tell apart:
       //
-      //   - ZERO shards of the leg attested: the whole matrix was superseded
-      //     (cancel-in-progress on a newer push, #3668). No shard produced a
-      //     verdict, the SHA is dead, and demanding credentials would paint
-      //     the false red #3668 removed. Passes without counting.
-      //   - AT LEAST ONE shard attested: the matrix RAN. A sibling that still
-      //     reads `cancelled` was killed mid-suite and produced no verdict, so
-      //     no `failure` exists to dominate the aggregate (run 34007386254:
-      //     shard 2/6 cancelled by its job timeout with the test step
-      //     `in_progress`, five siblings attested). The declared roster is
-      //     knowable from the shards that did attest, so it is REQUIRED —
-      //     the leg falls through to the count below, every missing shard is
-      //     named, and the required check goes red.
+      //   - ZERO shards of a matrix leg attested: the whole matrix was
+      //     superseded (cancel-in-progress on a newer push, #3668). No shard
+      //     produced a verdict, the SHA is dead, and demanding credentials
+      //     would paint the false red #3668 removed. Passes without counting
+      //     and without a cause read (ruled not extended on #22653).
+      //   - AT LEAST ONE shard attested (#16157): the matrix RAN. A sibling
+      //     that still reads `cancelled` produced no verdict, so no `failure`
+      //     exists to dominate the aggregate — but whether it was KILLED by
+      //     its own timeout (run 34007386254: shard 2/6, five siblings
+      //     attested) or SUPERSEDED by a newer push after the fast shards had
+      //     attested (run 38036705318: shard 5/6 attested, five superseded) is
+      //     not in the count. Each unattested shard's recorded cause decides
+      //     (#22653): every one a supersession ⇒ #3668's pass; anything else
+      //     ⇒ the roster is REQUIRED, the leg falls through to the count, and
+      //     every missing shard is named with its cause.
+      //   - a SINGLE-leg roster with zero attestations beside an attested
+      //     sibling leg (#22606): the same question for its one shard — "a
+      //     sibling leg attested" is no discriminator either (run
+      //     37984828810 was superseded after the sibling finished).
       for (const id of roster) allowed.add(id);
       const attested = roster.filter((id) => present.has(id));
-      if (attested.length === 0) {
+      const asked = roster.filter((id) => needsCause.has(id));
+      if (asked.length > 0) {
+        const notSuperseded = asked.filter((id) => causeOf(id).kind !== 'superseded');
+        if (notSuperseded.length === 0) {
+          for (const id of asked) supersededShards.set(id, causeOf(id));
+          attestedBeforeSupersession += attested.length;
+          if (leg.total === 1) {
+            log.push(`    satisfied (cancelled — superseded, per the leg's own check run: "${causeOf(asked[0]).detail}" — #3668; expected attestations: 0)`);
+          } else {
+            log.push(
+              `    satisfied (cancelled AFTER ${attested.length} of ${roster.length} declared shard(s) attested, and every unattested shard's own ` +
+                `check run records a supersession — #3668's pass, by the recorded cause (#22653))`,
+            );
+            for (const id of roster) {
+              const record = present.get(id);
+              log.push(record ? `    + ${id}  (run ${record.run_id}, attempt ${record.run_attempt})` : `    ~ ${id}  ${causeWords(causeOf(id))}`);
+            }
+          }
+          continue;
+        }
+        for (const id of notSuperseded) killedShards.set(id, causeOf(id));
+        if (leg.total === 1) {
+          const cause = causeOf(asked[0]);
+          log.push(
+            cause.kind === 'timeout'
+              ? `    cancelled by its OWN job timeout ("${cause.detail}") while a sibling leg attested — not a superseded run; the roster is REQUIRED (#22606)`
+              : `    cancelled while a sibling leg attested, and the cause is not a recorded supersession (${cause.kind}: ${cause.detail}) — failing closed; the roster is REQUIRED (#22606)`,
+          );
+        } else {
+          log.push(
+            `    cancelled AFTER ${attested.length} of ${roster.length} declared shard(s) attested, and ${notSuperseded.length} unattested shard(s) ` +
+              `carry no recorded supersession — the roster is REQUIRED and every missing shard is named (#16157, #22653)`,
+          );
+        }
+      } else if (attested.length === 0) {
         log.push(`    satisfied (cancelled — run-lifecycle state, #3668; expected attestations: 0)`);
         continue;
+      } else {
+        log.push(
+          `    cancelled AFTER ${attested.length} of ${roster.length} declared shard(s) attested — not a superseded matrix; ` +
+            `the roster is REQUIRED and every missing shard is named (#16157)`,
+        );
       }
-      log.push(
-        `    cancelled AFTER ${attested.length} of ${roster.length} declared shard(s) attested — not a superseded matrix; ` +
-          `the roster is REQUIRED and every missing shard is named (#16157)`,
-      );
     }
 
     if (leg.result === 'skipped') {
@@ -362,18 +548,42 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
     for (const id of roster) {
       const record = present.get(id);
       const carried = record && carriedOver(record) ? '  ← carried over from an earlier attempt of this run (#11998)' : '';
-      log.push(record ? `    + ${id}  (run ${record.run_id}, attempt ${record.run_attempt})${carried}` : `    - ${id}  MISSING`);
+      const recorded = needsCause.has(id) ? ` — ${causeWords(causeOf(id))}` : '';
+      log.push(record ? `    + ${id}  (run ${record.run_id}, attempt ${record.run_attempt})${carried}` : `    - ${id}  MISSING${recorded}`);
     }
     log.push(`    attested ${roster.length - missing.length} / ${roster.length} declared shard(s)`);
 
     counted += roster.length;
-    if (missing.length > 0) {
+    const killed = leg.total === 1 ? killedShards.get(roster[0]) : undefined;
+    const killedHere = roster.filter((id) => killedShards.has(id));
+    if (missing.length > 0 && killed) {
+      errors.push(
+        killed.kind === 'timeout'
+          ? `${gate}: leg ${leg.job} (single leg) published no positive attestation (${missing.join(', ')}) — it was killed by its ` +
+              `own job timeout ("${killed.detail}") while a sibling leg of this gate attested, so it produced no verdict at all. ` +
+              `A killed leg is not a passing leg, see #22606.`
+          : `${gate}: leg ${leg.job} (single leg) published no positive attestation (${missing.join(', ')}) and was cancelled while a ` +
+              `sibling leg of this gate attested; its cancel cause is ${killed.kind === 'other' ? 'not a recorded supersession' : 'unreadable'} ` +
+              `(${killed.detail}). Only a recorded supersession passes this shape — failing closed, see #22606.`,
+      );
+    } else if (missing.length > 0) {
+      // #22653: on a partially attested matrix every missing shard was asked
+      // for its recorded cause, and the leg only reaches this count when at
+      // least one of them is not a supersession. Each of those is named with
+      // what its own check run recorded; the superseded rest are said to be.
+      const supersededHere = missing.filter((id) => needsCause.has(id) && !killedShards.has(id));
+      const causes =
+        killedHere.length > 0
+          ? ` Only a recorded supersession excuses a missing shard here (#22653): ` +
+            `${killedHere.map((id) => `${id}: ${causeWords(killedShards.get(id))}`).join('; ')}` +
+            `${supersededHere.length > 0 ? `; ${supersededHere.length} other missing shard(s) (${supersededHere.join(', ')}) record a supersession` : ''}.`
+          : '';
       errors.push(
         leg.result === 'cancelled'
           ? `${gate}: ${missing.length} of ${roster.length} declared shard(s) of ${leg.job} published no positive attestation ` +
               `(${missing.join(', ')}) while ${roster.length - missing.length} sibling(s) did ` +
               `(${roster.filter((id) => present.has(id)).join(', ')}). The leg was cancelled mid-run, so the missing ` +
-              `shard(s) produced no verdict at all — an untested shard is not a passing shard, see #16157.`
+              `shard(s) produced no verdict at all — an untested shard is not a passing shard, see #16157.${causes}`
           : `${gate}: ${missing.length} of ${roster.length} declared shard(s) of ${leg.job} published no positive attestation ` +
               `(${missing.join(', ')}). A shard that never ran cannot be counted as passing — see #6082.`,
       );
@@ -413,10 +623,19 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
   }
 
   if (errors.length === 0) {
+    // A pass by recorded supersession says so, and never claims "none claimed
+    // to" over shards that DID attest before the newer push arrived (#22653).
+    const superseded =
+      supersededShards.size > 0
+        ? ` ${supersededShards.size} unattested shard(s) were cancelled by a recorded supersession (#3668, #22653)` +
+          `${attestedBeforeSupersession > 0 ? `, after ${attestedBeforeSupersession} sibling shard(s) of their leg(s) attested` : ''}.`
+        : '';
     log.push(
       counted > 0
-        ? `${gate}: satisfied — all ${counted} declared shard(s) published a positive attestation.`
-        : `${gate}: satisfied — no shard was expected to run, and none claimed to.`,
+        ? `${gate}: satisfied — all ${counted} declared shard(s) published a positive attestation.${superseded}`
+        : supersededShards.size > 0
+          ? `${gate}: satisfied — superseded:${superseded}`
+          : `${gate}: satisfied — no shard was expected to run, and none claimed to.`,
     );
   }
   return { ok: errors.length === 0, log, errors };
@@ -718,8 +937,10 @@ export async function scanWorkflow(root) {
   }
 
   let doc;
+  let workflowText = '';
   try {
-    doc = parse(readFileSync(file, 'utf8'));
+    workflowText = readFileSync(file, 'utf8');
+    doc = parse(workflowText);
   } catch (error) {
     return { problems: [`${file} does not parse as YAML: ${error.message}`], gates: 0, legs: 0, attesters: 0, gateIds: [], attesterIds: [] };
   }
@@ -767,6 +988,69 @@ export async function scanWorkflow(root) {
       .map((step) => String(step?.with?.pattern ?? ''));
     if (patterns.length === 0) {
       problems.push(`gate '${id}' never downloads the shard attestations it claims to count.`);
+    }
+
+    // #22606 / #22653: the legs `shardsNeedingCancelCause` can ever ask about —
+    // every MATRIX leg (a partially attested one asks per unattested shard)
+    // and a single-leg roster beside another leg. That read is declared HERE
+    // or it is not done: without the permissions and the token every such
+    // verdict fails closed — a superseded run painted red, #3668's false red
+    // back — and without a display name the runtime can read from the text,
+    // the shard's check run cannot be found at all.
+    const causeLegs = legs.filter((leg) => leg.total > 1 || legs.length > 1);
+    if (causeLegs.length > 0) {
+      const perms = job.permissions;
+      const grants = (scope) =>
+        perms === 'read-all' || perms === 'write-all' || (perms && typeof perms === 'object' && ['read', 'write'].includes(perms[scope]));
+      for (const scope of ['actions', 'checks']) {
+        if (!grants(scope)) {
+          problems.push(
+            `gate '${id}' counts ${causeLegs.map((leg) => `'${leg.job}'`).join(', ')}, whose cancelled shards are judged by their recorded ` +
+              `cancel cause — and that read needs \`permissions: ${scope}: read\` on the gate job (#22606, #22653).`,
+          );
+        }
+      }
+      const verifyStep = stepsOf(job).find((step) => invokesScript(step?.run, '--verify'));
+      if (!verifyStep?.env || typeof verifyStep.env.GITHUB_TOKEN !== 'string' || verifyStep.env.GITHUB_TOKEN.trim() === '') {
+        problems.push(
+          `gate '${id}': its --verify step must receive GITHUB_TOKEN in its env for the cancel-cause read of ` +
+            `${causeLegs.map((leg) => `'${leg.job}'`).join(', ')} (#22606, #22653).`,
+        );
+      }
+      for (const leg of causeLegs) {
+        const target = jobs[leg.job];
+        if (!target) continue; // reported below as an unknown leg
+        if (leg.total === 1) {
+          const declared = typeof target.name === 'string' ? target.name : leg.job;
+          const seen = workflowJobDisplayName(workflowText, leg.job);
+          if (seen !== declared) {
+            problems.push(
+              `job '${leg.job}' is named ${JSON.stringify(declared)} but the runtime's text reading resolves ${JSON.stringify(seen ?? null)} — ` +
+                `the cancel-cause read finds the leg's check run by that name, so a cancelled '${leg.job}' could never be judged (#22606). ` +
+                `Give it a literal, single-line \`name:\`.`,
+            );
+          }
+          continue;
+        }
+        // A matrix shard's check run is listed under the EXPANDED name
+        // (`Test Core (3/6)`, measured on run 38036705318), so the template
+        // must hold `${{ matrix.shard }}` and no other expression, and the
+        // text reading must expand to what the parsed YAML expands to, for
+        // every shard on the roster.
+        for (let shard = 1; shard <= leg.total; shard += 1) {
+          const declared = expandMatrixShardName(target.name, shard);
+          const seen = workflowJobDisplayName(workflowText, leg.job, shard);
+          if (declared === undefined || seen !== declared) {
+            problems.push(
+              `job '${leg.job}' is named ${JSON.stringify(target.name ?? null)}, which for shard ${shard} the parsed YAML expands to ` +
+                `${JSON.stringify(declared ?? null)} and the runtime's text reading to ${JSON.stringify(seen ?? null)} — the cancel-cause ` +
+                `read finds a shard's check run by that name, so a cancelled shard of '${leg.job}' could never be judged (#22653). ` +
+                `Give it a single-line \`name:\` whose only expression is \`\${{ matrix.shard }}\`.`,
+            );
+            break;
+          }
+        }
+      }
     }
 
     for (const leg of legs) {
@@ -846,6 +1130,239 @@ export async function scanWorkflow(root) {
   return { problems, gates: gates.size, legs, attesters: claimed.size, gateIds: [...gates.keys()], attesterIds: [...claimed.keys()] };
 }
 
+// ── Reading a cancelled shard's cause off the platform (#22606, #22653) ─────
+
+/**
+ * One matrix shard's display name: the job's `name:` template with every
+ * `${{ matrix.shard }}` replaced by the shard number, the way the runner
+ * expands it — measured: `Test Core (${{ matrix.shard }}/6)` is listed as
+ * `Test Core (3/6)` by the jobs API (run 38036705318), and
+ * `Dogfood Regression Gate (${{ matrix.shard }}/3)` as `… (1/3)` (run
+ * 38044009552).
+ *
+ * `undefined` means "cannot say", and the caller then fails closed: a template
+ * holding no `${{ matrix.shard }}` (GitHub then appends the matrix values
+ * itself, a shape this does not reproduce), one holding any OTHER expression,
+ * or no template at all.
+ *
+ * @param {unknown} template a job's `name:` value
+ * @param {number} shard the shard number on the roster (1..N)
+ * @returns {string | undefined}
+ */
+export function expandMatrixShardName(template, shard) {
+  if (typeof template !== 'string' || !Number.isInteger(shard)) return undefined;
+  const expression = /\$\{\{\s*matrix\.shard\s*\}\}/g;
+  if (!expression.test(template)) return undefined;
+  const expanded = template.replace(expression, String(shard));
+  return expanded.includes('${{') ? undefined : expanded;
+}
+
+/**
+ * A job's display name as the jobs API reports it, read from the workflow TEXT
+ * — for a matrix job, the name of ONE shard (`shard`), expanded by
+ * `expandMatrixShardName`.
+ *
+ * Text, not YAML, on purpose: `--verify` runs in a gate job that checks out the
+ * repository and never installs dependencies, so the `yaml` package
+ * `scanWorkflow()` uses is not there. The static guard (which does have it)
+ * holds this reading equal to the parsed `name:` for every leg — and every
+ * shard of it — the cause read can be asked about, so the two cannot drift
+ * apart silently.
+ *
+ * `undefined` means "cannot say" — an expression other than a matrix shard's
+ * (`${{ … }}`), a block scalar, an unterminated quote, no such job — and the
+ * caller then fails closed. A job with no `name:` is shown by GitHub under its
+ * id, so the id is returned; a matrix job with no `name:` is `undefined`.
+ *
+ * @param {string} text the workflow file's contents
+ * @param {string} jobKey the job's id under `jobs:`
+ * @param {number} [shard] the shard to name, for a matrix job
+ * @returns {string | undefined}
+ */
+export function workflowJobDisplayName(text, jobKey, shard) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  const jobsAt = lines.findIndex((line) => /^jobs:\s*(#.*)?$/.test(line));
+  if (jobsAt === -1) return undefined;
+  const header = new RegExp(`^  ${jobKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(#.*)?$`);
+  let at = -1;
+  for (let i = jobsAt + 1; i < lines.length; i += 1) {
+    if (/^\S/.test(lines[i]) && !lines[i].startsWith('#')) break;
+    if (header.test(lines[i])) {
+      at = i;
+      break;
+    }
+  }
+  if (at === -1) return undefined;
+  for (let i = at + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    if (/^ {0,3}\S/.test(line)) break; // the next job, or a top-level key
+    const match = /^ {4}name:[ \t]*(.*?)[ \t]*$/.exec(line);
+    if (!match) continue;
+    const raw = match[1];
+    let value;
+    if (raw.startsWith("'")) {
+      const quoted = /^'((?:[^']|'')*)'(?:[ \t]+#.*)?$/.exec(raw);
+      if (!quoted) return undefined;
+      value = quoted[1].replace(/''/g, "'");
+    } else if (raw.startsWith('"')) {
+      const quoted = /^("(?:[^"\\]|\\.)*")(?:[ \t]+#.*)?$/.exec(raw);
+      try {
+        value = quoted ? JSON.parse(quoted[1]) : undefined;
+      } catch {
+        return undefined;
+      }
+    } else {
+      value = raw.replace(/[ \t]+#.*$/, '');
+    }
+    if (typeof value !== 'string' || value === '' || value === '|' || value === '>') return undefined;
+    if (shard !== undefined) return expandMatrixShardName(value, shard);
+    return value.includes('${{') ? undefined : value;
+  }
+  return shard === undefined ? jobKey : undefined;
+}
+
+/**
+ * The live fetcher: one JSON GET against the REST API with the job's token.
+ * One retry, for a 5xx / 429 / network failure only — a 4xx is an answer (a
+ * 403 here names a missing `permissions:` entry and asking again does not help).
+ * The token is never printed: every failure carries the status and GitHub's own
+ * message, nothing else.
+ *
+ * @returns {(url: string) => Promise<{ ok: true, status: number, body: unknown } | { ok: false, status: number, error: string }>}
+ */
+export function githubFetchJson(token, { fetchImpl = globalThis.fetch, timeoutMs = 20_000, retryDelayMs = 2_000 } = {}) {
+  return async (url) => {
+    let last = { ok: false, status: 0, error: 'not attempted' };
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const res = await fetchImpl(url, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': SCRIPT_BASENAME,
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (res.ok) return { ok: true, status: res.status, body: await res.json() };
+        last = { ok: false, status: res.status, error: (await res.text()).replace(/\s+/g, ' ').slice(0, 300) };
+        if (res.status < 500 && res.status !== 429) return last;
+      } catch (error) {
+        last = { ok: false, status: 0, error: String(error?.message ?? error) };
+      }
+      if (attempt === 1) await new Promise((done) => setTimeout(done, retryDelayMs));
+    }
+    return last;
+  };
+}
+
+/**
+ * The cause the platform recorded for every shard `shardsNeedingCancelCause()`
+ * names (#22606, #22653), keyed by attestation id — and NO request at all when
+ * it names none, which is every run except a cancelled single leg beside an
+ * attested sibling or a cancelled matrix that partially attested.
+ *
+ * Documented reads, all under the gate job's own `GITHUB_TOKEN`:
+ *   - `GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs`
+ *     ("Actions" repository permission, read), ONCE per run however many
+ *     shards are asked — THIS attempt's jobs, matched by each shard's display
+ *     name, because `needs.<leg>.result` is this attempt's;
+ *   - `GET {check_run_url}/annotations` ("Checks" repository permission,
+ *     read), once per asked shard.
+ *
+ * Every failure is an `unreadable` cause naming why, which `judge()` turns red:
+ * an unanswerable question never buys #3668's pass on this path.
+ *
+ * @param {{
+ *   legs: { job: string, total: number, result: string }[],
+ *   present: Map<string, unknown>,
+ *   runId: string, runAttempt: string, repository?: string, apiUrl?: string,
+ *   token?: string, fetchJson: (url: string) => Promise<{ ok: boolean, status: number, body?: unknown, error?: string }>,
+ *   workflowText: string,
+ * }} input
+ * @returns {Promise<Map<string, { kind: 'timeout' | 'superseded' | 'other' | 'unreadable', detail: string }>>}
+ */
+export async function readCancelCauses({ legs, present, runId, runAttempt, repository, apiUrl, token, fetchJson, workflowText }) {
+  const causes = new Map();
+  const wanted = shardsNeedingCancelCause(legs, present);
+  if (wanted.length === 0) return causes;
+  const unreadable = (detail) => ({ kind: 'unreadable', detail });
+  const attempt = parseAttempt(runAttempt);
+  const precondition = !token
+    ? "no GITHUB_TOKEN in the verify step's environment — the gate job needs `permissions:` actions: read + checks: read, and the token passed to this step"
+    : !/^[^/\s]+\/[^/\s]+$/.test(String(repository ?? ''))
+      ? `GITHUB_REPOSITORY is unreadable (${JSON.stringify(repository ?? '')})`
+      : !/^\d+$/.test(String(runId ?? ''))
+        ? `GITHUB_RUN_ID is unreadable (${JSON.stringify(runId ?? '')})`
+        : attempt === undefined
+          ? `GITHUB_RUN_ATTEMPT is unreadable (${JSON.stringify(runAttempt ?? '')})`
+          : undefined;
+  if (precondition) {
+    for (const { id } of wanted) causes.set(id, unreadable(precondition));
+    return causes;
+  }
+
+  const base = String(apiUrl || 'https://api.github.com').replace(/\/+$/, '');
+  const jobsUrl = (page) => `${base}/repos/${repository}/actions/runs/${runId}/attempts/${attempt}/jobs?per_page=100&page=${page}`;
+  const jobs = [];
+  let listError;
+  for (let page = 1; ; page += 1) {
+    const res = await fetchJson(jobsUrl(page));
+    if (!res.ok) {
+      listError = `GET ${jobsUrl(page)} answered ${res.status || 'nothing'}: ${res.error}`;
+      break;
+    }
+    const batch = Array.isArray(res.body?.jobs) ? res.body.jobs : undefined;
+    if (!batch) {
+      listError = `GET ${jobsUrl(page)} answered without a jobs array`;
+      break;
+    }
+    jobs.push(...batch);
+    const total = Number(res.body?.total_count);
+    if (batch.length < 100 || (Number.isInteger(total) && jobs.length >= total)) break;
+    if (page === 10) {
+      listError = `this attempt lists more than ${jobs.length} jobs — refusing to judge from a partial list`;
+      break;
+    }
+  }
+
+  for (const { id, job, shard, total } of wanted) {
+    if (listError) {
+      causes.set(id, unreadable(listError));
+      continue;
+    }
+    const name = total > 1 ? workflowJobDisplayName(workflowText, job, shard) : workflowJobDisplayName(workflowText, job);
+    if (name === undefined) {
+      causes.set(
+        id,
+        unreadable(`job '${job}'${total > 1 ? ` (shard ${shard}/${total})` : ''} has no readable display name in the workflow file, so its check run cannot be found`),
+      );
+      continue;
+    }
+    const matches = jobs.filter((record) => record?.name === name);
+    if (matches.length !== 1) {
+      causes.set(id, unreadable(`this attempt's jobs list holds ${matches.length} job(s) named '${name}', not exactly one`));
+      continue;
+    }
+    const [record] = matches;
+    if (record.conclusion !== 'cancelled') {
+      causes.set(id, unreadable(`this attempt's jobs list reads '${name}' (job ${record.id}) as ${JSON.stringify(record.conclusion)}, not cancelled`));
+      continue;
+    }
+    const checkRun = typeof record.check_run_url === 'string' && record.check_run_url ? record.check_run_url : `${base}/repos/${repository}/check-runs/${record.id}`;
+    const annotationsUrl = `${checkRun}/annotations?per_page=100`;
+    const res = await fetchJson(annotationsUrl);
+    if (!res.ok || !Array.isArray(res.body)) {
+      causes.set(id, unreadable(`GET ${annotationsUrl} answered ${res.ok ? 'without an array' : `${res.status || 'nothing'}: ${res.error}`}`));
+      continue;
+    }
+    const cause = classifyCancelAnnotations(res.body);
+    causes.set(id, { kind: cause.kind, detail: `${cause.detail} — check run ${record.id}` });
+  }
+  return causes;
+}
+
 // ── Modes ───────────────────────────────────────────────────────────────────
 
 function argValue(flag, fallback) {
@@ -888,7 +1405,7 @@ function emit() {
 }
 
 /** A gate counts the credentials. */
-function verify() {
+async function verify() {
   const gate = argValue('--gate', 'gate');
   const dir = argValue('--dir');
   if (!dir) {
@@ -901,18 +1418,45 @@ function verify() {
     return { job, total: Number(total), result: at === -1 ? '' : token.slice(at + 1).trim() };
   });
   const { present, problems } = readAttestations(dir);
+  const runId = process.env.GITHUB_RUN_ID ?? '';
+  // Read from the environment for the same reason the run id is (#11998):
+  // `GITHUB_RUN_ATTEMPT` is a default variable in every job, `--emit` already
+  // stamps the credential from it, and taking both ends of the comparison
+  // from the same source means no ci.yml step has to remember to pass it.
+  const runAttempt = process.env.GITHUB_RUN_ATTEMPT ?? '';
+  // #22606 / #22653: the API is asked ONLY when a cancelled single leg sits
+  // beside an attested sibling, or a cancelled matrix partially attested;
+  // every other run makes no request and needs no token.
+  let cancelCauses = new Map();
+  if (shardsNeedingCancelCause(legs, present).length > 0) {
+    let workflowText = '';
+    try {
+      workflowText = readFileSync(join(scriptRepoRoot(), '.github', 'workflows', 'ci.yml'), 'utf8');
+    } catch {
+      // No display name can be read, so every asked leg comes back unreadable — red, never a pass.
+    }
+    const token = process.env.GITHUB_TOKEN ?? '';
+    cancelCauses = await readCancelCauses({
+      legs,
+      present,
+      runId,
+      runAttempt,
+      repository: process.env.GITHUB_REPOSITORY,
+      apiUrl: process.env.GITHUB_API_URL,
+      token,
+      fetchJson: githubFetchJson(token),
+      workflowText,
+    });
+  }
   const verdict = judge({
     gate,
     legs,
     filterResult: argValue('--filter-result', ''),
     present,
-    runId: process.env.GITHUB_RUN_ID ?? '',
-    // Read from the environment for the same reason the run id is (#11998):
-    // `GITHUB_RUN_ATTEMPT` is a default variable in every job, `--emit` already
-    // stamps the credential from it, and taking both ends of the comparison
-    // from the same source means no ci.yml step has to remember to pass it.
-    runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? '',
+    runId,
+    runAttempt,
     downloadOutcome: argValue('--download-outcome', ''),
+    cancelCauses,
   });
   for (const line of verdict.log) console.log(line);
   const errors = [...problems.map((p) => `${gate}: ${p}`), ...verdict.errors];
@@ -971,6 +1515,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#3668 lifecycle: a superseded matrix (cancelled, zero attestations) passes without counting': 3,
   '#16157 partial cancellation: attested shards make the roster REQUIRED': 14,
   'dogfood-gate: a matrix leg and a single leg under one context': 5,
+  "#22606 single-leg cancel cause: the platform's recorded cause decides": 29,
+  '#22606 the cause read, offline: two documented GETs, and every failure is unreadable': 32,
+  "#22653 partial cancel cause: every unattested shard's recorded cause decides": 32,
+  '#22653 the cause read, offline: one jobs list, then one annotations read per unattested shard': 21,
   'foreign / stale credentials': 3,
   '#11998: attempt scoping, in both directions': 26,
   'missing input is a failure, never a pass (#4690)': 2,
@@ -978,12 +1526,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '…and the PROGRAM word must be unquoted (#10889)': 12,
   'readAttestations over a real directory': 4,
   'the static drift guard, over fixture workflows': 17,
+  '#22606 the static guard pins the cause read where the verdict needs it': 13,
+  '#22653 the static guard pins the cause read on every matrix leg, test-gate included': 19,
   '#6589: a shard job is not a gate because a step says `--verify`': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 22;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1106,6 +1656,12 @@ async function selfTest() {
   // ruling on #16157 (option A) overturns the pin that used to sit here
   // ("a leg that attested before the cancellation is allowed, not required"):
   // once ANY shard of a cancelled leg attested, the roster is REQUIRED.
+  //
+  // Every case in this battery passes NO `cancelCauses`, so each unattested
+  // shard of a partially attested matrix reads as an UNREADABLE cause — the
+  // side the ruling on #22653 fails to — and what remains is #16157's reading,
+  // unchanged: red, naming every missing shard. The recorded-cause verdict on
+  // the same path is its own battery below.
   battery('#16157 partial cancellation: attested shards make the roster REQUIRED');
   const partialCancel = testGate('cancelled', [attest('test', 1, 3)]);
   assert(!partialCancel.ok, '#16157: a cancelled leg with 1 of 3 attested ⇒ red (the overturned #3668 pin, inverted)');
@@ -1182,6 +1738,459 @@ async function selfTest() {
   assert(dogfood('skipped', 'skipped', []).ok, 'dogfood: both legs skipped by the filter ⇒ green (#4928)');
   assert(dogfood('success', 'skipped', fullDogfood.slice(0, 3)).ok, 'dogfood: each leg is judged on its own roster — a full matrix + a filter-skipped CLI leg ⇒ green');
   assert(!dogfood('success', 'skipped', fullDogfood).ok, 'dogfood: a credential from the leg reported skipped contradicts the skip ⇒ red');
+
+  // ── #22606: a cancelled single leg is judged by its recorded cause ────────
+  // The fixtures are the measured runs: 38021470264 (dogfood 3/3 attested,
+  // `Dogfood Verify CLI` killed at its 20-minute timeout) and 37984828810 (the
+  // same results and the same credentials, but superseded by a newer push).
+  // The count cannot tell them apart; only the cause can.
+  battery("#22606 single-leg cancel cause: the platform's recorded cause decides");
+  const dogfoodLegs = (dogfoodResult, verifyResult) => [
+    { job: 'dogfood', total: 3, result: dogfoodResult },
+    { job: 'dogfood-verify', total: 1, result: verifyResult },
+  ];
+  const withCause = (dogfoodResult, verifyResult, ids, causes) =>
+    judge({
+      gate: 'Dogfood Regression Gate',
+      legs: dogfoodLegs(dogfoodResult, verifyResult),
+      filterResult: 'success',
+      present: new Map(ids),
+      runId: '99',
+      cancelCauses: causes,
+    });
+  const matrix3 = fullDogfood.slice(0, 3);
+  // Causes are keyed by attestation id (#22653): a single leg is a 1-shard roster.
+  const VERIFY_ID = attestationId('dogfood-verify', 1, 1);
+  const TIMEOUT_CAUSE = { kind: 'timeout', detail: 'The job has exceeded the maximum execution time of 20m0s — check run 114123251343' };
+  const SUPERSEDED_CAUSE = {
+    kind: 'superseded',
+    detail: 'Canceling since a higher priority waiting request for ci-CI-push-refs/heads/main exists — check run 114005072147',
+  };
+  assert(
+    JSON.stringify(shardsNeedingCancelCause(dogfoodLegs('success', 'cancelled'), new Map(matrix3)).map(({ id }) => id)) === `["${VERIFY_ID}"]`,
+    '#22606: the measured shape asks exactly one question — the cause of dogfood-verify',
+  );
+  assert(shardsNeedingCancelCause(dogfoodLegs('cancelled', 'cancelled'), new Map()).length === 0, '#22606: every leg cancelled with zero credentials asks nothing — #3668 decides without the API');
+  assert(
+    shardsNeedingCancelCause(dogfoodLegs('cancelled', 'success'), new Map([fullDogfood[3]])).length === 0,
+    "#22606: a zero-attestation MATRIX leg beside an attested single leg asks nothing — not this path (run 38038213421's shape)",
+  );
+  assert(shardsNeedingCancelCause(dogfoodLegs('success', 'cancelled'), new Map(fullDogfood)).length === 0, '#22606: a cancelled single leg that DID attest asks nothing — the count decides');
+  assert(shardsNeedingCancelCause([{ job: 'dogfood-verify', total: 1, result: 'cancelled' }], new Map()).length === 0, '#22606: a single leg with no sibling leg asks nothing');
+  assert(shardsNeedingCancelCause(dogfoodLegs('success', 'abandoned'), new Map(matrix3)).length === 0, '#22606: only `cancelled` asks — every other value is decided by the count');
+
+  const killedRun = withCause('success', 'cancelled', matrix3, new Map([[VERIFY_ID, TIMEOUT_CAUSE]]));
+  assert(!killedRun.ok, '#22606 run 38021470264: dogfood-verify killed by its own timeout beside 3/3 attested ⇒ red');
+  assert(
+    killedRun.errors.some((e) => e.includes('leg dogfood-verify') && e.includes('own job timeout') && e.includes('exceeded the maximum execution time') && e.includes('#22606')),
+    '#22606: the red names dogfood-verify and quotes the recorded timeout',
+  );
+  assert(killedRun.log.some((l) => l.includes('- dogfood-verify-1-of-1  MISSING')), "#22606: the killed leg's roster is REQUIRED — its credential is listed missing");
+  assert(!killedRun.log.some((l) => l.includes('expected attestations: 0')), '#22606: a killed leg never prints the #3668 zero-expectation line');
+  assert(!killedRun.log.some((l) => l.includes('satisfied')), '#22606: a red killed-leg verdict prints no satisfied line at all');
+
+  const supersededRun = withCause('success', 'cancelled', matrix3, new Map([[VERIFY_ID, SUPERSEDED_CAUSE]]));
+  assert(supersededRun.ok, '#22606 run 37984828810: the same inputs, but a recorded supersession ⇒ green (#3668)');
+  assert(
+    supersededRun.log.some((l) => l.includes('superseded') && l.includes('higher priority waiting request') && l.includes('#3668')),
+    '#22606: the superseded pass says why, quoting the recorded cause',
+  );
+
+  const noCause = withCause('success', 'cancelled', matrix3, new Map());
+  assert(!noCause.ok, '#22606: no cause read at all ⇒ red — an unanswered question never buys the pass');
+  assert(noCause.errors.some((e) => e.includes('leg dogfood-verify') && e.includes('unreadable')), '#22606: the fail-closed red names the leg and says the cause is unreadable');
+  assert(!withCause('success', 'cancelled', matrix3, undefined).ok, '#22606: a caller that passes no cancelCauses at all gets red, not the old pass');
+  const refused = withCause('success', 'cancelled', matrix3, new Map([[VERIFY_ID, { kind: 'unreadable', detail: 'GET …/attempts/1/jobs answered 403: Resource not accessible by integration' }]]));
+  assert(!refused.ok && refused.errors.some((e) => e.includes('403')), '#22606: an API refusal is red and quotes the status');
+
+  const manualCause = classifyCancelAnnotations([
+    { annotation_level: 'failure', message: 'The run was canceled by @someone.' },
+    { annotation_level: 'failure', message: 'The operation was canceled.' },
+  ]);
+  assert(manualCause.kind === 'other', '#22606: a manual cancel is neither a timeout nor a supersession');
+  const manualRun = withCause('success', 'cancelled', matrix3, new Map([[VERIFY_ID, manualCause]]));
+  assert(
+    !manualRun.ok && manualRun.errors.some((e) => e.includes('not a recorded supersession') && e.includes('canceled by @someone')),
+    '#22606: a manual cancel beside an attested sibling ⇒ red, quoting what was recorded',
+  );
+
+  assert(withCause('cancelled', 'cancelled', [], new Map()).ok, '#22606 control: every leg cancelled with zero attestations ⇒ green, #3668 unchanged');
+  assert(withCause('cancelled', 'success', [fullDogfood[3]], new Map()).ok, '#22606 control: a zero-attestation matrix leg beside the attested single leg keeps its #3668 pass — not this path');
+  const partialMatrix = withCause('cancelled', 'success', [fullDogfood[0], fullDogfood[3]], new Map());
+  assert(
+    !partialMatrix.ok && partialMatrix.errors.some((e) => e.includes('#16157')),
+    "#22653: a partially attested matrix with NO cause read stays red — #16157's reading is the side an unanswered question fails to",
+  );
+  assert(
+    withCause('cancelled', 'success', [fullDogfood[0], fullDogfood[3]], new Map([['dogfood', SUPERSEDED_CAUSE]])).errors.some((e) => e.includes('#16157')),
+    '#22653: a cause keyed by the matrix LEG answers no shard — each unattested shard is asked under its own attestation id',
+  );
+
+  const annotation = (message, level = 'failure') => ({ annotation_level: level, message });
+  const UBUNTU_NOTICE = annotation('"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026."', 'notice');
+  assert(
+    classifyCancelAnnotations([annotation('The job has exceeded the maximum execution time of 20m0s'), annotation('The operation was canceled.'), UBUNTU_NOTICE]).kind === 'timeout',
+    "#22606: job 114123251343's measured annotations read as a timeout",
+  );
+  assert(
+    classifyCancelAnnotations([annotation('Canceling since a higher priority waiting request for ci-CI-pull_request-22645 exists'), annotation('The operation was canceled.'), UBUNTU_NOTICE]).kind === 'superseded',
+    "#22606: job 114173074639's measured annotations read as a supersession",
+  );
+  assert(
+    classifyCancelAnnotations([annotation('Canceling since a higher priority waiting request for ci-CI-push-refs/heads/main exists'), annotation('The job has exceeded the maximum execution time of 20m0s')]).kind === 'timeout',
+    '#22606: two contradictory records resolve to the red side',
+  );
+  assert(classifyCancelAnnotations([annotation('The operation was canceled.')]).kind === 'other', '#22606: the bare cancel line every cancelled job carries is not a cause');
+  assert(classifyCancelAnnotations([]).kind === 'other' && classifyCancelAnnotations(undefined).kind === 'other', '#22606: no annotations, or no array, is other — never a supersession');
+  assert(classifyCancelAnnotations([UBUNTU_NOTICE]).detail.includes('ubuntu-latest'), '#22606: with no failure-level message the detail still says what was there');
+
+  // ── #22606: the cause read itself, offline ─────────────────────────────────
+  battery('#22606 the cause read, offline: two documented GETs, and every failure is unreadable');
+  const API = 'https://api.test';
+  const VERIFY_JOB = { id: 114123251343, name: 'Dogfood Verify CLI', conclusion: 'cancelled', check_run_url: `${API}/repos/o/r/check-runs/114123251343` };
+  const jobsBody = (verify = VERIFY_JOB, extra = []) => ({
+    total_count: 2 + extra.length,
+    jobs: [{ id: 1, name: 'filter', conclusion: 'success', check_run_url: `${API}/repos/o/r/check-runs/1` }, verify, ...extra],
+  });
+  const fakeApi = (routes) => {
+    const calls = [];
+    const fetchJson = async (url) => {
+      calls.push(url);
+      for (const [pattern, answer] of routes) if (pattern.test(url)) return typeof answer === 'function' ? answer(url) : answer;
+      return { ok: false, status: 404, error: 'Not Found' };
+    };
+    return { calls, fetchJson };
+  };
+  const ok = (body) => ({ ok: true, status: 200, body });
+  const ATTEMPT_JOBS = /\/repos\/o\/r\/actions\/runs\/38021470264\/attempts\/1\/jobs\?per_page=100&page=1$/;
+  const ANNOTATIONS = /\/repos\/o\/r\/check-runs\/114123251343\/annotations\?per_page=100$/;
+  const WORKFLOW_TEXT =
+    'on: push\njobs:\n  dogfood:\n    name: Dogfood Regression Gate (${{ matrix.shard }}/3)\n    runs-on: ubuntu-latest\n\n' +
+    '  # the CLI pass\n  dogfood-verify:\n    name: Dogfood Verify CLI\n    runs-on: ubuntu-latest\n';
+  const ask = (fetchJson, over = {}) =>
+    readCancelCauses({
+      legs: dogfoodLegs('success', 'cancelled'),
+      present: new Map(matrix3),
+      runId: '38021470264',
+      runAttempt: '1',
+      repository: 'o/r',
+      apiUrl: API,
+      token: 'not-a-real-token',
+      fetchJson,
+      workflowText: WORKFLOW_TEXT,
+      ...over,
+    });
+
+  const timeoutApi = fakeApi([
+    [ATTEMPT_JOBS, ok(jobsBody())],
+    [ANNOTATIONS, ok([annotation('The job has exceeded the maximum execution time of 20m0s'), annotation('The operation was canceled.')])],
+  ]);
+  const timeoutCauses = await ask(timeoutApi.fetchJson);
+  assert(timeoutCauses.get(VERIFY_ID)?.kind === 'timeout', '#22606: the recorded timeout is read off the leg’s own check run');
+  assert(timeoutCauses.get(VERIFY_ID)?.detail.includes('check run 114123251343'), '#22606: the cause names the check run it was read from');
+  assert(
+    timeoutApi.calls.length === 2 && ATTEMPT_JOBS.test(timeoutApi.calls[0]) && ANNOTATIONS.test(timeoutApi.calls[1]),
+    "#22606: exactly the two documented GETs — THIS attempt's jobs, then that job's annotations",
+  );
+  assert(
+    !judge({ gate: 'Dogfood Regression Gate', legs: dogfoodLegs('success', 'cancelled'), filterResult: 'success', present: new Map(matrix3), runId: '99', runAttempt: '1', cancelCauses: timeoutCauses }).ok,
+    '#22606 end to end: read, then judged — the killed leg is red',
+  );
+  const supersededApi = fakeApi([[ATTEMPT_JOBS, ok(jobsBody())], [ANNOTATIONS, ok([annotation('Canceling since a higher priority waiting request for ci-CI-push-refs/heads/main exists')])]]);
+  const supersededCauses = await ask(supersededApi.fetchJson);
+  assert(
+    judge({ gate: 'Dogfood Regression Gate', legs: dogfoodLegs('success', 'cancelled'), filterResult: 'success', present: new Map(matrix3), runId: '99', runAttempt: '1', cancelCauses: supersededCauses }).ok,
+    '#22606 end to end: read, then judged — the superseded leg passes',
+  );
+
+  const silentApi = fakeApi([]);
+  const nothingAsked = await readCancelCauses({ legs: dogfoodLegs('success', 'success'), present: new Map(fullDogfood), runId: '1', runAttempt: '1', repository: 'o/r', token: '', fetchJson: silentApi.fetchJson, workflowText: '' });
+  assert(nothingAsked.size === 0 && silentApi.calls.length === 0, '#22606: nothing to ask ⇒ no request at all, and no token needed');
+  const unreadableWith = async (label, over, routes, needle) => {
+    const api = fakeApi(routes);
+    const cause = (await ask(api.fetchJson, over)).get(VERIFY_ID);
+    assert(cause?.kind === 'unreadable' && cause.detail.includes(needle), `#22606 unreadable — ${label}: got ${JSON.stringify(cause)}`);
+    return api;
+  };
+  const noTokenApi = await unreadableWith('no token in the step env', { token: '' }, [], 'GITHUB_TOKEN');
+  assert(noTokenApi.calls.length === 0, '#22606: without a token no request is attempted');
+  await unreadableWith('an unreadable attempt', { runAttempt: '' }, [], 'GITHUB_RUN_ATTEMPT');
+  await unreadableWith('an unreadable run id', { runId: 'latest' }, [], 'GITHUB_RUN_ID');
+  await unreadableWith('the jobs list refused', {}, [[ATTEMPT_JOBS, { ok: false, status: 403, error: 'Resource not accessible by integration' }]], '403');
+  await unreadableWith('the jobs list with no jobs array', {}, [[ATTEMPT_JOBS, ok({ message: 'odd' })]], 'without a jobs array');
+  await unreadableWith('the leg absent from this attempt', {}, [[ATTEMPT_JOBS, ok({ total_count: 1, jobs: [jobsBody().jobs[0]] })]], "0 job(s) named 'Dogfood Verify CLI'");
+  await unreadableWith('the leg listed twice', {}, [[ATTEMPT_JOBS, ok(jobsBody(VERIFY_JOB, [{ ...VERIFY_JOB, id: 7 }]))]], '2 job(s)');
+  await unreadableWith('the API reads the leg as not cancelled', {}, [[ATTEMPT_JOBS, ok(jobsBody({ ...VERIFY_JOB, conclusion: 'success' }))]], 'not cancelled');
+  await unreadableWith('the annotations refused', {}, [[ATTEMPT_JOBS, ok(jobsBody())], [ANNOTATIONS, { ok: false, status: 403, error: 'Resource not accessible by integration' }]], 'annotations');
+  await unreadableWith('no display name in the workflow text', { workflowText: 'jobs:\n  other:\n    name: x\n' }, [[ATTEMPT_JOBS, ok(jobsBody())]], 'no readable display name');
+  const pages = fakeApi([
+    [/attempts\/1\/jobs\?per_page=100&page=1$/, ok({ total_count: 101, jobs: Array.from({ length: 100 }, (_, i) => ({ id: 1000 + i, name: `job ${i}`, conclusion: 'success' })) })],
+    [/attempts\/1\/jobs\?per_page=100&page=2$/, ok({ total_count: 101, jobs: [VERIFY_JOB] })],
+    [ANNOTATIONS, ok([annotation('The job has exceeded the maximum execution time of 20m0s')])],
+  ]);
+  assert((await ask(pages.fetchJson)).get(VERIFY_ID)?.kind === 'timeout' && pages.calls.length === 3, '#22606: a second page of jobs is read before the leg is looked up');
+
+  const fakeFetch = (answers) => {
+    const seen = [];
+    const impl = async (url, init) => {
+      seen.push({ url, init });
+      const next = answers.shift();
+      if (next instanceof Error) throw next;
+      return { ok: next.status < 300, status: next.status, json: async () => next.body, text: async () => next.text ?? '' };
+    };
+    return { seen, impl };
+  };
+  const flaky = fakeFetch([{ status: 502, text: 'Bad Gateway' }, { status: 200, body: [1] }]);
+  const flakyRes = await githubFetchJson('sekrit', { fetchImpl: flaky.impl, retryDelayMs: 0 })('https://api.test/x');
+  assert(flakyRes.ok && flaky.seen.length === 2, '#22606: one 5xx is retried once');
+  assert(flaky.seen[0].init.headers.Authorization === 'Bearer sekrit', '#22606: the token travels only in the Authorization header');
+  const denied = fakeFetch([{ status: 403, text: '{"message":"Resource not accessible by integration"}' }]);
+  const deniedRes = await githubFetchJson('sekrit', { fetchImpl: denied.impl, retryDelayMs: 0 })('https://api.test/x');
+  assert(!deniedRes.ok && deniedRes.status === 403 && denied.seen.length === 1, '#22606: a 4xx is an answer, not retried');
+  assert(!JSON.stringify(deniedRes).includes('sekrit'), '#22606: a failure never carries the token');
+  const dropped = fakeFetch([new Error('socket hang up'), new Error('socket hang up')]);
+  const droppedRes = await githubFetchJson('sekrit', { fetchImpl: dropped.impl, retryDelayMs: 0 })('https://api.test/x');
+  assert(!droppedRes.ok && droppedRes.status === 0 && droppedRes.error.includes('socket hang up') && dropped.seen.length === 2, '#22606: a network failure twice is a failure, with its message');
+
+  assert(workflowJobDisplayName(WORKFLOW_TEXT, 'dogfood-verify') === 'Dogfood Verify CLI', '#22606: a literal job name is read off the text, past a 2-space comment');
+  assert(workflowJobDisplayName(WORKFLOW_TEXT, 'dogfood') === undefined, '#22606: an expression name cannot be resolved from text ⇒ undefined');
+  assert(workflowJobDisplayName('jobs:\n  a:\n    runs-on: x\n  b:\n    name: B\n', 'a') === 'a', '#22606: a job with no name: is shown under its id — and the next job’s name is not borrowed');
+  assert(workflowJobDisplayName("jobs:\n  a:\n    name: 'It''s A' # note\n", 'a') === "It's A", '#22606: single-quoted names unescape');
+  assert(workflowJobDisplayName('jobs:\n  a:\n    name: "Q \\"A\\""\n', 'a') === 'Q "A"', '#22606: double-quoted names unescape');
+  assert(workflowJobDisplayName('jobs:\n  a:\n    name: Plain A # trailing comment\n', 'a') === 'Plain A', '#22606: a trailing comment is not part of a plain name');
+  assert(workflowJobDisplayName('jobs:\n  a:\n    name: >\n      folded\n', 'a') === undefined, '#22606: a block scalar is not read from text ⇒ undefined');
+  assert(workflowJobDisplayName('jobs:\n  a:\n    steps:\n      - name: step A\n', 'a') === 'a', '#22606: a STEP name is never taken for the job name');
+  assert(workflowJobDisplayName('jobs:\n  b:\n    name: B\n', 'a') === undefined, '#22606: no such job ⇒ undefined');
+
+  // ── #22653: a partially attested matrix is judged per unattested shard ───
+  // The fixtures are the measured runs. 38036705318 (PR #22644): `Test Core
+  // (5/6)` attested, the other five cancelled, each annotated `Canceling since
+  // a higher priority waiting request for ci-CI-pull_request-22644 exists` —
+  // red under #16157's proxy, a false red on a dead SHA. 34007386254 attempt 1
+  // (PR #16131, #16157's own run): five attested, `Test Core (2/6)` annotated
+  // `The job has exceeded the maximum execution time of 30m0s` — green before
+  // #16157, red after it, and it must stay red. 38044009552 (PR #22674): the
+  // dogfood twin of the first, `(1/3)` superseded beside 2/3 attested.
+  battery("#22653 partial cancel cause: every unattested shard's recorded cause decides");
+  const supersededBy = (group, checkRun) => ({ kind: 'superseded', detail: `Canceling since a higher priority waiting request for ${group} exists — check run ${checkRun}` });
+  const PR_22644 = 'ci-CI-pull_request-22644';
+  const OWN_TIMEOUT = { kind: 'timeout', detail: 'The job has exceeded the maximum execution time of 30m0s — check run 101417030701' };
+  const testCore = (ids, causes, { result = 'cancelled', runAttempt = '1' } = {}) =>
+    judge({ gate: 'Test Core', legs: [{ job: 'test', total: 6, result }], filterResult: 'success', present: new Map(ids), runId: '99', runAttempt, cancelCauses: causes });
+  const shardIds = (legs, ids) => shardsNeedingCancelCause(legs, new Map(ids)).map(({ id }) => id);
+  const testLegs = (result) => [{ job: 'test', total: 6, result }];
+  const only5 = [attest('test', 5, 6)];
+  const allBut2 = [1, 3, 4, 5, 6].map((n) => attest('test', n, 6));
+  const SUPERSEDED_5 = new Map([1, 2, 3, 4, 6].map((n) => [attestationId('test', n, 6), supersededBy(PR_22644, 114168570850 + n)]));
+
+  assert(
+    JSON.stringify(shardIds(testLegs('cancelled'), only5)) === JSON.stringify(['test-1-of-6', 'test-2-of-6', 'test-3-of-6', 'test-4-of-6', 'test-6-of-6']),
+    '#22653 run 38036705318: a partially attested cancelled matrix asks about EVERY unattested shard, and only those',
+  );
+  assert(JSON.stringify(shardIds(testLegs('cancelled'), allBut2)) === '["test-2-of-6"]', "#22653 run 34007386254: five attested ⇒ one question, the killed shard's");
+  assert(shardIds(testLegs('cancelled'), [1, 2, 3, 4, 5, 6].map((n) => attest('test', n, 6))).length === 0, '#22653: a cancelled matrix whose every shard attested asks nothing — the count decides');
+  assert(shardIds(testLegs('cancelled'), []).length === 0, '#22653 ruled not extended: a matrix with ZERO attestations asks nothing — #3668 passes it by count, with no read');
+  assert(shardIds(testLegs('failure'), only5).length === 0, '#22653: a FAILED matrix asks nothing — a real failure dominates and stays red on its own veto');
+  for (const value of ['success', 'abandoned', 'skipped']) {
+    assert(shardIds(testLegs(value), only5).length === 0, `#22653: only \`cancelled\` asks — '${value}' is decided by the count as before`);
+  }
+
+  const supersededPartial = testCore(only5, SUPERSEDED_5);
+  assert(supersededPartial.ok, '#22653 run 38036705318: five unattested shards, each a recorded supersession ⇒ green — the false red is gone');
+  assert(
+    [1, 2, 3, 4, 6].every((n) => supersededPartial.log.some((l) => l.includes(`~ test-${n}-of-6`) && l.includes(PR_22644))),
+    '#22653: the superseded pass quotes each shard’s own recorded cause, shard by shard',
+  );
+  assert(supersededPartial.log.some((l) => l.includes('+ test-5-of-6')), '#22653: …and lists the shard that DID attest');
+  assert(
+    supersededPartial.log.some((l) => l.includes('satisfied') && l.includes('5 unattested shard(s)') && l.includes('#22653') && l.includes('after 1 sibling')) &&
+      !supersededPartial.log.some((l) => l.includes('none claimed to') || l.includes('expected attestations: 0')),
+    '#22653: the verdict line says the run was superseded after a shard attested — never "none claimed to" over an attested shard',
+  );
+
+  const ownTimeout = testCore(allBut2, new Map([['test-2-of-6', OWN_TIMEOUT]]));
+  assert(!ownTimeout.ok, '#22653 run 34007386254: shard 2/6 killed by its own timeout beside five attested ⇒ red, as #16157 ruled');
+  assert(
+    ownTimeout.errors.some((e) => e.includes('(test-2-of-6)') && e.includes('test-2-of-6: killed by its own job timeout') && e.includes('maximum execution time of 30m0s') && e.includes('#22653')),
+    '#22653: the red names the killed shard and quotes its recorded timeout',
+  );
+  assert(ownTimeout.log.some((l) => l.includes('- test-2-of-6  MISSING — killed by its own job timeout')), "#22653: the roster listing carries the killed shard's cause");
+  assert(!ownTimeout.log.some((l) => l.includes('satisfied')), '#22653: a red partial prints no satisfied line');
+
+  const mixed = testCore(only5, new Map([...SUPERSEDED_5, ['test-2-of-6', OWN_TIMEOUT]]));
+  assert(!mixed.ok, '#22653: ONE shard killed by its own timeout among four superseded ⇒ red — every unattested shard must read superseded');
+  assert(
+    mixed.errors.some((e) => e.includes('test-2-of-6: killed by its own job timeout') && e.includes('4 other missing shard(s)') && !e.includes('test-1-of-6: ')),
+    '#22653: …naming exactly the killed shard, and saying the other four record a supersession',
+  );
+  const unreadableOne = testCore(only5, new Map([...SUPERSEDED_5, ['test-4-of-6', { kind: 'unreadable', detail: 'GET …/check-runs/114168570868/annotations answered 403: Resource not accessible by integration' }]]));
+  assert(
+    !unreadableOne.ok && unreadableOne.errors.some((e) => e.includes('test-4-of-6: cancel cause unreadable') && e.includes('403')),
+    '#22653: one unreadable cause among superseded ⇒ red, naming that shard and why',
+  );
+  const manualOne = testCore(only5, new Map([...SUPERSEDED_5, ['test-6-of-6', classifyCancelAnnotations([annotation('The run was canceled by @someone.')])]]));
+  assert(
+    !manualOne.ok && manualOne.errors.some((e) => e.includes('test-6-of-6: cancel cause not a recorded supersession') && e.includes('canceled by @someone')),
+    '#22653: a manual cancel is not a supersession ⇒ red, quoting what was recorded',
+  );
+  const missingEntry = new Map(SUPERSEDED_5);
+  missingEntry.delete('test-3-of-6');
+  assert(
+    !testCore(only5, missingEntry).ok && testCore(only5, missingEntry).errors.some((e) => e.includes('test-3-of-6: cancel cause unreadable')),
+    '#22653: a shard the read returned no answer for is unreadable ⇒ red — four answers do not cover five questions',
+  );
+  assert(!testCore(only5, undefined).ok && !testCore(only5, new Map()).ok, '#22653: a caller that passes no cause at all gets red — the fail-closed side is #16157’s reading');
+  assert(!testCore(only5, new Map([['test', supersededBy(PR_22644, 1)]])).ok, '#22653: a supersession keyed by the LEG answers no shard ⇒ red');
+  assert(
+    !testCore(only5, SUPERSEDED_5, { result: 'failure' }).ok,
+    '#22653: recorded supersessions never override a declared `failure` — the cause is only asked on `cancelled`',
+  );
+  const foreignBeside = testCore([attest('test', 5, 6, '1234')], SUPERSEDED_5);
+  assert(
+    !foreignBeside.ok && foreignBeside.errors.some((e) => e.includes('belongs to run 1234')),
+    '#22653: a superseded pass still refuses a credential from another run (#6082) — the cause excuses the missing, never the present',
+  );
+  assert(
+    testCore([attest('test', 5, 6, '99', '1')], SUPERSEDED_5, { runAttempt: '2' }).ok,
+    "#22653 × #11998: attempt 2 superseded after shard 5's attempt-1 credential carried over ⇒ green",
+  );
+  assert(testCore([], new Map()).ok, '#22653 control: every shard cancelled with ZERO attestations ⇒ green, #3668 unchanged and asked nothing');
+
+  // Both gates: the dogfood matrix is asked the same way, and the single-leg
+  // question (#22606) is the same question for a 1-shard roster.
+  const dogfoodRun = (ids, causes, verifyResult = 'success') =>
+    judge({ gate: 'Dogfood Regression Gate', legs: dogfoodLegs('cancelled', verifyResult), filterResult: 'success', present: new Map(ids), runId: '99', cancelCauses: causes });
+  const PR_22674 = 'ci-CI-pull_request-22674';
+  const dogfood23 = [fullDogfood[1], fullDogfood[2]];
+  assert(dogfoodRun([...dogfood23, fullDogfood[3]], new Map([['dogfood-1-of-3', supersededBy(PR_22674, 114189818518)]])).ok, '#22653 run 38044009552: dogfood (1/3) superseded beside 2/3 attested and the CLI leg attested ⇒ green');
+  const dogfoodKilled = dogfoodRun([...dogfood23, fullDogfood[3]], new Map([['dogfood-1-of-3', TIMEOUT_CAUSE]]));
+  assert(
+    !dogfoodKilled.ok && dogfoodKilled.errors.some((e) => e.includes('(dogfood-1-of-3)') && e.includes('dogfood-1-of-3: killed by its own job timeout')),
+    '#22653: the Dogfood Regression Gate names a killed dogfood shard the same way',
+  );
+  assert(
+    JSON.stringify(shardIds(dogfoodLegs('cancelled', 'cancelled'), dogfood23)) === '["dogfood-1-of-3","dogfood-verify-1-of-1"]',
+    '#22653 × #22606: a partial dogfood matrix beside a zero-credential CLI leg asks both questions in one read',
+  );
+  assert(
+    dogfoodRun(dogfood23, new Map([['dogfood-1-of-3', supersededBy(PR_22674, 1)], [VERIFY_ID, supersededBy(PR_22674, 2)]]), 'cancelled').ok,
+    '#22653 × #22606: both superseded ⇒ green',
+  );
+  const verifyKilled = dogfoodRun(dogfood23, new Map([['dogfood-1-of-3', supersededBy(PR_22674, 1)], [VERIFY_ID, TIMEOUT_CAUSE]]), 'cancelled');
+  assert(
+    !verifyKilled.ok && verifyKilled.errors.some((e) => e.includes('leg dogfood-verify (single leg)') && e.includes('own job timeout')),
+    "#22653 control: the single-leg path keeps #22606's verdict and words — a killed CLI leg is red beside a superseded matrix shard",
+  );
+
+  // ── #22653: the per-shard cause read itself, offline ─────────────────────
+  battery('#22653 the cause read, offline: one jobs list, then one annotations read per unattested shard');
+  const CI_TEXT = readFileSync(join(scriptRepoRoot(), '.github', 'workflows', 'ci.yml'), 'utf8');
+  const PARTIAL_JOBS = /\/repos\/o\/r\/actions\/runs\/38036705318\/attempts\/1\/jobs\?per_page=100&page=1$/;
+  const ANY_ANNOTATIONS = /\/check-runs\/\d+\/annotations\?per_page=100$/;
+  const shardCheckRun = (n) => 114168570850 + n;
+  const testCoreJob = (n, conclusion) => ({ id: shardCheckRun(n), name: `Test Core (${n}/6)`, conclusion, check_run_url: `${API}/repos/o/r/check-runs/${shardCheckRun(n)}` });
+  const partialJobs = (over = {}) => ({
+    total_count: 8,
+    jobs: [
+      { id: 1, name: 'filter', conclusion: 'success' },
+      ...[1, 2, 3, 4, 5, 6].map((n) => over[n] ?? testCoreJob(n, n === 5 ? 'success' : 'cancelled')),
+      { id: 2, name: 'Test Core', conclusion: null },
+    ],
+  });
+  const annotationsOf = (n) => new RegExp(`/check-runs/${shardCheckRun(n)}/annotations\\?per_page=100$`);
+  const supersededAnnotations = ok([annotation(`Canceling since a higher priority waiting request for ${PR_22644} exists`), annotation('The operation was canceled.')]);
+  const askPartial = (fetchJson, over = {}) =>
+    readCancelCauses({
+      legs: testLegs('cancelled'),
+      present: new Map(only5),
+      runId: '38036705318',
+      runAttempt: '1',
+      repository: 'o/r',
+      apiUrl: API,
+      token: 'not-a-real-token',
+      fetchJson,
+      workflowText: CI_TEXT,
+      ...over,
+    });
+
+  const partialApi = fakeApi([[PARTIAL_JOBS, ok(partialJobs())], [ANY_ANNOTATIONS, supersededAnnotations]]);
+  const partialCauses = await askPartial(partialApi.fetchJson);
+  assert(
+    partialCauses.size === 5 && [...partialCauses.values()].every((cause) => cause.kind === 'superseded'),
+    '#22653 run 38036705318: five unattested shards asked, each read off its own check run as superseded',
+  );
+  assert(
+    partialApi.calls.length === 6 && PARTIAL_JOBS.test(partialApi.calls[0]) && [1, 2, 3, 4, 6].every((n, i) => annotationsOf(n).test(partialApi.calls[i + 1])),
+    '#22653: exactly ONE jobs list, then one annotations read per unattested shard — the attested shard 5 is never asked',
+  );
+  assert(partialCauses.get('test-3-of-6')?.detail.includes(`check run ${shardCheckRun(3)}`), "#22653: each cause names its own shard's check run");
+  assert(
+    judge({ gate: 'Test Core', legs: testLegs('cancelled'), filterResult: 'success', present: new Map(only5), runId: '99', runAttempt: '1', cancelCauses: partialCauses }).ok,
+    '#22653 end to end: read, then judged — the superseded partial matrix passes',
+  );
+
+  const KILLED_RUN_JOBS = /\/runs\/34007386254\/attempts\/1\/jobs\?per_page=100&page=1$/;
+  const killedApi = fakeApi([
+    [KILLED_RUN_JOBS, ok({ total_count: 6, jobs: [1, 2, 3, 4, 5, 6].map((n) => ({ id: 101417030700 + n, name: `Test Core (${n}/6)`, conclusion: n === 2 ? 'cancelled' : 'success' })) })],
+    [/\/check-runs\/101417030702\/annotations\?per_page=100$/, ok([annotation('The job has exceeded the maximum execution time of 30m0s')])],
+  ]);
+  const killedCauses = await askPartial(killedApi.fetchJson, { present: new Map(allBut2), runId: '34007386254' });
+  assert(
+    killedCauses.size === 1 && killedCauses.get('test-2-of-6')?.kind === 'timeout' && killedApi.calls.length === 2,
+    '#22653 run 34007386254: one question, two reads — and no check_run_url falls back to the check run of the job id',
+  );
+  const killedJudged = judge({ gate: 'Test Core', legs: testLegs('cancelled'), filterResult: 'success', present: new Map(allBut2), runId: '99', runAttempt: '1', cancelCauses: killedCauses });
+  assert(!killedJudged.ok && killedJudged.errors.some((e) => e.includes('test-2-of-6: killed by its own job timeout')), '#22653 end to end: read, then judged — the killed shard is red, named');
+
+  const absent = await askPartial(fakeApi([[PARTIAL_JOBS, ok({ total_count: 7, jobs: partialJobs().jobs.filter((job) => job.name !== 'Test Core (4/6)') })], [ANY_ANNOTATIONS, supersededAnnotations]]).fetchJson);
+  assert(
+    absent.get('test-4-of-6')?.kind === 'unreadable' && absent.get('test-4-of-6').detail.includes("0 job(s) named 'Test Core (4/6)'") && absent.get('test-1-of-6')?.kind === 'superseded',
+    '#22653: a shard absent from the list is unreadable for itself alone — its siblings are still read',
+  );
+  const refusedList = fakeApi([[PARTIAL_JOBS, { ok: false, status: 403, error: 'Resource not accessible by integration' }]]);
+  const refusedCauses = await askPartial(refusedList.fetchJson);
+  assert(
+    refusedCauses.size === 5 && [...refusedCauses.values()].every((cause) => cause.kind === 'unreadable' && cause.detail.includes('403')) && refusedList.calls.length === 1,
+    '#22653: a refused jobs list makes every asked shard unreadable, and no annotation is read',
+  );
+  const lostCredential = await askPartial(fakeApi([[PARTIAL_JOBS, ok(partialJobs({ 3: testCoreJob(3, 'success') }))], [ANY_ANNOTATIONS, supersededAnnotations]]).fetchJson);
+  assert(
+    lostCredential.get('test-3-of-6')?.kind === 'unreadable' && lostCredential.get('test-3-of-6').detail.includes('not cancelled'),
+    '#22653: a shard the API reads as SUCCESS whose credential never reached the gate is unreadable — a lost credential is never excused as a supersession',
+  );
+  const oneRefused = await askPartial(fakeApi([[PARTIAL_JOBS, ok(partialJobs())], [annotationsOf(6), { ok: false, status: 403, error: 'nope' }], [ANY_ANNOTATIONS, supersededAnnotations]]).fetchJson);
+  assert(oneRefused.get('test-6-of-6')?.kind === 'unreadable' && oneRefused.get('test-1-of-6')?.kind === 'superseded', "#22653: one shard's refused annotations are that shard's unreadable cause only");
+  const noTokenPartial = fakeApi([]);
+  const noTokenCauses = await askPartial(noTokenPartial.fetchJson, { token: '' });
+  assert(
+    noTokenCauses.size === 5 && [...noTokenCauses.values()].every((cause) => cause.kind === 'unreadable' && cause.detail.includes('GITHUB_TOKEN')) && noTokenPartial.calls.length === 0,
+    "#22653: without the gate's token every asked shard is unreadable and no request is attempted",
+  );
+  const secondAttempt = fakeApi([[/\/runs\/38036705318\/attempts\/2\/jobs\?per_page=100&page=1$/, ok(partialJobs())], [ANY_ANNOTATIONS, supersededAnnotations]]);
+  assert(
+    (await askPartial(secondAttempt.fetchJson, { runAttempt: '2' })).get('test-1-of-6')?.kind === 'superseded' && secondAttempt.calls.length === 6,
+    "#22653: attempt 2 reads attempt 2's jobs list — the attempt `needs.test.result` describes",
+  );
+  const noTemplate = await askPartial(fakeApi([[PARTIAL_JOBS, ok(partialJobs())]]).fetchJson, { workflowText: 'jobs:\n  test:\n    name: Test Core\n' });
+  assert(
+    noTemplate.get('test-1-of-6')?.kind === 'unreadable' && noTemplate.get('test-1-of-6').detail.includes("job 'test' (shard 1/6) has no readable display name"),
+    '#22653: a matrix name with no shard expression cannot locate a shard ⇒ unreadable, naming the shard',
+  );
+
+  assert([1, 2, 3, 4, 5, 6].every((n) => workflowJobDisplayName(CI_TEXT, 'test', n) === `Test Core (${n}/6)`), '#22653: the real ci.yml names each Test Core shard as the jobs API lists it');
+  assert([1, 2, 3].every((n) => workflowJobDisplayName(CI_TEXT, 'dogfood', n) === `Dogfood Regression Gate (${n}/3)`), '#22653: …and each dogfood shard');
+  assert(workflowJobDisplayName(CI_TEXT, 'dogfood-verify') === 'Dogfood Verify CLI', "#22653 control: the single leg's literal name reads as before");
+  assert(workflowJobDisplayName(CI_TEXT, 'test') === undefined, '#22653: a matrix template asked WITHOUT a shard is still unresolvable ⇒ undefined');
+  assert(workflowJobDisplayName('jobs:\n  m:\n    runs-on: x\n', 'm', 1) === undefined, '#22653: a nameless matrix job is not guessed at — GitHub appends the matrix values itself');
+  assert(workflowJobDisplayName('jobs:\n  m:\n    name: M (${{ matrix.shard }}, ${{ matrix.os }})\n', 'm', 1) === undefined, '#22653: any expression besides the shard ⇒ undefined');
+  assert(workflowJobDisplayName('jobs:\n  m:\n    name: "M ${{matrix.shard}}"\n', 'm', 4) === 'M 4', '#22653: a double-quoted template, tight braces, expands');
+  assert(
+    expandMatrixShardName('M', 1) === undefined &&
+      expandMatrixShardName('M (${{ matrix.shard }}/2) #${{ matrix.shard }}', 2) === 'M (2/2) #2' &&
+      expandMatrixShardName(undefined, 1) === undefined &&
+      expandMatrixShardName('M ${{ matrix.shard }}', '1') === undefined,
+    '#22653 expandMatrixShardName: every occurrence expands; no expression, no template or a non-integer shard ⇒ undefined',
+  );
 
   // ── foreign / stale credentials ───────────────────────────────────────────
   battery('foreign / stale credentials');
@@ -1491,6 +2500,106 @@ async function selfTest() {
       'an `if:` on the credential step ⇒ red (the credential would stop meaning "every earlier step passed")',
     );
 
+    // ── #22606: the cause read's prerequisites, declared where it is needed ──
+    battery('#22606 the static guard pins the cause read where the verdict needs it');
+    const PERMS_ANCHOR = '      actions: read\n      checks: read\n';
+    const TOKEN_LINE = '          GITHUB_TOKEN: ${{ github.token }}\n';
+    /**
+     * `from` → `to` inside ONE job's block of the workflow, never elsewhere
+     * (#22653). Both gates now carry the same permissions lines and the same
+     * token line, and `String.replace` takes the FIRST match — which would
+     * silently move every dogfood-gate fixture onto test-gate: still red, for
+     * the wrong gate. A missing job or anchor returns the source unchanged,
+     * which `fixture()` reports as a dead anchor.
+     */
+    const inJob = (jobId, from, to) => (source) => {
+      const header = `\n  ${jobId}:\n`;
+      const start = source.indexOf(header);
+      if (start === -1) return source;
+      const bodyAt = start + header.length;
+      const next = source.slice(bodyAt).search(/\n {2}[A-Za-z0-9_-]+:[ \t]*\n/);
+      const end = next === -1 ? source.length : bodyAt + next;
+      return source.slice(0, start) + source.slice(start, end).replace(from, to) + source.slice(end);
+    };
+    const hasProblem = (result, ...needles) => result.problems.some((p) => needles.every((needle) => p.includes(needle)));
+    const dogfoodNoChecks = await fixture('drop checks: read (dogfood-gate)', inJob('dogfood-gate', PERMS_ANCHOR, '      actions: read\n'));
+    assert(hasProblem(dogfoodNoChecks, '#22606', "gate 'dogfood-gate'", 'checks: read'), '#22606: dogfood-gate without checks: read ⇒ red — the annotations read would 403');
+    assert(
+      !dogfoodNoChecks.problems.some((p) => p.includes("'test-gate'")),
+      "#22653: a fixture scoped to dogfood-gate names dogfood-gate only — test-gate's identical lines are not what it mutated",
+    );
+    assert(
+      hasProblem(await fixture('drop actions: read (dogfood-gate)', inJob('dogfood-gate', PERMS_ANCHOR, '      checks: read\n')), '#22606', "gate 'dogfood-gate'", 'actions: read'),
+      '#22606: dogfood-gate without actions: read ⇒ red — the jobs list read would 403',
+    );
+    assert(
+      hasProblem(await fixture('an empty permissions block (dogfood-gate)', inJob('dogfood-gate', `      contents: read\n${PERMS_ANCHOR}`, '')), "gate 'dogfood-gate'", 'actions: read'),
+      '#22606: a gate whose permissions block grants nothing ⇒ red',
+    );
+    assert(
+      (await fixture('permissions: read-all (dogfood-gate)', inJob('dogfood-gate', `    permissions:\n      contents: read\n${PERMS_ANCHOR}`, '    permissions: read-all\n'))).problems.length === 0,
+      '#22606: read-all grants both reads ⇒ green',
+    );
+    assert(
+      hasProblem(await fixture('drop the token (dogfood-gate)', inJob('dogfood-gate', TOKEN_LINE, '')), "gate 'dogfood-gate'", 'GITHUB_TOKEN'),
+      '#22606: a verify step without GITHUB_TOKEN in its env ⇒ red',
+    );
+    assert(
+      hasProblem(await fixture('an expression job name', (s) => s.replace('    name: Dogfood Verify CLI\n', '    name: Dogfood Verify CLI (${{ github.event_name }})\n')), '#22606', "job 'dogfood-verify' is named"),
+      "#22606: a leg name the runtime cannot read from text ⇒ red — its check run could never be found",
+    );
+
+    // ── #22653: every matrix leg can be asked, so test-gate owes it too ──────
+    // A partially attested cancelled matrix asks each unattested shard's own
+    // check run for its cause, and a shard's check run is found under the
+    // EXPANDED name (`Test Core (3/6)`). So the guard now holds, for every
+    // matrix leg as well as for a single leg beside a sibling: the two read
+    // permissions, the token in the --verify step, and a `name:` template the
+    // text reading expands exactly as the parsed YAML does, shard by shard.
+    battery('#22653 the static guard pins the cause read on every matrix leg, test-gate included');
+    assert(
+      hasProblem(await fixture("test-gate as it stood before #22653 (contents: read only)", inJob('test-gate', `      contents: read\n${PERMS_ANCHOR}`, '      contents: read\n')), '#22653', "gate 'test-gate'", 'actions: read'),
+      "#22653: test-gate's pre-#22653 permissions block ⇒ red — every partial supersession would read as unreadable",
+    );
+    assert(
+      hasProblem(await fixture('drop checks: read (test-gate)', inJob('test-gate', PERMS_ANCHOR, '      actions: read\n')), "gate 'test-gate'", 'checks: read'),
+      '#22653: test-gate without checks: read ⇒ red — the annotations read would 403',
+    );
+    assert(
+      hasProblem(await fixture('drop actions: read (test-gate)', inJob('test-gate', PERMS_ANCHOR, '      checks: read\n')), "gate 'test-gate'", 'actions: read'),
+      '#22653: test-gate without actions: read ⇒ red — the jobs list read would 403',
+    );
+    assert(
+      hasProblem(await fixture('drop the token (test-gate)', inJob('test-gate', TOKEN_LINE, '')), "gate 'test-gate'", 'GITHUB_TOKEN'),
+      "#22653: test-gate's verify step without GITHUB_TOKEN ⇒ red",
+    );
+    const TEST_NAME = '    name: Test Core (${{ matrix.shard }}/6)\n';
+    assert(
+      hasProblem(await fixture('a matrix name without the shard expression', (s) => s.replace(TEST_NAME, '    name: Test Core shards\n')), '#22653', "job 'test' is named"),
+      '#22653: a matrix name with no `${{ matrix.shard }}` ⇒ red — the platform would append the values itself, a name the reader cannot rebuild',
+    );
+    assert(
+      hasProblem(await fixture('a matrix name with a second expression', (s) => s.replace(TEST_NAME, '    name: Test Core (${{ matrix.shard }}/6) ${{ github.event_name }}\n')), '#22653', "job 'test' is named"),
+      '#22653: any expression besides the shard ⇒ red — the text reading cannot evaluate it',
+    );
+    assert(
+      hasProblem(
+        await fixture('the dogfood matrix name on another matrix key', (s) => s.replace('    name: Dogfood Regression Gate (${{ matrix.shard }}/3)\n', '    name: Dogfood Regression Gate (${{ matrix.os }}/3)\n')),
+        '#22653',
+        "job 'dogfood' is named",
+      ),
+      "#22653: dogfood's matrix leg is held to the same name rule — it is asked on a partial cancel too",
+    );
+    assert(
+      (await fixture('the matrix name double-quoted', (s) => s.replace(TEST_NAME, '    name: "Test Core (${{ matrix.shard }}/6)"\n'))).problems.length === 0,
+      '#22653 positive limb: a quoted template reads the same from text and from YAML ⇒ green',
+    );
+    assert(
+      (await fixture('the shard expression without inner spaces', (s) => s.replace(TEST_NAME, '    name: Test Core (${{matrix.shard}}/6)\n'))).problems.length === 0,
+      '#22653 positive limb: `${{matrix.shard}}` is the same expression ⇒ green',
+    );
+    assert(baseline.problems.length === 0 && baseline.gateIds.includes('test-gate'), '#22653: the checked-in test-gate carries every prerequisite — the baseline is green with it counted as a gate');
+
     // ── #6589: a shard job is not a gate because a step says `--verify` ──────
     // The classification, asserted as a classification. The measured false red
     // reported neither the classifier nor the flag — it reported that job
@@ -1612,7 +2721,7 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(
-    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins + the #10889 quoting pins + the #11998 attempt-scoping sequence + the #16157 partial-cancellation split).`,
+    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins + the #10889 quoting pins + the #11998 attempt-scoping sequence + the #16157 partial-cancellation split + the #22606 single-leg cancel cause + the #22653 per-shard cancel cause on a partial matrix).`,
   );
 
   return SELF_TEST_VERDICT;
@@ -1635,7 +2744,7 @@ if (!invokedDirectly) {
 } else if (process.argv.includes('--emit')) {
   emit();
 } else if (process.argv.includes('--verify')) {
-  verify();
+  await verify();
 } else {
   await main();
 }

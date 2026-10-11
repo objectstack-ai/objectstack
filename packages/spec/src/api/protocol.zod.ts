@@ -237,15 +237,6 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
-  organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. When an org partition applies, '
-    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
-    + 'over env-wide overlay wins over packaged artifact — so it decides which '
-    + 'tenant\'s customization rows are merged into the list. Supplying a value '
-    + 'does not by itself guarantee an org partition is consulted; where none '
-    + 'applies, and whenever it is absent, the read is environment-wide and '
-    + 'only env-level overlays apply.',
-  ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
     + 'pending `state=\'draft\'` rows are overlaid on the active list — draft '
@@ -274,15 +265,6 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name (snake_case identifier)'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
-  organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. When an org partition applies, '
-    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
-    + 'over env-wide overlay wins over packaged artifact — so it decides which '
-    + 'tenant\'s customization row is served as the item. Supplying a value '
-    + 'does not by itself guarantee an org partition is consulted; where none '
-    + 'applies, and whenever it is absent, the read is environment-wide and '
-    + 'only env-level overlays apply.',
-  ),
   state: z.enum(['active', 'draft']).optional().describe(
     'Draft-visibility switch — which lifecycle row to read (strict mode): '
     + '`\'draft\'` opens the pending draft buffer (Studio\'s editor read) and '
@@ -333,7 +315,7 @@ const MetadataProtectionEnvelopeFields = {
     'Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; '
     + '`no-overlay` / `no-delete` / `full` mean the write doors refuse the '
     + 'corresponding write with 403. Joins two refusals: the document\'s own '
-    + '`_lock` (`ITEM_LOCKED`; the packaged artifact wins over any org overlay), '
+    + '`_lock` (`ITEM_LOCKED`; the packaged artifact wins over any overlay), '
     + 'and the locked packaged base — an item a code package ships, on a type with '
     + 'no per-org overlay channel (`NOT_OVERRIDABLE`, or `ITEM_LOCKED` when the '
     + 'write names the read-only package).',
@@ -447,16 +429,16 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ...MetadataProtectionEnvelopeFields,
   version: z.string().nullable().optional().describe(
     'ADR-0008 version token of the STORED row a save to this item compares '
-    + 'against, at this read\'s scope (the caller\'s organization partition and '
+    + 'against, at this read\'s scope (the environment\'s partition and '
     + '`?package=`) and lifecycle (`?state=draft` reads the draft row, the plain '
     + 'read the active row). The same keyed token a save receipt\'s `version` '
     + 'serves for that row: send it back as the `If-Match` request header on '
     + '`PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a '
     + 'concurrent edit is refused 409 `METADATA_CONFLICT` instead of '
     + 'overwritten. `null` when no stored row is there — an item served from '
-    + 'code or a package artifact, or from a row in another scope (the '
-    + 'environment-wide row an organization falls back to, a package-less row a '
-    + 'package read falls back to) — so the next save creates one: pin it with '
+    + 'code or a package artifact, or from a row in another scope (a '
+    + 'package-less row a package read falls back to) — so the next save '
+    + 'creates one: pin it with '
     + '`If-None-Match: *`. ABSENT on the cached published-value branch and on a '
     + '`?preview=draft` read, which publish no version: absence means "not '
     + 'published here", never "no row". Opaque — echo it verbatim, never parse '
@@ -479,15 +461,6 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
   packageId: z.string().optional().describe(
     'Optional package ID — scopes the `code` layer so a same-name collision '
     + 'resolves to the requested package\'s artifact (ADR-0048).',
-  ),
-  organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. When an org partition applies, '
-    + 'this selects it in the ADR-0005 overlay read order, so it decides which '
-    + 'tenant\'s customization row is reported as the `overlay` layer (and '
-    + 'merged into `effective`). Supplying a value does not by itself guarantee '
-    + 'an org partition is consulted; where none applies, and whenever it is '
-    + 'absent, the read is environment-wide: `overlay` reports the env-level '
-    + 'row only.',
   ),
 }));
 
@@ -533,11 +506,11 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
   ),
   overlay: z.unknown().describe(
     'LAYER 2 — the stored customization row ALONE, not merged with `code`. '
-    + '`null` when this tenant has not customized the item.',
+    + '`null` when the environment has not customized the item.',
   ),
-  overlayScope: z.enum(['org', 'env']).nullable().describe(
-    'Which scope the `overlay` row was read from — `org` for a tenant overlay, '
-    + '`env` for an environment-level one. `null` exactly when `overlay` is null.',
+  overlayScope: z.enum(['env']).nullable().describe(
+    'Which scope the `overlay` row was read from: `env`, the environment layer — '
+    + 'the only layer a read serves (ADR-0131 D6). `null` exactly when `overlay` is null.',
   ),
   effective: z.unknown().describe(
     'LAYER 3 — the merged result, i.e. the value an ordinary '
@@ -1490,15 +1463,6 @@ export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
 export const AuditMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
-  organizationId: z.string().nullable().optional().describe(
-    'Organization (tenant) scope for the read. With an organization, '
-    + 'the trail includes that org\'s rows AND the env-wide '
-    + '(`organization_id IS NULL`) rows — the env-wide limb is load-bearing, '
-    + 'because env-level writes are stamped org-less. `null` and absent are '
-    + 'equivalent and both mean the env-wide rows only — the fail-closed '
-    + 'direction: an unresolved organization reads env-wide rows, never every '
-    + 'tenant\'s.',
-  ),
   limit: z.number().optional().describe(
     'Maximum events to return, newest first. The implementation clamps to '
     + '[1, 500] and defaults to 100 — out-of-range values are clamped, never '
@@ -1593,19 +1557,6 @@ export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
 export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
-  organizationId: z.string().optional().describe(
-    'Organization (tenant) partition the change log is read from. Absent '
-    + 'means the env-wide partition (the implementation resolves the overlay '
-    + 'repository as `organizationId ?? null`, keyed `org: \'env\'`). '
-    + 'Declared because the implementation declares and reads it; plain '
-    + '`string`, not nullable, because that is the implementation\'s '
-    + 'parameter type — unlike the audit twin, whose door always sends '
-    + '`ctx?.tenantId ?? null` and whose implementation declares '
-    + '`string | null`. The REST history door currently sends no '
-    + 'organization at all (whether it should is a tenant-scoping question '
-    + 'measured separately for that door — declaring the member records '
-    + 'the implementation contract, it does not answer that question).',
-  ),
   sinceSeq: z.number().optional().describe(
     'Exclusive lower bound on `seq` for pagination: only events with '
     + '`seq > sinceSeq` are returned. Absent means "from the beginning".',
@@ -1780,9 +1731,6 @@ export const ListDraftsResponseSchema = lazySchema(() => z.object({
       + 'locale map (`I18nLabel`), resolved by the reader. `null` when the body declares '
       + 'none, or none this shape admits — never the item name standing in for it.',
     ),
-    organizationId: z.string().nullable().describe(
-      'Owning organization of the draft row, `null` for an environment-wide draft.',
-    ),
     packageId: z.string().nullable().describe(
       'Package the draft is bound to, `null` for a package-less draft.',
     ),
@@ -1915,16 +1863,6 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
     'Resolved response locale. Folded into the ETag so a language switch '
     + 'never returns a stale-locale 304 — metadata is translated *after* the '
     + 'cache validator check (issue).',
-  ),
-  organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. When an org partition applies, '
-    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
-    + 'over env-wide overlay wins over packaged artifact — exactly as on the '
-    + 'uncached read. Also '
-    + 'folded into the ETag, so a scope switch never returns a stale 304 from '
-    + 'another scope\'s cached representation. Supplying a value does not by '
-    + 'itself guarantee an org partition is consulted; where none applies, and '
-    + 'whenever it is absent, the read is environment-wide.',
   ),
 }));
 

@@ -150,6 +150,7 @@ import {
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { registerPackageRoutes } from './package-routes.js';
 import { RestServer } from './rest-server.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const PKGS = '/api/v1/packages';
 /**
@@ -257,15 +258,13 @@ const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_
  * the SHIPPED aggregation (`sys_user_permission_set` → `sys_permission_set`
  * → `system_permissions`) rather than by handing the door a ready-made context.
  */
-const qlHealthy = () => ({
+const qlHealthy = () => bindTestSecurityCatalog({
   find: async (object: string) => {
     if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' }];
-    if (object === 'sys_permission_set') {
-      return [{ id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] }];
-    }
+    if (object === 'sys_permission_set') return [{ id: 'ps_pkg', name: 'pkg_admin' }];
     return [];
   },
-});
+}, { permissions: [{ name: 'pkg_admin', systemPermissions: ['manage_metadata', 'studio.access'] }] });
 
 /** The same store, unreachable — every read throws, as a driver outage does. */
 const qlDown = () => ({ find: async () => { throw new Error('permission store unreachable'); } });

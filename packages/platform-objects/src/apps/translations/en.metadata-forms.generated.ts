@@ -293,6 +293,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "enable.clone": {
         label: "Clone"
       },
+      "enable.approvalsVisibleToReaders": {
+        label: "Approvals Visible To Readers",
+        helpText: "Readers of a record see its approval requests and history, read-only, with no approval action"
+      },
       validations: {
         label: "Validations",
         helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
@@ -419,7 +423,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fileAccessDelegate: {
         label: "File Access Delegate",
-        helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed."
+        helpText: "Kernel service that authorizes downloads of files owned by this object's media fields, and decides whether a reader who may not read sys_file sees their name, size and type in a record read of this object (asked once per owning record on each such read), instead of testing whether the caller can read the owning row. For objects whose access is mediated by a service. Fails closed."
       },
       lifecycle: {
         label: "Lifecycle",
@@ -2347,7 +2351,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     sections: {
       position: {
         label: "Position",
-        description: "A position is a flat, assignable bundle of permission sets (e.g. sales_rep, sales_manager). Capability lives on permission sets; visibility depth lives on the business-unit tree."
+        description: "A position is a flat, assignable bundle of permission sets (e.g. sales_rep, sales_manager): it names the sets it distributes. Capability lives on permission sets; visibility depth lives on the business-unit tree."
       }
     },
     fields: {
@@ -2360,6 +2364,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       description: {
         label: "Description"
+      },
+      permissionSets: {
+        label: "Permission Sets",
+        helpText: "Permission sets this position distributes, by name (snake_case)."
       },
       delegatable: {
         label: "Delegatable",

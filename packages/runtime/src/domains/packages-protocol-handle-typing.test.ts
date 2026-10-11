@@ -73,7 +73,7 @@ import type { PackagesDomainProtocol } from './packages.js';
 function declaredKeysCompile(protocol: PackagesDomainProtocol) {
     return [
         // ADR-0045 visibility flip — `GET` half.
-        protocol.getMetaItems?.({ type: 'app', packageId: 'crm', organizationId: 'org_1' }),
+        protocol.getMetaItems?.({ type: 'app', packageId: 'crm' }),
         // ADR-0045 visibility flip — `SAVE` half. `packageId` is declared
         // `nullable().optional()`, `actor` optional; both are load-bearing here.
         protocol.saveMetaItem?.({
@@ -83,11 +83,10 @@ function declaredKeysCompile(protocol: PackagesDomainProtocol) {
             packageId: 'crm',
             actor: 'u_publisher',
         }),
-        // `applyPublishedSeeds`' seed body read-back, both attempts.
-        protocol.getMetaItem?.({ type: 'seed', name: 'crm_seed', organizationId: 'org_1' }),
+        // `applyPublishedSeeds`' seed body read-back.
         protocol.getMetaItem?.({ type: 'seed', name: 'crm_seed' }),
         // The manifest-export read.
-        protocol.getMetaItems?.({ type: 'view', packageId: 'crm', organizationId: undefined }),
+        protocol.getMetaItems?.({ type: 'view', packageId: 'crm' }),
     ];
 }
 

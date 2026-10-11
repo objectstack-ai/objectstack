@@ -6,14 +6,16 @@
  *
  * ## Why this file exists at all
  *
- * objectui's `FormPage` redirects **verbatim** on this value, and objectui#4190
+ * History, as it stood when #7496 was ruled: objectui's `FormPage` handed this
+ * value, as authored, to a browser-level navigation, and objectui#4190
  * dead-ended asking what the value may be: `url` was an unconstrained
  * `z.string()`, so `https://example.com`, `javascript:alert(1)` and
  * `//evil.example` all parsed, and the consumer had no contract to harden
  * against. The maintainer ruled the narrowest shape on 2026-08-11 —
  * relative-only, interpolation only from declared record fields, every
- * interpolated value URL-escaped, verbatim redirect on the resolved path — and
- * this file is where the spec side of that ruling is measurable.
+ * interpolated value URL-escaped, verbatim redirect on the resolved path (the
+ * destination, not a navigation mechanism) — and this file is where the spec
+ * side of that ruling is measurable.
  *
  * ## What the assertions assert, and why it is the MESSAGE
  *

@@ -188,11 +188,11 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const states = Array.from(rows.values()).map((r) => r.state).sort();
         expect(states).toEqual(['active', 'draft']);
         const active = await protocol.getMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
         });
         expect((active as any).item.label).toBe('Published');
         const draft = await protocol.getMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha', state: 'draft',
+            type: 'view', name: 'case_grid', state: 'draft',
         });
         expect((draft as any).item.label).toBe('Pending');
     });
@@ -249,7 +249,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         });
         await expect(
             protocol.getMetaItem({
-                type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+                type: 'view', name: 'case_grid',
                 state: 'draft',
             }),
         ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
@@ -257,7 +257,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         // Also covers the "never saved" path — no overlay row at all.
         await expect(
             protocol.getMetaItem({
-                type: 'view', name: 'never_existed', organizationId: 'org_alpha',
+                type: 'view', name: 'never_existed',
                 state: 'draft',
             }),
         ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
@@ -277,7 +277,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
             mode: 'draft',
         } as any);
         const got = await protocol.getMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
             state: 'draft',
         });
         expect(got).toMatchObject({
@@ -305,7 +305,7 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         expect((result as any).success).toBe(true);
         expect((result as any).restoredFromVersion).toBe(1);
         const live = await protocol.getMetaItem({
-            type: 'view', name: 'case_grid', organizationId: 'org_alpha',
+            type: 'view', name: 'case_grid',
         });
         expect((live as any).item.label).toBe('v1');
         // History records a revert.

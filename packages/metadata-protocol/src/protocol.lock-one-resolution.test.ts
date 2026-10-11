@@ -240,7 +240,6 @@ const POSITIONS: ReadonlyArray<{
 const ADDRESS_AXES: { readonly [F in ItemAddressField]: AxisName | 'one item' } = {
     type: 'requestSpelling',
     name: 'one item',
-    organizationId: 'requestScope',
     packageId: 'requestPackage',
 };
 
@@ -386,8 +385,8 @@ const declaredLockOf = (a: ArtifactAxis): Lock => (a.artifact === 'declared' ? a
  *  - `artifact`: [#21803] one lock per installed package that ships the name
  *    (the package's own, another package's), `'none'` for an artifact that
  *    declares no lock; no entry for a package that ships nothing.
- *  - `overlay`: the strictest lock among the rows in scope (ADR-0005: the
- *    organization's rows when it holds any, else the env-wide rows; any
+ *  - `overlay`: the strictest lock among the rows in scope (ADR-0131 D6: the
+ *    environment's rows, whatever organization the request comes from; any
  *    package). The door differs on exactly one input: it does not see a row
  *    stored under the other spelling, which the reads see only when no
  *    canonical row is in that scope. The request's package selects nothing.
@@ -398,7 +397,7 @@ const DECLARED: {
 } = {
     artifact: (row) => [row.artifact, row.otherArtifact].filter(present).map(declaredLockOf),
     overlay: (row, side) => {
-        const scopes: Array<OracleRow['scope']> = row.requestScope === ORG ? ['org-scoped', 'env-wide'] : ['env-wide'];
+        const scopes: Array<OracleRow['scope']> = ['env-wide'];
         for (const scope of scopes) {
             const inScope = oracleRows(row).filter((r) => r.scope === scope);
             let visible = inScope.filter((r) => r.spelling === 'canonical');
@@ -625,9 +624,11 @@ async function door(
 
 /** Both reads' envelopes for one request; they must agree with each other first. */
 async function envelope(
-    protocol: ObjectStackProtocolImplementation, type: string, organizationId?: string, name = NAME, packageId?: string,
+    // [ADR-0131 D6] The caller's organization reaches no read: the reads take
+    // none, so the request's organization changes nothing here.
+    protocol: ObjectStackProtocolImplementation, type: string, _callerOrganization?: string, name = NAME, packageId?: string,
 ) {
-    const scope = { ...(organizationId ? { organizationId } : {}), ...(packageId ? { packageId } : {}) };
+    const scope = { ...(packageId ? { packageId } : {}) };
     const byName: any = await protocol.getMetaItem({ type, name, ...scope });
     const layered: any = await protocol.getMetaItemLayered({ type, name, ...scope });
     const pick = (r: any) => ({ lock: r.lock, editable: r.editable, deletable: r.deletable });
@@ -841,12 +842,13 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
         expect(locks.some((l) => l.row.artifact.artifact === 'no _lock'
             && l.row.otherArtifact.artifact === 'declared' && l.row.otherArtifact.lock === 'no-delete'
             && l.row.storedRow.row === 'stored' && l.row.storedRow.lock === 'no-overlay' && l.door === 'full')).toBe(true);
-        // [#21803] The folded position: the organization's only row is another
-        // package's, and the request names the package, whose env-wide row is
-        // what it is served, with a lock the organization's rows do not declare.
+        // [#21803, ADR-0131 D6] The folded position is closed: the
+        // organization's only row (another package's) is in no read's scope,
+        // so the env-wide package row's 'full' binds the request naming the
+        // package, as it binds one naming no organization.
         expect(locks.some((l) => l.row.otherPackageRow.row === 'stored' && l.row.otherPackageRow.lock === 'none'
             && l.row.packageRow.row === 'stored' && l.row.packageRow.lock === 'full'
-            && l.row.requestScope === ORG && l.row.requestPackage === PACKAGE_ID && l.reads === 'none')).toBe(true);
+            && l.row.requestScope === ORG && l.row.requestPackage === PACKAGE_ID && l.reads === 'full')).toBe(true);
     });
 
     it('lit control: an org-scoped request is served the env-wide row and reads its lock; an org-scoped row is never served to a request naming none', async () => {
@@ -1081,14 +1083,14 @@ describe('[#21761] pin 7 — a third package\'s row is in scope: no write the ga
         });
     }
 
-    it('an organization holding only another package\'s row: its rows are the reads\' scope, and its writes are refused', async () => {
+    it('[ADR-0131 D6] an organization holding only another package\'s row: that legacy row is in no read\'s scope, and its writes are refused', async () => {
         const protocol = harness(ENV_ID, [
             storedRow('view', ORG, 'full', 'org row of the other package', 'v_org', OTHER),
             storedRow('view', null, 'none', 'env-wide package row', 'v_org', PACKAGE_ID),
         ]);
         const read = await envelope(protocol, 'view', ORG, 'v_org', PACKAGE_ID);
         expect({ lock: read.lock, editable: read.editable, deletable: read.deletable })
-            .toEqual({ lock: 'full', editable: false, deletable: false });
+            .toEqual({ lock: 'none', editable: true, deletable: true });
         // Content stays prefer-local: the organization holds no row of the
         // package or package-less, so the env-wide package row is served.
         expect(read.byName.item?.label).toBe('env-wide package row');
@@ -1211,27 +1213,28 @@ describe('[#21803] pin 10 — a disabled package is still installed: its package
     }
 });
 
-describe('[#21803] pin 11 — the folded position: a body served from outside the lock\'s scope states no lock the envelope does not report', () => {
+describe('[#21803, ADR-0131 D6] pin 11 — the folded position is closed: a legacy organization row is in neither the content\'s scope nor the lock\'s', () => {
     // 5988387087: the organization holds only package B's row; an env-wide row
-    // of package A declares 'full'. A request naming A in the organization is
-    // served A's env-wide row (content: the organization holds no row of A and
-    // no package-less row), while the lock's scope is the organization's rows.
+    // of package A declares 'full'. Before ADR-0131 D6 a request naming A in
+    // the organization was served A's env-wide row while the lock's scope was
+    // the organization's rows. The reads take no organization now, so the
+    // content and the lock are both the environment's: 'full'.
     const rows = () => [
         storedRow('view', ORG, 'none', 'org row of the other package', 'v_scope', OTHER_PACKAGE),
         storedRow('view', null, 'full', 'env-wide package row', 'v_scope', PACKAGE_ID),
     ];
 
     for (const reversed of [false, true]) {
-        it(`${reversed ? 'the env-wide row returned first' : 'the org row returned first'}: the envelope says 'none', and the served body carries no _lock`, async () => {
+        it(`${reversed ? 'the env-wide row returned first' : 'the org row returned first'}: the envelope and the served body both say 'full'`, async () => {
             const protocol = harness(ENV_ID, reversed ? rows().reverse() : rows());
             const read = await envelope(protocol, 'view', ORG, 'v_scope', PACKAGE_ID);
             expect({ lock: read.lock, editable: read.editable, deletable: read.deletable })
-                .toEqual({ lock: 'none', editable: true, deletable: true });
+                .toEqual({ lock: 'full', editable: false, deletable: false });
             expect(read.byName.item?.label).toBe('env-wide package row');
-            expect(Object.keys(read.byName.item ?? {}).filter((k) => k.startsWith('_lock'))).toEqual([]);
-            expect(Object.keys(read.layered.effective ?? {}).filter((k) => k.startsWith('_lock'))).toEqual([]);
-            // The layered read still reports the stored layer as stored.
+            expect(read.byName.item?._lock).toBe('full');
+            expect(read.layered.effective?._lock).toBe('full');
             expect(read.layered.overlay?._lock).toBe('full');
+            expect(read.layered.overlayScope).toBe('env');
             // [ADR-0131 D6] The organization's writes are refused before the gate.
             expect(await door(protocol, 'view', 'save', ORG, 'v_scope', PACKAGE_ID)).toEqual(NOT_OVERRIDABLE);
             expect(await door(protocol, 'view', 'delete', ORG, 'v_scope')).toEqual(NOT_OVERRIDABLE);

@@ -7,8 +7,8 @@
  * and the representation it validates agree at the only door that reaches this
  * verb in production. The history below is how the door used to reduce the
  * organization by the registry read gate; §1 and §2 now pin that nothing
- * reaches the read, and §3 that a supplied organization WOULD move the
- * validator (so §1's equality is not vacuous).
+ * reaches the read, and §3 that since S5 the protocol itself folds no
+ * organization into the validator either (ADR-0131 D6).
  *
  * ── Why this file exists ──────────────────────────────────────────────────
  *
@@ -329,25 +329,22 @@ describe('§2 [ADR-0131 D6] a legacy organization-scoped row is served to nobody
 // §3 — ⭐ the counterfactual: what the pre-gate is actually worth
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('§3 handing the protocol the RAW tenant issues a different validator', () => {
-    it(`${NON_OVERRIDABLE}: the raw-tenant validator differs from the one the door issued`, async () => {
+describe('§3 [ADR-0131 D6] handing the protocol the RAW tenant issues the SAME validator', () => {
+    it(`${NON_OVERRIDABLE}: the protocol folds no organization into the validator, so the raw tenant changes nothing`, async () => {
         const rows = [row(NON_OVERRIDABLE)];
         const b = boot(rows);
 
         b.as(ORG_A);
         const throughDoor = await b.get(NON_OVERRIDABLE);
 
-        // The same read the door performs, minus the door's `organizationIdFor
-        // MetaRead` reduction. The protocol re-folds for the BODY — the label
-        // below proves it — and does NOT re-fold for the validator.
+        // The same read the door performs, handed a retired organization key:
+        // no read takes one any more, so neither the body nor the validator
+        // moves.
         const raw = await b.protocol.getMetaItemCached({
             type: NON_OVERRIDABLE, name: NAME, organizationId: ORG_A,
-        });
+        } as { type: string; name: string });
 
-        expect(raw.data?.label, 'the callee stopped re-folding for the body').toBe(`env ${NON_OVERRIDABLE}`);
-        expect(
-            throughDoor.etag,
-            'the door\'s pre-gate no longer changes the validator — re-read #16525 §3',
-        ).not.toBe(`"${raw.etag.value}"`);
+        expect(raw.data?.label).toBe(`env ${NON_OVERRIDABLE}`);
+        expect(throughDoor.etag).toBe(`"${raw.etag.value}"`);
     });
 });

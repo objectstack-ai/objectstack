@@ -100,9 +100,22 @@ const FAMILY: Record<string, string[]> = {
   'migrate files-to-references': [],
   'migrate meta': ['--stored'],
   'migrate multi-value-columns': [],
+  // Its bare form is its only mode — a read-only plan (`deferSchemaDdl` +
+  // `readOnlyProbe`). The fixture's database holds none of the platform tables
+  // the ceremony inventories, so the face driven here is its REFUSAL face
+  // (`plan_refused`, `emitJson(…, 1, { compact: true })`), emitted after the
+  // stack is shut down. A refused plan writes no plan file, so the fixture
+  // directory gains nothing.
+  'migrate organization-ownership': [],
   'migrate plan': [],
   'migrate recorded-by': [],
   'migrate resume': [],
+  // A preview is its DEFAULT and the only form driven here: without `--apply`
+  // it composes the deployment the way `os serve` does (the host config's
+  // plugins and the auth-gated security plugin) and boots read-only with no
+  // `sys_metadata` hydration, so it deletes nothing. No table exists in the
+  // fixture, so the face driven here is its empty listing.
+  'migrate security-catalog-overlays': [],
   'migrate summary-nulls': [],
   // One object per run, so it needs a name: the fixture's own `jp_ticket`,
   // which the composed host config registers. No database file exists, so the

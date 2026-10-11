@@ -293,6 +293,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "enable.clone": {
         label: "Clonación"
       },
+      "enable.approvalsVisibleToReaders": {
+        label: "Aprobaciones visibles para lectores",
+        helpText: "Quien puede leer un registro ve sus solicitudes de aprobación y su historial, en solo lectura y sin ninguna acción de aprobación"
+      },
       validations: {
         label: "Validaciones",
         helpText: "Reglas de validación a nivel de objeto — un array de objetos de regla, p. ej. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Las tablas de transición de máquinas de estado también se declaran aquí (ADR-0020)"
@@ -419,7 +423,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fileAccessDelegate: {
         label: "Delegado de acceso a archivos",
-        helpText: "Servicio del kernel que autoriza la descarga de archivos pertenecientes a los campos multimedia de este objeto, en lugar de comprobar si quien llama puede leer la fila propietaria. Para objetos cuyo acceso media un servicio. Falla cerrado."
+        helpText: "Servicio del kernel que autoriza la descarga de archivos pertenecientes a los campos multimedia de este objeto y decide si un lector que no puede leer sys_file ve su nombre, tamaño y tipo al leer un registro de este objeto (se consulta una vez por registro propietario en cada lectura de ese tipo), en lugar de comprobar si quien llama puede leer la fila propietaria. Para objetos cuyo acceso media un servicio. Falla cerrado."
       },
       lifecycle: {
         label: "Ciclo de vida de los datos",
@@ -2360,6 +2364,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "Descripción"
+      },
+      permissionSets: {
+        label: "Conjuntos de permisos",
+        helpText: "Conjuntos de permisos que distribuye este puesto, por nombre (snake_case)."
       },
       delegatable: {
         label: "Delegable",

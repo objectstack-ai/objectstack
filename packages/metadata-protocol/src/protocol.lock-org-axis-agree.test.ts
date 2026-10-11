@@ -25,8 +25,9 @@
  *     control moved with it.
  *  2. The measured defect, named: an env-wide `_lock: 'full'` row, an
  *     org-scoped read, save, delete, publish and rollback.
- *  3. Precedence: with both rows present the read serves the org-scoped row,
- *     and the door binds THAT row's `_lock`, whatever the env-wide row says.
+ *  3. Precedence: with both rows present, [ADR-0131 D6] every request is
+ *     served the env-wide row — a legacy organization row is served by no
+ *     read — and the door binds that row's `_lock`.
  *  4. The organization gate: on a type with no per-org channel the reads
  *     never serve an org-scoped row, and neither does the door.
  *
@@ -216,7 +217,7 @@ describe('[#21716] pin 2 — an env-wide _lock: full row binds an organization w
     }
 });
 
-describe('[#21716] pin 3 — both rows present: the door binds the lock of the row the read serves', () => {
+describe('[#21716, ADR-0131 D6] pin 3 — both rows present: every request is served the env-wide row, and the door binds its lock', () => {
     const cases: Array<{ env: Lock; org: Lock }> = [
         { env: 'full', org: 'none' },
         { env: 'none', org: 'full' },
@@ -229,13 +230,12 @@ describe('[#21716] pin 3 — both rows present: the door binds the lock of the r
                     const rows = [viewRow('v_both', null, c.env), viewRow('v_both', ORG, c.org)];
                     const { protocol } = harness(environmentId, rows);
                     const read = await envelope(protocol, 'v_both', q.organizationId);
-                    // The read serves the org-scoped row to its organization, the
-                    // env-wide row otherwise (ADR-0005 precedence, never a merge)…
-                    const servedLock = q.organizationId ? c.org : c.env;
+                    // [ADR-0131 D6] The read serves the env-wide row to every
+                    // request: a legacy organization row is served by no read…
                     expect(read).toMatchObject({
-                        lock: servedLock,
-                        served: q.organizationId ? 'org row' : 'env-wide row',
-                        overlayScope: q.organizationId ? 'org' : 'env',
+                        lock: c.env,
+                        served: 'env-wide row',
+                        overlayScope: 'env',
                     });
                     // …and that row's lock is the one the doors enforce. [ADR-0131 D6]
                     // An org-scoped write is refused before the `_lock` gate.
@@ -252,7 +252,7 @@ describe('[#21716] pin 3 — both rows present: the door binds the lock of the r
 describe('[#21716] pin 4 — a type with no per-org channel: neither the read nor the door serves an org-scoped row', () => {
     // `page` declares `allowOrgOverride: false`, so an org-scoped row of it is
     // pre-#6190 residue boot hydration walks past. The reads gate the
-    // organization away (`organizationIdForMetaRead`) and serve the env-wide
+    // organization away (ADR-0131 D6: no read takes one) and serve the env-wide
     // row. [ADR-0131 D6] Every org-scoped write — the removal included — is
     // refused by the org-scope door (`NOT_OVERRIDABLE`) before the `_lock` gate.
     const cases: Array<{ env: Lock; org: Lock }> = [

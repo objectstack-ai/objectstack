@@ -25,7 +25,7 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (82 rows
-// / 18 families) and `packages/runtime/src/route-ledger.ts` (82 rows / 21
+// / 18 families) and `packages/runtime/src/route-ledger.ts` (84 rows / 22
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
@@ -67,8 +67,9 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 39 ledger keys, 9 are classified by rows below (re-derived when the
-// `/i18n` domain left the baseline, #22432); the other 30 are enumerated one by one,
+// Of the 40 ledger keys, 10 are classified by rows below (re-derived when the
+// `/approvals/act` domain arrived classified, #22576, after `/i18n` left the
+// baseline, #22432); the other 30 are enumerated one by one,
 // dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
 // whose MAX note dates every step down from the 34 of 40 it held on the
 // 2026-08-31 adoption day. That list can only get shorter: growth, staleness,
@@ -98,12 +99,12 @@
 // [commit 2ce1eb41b] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
-// 44 of 54 carry no `covers` key at all (10 rows, 20 keys, every one an
-// HTTP/transport pin), and 38 of the file's 47 `enforced` rows are exactly
+// 44 of 55 carry no `covers` key at all (11 rows, 21 keys, every one an
+// HTTP/transport pin), and 38 of the file's 48 `enforced` rows are exactly
 // that in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
 // grant-validity-window row among them (see their own blocks further down)
 // are the normal case, not an exception. Of the
-// 20 `covers` keys that DO exist, 7 are GATE pins tied to the enforcement call
+// 21 `covers` keys that DO exist, 7 are GATE pins tied to the enforcement call
 // itself, not merely a function name — delete `shouldDenyAnonymous` from
 // `/actions`, `/automation`, `/packages`, `/analytics` or `/i18n`, or drop the MCP
 // context-threading / stdio principal binding, and the pinned key vanishes from source, its row
@@ -306,6 +307,28 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     // pairing the `/packages` and `/analytics` rows make.
     covers: ['i18n:domains/i18n.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/i18n'],
     note: 'Ungated, an unauthenticated caller was served the application\'s translation bundle (the labels of its objects, fields, apps and pages) while the metadata read of the same objects answered it 401 on the same boot; ADR-0056 D2 is default-deny and no ADR-0138 D2 door class names this domain. Gating the DOMAIN rather than each face keeps a newly added face from arriving ungated. The Console renders its sign-in page from its built-in packs and reads this domain once signed in, so the console pin moved past that change in the same landing. The cited proof drives every mounted face anonymously (401, the dispatcher-wrapper envelope, nothing of the bundle served) and with a signed-in member (200, served) on one boot. The per-face unit pins (anonymous 401 with the provider never consulted, a missing locale and an empty slot still 401, signed-in control unchanged) live in runtime/domains/i18n-anonymous-deny.test.ts.' },
+
+  // #22576 — the `/approvals/act` dispatcher domain (segment 2 of ruling A on
+  // #22438, "token-only, aligned with self-hosted"). Unlike every
+  // anonymous-deny row above, this surface is session-less BY DESIGN: the
+  // holder of an e-mail / IM action link has no session, and the ADR-0043
+  // action token IS the authorization. So the honest class is not "anonymous
+  // is refused" but "the token is the only credential, and it is enforced":
+  // the row names the token chain as its enforcement site, and the two
+  // dispatcher preamble gates that were aligned to it for the exact path and
+  // nothing wider. ⛔ Ids stay in this comment, out of the row's strings.
+  //
+  // Not HIGH_RISK, and the reason is the list's own definition: HIGH_RISK marks
+  // a primitive guarding object DATA through a sibling HTTP entry point. This
+  // door serves no record read or query — it renders one confirm page and
+  // records one decision, as the approver the token binds — and its proofs are
+  // the plugin's own redemption suite plus the two-door wire suite, neither of
+  // which lives in this directory. The honest upgrade path is a dogfood proof
+  // that drives the route at its literal wire path and claims this row back.
+  { id: 'approval-action-token', summary: 'ADR-0043 approval action page (`/approvals/act`, GET renders / POST redeems) — session-less by design: the single-use, approver-bound action token is the ONLY credential; no session, cookie or Authorization header is read, and a signed-in caller is treated exactly as an anonymous one', state: 'enforced',
+    enforcement: 'plugin-approvals/approval-service.ts resolveActionToken → peekActionToken (GET: validate WITHOUT consuming, never decides) / redeemActionToken (POST: consume FIRST, then decide AS the token\'s bound approver) — the ADR-0043 chain: SHA-256 token-hash lookup, not consumed, not expired, request still `pending`, approver still holding the slot; reached through IApprovalService.handleActionPage by runtime/domains/approvals.ts, which forwards the transport\'s request UNREAD and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates are aligned to token-only for the EXACT path (unscoped or environment-scoped) and nothing wider: core/security/auth-gate.ts ALLOW_ROUTES [approvals, act] (ADR-0069) and runtime/http-dispatcher.ts enforceProjectMembership → isApprovalsActPath. The self-hosted raw-app mount (plugin-approvals approvals-plugin.ts mountActionPages) runs the same chain on the same token store',
+    covers: ['dispatcher-domain:route-ledger.ts:/approvals/act'],
+    note: 'The DISPATCHER domain only: on a self-hosted kernel the same path is served from the raw Hono app and never reaches the dispatcher, which is why the route-ledger rows are pinned unobservable on the showcase boot. Unit- and wire-proven, not dogfood-proven: plugin-approvals action-page-member.integration.test.ts drives the member on a real kernel and store (GET never decides; POST decides as the bound approver, audited as that approver; unknown, expired and consumed tokens told on the page with 200; no cookie or Authorization read); runtime domains/approvals-act.test.ts pins the domain on the real HttpDispatcher (the request forwarded unread, HEAD answered as a bodiless GET, 501 for an absent slot or member, a SIGNED-IN non-member reaching the member exactly as an anonymous caller does while /approvals/act/x, /approvals/actx, /approvals, /approvals/requests and /data/task stay membership-checked); core/security/auth-gate.test.ts pins the exact allow-list entry; http-conformance hono-approvals-act.conformance.test.ts drives the real plugin through createHonoApp and the self-hosted mount, where a form POST redeems a live token and HEAD answers identically at both doors.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
   // admission). Neither surface is reachable by a client today; these rows

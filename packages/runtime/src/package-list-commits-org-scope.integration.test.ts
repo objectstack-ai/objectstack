@@ -266,7 +266,7 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
     ]);
   });
 
-  it('returns the env-wide commits to an org-scoped caller (was: returned none of them)', async () => {
+  it('[ADR-0131 D6] returns the env-wide commits to a caller naming an organization — and not its legacy organization commit', async () => {
     const { protocol } = await boot();
     const { envWide, own } = await seed(protocol as any);
 
@@ -275,15 +275,12 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
       organizationId: ACTIVE_ORG,
     });
 
-    // The CONSEQUENCE: the caller's own commit AND the env-wide one. Before
-    // the fix this was `[own]` alone — `envWide` was missing outright.
-    expect(idsOf(commits)).toEqual([envWide, own].sort());
-
-    // Newest-first is the contract the timeline UI and
-    // `rollbackToPackageCommit` both rely on, and widening the predicate must
-    // not disturb it: `own` was published after `envWide`.
-    expect(commits[0].id).toBe(own);
-    expect(commits.map((c: any) => c.message)).toEqual(['own-org publish', 'env-wide publish']);
+    // The env-wide commit is the timeline (#7779 closed its absence). The
+    // caller's legacy organization commit is reported at boot, never served:
+    // the timeline holds exactly the commits whose changes the reads serve.
+    expect(idsOf(commits)).toEqual([envWide]);
+    expect(idsOf(commits)).not.toContain(own);
+    expect(commits.map((c: any) => c.message)).toEqual(['env-wide publish']);
   });
 
   it('does NOT surface another organization’s commits', async () => {
@@ -313,28 +310,32 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
     expect(idsOf(commits)).not.toContain(otherPkg);
   });
 
-  it('a caller with NO org still sees the package’s whole timeline (the other door)', async () => {
+  it('[ADR-0131 D6] a caller with NO org sees the environment\'s timeline — no organization\'s legacy commits', async () => {
     const { protocol } = await boot();
     const { envWide, own, foreign } = await seed(protocol as any);
 
-    // The no-org branch is deliberately left package-wide. Narrowing it to
-    // `organization_id IS NULL` — mirroring only half the #3115 shape — would
-    // hide every org-scoped commit from this door instead, re-creating the
-    // bug pointed the other way. #7705 left its own no-org branch alone for
-    // the same reason and this pins the equivalent here.
+    // The no-org branch used to be left package-wide, so an org-active
+    // operator on the packages door saw every organization's legacy commits.
+    // The ledger is deployment-level (ADR-0131 D7) and the legacy rows are
+    // reported at boot, not served — the same rule as the metadata rows.
     const commits = await (protocol as any).listCommits({ packageId: PKG });
 
-    expect(idsOf(commits)).toEqual([envWide, own, foreign].sort());
+    expect(idsOf(commits)).toEqual([envWide]);
+    expect(idsOf(commits)).not.toContain(own);
+    expect(idsOf(commits)).not.toContain(foreign);
   });
 
   it('the timeline the rollback planner reads now contains the env-wide commit', async () => {
     const { protocol } = await boot();
     const p = protocol as any;
 
-    // C1 under an active org, then C2 env-wide and strictly newer — the shape
-    // a session hits when its org resolution lapses between two publishes.
-    const c1 = await publishOne(p, {
-      view: 'roll_a', packageId: PKG, organizationId: ACTIVE_ORG, message: 'c1',
+    // [ADR-0131 D6] C1 and C2, both env-wide (every publish is), C2 strictly
+    // newer; plus a legacy organization commit between them, which the
+    // timeline does not show and the planner therefore never reverts.
+    const c1 = await publishOne(p, { view: 'roll_a', packageId: PKG, message: 'c1' });
+    await tick();
+    const legacy = await publishOne(p, {
+      view: 'roll_legacy', packageId: PKG, organizationId: ACTIVE_ORG, message: 'legacy',
     });
     await tick();
     const c2 = await publishOne(p, { view: 'roll_b', packageId: PKG, message: 'c2' });
@@ -344,8 +345,9 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
     // list was `[c1]` and an org-scoped rollback to C1 answered
     // `{success: true, revertedCommits: []}` — reporting a rollback it had not
     // performed, with C2's changes still live.
-    const commits = await p.listCommits({ packageId: PKG, organizationId: ACTIVE_ORG });
+    const commits = await p.listCommits({ packageId: PKG });
     expect(idsOf(commits)).toEqual([c1, c2].sort());
+    expect(idsOf(commits)).not.toContain(legacy);
 
     // [#7819 tier 1] ⭐ THE GAP THIS SUITE HANDED ON IS NOW CLOSED — these
     // lines are the handoff, and they changed exactly as it predicted.

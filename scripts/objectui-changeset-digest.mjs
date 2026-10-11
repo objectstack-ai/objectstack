@@ -206,7 +206,7 @@
 // full, including the two rejected alternatives, is at `ADR_0087_SCAFFOLD`.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -2300,10 +2300,25 @@ function selfTest() {
       `export const X = {\n  semantic: [\n    {\n      id: '${id}',\n      surface: 's',\n    },\n  ],\n};\n`;
     gw('packages/spec/src/migrations/registry.ts', LEDGER_ENTRY('old-entry-one'));
     gw('packages/spec/src/conversions/registry.ts', LEDGER_ENTRY('a-conversion'));
+    // The gate's parser-rot witness is GENERATED at the rev it judges (#22485): it
+    // runs `packages/spec/scripts/build-spec-changes.ts --out` from a `git archive`
+    // of that rev, under the `tsx` its own checkout's `node_modules` supplies. The
+    // committed `spec-changes.json` this fixture used to carry is gone with the real
+    // one. So the sandbox carries a stand-in generator (the shape the gate's own
+    // self-test stages: it EVALUATES the fixture registry, which is what the real
+    // generator does to the real one) and the package manifest the archive takes,
+    // and borrows this checkout's `node_modules`, untracked.
     gw(
-      'packages/spec/spec-changes.json',
-      `${JSON.stringify({ perMajor: [{ to: 17, migrated: [{ migrationId: 'old-entry-one' }] }] }, null, 2)}\n`,
+      'packages/spec/scripts/build-spec-changes.ts',
+      "import { writeFileSync } from 'node:fs';\n"
+        + "import { X } from '../src/migrations/registry';\n"
+        + "const out = process.argv[process.argv.indexOf('--out') + 1];\n"
+        + 'writeFileSync(out, JSON.stringify({ perMajor: [{ to: 17, migrated: '
+        + 'X.semantic.map((e: { id: string }) => ({ migrationId: e.id })) }] }));\n',
     );
+    gw('packages/spec/package.json', JSON.stringify({ name: '@objectstack/spec', version: '1.0.0' }));
+    gw('.git/info/exclude', 'node_modules\n');
+    symlinkSync(join(__dirname, '..', 'node_modules'), join(gateRepo, 'node_modules'));
     // ADR-0087 itself, an input the gate refuses to report a verdict without
     // since #8299: it pins its `CATEGORIES` vocabulary against the categories the
     // record documents, in BOTH directions, so a category with no written

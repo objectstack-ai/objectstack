@@ -274,7 +274,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 774 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 775 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -670,6 +670,7 @@ export type Iso_api_storage__CompleteChunkedUploadRequestSchema = Assert<Eq< z.i
 export type Iso_api_storage__CompleteUploadRequestSchema = Assert<Eq< z.input< typeof M34.CompleteUploadRequestSchema >, z.infer< typeof M34.CompleteUploadRequestSchema > >>;
 export type Iso_api_storage__FileTypeValidationSchema = Assert<Eq< z.input< typeof M34.FileTypeValidationSchema >, z.infer< typeof M34.FileTypeValidationSchema > >>;
 export type Iso_api_storage__UploadChunkRequestSchema = Assert<Eq< z.input< typeof M34.UploadChunkRequestSchema >, z.infer< typeof M34.UploadChunkRequestSchema > >>;
+export type Iso_api_storage__UploadScopeSchema = Assert<Eq< z.input< typeof M34.UploadScopeSchema >, z.infer< typeof M34.UploadScopeSchema > >>;
 
 // api/versioning.zod.ts
 export type Iso_api_versioning__VersionDefinitionSchema = Assert<Eq< z.input< typeof M35.VersionDefinitionSchema >, z.infer< typeof M35.VersionDefinitionSchema > >>;
@@ -1672,7 +1673,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 774 isomorphic pins', () => {
+  it('still declares all 775 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2441,7 +2442,12 @@ describe('ADR-0122 type-alias convention', () => {
     // in its tree, so it is pinned here
     // (Iso_data_fieldValue__FileRefusedValueSchema) rather than given a
     // `FileRefusedValueParsed` synonym. +1 added.
-    expect(pins).toHaveLength(774);
+    //
+    // 774 -> 775 is #22470: the upload requests' `scope` closed to the new
+    // exported `UploadScopeSchema`, a bare enum with no default and no
+    // transform, so it is pinned here (Iso_api_storage__UploadScopeSchema)
+    // rather than given an `UploadScopeParsed` synonym. +1 added.
+    expect(pins).toHaveLength(775);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

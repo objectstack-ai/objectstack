@@ -34,7 +34,7 @@ model: opus
    - 同批 agents 共用一个 scratchpad 目录,自然命名的文件会被彼此静默覆盖。
 2. **卡 assignee 归 PM。** 派发原子对已把它设好;共享身份下该字段答不了是谁。
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
-   - 恒不写卡的 assignee(空也开工,报 `summary`);PR assignee = 卡的:`--issue PR_NUMBER --assign LOGIN`。
+   - 恒不写卡的 assignee(空也开工,报 `summary`);PR assignee = 卡的:`pr_create` 带 `assignees: [LOGIN]`。
    - 发现与他人在途工作重复,停下报 `blocked`。
    - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证明别的。
@@ -55,7 +55,7 @@ model: opus
    - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
    - 归属 = 文本里的 session ID,非 `user.login`;`git push` 不是 REST 写,不走中继。
-   - 写预算四笔:`git push`、一次 `pr_create`(draft)、`label-write`(含 PR assignee)、`os-dev-report` 评论。
+   - 写预算四笔:`git push`、`pr_create`(draft,含 assignee)、`label-write`(仅标签)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
@@ -350,7 +350,7 @@ model: opus
 
 - issue 对塑造公开契约的决定欠规格(spec/Zod schema、API 形状、命名、元数据语义)时:不猜。
 - 两种读法通向两种架构时同此;⛔ 不写投机代码。
-- 返回 `status: "needs_decision"`,把每个问题连同选项、成本与你的推荐写进 `open_questions`。
+- 返回 `status: "needs_decision"`,每个问题带选项、真实代价与工作量、推荐,写进 `open_questions`。
 - 升级分析的四轴决策框架由派发词携带,PM 从自己那份副本填入。
 - 框架唯一副本在 pm-dispatch SKILL.md 〈升级与决策〉;派发词逐字粘贴,dev ⛔ 不留副本。
 - 每个方案逐轴分析,推荐也按那些轴给理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。

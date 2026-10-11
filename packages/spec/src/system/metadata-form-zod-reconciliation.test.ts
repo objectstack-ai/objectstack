@@ -416,6 +416,25 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'externalSharingModel',
     why: 'declared, not enforced yet — liveness verdict `planned` (ADR-0090 D11: validated at authoring time only; the audience-aware evaluator branch that would honour it is scheduled, not built). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
   },
+  // #22611 — the audience gate on a list view and a dashboard lands spec-first:
+  // `planned` + `authorWarn` in the liveness ledger, read by no server until the
+  // `/meta` read gate applies it (#22639). The app and action forms offer their
+  // `requiredPermissions` because those gates are enforced; offering these two
+  // first would be the UI half of declared-not-enforced.
+  {
+    kind: 'omit',
+    type: 'dashboard',
+    path: ROOT_PATH,
+    key: 'requiredPermissions',
+    why: "declared, not enforced yet — liveness verdict `planned` with `authorWarn`: the dashboard's audience gate (a list of capabilities, all required) parses and is stored, but no server reads it until the `/meta` read gate serves a gated dashboard only to a holder. A form control offered today would let an author set a gate that hides nothing; whether to offer it then is a ruling for the enforcement, not for this gate",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'requiredPermissions',
+    why: "declared, not enforced yet — liveness verdict `planned` with `authorWarn`: a list view's audience gate (a list of capabilities, all required) parses and is stored, but no server reads it until the `/meta` read gate serves a gated view only to a holder. A form control offered today would let an author set a gate that hides nothing; whether to offer it then is a ruling for the enforcement, not for this gate",
+  },
 
   // Renderer-owned vocabulary — a key is admitted here only when all three
   // hold: its `describe()` says the spec declares no vocabulary for its value;

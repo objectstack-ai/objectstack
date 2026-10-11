@@ -10,8 +10,10 @@
  * that judge and under which package id — the load path's answer:
  *
  *   - no `packages[]` → the top-level `views`, owned by `manifest.id`;
- *   - `packages[]`    → each body's own `views`, owned by that package, and the
- *     top level NOT at all (the load path does not register from it).
+ *   - `packages[]`    → each body's own `views`, owned by that package, then
+ *     the top-level entries NO body declares — the residual the config boot
+ *     registers (and refuses) under the stack's manifest id — and never a
+ *     top-level entry a body already declares.
  *
  * Every row's message is asserted EQUAL to the judge's answer for the same
  * entry, source label and id — never re-spelled — so this file cannot drift
@@ -81,15 +83,44 @@ describe('#20331 — findViewContainerNameRefusals walks what the load path regi
     expect(rows[0].message).toBe(viewContainerNameRefusal(divergent, 'manifest', 'com.example.orders')!.message);
   });
 
-  it('a `packages[]` stack: the top-level `views` is NOT judged, because the load path does not register it', () => {
-    // `resolveArtifactPackageOrder` returns the package bodies alone once
-    // `packages` is present, so a top-level copy never reaches the registrar.
-    // Judging it here would refuse a stack the server loads.
+  it('a `packages[]` stack: a top-level container a body already declares is NOT judged', () => {
+    // The residual rule skips a top-level entry whose slot a body registers —
+    // `composeStacks(…, { manifest: 'preserve' })` repeats every body at the
+    // top level — so no boot ever judges this copy. Judging it here would
+    // refuse a stack the server loads.
     const rows = findViewContainerNameRefusals({
       manifest: manifest(ID),
       views: [divergent],
       packages: [{ manifest: { ...manifest('com.example.core'), views: [view({ name: 'vcn_order_line' })] } }],
     });
     expect(rows).toEqual([]);
+  });
+
+  it('[#22521] a `packages[]` stack: an UNCLAIMED top-level container is judged, under the stack\'s manifest id', () => {
+    // No body declares `vcn_order_line`, so the config boot registers this
+    // container as the stack's residual — and refuses it, in these words.
+    const RELEASE = 'com.example.vcn.release';
+    const rows = findViewContainerNameRefusals({
+      manifest: manifest(RELEASE),
+      views: [view({ name: 'vcn_order_line', object: 'vcn_other' }), divergent],
+      packages: [{ manifest: { ...manifest('com.example.core'), views: [view({ object: 'vcn_other', name: 'vcn_other' })] } }],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({
+      path: 'views[1]',
+      code: 'VALIDATION_ERROR',
+      httpStatus: 400,
+      message: viewContainerNameRefusal(divergent, 'manifest', RELEASE)!.message,
+    });
+  });
+
+  it('[#22521] a divergent container a body declares AND the top level repeats is judged ONCE, as the body\'s', () => {
+    const rows = findViewContainerNameRefusals({
+      manifest: manifest('com.example.vcn.release'),
+      views: [divergent],
+      packages: [{ manifest: { ...manifest('com.example.orders'), views: [divergent] } }],
+    });
+    expect(rows.map((r) => r.path)).toEqual(['packages[0].manifest.views[0]']);
+    expect(rows[0].message).toBe(viewContainerNameRefusal(divergent, 'manifest', 'com.example.orders')!.message);
   });
 });

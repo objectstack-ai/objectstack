@@ -246,7 +246,7 @@ describe('validateFilterTokens — {record_id}', () => {
         {
           name: 'main',
           components: [
-            { type: 'element:number', properties: { object: 'task', aggregate: 'count', filter } },
+            { type: 'element:number', dataSource: { object: 'task', filter }, properties: { aggregate: 'count' } },
           ],
         },
       ],
@@ -312,7 +312,7 @@ describe('validateFilterTokens — {record_id}', () => {
   it.each(['home', 'app', 'utility', 'list'])('refuses it on a %s page', (type) => {
     expectRefusal(
       validateFilterTokens({ pages: [recordPage(type, { assignee: '{record_id}' })] }),
-      'pages[0].regions[0].components[0].properties.filter.assignee',
+      'pages[0].regions[0].components[0].dataSource.filter.assignee',
       'page "person_page"',
     );
   });

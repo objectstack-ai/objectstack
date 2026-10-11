@@ -106,7 +106,7 @@ it('canonicalizes a stored `functionName` key to `function` at load (#1870 DX, #
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
                 { id: 'mk', type: 'script', label: 'compute', config: { function: 'compute', outputVariable: 'aiResult' } },
-                { id: 'use', type: 'script', label: 'consume', config: { function: 'consume', inputs: { cat: '{aiResult.ai_category}', conf: '{aiResult.ai_confidence}' } } },
+                { id: 'use', type: 'script', label: 'consume', config: { function: 'consume', inputs: { cat: { dialect: 'cel', source: 'aiResult.ai_category' }, conf: { dialect: 'cel', source: 'aiResult.ai_confidence' } } } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
             edges: [
@@ -190,7 +190,7 @@ describe('script retired branches, as a stored flow meets them (#4343)', () => {
             .not.toMatch(/#\d{3,5}/);
         expect(ScriptConfigSchema.parse({
             function: 'score_lead',
-            inputs: { leadId: '{record.id}' },
+            inputs: { leadId: { dialect: 'cel', source: 'record.id' } },
             outputVariable: 'score',
         })).toMatchObject({ function: 'score_lead' });
     });

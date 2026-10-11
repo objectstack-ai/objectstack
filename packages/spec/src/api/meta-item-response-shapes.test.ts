@@ -149,7 +149,7 @@ describe('GetMetaItemLayeredResponseSchema — the three-layer projection', () =
     name: 'customer',
     code: { name: 'customer', label: 'Customer' },
     overlay: { label: 'Client' },
-    overlayScope: 'org',
+    overlayScope: 'env',
     effective: { name: 'customer', label: 'Client' },
     _diagnostics: { valid: true },
     lock: 'none',
@@ -166,7 +166,7 @@ describe('GetMetaItemLayeredResponseSchema — the three-layer projection', () =
     expect(parsed.code).toEqual({ name: 'customer', label: 'Customer' });
     expect(parsed.overlay).toEqual({ label: 'Client' });
     expect(parsed.effective).toEqual({ name: 'customer', label: 'Client' });
-    expect(parsed.overlayScope).toBe('org');
+    expect(parsed.overlayScope).toBe('env');
     expect(parsed._diagnostics).toEqual({ valid: true });
   });
 
@@ -196,10 +196,10 @@ describe('GetMetaItemLayeredResponseSchema — the three-layer projection', () =
     }
   });
 
-  it('rejects an overlayScope outside `org` | `env`', () => {
-    expect(() =>
-      GetMetaItemLayeredResponseSchema.parse({ ...LAYERED_BODY, overlayScope: 'package' }),
-    ).toThrow();
+  it('[ADR-0131 D6] rejects an overlayScope other than `env` — `org` included: no read serves an organization\'s row', () => {
+    for (const overlayScope of ['package', 'org']) {
+      expect(() => GetMetaItemLayeredResponseSchema.parse({ ...LAYERED_BODY, overlayScope })).toThrow();
+    }
   });
 
   it('is a DIFFERENT shape from the ordinary read — which is why it got its own path', () => {

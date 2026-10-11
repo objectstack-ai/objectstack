@@ -262,6 +262,8 @@ today (the object grants on the catalog), and is **open under `single`** (the or
 environment) and **refused under a wall** (a plant is not the environment). This is what keeps a
 single-tenant admin's Setup experience unchanged: the same page, the same editor, the write landing in the
 environment ledger exactly as ADR-0094 D3 already redirects it today.
+*Read against the code on 2026-10-10* (#22621, record `6094985249`): that authority is read-only, and
+Setup authoring under `single` requires `manage_metadata` — D14's execution-plan note, item 4.
 
 A package reaches a deployment in one of **two install modes** (D6): **managed** — registered as code,
 sealed, upgradeable; or **template** — copied once into the environment ledger as environment
@@ -304,8 +306,9 @@ the ruling 「单库多租户我可以禁止他们创建。但是你要支持我
 - **Single-tenant** (`single`): the organization is the environment. An admin who creates or edits a
   position or permission set in Setup performs an environment metadata write — the redirect ADR-0094 D3
   already makes today — under the security-administration authority `organization_admin` already holds;
-  no Studio capability is required. Managed-package items stay locked as they have been since
-  2026-08-24 (clone to customize).
+  no Studio capability is required *(withdrawn 2026-10-10 by #22621, record `6094985249`: Setup
+  authoring under `single` requires `manage_metadata` — D14's execution-plan note, item 4)*.
+  Managed-package items stay locked as they have been since 2026-08-24 (clone to customize).
 - **Shared-DB multi-tenant** (`group` / `isolated`): tenant admins **cannot create or edit catalog
   items**; the operator defines the catalog for every tenant (managed packages, Studio). Creation
   through Setup or the API is refused with a message naming the posture and the capability.
@@ -696,6 +699,38 @@ Doing it in one major rather than additively across 17.x avoids carrying dual id
 registry-first-then-rows resolution through a public release — compatibility shims for a shape nobody
 has used yet.
 
+**Execution-plan note (2026-10-10, #22619).** Four ruling records of the maintainer, all dated
+2026-10-10, adjust the staging inside the v18 line and settle one reading of D2/D3. ⛔ None changes a
+decision of this record: D6 stands, the fence above stands, and §8's rows stand as written — this note
+sits beside them.
+
+1. **The cutover** — #22601, option **B**, 「同意」 (record `6094045326`). C2's remaining reader switch
+   (stages S8a, S8b and S9 of C2's census plan on #15196) and C3 land as **one cutover batch**: a
+   sequence of PRs merged in a short window, each green on its own and leaving `main` usable, with no
+   transition piece built for an intermediate state the batch removes. The batch still lands before C7 —
+   before its apply half, C7b (item 2). Under `single` a position name is unique per deployment
+   (sub-question Q, answer (a)); the migration reports an existing same-name pair as `conflicting`
+   (D10, fate 4: reported for the operator, never guessed, never merged).
+2. **The C7 split** — #15211, batch #310 item 2, 「cloud 冻结在 v17 没问题，其他同意你的建议。」 (record
+   `6094175435`). **C7a** — the inventory, the read-only `--plan`, the design of the completion marker the
+   boot refusal reads — starts at once and does not wait for the cutover (#22617). **C7b** — `--apply`,
+   the post-check, the boot refusal — keeps the dependency on the cutover, C4 and C5 (C6, #15207, is
+   closed). The C7 row's substance holds: nothing is applied before the data shape is final.
+3. **The C12 move** — #15213, batch #310 item 5, the same answer (record `6094183024`). C12, D6's
+   template install mode, leaves the v18.0 release-blocking set and lands on the 18.x line — still the
+   v18 line this decision names; v18.0 offers the managed mode, which D6 already makes the default. D6
+   itself is unchanged: both install modes stay decided, and only when the second one is built moves.
+4. **The D2/D3 reading** — #22621, option **A**, 「同意」 (record `6094985249`). Read against the code on
+   2026-10-10, the "security-administration authority an organization admin holds today (the object
+   grants on the catalog)" that D2 names is read-only: the anti-escalation rule in
+   `packages/plugins/plugin-security/src/objects/default-permission-sets.ts`. Setup authoring of
+   positions, permission sets and capabilities under `single` requires `manage_metadata` (the metadata
+   door's gate, `packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict`),
+   which the platform administrator holds through `admin_full_access`
+   (`packages/spec/src/identity/eval-user.zod.ts#ADMIN_FULL_ACCESS_CAPABILITIES`). D7's "as an editor
+   under `single` for capability holders" is the accurate wording, and D3's "no Studio capability is
+   required" is withdrawn by this ruling.
+
 ---
 
 ## 3. Non-goals
@@ -878,6 +913,8 @@ Amendment at the end); Choice 4A's NULL grant row itself is unaffected and still
 ## 8. Execution plan (cards are cut from the merged record)
 
 One epic tracks the family. C0 and #15030 land before 17.3; every other card is on the **v18** line (D14), in this order.
+
+**Read with D14's execution-plan note (2026-10-10, #22619):** C2's remainder and C3 land as one cutover batch, C7 splits into C7a and C7b, and C12 leaves the v18.0 release-blocking set for the 18.x line; the rows below stand as written.
 
 | # | Card | Decisions | Blocked by |
 |---|---|---|---|

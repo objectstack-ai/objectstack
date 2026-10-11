@@ -26,13 +26,20 @@
  *
  * ## The bound set — the flow's own static bindings
  *
- *  - **the engine's roots**: `record` and `previous` (`seedRunVariables` binds
- *    `previous` on every run, `null` on a create; `celScope` binds `record` to
- *    the trigger record, or to the variables themselves when there is none),
- *    `vars` and `current_user` (`celScope` binds both after the spread). A
- *    `$`-named variable has no CEL spelling at all — `$runId == "x"` does not
- *    parse — so the `$` names never reach this judge: they stay the text-slot
- *    rule's (`flow-text-slot-template.ts`), and this module keeps no list of them;
+ *  - **the engine's roots**: `previous` (`seedRunVariables` binds it on every
+ *    run, `null` when the run was handed none), `vars` and `current_user`
+ *    (`celScope` binds both after the spread). A `$`-named variable has no CEL
+ *    spelling at all — `$runId == "x"` does not parse — so the `$` names never
+ *    reach this judge: they stay the text-slot rule's
+ *    (`flow-text-slot-template.ts`), and this module keeps no list of them;
+ *  - **`record` — the record the run was handed (#22677)**. `celScope` binds
+ *    no `record` of its own (#22642): `seedRunVariables` binds `context.record`
+ *    as `record` when the run's entrance hands it one, and nothing else does
+ *    but a flow's own `record` variable (the next bullet). So `record` is bound
+ *    here only when {@link flowCelEntrances} reads an entrance that hands this
+ *    flow a record (the rule for records below), or the flow binds the name
+ *    itself. An autolaunched flow with no visible entrance gets none, and its
+ *    `record.X` is refused: the run faults `Unknown variable: record`;
  *  - **every name the flow binds**: {@link collectFlowVariableNames} — declared
  *    variables, `outputVariable` / `errorVariable` / `iteratorVariable` /
  *    `indexVariable`, `assignment` targets, node ids — plus the two bindings that
@@ -99,6 +106,30 @@
  * carries `params` and `recordId` but no `record`, and the engine never loads a
  * record from `object` + `recordId`. A schedule run hands none either.
  *
+ * ## Two questions per entrance: does it open the flow, does it hand a record
+ *
+ * "Opens" (above) asks whether an entrance can hand a record whose keys are not
+ * in hand. "Hands a record" asks whether it hands one at all, and answers whether
+ * `record` is bound (#22677). A flow can be handed a record and still judged —
+ * its object is declared, so `record` is bound and its fields resolve. The
+ * entrances that hand a record, measured on the engine:
+ *
+ *  - **a record trigger** — trigger kind `record_change`
+ *    (`resolveFlowTriggerKind`: start `config.triggerType` is a `record-*`
+ *    string), the row; a start `config.objectName` alone hands none, because with
+ *    no `record-*` trigger nothing binds the flow to a write (`deriveTriggerBinding`);
+ *  - **a time-relative sweep** — trigger kind `time_relative`, each swept row;
+ *  - **the inbound hook** — trigger kind `api`, the request body;
+ *  - **an action** — every `type: 'flow'` action that targets it, whatever its
+ *    object: `dispatchFlowAction` hands the row it loaded, or an empty record
+ *    carrying at most the `id` it was given, and an empty record is a record;
+ *  - **a `map` node** with a `config.itemObject` — each id-bearing item becomes
+ *    the child's record;
+ *  - **a parent that is itself handed one** — a `subflow` or `map` node in a flow
+ *    an entrance hands a record: the child spreads its parent's context, and so
+ *    its `context.record`. A parent's own `record` VARIABLE is not handed on —
+ *    the child gets the parent's context, not its variables. Read to a fixpoint.
+ *
  * ## The runtime publish gate stands down (#22636 is the carrier)
  *
  * The same pass runs at the runtime publish gate on a flow write, and there the
@@ -132,11 +163,13 @@ type AnyRec = Record<string, unknown>;
 
 /**
  * The roots the flow engine binds on every run, whatever the flow declares:
- * `record` and `previous` (`seedRunVariables`, and `celScope`'s `record` arm),
- * `vars` and `current_user` (bound by `celScope` after the variables are spread).
- * Not the `$` names — those have no CEL spelling (module note).
+ * `previous` (`seedRunVariables`, `null` when the run was handed none), `vars`
+ * and `current_user` (bound by `celScope` after the variables are spread).
+ * Not `record`: it is the record the run was handed, bound only where an
+ * entrance hands one or the flow binds the name (module note, #22677). Not the
+ * `$` names — those have no CEL spelling (module note).
  */
-const ENGINE_BOUND_ROOTS: readonly string[] = ['record', 'previous', 'vars', 'current_user'];
+const ENGINE_BOUND_ROOTS: readonly string[] = ['previous', 'vars', 'current_user'];
 
 /**
  * The node types whose variable writes this reader models completely — every
@@ -219,7 +252,10 @@ export interface UnboundFlowCelRoot {
 export interface FlowCelEntrance {
   /** Set ⇒ the flow is not judged; names the entrance. */
   readonly openedBy?: string;
-  /** Names an entrance binds beyond the objects' fields (an object-less action's `id`). */
+  /**
+   * Names an entrance binds beyond the objects' fields: `record` when an
+   * entrance hands the flow a record, and an object-less action's `id`.
+   */
   readonly bound?: readonly string[];
 }
 
@@ -301,13 +337,15 @@ function nameOf(value: unknown): string | undefined {
 /**
  * Every flow of the stack whose entrances open it, or bind a name beyond the
  * objects' fields — read from the stack's own declarations (the module's rule
- * for records). A flow absent from the map is judged as its own text reads.
+ * for records). A flow an entrance hands a record gets `record` in
+ * {@link FlowCelEntrance.bound}. A flow absent from the map is judged as its own
+ * text reads, with no `record` unless it binds one itself.
  *
  * Built once per stack, because an entrance lives OUTSIDE the flow it feeds (an
- * action, another flow's `subflow` / `map` node) and a parent's openness passes
- * to its children: the parent edges are read to a fixpoint. A child named by a
- * node but not declared in this stack is another package's flow and is not
- * judged here.
+ * action, another flow's `subflow` / `map` node) and a parent's openness, and
+ * the record it was handed, pass to its children: the parent edges are read to
+ * a fixpoint. A child named by a node but not declared in this stack is another
+ * package's flow and is not judged here.
  *
  * @param fieldIndex object name → field names; an object is "declared" when it
  *   is a key here, the same universe the bound set reads.
@@ -320,8 +358,13 @@ export function flowCelEntrances(
   const flowNames = new Set(flows.map((flow) => nameOf(flow.name)).filter((name): name is string => !!name));
   const openedBy = new Map<string, string>();
   const bound = new Map<string, string[]>();
+  // The flows an entrance hands a record — any object's — so `record` is bound.
+  const handed = new Set<string>();
   const open = (flow: string, reason: string): void => {
     if (flowNames.has(flow) && !openedBy.has(flow)) openedBy.set(flow, reason);
+  };
+  const hand = (flow: string): void => {
+    if (flowNames.has(flow)) handed.add(flow);
   };
   const undeclared = (object: string): boolean => !fieldIndex.has(object);
 
@@ -329,6 +372,8 @@ export function flowCelEntrances(
   for (const flow of flows) {
     const name = nameOf(flow.name);
     if (!name) continue;
+    const kind = resolveFlowTriggerKind(flow);
+    if (kind === 'record_change' || kind === 'time_relative' || kind === 'api') hand(name);
     const start = recordsOf(flow.nodes).find((node) => node.type === 'start');
     const config = start ? configOf(start) : {};
     const triggerObject = nameOf(config.objectName);
@@ -340,7 +385,7 @@ export function flowCelEntrances(
     if (sweepObject && undeclared(sweepObject)) {
       open(name, `its time-relative sweep's object '${sweepObject}' (start config.timeRelative.object) is not declared in this stack, so the record's keys are not in hand`);
     }
-    if (resolveFlowTriggerKind(flow) === 'api') {
+    if (kind === 'api') {
       open(name, 'its trigger kind is api, so the inbound hook hands the request body in as the record, whatever its keys');
     }
   }
@@ -356,6 +401,7 @@ export function flowCelEntrances(
   for (const { action, object } of launches) {
     const target = action.type === 'flow' ? nameOf(action.target) : undefined;
     if (!target || !flowNames.has(target)) continue;
+    hand(target);
     if (object === undefined) {
       // Object-less: the action hands an empty record, carrying at most the row id it was given.
       bound.set(target, [...(bound.get(target) ?? []), 'id']);
@@ -384,6 +430,7 @@ export function flowCelEntrances(
         edges.push({ parent, child, kind: node.type, node: nodeId });
         if (node.type === 'map') {
           const itemObject = nameOf(config.itemObject);
+          if (itemObject) hand(child);
           if (!itemObject) {
             open(child, `map node '${nodeId}' in flow '${parent}' feeds it items and declares no config.itemObject, so the items' object is not in hand`);
           } else if (undeclared(itemObject)) {
@@ -396,6 +443,10 @@ export function flowCelEntrances(
   for (let changed = true; changed;) {
     changed = false;
     for (const edge of edges) {
+      if (handed.has(edge.parent) && !handed.has(edge.child)) {
+        handed.add(edge.child);
+        changed = true;
+      }
       if (!openedBy.has(edge.parent) || openedBy.has(edge.child)) continue;
       open(edge.child, `${edge.kind} node '${edge.node}' in flow '${edge.parent}' hands it that flow's record, and '${edge.parent}' is itself open`);
       changed = true;
@@ -405,9 +456,9 @@ export function flowCelEntrances(
   const out = new Map<string, FlowCelEntrance>();
   for (const name of flowNames) {
     const reason = openedBy.get(name);
-    const names = bound.get(name);
-    if (reason === undefined && names === undefined) continue;
-    out.set(name, { ...(reason !== undefined ? { openedBy: reason } : {}), ...(names !== undefined ? { bound: names } : {}) });
+    const names = [...(handed.has(name) ? ['record'] : []), ...(bound.get(name) ?? [])];
+    if (reason === undefined && names.length === 0) continue;
+    out.set(name, { ...(reason !== undefined ? { openedBy: reason } : {}), ...(names.length > 0 ? { bound: names } : {}) });
   }
   return out;
 }
@@ -526,8 +577,10 @@ export function unboundFlowCelRoots(source: string, scope: FlowCelRootScope): Un
  * The refusal for one unbound root.
  *
  * A run-user spelling (`user`, `ctx.user`, `os.user`) is told to write
- * `current_user`; any other root is named with what the flow could have bound
- * it, and the nearest in-scope name when there is one.
+ * `current_user`; `record` with no entrance that hands the flow one is told to
+ * read the variable by its name or through `vars` (the remedy #22642 names), or
+ * to give the flow its entrance; any other root is named with what the flow
+ * could have bound it, and the nearest in-scope name when there is one.
  */
 export function unboundFlowCelRootMessage(unbound: UnboundFlowCelRoot, scope: FlowCelRootScope): string {
   const { root, members } = unbound;
@@ -541,12 +594,24 @@ export function unboundFlowCelRootMessage(unbound: UnboundFlowCelRoot, scope: Fl
       'without a user, guard it: `current_user != null ? current_user.id : null`.'
     );
   }
+  if (root === 'record') {
+    const member = members[0] ?? 'assignee';
+    return (
+      '`record` is not bound in this flow\'s expression scope, so the run fails with `Unknown variable: record`: ' +
+      'a flow\'s `record` is the record its run was handed, and no entrance in this stack hands this flow one — no ' +
+      'record trigger (start `config.triggerType: \'record-…\'`), time-relative sweep, inbound hook, `type: \'flow\'` ' +
+      'action, `map` node with a `config.itemObject`, or `subflow` / `map` parent that is handed a record — and the ' +
+      'flow binds no variable named `record`. ' +
+      `Read a variable by its name (\`record.${member}\` → \`${member}\`) or through \`vars\` (\`vars.${member}\`), ` +
+      'or give the flow the entrance that hands it its record.'
+    );
+  }
   const near = nearestName(root, scope.bound);
   return (
     `\`${root}\` is not bound in this flow's expression scope, so the run fails with \`Unknown variable: ${root}\`: ` +
     'no variable, `outputVariable`, iterator, index or error variable, `assignment` target, node id or screen field ' +
     `of this flow is named \`${root}\`, no object in the stack declares a field \`${root}\`, and the engine binds ` +
-    'only `record`, `previous`, `vars` and `current_user`. ' +
+    'only `previous`, `vars` and `current_user` on every run, and `record` when an entrance hands the run one. ' +
     `Declare \`${root}\` as a flow variable or bind it with a node, or correct the name` +
     (near ? ` — did you mean \`${near}\`?` : '.')
   );

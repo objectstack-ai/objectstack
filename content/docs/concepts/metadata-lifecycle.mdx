@@ -45,8 +45,8 @@ Reads walk top-to-bottom: the first non-null layer wins. Writes always route to 
 <Callout type="warn">
 Today this precedence is implemented **inside the protocol layer**, not by
 `LayeredRepository`. `ObjectStackProtocolImplementation` lazily builds one
-`SysMetadataRepository` per org (`getOverlayRepo()`) and merges it against the
-in-memory code registry — `getMetaItemLayered()` returns `code` / `overlay` /
+`SysMetadataRepository` for the environment (`getOverlayRepo()`) and merges it
+against the in-memory code registry — `getMetaItemLayered()` returns `code` / `overlay` /
 `effective` separately. `LayeredRepository` ships in `@objectstack/metadata-core`
 and implements exactly the semantics above, but it is **not yet composed** into
 any production path: every `new LayeredRepository(...)` call site is a test
@@ -106,7 +106,7 @@ later ships. See [ADR-0070](https://github.com/objectstack-ai/objectstack/blob/m
 
 In shared-database multi-tenancy, **most metadata types must not be per-org customizable** — overriding them would break the physical schema. The whitelist lives in **one** place: `MetadataTypeRegistryEntry.allowOrgOverride` in `packages/spec/src/kernel/metadata-plugin.zod.ts`.
 
-> **ADR-0131 D6 — the per-organization overlay axis is retired.** The `/meta` doors (REST and the runtime dispatcher) carry no organization into a metadata write or read: a Studio or `PUT /api/v1/meta/...` write of the five ✅ types below lands **environment-wide** (`organization_id` NULL) and is served to every organization, and an organization admin holding only the retired `manage_org_presentation` capability is refused (`403`). An overlay row an earlier release stored under an organization — under the `single` posture, every Studio save of these types, filed under the Default Organization — is not served by any `/meta` read until the promotion ceremony (ADR-0131 C7) carries it to the environment layer; re-save the item in Studio to make the edit live on the `/meta` doors now. Public forms are the exception: until that ceremony the anonymous form doors read a form `view` in the Default Organization and prefer its overlay for the form's body, while a withdrawal in either layer closes the form, fail-closed. So a legacy organization overlay of a public form keeps serving its body there: a Studio re-save of that body (an environment row) does not change the body the public form serves, and a Studio withdrawal (an environment row) still closes it. The table still records which types take an overlay of a shipped item.
+> **ADR-0131 D6 — the per-organization overlay axis is retired.** The `/meta` doors (REST and the runtime dispatcher) carry no organization into a metadata write or read: a Studio or `PUT /api/v1/meta/...` write of the five ✅ types below lands **environment-wide** (`organization_id` NULL) and is served to every organization, and an organization admin holding only the retired `manage_org_presentation` capability is refused (`403`). The protocol itself refuses every organization-scoped write, and every read — item, list, layers, cached, history, diff, audit, drafts and the commit timeline — is environment → code, whatever organization a caller names. An overlay row an earlier release stored under an organization — under the `single` posture, every Studio save of these types, filed under the Default Organization — is served by no read: boot names each such row, per type (`[metadata_org_scoped_unserved]`), and the v18 migration ceremony (ADR-0131 C7, `os migrate`) carries it to the environment layer; nothing deletes or rewrites it before then. Re-save the item in Studio to make the edit live now. Public forms are the exception: until that ceremony the anonymous form doors read a form `view` in the Default Organization and prefer its overlay for the form's body, while a withdrawal in either layer closes the form, fail-closed. So a legacy organization overlay of a public form keeps serving its body there: a Studio re-save of that body (an environment row) does not change the body the public form serves, and a Studio withdrawal (an environment row) still closes it. The table still records which types take an overlay of a shipped item.
 
 | Type | `allowOrgOverride` | Rationale |
 | :--- | :---: | :--- |
@@ -142,6 +142,8 @@ See [ADR-0005](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/
 
 The switches are operator-only where one install serves several organizations. The refusal names the same path whichever layer answers it: `403 NOT_OVERRIDABLE` for a write that names no base, and `403 ITEM_LOCKED` for one that names the read-only package. Which writes are refused, and with which code, is unchanged.
 
+An environment row stored over a managed item of a type sealed against overlays (a flow, action, hook, object or datasource, for example — any type whose registry entry admits no overlay) before the seal — written through the `OS_METADATA_WRITABLE` hatch — is **not served** (ADR-0131 D6): every read, and boot, takes the package's definition, and the row stays at rest, untouched. Boot names each such row, per type (`[metadata_sealed_overlay_unserved]`), with the two remedies: re-express the change as a new item under a new name, or delete the stored row. A stored fork of a code-declared permission set is the one exception: it keeps the detection reading and the operator's Discard Overlay action it already had.
+
 ---
 
 ## Conflict handling
@@ -176,13 +178,13 @@ The hash is `sha256:` + 64-hex of a canonical JSON serialization of the body, wi
 | :--- | :--- |
 | `InMemoryRepository`, `LayeredRepository` | ✅ Shipped (`@objectstack/metadata-core`) |
 | `FileSystemRepository` | ✅ Shipped (`@objectstack/metadata-fs`) |
-| Change log + `seq` (per-org, monotonic) | ✅ Shipped |
+| Change log + `seq` (per environment, monotonic) | ✅ Shipped |
 | SSE bridge (`/api/v1/dev/metadata-events`, `event: metadata-change`) | ✅ Shipped |
 | Granular client-side HMR hook + seq status badge | ❌ Not implemented — no such hook or badge exists in the console today |
 | Console dev-mode HMR reloader (`MetadataHmrReloader`) | ✅ Shipped (console app, mounted app-wide, dev-only) |
 | `SysMetadataRepository` (overlay over `sys_metadata`) | ✅ Shipped (`@objectstack/metadata-protocol`) |
 | `LayeredRepository(SysMeta + artifact)` composition | ⏳ Not wired — the class ships, but nothing composes it outside tests |
-| `protocol.ts:saveMetaItem` routed through `SysMetadataRepository.put` | ✅ Shipped (via the per-org `getOverlayRepo()` cache) |
+| `protocol.ts:saveMetaItem` routed through `SysMetadataRepository.put` | ✅ Shipped (via the environment's `getOverlayRepo()` repository) |
 | `sys_metadata_history` table (durable, org-keyed change log) | ✅ Shipped (object definition in `@objectstack/metadata-core`; written by `SysMetadataRepository`) |
 | Cache + Registry refactor against `MetadataRepository` | ⏳ Post-M0 |
 
@@ -236,9 +238,9 @@ The hash is `sha256:` + 64-hex of a canonical JSON serialization of the body, wi
 ### Why artifact never enters the database
 
 1. **Single source of truth.** Code → artifact → memory. If artifact also wrote to `sys_metadata`, every deploy would need a reconciliation step ("the row says v3.0.0 but the code says v3.0.1") that is impossible to get right under concurrent edits.
-2. **Overlay stays small and auditable.** Per-org overlay = "what this organization deliberately changed at runtime". A clean table that's safe to dump, diff, or reset to factory.
+2. **Overlay stays small and auditable.** The overlay = "what this environment deliberately changed at runtime" (ADR-0131 D6: one environment layer, no per-organization one). A clean table that's safe to dump, diff, or reset to factory.
 3. **Immutable infrastructure.** Rolling back a deploy = switching image tags. No DB migration, no reverse `put`, no history replay required.
-4. **Per-org multi-tenant economics.** If artifacts were materialised into `sys_metadata`, every org would carry tens of thousands of baseline rows. Overlay-only keeps each org's row count proportional to its actual customisation.
+4. **Storage economics.** If artifacts were materialised into `sys_metadata`, every environment would carry tens of thousands of baseline rows. Overlay-only keeps its row count proportional to its actual customisation.
 
 ### What if I want auditable history of deployed artifact changes?
 

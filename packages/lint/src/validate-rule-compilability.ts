@@ -318,6 +318,40 @@ function errorText(err: unknown): string {
 }
 
 /**
+ * [#22161] What a skipped rule leaves — the clause both compile verdicts close
+ * on. Why the write path skips rather than refuses (the fail-open `try/catch`
+ * in `rule-validator.ts`) is their `os explain` text.
+ */
+const SKIPPED_ON_EVERY_WRITE = 'so the write path skips the rule and it enforces nothing on any record';
+
+/**
+ * [#22161] The verdict half of `new RegExp(source)`'s refusal. V8 spells it
+ * `Invalid regular expression: /SOURCE/: REASON`, and the source is the
+ * finding's `path` (and the `fix:` line quotes it), so only the reason is
+ * quoted. Any other spelling is quoted whole.
+ */
+function regexRefusal(source: string, err: unknown): string {
+  const text = errorText(err);
+  const echo = `Invalid regular expression: /${source}/: `;
+  return text.startsWith(echo) ? text.slice(echo.length) : text;
+}
+
+/**
+ * [#22161] ajv's refusal, to its first error. Under `allErrors: true` a
+ * metaschema failure lists every violation in one sentence (`schema is
+ * invalid: data/required must be array, data/type must be …`); the verdict
+ * quotes the first, which names the offending keyword, and counts the rest.
+ * Any other refusal is quoted whole.
+ */
+function schemaRefusal(err: unknown): string {
+  const text = errorText(err);
+  const lead = 'schema is invalid: ';
+  if (!text.startsWith(lead)) return text;
+  const violations = text.slice(lead.length).split(/, (?=data\b)/);
+  return `${lead}${violations[0]}${violations.length > 1 ? ` (and ${violations.length - 1} more)` : ''}`;
+}
+
+/**
  * Depth cap on `conditional` nesting. Parsed metadata is a tree, so this is not
  * a cycle guard — it is the same cheap promise `flow-walk.ts`'s
  * `MAX_REGION_DEPTH` makes: a hand-authored (PRE-parse) stack cannot make a lint
@@ -418,7 +452,7 @@ export function walkObjectValidationRules(stack: unknown): WalkedValidationRule[
 export function validateRuleCompilability(stack: unknown): RuleCompilabilityFinding[] {
   const findings: RuleCompilabilityFinding[] = [];
 
-  for (const { rule, objectName, label, where, basePath } of walkObjectValidationRules(stack)) {
+  for (const { rule, where, basePath } of walkObjectValidationRules(stack)) {
     if (rule.type === 'format' && typeof rule.regex === 'string' && rule.regex !== '') {
       try {
         // The exact call `checkFormat` makes — no flags, same constructor.
@@ -429,11 +463,10 @@ export function validateRuleCompilability(stack: unknown): RuleCompilabilityFind
           rule: VALIDATION_RULE_REGEX_UNCOMPILABLE,
           where,
           path: `${basePath}.regex`,
-          message:
-            `\`format\` validation ${label} on object '${objectName}' declares a \`regex\` that does not ` +
-            `compile: ${errorText(err)}. The write path builds it with \`new RegExp(rule.regex)\` and ` +
-            `SKIPS the rule when that throws (rule-validator.ts \`checkFormat\`), so the rule is declared, ` +
-            `listed in the metadata, and enforces nothing on any record.`,
+          // [#22161] One verdict sentence; `where` names the rule and its
+          // object. How the write path compiles it and why it skips is
+          // `os explain validation-rule-regex-uncompilable`.
+          message: `\`regex\` does not compile (${regexRefusal(rule.regex, err)}), ${SKIPPED_ON_EVERY_WRITE}`,
           hint:
             `Fix the pattern so \`new RegExp('${rule.regex}')\` compiles — a literal \`(\`, \`[\` or \`\\\` ` +
             `must be escaped (\`\\\\(\`, \`\\\\[\`, \`\\\\\\\\\`), and the source is a STRING, so a backslash ` +
@@ -453,12 +486,10 @@ export function validateRuleCompilability(stack: unknown): RuleCompilabilityFind
           rule: VALIDATION_RULE_SCHEMA_UNCOMPILABLE,
           where,
           path: `${basePath}.schema`,
-          message:
-            `\`json_schema\` validation ${label} on object '${objectName}' declares a \`schema\` ajv cannot ` +
-            `compile: ${errorText(err)}. The write path compiles it with the same ajv ` +
-            `(\`new Ajv({ allErrors: true, strict: false })\` + \`ajv-formats\`) and SKIPS the rule when that throws ` +
-            `(rule-validator.ts \`checkJsonSchema\`), so the rule is declared and enforces nothing on any ` +
-            `record.`,
+          // [#22161] One verdict sentence; the runtime's ajv environment and
+          // why the write path skips is
+          // `os explain validation-rule-json-schema-uncompilable`.
+          message: `ajv cannot compile \`schema\` (${schemaRefusal(err)}), ${SKIPPED_ON_EVERY_WRITE}`,
           hint:
             `Correct the schema so ajv compiles it — the message above names the offending keyword. ` +
             `\`type\` must be one of null|boolean|object|array|number|string|integer (or an array of ` +

@@ -226,10 +226,13 @@ node renders the variable as any other: `message: '{{ digest }}'`, and it render
 the **evaluated** value.
 
 The same rules hold for the field values of `create_record` / `update_record`
-(below): the `assignments` map and the `fields` map are the flow's **value
-slots**, and each takes a CEL value envelope or a literal. Only a slot's
-top-level value is an expression — an object nested inside a JSON value or an
-array is data, whatever keys it carries.
+(below), and for the maps a node hands to a **callee**: a `subflow` node's and a
+`map` node's `input` (the child flow's input variables — on a `map`, evaluated
+once per item with the item variable bound) and a `script` node's `inputs` (the
+registered function's `input`). Those maps — `assignments`, `fields`, `input`,
+`inputs` — are the flow's **value slots**, and each value takes a CEL value
+envelope or a literal. Only a slot's top-level value is an expression — an
+object nested inside a JSON value or an array is data, whatever keys it carries.
 
 <Callout type="info" title="Where a malformed envelope is refused">
 
@@ -282,9 +285,19 @@ for some input, so the rewrite is yours to judge.
 
 No spelling is kept: a value slot reads no `{…}` token at all.
 
+**A callee's input: the guarded form supplies `null`.** In a `subflow` or `map`
+`input`, a whole token that resolved to nothing handed the child flow nothing,
+and the child seeded its input variable from the variable's `defaultValue`. The
+guarded form hands `null`, and a `null` the caller supplies is a value: it wins
+over the default. So where the child's default should apply to an absent value,
+write the default in the guard — `has(vars.x) ? vars.x : 'standard'` — or leave
+the key out of `input` where the value is never meant to be supplied. A `script`
+function is handed `null` there, where the template handed `undefined`. The
+refusal at those positions says so.
+
 **Where an envelope is data, the remedy names none there.** An envelope
-evaluates only as the top-level value of the `fields` map or the `assignments`
-map. Inside an object or list value, and in the two legacy `assignment` shapes
+evaluates only as the top-level value of a value slot's map — `fields`,
+`assignments`, or a callee's `input` / `inputs`. Inside an object or list value, and in the two legacy `assignment` shapes
 (an `assignments: [{ variable, value }]` array, variables as the config's own
 keys), it is stored as the object it spells — so the refusal there names what
 does evaluate:
@@ -399,8 +412,9 @@ The built-in `script` executor never evaluates an arbitrary JavaScript string �
 it **calls a registered function**, and that is the whole of what it does.
 
 **`config.function`** names a function registered through
-`defineStack({ functions })`, and it is **required**. `config.inputs` is
-`{var}`-interpolated and handed to it; `config.outputVariable` binds the
+`defineStack({ functions })`, and it is **required**. `config.inputs` is a value
+slot — each value a CEL value envelope evaluated against the flow's variables,
+or a literal — handed to it as its `input`; `config.outputVariable` binds the
 returned value as a flow variable, so a later declarative node persists it. A
 node that names no function refuses before it runs; one naming a function
 nothing registered fails the step loudly rather than passing silently.
@@ -439,7 +453,7 @@ compile error carrying the same prescription.
   label: 'Score Lead',
   config: {
     function: 'scoreLead',                  // registered via defineStack({ functions })
-    inputs: { rating: '{record.rating}' },  // {var} templates resolve against flow variables
+    inputs: { rating: { dialect: 'cel', source: 'record.rating' } },  // CEL value envelope, type kept
     outputVariable: 'leadScore',            // later: fields: { score: { dialect: 'cel', source: 'leadScore' } }
   },
 }
@@ -1210,6 +1224,7 @@ the map waits for that item's decision, then moves to the next.
     iteratorVariable: 'task',
     flowName: 'one_task_signoff',    // the per-item subflow (it may pause)
     itemObject: 'showcase_task',     // when an item is a record, it becomes the child's `$record`
+    input: { taskId: { dialect: 'cel', source: 'task.id' } }, // evaluated per item, `task` bound
     outputVariable: 'signoffResults',// each item's subflow output, collected in order
   },
 }

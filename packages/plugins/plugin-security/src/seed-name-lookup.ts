@@ -134,7 +134,7 @@
  * is as silent as it always was, on every channel.
  */
 
-import { resolveOwnOrganizationRow, seedCtx as lookupCtx } from './per-organization-catalog.js';
+import { resolveOwnOrganizationRow, seedCtx as lookupCtx } from './organization-scope.js';
 import { reportThroughSink, type CollisionReportSink } from './seed-refusal-sink.js';
 
 

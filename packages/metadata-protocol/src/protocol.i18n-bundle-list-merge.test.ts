@@ -265,12 +265,10 @@ describe('[#7774] the unscoped /meta list keeps every i18n bundle member', () =>
             expect(byPkg['com.acme.hr'].locale).toBe('zh-CN');
         });
 
-        it('keys an env-wide row and an org row of DIFFERENT locales as different slots', async () => {
-            // The store's unique index is `(type, name, organization_id,
-            // package_id)`, so an org cannot hold two rows differing only by
-            // body locale — but the env-wide tier and the org tier can, and
-            // keying them together made the org's row displace the env-wide
-            // one. Precedence within a member is unchanged; see the next case.
+        it('[ADR-0131 D6] a legacy organization row of a bundle member is served by no list read, whatever organization the caller names', async () => {
+            // The env-wide row customizes en-US; a legacy organization row
+            // customizes zh-CN. The organization row is not read: zh-CN is the
+            // registry's member, en-US the env-wide row.
             const { engine } = makeEngine({
                 items: [
                     { __type: 'email_template', ...tpl('auth.welcome', 'en-US'), _packageId: PKG },
@@ -291,36 +289,13 @@ describe('[#7774] the unscoped /meta list keeps every i18n bundle member', () =>
             });
             const protocol = new ObjectStackProtocolImplementation(engine);
 
-            const res = await protocol.getMetaItems({ type: 'email_template', organizationId: 'org_1' });
-            const byLocale = Object.fromEntries((res.items as any[]).map((i) => [i.locale, i]));
-            expect(Object.keys(byLocale).sort()).toEqual(['en-US', 'zh-CN']);
-            expect(byLocale['en-US'].subject).toBe('ENV en-US');
-            expect(byLocale['zh-CN'].subject).toBe('ORG zh-CN');
-        });
-
-        it('still lets an org row override the env-wide row of the SAME locale', async () => {
-            // ADR-0005 org-over-env precedence, unchanged where it was ever
-            // meaningful: two rows of one member still resolve to one row.
-            const { engine } = makeEngine({
-                items: [{ __type: 'email_template', ...tpl('auth.welcome', 'en-US'), _packageId: PKG }],
-                rows: [
-                    row({
-                        type: 'email_template', name: 'auth.welcome', package_id: PKG,
-                        organization_id: null,
-                        metadata: tpl('auth.welcome', 'en-US', { subject: 'ENV en-US' }),
-                    }),
-                    row({
-                        type: 'email_template', name: 'auth.welcome', package_id: PKG,
-                        organization_id: 'org_1',
-                        metadata: tpl('auth.welcome', 'en-US', { subject: 'ORG en-US' }),
-                    }),
-                ],
-            });
-            const protocol = new ObjectStackProtocolImplementation(engine);
-
-            const res = await protocol.getMetaItems({ type: 'email_template', organizationId: 'org_1' });
-            expect((res.items as any[]).length).toBe(1);
-            expect((res.items as any[])[0].subject).toBe('ORG en-US');
+            for (const request of [{ type: 'email_template' }, { type: 'email_template', organizationId: 'org_1' }]) {
+                const res = await protocol.getMetaItems(request as { type: string });
+                const byLocale = Object.fromEntries((res.items as any[]).map((i) => [i.locale, i]));
+                expect(Object.keys(byLocale).sort()).toEqual(['en-US', 'zh-CN']);
+                expect(byLocale['en-US'].subject).toBe('ENV en-US');
+                expect(byLocale['zh-CN'].subject).toBe('Subject zh-CN');
+            }
         });
 
         it('treats a member that declares no locale as the canonical member', async () => {

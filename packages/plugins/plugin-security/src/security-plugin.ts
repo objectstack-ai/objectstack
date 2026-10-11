@@ -85,7 +85,7 @@ import {
   listSeedOrganizationIds,
   resolveOwnOrganizationRow,
   seedCtx,
-} from './per-organization-catalog.js';
+} from './organization-scope.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
@@ -101,7 +101,7 @@ import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader } from '@objectstack/core';
+import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
@@ -179,7 +179,8 @@ import {
   securityPluginManifestHeader,
   SECURITY_PLUGIN_ID,
 } from './manifest.js';
-import { registerBuiltinPositions } from './builtin-positions.js';
+import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-positions.js';
+import { registerBuiltinCapabilities, withoutPlatformCapabilityDeclarations } from './builtin-capabilities.js';
 
 /**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
@@ -1785,14 +1786,67 @@ export class SecurityPlugin implements Plugin {
     // id — the provenance the manifest stamps on `permissions`. Here, on the
     // engine handle `start()` already holds, before `kernel:ready` runs the
     // seeders and before any request reaches the metadata door. Rows keep
-    // seeding from the same list (`bootstrapBuiltinRoles`); nothing here writes
-    // a row or moves a grant.
-    if (registerBuiltinPositions((ql as { registry?: unknown }).registry, SECURITY_PLUGIN_ID) === 0) {
+    // seeding from the same list (`bootstrapBuiltinRoles`).
+    const builtinRegistry = (ql as { registry?: unknown }).registry;
+    if (registerBuiltinPositions(builtinRegistry, SECURITY_PLUGIN_ID) === 0) {
       ctx.logger.warn(
         '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
           + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
-          + 'them. Their sys_position rows still seed and no grant changes, but the security catalog read and '
-          + 'GET /api/v1/meta/position will not list them.',
+          + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
+          + '`everyone` baseline sets are granted through no position.',
+      );
+    }
+    // [ADR-0090 D5, ADR-0131 D3/D4] `everyone` declares the deployment's
+    // baseline in its `permissionSets` — the binding the authorization resolver
+    // reads, in place of the junction rows the boot used to write. At
+    // `kernel:ready`, where that binding ran, because the high-privilege check
+    // reads the stack's declared capabilities (#18535) and they are all in by
+    // then; the check and its report are the binding's own.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:ready', async () => {
+        try {
+          const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
+          const everyoneSets = this.baselinePermissionSets.filter((name) => {
+            const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
+            const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
+            if (offending) {
+              ctx.logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set: name, offending });
+            }
+            return !offending;
+          });
+          if (everyoneSets.length > 0) declareEveryoneBaseline(builtinRegistry, SECURITY_PLUGIN_ID, everyoneSets);
+        } catch (e) {
+          ctx.logger.warn('[security] everyone-anchor baseline declaration failed (non-fatal)', { error: (e as Error).message });
+        }
+      });
+    }
+
+    // [ADR-0131 D3/D4] Bind the security catalog read to this engine: every
+    // authorization resolution over it (`resolveUserAuthzGrants`, core) reads
+    // positions, the sets they name and the set bodies through this reader.
+    // An engine with no reader bound resolves an empty catalog — no position
+    // distributes a set and no set grants — so a failure here is said at once.
+    try {
+      bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: (ql as any).registry, metadata: metadata as any }));
+    } catch (e) {
+      ctx.logger.warn(
+        '[security] the security catalog read was NOT bound to the ObjectQL engine: '
+          + `${(e as Error).message} Every permission set and every position-bound set resolves to nothing `
+          + 'until the engine exposes its registry and the metadata service is registered.',
+      );
+    }
+
+    // [ADR-0131 D3, ADR-0066 D1] The curated capabilities are declared metadata
+    // of THIS plugin too, by the same item seam and for the same reason: the
+    // manifest's package door refuses a built-in name, and the curated names
+    // are the built-in capability names (`builtin-capabilities.ts`). Sourced
+    // from `PLATFORM_CAPABILITIES`, the list the curated seeding pass reads;
+    // nothing here writes a `sys_capability` row.
+    if (registerBuiltinCapabilities((ql as { registry?: unknown }).registry, SECURITY_PLUGIN_ID) === 0) {
+      ctx.logger.warn(
+        '[security] the curated platform capabilities were NOT declared as capability metadata: the ObjectQL '
+          + 'engine exposes no registry that can register them. Their sys_capability rows still seed and no grant '
+          + 'changes, but the security catalog read and GET /api/v1/meta/capability will not list them.',
       );
     }
 
@@ -4597,9 +4651,10 @@ export class SecurityPlugin implements Plugin {
     // The four steps are named ONCE and driven from two places (the boot sweep
     // below, and the organization-creation hook further down) so a newly
     // created organization can never be seeded differently from one present at
-    // boot. See `per-organization-catalog.ts` for the doctrine, the loud guard
-    // that stands in place of a reap, and why the boot sweep is O(changed
-    // declarations) rather than O(organizations x rows) of blind writes.
+    // boot. See `organization-scope.ts` for the doctrine and the loud guard
+    // that stands in place of a reap, and `rowMatchesDeclaration` for why the
+    // boot sweep is O(changed declarations) rather than O(organizations x rows)
+    // of blind writes.
     //
     // `organizationId` undefined is the `single`-posture pass and reproduces
     // the pre-existing organization-less behaviour exactly.
@@ -4985,7 +5040,11 @@ export class SecurityPlugin implements Plugin {
         // it affects (#4967 Part 3).
         let materializedCapabilityNames: string[] = [];
         try {
-          const capOutcome = await bootstrapDeclaredCapabilities(ql, this.metadata, {
+          // [ADR-0131 D3] Handed the engine WITHOUT this plugin's own curated
+          // declarations (`builtin-capabilities.ts`): they are not a package's,
+          // the curated pass below seeds their rows, and read here each would be
+          // refused as a package claiming a curated name.
+          const capOutcome = await bootstrapDeclaredCapabilities(withoutPlatformCapabilityDeclarations(ql), this.metadata, {
             logger: ctx.logger,
             permissionSets: this.bootstrapPermissionSets,
           });
@@ -7137,8 +7196,9 @@ export class SecurityPlugin implements Plugin {
    *      and app-showcase's `finance` / `legal`) are all of that kind. ⛔ A
    *      false positive on a built-in identity is the most expensive failure
    *      this warning has, and this clause is what prevents it;
-   *   2. `P` was NOT already requested through the governed channel. Junction
-   *      rows arrive as permission-set NAMES in `context.permissions`
+   *   2. `P` was NOT already requested through the governed channel. The sets
+   *      a position's definition names (`permissionSets`, ADR-0131 D3/D4)
+   *      arrive as permission-set NAMES in `context.permissions`
    *      (`resolve-authz-context.ts` §6b pushes `ps.name`), as do directly
    *      assigned sets. Either way the grant does not depend on the fold, so
    *      there is nothing ungoverned to report;
@@ -7189,11 +7249,10 @@ export class SecurityPlugin implements Plugin {
       // who can resolve it is already looking.
       this.logger.warn?.(
         `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
-          `because a POSITION of the same name resolved by name — there is no ` +
-          `sys_position_permission_set row binding them. This grant is in force and ungoverned: ` +
-          `it appears in no junction table an operator can inspect. Bind it explicitly ` +
-          `(sys_position_permission_set: position '${position}' -> permission set '${position}') ` +
-          `or rename one of the two.`,
+          `because a POSITION of the same name resolved by name — the position's definition ` +
+          `does not name it in its permissionSets. This grant is in force and ungoverned: ` +
+          `no position declares it. Declare it explicitly (position '${position}': ` +
+          `permissionSets: ['${position}']) or rename one of the two.`,
         {
           event: POSITION_NAME_FOLD_EVENT,
           position,

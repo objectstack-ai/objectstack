@@ -42,9 +42,9 @@ const SEMANTIC_ENTRIES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'e
  * The full text — leading comment AND literal — of every `semantic/` entry
  * file registered under `major`, keyed by filename. The files, not the parsed
  * objects: an entry may name its family's conversion in the comment the
- * generator carries into `registry.ts` rather than in a field, and
- * `check:migration-registry` already proves the files and the generated
- * region are the same set.
+ * generator carries into `registry.ts` rather than in a field, and the
+ * generator writes the region from exactly these files on every build (the
+ * registry is never committed, so there is no second copy to drift).
  */
 function semanticEntrySources(major: number): Map<string, string> {
   const out = new Map<string, string>();
