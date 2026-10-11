@@ -700,10 +700,8 @@ describe('sharing rules target an object under record-sharing enforcement (#9237
     expect(rules.length).toBeGreaterThan(0);
   });
 
-  // [ADR-0131 D3/D4] The junction binder still writes the same bindings for the
-  // readers that have not moved off `sys_position_permission_set`; until it is
-  // deleted the two must name the same pairs, or those readers judge a
-  // position by bindings the resolver does not grant.
+  // [ADR-0131 D3/D4] The junction binder is deleted: the position's own
+  // `permissionSets` is the one binding, and no row repeats it.
   it('each persona position declares the permission set its personas hold (ADR-0131 D3/D4)', () => {
     // The position definition is the binding the resolver reads; no junction
     // row is written for it. Pinned literally so a persona losing its set is a
