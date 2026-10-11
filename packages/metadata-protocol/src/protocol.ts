@@ -16328,8 +16328,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private isDeclaredCodeDatasource(type: string, name: string): boolean {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
-        const hostCode = this.getServicesRegistry?.().get('code-datasource-names') as { has?: unknown } | undefined;
-        if (typeof hostCode?.has === 'function' && (hostCode as { has(n: string): boolean }).has(name)) return true;
+        if (this.isHostCodeDatasource(type, name)) return true;
         const registry = (this.engine as any)?.registry;
         if (typeof registry?.getAllPackages !== 'function') return false;
         for (const record of registry.getAllPackages() as unknown[]) {
@@ -16340,6 +16339,19 @@ export class ObjectStackProtocolImplementation implements
             }
         }
         return false;
+    }
+
+    /**
+     * [#21944] The host's code-datasource set alone — the first half of
+     * {@link isDeclaredCodeDatasource}, and exactly the names the
+     * datasource-admin boot restore reads to keep a stored row off a code
+     * definition and to name it in a warning ({@link loadMetaFromDb} leaves
+     * those rows to that warning).
+     */
+    private isHostCodeDatasource(type: string, name: string): boolean {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'datasource') return false;
+        const hostCode = this.getServicesRegistry?.().get('code-datasource-names') as { has?: unknown } | undefined;
+        return typeof hostCode?.has === 'function' && (hostCode as { has(n: string): boolean }).has(name);
     }
 
     /**
@@ -26566,7 +26578,13 @@ export class ObjectStackProtocolImplementation implements
                     // Normalize DB type to singular (DB may store legacy plural forms)
                     const normalizedType = PLURAL_TO_SINGULAR[record.type] ?? record.type;
                     if (this.isUnservedSealedOverlay(normalizedType, String(record.name))) {
-                        sealedOverlays.push({ type: normalizedType, name: String(record.name) });
+                        // [#15206] A row under a datasource name the host
+                        // defines in code is named once, by the
+                        // datasource-admin boot restore's warning, which
+                        // carries its own remedy — not here as well.
+                        if (!this.isHostCodeDatasource(normalizedType, String(record.name))) {
+                            sealedOverlays.push({ type: normalizedType, name: String(record.name) });
+                        }
                         if (normalizedType === 'object') continue;
                     }
                     const data = this.convertStoredItem(
@@ -26972,12 +26990,16 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * [ADR-0131 D6, triage ruling Q1 → C] Say out loud which stored
-     * ENVIRONMENT rows boot did not load because they overlay sealed managed
+     * ENVIRONMENT rows no read serves because they overlay sealed managed
      * content ({@link isUnservedSealedOverlay}): an overlay of an item a
-     * managed package ships, on a type whose registry entry opens no overlay
-     * channel — a managed flow, action, hook or object, written through the
-     * `OS_METADATA_WRITABLE` hatch before D6 sealed it. No read serves such a
-     * row: the package's definition wins.
+     * managed package ships, on ANY type whose registry entry opens no
+     * overlay channel ({@link isSealedManagedItem}: every type but the five
+     * regime-O ones, so a merge-at-read `page` or `app` as much as a flow or
+     * an object), `permission` excepted, written through the
+     * `OS_METADATA_WRITABLE` hatch before D6 sealed it. The package's
+     * definition wins; an `object` such row is not even loaded. A row under a
+     * datasource name the host defines in code is not listed: the
+     * datasource-admin boot restore names it, once ({@link isHostCodeDatasource}).
      *
      * Per type, a capped sample of names, and the two remedies the ruling
      * names. ⛔ Nothing here deletes or rewrites the row — its fate is the v18
