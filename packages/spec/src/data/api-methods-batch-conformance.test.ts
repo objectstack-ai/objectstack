@@ -61,7 +61,24 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `20c6d351a`, re-read there 2026-10-10:
+  // (`.objectui-sha` = `0df67f237`, re-read there 2026-10-11:
+  // in `packages/plugin-grid`, on the hop off `20c6d351a`, `ObjectGrid.tsx`
+  // changed again (82 insertions, 32 deletions: objectui#12082's
+  // affordance-to-grant map, objectui#12103's per-column write grant and
+  // objectui#12105's promoted bulk-action params), none of it inside the
+  // selection block, which only MOVED by +29: `ObjectGrid.tsx:4897-4924` here
+  // (`4868-4895` at `20c6d351a`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
+  // re-READ with the same reading below. Two hunks touch that reading and were
+  // re-READ as well: the `delete` verdict the implicit bulk-delete is gated on
+  // now comes from `resolveAffordance('rowDelete', …)` (`:1786`), which still
+  // asks the managed-object policy and the object's effective API operations,
+  // with the caller's delete grant beside them; and a promoted def's params
+  // now resolve when its dialog opens (`:5097-5116`, called at `:5132`), its
+  // rows still fanned out through `useBulkExecutor`. `hooks/useBulkExecutor.ts`
+  // is byte-identical to `20c6d351a` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `20c6d351a`, re-read there
+  // 2026-10-10:
   // every objectui file this record cites is byte-identical across the hop
   // from `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved:
   // `ObjectGrid.tsx:4868-4895` still hashes to
