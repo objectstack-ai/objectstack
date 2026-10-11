@@ -5,28 +5,18 @@
  * the two audience anchors (ADR-0090 D5/D9) — declared ONCE, as position
  * metadata this plugin owns.
  *
- * ## One list, two consumers
+ * ## One list, one home
  *
- * {@link securityBuiltinPositions} is the only place the six are listed:
- *
- *  1. `SecurityPlugin.start` declares them to the engine registry
- *     ({@link registerBuiltinPositions}), under this plugin's package id, so
- *     the security catalog read (`createSecurityCatalogReader`,
- *     `@objectstack/core`) and the metadata door (`GET /api/v1/meta/position`)
- *     list them beside every other declared position (ADR-0131 D2: built-ins
- *     and audience anchors are declared metadata — the C3 slice the C2
- *     execution card pulls forward).
- *  2. `bootstrapBuiltinRoles` seeds their `sys_position` rows from this same
- *     list, exactly as it seeded them from its own code list before: the same
- *     names, the same organizations, `managed_by: 'platform'`, `active: true`,
- *     `is_default: false`.
- *
- * And one exclusion: `bootstrapDeclaredPositions` skips every name here
- * ({@link isBuiltinPositionName}). It seeds from the security catalog read,
- * which lists the six now that they are declared; taken there, they would get
- * a copy without the `platform` provenance ahead of the built-in pass, which
- * then restamps it. The exclusion is by name, so an environment-stored
- * definition that shadows one of the six at read is skipped as well.
+ * {@link securityBuiltinPositions} is the only place the six are listed.
+ * `SecurityPlugin.start` declares them to the engine registry
+ * ({@link registerBuiltinPositions}), under this plugin's package id, so the
+ * security catalog read (`createSecurityCatalogReader`, `@objectstack/core`)
+ * and the metadata door (`GET /api/v1/meta/position`) list them beside every
+ * other declared position (ADR-0131 D2: built-ins and audience anchors are
+ * declared metadata). The declaration is their one home: no boot step writes a
+ * `sys_position` row for them — the built-in and declared position seeders are
+ * retired (ADR-0131 D2, C3 stage 6a). Rows an earlier boot wrote stay on an
+ * existing database until the upgrade ceremony removes them (C7).
  *
  * ## Why the engine registry, and not the manifest's `positions` key
  *
@@ -49,9 +39,9 @@
  *
  * ## What a declaration here does NOT carry
  *
- * Identity and display: `name`, `label`, `description` — what the rows have
- * always been stamped with. Activation (`active`), the default flag
- * (`is_default`) and provenance (`managed_by`) stay on the catalog ROW. The
+ * Identity and display: `name`, `label`, `description`. Activation is the
+ * activation ledger's (`sys_metadata_activation`), and provenance is the
+ * owning package the registry stamps. The
  * sources of truth behind the identity names — `sys_member.role` for the
  * `org_*` trio, the unscoped `admin_full_access` grant for `platform_admin` —
  * are untouched: these remain a projection.
@@ -108,13 +98,6 @@ export const securityBuiltinPositions: readonly BuiltinPositionDeclaration[] = O
   ...BUILTIN_IDENTITY_NAMES.map((name) => Object.freeze({ name, ...BUILTIN_IDENTITY_METADATA[name] })),
   ...AUDIENCE_ANCHOR_POSITIONS.map((name) => Object.freeze({ name, ...AUDIENCE_ANCHOR_METADATA[name] })),
 ]);
-
-const BUILTIN_POSITION_NAMES: ReadonlySet<string> = new Set(securityBuiltinPositions.map((p) => p.name));
-
-/** Is `name` one of the six built-in positions this plugin declares? Exact match. */
-export function isBuiltinPositionName(name: unknown): boolean {
-  return typeof name === 'string' && BUILTIN_POSITION_NAMES.has(name);
-}
 
 /**
  * The engine registry's registration seam, as this module uses it — ObjectQL's

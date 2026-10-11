@@ -255,7 +255,7 @@ export function tokenRepositoriesOf(payload) {
 /**
  * The grants the relay's token must carry for a JUDGED payload: every entry of
  * `PERMISSIONS` but the stroke-scoped ones, plus each stroke-scoped grant some
- * action's op spends. `{ …four grants }` for every stroke but a
+ * action's op spends. `{ …five grants }` for every stroke but a
  * `workflow_dispatch` one, which adds `actions: write`. Pure.
  */
 export function tokenPermissionsOf(payload) {
@@ -454,7 +454,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the fields: request_id shape and cap, the one organization, the session id': 8,
   'the actions: count, the closed op list, closed keys per op, typed values': 30,
   'the platform ceilings: ten top-level properties and under 64KB, pinned with their source': 6,
-  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 20,
+  'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 22,
   'the normalised payload: only judged keys travel': 3,
   'the CLI: a file, the environment, GitHub outputs, and the exit ladder': 10,
   'the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created': 12,
@@ -633,14 +633,18 @@ export async function selfTest() {
     t("⛔ exactly ONE descriptor reads an earlier answer — pr_create's assignees leg: a POST to the created pull's issue-assignees path at the placeholder the executor fills from the create's number, carrying the logins the answer must list", legs.map((r) => [r.op, r.verb, r.path, r.fromAnswer, r.body, r.assigned]), [['pr_create', 'POST', `/repos/${TARGET_OWNER}/objectstack/issues/${answerPlaceholder('number')}/assignees`, 'number', { assignees: ['u'] }, ['u']]]);
     t('…and it is never the FIRST request of its action — the answer it reads exists before it is sent', OP_NAMES.filter((op) => { const a = { op }; for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = sample[k]; return OPS[op].requests(a, 'o/r')[0].fromAnswer !== undefined; }), []);
     t('…its placeholder is the one spelling the executor fills, spelled once, and no path without fromAnswer carries a brace', [answerPlaceholder('number'), everyRequest.filter((r) => r.fromAnswer === undefined && /[{}]/.test(r.path)).map((r) => `${r.op} ${r.path}`)], ['{number}', []]);
-    t('every grant a row ALSO spends is a literal mint input of PERMISSIONS, never a stroke-scoped one — so the mint widens nothing for it; pr_create\'s issues write is the one such row', [OP_NAMES.flatMap((op) => OPS[op].alsoSpends ?? []).every((name) => name in PERMISSIONS && !STROKE_SCOPED_PERMISSIONS.includes(name)), OP_NAMES.filter((op) => OPS[op].alsoSpends).map((op) => [op, [...OPS[op].alsoSpends]])], [true, [['pr_create', ['issues']]]]);
+    t('every grant a row ALSO spends is a literal mint input of PERMISSIONS, never a stroke-scoped one — so the mint widens nothing for it; pr_create\'s issues write and automerge_enable\'s workflows write are the two such rows', [OP_NAMES.flatMap((op) => OPS[op].alsoSpends ?? []).every((name) => name in PERMISSIONS && !STROKE_SCOPED_PERMISSIONS.includes(name)), OP_NAMES.filter((op) => OPS[op].alsoSpends).map((op) => [op, [...OPS[op].alsoSpends]])], [true, [['pr_create', ['issues']], ['automerge_enable', ['workflows']]]]);
     t('pr_create without assignees is the one create request it always was — no second leg', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r').length, 1);
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);
     t('every op names a permission the token is narrowed to', OP_NAMES.every((op) => OPS[op].permission in PERMISSIONS));
     // The permission map, pinned entry by entry: the auto-merge mutations need `contents: write` on the
     // App token (measured live: without it, "Resource not accessible by integration"), and NOTHING else may
-    // spend it — the table has no contents op, so the grant reaches exactly two mutations.
-    t('the map is exactly issues/pull-requests/contents/actions write and metadata read', PERMISSIONS, { issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read', actions: 'write' });
+    // spend it — the table has no contents op, so the grant reaches exactly two mutations. `workflows: write`
+    // is the maintainer's ruling (comment 6104822731): a literal grant on every stroke, spent by the
+    // `automerge_enable` row alone (`alsoSpends`) when the pull it arms changes a workflow file.
+    t('the map is exactly issues/pull-requests/contents/workflows/actions write and metadata read', PERMISSIONS, { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write' });
+    t('workflows is spent by automerge_enable alone, as alsoSpends, and is no row\'s permission', [OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('workflows')), OP_NAMES.filter((op) => OPS[op].permission === 'workflows')], [['automerge_enable'], []]);
+    t('nothing wider: every PERMISSIONS key but metadata (the sender gate\'s read) is spent by some row as its permission or an alsoSpends, and the two sets are exactly actions/contents/issues/pull-requests/workflows', [Object.keys(PERMISSIONS).filter((name) => name !== 'metadata').sort(), [...new Set(OP_NAMES.flatMap((op) => [OPS[op].permission, ...(OPS[op].alsoSpends ?? [])]))].sort()], [['actions', 'contents', 'issues', 'pull-requests', 'workflows'], ['actions', 'contents', 'issues', 'pull-requests', 'workflows']]);
     t('the two auto-merge rows spend contents', [OPS.automerge_enable.permission, OPS.automerge_disable.permission], ['contents', 'contents']);
     t('⛔ …and no other row does: contents reaches the two auto-merge mutations and nothing else', OP_NAMES.filter((op) => OPS[op].permission === 'contents').sort(), ['automerge_disable', 'automerge_enable']);
     t('every row spending contents is a GraphQL auto-merge mutation, never a REST path', OP_NAMES.filter((op) => OPS[op].permission === 'contents').every((op) => OPS[op].requests({ op, pull: 1 }).every((r) => r.graphql && /PullRequestAutoMerge$/.test(r.graphql.mutation))));
@@ -783,7 +787,7 @@ export async function selfTest() {
     t('…and actions is spent by the workflow_dispatch row and NOTHING else', OP_NAMES.filter((op) => OPS[op].permission === 'actions'), ['workflow_dispatch']);
     const plain = validatePayload(fixturePayload()).payload;
     const run = validatePayload(one(start())).payload;
-    t('the token grants: a comment stroke carries the four literal grants and no actions; a workflow_dispatch stroke adds actions write', [tokenPermissionsOf(plain), tokenPermissionsOf(run)], [{ issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read' }, { issues: 'write', 'pull-requests': 'write', contents: 'write', metadata: 'read', actions: 'write' }]);
+    t('the token grants: a comment stroke carries the five literal grants and no actions; a workflow_dispatch stroke adds actions write', [tokenPermissionsOf(plain), tokenPermissionsOf(run)], [{ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read' }, { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write' }]);
     t('…and the GitHub output spells that as permission_actions=write for the run stroke, EMPTY for every other — the mint action skips an empty input', [githubOutputLines(run).split('\n').at(-2), githubOutputLines(plain).split('\n').at(-2), [...STROKE_SCOPED_PERMISSIONS]], ['permission_actions=write', 'permission_actions=', ['actions']]);
     // The fence on the grant: every path every row can spell, against the actions families — the dispatch call is the ONE
     // actions path reached; and a POSITIVE CONTROL that the families would catch what actions: write otherwise reaches.

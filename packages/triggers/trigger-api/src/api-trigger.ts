@@ -2,6 +2,7 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import { HTTP_SIGNATURE_TOLERANCE_SECONDS, verifyHttpSignature } from '@objectstack/core';
+import type { HttpSignatureVerdict } from '@objectstack/core';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 
 /**
@@ -85,6 +86,39 @@ interface ArmedHook {
     bodyOnlyDeprecationLogged: boolean;
 }
 
+/**
+ * Why an inbound post did not verify. Recorded in the server log only, ⛔ never
+ * sent: every one of these gets the same answer ({@link unverifiedPostAnswer}),
+ * so an operator can still tell a misconfigured sender's wrong URL from its
+ * wrong secret while the sender cannot. The `signature-*` kinds carry
+ * `verifyHttpSignature`'s own `reason`, the one vocabulary for them.
+ */
+type UnverifiedPostCause =
+    | 'unknown-flow'
+    | 'wrong-hook-id'
+    | `signature-${Extract<HttpSignatureVerdict, { valid: false }>['reason']}`;
+
+const UNVERIFIED_POST_CAUSE_TEXT: Readonly<Record<UnverifiedPostCause, string>> = {
+    'unknown-flow': 'no hook is armed for the flow it names',
+    'wrong-hook-id': 'the hook id it names is not the one its flow is armed with',
+    'signature-absent': 'it carries no x-objectstack-signature',
+    'signature-malformed': 'its x-objectstack-signature has neither accepted form',
+    'signature-mismatch': "its x-objectstack-signature is not the hook secret's HMAC of the body it carries",
+    'signature-outside-window':
+        `its timestamped x-objectstack-signature verified, with a timestamp more than ` +
+        `${HTTP_SIGNATURE_TOLERANCE_SECONDS}s from this server's clock (a replay, or a sender clock that is wrong)`,
+};
+
+/**
+ * The ONE answer every inbound post that does not verify gets: an unknown
+ * flow, a wrong hook id, an absent signature and a bad one alike. One status
+ * and one body, so the answer does not tell an armed flow name from an unarmed
+ * one. A fresh object per call, so no caller can alter the next answer.
+ */
+function unverifiedPostAnswer(): { status: number; body: Record<string, unknown> } {
+    return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
+}
+
 /** The trimmed, non-blank string `value` holds, else `undefined`. */
 function usableSecret(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -130,9 +164,12 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  * flow in-band:
  *
  *   POST /api/v1/automation/hooks/:flowName/:hookId
- *     → 404 unknown flow / wrong hookId
- *     → 401 missing/bad HMAC signature (a timestamped one outside its
- *           window included — see {@link verifySignature})
+ *     → 401 INVALID_SIGNATURE — every post that does not verify, one answer:
+ *           an unknown flow, a wrong hookId, a missing or bad HMAC signature
+ *           (a timestamped one outside its window included — see
+ *           {@link verifySignature}). The cause goes to the server log only.
+ *     → 503 the armed hook's secret cannot be read (the one residual: it
+ *           answers a post naming that flow and its hookId, signed or not)
  *     → 400 non-JSON body
  *     → 202 { accepted, messageId } — queued; a consumer executes the flow
  *
@@ -244,14 +281,20 @@ export class ApiTrigger implements FlowTrigger {
         idempotencyKey?: string;
     }): Promise<{ status: number; body: Record<string, unknown> }> {
         const hook = this.hooks.get(input.flowName);
-        // Unknown flow and wrong hookId answer identically — no oracle for
-        // probing which flows exist.
-        if (!hook || !safeEqual(hook.hookId, input.hookId)) {
-            return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No such hook.' } } };
-        }
+        // An unknown flow, a wrong hookId, and (below) an absent or bad
+        // signature all get the one unverified-post answer, so the answer
+        // (status and body) does not tell an armed flow name from an unarmed
+        // one; the cause goes to the log only. The claim is about the answer,
+        // and nothing else. The hook is matched before its secret is read, so
+        // the secret-unavailable 503 below, the one residual, answers only a
+        // post that names an armed flow AND its hookId.
+        if (!hook) return this.refuseUnverified('unknown-flow', input.flowName);
+        if (!safeEqual(hook.hookId, input.hookId)) return this.refuseUnverified('wrong-hook-id', hook.flowName);
         // The secret, read now: a rotation applies to the next post. One that
         // cannot be read is the deployment's fault, not the sender's, and is
         // never read as "no secret" — the post is refused without verifying.
+        // A 5xx on purpose: a sender retries it, and the fault lasts only
+        // while the secret cannot be read.
         let secret: string | undefined;
         try {
             secret = hook.secret.kind === 'literal' ? hook.secret.secret : usableSecret(await hook.secret.resolve());
@@ -266,9 +309,7 @@ export class ApiTrigger implements FlowTrigger {
             };
         }
         const verdict = verifyHttpSignature(input.rawBody, secret, input.signatureHeader);
-        if (!verdict.valid) {
-            return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
-        }
+        if (!verdict.valid) return this.refuseUnverified(`signature-${verdict.reason}`, hook.flowName);
         if (verdict.scheme === 'body-only' && !hook.bodyOnlyDeprecationLogged) {
             hook.bodyOnlyDeprecationLogged = true;
             this.logger.warn(
@@ -305,5 +346,20 @@ export class ApiTrigger implements FlowTrigger {
             this.logger.warn(`[trigger-api] enqueue failed for '${hook.queue}': ${err?.message ?? err}`);
             return { status: 503, body: { success: false, error: { code: 'ENQUEUE_FAILED', message: 'Could not enqueue the trigger message.' } } };
         }
+    }
+
+    /**
+     * Refuse a post that did not verify: log its real cause, then answer
+     * {@link unverifiedPostAnswer}, the same for every cause. The line names
+     * the cause and the flow name the post carried, as structured fields, and
+     * ⛔ never the secret, the signature value or the body.
+     */
+    private refuseUnverified(cause: UnverifiedPostCause, flowName: string): { status: number; body: Record<string, unknown> } {
+        this.logger.warn(
+            `[trigger-api] refused an inbound post (${cause}): ${UNVERIFIED_POST_CAUSE_TEXT[cause]}. ` +
+                `The sender got the one answer every unverified post gets; this line is the only record of the cause.`,
+            { cause, flowName },
+        );
+        return unverifiedPostAnswer();
     }
 }

@@ -34,10 +34,7 @@
 // error would stop the parse, and the predicate reads only authored keys
 // (`managedBy`, `userActions`, `enable.apiMethods`) — no parse-time defaults.
 
-import {
-  checkManagedApiMethodAffordances,
-  describeManagedApiMethodConflicts,
-} from '@objectstack/spec/data';
+import { checkManagedApiMethodAffordances } from '@objectstack/spec/data';
 
 /**
  * Stable diagnostic id. Named for the CONTRADICTION rather than for the strip,
@@ -104,11 +101,12 @@ export function validateManagedApiMethods(stack: unknown): ManagedApiMethodFindi
       rule: MANAGED_API_METHOD_UNAFFORDABLE,
       where: `object "${obj.name}"`,
       path: `objects[${oi}].enable.apiMethods`,
+      // [#22161] One verdict sentence; `where` names the object. The verb →
+      // affordance table, the boot-time strip it predicts and why this
+      // refuses are `os explain object/managed-api-method-unaffordable`.
       message:
-        `\`managedBy: '${String(obj.def.managedBy)}'\` object "${obj.name}" ` +
-        describeManagedApiMethodConflicts(conflicts) +
-        ` The registry STRIPS [${verbs}] at registration, so this declaration and the API you ` +
-        `actually get already disagree — today the only trace is a line in the boot log.`,
+        `\`enable.apiMethods\` advertises [${verbs}], which \`managedBy: '${String(obj.def.managedBy)}'\` ` +
+        `affordances refuse (needs userActions ${flags.join('/')}), so the registry strips them`,
       hint:
         `Either add \`userActions: { ${flags.map((f) => `${f}: true`).join(', ')} }\` to the object ` +
         `— only if the write is genuinely one a user context may perform, and only once the guard ` +

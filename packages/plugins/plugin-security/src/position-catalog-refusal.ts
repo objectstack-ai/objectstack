@@ -68,11 +68,8 @@
  *
  * - every `isSystem` write — the stand-down the engine's own lookup refusal and
  *   this plugin's whole security middleware take. That covers the seed loader,
- *   which on a fresh `single`-posture boot writes `stack.data` from
- *   `AppPlugin.start()`, BEFORE `kernel:ready` seeds the declared catalog: a
- *   refusal there would turn every authored assignment seed into a failed boot
- *   that succeeds on the second one. It also covers invitation acceptance and
- *   the platform's own bootstraps;
+ *   which writes `stack.data` from `AppPlugin.start()` under a system context,
+ *   invitation acceptance and the platform's own bootstraps;
  * - a value the engine answers itself, and only those: `null` or a blank
  *   string (`required`); one whose `String()` form is longer than the column
  *   (`max_length`); and an operator object, a plain object carrying a declared

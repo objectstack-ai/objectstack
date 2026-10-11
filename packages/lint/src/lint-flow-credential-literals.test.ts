@@ -27,9 +27,26 @@ import {
   authoringRulesFor,
   runAuthoringRules,
 } from './authoring-rules.js';
-import { FLOW_CREDENTIAL_LITERAL, lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
+import {
+  FLOW_CREDENTIAL_LITERAL,
+  lintFlowCredentialLiterals as lintFlowCredentialLiteralsUnrecorded,
+} from './lint-flow-credential-literals.js';
+import { explainRule } from './rule-explanations.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import * as barrel from './index.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain flow-credential-literal`. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const lintFlowCredentialLiterals: typeof lintFlowCredentialLiteralsUnrecorded = (...args) => {
+  const findings = lintFlowCredentialLiteralsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /** The probe sentinels. Each names the position it stands in. */
 const S = {
@@ -201,21 +218,23 @@ describe('flow-credential-literal — the pin set', () => {
     expect(header.where).toBe("flow 'scan_control' · node 'h' (http)");
     expect(header.message).toContain("header 'X-Api-Key'");
     expect(header.message).toContain('every member who can read flows');
-    // The route rides the MESSAGE: the CLI text faces print `where: message`
-    // and leave the hint to `--json`.
+    // [#22161] A short route rides the MESSAGE: `os lint`'s text face prints
+    // the hint only under `--fix`. The route by auth variant is the hint's
+    // (the `fix:` line `os validate` and `os build` print).
+    expect(header.message).toContain("move it to a connector's `auth.credentialRef`");
     // Routed by shape, to an auth variant the connector schema really has.
-    expect(header.message).toContain('`bearer` or `api-key` (a header), with `auth.credentialRef`');
+    expect(header.hint).toContain("type: 'bearer', credentialRef");
     expect(header.hint).toContain("type: 'api-key', headerName, credentialRef");
     expect(header.hint).toContain('connector_action');
 
     const url = byPath.get('flows[2].nodes[1].config.url')!;
     expect(url.message).toContain("query parameter 'api_key'");
-    expect(url.message).toContain('`api-key` with `paramName`');
+    expect(url.message).toContain("move it to a connector's `auth.credentialRef`");
     expect(url.hint).toContain("type: 'api-key', paramName, credentialRef");
 
     const input = byPath.get('flows[2].nodes[3].connectorConfig.input.auth.clientSecret')!;
     expect(input.message).toContain("connector input 'auth.clientSecret'");
-    expect(input.message).toContain('authenticates through its own `auth.credentialRef`');
+    expect(input.message).toContain('the connector authenticates through `auth.credentialRef`');
     expect(input.hint).toContain('credentialRef');
 
     const nested = byPath.get('flows[2].nodes[2].config.try.nodes[0].config.headers.Authorization')!;
@@ -358,7 +377,100 @@ describe('flow-credential-literal — registered once, at every door, as an advi
 
   it('exports the rule and its id from the package entry', () => {
     const b = barrel as Record<string, unknown>;
-    expect(b.lintFlowCredentialLiterals).toBe(lintFlowCredentialLiterals);
+    expect(b.lintFlowCredentialLiterals).toBe(lintFlowCredentialLiteralsUnrecorded);
     expect(b.FLOW_CREDENTIAL_LITERAL).toBe(FLOW_CREDENTIAL_LITERAL);
+  });
+});
+
+describe('[#22161] one-line verdicts — flow-credential-literal', () => {
+  it('reads as one sentence per position, the short route included', () => {
+    const byPath = new Map(lintFlowCredentialLiterals(controlStack()).map((f) => [f.path, f.message]));
+    expect(byPath.get('flows[0].nodes[0].config.headers["X-Api-Key"]')).toBe(
+      "header 'X-Api-Key' holds a credential-shaped literal, readable by every member who can read flows; "
+        + "move it to a connector's `auth.credentialRef`",
+    );
+    expect(byPath.get('flows[2].nodes[1].config.url')).toBe(
+      "url query parameter 'api_key' holds a credential-shaped literal, readable by every member who can read "
+        + "flows; move it to a connector's `auth.credentialRef`",
+    );
+    expect(byPath.get('flows[2].nodes[3].connectorConfig.input.auth.clientSecret')).toBe(
+      "connector input 'auth.clientSecret' holds a credential-shaped literal, readable by every member who can "
+        + 'read flows; drop it: the connector authenticates through `auth.credentialRef`',
+    );
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(FLOW_CREDENTIAL_LITERAL);
+    expect(entry, 'no `os explain flow-credential-literal` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'served, as authored, to every member who can read flows',
+      'cannot withhold a value here',
+      'ADR-0097 §3',
+      '`bearer` or a header `api-key`',
+      '`api-key` with `paramName`',
+      'No variant carries a secret in a url path',
+      'a heuristic',
+      'A `{variable}` template is not a literal',
+      'never the value itself',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('each position and each region kind the explanation names fires', () => {
+    // The explanation module imports nothing, so its positions are held to the
+    // rule by running the rule: one probe per position, top level and inside
+    // each region kind it names.
+    const text = explainRule(FLOW_CREDENTIAL_LITERAL)!.paragraphs.join('\n');
+    for (const named of ['`config.headers`', '`config.url`', '`connectorConfig.input`', '`try_catch`', '`loop`', '`parallel`']) {
+      expect(text, named).toContain(named);
+    }
+    const call = (id: string) => ({
+      id,
+      type: 'http',
+      config: { url: 'https://x.invalid/p?api_key=probe-url-sentinel', headers: { Authorization: 'Bearer probe-sentinel' } },
+    });
+    const stack = {
+      flows: [
+        {
+          name: 'regions',
+          nodes: [
+            { id: 'loop', type: 'loop', config: { collection: '{items}', body: { nodes: [call('in_loop')], edges: [] } } },
+            {
+              id: 'par',
+              type: 'parallel',
+              config: { branches: [{ nodes: [call('in_branch')], edges: [] }] },
+            },
+            {
+              id: 'conn',
+              type: 'connector_action',
+              connectorConfig: { connectorId: 'rest', actionId: 'request', input: { token: 'probe-input-sentinel' } },
+            },
+          ],
+          edges: [],
+        },
+      ],
+    };
+    const paths = lintFlowCredentialLiterals(stack).map((f) => f.path);
+    expect(paths).toEqual([
+      'flows[0].nodes[0].config.body.nodes[0].config.headers.Authorization',
+      'flows[0].nodes[0].config.body.nodes[0].config.url',
+      'flows[0].nodes[1].config.branches[0].nodes[0].config.headers.Authorization',
+      'flows[0].nodes[1].config.branches[0].nodes[0].config.url',
+      'flows[0].nodes[2].connectorConfig.input.token',
+    ]);
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FLOW_CREDENTIAL_LITERAL);
+    // The coverage control first: all three positions fired.
+    for (const opening of ['header ', 'url query parameter ', 'connector input ']) {
+      expect(converted.some((f) => f.message.startsWith(opening)), opening).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

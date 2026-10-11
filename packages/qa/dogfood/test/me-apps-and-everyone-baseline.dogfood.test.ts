@@ -29,6 +29,7 @@
 // @proof: me-apps-and-everyone-baseline
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createSecurityCatalogReader } from '@objectstack/core';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin } from '@objectstack/plugin-security';
@@ -148,15 +149,15 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
   });
 
   // ── #2753: the baseline binds to the everyone anchor at bootstrap ────────
-  it('bootstrap binds member_default to the everyone position (one channel, D5)', async () => {
-    const everyone = await ql.findOne('sys_position', { where: { name: 'everyone' }, context: SYS });
-    const baseline = await ql.findOne('sys_permission_set', { where: { name: 'member_default' }, context: SYS });
-    expect(everyone?.id && baseline?.id, 'anchor + baseline seeded').toBeTruthy();
-    const binding = await ql.findOne('sys_position_permission_set', {
-      where: { position_id: everyone.id, permission_set_id: baseline.id },
-      context: SYS,
-    });
-    expect(binding, 'everyone ← member_default binding row exists (bootstrap no longer refuses)').toBeTruthy();
+  // [ADR-0131 D2/D3] The binding is the `everyone` definition's
+  // `permissionSets`, which the resolver reads; the boot writes no
+  // `sys_position` or junction row for it.
+  it('bootstrap names member_default on the everyone definition (one channel, D5)', async () => {
+    const reader = createSecurityCatalogReader({ registry: ql.registry, metadata: stack.kernel.getService('metadata') });
+    const everyone = await reader.resolve('position', 'everyone');
+    expect((everyone?.definition as any)?.permissionSets, 'everyone names member_default (bootstrap no longer refuses)')
+      .toContain('member_default');
+    expect(await ql.find('sys_position', { where: { name: 'everyone' }, context: SYS }), 'no everyone row is written').toEqual([]);
   });
 
   it('deleting records is no longer a baseline right (anchor-forbidden bit removed)', async () => {

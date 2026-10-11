@@ -108,6 +108,26 @@ export type EngineRow = Record<string, any>;
 type AutomationCondition = Parameters<AutomationEngine['evaluateCondition']>[0];
 
 /**
+ * [#22599] What the engine's `delete` answers: the method's own declared
+ * return type, read off it rather than re-declared here, so the door promises
+ * exactly what the engine promises. The engine declares `boolean | number`:
+ * whether a by-id delete removed its row, or how many rows a predicate delete
+ * removed. Every `hooks.run` delete is by id, so it answers `true` for the
+ * row it removed (a row that is not there is refused before the driver
+ * runs). It is never the row: a test that needs the deleted row reads it
+ * before the delete.
+ */
+type EngineDeleteAnswer = Awaited<ReturnType<ObjectQL['delete']>>;
+
+/**
+ * [#22599] What one `hooks.run` write resolves with, keyed on its operation:
+ * the row the engine answers for an `insert` or an `update`, and
+ * {@link EngineDeleteAnswer} for a `delete`. Distributive, so a call whose
+ * `operation` is the union type resolves with the union of the answers.
+ */
+type HookWriteAnswer<Op extends 'insert' | 'update' | 'delete'> = Op extends 'delete' ? EngineDeleteAnswer : EngineRow;
+
+/**
  * The refusal a dispatcher-door method (`flows.*`, `actions.run`) throws when
  * the route answered a 4xx/5xx — the route's own ADR-0112 envelope, carried
  * whole. `code` and `status` are the assertion pair (the same pair a REST
@@ -254,6 +274,10 @@ export interface VerifyHandle {
      * engine's own error: assert on its `code` (and `statusCode`), never on
      * the message alone.
      *
+     * [#22599] An `insert` or an `update` resolves with the row the engine
+     * answers. A `delete` resolves with what the engine's `delete` answers,
+     * `true` for the row it removed, and never with the row.
+     *
      * `update` and `delete` address the row by `input.id`. The caller is a
      * person (`{ as }`, this overload) or the system (`{ system: true }`,
      * the next one), never both.
@@ -264,12 +288,12 @@ export interface VerifyHandle {
      * body })` with no token. That route hands the engine its own guest
      * context, keeps only the fields the form collects, and answers `{ id }`.
      */
-    run(
+    run<Op extends 'insert' | 'update' | 'delete'>(
       object: string,
-      operation: 'insert' | 'update' | 'delete',
+      operation: Op,
       input: EngineRow,
       opts: AsUser,
-    ): Promise<EngineRow>;
+    ): Promise<HookWriteAnswer<Op>>;
     /**
      * [#22301] The same three writes as the SYSTEM principal ({@link AsSystem}):
      * the engine calls above with `context: { isSystem: true }`, the write an
@@ -289,7 +313,12 @@ export interface VerifyHandle {
      * so it fires no record-change flow. Insert through `seed` for end-state
      * fixture data, and through this door for a write the app should react to.
      */
-    run(object: string, operation: 'insert' | 'update' | 'delete', input: EngineRow, opts: AsSystem): Promise<EngineRow>;
+    run<Op extends 'insert' | 'update' | 'delete'>(
+      object: string,
+      operation: Op,
+      input: EngineRow,
+      opts: AsSystem,
+    ): Promise<HookWriteAnswer<Op>>;
     /**
      * [#22301] A PREDICATE update: one payload written to every row `where`
      * selects. This is the engine's own predicate path, `update(object, data,
@@ -694,7 +723,10 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
     hooks: {
       // Parameters annotated because the member is overloaded (an overload
       // set gives no contextual parameter types); the return type is left to
-      // inference, as it was before the overload.
+      // inference, as it was before the overload. [#22599] Inference gives
+      // `Promise<any>` (the engine's `insert` declares `any`), so tsc does not
+      // relate each `case` below to its overload's answer: each returns the
+      // engine call unchanged, the call `HookWriteAnswer` reads its types off.
       async run(object: string, operation: 'insert' | 'update' | 'delete', input: EngineRow, opts: AsUser | AsSystem) {
         // The call's own shape is judged before anyone is resolved: a
         // malformed call is refused for its own reason, not for whatever the

@@ -2,8 +2,26 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { validateFlowFilterTokens, FLOW_FILTER_TOKEN_UNKNOWN } from './validate-flow-filter-tokens.js';
+import {
+  validateFlowFilterTokens as validateFlowFilterTokensUnrecorded,
+  FLOW_FILTER_TOKEN_UNKNOWN,
+} from './validate-flow-filter-tokens.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
+import { FLOW_TEMPLATE_DATE_FUNCTIONS, FLOW_TEMPLATE_VALUE_FUNCTIONS } from './flow-template-grammar.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain flow-filter-token-unknown`. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateFlowFilterTokens: typeof validateFlowFilterTokensUnrecorded = (...args) => {
+  const findings = validateFlowFilterTokensUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /** A flow whose `query_stalled` node filters on `value` — #16096's own shape. */
 function flowStack(value: unknown): Record<string, unknown> {
@@ -164,5 +182,58 @@ describe('walk reach', () => {
     const cyclic: Record<string, unknown> = { filter: {} };
     (cyclic.filter as Record<string, unknown>).self = cyclic;
     expect(() => validateFlowFilterTokens({ flows: [{ name: 'f', nodes: [cyclic] }] })).not.toThrow();
+  });
+});
+
+describe('[#22161] one-line verdicts — flow-filter-token-unknown', () => {
+  it('reads as one sentence', () => {
+    const findings = validateFlowFilterTokens(flowStack('{TOMORROW()}'));
+    expect(findings.map((f) => f.message)).toEqual([
+      'Filter value "{TOMORROW()}" calls \'TOMORROW\', which neither the flow template dialect nor the filter '
+        + 'placeholders define, so the evaluator raises a guard refusal and this node cannot run',
+    ]);
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(FLOW_FILTER_TOKEN_UNKNOWN);
+    expect(entry, 'no `os explain flow-filter-token-unknown` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'two layers',
+      '`interpolateFilter`',
+      '`FlowExpressionFunctionError`',
+      'a `fault` edge may not swallow',
+      'renders empty',
+      'call-position',
+      '`{record.id}`',
+      'a machine consumer keyed on the id',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('the two vocabularies the explanation names are the rule\'s own', () => {
+    // The explanation module imports nothing, so its function lists are held
+    // to the grammar's constants here; the placeholders and the template
+    // forms it names are held by the silent cases above.
+    const text = explainRule(FLOW_FILTER_TOKEN_UNKNOWN)!.paragraphs.join('\n');
+    expect(FLOW_TEMPLATE_DATE_FUNCTIONS).toEqual(['NOW', 'TODAY']);
+    expect(text).toContain('`{NOW()}` and `{TODAY()}` with an optional ± N day offset');
+    const values = [...FLOW_TEMPLATE_VALUE_FUNCTIONS];
+    expect(text).toContain(`the value functions ${values.slice(0, -1).join(', ')} and ${values[values.length - 1]}.`);
+    for (const placeholder of ['{current_user_id}', '{today}', '{30_days_ago}', '{$User.Id}']) {
+      expect(text, placeholder).toContain(placeholder);
+      expect(validateFlowFilterTokensUnrecorded(flowStack(placeholder)), placeholder).toEqual([]);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FLOW_FILTER_TOKEN_UNKNOWN);
+    // The coverage control first: the id fired, on more than one token.
+    expect(new Set(converted.map((f) => f.message)).size).toBeGreaterThan(1);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

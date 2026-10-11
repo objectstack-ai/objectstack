@@ -82,12 +82,13 @@ describe('ApiTrigger', () => {
         expect(runs[0].params).toEqual({ title: 'New lead', amount: 5000 });
     });
 
-    it('answers 404 identically for unknown flows and wrong hookIds (no probing oracle)', async () => {
+    it('answers unknown flows and wrong hookIds identically, with the unverified-post refusal', async () => {
         arm({ hookId: 'hk1', secret: 's3cret' });
         const a = await trigger.handleRequest({ flowName: 'nope', hookId: 'hk1', rawBody: '{}' });
         const b = await trigger.handleRequest({ flowName: 'lead_intake', hookId: 'wrong', rawBody: '{}' });
         expect(a).toEqual(b);
-        expect(a.status).toBe(404);
+        expect(a.status).toBe(401);
+        expect((a.body as any).error.code).toBe('INVALID_SIGNATURE');
     });
 
     it('401s a missing or bad signature', async () => {
@@ -115,11 +116,12 @@ describe('ApiTrigger', () => {
             expect(queue.subscribed).toEqual([]);
             expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('armed:'));
 
-            // A post to the flow finds no hook: the same 404 an unknown flow
-            // gets, and nothing reaches the queue or the flow.
+            // A post to the flow finds no hook: the same refusal an unknown
+            // flow gets, and nothing reaches the queue or the flow.
             const res = await trigger.handleRequest({ flowName: 'lead_intake', hookId: 'default', rawBody: '{"x":1}' });
-            expect(res.status).toBe(404);
-            expect(res.body).toEqual({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No such hook.' } });
+            expect(res).toEqual(await trigger.handleRequest({ flowName: 'never_armed', hookId: 'default', rawBody: '{"x":1}' }));
+            expect(res.status).toBe(401);
+            expect((res.body as any).error.code).toBe('INVALID_SIGNATURE');
             expect(queue.published).toEqual([]);
             expect(await queue.deliver()).toBe(0);
             expect(runs).toEqual([]);
@@ -154,8 +156,12 @@ describe('ApiTrigger', () => {
     it('stop() disarms the hook and unsubscribes the queue', async () => {
         arm({ hookId: 'hk1', secret: 's3cret' });
         trigger.stop('lead_intake');
-        const res = await trigger.handleRequest({ flowName: 'lead_intake', hookId: 'hk1', rawBody: '{}' });
-        expect(res.status).toBe(404);
+        const res = await trigger.handleRequest({
+            flowName: 'lead_intake', hookId: 'hk1', rawBody: '{}', signatureHeader: sig('s3cret', '{}'),
+        });
+        expect(res.status).toBe(401);
+        expect((res.body as any).error.code).toBe('INVALID_SIGNATURE');
+        expect(queue.published).toEqual([]);
         expect(trigger.listHooks()).toHaveLength(0);
     });
 });
@@ -213,11 +219,12 @@ describe('ApiTrigger — a secret read at verification time', () => {
         }
     });
 
-    it('an unknown hook still answers 404 before any secret is read (no oracle)', async () => {
+    it('a wrong hook id is refused before any secret is read', async () => {
         let reads = 0;
         const { t } = armWith(async () => { reads += 1; return HELD; });
         const res = await t.handleRequest({ flowName: 'held_intake', hookId: 'wrong', rawBody: '{}', signatureHeader: sig(HELD, '{}') });
-        expect(res.status).toBe(404);
+        expect(res.status).toBe(401);
+        expect((res.body as any).error.code).toBe('INVALID_SIGNATURE');
         expect(reads).toBe(0);
     });
 });
@@ -355,5 +362,153 @@ describe('ApiTrigger — the timestamped signature form', () => {
         expect(verifySignature(SECRET, BODY, sigV1(SECRET, BODY, NOW))).toBe(true);
         expect(verifySignature(SECRET, BODY, sig(SECRET, BODY))).toBe(true);
         expect(verifySignature(SECRET, BODY, sigV1(SECRET, BODY, NOW - WINDOW - 1))).toBe(false);
+    });
+});
+
+/**
+ * One answer for every post that does not verify, whatever the flow and the
+ * hook id: an unknown flow, an armed flow under the default hook id, an armed
+ * flow under a custom hook id posted with the wrong hook id, and each of those
+ * unsigned or with a signature that does not verify. Every answer is the same
+ * status and the same body, so the answer does not separate armed flow names
+ * from unarmed ones. The cause goes to the server log only.
+ *
+ * These pins assert the status, the code, and that every answer equals every
+ * other; the message prose is not pinned. Two CONTROLS beside them: a valid
+ * post is still accepted under the default and a custom hook id, and the
+ * `503` for a secret that cannot be read (the declared residual) is unchanged.
+ */
+describe('ApiTrigger — one answer for every post that does not verify', () => {
+    const NOW = 1760000000;
+    const SECRET_DEFAULT = 'pin-uniform-default-61c2';
+    const SECRET_CUSTOM = 'pin-uniform-custom-9d04';
+    const BODY = JSON.stringify({ event: 'uniform.pin', marker: 'pin-body-marker-4b7e' });
+
+    function sigV1(secret: string, body: string, t: number): string {
+        return `t=${t},v1=` + createHmac('sha256', secret).update(`${t}.${body}`, 'utf8').digest('hex');
+    }
+
+    let queue: ReturnType<typeof makeFakeQueue>;
+    let log: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
+    let trigger: ApiTrigger;
+
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(NOW * 1000);
+        queue = makeFakeQueue();
+        log = { info: vi.fn(), warn: vi.fn() };
+        trigger = new ApiTrigger(() => queue, log as any);
+        trigger.start({ flowName: 'armed_on_default', config: { secret: SECRET_DEFAULT } }, async () => {});
+        trigger.start({ flowName: 'armed_on_custom', config: { hookId: 'hk_custom', secret: SECRET_CUSTOM } }, async () => {});
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    /** Where a post is sent, and the cause the log must record whatever it is signed with (`null`: the signature's). */
+    const ADDRESSES = [
+        ['an unknown flow', 'never_armed', 'default', 'unknown-flow'],
+        ['an unknown flow, under a custom-looking hook id', 'never_armed', 'hk_custom', 'unknown-flow'],
+        ['an armed flow under the default hook id', 'armed_on_default', 'default', null],
+        ['an armed flow under a custom hook id, posted with the wrong hook id', 'armed_on_custom', 'default', 'wrong-hook-id'],
+        ['an armed flow under a custom hook id, posted with its hook id', 'armed_on_custom', 'hk_custom', null],
+    ] as const;
+
+    /** A signature that does not verify for any of the addresses, and the cause it records. */
+    const BAD_SIGNATURES = [
+        ['unsigned', undefined, 'signature-absent'],
+        ['a malformed signature', 'not-a-signature-value', 'signature-malformed'],
+        ['a body-only signature under another secret', sig('not-the-secret', BODY), 'signature-mismatch'],
+        ['a timestamped signature under another secret', sigV1('not-the-secret', BODY, NOW), 'signature-mismatch'],
+    ] as const;
+
+    /** Posts that carry the RIGHT secret for some flow and still must not verify. */
+    const SIGNED_BUT_UNVERIFIED = [
+        ['the right secret, posted with the wrong hook id', 'armed_on_custom', 'default', sig(SECRET_CUSTOM, BODY), 'wrong-hook-id'],
+        ['another flow\'s secret, posted to an unknown flow', 'never_armed', 'default', sig(SECRET_DEFAULT, BODY), 'unknown-flow'],
+        ['another flow\'s secret, posted to an armed flow', 'armed_on_default', 'default', sig(SECRET_CUSTOM, BODY), 'signature-mismatch'],
+        ['the right secret, with a timestamp outside the window', 'armed_on_default', 'default', sigV1(SECRET_DEFAULT, BODY, NOW - 3600), 'signature-outside-window'],
+    ] as const;
+
+    type Case = { label: string; flowName: string; hookId: string; header: string | undefined; cause: string };
+    const CASES: Case[] = [
+        ...ADDRESSES.flatMap(([where, flowName, hookId, addressCause]) =>
+            BAD_SIGNATURES.map(([how, header, signatureCause]) => ({
+                label: `${where}, ${how}`, flowName, hookId, header, cause: addressCause ?? signatureCause,
+            }))),
+        ...SIGNED_BUT_UNVERIFIED.map(([label, flowName, hookId, header, cause]) => ({ label, flowName, hookId, header, cause })),
+    ];
+
+    const post = (c: Case) =>
+        trigger.handleRequest({ flowName: c.flowName, hookId: c.hookId, rawBody: BODY, signatureHeader: c.header });
+
+    /** The `cause` of every refusal line logged so far. */
+    const refusalCauses = () =>
+        log.warn.mock.calls
+            .map((call) => call[1] as { cause?: unknown } | undefined)
+            .filter((meta) => meta != null && typeof meta === 'object' && 'cause' in meta)
+            .map((meta) => meta!.cause);
+
+    it('every unverified post gets the same status and the same envelope, and nothing is enqueued', async () => {
+        expect(CASES).toHaveLength(ADDRESSES.length * BAD_SIGNATURES.length + SIGNED_BUT_UNVERIFIED.length);
+        const answers = [];
+        for (const c of CASES) answers.push({ label: c.label, answer: await post(c) });
+
+        const [first] = answers;
+        expect(first!.answer.status).toBe(401);
+        expect(first!.answer.body.success).toBe(false);
+        expect((first!.answer.body as any).error.code).toBe('INVALID_SIGNATURE');
+        for (const { label, answer } of answers) {
+            expect(answer, label).toEqual(first!.answer);
+        }
+        expect(queue.published).toEqual([]);
+    });
+
+    it('the server log records the real cause of each refusal, once, and never the secret, the signature or the body', async () => {
+        for (const c of CASES) {
+            log.warn.mockClear();
+            await post(c);
+            expect(refusalCauses(), c.label).toEqual([c.cause]);
+            const logged = JSON.stringify([...log.warn.mock.calls, ...log.info.mock.calls]);
+            for (const secret of [SECRET_DEFAULT, SECRET_CUSTOM]) {
+                expect(logged.includes(secret), `${c.label}: the secret`).toBe(false);
+            }
+            if (c.header) expect(logged.includes(c.header), `${c.label}: the signature value`).toBe(false);
+            expect(logged.includes('pin-body-marker-4b7e'), `${c.label}: the body`).toBe(false);
+        }
+    });
+
+    it('CONTROL: a valid post is still accepted under the default hook id and under a custom one, in both signature forms', async () => {
+        for (const [flowName, hookId, secret] of [
+            ['armed_on_default', 'default', SECRET_DEFAULT],
+            ['armed_on_custom', 'hk_custom', SECRET_CUSTOM],
+        ] as const) {
+            for (const header of [sigV1(secret, BODY, NOW), sig(secret, BODY)]) {
+                const res = await trigger.handleRequest({ flowName, hookId, rawBody: BODY, signatureHeader: header });
+                expect(res.status, `${flowName}/${hookId}`).toBe(202);
+                expect(res.body.accepted).toBe(true);
+            }
+        }
+        expect(queue.published).toHaveLength(4);
+        expect(refusalCauses()).toEqual([]);
+    });
+
+    it('CONTROL: a secret that cannot be read still answers 503 for its flow and hook id, signed or not; a wrong hook id never reads it', async () => {
+        let reads = 0;
+        trigger.start(
+            { flowName: 'armed_unreadable', config: {}, resolveSecret: async () => { reads += 1; throw new Error('store offline'); } },
+            async () => {},
+        );
+        for (const header of [undefined, sig('not-the-secret', BODY)]) {
+            const res = await trigger.handleRequest({ flowName: 'armed_unreadable', hookId: 'default', rawBody: BODY, signatureHeader: header });
+            expect(res.status).toBe(503);
+            expect((res.body as any).error.code).toBe('SERVICE_UNAVAILABLE');
+        }
+        expect(reads).toBe(2);
+
+        const wrongHook = await trigger.handleRequest({ flowName: 'armed_unreadable', hookId: 'other', rawBody: BODY });
+        expect(wrongHook).toEqual(await post(CASES[0]!));
+        expect(reads).toBe(2);
+        expect(queue.published).toEqual([]);
     });
 });

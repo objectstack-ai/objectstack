@@ -64,7 +64,7 @@
 - ready + 全绿 ≠ 已入队:队列从不主动拉 PR,入队是显式动作。
 - 零 `enqueued` 事件按序查三条:① `mergeable_state` 是否 `dirty`。
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
-- ③ PR 碰 `.github/workflows/**` 而 token 缺 workflows 权限。
+- ③ PR 碰 `.github/workflows/**`:令牌常驻 `workflows: write`(裁决评论 6104822731),仍拒即授权漂移。
 - 确认 MERGED 同一动作里给 `Part of` 卡收口、`Fixes` 卡代关但标也须摘,⛔ 不拆到下轮巡检。
 - 卡以 completed 关闭且带 `Adopts:` 行 ⇒ 同一动作在所指 fork PR 贴致谢与落地链接并关闭它。
 - `Part of` 卡开着不摘 `pm:dispatched`,无在飞物的卡就永远算进 `label:pm:dispatched is:open`。

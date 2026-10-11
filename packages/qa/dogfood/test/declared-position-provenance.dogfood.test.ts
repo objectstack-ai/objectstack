@@ -9,36 +9,36 @@
 //
 // The declared-position seeder wrote its rows with no provenance stamp, so they
 // carried the object default (`managed_by: 'admin'`) and the system-row write
-// gate did not protect them. Measured on `origin/main` before the fix, through
-// this file's own steps: `PATCH /api/v1/data/sys_position/:id` of `manager`'s
-// label answered 200 and the row carried the new label; the next boot wrote the
-// declared label back over it, with no message. The metadata door refused the
-// same edit (403 `NOT_OVERRIDABLE`).
+// gate did not protect them: a data-door label edit of `manager` answered 200,
+// and the next boot wrote the declared label back over it, with no message.
 //
 // ## The rule now
 //
-// The seeder stamps `managed_by: 'package'`, and a package position row is
-// locked the way a packaged permission set is (`permission-set-projection.ts`,
-// #4669): a patch touching only row state (`active`, `is_default` — Setup's
-// Activate, Deactivate and Set as Default) passes; a definition column
-// (`label`, `delegatable`, …) and a delete are refused with the gate's code.
+// [ADR-0131 D2, stage 6a] No boot writes a `sys_position` row: the declared
+// and built-in position seeders are retired, and a declared position lives in
+// the registry. The rows an earlier boot wrote stay on an existing database
+// (C7 removes them), stamped `managed_by: 'package'` by the seeder this file
+// once pinned, and the system-row write gate still guards them: a patch
+// touching only row state (`active`, `is_default` — Setup's Activate,
+// Deactivate and Set as Default) passes; a definition column (`label`,
+// `delegatable`, …) and a delete are refused with the gate's code. This file
+// stages those rows itself ({@link stageExistingRows}), the way the retired
+// seeder left them.
 //
 // ## What each case pins
 //
-//   - precondition: the showcase package holds the name, and the metadata door
-//     refuses an edit of it;
-//   - the declared row carries `managed_by: 'package'`; a label edit, a
-//     `delegatable` edit and a delete are refused with the gate's code and
-//     leave the row as it was;
+//   - precondition: the showcase package holds the name, the metadata door
+//     refuses an edit of it, and the boot wrote no position row;
+//   - a staged declared row: a label edit, a `delegatable` edit and a delete
+//     are refused with the gate's code and leave the row as it was;
 //   - Deactivate, Activate and Set as Default answer 200; a multi-row
 //     (`updateMany`) row-state patch lands, a multi-row label patch is refused;
-//   - after a cold boot: the declared label and the refused columns stand, the
-//     row-state writes persisted, an upgraded deployment's row (stamped `admin`
-//     before the fix) is re-stamped and refused the same way;
-//   - controls: an administrator-authored position and an environment-authored
-//     one (saved through the metadata door) stay editable; a built-in refuses
-//     even a bare `{ active }` patch; the seeder's own system write still
-//     refreshes a declared row's display text from the declaration.
+//   - after a cold boot: the boot writes nothing — the refused columns stand,
+//     the row-state writes persisted, a row stamped `admin` stays `admin`, a
+//     drifted label stays drifted, and a position saved through the metadata
+//     door gets no row (the catalog serves it);
+//   - controls: an administrator-authored position stays editable; a built-in
+//     row refuses even a bare `{ active }` patch.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -74,6 +74,8 @@ const DRIFTED = 'field_ops_delegate';
 const ADMIN_AUTHORED = 'p22360_admin_authored';
 const ENV_AUTHORED = 'p22360_env_authored';
 const REFUSED = { status: 403, code: 'PERMISSION_DENIED' };
+/** Every declared row the cases read. */
+const STAGED = [EDITED, DELETED, DEACTIVATED, ACTIVATED, DEFAULTED, ...BULK, UPGRADED, DRIFTED];
 
 describe('[#22360] a package-declared position: definition locked at the data door, row state switchable, across a cold boot (showcase)', () => {
     let prevCwd: string;
@@ -103,6 +105,25 @@ describe('[#22360] a package-declared position: definition locked at the data do
         token = await stack.signIn();
         ql = await stack.kernel.getServiceAsync('objectql');
     };
+    /** Every `sys_position` row, by name, past every scope. */
+    const census = async () =>
+        ((await ql.find('sys_position', { where: {}, limit: 1000 }, SYS)) as any[]).map((r) => r.name).sort();
+    let bootCensus: string[] = [];
+    /**
+     * The rows an existing database holds: what the retired seeders wrote — a
+     * declared position stamped `package` with its declared label, the
+     * `everyone` anchor stamped `platform`.
+     */
+    const stageExistingRows = async () => {
+        for (const name of STAGED) {
+            await ql.insert('sys_position', {
+                id: `pos_${name}`, name, label: declaredLabel(name), managed_by: 'package', active: true, is_default: false,
+            }, SYS);
+        }
+        await ql.insert('sys_position', {
+            id: 'pos_everyone', name: 'everyone', label: 'Everyone', managed_by: 'platform', active: true, is_default: false,
+        }, SYS);
+    };
 
     beforeAll(async () => {
         prevCwd = process.cwd();
@@ -110,6 +131,8 @@ describe('[#22360] a package-declared position: definition locked at the data do
         dir = mkdtempSync(join(tmpdir(), 'dogfood-22360-'));
         dbFile = join(dir, 'showcase.db');
         await start();
+        bootCensus = await census();
+        await stageExistingRows();
     }, 300_000);
 
     afterAll(async () => {
@@ -123,12 +146,8 @@ describe('[#22360] a package-declared position: definition locked at the data do
         expect((ql.registry.getArtifactItem('position', EDITED) as any)?._packageId).toBe(SHOWCASE_PACKAGE);
         const put = await call('PUT', `/meta/position/${EDITED}`, { name: EDITED, label: 'Manager (metadata door)' });
         expect(outcome(put), JSON.stringify(put.json)).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
-    });
-
-    it('the declared row carries package provenance', async () => {
-        const row = await one(EDITED);
-        expect({ label: row.label, managed_by: row.managed_by })
-            .toEqual({ label: declaredLabel(EDITED), managed_by: 'package' });
+        // [ADR-0131 D2] The fresh boot wrote no position row at all.
+        expect(bootCensus).toEqual([]);
     });
 
     it('a label edit and a delegatable edit are refused with the gate\'s code, and the row is unchanged', async () => {
@@ -204,22 +223,23 @@ describe('[#22360] a package-declared position: definition locked at the data do
         expect((await one('everyone')).active).toBe(everyone.active);
     });
 
-    it('after a cold boot: the definition stands, the row-state writes persisted, an upgraded deployment\'s row is re-stamped and refused, the seeder still refreshes display text', async () => {
-        // The upgraded shape: the row a pre-fix boot wrote (the object default,
-        // `admin`) carrying a column an administrator set before the upgrade.
+    it('after a cold boot: the boot writes nothing — the refused columns stand, the row-state writes persisted, and no row is re-stamped, refreshed or added', async () => {
+        // The upgraded shape: a row stamped with the object default (`admin`)
+        // carrying a column an administrator set.
         const upgraded = await one(UPGRADED);
         await ql.update('sys_position', { id: upgraded.id, managed_by: 'admin', delegatable: true }, SYS);
-        expect([(await one(UPGRADED)).managed_by, (await one(UPGRADED)).delegatable]).toEqual(['admin', true]);
         // Drifted display text, which only a system write can reach now.
         await ql.update('sys_position', { id: (await one(DRIFTED)).id, label: 'Field ops delegate (stale)' }, SYS);
-        // An environment-authored position: a metadata-door save, whose row the
-        // seeder writes at the next boot.
+        // An environment-authored position: a metadata-door save. The catalog
+        // serves it; no boot writes its row.
         const saved = await call('PUT', `/meta/position/${ENV_AUTHORED}`, { name: ENV_AUTHORED, label: 'Environment authored' });
         expect(saved.status, JSON.stringify(saved.json)).toBe(200);
+        const before = await census();
 
         await stack!.stop();
         await start();
 
+        expect(await census()).toEqual(before);
         const edited = await one(EDITED);
         expect({ label: edited.label, managed_by: edited.managed_by })
             .toEqual({ label: declaredLabel(EDITED), managed_by: 'package' });
@@ -231,13 +251,12 @@ describe('[#22360] a package-declared position: definition locked at the data do
             bulk: await Promise.all(BULK.map(async (name) => (await one(name)).active)),
         }).toEqual({ deactivated: false, activated: true, defaulted: true, bulk: [false, false] });
 
-        const restamped = await one(UPGRADED);
-        expect({ managed_by: restamped.managed_by, delegatable: restamped.delegatable, label: restamped.label })
-            .toEqual({ managed_by: 'package', delegatable: true, label: declaredLabel(UPGRADED) });
-        const refused = await patch(UPGRADED, { label: 'Executive (edited in Setup)' });
-        expect(outcome(refused), JSON.stringify(refused.json)).toEqual(REFUSED);
-
-        expect((await one(DRIFTED)).label).toBe(declaredLabel(DRIFTED));
+        const kept = await one(UPGRADED);
+        expect({ managed_by: kept.managed_by, delegatable: kept.delegatable }).toEqual({ managed_by: 'admin', delegatable: true });
+        expect((await one(DRIFTED)).label).toBe('Field ops delegate (stale)');
+        expect(await rows(ENV_AUTHORED)).toEqual([]);
+        const served = await call('GET', `/meta/position/${ENV_AUTHORED}`);
+        expect(served.status, JSON.stringify(served.json)).toBe(200);
         // This case boots the showcase again (`start()`), so it carries the
         // budget `beforeAll` gives that same `start()`, not vitest's 5000 ms
         // default. Since #22301 the showcase boots with the providers its
@@ -246,12 +265,8 @@ describe('[#22360] a package-declared position: definition locked at the data do
         // loaded one.
     }, 300_000);
 
-    it('controls after the cold boot: administrator- and environment-authored positions keep unmanaged, editable rows', async () => {
+    it('control after the cold boot: an administrator-authored position keeps its unmanaged, edited row', async () => {
         const admin = await one(ADMIN_AUTHORED);
         expect([admin.label, admin.managed_by]).toEqual(['Admin authored (edited)', 'admin']);
-        const env = await one(ENV_AUTHORED);
-        expect(env.managed_by, 'the seeder wrote the environment definition\'s row').toBe('admin');
-        const edited = await patch(ENV_AUTHORED, { label: 'Environment authored (edited)' });
-        expect(edited.status, JSON.stringify(edited.json)).toBe(200);
     });
 });

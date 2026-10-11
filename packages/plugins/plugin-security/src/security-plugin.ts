@@ -57,7 +57,6 @@ import { jsonColumnCheckRefusalCarriedBy, storedFormCheckJudge } from './rls-che
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
-import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredPermissions, upsertPackagePermissionSet, readDeclared } from './bootstrap-declared-permissions.js';
 import { applyManagedWriteDenies } from './managed-object-write-denies.js';
 import {
@@ -78,12 +77,9 @@ import {
   type SuggestionListFilter,
 } from './suggested-audience-bindings.js';
 import { cleanupPackagePermissions } from './cleanup-package-permissions.js';
-import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import {
   catalogIsPerOrganization,
   listSeedOrganizationIds,
-  resolveOwnOrganizationRow,
-  seedCtx,
 } from './organization-scope.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
@@ -1717,8 +1713,9 @@ export class SecurityPlugin implements Plugin {
     // engine registry by the registry's own seam, under this plugin's package
     // id — the provenance the manifest stamps on `permissions`. Here, on the
     // engine handle `start()` already holds, before `kernel:ready` runs the
-    // seeders and before any request reaches the metadata door. Rows keep
-    // seeding from the same list (`bootstrapBuiltinRoles`).
+    // bootstrap and before any request reaches the metadata door. The
+    // declaration is their one home: the boot writes no `sys_position` row for
+    // them (ADR-0131 D2).
     const builtinRegistry = (ql as { registry?: unknown }).registry;
     if (registerBuiltinPositions(builtinRegistry, SECURITY_PLUGIN_ID) === 0) {
       ctx.logger.warn(
@@ -4446,23 +4443,19 @@ export class SecurityPlugin implements Plugin {
     // conjunction of the two is the strict equality alone. Nothing about the
     // wall changes here, at either layer — the rows get an owner instead.
     //
-    // The four steps are named ONCE and driven from two places (the boot sweep
+    // The catalog step is named ONCE and driven from two places (the boot sweep
     // below, and the organization-creation hook further down) so a newly
     // created organization can never be seeded differently from one present at
-    // boot. See `organization-scope.ts` for the doctrine and the loud guard
+    // boot. [ADR-0131 D2/D3] Positions get no row from the boot: the six
+    // built-ins are declared by this plugin (`builtin-positions.ts`), a
+    // package's positions are registry items, and the `everyone` baseline is
+    // that anchor's declared `permissionSets` (`declareEveryoneBaseline`). See `organization-scope.ts` for the doctrine and the loud guard
     // that stands in place of a reap, and `rowMatchesDeclaration` for why the
     // boot sweep is O(changed declarations) rather than O(organizations x rows)
     // of blind writes.
     //
     // `organizationId` undefined is the `single`-posture pass and reproduces
     // the pre-existing organization-less behaviour exactly.
-    const seedCatalogPositions = async (organizationId?: string): Promise<void> => {
-      try {
-        await bootstrapDeclaredPositions(ql, this.metadata, { logger: ctx.logger, organizationId });
-      } catch (e) {
-        ctx.logger.warn('[security] declared-position seeding failed', { error: (e as Error).message, organization: organizationId });
-      }
-    };
     // [#11532] The names `bootstrapPlatformAdmin` seeds organization-less on
     // every boot. The per-organization pass sees those rows through the driver's
     // compatibility arm and used to report them as PRE-FIX leftovers with a
@@ -4481,75 +4474,13 @@ export class SecurityPlugin implements Plugin {
         ctx.logger.warn('[security] declared-permission seeding failed', { error: (e as Error).message, organization: organizationId });
       }
     };
-    const seedCatalogBuiltins = async (organizationId?: string): Promise<void> => {
-      try {
-        await bootstrapBuiltinRoles(ql, { logger: ctx.logger, organizationId });
-      } catch (e) {
-        ctx.logger.warn('[security] built-in role seeding failed', { error: (e as Error).message, organization: organizationId });
-      }
-    };
-    // [ADR-0090 D5] Bind the configured baseline set(s) to THIS organization's
-    // `everyone` anchor. Scoped for the same reason the anchors themselves are:
-    // once each organization holds its own `everyone` row, an unscoped
-    // `where: { name: 'everyone' }` would bind whichever copy the driver
-    // happened to order first — one organization's baseline landing in
-    // another's catalog.
-    const bindBaselineToEveryone = async (organizationId?: string): Promise<void> => {
-      try {
-        // [#18535, ADR-0090 D5] The stack's declared `capabilities:` — the half
-        // of the anchor question the predicate cannot discover for itself. Read
-        // ONCE per pass, from the DECLARATIONS rather than from `sys_capability`:
-        // the registry is a package capability's one home (ADR-0131 D3), and no
-        // row is seeded for it. Unreadable or absent ⇒ `undefined` ⇒ the
-        // pre-#17811 verdict, which refuses.
-        const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
-        for (const baselineName of this.baselinePermissionSets) {
-          const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
-          const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
-          if (offending) {
-            ctx.logger.warn('[security] refusing to bind fallback set to everyone — high-privilege bits', {
-              set: baselineName, offending,
-            });
-            continue;
-          }
-          // Limit 5, not 1: a tenant-scoped read returns organization-less rows
-          // alongside this organization's own, and the two are not
-          // interchangeable — `resolveOwnOrganizationRow` is what tells them
-          // apart.
-          const everyoneRows = await ql.find('sys_position', { where: { name: 'everyone' }, limit: 5, context: seedCtx(organizationId) });
-          const everyone: any = resolveOwnOrganizationRow(Array.isArray(everyoneRows) ? everyoneRows : [], organizationId).own;
-          const setRows = await ql.find('sys_permission_set', { where: { name: baselineName }, limit: 5, context: seedCtx(organizationId) });
-          const set: any = resolveOwnOrganizationRow(Array.isArray(setRows) ? setRows : [], organizationId).own;
-          if (everyone?.id && set?.id) {
-            const existing = await ql.find('sys_position_permission_set', {
-              where: { position_id: everyone.id, permission_set_id: set.id }, limit: 1, context: seedCtx(organizationId),
-            });
-            if (!(Array.isArray(existing) && existing[0])) {
-              await ql.insert('sys_position_permission_set', {
-                id: `pps_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-                position_id: everyone.id,
-                permission_set_id: set.id,
-              }, { context: seedCtx(organizationId) });
-              ctx.logger.info('[security] baseline set bound to everyone anchor (ADR-0090 D5)', {
-                set: baselineName, ...(organizationId ? { organization: organizationId } : {}),
-              });
-            }
-          }
-        }
-      } catch (e) {
-        ctx.logger.warn('[security] everyone-anchor baseline binding failed (non-fatal)', { error: (e as Error).message });
-      }
-    };
     /**
      * Every catalog step for ONE organization, in boot order. Used by the
-     * organization-creation hook; the boot sweep drives the same four steps
+     * organization-creation hook; the boot sweep drives the same step
      * interleaved with the organization-independent bootstrap work.
      */
     const seedCatalogForOrganization = async (organizationId?: string): Promise<void> => {
-      await seedCatalogPositions(organizationId);
       await seedCatalogPermissions(organizationId);
-      await seedCatalogBuiltins(organizationId);
-      await bindBaselineToEveryone(organizationId);
     };
     /**
      * Which passes this boot performs: one per organization under a walled
@@ -4592,16 +4523,8 @@ export class SecurityPlugin implements Plugin {
         // real answer: a later pass that returns none (walled posture, an
         // unreadable engine) must not erase the admin an earlier pass resolved.
         if (report?.adminUserId) this.claimTargetAdminUserId = report.adminUserId;
-        // Which organizations this boot seeds. Resolved ONCE per bootstrap run
-        // and reused by all four catalog steps, so a sweep costs one
-        // organization enumeration rather than four.
+        // Which organizations this boot seeds. Resolved ONCE per bootstrap run.
         const catalogPasses = await catalogSeedPasses();
-        // [ADR-0057 D6 / #2077] Seed stack-declared positions into sys_position so they
-        // stop being decorative (position→permission-set resolution + recipients).
-        // One pass per organization under a walled posture.
-        for (const organizationId of catalogPasses) {
-          await seedCatalogPositions(organizationId);
-        }
         // [ADR-0086 D5] Seed stack-declared permission sets into
         // sys_permission_set with package provenance (managed_by:'package' +
         // package_id) — packages ship working default access for their own
@@ -4612,9 +4535,6 @@ export class SecurityPlugin implements Plugin {
           await seedCatalogPermissions(organizationId);
         }
 
-        // [ADR-0090 D5] The baseline→`everyone` binding runs LATER — after
-        // `bootstrapBuiltinRoles` seeds the `everyone` anchor (the anchor must
-        // exist before it can be bound). See `bindFallbackToEveryone` below.
         // [ADR-0086 P2 — 块1] Register the publish-time materializer so a
         // permission set authored/edited through the PACKAGE door (saved as a
         // `permission` draft, then published) lands in sys_permission_set with
@@ -4773,33 +4693,6 @@ export class SecurityPlugin implements Plugin {
           }
         } catch (e) {
           ctx.logger.warn('[security] permission publish-materializer registration failed', { error: (e as Error).message });
-        }
-        // [ADR-0068 D2] Seed the framework's reserved built-in identity positions
-        // (platform_admin / org_*) so the role catalog is self-describing.
-        for (const organizationId of catalogPasses) {
-          await seedCatalogBuiltins(organizationId);
-        }
-        // [ADR-0090 D5] Bind the configured baseline set(s) to the `everyone`
-        // audience anchor (idempotent). This makes the CLI/dev baseline
-        // (`fallbackPermissionSet` — the app's `isDefault` set) visible as an
-        // ordinary position binding: same table, same audit path, same explain
-        // surface as any admin-authored default grant. The binding is validated
-        // with the SAME high-privilege predicate the write gate enforces — a
-        // dangerous baseline is refused loudly, never seeded. MUST run after
-        // `bootstrapBuiltinRoles` (which seeds the `everyone` anchor) and before
-        // `syncAudienceBindingSuggestions` (so the app's own fallback set is
-        // already bound and never generates a redundant pending suggestion).
-        //
-        // [#7555] Every name in the COMPOSED baseline is bound, not just the
-        // declared one — the join table takes many rows per position, and the
-        // explain surface's whole job is to answer "what does a new member get"
-        // truthfully. Binding only the app's set while `member_default` also
-        // resolves at request time would make `security/explain` report a
-        // narrower default than the runtime actually applies. The refusal is
-        // PER SET: a high-privilege name is skipped loudly and the rest still
-        // bind (the D5/D9 anchor gate is untouched, and each set faces it).
-        for (const organizationId of catalogPasses) {
-          await bindBaselineToEveryone(organizationId);
         }
         // [ADR-0090 D5/D9] Reconcile the suggested-audience-binding surface:
         // every declared `isDefault: true` set that is not already bound to
