@@ -114,8 +114,10 @@ describe('verifyHttpSignature — the receiver\'s half of both forms', () => {
 
     it('refuses a timestamp the HMAC does not cover — never a fallback to the body-only form', () => {
         const bodyOnlyHex = signHttpBody(BODY, SECRET).slice('sha256='.length);
-        // A captured body-only signature, re-labelled with a fresh timestamp.
+        // A captured body-only signature, re-labelled with a fresh timestamp,
+        // in either spelling.
         expect(verifyHttpSignature(BODY, SECRET, `t=${NOW},v1=${bodyOnlyHex}`)).toEqual({ valid: false, reason: 'mismatch' });
+        expect(verifyHttpSignature(BODY, SECRET, `t=${NOW},sha256=${bodyOnlyHex}`)).toEqual({ valid: false, reason: 'malformed' });
         // A genuine value whose timestamp was moved into the window.
         const stale = signHttpBodyAt(BODY, SECRET, NOW - 3600);
         const moved = stale.replace(`t=${NOW - 3600},`, `t=${NOW},`);
