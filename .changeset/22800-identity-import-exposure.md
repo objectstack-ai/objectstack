@@ -1,10 +1,14 @@
 ---
-'@objectstack/plugin-auth': patch
+'@objectstack/plugin-auth': minor
 ---
 
-fix(plugin-auth): the identity import asks each lookup target its declared exposure before matching a cell, like every other `runImport` caller (#22800)
+fix(plugin-auth)!: the identity import asks each lookup target its declared exposure before matching a cell, like every other `runImport` caller (#22800)
 
-Clause-②: no
+Clause-②: no (narrowing)
+
+<!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime read: the identity import stops matching cells against a lookup target whose existing `enable` declaration already refuses `list` on every data route (the remedy is the declaration the author already wrote). The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only); `IdentityImportDeps` keeps its shape and only its doc comment changes. -->
+
+**BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
 
 The identity import (`runAdminImportUsers`) parses its payload with `prepareImportRequest` and runs its rows through `runImport`, with a run protocol of its own that writes through better-auth. Its `sys_user` field map, which decides which cells are references, is read through the import's declaration reader (`IdentityImportDeps.getMetaItem`).
 

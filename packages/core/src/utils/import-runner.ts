@@ -211,9 +211,9 @@ export interface ImportProtocolLike {
    * [#22739] The object-declaration read, the one the door's import template
    * and the connector pull already make. The reference resolution reads a
    * lookup TARGET's `enable` block through it ({@link servesReferenceTarget}).
-   * A protocol without it (plugin-auth's identity import, whose reads run
-   * under the system identity) has no declaration to judge, and none is
-   * fabricated for it.
+   * A protocol without it has no declaration to judge, and none is fabricated
+   * for it; plugin-auth's identity import, whose reads run under the system
+   * identity, carries it like every other caller (#22800).
    */
   getMetaItem?(request: GetMetaItemRequest): Promise<unknown>;
 }
