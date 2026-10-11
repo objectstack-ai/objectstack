@@ -354,11 +354,29 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + '`manage_metadata`, then the ADR-0126 §5 posture rule requiring the platform operator in `group`/`isolated` — one shared '
       + 'implementation in `domains/activation-gate.ts`. The name must resolve in the security catalog the resolver reads (404 '
       + 'otherwise, 503 when no catalog is bound), and the audience anchors `everyone` / `guest` are refused 400 in either direction; switching `admin_full_access` off is refused 403 by the last-admin guard\'s '
-      + 'ledger hook. The ONE `/security` route the dispatcher mounts on the wire (`registerSecurityActivationRoutes`); the rest '
-      + 'of `/security` is the REST server\'s. NOT JS-SDK surface, for the action door\'s reason: its caller is the Setup console '
+      + 'ledger hook. One of the two `/security` routes the dispatcher mounts on the wire (`registerSecurityActivationRoutes`, '
+      + 'beside the permission-set clone door below); the rest of `/security` is the REST server\'s. NOT JS-SDK surface, for the action door\'s reason: its caller is the Setup console '
       + '(Deactivate on the position and permission-set pages), which calls the platform API directly; adding a client method '
       + 'reclassifies this row to `sdk`. Pinned in `domains/catalog-activation-door.test.ts` and '
       + '`qa/dogfood/test/catalog-activation-door.dogfood.test.ts`' },
+  { route: 'POST /security/permission-sets/:name/clone', domain: '/security', disposition: 'server-only',
+    note: "ADR-0126 §7.1 — copy a permission set's whole definition under a NEW machine name: the sanctioned way to customize a "
+      + "packaged set whose base is locked (the lock-and-clone rule), and the clone that keeps working once no `sys_permission_set` "
+      + "row exists. Body `{ name, label }`, both mandatory, closed; the name must meet the metadata name rule (snake_case), else 400. "
+      + "The SOURCE is read through the security catalog the resolver reads (registry first, then the metadata service) — ⛔ never a "
+      + "`sys_permission_set` row; unknown 404, no catalog bound or an unreadable one 503. A target name the catalog holds (the "
+      + "source's own included) answers 409 `RESOURCE_CONFLICT`, and the save is create-only (`parentVersion: null`), so a row "
+      + "written in between is refused rather than overwritten. The copy is saved through the metadata protocol's `saveMetaItem` as an "
+      + "environment-authored `permission` item — no organization, no package — so `/meta`'s schema, gates and hooks judge it. "
+      + "Whole-definition copy minus ONE server-declared list, `PERMISSION_SET_CLONE_DROPPED_KEYS` (`domains/permission-set-clone.ts`): "
+      + "the provenance envelope (derived from the spec), `packageId` / `managedBy` / `protection`, and the two privilege decisions "
+      + "`adminScope` and `isDefault`; the response `{ permissionSet, notice }` names what was not copied. ⛔ No ancestry on the "
+      + "definition or the response (ADR-0126 §9). ⚑ `manage_metadata` — the metadata door's own verdict "
+      + "(`metaWriteCapabilityVerdict`), because the clone is a metadata save; fail-closed, only `isSystem` bypassing; the domain-wide "
+      + "anonymous floor answers 401 first. ⛔ NOT the ADR-0126 §5 activation gate: a clone takes nothing away from any tenant. NOT "
+      + "JS-SDK surface, for the flow clone door's reason: its caller is the Setup console's Clone on the permission-set page, which "
+      + "calls the platform API directly; adding a client method reclassifies this row to `sdk`. Pinned in "
+      + "`domains/permission-set-clone.test.ts` and over HTTP in `qa/dogfood/test/permission-set-clone-door.dogfood.test.ts`" },
 
   // ── keys ──────────────────────────────────────────────────────────────────
   { route: 'POST /keys', domain: '/keys', disposition: 'sdk', client: 'keys.create',
