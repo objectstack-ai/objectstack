@@ -4,10 +4,10 @@
  * [ADR-0131 D3, ADR-0066 D1] The curated platform capabilities as declared
  * `capability` metadata, read off a REAL boot of this plugin: what the security
  * catalog read lists, what the boot writes into `sys_capability`, and what the
- * capability seeders report.
+ * capability seeder reports.
  *
  * The boot is the plugin's own — `init`, `start`, then its `kernel:ready`
- * handlers in registration order (both capability seeding passes included) —
+ * handlers in registration order (the declared-capability seeding included) —
  * over a real `ObjectQL` engine on a SQLite file, so a second boot can open the
  * database the first one seeded.
  *
@@ -25,10 +25,10 @@
  * ## The expected values
  *
  * Read off the producers, never off a registry: the curated entries from
- * `PLATFORM_CAPABILITIES`, the stack's from its declaration. The census is the
- * curated pass's rows and nothing else: the stack's declared capability is
- * served by the registry, its one home (ADR-0131 D3), and no row is written
- * for it.
+ * `PLATFORM_CAPABILITIES`, the stack's from its declaration. The
+ * census is empty: neither the curated capabilities nor the stack's declared
+ * capability gets a row. Both are served by the registry, their one home
+ * (ADR-0131 D3), on a fresh database or on one the boot opened again.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -192,10 +192,8 @@ async function census(engine: ObjectQL): Promise<string[]> {
     .sort();
 }
 
-/** The census the boot writes, read off the producers (module doc). */
-const EXPECTED_CENSUS = PLATFORM_CAPABILITIES
-  .map((c) => [c.name, 'platform', '-', c.label, c.description, c.scope, true].join(' | '))
-  .sort();
+/** The census the boot writes, read off the producers (module doc): no row at all. */
+const EXPECTED_CENSUS: string[] = [];
 
 const SCENARIOS: ReadonlyArray<{ posture: Posture; declared: Declared }> = [
   { posture: 'single', declared: 'in the registry' },
@@ -247,11 +245,11 @@ describe.each(SCENARIOS)('a $posture boot, the stack capability $declared', ({ p
     }
   });
 
-  it('the boot writes the curated rows and no row for the stack’s declared capability, on a fresh and on a seeded database', async () => {
+  it('the boot writes no `sys_capability` row — neither curated nor the stack’s declared one — on a fresh and on a seeded database', async () => {
     expect(await census(fresh.engine)).toEqual(EXPECTED_CENSUS);
     expect(await census(reseeded.engine)).toEqual(EXPECTED_CENSUS);
-    expect(fresh.writes.filter((w) => w.endsWith(` ${STACK_CAPABILITY.name}`))).toEqual([]);
-    // The seeded database needs no write at all: every row already reads as declared.
+    expect(fresh.writes).toEqual([]);
+    // The seeded database needs no write at all either.
     expect(reseeded.writes).toEqual([]);
   });
 

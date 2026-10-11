@@ -17,7 +17,7 @@
     "setup": "pnpm install && pnpm --filter @objectstack/spec build",
     "prepare": "node scripts/setup-git-hooks.mjs",
     "check:merge-driver": "node scripts/git-env.mjs --self-test && node scripts/git-merge-regen.mjs --self-test && node scripts/check-regen-pending.mjs --self-test",
-    "version": "changeset version && node scripts/sync-protocol-version.mjs && node scripts/sync-template-versions.mjs && node scripts/sync-docs-image-tags.mjs && node scripts/sync-release-index-currency.mjs",
+    "version": "changeset version && node scripts/sync-protocol-version.mjs && node scripts/sync-template-versions.mjs && node scripts/sync-docs-image-tags.mjs && node scripts/sync-release-index-currency.mjs && node scripts/check-skill-compatibility-version.mjs --fix",
     "release": "pnpm run build && bash scripts/build-console.sh && bash scripts/release-publish.sh",
     "docs:dev": "pnpm --filter @objectstack/docs dev",
     "docs:build": "pnpm --filter @objectstack/docs build",

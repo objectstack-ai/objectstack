@@ -23,6 +23,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
 import { AuthManager } from './auth-manager';
+import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit.js';
 import {
   assertAudienceConfig,
   classifyCreationMethod,
@@ -113,11 +114,19 @@ const createMemoryEngine = () => {
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-4785';
 
+/**
+ * [ADR-0131 D3/D4] The sets the fixture's `sys_permission_set` rows name are
+ * catalog definitions too — the admission asks the catalog whether a set
+ * grants, and the grant is written with the row's id.
+ */
+const bindRowCatalog = (engine: any) =>
+  bindTestSecurityCatalog(engine, () => catalogFromTables({ sys_permission_set: engine.tables.get('sys_permission_set') }));
+
 const makeManager = (engine: any, config: Record<string, unknown> = {}) =>
   new AuthManager({
     secret: SECRET,
     baseUrl: 'http://localhost:3000',
-    dataEngine: engine,
+    dataEngine: bindRowCatalog(engine),
     ...config,
   } as any);
 
@@ -804,6 +813,37 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect(body.code).toBe(AUDIENCE_CONFIG_ERROR);
     expect(String(body.message)).toContain("'ghost'");
     expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
+  });
+
+  it('[ADR-0131 D3] a declared set the activation ledger switches OFF refuses admission — never an ungranted admit', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPermissionSet(engine, 'member_default');
+    engine.tables.set('sys_metadata_activation', [
+      { id: 'act_member', metadata_type: 'permission', name: 'member_default', package_id: 'pkg', active: false },
+    ]);
+    const manager = makeManager(engine, {
+      audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
+    });
+    const res = await signUp(manager, 'user@anywhere.com');
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe(AUDIENCE_CONFIG_ERROR);
+    expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
+  });
+
+  it('[ADR-0131 D3] the set ROW\'s `active` switches nothing: a row flagged off still admits and grants', async () => {
+    // The resolver reads no catalog row, so the row flag is not a deactivation.
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPermissionSet(engine, 'member_default', { active: false });
+    const manager = makeManager(engine, {
+      audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
+    });
+    const res = await signUp(manager, 'anyone@anywhere.com');
+    expect(res.status).toBeLessThan(300);
+    await vi.waitFor(() => {
+      expect((engine.tables.get('sys_user_permission_set') ?? []).length).toBe(1);
+    });
   });
 
   it('open: self-serve admitted and granted', async () => {

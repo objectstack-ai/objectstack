@@ -201,8 +201,7 @@ describe('#8692 — provenance of a seeder-created default permission set (measu
     // THE RULING, pinned (Option A, 2026-08-15). Before it, this row stored
     // `'admin'` — the declaration's `defaultValue` — because the insert omitted
     // `managed_by` entirely. The seeder now stamps provenance explicitly, in
-    // line with `bootstrap-builtin-positions.ts` and
-    // `bootstrap-system-capabilities.ts`, which always have.
+    // line with `bootstrap-builtin-positions.ts`, which always has.
     const engine = await boot();
     await bootstrapPlatformAdmin(engine as any, defaultPermissionSets);
 

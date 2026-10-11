@@ -11,14 +11,14 @@ import { strictObject } from '../shared/strict-object';
  * The built-in authorization capabilities the framework ships, as first-class
  * definitions (name / label / description / scope). This module is the SINGLE
  * SOURCE OF TRUTH consumed by:
- *   - `@objectstack/plugin-security` `bootstrapSystemCapabilities`, which seeds
- *     these into `sys_capability` records at boot (`managed_by: 'platform'`), and
+ *   - `@objectstack/plugin-security` `registerBuiltinCapabilities`, which
+ *     registers these as `capability` metadata items at boot (ADR-0131 D3), and
  *   - the authoring lint `validateCapabilityReferences` (ADR-0066 ⑨), which
  *     resolves capability references (`requiredPermissions`) against these names
  *     plus any a stack declares via a permission set's `systemPermissions`.
  *
  * Keeping the list here (in the contract package, which everything depends on)
- * avoids a spec→plugin dependency inversion and keeps the seeder and the lint
+ * avoids a spec→plugin dependency inversion and keeps the registry and the lint
  * from drifting apart.
  */
 

@@ -213,10 +213,11 @@ read and the metadata door serve.
 
 <Callout type="info">
 **No authorization check reads a `sys_capability` row.** Permission-set grants
-and resource `requiredPermissions` match capability names **as strings**. A
-declared capability has no row at all, and the rows the platform still seeds
-for its curated capabilities are a catalogue only: clearing a row's `active`
-flag revokes nothing. Withdraw a capability by withdrawing the **grant**.
+and resource `requiredPermissions` match capability names **as strings**. The
+boot writes no row for a capability, declared or curated: both are served by
+the registry. A row an older database still holds is a catalogue only, and
+clearing its `active` flag revokes nothing. Withdraw a capability by
+withdrawing the **grant**.
 </Callout>
 
 ## `capability` is code-only

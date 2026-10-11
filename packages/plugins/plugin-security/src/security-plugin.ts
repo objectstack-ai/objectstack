@@ -43,6 +43,7 @@ import {
 import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
 import { createPositionWriteThrough } from './position-write-through.js';
 import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
+import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
   explainAccess,
   buildContextForUser,
@@ -85,7 +86,6 @@ import {
   resolveOwnOrganizationRow,
   seedCtx,
 } from './organization-scope.js';
-import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
 import { RLSCompiler, RLS_DENY_FILTER, compiledPolicyNameOf, policyDeclaresClause } from './rls-compiler.js';
@@ -5021,20 +5021,6 @@ export class SecurityPlugin implements Plugin {
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
         }
-        // [ADR-0131 D3] A package's declared capabilities (`defineCapability` /
-        // `stack.capabilities`) are served by the registry, their one home; no
-        // `sys_capability` row is seeded for them, so no declared name is
-        // materialized here, and a second holder of a name is refused by the
-        // registry's one-holder rule (`security-catalog-namespace.ts`).
-        const materializedCapabilityNames: string[] = [];
-        try {
-          await bootstrapSystemCapabilities(ql, this.bootstrapPermissionSets, {
-            logger: ctx.logger,
-            materializedCapabilityNames,
-          });
-        } catch (e) {
-          ctx.logger.warn('[security] capability seeding failed', { error: (e as Error).message });
-        }
         // [A4 #2920] Heal residual legacy `managed_by` values (env sets stamped
         // 'user'; older positions stamped system/config/user) onto the unified
         // platform/package/admin vocab. Runs after the seeders so their canonical
@@ -5115,6 +5101,34 @@ export class SecurityPlugin implements Plugin {
       (ctx as any).hook('kernel:bootstrapped', runPositionBackfill);
     } else {
       void runPositionBackfill();
+    }
+
+    // [ADR-0131 D3/D4] The catalog reference report: per organization, every
+    // assignment and grant whose name the security catalog does not resolve,
+    // every grant that names nothing, every position row with no definition
+    // (by name and organization), and under `single` every position name more
+    // than one row carries. A reference that resolves nowhere confers nothing;
+    // this is what makes that loud. Registered AFTER the two backfills above,
+    // so it runs after them (handlers run in registration order) and does not
+    // report a name either one resolved this boot. It writes nothing. Only at
+    // `kernel:bootstrapped`: run any earlier, it would judge a catalog that is
+    // still being filled. See `catalog-reference-report.ts`.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
+        try {
+          await reportCatalogReferences(ql as any, {
+            posture: this.tenancyPosture,
+            catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
+            logger: ctx.logger,
+          });
+        } catch (e) {
+          ctx.logger.warn(
+            '[security] the catalog reference report did not run — assignments and grants whose names the ' +
+              'security catalog does not resolve go unreported for this boot',
+            { error: (e as Error)?.message },
+          );
+        }
+      });
     }
 
     // ── Project the permission sets of a package that arrives AFTER the boot ──
@@ -7628,13 +7642,11 @@ export class SecurityPlugin implements Plugin {
    *
    * A name in `PLATFORM_CAPABILITY_NAMES` is a capability the PLATFORM
    * defines: grants (`systemPermissions`) and requirements
-   * (`requiredPermissions`) resolve it by name, and the curated seeder owns
-   * the row for it in the NULL-organization bucket
-   * (`bootstrap-system-capabilities.ts`). A Setup-authored row claiming such
-   * a name is a declaration the platform cannot honour — it can never BE the
-   * curated capability (provenance forging is refused by the gate above), and
-   * once it holds the name's bucket slot the seeder must decline the
-   * collision on every boot (`blockedCurated`, #8470). Maintainer ruling on
+   * (`requiredPermissions`) resolve it by name, and its definition is served
+   * by the registry (`builtin-capabilities.ts`, ADR-0131 D3), not by a row. A
+   * Setup-authored row claiming such a name is a declaration the platform
+   * cannot honour — it can never BE the curated capability (provenance
+   * forging is refused by the gate above). Maintainer ruling on
    * #8552 (2026-08-13): refuse the collision AT THE WRITE DOOR — create and
    * rename both — naming the colliding curated name; never answer 200.
    *
