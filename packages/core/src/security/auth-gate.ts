@@ -132,6 +132,131 @@ const ALLOW_ROUTES: readonly (readonly string[])[] = [
   ['approvals', 'act'],
 ];
 
+/**
+ * One PARAMETERISED row: a route of literal segments and `:name` parameters,
+ * exempt for the METHODS it names and no other. A parameter matches exactly one
+ * segment, of any value; a literal matches itself, unencoded.
+ */
+interface ParameterisedAllowRoute {
+  readonly segments: readonly string[];
+  readonly methods: readonly string[];
+}
+
+/**
+ * `POST /automation/hooks/:flowName/:hookId` — the inbound hook a third-party
+ * sender posts a signed event through to start an `api` flow (ADR-0041 Tier 1),
+ * admitted with no session by ruling A on #22757 (director record `6105447950`).
+ * The self-hosted raw-app mount (`@objectstack/trigger-api`, `HOOKS_PATH`) has
+ * never passed through this gate, and the sender has no session at all: the
+ * HMAC over the body, under the hook's own secret, is its whole credential, and
+ * the trigger-api service verifies it (`ITriggerApiService.handleInboundHook`).
+ * This row gives the dispatcher's spelling of the same route the same
+ * signature-only authentication, read by every seam that asks this list —
+ * the ADR-0069 gate, and `shouldDenyAnonymous` (`anonymous-deny.ts`), which
+ * the `/automation` domain's anonymous floor calls with its path and method.
+ *
+ * ⛔ Ruling condition 1, exactness. Exactly four segments, `POST` only, no
+ * prefix and no wildcard beyond the two parameters: `/automation/hooks`,
+ * `/automation/hooks/x`, `/automation/hooks/x/y/z`, any other method and every
+ * other `/automation` path stay gated. Anything wider returns to #22757.
+ */
+const INBOUND_HOOK_ROUTE: ParameterisedAllowRoute = {
+  segments: ['automation', 'hooks', ':flowName', ':hookId'],
+  methods: ['POST'],
+};
+
+/**
+ * The parameterised rows. Unlike {@link ALLOW_ROUTES} they are read in the
+ * DISPATCHER's spelling only, by {@link matchParameterisedRoute}: the route
+ * exists on the dispatcher alone, and a row must not admit a spelling the
+ * dispatcher's router reads differently.
+ */
+const ALLOW_PARAMETERISED_ROUTES: readonly ParameterisedAllowRoute[] = [INBOUND_HOOK_ROUTE];
+
+/**
+ * The segments of `rawPath` as a parameterised row reads them, or `null` for a
+ * spelling it does not read at all. Query and trailing slashes are stripped as
+ * for every row; nothing is percent-decoded.
+ *
+ * ⛔ A spelling with an EMPTY segment is not read, rather than read with the
+ * empty segments dropped as {@link matchesAllowlistedRoute} drops them. The
+ * dispatcher's scope strip (`/environments/:id`, which needs a non-empty id
+ * right after its slash) and its domain claims do not drop them, so a dropped
+ * reading could admit a path the router serves as a different route or as
+ * none: `/environments//env_1/automation/hooks/f/h` is a scoped hook here and an
+ * unrouted path there. One reading, the router's, and every other spelling
+ * stays gated.
+ */
+function canonicalRouteSegments(rawPath: string): string[] | null {
+  let path = rawPath.split('?')[0] ?? '';
+  let end = path.length;
+  while (end > 1 && path.charCodeAt(end - 1) === 47) end--;
+  path = path.slice(0, end);
+  if (path.length < 2 || path.charCodeAt(0) !== 47) return null;
+  const segments = path.slice(1).split('/');
+  return segments.includes('') ? null : segments;
+}
+
+/**
+ * The parameters `route` binds on `rawPath` + `method`, RAW (still
+ * percent-encoded, as the path carries them), or `null` when it does not match.
+ *
+ * Read as the dispatcher's router reads it: no mount base (the dispatcher's path
+ * arrives with the app prefix stripped), and one optional environment scope in
+ * the one spelling its scope strip removes (`/environments/:id`, never the
+ * retired `projects`), because the ADR-0069 gate and the membership gate both
+ * run BEFORE that strip. The segment count is pinned by the route's own length.
+ *
+ * ⛔ No method, no match: an exemption the route earns only for the methods it
+ * names cannot be earned by a caller that does not say which method it asks for.
+ */
+function matchParameterisedRoute(
+  route: ParameterisedAllowRoute,
+  rawPath: string | undefined | null,
+  method: string | undefined | null,
+): Record<string, string> | null {
+  if (!rawPath || typeof method !== 'string' || !route.methods.includes(method.toUpperCase())) return null;
+  const segments = canonicalRouteSegments(rawPath);
+  if (!segments) return null;
+  const rest = segments[0] === 'environments' && segments.length > 1 ? segments.slice(2) : segments;
+  if (rest.length !== route.segments.length) return null;
+  const params: Record<string, string> = {};
+  for (let k = 0; k < rest.length; k++) {
+    const want = route.segments[k] as string;
+    const got = rest[k] as string;
+    if (want.startsWith(':')) params[want.slice(1)] = got;
+    else if (got !== want) return null;
+  }
+  return params;
+}
+
+/** The inbound hook's two path parameters, as {@link matchInboundHookRoute} reads them. */
+export interface InboundHookRouteMatch {
+  /** The flow's name, raw: still percent-encoded as the path carries it. */
+  readonly flowName: string;
+  /** The hook id, raw: still percent-encoded as the path carries it. */
+  readonly hookId: string;
+}
+
+/**
+ * Is `path` + `method` the inbound hook route the allow-list admits, and with
+ * which parameters? The ONE reading of that route: the allow-list row matches
+ * through it, and the dispatcher's `/automation` domain and membership gate ask
+ * it too, so the readers that admit the route and the reader that serves it
+ * cannot disagree on any spelling. Same reading as the row (dispatcher spelling,
+ * one optional `/environments/:id` scope, no empty segment, `POST` only).
+ *
+ * The parameters come back RAW. Decoding them is the serving domain's job, as
+ * for every dispatcher domain that reads a path segment.
+ */
+export function matchInboundHookRoute(
+  path: string | undefined | null,
+  method: string | undefined | null,
+): InboundHookRouteMatch | null {
+  const params = matchParameterisedRoute(INBOUND_HOOK_ROUTE, path, method);
+  return params ? { flowName: params.flowName as string, hookId: params.hookId as string } : null;
+}
+
 /** Do `segments` start with every segment of `prefix`? */
 function startsWithSegments(segments: readonly string[], prefix: readonly string[]): boolean {
   if (segments.length < prefix.length) return false;
@@ -213,20 +338,30 @@ function matchesAllowlistedRoute(rawPath: string): boolean {
  * Normalising that `'' → '/'` at the dispatcher is the ruling's step 2, tracked
  * as #17625 (`domain:cli`, `Blocked-by: #7898`) — ⛔ not a tolerance to add back
  * here.
+ *
+ * ## `method` is read by the parameterised rows only (#22773)
+ *
+ * Every {@link ALLOW_ROUTES} row is exempt for every method, as before, so a
+ * caller that passes no method gets exactly the answer it always got. A
+ * parameterised row ({@link ALLOW_PARAMETERISED_ROUTES}) is exempt only for the
+ * methods it names, and only for a caller that names one: no method, no
+ * exemption on that row.
  */
-export function isAuthGateAllowlisted(rawPath: string | undefined | null): boolean {
+export function isAuthGateAllowlisted(rawPath: string | undefined | null, method?: string | null): boolean {
   if (!rawPath) return false;
-  return matchesAllowlistedRoute(rawPath);
+  if (matchesAllowlistedRoute(rawPath)) return true;
+  return ALLOW_PARAMETERISED_ROUTES.some((route) => matchParameterisedRoute(route, rawPath, method) !== null);
 }
 
 /**
  * Returns the active gate when `sessionUser` carries an `authGate` AND `path`
- * is not allow-listed; otherwise null. Anonymous users (no `authGate`) and
+ * (+ `method`, read as {@link isAuthGateAllowlisted} reads it) is not
+ * allow-listed; otherwise null. Anonymous users (no `authGate`) and
  * allow-listed paths always pass.
  */
-export function evaluateAuthGate(sessionUser: any, path: string): AuthGate | null {
+export function evaluateAuthGate(sessionUser: any, path: string, method?: string | null): AuthGate | null {
   const gate = normalizeAuthGate(sessionUser);
   if (!gate) return null;
-  if (isAuthGateAllowlisted(path)) return null;
+  if (isAuthGateAllowlisted(path, method)) return null;
   return gate;
 }

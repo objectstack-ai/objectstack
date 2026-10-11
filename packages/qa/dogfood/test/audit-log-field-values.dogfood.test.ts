@@ -190,7 +190,7 @@ describe('[#21155] the compliance ledger serves a parent field value only to a r
       for (const name of sets) {
         const setId = await idOf('sys_permission_set', { name });
         expect(setId, `fixture permission set ${name} seeded`).toBeTruthy();
-        await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: setId }, SYS);
+        await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
       }
     }
 

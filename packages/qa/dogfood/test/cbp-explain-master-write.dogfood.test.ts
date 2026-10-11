@@ -259,7 +259,7 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     stewardId = await uid('cpe-steward@verify.test');
     const stewardSet = await ql.findOne('sys_permission_set', { where: { name: contractStewardSet.name }, context: SYS });
     expect(stewardSet?.id, 'fixture permission set seeded').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: stewardId, permission_set_id: stewardSet.id }, { context: { ...SYS } });
+    await ql.insert('sys_user_permission_set', { user_id: stewardId, permission_set: stewardSet.name }, { context: { ...SYS } });
 
     await assertArmed([
       principalArmed({
@@ -474,7 +474,7 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
       const boardStewardId = await uid('cpe-board-steward@verify.test');
       const set = await ql.findOne('sys_permission_set', { where: { name: boardStewardSet.name }, context: SYS });
       expect(set?.id, 'board steward permission set seeded').toBeTruthy();
-      await ql.insert('sys_user_permission_set', { user_id: boardStewardId, permission_set_id: set.id }, { context: { ...SYS } });
+      await ql.insert('sys_user_permission_set', { user_id: boardStewardId, permission_set: set.name }, { context: { ...SYS } });
       await assertArmed([
         principalArmed({
           stack,

@@ -38,7 +38,6 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
 
 const SYS = { context: { isSystem: true } } as any;
-const NAME_HOOKS = 'plugin-security:grant-permission-set-name';
 const GUARD_PACKAGE = 'test.grant-readers-unnamed';
 
 function registerGuard(engine: ObjectQL): void {
@@ -138,10 +137,10 @@ const adminGrant = async (engine: ObjectQL): Promise<any> =>
  * refuses like any other revocation. The guard is bound again afterwards.
  */
 async function unnameAdminGrant(engine: ObjectQL): Promise<void> {
-  (engine as any).unregisterHooksByPackage(NAME_HOOKS);
-  (engine as any).unregisterHooksByPackage(GUARD_PACKAGE);
-  await engine.update('sys_user_permission_set', { permission_set: null }, { where: { user_id: 'usr_admin' }, multi: true, ...SYS });
-  registerGuard(engine);
+  // Beneath the engine: it refuses clearing a required name (ADR-0131 D4), and
+  // the guard refuses taking the standing away.
+  const driver: any = (engine as any).getDriver('sys_user_permission_set');
+  await driver.knex('sys_user_permission_set').where({ user_id: 'usr_admin' }).update({ permission_set: null });
   expect((await adminGrant(engine)).permission_set ?? null).toBeNull();
 }
 
@@ -170,24 +169,12 @@ describe('[ADR-0131 D4] a grant that names nothing — the last-administrator gu
     expect((await adminGrant(engine)).permission_set).toBe('admin_full_access');
   });
 
-  it('re-pointing the sole administrator’s grant by id is read as taking the standing away', async () => {
+  it('writing the legacy id moves no standing: nothing derives a name from it, so the write is permitted', async () => {
     const { engine } = await soleGrantAnchoredAdmin();
     const grant = await adminGrant(engine);
     const [viewer] = (await engine.find('sys_permission_set', { where: { name: 'viewer_readonly' }, ...SYS })) as any[];
-    await expect(engine.update('sys_user_permission_set', { id: grant.id, permission_set_id: viewer.id }, SYS))
-      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
-    expect((await adminGrant(engine)).permission_set).toBe('admin_full_access');
-  });
-
-  it('echoing the grant’s own id keeps the standing: the write is permitted', async () => {
-    const { engine } = await soleGrantAnchoredAdmin();
-    const grant = await adminGrant(engine);
-    await engine.update(
-      'sys_user_permission_set',
-      { id: grant.id, permission_set_id: grant.permission_set_id, reason: 'renewed' },
-      SYS,
-    );
-    expect((await adminGrant(engine)).reason).toBe('renewed');
+    await engine.update('sys_user_permission_set', { id: grant.id, permission_set_id: viewer.id, reason: 'renewed' }, SYS);
+    expect(await adminGrant(engine)).toMatchObject({ permission_set: 'admin_full_access', reason: 'renewed' });
   });
 });
 

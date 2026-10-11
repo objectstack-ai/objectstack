@@ -353,11 +353,11 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
       await engine.insert('sys_permission_set', { ...rest, id: `ps_${name}_${ORG}`, organization_id: ORG }, { context: orgCtx } as any);
     }
   }
-  // `single`: the boot's organization-admin backfill already granted it, so
-  // the reconcile finds nothing to do; walled: the organization's copy exists
-  // only now, so the reconcile grants.
+  // [ADR-0131 D4] The boot's organization-admin backfill already granted it by
+  // name, in every posture — no organization copy of the set is needed — so
+  // the reconcile finds nothing to do.
   const reconciled = await reconcileOrgAdminGrant(engine, 'usr_orgadmin', ORG, { posture });
-  expect(reconciled.action).toBe(posture === 'single' ? 'noop' : 'granted');
+  expect(reconciled.action).toBe('noop');
 
   // The member's set, granted through the data door by an administrator.
   const [viewer] = await engine.find('sys_permission_set', {
@@ -366,7 +366,7 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
   });
   await engine.insert(
     'sys_user_permission_set',
-    { user_id: 'usr_member', permission_set_id: (viewer as any).id },
+    { user_id: 'usr_member', permission_set: (viewer as any).name },
     { context: { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG } } as any,
   );
 

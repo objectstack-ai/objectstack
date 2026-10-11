@@ -168,6 +168,9 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
   // grant id lookup's, nothing more.
   const QA_PKG = 'com.objectstack.qa.granted-by';
   engine.registry.registerItem('permission', { name: 'qa_plain', label: 'Plain' } as any, 'name' as any, QA_PKG);
+  for (const name of ['organization_admin', 'organization_admin_no_bypass']) {
+    engine.registry.registerItem('permission', { name, label: name } as any, 'name' as any, QA_PKG);
+  }
   engine.registry.registerItem('position', { name: 'qa_rep', label: 'Rep', permissionSets: ['qa_plain'] } as any, 'name' as any, QA_PKG);
 
   let placement: InvitationPlacementService | undefined;
@@ -206,7 +209,7 @@ const CALLERS = {
 /** Each grant table, and a row on it every caller above may write. */
 const TABLES = {
   sys_user_permission_set: (extra: Record<string, unknown> = {}) => ({
-    user_id: TARGET, permission_set_id: 'ps_plain', ...extra,
+    user_id: TARGET, permission_set: 'qa_plain', ...extra,
   }),
   sys_user_position: (extra: Record<string, unknown> = {}) => ({
     user_id: TARGET, position: 'qa_rep', business_unit_id: 'bu_east', ...extra,

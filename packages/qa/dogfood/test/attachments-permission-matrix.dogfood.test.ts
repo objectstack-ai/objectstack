@@ -166,7 +166,7 @@ describe('attachments permission matrix (#2755)', () => {
     const managerSet = await ql.findOne('sys_permission_set', { where: { name: 'att_attachment_manager' }, context: SYS });
     expect(managerSet?.id, 'fixture permission set seeded').toBeTruthy();
     for (const userId of [memberAId, memberBId]) {
-      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: managerSet.id }, { context: { ...SYS } });
+      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: managerSet.name }, { context: { ...SYS } });
     }
 
     // [#21729] The precondition the header records, read off the live stack
@@ -721,7 +721,7 @@ describe('attachments without service-storage (a′)', () => {
     const editorId = (await ql.findOne('sys_user', { where: { email: 'att-nostorage-b@verify.test' }, context: SYS }))?.id;
     const managerSet = await ql.findOne('sys_permission_set', { where: { name: 'att_attachment_manager' }, context: SYS });
     for (const userId of [uploaderId, editorId]) {
-      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: managerSet.id }, { context: { ...SYS } });
+      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: managerSet.name }, { context: { ...SYS } });
     }
     await assertArmed([
       principalArmed({

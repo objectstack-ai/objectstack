@@ -125,7 +125,7 @@ async function boot(inside: boolean, email: string): Promise<Booted> {
   for (const name of GRANTS) {
     const set = await ql.findOne('sys_permission_set', { where: { name }, context: SYS });
     expect(set?.id, `fixture permission set ${name} seeded`).toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: set.id }, { context: { ...SYS } });
+    await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: set.name }, { context: { ...SYS } });
   }
   if (!inside) token = await leaveOrganization(stack, email);
   return { stack, rootDir, ql, adminId, token };

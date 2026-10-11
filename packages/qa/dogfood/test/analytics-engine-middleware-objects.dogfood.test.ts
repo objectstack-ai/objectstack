@@ -126,7 +126,7 @@ describe('[#21080] comment threads and activity rows: the analytics door answers
     const memberId = (await ql.findOne('sys_user', { where: { email: 'mw-objects-member@verify.test' }, context: SYS }))?.id;
     const set = await ql.findOne('sys_permission_set', { where: { name: activityReaderSet.name }, context: SYS });
     expect(set?.id, 'fixture permission set seeded').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set_id: set.id }, { context: { ...SYS } });
+    await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set: set.name }, { context: { ...SYS } });
 
     const idOf = async (res: Response) => {
       expect(res.status, 'fixture write').toBeLessThan(300);

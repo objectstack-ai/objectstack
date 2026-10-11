@@ -138,15 +138,35 @@ export interface FreeIdentifierResult {
  * Parse `rawFunctionSource` (the result of `String(fn)`) into a single
  * function-like node. Handlers come in three `.toString()` shapes — arrow,
  * function expression/declaration, and object-method shorthand — so we try
- * three wraps and take the first that yields exactly one function-like node.
+ * three wraps and take the first that yields exactly one function-like node
+ * SPANNING the whole source.
+ *
+ * The span is the half the count alone did not check (#22837). A method
+ * shorthand (`async handler(ctx) { … }`) is not a statement, so the first wrap
+ * parses it as a call followed by a block — and when that block holds exactly
+ * ONE nested function (`rows.map((r) => r.id)`), "exactly one function-like
+ * node" was true of the NESTED one, which was returned as the handler. Measured
+ * on the base of that card: the nested arrow's parameter read as the handler's,
+ * a method-body local it closed over read as free (the handler was refused and
+ * bundled for a name it declares), and a module-scope helper called outside it
+ * read as nothing (the handler lowered and threw ReferenceError on its first
+ * run). A node that is the handler starts where the wrapped source starts and
+ * ends where it ends; the nested one never does, so that wrap is rejected and
+ * the object-literal wrap reaches the method.
+ *
+ * Exported for `extract-hook-body.ts`, which reads the handler's PARAMETER
+ * LIST off the same node to rebind it to the sandbox's `ctx` — one parse of the
+ * handler, so the free-identifier verdict and the rebind can never disagree
+ * about which names the handler's parameters bind.
  */
-function parseFunction(rawFunctionSource: string): ts.FunctionLikeDeclarationBase | null {
-  const wraps = [
-    rawFunctionSource, // function decl / named function expression statement
-    `(${rawFunctionSource})`, // arrow / anonymous function expression
-    `({${rawFunctionSource}})`, // object-method shorthand `name(ctx){...}`
+export function parseFunction(rawFunctionSource: string): ts.FunctionLikeDeclarationBase | null {
+  const wraps: Array<[prefix: string, suffix: string]> = [
+    ['', ''], // function decl / named function expression statement
+    ['(', ')'], // arrow / anonymous function expression
+    ['({', '})'], // object-method shorthand `name(ctx){...}`
   ];
-  for (const code of wraps) {
+  for (const [prefix, suffix] of wraps) {
+    const code = `${prefix}${rawFunctionSource}${suffix}`;
     const sf = ts.createSourceFile('__handler__.js', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     let found: ts.FunctionLikeDeclarationBase | null = null;
     let count = 0;
@@ -164,8 +184,17 @@ function parseFunction(rawFunctionSource: string): ts.FunctionLikeDeclarationBas
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sf, visit);
-    // Exactly one top-level function-like node means the wrap matched cleanly.
-    if (found && count === 1) return found;
+    // Exactly one top-level function-like node, and it is the whole source:
+    // the wrap matched cleanly, and what matched is the handler itself.
+    const node = found as ts.FunctionLikeDeclarationBase | null;
+    if (
+      node &&
+      count === 1 &&
+      node.getStart(sf) === prefix.length &&
+      node.end === prefix.length + rawFunctionSource.length
+    ) {
+      return node;
+    }
   }
   return null;
 }

@@ -525,9 +525,10 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
 
       // Empty-slate dead-end (#3424): when EVERY approver on the node routes to
       // a group whose membership can be empty (an unstaffed position, an empty
-      // team/department), the request can resolve to an empty `pending_approvers`
-      // at runtime — no concrete user can act, and with `lockRecord` the record
-      // stays locked with no recovery except a platform/tenant admin override.
+      // team/department), no person the node names can act at runtime, and
+      // under the default `admin_rescue` the request opens on the
+      // organization's administrators instead (#22824), the record locked
+      // under `lockRecord` until one of them decides.
       // Advisory (`info`): staffing is runtime data a linter can't see, so this
       // flags the risky SHAPE and prescribes a guaranteed-staffed fallback.
       const routable = approvers.filter(
@@ -547,15 +548,15 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           // what recovers a stuck request is `os explain` text.
           message:
             `every approver on this node routes to a group (position/team/department), so if ` +
-            `none is staffed the request opens on an empty slate and waits forever` +
+            `none is staffed the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
           hint:
             `Make sure at least one target is always staffed, or add a guaranteed-staffed ` +
             `approver entry, e.g. { type: 'org_membership_level', value: 'owner' }, or declare ` +
-            `onEmptyApprovers: 'fallback' with a fallbackApprovers list for the node to open on ` +
-            `when the groups come back empty. A request that still lands empty is recoverable ` +
-            `only by a platform/tenant admin override, which may act on any pending request so that ` +
-            `one nobody in its slate can decide never stays stuck.`,
+            `onEmptyApprovers: 'fallback' with a fallbackApprovers list to name who decides ` +
+            `when the groups come back empty. A request that still lands empty opens on the ` +
+            `organization's administrators; only an organization with no administrator leaves it ` +
+            `to a platform administrator's override.`,
         });
       }
 
@@ -599,13 +600,14 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           // runtime fact; that reasoning is `os explain` text.
           message:
             `every approver on this node is { type: 'manager' }, so where sys_user.manager_id ` +
-            `is unset the request opens on an empty slate and waits forever` +
+            `is unset the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
           hint:
             `${MANAGER_ONLY_REMEDY} ${MANAGER_ONLY_ROUTES} Populate it for everyone who submits ` +
             `this request, or take the other escape that needs none of that: add a second approver ` +
             `entry which cannot resolve empty, e.g. { type: 'org_membership_level', value: 'owner' }. ` +
-            `A request that still lands empty is recoverable only by a platform/tenant admin override.`,
+            `A request that still lands empty opens on the organization's administrators; to name who ` +
+            `decides instead, declare onEmptyApprovers: 'fallback' with a fallbackApprovers list.`,
         });
       }
 

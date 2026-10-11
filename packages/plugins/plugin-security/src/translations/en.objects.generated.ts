@@ -322,12 +322,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Foreign key to sys_user."
       },
       permission_set_id: {
-        label: "Permission Set",
-        help: "Foreign key to sys_permission_set."
+        label: "Permission Set (legacy id)",
+        help: "[ADR-0131 D10] Legacy id reference to a sys_permission_set row, dropped with its data by a later stage. Not written and not read to grant anything: the grant names its set by permission_set."
       },
       permission_set: {
-        label: "Permission Set Name",
-        help: "[ADR-0131 D4] Machine name of the permission set this grant holds (sys_permission_set.name). Written by the platform from permission_set_id on every write that carries it; a supplied value must equal that name or the write is refused. NULL on a grant written before the column existed."
+        label: "Permission Set",
+        help: "[ADR-0131 D4] Machine name of the permission set this grant holds, as the security catalog names it. A name the catalog does not hold is refused. NULL only on a grant written before the column existed."
       },
       organization_id: {
         label: "Organization",

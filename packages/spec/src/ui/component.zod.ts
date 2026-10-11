@@ -1596,8 +1596,8 @@ export const RecordRelatedListProps = strictObject({
    * Server-side rules still apply on insert (e.g. the AI-seat cap), and their
    * errors surface in the dialog. The canonical use is "Assigned Users" on a
    * permission set (objectName=`sys_user_permission_set`,
-   * relationshipField=`permission_set_id`, picker.object=`sys_user`,
-   * linkField=`user_id`).
+   * relationshipField=`permission_set`, relationshipValueField=`name`,
+   * picker.object=`sys_user`, linkField=`user_id`).
    */
   add: strictObject({
     surface: 'this `record:related_list` `add` config',

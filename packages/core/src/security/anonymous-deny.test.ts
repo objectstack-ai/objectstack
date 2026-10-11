@@ -72,6 +72,24 @@ describe('shouldDenyAnonymous — the shared HTTP anonymous-deny decision (#2567
     expect(shouldDenyAnonymous({ method: 'OPTIONS', path: '' })).toBe(false);
   });
 
+  // [#22773] The allow-list's parameterised row (the inbound automation hook)
+  // is honoured here only with the method beside the path, and only for POST:
+  // the `/automation` floor passes both, and a seam that passes neither is
+  // answered exactly as before.
+  it('honours the inbound-hook row for POST on the exact route only, and only with the method', () => {
+    expect(shouldDenyAnonymous({ path: '/automation/hooks/f/h', method: 'POST' })).toBe(false);
+    expect(shouldDenyAnonymous({ path: '/environments/env_1/automation/hooks/f/h', method: 'post' })).toBe(false);
+    for (const method of ['GET', 'PUT', 'DELETE', 'HEAD', undefined, null]) {
+      expect(shouldDenyAnonymous({ path: '/automation/hooks/f/h', method }), String(method)).toBe(true);
+    }
+    for (const path of ['/automation/hooks', '/automation/hooks/x', '/automation/hooks/x/y/z', '/automation/f/trigger', '/automation']) {
+      expect(shouldDenyAnonymous({ path, method: 'POST' }), path).toBe(true);
+    }
+    // ⭐ The pathless guard still decides first: a method alone exempts nothing.
+    expect(shouldDenyAnonymous({ method: 'POST' })).toBe(true);
+    expect(shouldDenyAnonymous({ path: '', method: 'POST' })).toBe(true);
+  });
+
   it('exposes a stable 401 body + status for seams to return', () => {
     expect(ANONYMOUS_DENY_STATUS).toBe(401);
     // [#9487] `code` carries the machine code — the documented key every other

@@ -232,7 +232,7 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
       const setRow = await ql.findOne('sys_permission_set', { where: { name }, context: { ...SYS } });
       expect(setRow?.id, `the app-declared set '${name}' is seeded`).toBeTruthy();
       await ql.insert('sys_user_permission_set',
-        { user_id: userId, permission_set_id: setRow.id }, { context: { ...SYS } });
+        { user_id: userId, permission_set: setRow.name }, { context: { ...SYS } });
     };
     await bindSet(bobId, 'wscope_widener');
     await bindSet(carolId, 'wscope_plain');
