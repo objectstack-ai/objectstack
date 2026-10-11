@@ -335,3 +335,134 @@ describe('SmsServicePlugin — daily quota binding (#2814)', () => {
     }
   });
 });
+
+describe('SmsServicePlugin — the configured provider when the namespace names none', () => {
+  // The `sms` namespace as a deployment with no saved settings resolves it:
+  // `provider` at its manifest default, the provider's credentials from the
+  // `OS_SMS_*` env locks. Before this change the plugin read only the
+  // namespace's `provider`, so the constructor's `twilio` / `aliyun` never got
+  // a transport from these credentials.
+  const TWILIO_FROM_ENV = {
+    values: {
+      provider: 'log',
+      twilio_account_sid: 'AC1',
+      twilio_auth_token: 'tok',
+      twilio_from_number: '+15005550006',
+    },
+    sources: {
+      provider: 'default',
+      twilio_account_sid: 'env',
+      twilio_auth_token: 'env',
+      twilio_from_number: 'env',
+    },
+  };
+
+  it('builds the constructor provider from the namespace credentials (twilio)', async () => {
+    const harness = fakeCtx({ settingsValues: TWILIO_FROM_ENV.values, settingsSources: TWILIO_FROM_ENV.sources });
+    const plugin = new SmsServicePlugin({ provider: 'twilio' });
+    await plugin.init(harness.ctx);
+    const svc = harness.services.get('sms') as SmsService;
+    expect(svc.isConfigured()).toBe(false); // no constructor credentials: init falls back
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    expect(svc.options.transport).toBeInstanceOf(TwilioSmsTransport);
+    expect(svc.isConfigured()).toBe(true);
+  });
+
+  it('builds the constructor provider from the namespace credentials (aliyun)', async () => {
+    const harness = fakeCtx({
+      settingsValues: {
+        provider: 'log',
+        aliyun_access_key_id: 'ak',
+        aliyun_access_key_secret: 'sec',
+        aliyun_sign_name: '签名',
+      },
+      settingsSources: {
+        provider: 'default',
+        aliyun_access_key_id: 'env',
+        aliyun_access_key_secret: 'env',
+        aliyun_sign_name: 'env',
+      },
+    });
+    const plugin = new SmsServicePlugin({ provider: 'aliyun' });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    expect(svc.options.transport).toBeInstanceOf(AliyunSmsTransport);
+    expect(svc.isConfigured()).toBe(true);
+  });
+
+  it('keeps a constructor-only option through the rebuild — namespace credentials overlay, key by key', async () => {
+    const harness = fakeCtx({ settingsValues: TWILIO_FROM_ENV.values, settingsSources: TWILIO_FROM_ENV.sources });
+    const plugin = new SmsServicePlugin({ provider: 'twilio', providerOptions: { baseUrl: 'http://twilio.mock' } });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    expect(svc.options.transport).toBeInstanceOf(TwilioSmsTransport);
+    expect((svc.options.transport as unknown as { baseUrl: string }).baseUrl).toBe('http://twilio.mock');
+  });
+
+  it('a provider the namespace NAMES still wins over the configured one (control)', async () => {
+    const harness = fakeCtx({
+      settingsValues: {
+        provider: 'aliyun',
+        aliyun_access_key_id: 'ak',
+        aliyun_access_key_secret: 'sec',
+        aliyun_sign_name: '签名',
+        twilio_account_sid: 'AC1',
+        twilio_auth_token: 'tok',
+        twilio_from_number: '+15005550006',
+      },
+      settingsSources: { provider: 'global' },
+    });
+    const plugin = new SmsServicePlugin({
+      provider: 'twilio',
+      providerOptions: { accountSid: 'AC1', authToken: 't', from: '+15005550006' },
+    });
+    await plugin.init(harness.ctx);
+    const svc = harness.services.get('sms') as SmsService;
+    expect(svc.options.transport).toBeInstanceOf(TwilioSmsTransport);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    expect(svc.options.transport).toBeInstanceOf(AliyunSmsTransport);
+    expect(svc.isConfigured()).toBe(true);
+  });
+
+  it('keeps the transport the constructor credentials built when the namespace carries none, without a warning', async () => {
+    const harness = fakeCtx({ settingsValues: { provider: 'log' }, settingsSources: { provider: 'default' } });
+    const plugin = new SmsServicePlugin({
+      provider: 'twilio',
+      providerOptions: { accountSid: 'AC1', authToken: 't', from: '+15005550006' },
+    });
+    await plugin.init(harness.ctx);
+    const svc = harness.services.get('sms') as SmsService;
+    const before = svc.options.transport;
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    expect(svc.options.transport).toBe(before);
+    expect(svc.isConfigured()).toBe(true);
+    expect(harness.logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('a configured provider with no credentials anywhere still fails loudly — log transport, warn level (control)', async () => {
+    const harness = fakeCtx({ settingsValues: { provider: 'log' }, settingsSources: { provider: 'default' } });
+    const plugin = new SmsServicePlugin({ provider: 'twilio' });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    harness.logger.warn.mockClear(); // the init fallback warned already; read the namespace's verdict alone
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    expect(svc.options.transport).toBeInstanceOf(LogSmsTransport);
+    expect(svc.isConfigured()).toBe(false);
+    expect(harness.logger.warn).toHaveBeenCalledTimes(1);
+    expect(String(harness.logger.warn.mock.calls[0][0])).toContain("provider='twilio'");
+  });
+});
