@@ -170,9 +170,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "手机号",
             helpText: "登录手机号（E.164 格式，如 +8613800000000）。未填写邮箱时必填。"
           },
-          generatePassword: {
-            label: "生成临时密码"
-          },
           password: {
             label: "密码（留空则自动生成）"
           },
@@ -195,9 +192,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "设置密码",
         successMessage: "密码已更新",
         params: {
-          generatePassword: {
-            label: "生成临时密码"
-          },
           newPassword: {
             label: "新密码（留空则自动生成）"
           },

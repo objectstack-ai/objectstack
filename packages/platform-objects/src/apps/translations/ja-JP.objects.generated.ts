@@ -170,9 +170,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             label: "電話番号",
             helpText: "サインイン用の電話番号（E.164 形式、例: +8613800000000）。メールアドレスを指定しない場合は必須です。"
           },
-          generatePassword: {
-            label: "一時パスワードを生成"
-          },
           password: {
             label: "パスワード（空欄の場合は自動生成）"
           },
@@ -195,9 +192,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "パスワードを設定",
         successMessage: "パスワードを更新しました",
         params: {
-          generatePassword: {
-            label: "一時パスワードを生成"
-          },
           newPassword: {
             label: "新しいパスワード（空欄の場合は自動生成）"
           },

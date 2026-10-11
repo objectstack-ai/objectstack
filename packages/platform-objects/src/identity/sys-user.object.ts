@@ -199,8 +199,8 @@ export const SysUser = ObjectSchema.create({
       // the email-dependent invite flow. Hits the plugin-auth wrapper route
       // (NOT better-auth's stock /admin/create-user): the wrapper runs the
       // ADR-0068 admin gate, drives the better-auth pipeline (scrypt hash +
-      // credential sys_account), stamps must_change_password, and — when
-      // "Generate temporary password" is picked — returns the password ONCE
+      // credential sys_account), stamps must_change_password, and — when the
+      // password is left empty — returns a generated temporary password ONCE
       // in the response for the result dialog. It is never persisted or logged.
       name: 'create_user',
       label: 'Create User',
@@ -214,6 +214,16 @@ export const SysUser = ObjectSchema.create({
       requiresFeature: 'admin',
       successMessage: 'User created',
       refreshAfter: true,
+      // One rule for the admin: the password field's own label, "leave empty
+      // to generate". `generatePassword` is therefore a constant the dialog
+      // never offers, not a param: the endpoint lets a non-empty explicit
+      // password win over it and generates only when the password is empty,
+      // which is exactly what the label says. A ticked box beside a typed
+      // password was a control the server ignored. It is not a hidden param
+      // either — `visible: false` drops the value from the submission too, and
+      // the endpoint answers an empty password without `generatePassword: true`
+      // with a 400 (its contract for other callers, unchanged).
+      bodyExtra: { generatePassword: true },
       params: [
         // The endpoint requires email OR phone (phone-only users get a
         // placeholder address; requires auth.plugins.phoneNumber).
@@ -231,13 +241,6 @@ export const SysUser = ObjectSchema.create({
           requiresFeature: 'phoneNumber',
         },
         { field: 'name', required: false },
-        {
-          name: 'generatePassword',
-          label: 'Generate Temporary Password',
-          type: 'boolean',
-          required: false,
-          defaultValue: true,
-        },
         { name: 'password', label: 'Password (leave empty to generate)', type: 'text', required: false },
         {
           name: 'mustChangePassword',
@@ -281,14 +284,11 @@ export const SysUser = ObjectSchema.create({
       recordIdParam: 'userId',
       successMessage: 'Password updated',
       refreshAfter: false,
+      // Same one rule as `create_user` above: the new-password field's label
+      // ("leave empty to generate") is the whole instruction, and
+      // `generatePassword` rides as a constant so an empty field generates.
+      bodyExtra: { generatePassword: true },
       params: [
-        {
-          name: 'generatePassword',
-          label: 'Generate Temporary Password',
-          type: 'boolean',
-          required: false,
-          defaultValue: false,
-        },
         { name: 'newPassword', label: 'New Password (leave empty to generate)', type: 'text', required: false },
         {
           name: 'mustChangePassword',
