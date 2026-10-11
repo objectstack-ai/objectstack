@@ -6,7 +6,7 @@
 
 feat(plugin-email)!: email templates resolve from the registry; the built-in seed, the declared-template boot sweep and the live projector retire
 
-Clause-②: no
+Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What changes is where @objectstack/plugin-email reads a template (the email_template metadata in the registry instead of the sys_email_template rows it used to copy there) and which runtime exports and plugin options exist. The retired names are runtime functions, two types, a string constant and two EmailServicePluginOptions members of @objectstack/plugin-email, each with its one-line fix below; measured consumers in this repository outside the package (a showcase test and three dogfood tests) are rewritten here. The legacy sys_email_template rows stay where they are, untouched: promoting the customized ones to environment-level templates is the v18 migration ceremony's (ADR-0131 C7), not this change's. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the retired names include runtime functions, not only a type surface (not runtime-interface-only / type-surface-only). -->
 
