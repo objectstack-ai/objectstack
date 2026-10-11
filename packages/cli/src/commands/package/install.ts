@@ -4,16 +4,29 @@
  * `objectstack package install` — install a package into a RUNNING ObjectStack
  * runtime through its install-local endpoint (ADR-0008 Phase 3).
  *
- * Two modes, by argument shape:
+ * Two sources, by argument shape:
  *
  *   os package install com.acme.crm [--version 1.2.0]
- *     Catalog mode: the runtime fetches the manifest snapshot from ITS
+ *     Catalog source: the runtime fetches the manifest snapshot from ITS
  *     configured catalog (`OS_CLOUD_URL` of the runtime, public R2
- *     fast-path first) and registers it into the live kernel.
+ *     fast-path first) and installs it.
  *
  *   os package install ./dist/objectstack.json
- *     Air-gapped mode: the compiled artifact is read locally and sent
+ *     Air-gapped source: the compiled artifact is read locally and sent
  *     inline — no catalog round-trip, works fully offline.
+ *
+ * Two install MODES, by `--install-mode` (ADR-0131 D6), either source:
+ *
+ *   managed (the default) — the package is registered into the live kernel as
+ *     code and stays the authority: it upgrades, and nothing it ships is
+ *     edited in place.
+ *   unmanaged — the package's metadata is copied ONCE into the environment as
+ *     a new writable base: every item editable, followed by no upgrade, and
+ *     refused by a runtime whose tenancy posture walls organizations. Only for
+ *     a package whose manifest's `installModes` permits it.
+ *
+ * "Source" and "mode" are two words for two questions on purpose: where the
+ * package comes from, and how it is installed.
  *
  * This complements `os package publish` (which uploads to the CLOUD): the
  * pairing is publish-to-cloud / install-into-runtime. The target runtime
@@ -26,6 +39,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
+import { INSTALL_MODES, type InstallMode } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printWarning, printError, printStep, isExitSignal } from '../../utils/format.js';
 
 export default class PackageInstall extends Command {
@@ -36,6 +50,7 @@ export default class PackageInstall extends Command {
     '$ os package install com.acme.crm',
     '$ os package install com.acme.crm --version 1.2.0 --runtime http://localhost:3000',
     '$ os package install ./dist/objectstack.json                     # air-gapped, no catalog',
+    '$ os package install ./dist/objectstack.json --install-mode unmanaged   # copy into the environment, editable',
     '$ OS_RUNTIME_EMAIL=admin@local.test OS_RUNTIME_PASSWORD=… os package install com.acme.crm',
   ];
 
@@ -55,7 +70,7 @@ export default class PackageInstall extends Command {
     }),
     version: Flags.string({
       char: 'v',
-      description: "Version to install in catalog mode (default: 'latest')",
+      description: "Version to install from the catalog (default: 'latest')",
       default: 'latest',
     }),
     email: Flags.string({
@@ -80,6 +95,18 @@ export default class PackageInstall extends Command {
     // for (`unconfirmedGlobalUniques` in `@objectstack/types`) — an attested
     // install does not become the recurring nag the gate exists to avoid. It
     // does not display who affirmed it or when.
+    // [ADR-0131 D6] How the package is installed — the install-local body's
+    // `installMode`, spelled by the manifest key's own enum. Not defaulted
+    // here: an absent flag sends no `installMode`, which the runtime reads as
+    // `managed`, so a runtime that predates the key receives the body it
+    // always did.
+    'install-mode': Flags.string({
+      description:
+        "How to install: 'managed' (default — registered as code, upgradeable) or 'unmanaged' (copied once into the "
+        + "environment as editable metadata, no upgrade; the package's `installModes` must permit it, and a runtime "
+        + 'that walls organizations refuses it)',
+      options: [...INSTALL_MODES],
+    }),
     'confirm-global-uniques': Flags.boolean({
       description:
         "Confirm this app's installation-wide (`unique: 'global'`) constraints are genuinely platform-wide when "
@@ -95,7 +122,7 @@ export default class PackageInstall extends Command {
     const runtime = flags.runtime.replace(/\/+$/, '');
 
     try {
-      // ---- Resolve mode: inline artifact file vs catalog id ---------------
+      // ---- Resolve the source: inline artifact file vs catalog id ---------
       const looksLikeFile = args.package.endsWith('.json')
         || args.package.startsWith('./')
         || args.package.startsWith('../')
@@ -167,6 +194,8 @@ export default class PackageInstall extends Command {
       // ---- Install ---------------------------------------------------------
       printStep(`Installing ${label} into ${runtime}...`);
       if (flags['confirm-global-uniques']) body.confirmGlobalUniques = true;
+      const installMode = flags['install-mode'] as InstallMode | undefined;
+      if (installMode !== undefined) body.installMode = installMode;
       const res = await this.request(`${runtime}/api/v1/marketplace/install-local`, {
         method: 'POST',
         headers: {
@@ -220,6 +249,41 @@ export default class PackageInstall extends Command {
       }
 
       const data = res.body?.data ?? res.body ?? {};
+
+      // [ADR-0131 D6] An unmanaged install answers its own shape: what was
+      // copied and where, never a kernel registration — so none of the
+      // managed lines below (hot-load, the cached-manifest directory that
+      // "re-registers on every boot") is true of it, and none is printed.
+      if (data.installMode === 'unmanaged') {
+        console.log('');
+        printSuccess('Package copied into the environment (unmanaged) — every item is editable, and follows no upgrade');
+        printKV('  Package',   String(data.manifestId ?? label));
+        printKV('  Version',   String(data.version ?? flags.version));
+        printKV('  Runtime',   runtime);
+        if (typeof data.targetPackageId === 'string') printKV('  Base', data.targetPackageId);
+        if (typeof data.copiedCount === 'number') printKV('  Items copied', String(data.copiedCount));
+        const from = data.installedFrom;
+        if (from && typeof from.packageId === 'string') {
+          printKV('  Installed from', typeof from.version === 'string' ? `${from.packageId}@${from.version}` : from.packageId);
+        }
+        if (data.seeded?.mode === 'skipped' && typeof data.seeded.reason === 'string') {
+          printKV('  Sample data', `not loaded — ${data.seeded.reason}`);
+        }
+        console.log('');
+        return;
+      }
+      // Asked for `unmanaged`, answered without it: the runtime predates the
+      // install mode, read no `installMode`, and installed the package
+      // MANAGED. Said out loud — the opposite of what was asked happened.
+      if (installMode === 'unmanaged') {
+        printError(
+          `The runtime at ${runtime} does not support unmanaged installs: it ignored \`--install-mode unmanaged\` `
+          + `and installed ${label} MANAGED (registered as code, not copied). Upgrade the runtime, then uninstall `
+          + 'the package and install it again with `--install-mode unmanaged`.',
+        );
+        this.exit(1);
+        return;
+      }
       // [#22729] A `200` is not by itself a hot install. install-local's
       // LENIENT path — a cloud-fetched manifest whose `manifest.register`
       // throws — writes the ledger entry and answers `200` with

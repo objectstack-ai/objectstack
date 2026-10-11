@@ -44,6 +44,13 @@
       "evidenceScope": "in-repo",
       "note": "Three consumers of three different kinds — a default, a writability gate and a UI filter — so the deployment scope is read on both the runtime and the admin path. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) — all three citations were still ACCURATE, so this is a grammar migration. The anchor is what the entry gains: `settings-service.ts` is 2586 lines and its read sits ~800 lines in, which is exactly the shape that rots next."
     },
+    "installModes": {
+      "status": "live",
+      "evidence": "packages/cloud-connection/src/marketplace-install-local-plugin.ts#judgeInstallMode (the install door, `POST /api/v1/marketplace/install-local`: parses the package's `installModes` through `ManifestSchema.shape.installModes`, resolves it with `resolveInstallModes` — absent meaning ['managed'] — and refuses a requested `installMode` it does not list with 422 INSTALL_MODE_NOT_PERMITTED before any write); packages/spec/src/stack.zod.ts#validateUnmanagedInstallMode (`defineStack`, so `os validate` / `os build`: a package whose `installModes` permits 'unmanaged' while it carries a runtime-uncreatable collection, code or another package's extension is refused STACK_UNMANAGED_INSTALL_UNCOPYABLE)",
+      "verifiedAt": "2026-10-11",
+      "evidenceScope": "in-repo",
+      "note": "ADR-0131 D6, landed with its reader so there was never a declared-but-unenforced window (the stage-0 ACCEPT's Q8 on the D6 execution card): the key and the install door's mode arrived in one change, after the copy-once import verb (`importUnmanagedPackage`) it calls. Spelled `managed` / `unmanaged` by the maintainer's ruling B on that card. Optional with NO parse-time default (Q9): absence survives a parse and `resolveInstallModes` (kernel/manifest.zod.ts) is the one reader of what it means. Enforced at both ends: at authoring by `defineStack`, at install by the door — and the door's `unmanaged` branch refuses a deployment whose REQUESTED tenancy posture walls organizations (Q2) through the import verb's own refusal. The key-classification table both refusals read is `UNMANAGED_INSTALL_KEY_DISPOSITIONS` (kernel/unmanaged-install.ts), held total against this schema by its test."
+    },
     "name": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts#registerApp (`const id = manifest.id || manifest.name` — the package-id fallback when `id` is absent; the same function then registers manifest-as-app under it: `if (manifest.name && manifest.navigation && !manifest.apps?.length)`); packages/cli/src/commands/plugin/publish.ts#PluginPublish (`flags['display-name'] ?? manifest.name ?? id` — the marketplace display name)",
