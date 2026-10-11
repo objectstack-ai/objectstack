@@ -138,7 +138,7 @@ describe('sys_comment permission matrix (#4630)', () => {
     const managerSet = await ql.findOne('sys_permission_set', { where: { name: 'cmt_comment_manager' }, context: SYS });
     expect(managerSet?.id, 'fixture permission set seeded').toBeTruthy();
     for (const userId of [memberAId, memberBId]) {
-      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: managerSet.id }, { context: { ...SYS } });
+      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: managerSet.name }, { context: { ...SYS } });
     }
 
     // [#8074 / commit c25b2d52a] The precondition the header records in prose, now read off

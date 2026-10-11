@@ -42,10 +42,6 @@ import { SysPositionPermissionSet } from './objects/sys-position-permission-set.
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import {
-  registerGrantPermissionSetNameHooks,
-  unregisterGrantPermissionSetNameHooks,
-} from './grant-permission-set-name.js';
-import {
   GRANT_SET_NAME_BACKFILL_MIGRATION_ID,
   runOneTimeGrantPermissionSetNameBackfill,
 } from './grant-permission-set-name-backfill.js';
@@ -201,26 +197,30 @@ async function insertUser(engine: Engine, id: string, email: string, createdAt: 
 
 /** Write grants the way they were stored before the name column existed: id only, name NULL. */
 async function insertUnnamedGrants(engine: Engine, rows: Array<Record<string, unknown>>): Promise<void> {
-  unregisterGrantPermissionSetNameHooks(engine);
-  try {
-    for (const row of rows) {
-      await engine.insert('sys_user_permission_set', row, { context: SYS } as any);
-    }
-  } finally {
-    registerGrantPermissionSetNameHooks(engine);
+  // [ADR-0131 D4] The engine refuses a grant naming nothing (`permission_set`
+  // is required), so the shape a grant written before the column carries is
+  // written beneath it, through the driver's own connection.
+  const driver: any = (engine as any).getDriver('sys_user_permission_set');
+  for (const row of rows) {
+    await driver.knex('sys_user_permission_set').insert({ permission_set: null, ...row });
   }
 }
 
-/** Clear every grant's name — what a grant written before the column carries. */
+/**
+ * Turn every grant into what a grant written before the name column carries:
+ * the id of the set row it names (its own organization's copy, else the
+ * organization-less one) and NO name. Grants are written by name today
+ * (ADR-0131 D4), so the legacy id is put back beneath the engine.
+ */
 async function clearAllNames(engine: Engine): Promise<void> {
-  unregisterGrantPermissionSetNameHooks(engine);
-  try {
-    const rows = (await engine.find('sys_user_permission_set', { fields: ['id'], context: SYS })) as any[];
-    for (const row of rows) {
-      await engine.update('sys_user_permission_set', { id: row.id, permission_set: null }, { context: SYS } as any);
-    }
-  } finally {
-    registerGrantPermissionSetNameHooks(engine);
+  const knex = ((engine as any).getDriver('sys_user_permission_set') as any).knex;
+  const sets = await knex('sys_permission_set').select('id', 'name', 'organization_id');
+  for (const g of await knex('sys_user_permission_set').select('id', 'permission_set', 'permission_set_id', 'organization_id')) {
+    const named = sets.filter((r: any) => r.name === g.permission_set);
+    const row = named.find((r: any) => (r.organization_id ?? null) === (g.organization_id ?? null) && r.organization_id)
+      ?? named.find((r: any) => !r.organization_id);
+    await knex('sys_user_permission_set').where({ id: g.id })
+      .update({ permission_set: null, permission_set_id: g.permission_set_id ?? row?.id ?? null });
   }
 }
 
@@ -294,7 +294,9 @@ async function seedPrincipals(world: World, posture: Posture): Promise<void> {
   })) as any[];
   await engine.insert(
     'sys_user_permission_set',
-    { user_id: 'usr_member', permission_set_id: viewer.id },
+    // The shape a grant written before this stage carries: its legacy id
+    // beside the name, which `clearAllNames` then takes away.
+    { user_id: 'usr_member', permission_set_id: viewer.id, permission_set: viewer.name },
     { context: { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG } } as any,
   );
 }
@@ -572,11 +574,10 @@ describe('[ADR-0131 D4] grant name backfill — once, and remembered in sys_migr
 });
 
 describe('[ADR-0131 D4] grant name backfill — the write path', () => {
-  it('the name lands with the S4a hooks unbound too: the backfill writes the name, it does not lean on the hook stamp', async () => {
+  it('the backfill writes the name itself: nothing on the write path derives it from the id', async () => {
     const world = await boot('isolated');
     await seedPrincipals(world, 'isolated');
     await clearAllNames(world.engine);
-    unregisterGrantPermissionSetNameHooks(world.engine);
 
     const outcome = await runOneTimeGrantPermissionSetNameBackfill(world.engine as any, {
       catalog: world.catalog, logger: newLogger(),
@@ -615,14 +616,10 @@ describe('[ADR-0131 D4] grant name backfill — on a real kernel boot', () => {
       engine.registry.registerItem('permission', structuredClone(ps) as any, 'name' as any, CATALOG_PACKAGE);
     }
     // Stored before this boot: the set row, and a grant written before the
-    // name column existed (no SecurityPlugin has bound the name hooks yet).
+    // name column existed.
     await insertSet(engine, { id: 'ps_late', name: 'late_reviewer', label: 'Late' });
     await insertUser(engine, 'usr_member', 'member@eq.example', '2025-03-01T00:00:00.000Z');
-    await engine.insert(
-      'sys_user_permission_set',
-      { id: 'g_late', user_id: 'usr_member', permission_set_id: 'ps_late' },
-      { context: SYS } as any,
-    );
+    await insertUnnamedGrants(engine, [{ id: 'g_late', user_id: 'usr_member', permission_set_id: 'ps_late' }]);
     expect((await grant(engine, 'g_late'))?.permission_set).toBeNull();
 
     const metadata = {

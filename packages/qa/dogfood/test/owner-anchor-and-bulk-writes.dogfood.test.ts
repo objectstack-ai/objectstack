@@ -100,7 +100,7 @@ describe('owner anchor guard + owner-scoped bulk writes (#3004 / #2982)', () => 
     const delSet = await ql.findOne('sys_permission_set', { where: { name: 'anchor_note_delete' }, context: SYS });
     expect(delSet?.id, 'declared delete set seeded').toBeTruthy();
     for (const userId of [aliceId, bobId]) {
-      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: delSet.id }, { context: { ...SYS } });
+      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: delSet.name }, { context: { ...SYS } });
     }
 
     const a = await stack.apiAs(aliceToken, 'POST', OBJ, { title: 'alice note', body: 'a' });

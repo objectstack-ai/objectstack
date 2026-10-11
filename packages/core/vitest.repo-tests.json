@@ -3,5 +3,6 @@
   "src/security/granted-permissions-not-enforced.pin.test.ts",
   "src/security/operation-private-keys.pin.test.ts",
   "src/security/row-serving-door-exposure.pin.test.ts",
-  "src/security/second-object-read-exposure.pin.test.ts"
+  "src/security/second-object-read-exposure.pin.test.ts",
+  "src/utils/import-runner-sandbox-fault-row.test.ts"
 ]

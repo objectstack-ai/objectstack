@@ -186,7 +186,7 @@ async function grantsByPrincipal(posture: Posture): Promise<Record<string, unkno
   });
   await engine.insert(
     'sys_user_permission_set',
-    { user_id: 'usr_member', permission_set_id: (viewer as any).id },
+    { user_id: 'usr_member', permission_set: (viewer as any).name },
     { context: { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG } } as any,
   );
 

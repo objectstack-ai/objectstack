@@ -2,6 +2,9 @@
 
 import {
     ObjectKernel, getEnv, evaluateAuthGate, isAuthGateAllowlisted,
+    // [#22773] The inbound hook's one reading — the allow-list row's — read by
+    // the membership gate's skip below.
+    matchInboundHookRoute,
     // [#13906 decision 1 A] The identity step's net re-raises ONLY the loud
     // authz-store outage (the `.catch` shape `@objectstack/core` prescribes for
     // every seam between `resolveAuthzContext` and a door), and the tenancy
@@ -1351,10 +1354,14 @@ export class HttpDispatcher {
      * an auth-policy gate (expired password / required MFA) on a non-allow-listed
      * path, else null. Mirrors the REST `enforceAuth` seam so REST + dispatcher
      * (MCP) enforce consistently. Fails open on any lookup error.
+     *
+     * [#22773] `method` is the request's: the allow-list's parameterised row
+     * (the inbound automation hook) is exempt for `POST` only, and without a
+     * method it exempts nothing.
      */
-    private async enforceAuthGate(context: any, cleanPath: string): Promise<any | null> {
+    private async enforceAuthGate(context: any, cleanPath: string, method?: string): Promise<any | null> {
         try {
-            if (isAuthGateAllowlisted(cleanPath)) return null;
+            if (isAuthGateAllowlisted(cleanPath, method)) return null;
             // [#4127 FINDING, batch 5]
             // `auth` IS contracted, so this `any` is not legitimate.
             // `isAuthGateActive` is implemented (auth-manager.ts) and load-bearing
@@ -1386,7 +1393,7 @@ export class HttpDispatcher {
             // a cookie request reads without renewal, because this door's
             // response never carries a renewed cookie.
             const session: any = await api.getSession(inProcessSessionReadInput(headers)).catch(() => undefined);
-            const gate = evaluateAuthGate(session?.user, cleanPath);
+            const gate = evaluateAuthGate(session?.user, cleanPath, method);
             if (!gate) return null;
             return this.error(gate.message, 403, { code: gate.code });
         } catch {
@@ -1397,6 +1404,7 @@ export class HttpDispatcher {
     private async enforceProjectMembership(
         context: HttpProtocolContext,
         path: string,
+        method?: string,
     ): Promise<{ status: number; body: any } | null> {
         if (!this.enforceMembership) return null;
 
@@ -1452,6 +1460,23 @@ export class HttpDispatcher {
         // route the ADR-0069 allow-list admits in `packages/core`, and nothing
         // wider. Pinned in `domains/approvals-act.test.ts`.
         if (isApprovalsActPath(path)) return null;
+
+        // The inbound automation hook — the HMAC signature IS the authorisation
+        // (#22773; ruling A on #22757, "equal to self-hosted"): the trigger-api
+        // service verifies it, and a signed-in caller is judged exactly as an
+        // anonymous one, as on the self-hosted raw-app mount, which has no such
+        // gate. Without this line a signed-in non-member's post would stop here
+        // with `403 PROJECT_MEMBERSHIP_REQUIRED` before the verifier, so
+        // something would sit between the allow-list and the verifier.
+        //
+        // ⛔ EXACTLY the route, `POST` only, read by the one reading the
+        // ADR-0069 allow-list row matches through (core's
+        // `matchInboundHookRoute`, which also reads the environment-scoped
+        // spelling this gate sees). Every other method on the same path is an
+        // ordinary `/automation` request — `GET /automation/hooks/runs/:runId`
+        // reads a run of a flow named `hooks` — and stays checked. Pinned in
+        // `domains/automation-hooks.test.ts`.
+        if (matchInboundHookRoute(path, method)) return null;
 
         const environmentId = context.environmentId;
         if (!environmentId) return null; // Unscoped legacy routes fall through.
@@ -2690,8 +2715,9 @@ export class HttpDispatcher {
         // Block a gated session (expired password / required MFA) from
         // protected MCP/data routes, mirroring the REST seam. The core
         // allow-list keeps auth + remediation reachable. Skipped (no session
-        // lookup) when no gate feature is active.
-        const authGated = await this.enforceAuthGate(context, cleanPath);
+        // lookup) when no gate feature is active. [#22773] The method rides
+        // along: the allow-list's inbound-hook row is exempt for `POST` only.
+        const authGated = await this.enforceAuthGate(context, cleanPath, method);
         if (authGated) {
             return { handled: true, response: authGated };
         }
@@ -2700,7 +2726,7 @@ export class HttpDispatcher {
         // Once the environmentId is known, gate scoped data/meta/AI/automation
         // routes on `sys_environment_member`. Control-plane paths, the system
         // project, and platform-org members bypass this check.
-        const forbidden = await this.enforceProjectMembership(context, cleanPath);
+        const forbidden = await this.enforceProjectMembership(context, cleanPath, method);
         if (forbidden) {
             return { handled: true, response: forbidden };
         }

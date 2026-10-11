@@ -40,6 +40,14 @@
  * (`.message` the wrapper, `.innerMessage` the sentence), reproduced here as
  * `rest-hook-refusal-message-parity.test.ts` does, because this package does
  * not depend on `@objectstack/runtime`.
+ *
+ * ## [#22764] The fault side, over the same population
+ *
+ * §6 drives every row §2 drives with the two sandbox shapes the doors answer
+ * as FAULTS — a body that crashed, and a refusal that declared a 5xx — and
+ * holds each to the doors' answer: their status and code, their withheld
+ * sentence, and no trace of the native text or the wrapper. §2 stays the
+ * control: a refusal keeps its sentence on the same rows.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -464,8 +472,10 @@ describe('[#22718] §4 a sandboxed body the doors answer as a fault reads as tha
 
 /**
  * The fault terminal each repaired row keeps: the code its own arm answers a
- * throw that is NOT a refusal. External datasources answer every throw at
- * `400` with their own code and are listed with that answer.
+ * throw that is NOT a refusal. External datasources answer such a throw at
+ * `400` with their own code and are listed with that answer. [#22764] A
+ * sandboxed body the doors answer as a fault is not such a throw: §6 holds
+ * every row to the doors' answer for it.
  */
 const OWN_TERMINAL: Record<string, { status: number; code: string }> = {
     'POST /api/v1/sharing/rules': { status: 500, code: 'RULE_DEFINE_FAILED' },
@@ -547,5 +557,74 @@ describe('[#22719] §5 the repaired rows: a fault keeps its own terminal, a refu
                 userMessage: 'Ask an administrator to unlock it.',
             });
         }, 60_000);
+    }
+});
+
+// ─── [#22764] the fault side: every driven row answers as the doors do ──────
+
+/**
+ * The two sandbox shapes the doors answer as FAULTS, the status and code they
+ * answer each with, and the text that must not reach the caller: the native
+ * error a crash carries, and the prose a declared 5xx withholds.
+ */
+const SANDBOX_FAULTS = [
+    ['a body that CRASHED', sandboxCrash, { status: 500, code: 'INTERNAL_ERROR' }, /TypeError|boom/],
+    ['a refusal that declared a 5xx', sandboxDeclared5xx, { status: 503, code: 'SERVICE_UNAVAILABLE' }, /ledger/],
+] as const;
+
+/**
+ * Driven rows that answer a sandboxed fault at their OWN terminal rather than
+ * the doors' status and code, with the reason. Closed. The words are withheld
+ * on both all the same, and §6 still holds them to the doors' sentence.
+ */
+const OWN_FAULT_TERMINAL: ReadonlyMap<string, { status: number; code: string; reason: string }> = new Map([
+    ['POST /api/v1/data/:object/:id/shares', {
+        status: 500, code: 'SHARE_GRANT_FAILED',
+        reason: "the record-share family withholds a sandbox's words at its own 500 (`sharingFaultMessage`) and "
+            + 'folds a declared 5xx into that terminal by a recorded choice (#11683, #12693); neither is a '
+            + 'leak, and its status and code are a decision this card does not take',
+    }],
+    ['DELETE /api/v1/data/:object/:id/shares/:shareId', {
+        status: 500, code: 'SHARE_REVOKE_FAILED',
+        reason: 'the record-share family, as its grant row',
+    }],
+]);
+
+describe('[#22764] §6 every driven write row answers a sandboxed fault as the doors do, its words withheld', () => {
+    it('the reference: the `/data` door answers each shape at the pinned status and code', async () => {
+        for (const [label, error, doors, leak] of SANDBOX_FAULTS) {
+            const res = await drive(boot(error), 'POST /api/v1/data/:object', { name: 'x' });
+            expect(res.statusCode, label).toBe(doors.status);
+            expect(codeOf(res.body), label).toBe(doors.code);
+            expect(JSON.stringify(res.body), label).not.toMatch(leak);
+        }
+    }, 60_000);
+
+    it('every row naming its own terminal is a driven row', () => {
+        for (const route of OWN_FAULT_TERMINAL.keys()) expect(Object.keys(ANSWERS_THE_SENTENCE), route).toContain(route);
+    });
+
+    for (const [route, driver] of Object.entries(ANSWERS_THE_SENTENCE)) {
+        for (const [label, error, doors, leak] of SANDBOX_FAULTS) {
+            it(`${route}: ${label}`, async () => {
+                const door = await drive(boot(error), 'POST /api/v1/data/:object', { name: 'x' });
+                const b = boot(error, driver.protocol?.(error));
+                const res = await drive(b, route, driver.body ?? {});
+                // Read first: the async job's worker writes after the `201`.
+                const answer = driver.answer ? await driver.answer(res, b) : sentenceOf(res.body);
+
+                expect(b.calls, `${driver.called} was never called`).toContain(driver.called);
+                expect(answer).toBe(sentenceOf(door.body));
+                for (const text of [JSON.stringify(res.body ?? null), String(answer)]) {
+                    expect(text).not.toMatch(leak);
+                    expect(text).not.toMatch(WRAPPER_RE);
+                }
+                // The import rows answer per row, inside a `200` / `201`.
+                if (driver.answer) return;
+                const expected = OWN_FAULT_TERMINAL.get(route) ?? doors;
+                expect(res.statusCode).toBe(expected.status);
+                expect(codeOf(res.body)).toBe(expected.code);
+            }, 60_000);
+        }
     }
 });

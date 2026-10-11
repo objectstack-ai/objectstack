@@ -230,7 +230,7 @@ describe('[#8023] a public_read_write OWD opens row-level writes (and nothing el
       expect(setRow?.id, `the app-declared set '${name}' is seeded`).toBeTruthy();
       await ql.insert(
         'sys_user_permission_set',
-        { user_id: userId, permission_set_id: setRow.id },
+        { user_id: userId, permission_set: setRow.name },
         { context: { ...SYS } },
       );
     };

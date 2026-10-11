@@ -109,10 +109,8 @@ async function boot() {
   await plugin.start(ctx);
   vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
 
-  await engine.insert('sys_permission_set', {
-    id: 'ps_alpha', name: 'qa_alpha', label: 'qa_alpha',
-    object_permissions: '{}', field_permissions: '{}', system_permissions: '[]', active: true,
-  }, { context: SYS } as any);
+  // [ADR-0131 D3/D4] The set a grant names lives in the catalog (the registry).
+  engine.registry.registerItem('permission', { name: 'qa_alpha', label: 'qa_alpha' } as any, 'name' as any, 'qa.window-order');
   return { engine, driver };
 }
 
@@ -152,7 +150,7 @@ describe('an insert is judged by the window it stores', () => {
     it(`NEGATIVE — ${who}: valid_until before valid_from is refused 400 VALIDATION_FAILED; nothing is stored`, async () => {
       const h = await boot();
       const err = await refusalOf(() => h.engine.insert(
-        GRANTS, { user_id: 'u_inv', permission_set_id: 'ps_alpha', valid_from: T1, valid_until: T0 }, { context } as any,
+        GRANTS, { user_id: 'u_inv', permission_set: 'qa_alpha', valid_from: T1, valid_until: T0 }, { context } as any,
       ));
       expectWindowRefusal(err);
       expect(await grantsOf(h, 'u_inv')).toHaveLength(0);
@@ -162,7 +160,7 @@ describe('an insert is judged by the window it stores', () => {
   it('NEGATIVE — equal bounds are refused: [t, t) is empty', async () => {
     const h = await boot();
     const err = await refusalOf(() => h.engine.insert(
-      GRANTS, { user_id: 'u_eq', permission_set_id: 'ps_alpha', valid_from: T1, valid_until: T1 }, { context: ADMIN } as any,
+      GRANTS, { user_id: 'u_eq', permission_set: 'qa_alpha', valid_from: T1, valid_until: T1 }, { context: ADMIN } as any,
     ));
     expectWindowRefusal(err);
     expect(await grantsOf(h, 'u_eq')).toHaveLength(0);
@@ -171,8 +169,8 @@ describe('an insert is judged by the window it stores', () => {
   it('NEGATIVE — a batch with one inverted row is refused whole; nothing is stored', async () => {
     const h = await boot();
     const err = await refusalOf(() => h.engine.insert(GRANTS, [
-      { user_id: 'u_b1', permission_set_id: 'ps_alpha', valid_from: T0, valid_until: T1 },
-      { user_id: 'u_b2', permission_set_id: 'ps_alpha', valid_from: T2, valid_until: T1 },
+      { user_id: 'u_b1', permission_set: 'qa_alpha', valid_from: T0, valid_until: T1 },
+      { user_id: 'u_b2', permission_set: 'qa_alpha', valid_from: T2, valid_until: T1 },
     ], { context: ADMIN } as any));
     expectWindowRefusal(err);
     expect(await grantsOf(h, 'u_b1')).toHaveLength(0);
@@ -181,15 +179,15 @@ describe('an insert is judged by the window it stores', () => {
 
   it('a valid window lands', async () => {
     const h = await boot();
-    await h.engine.insert(GRANTS, { user_id: 'u_ok', permission_set_id: 'ps_alpha', valid_from: T0, valid_until: T1 }, { context: ADMIN } as any);
+    await h.engine.insert(GRANTS, { user_id: 'u_ok', permission_set: 'qa_alpha', valid_from: T0, valid_until: T1 }, { context: ADMIN } as any);
     expect(windowOf((await grantsOf(h, 'u_ok'))[0])).toEqual({ valid_from: T0, valid_until: T1 });
   });
 
   it('one bound alone lands, either one; no window at all lands', async () => {
     const h = await boot();
-    await h.engine.insert(GRANTS, { user_id: 'u_from', permission_set_id: 'ps_alpha', valid_from: T1 }, { context: ADMIN } as any);
-    await h.engine.insert(GRANTS, { user_id: 'u_until', permission_set_id: 'ps_alpha', valid_until: T0 }, { context: ADMIN } as any);
-    await h.engine.insert(GRANTS, { user_id: 'u_none', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any);
+    await h.engine.insert(GRANTS, { user_id: 'u_from', permission_set: 'qa_alpha', valid_from: T1 }, { context: ADMIN } as any);
+    await h.engine.insert(GRANTS, { user_id: 'u_until', permission_set: 'qa_alpha', valid_until: T0 }, { context: ADMIN } as any);
+    await h.engine.insert(GRANTS, { user_id: 'u_none', permission_set: 'qa_alpha' }, { context: ADMIN } as any);
     expect(windowOf((await grantsOf(h, 'u_from'))[0])).toEqual({ valid_from: T1, valid_until: null });
     expect(windowOf((await grantsOf(h, 'u_until'))[0])).toEqual({ valid_from: null, valid_until: T0 });
     expect(windowOf((await grantsOf(h, 'u_none'))[0])).toEqual({ valid_from: null, valid_until: null });
@@ -198,7 +196,7 @@ describe('an insert is judged by the window it stores', () => {
 
 describe('an update is judged by the stored row overlaid with the patch', () => {
   async function stored(h: Harness, id: string, window: Record<string, string>) {
-    await h.engine.insert(GRANTS, { id, user_id: `u_${id}`, permission_set_id: 'ps_alpha', ...window }, { context: ADMIN } as any);
+    await h.engine.insert(GRANTS, { id, user_id: `u_${id}`, permission_set: 'qa_alpha', ...window }, { context: ADMIN } as any);
   }
 
   it('NEGATIVE — moving valid_until to before the stored valid_from is refused; the stored row is unchanged', async () => {
@@ -222,7 +220,7 @@ describe('an update is judged by the stored row overlaid with the patch', () => 
     await stored(h, 'g_m1', { valid_from: T1, valid_until: T2 });
     await stored(h, 'g_m2', { valid_from: T1 });
     const err = await refusalOf(() => h.engine.update(
-      GRANTS, { valid_until: T0 }, { where: { permission_set_id: 'ps_alpha' }, multi: true, context: SYS } as any,
+      GRANTS, { valid_until: T0 }, { where: { permission_set: 'qa_alpha' }, multi: true, context: SYS } as any,
     ));
     expectWindowRefusal(err);
     expect(windowOf((await grantsOf(h, 'u_g_m1'))[0])).toEqual({ valid_from: T1, valid_until: T2 });
@@ -241,7 +239,7 @@ describe('an update is judged by the stored row overlaid with the patch', () => 
     // A row the refusal never judged — stored beneath the engine, the way a
     // row written before the refusal existed sits in a deployed table.
     await h.driver.create(GRANTS, {
-      id: 'g_legacy', user_id: 'u_legacy', permission_set_id: 'ps_alpha', valid_from: T1, valid_until: T0,
+      id: 'g_legacy', user_id: 'u_legacy', permission_set: 'qa_alpha', valid_from: T1, valid_until: T0,
     });
     expect(windowOf((await grantsOf(h, 'u_legacy'))[0]), 'the legacy row is stored inverted').toEqual({ valid_from: T1, valid_until: T0 });
 

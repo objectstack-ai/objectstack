@@ -66,8 +66,9 @@ const CASES: Case[] = [
   },
   {
     schema: SysUserPermissionSet,
-    row: { user_id: 'usr_alice', permission_set_id: 'ps_crm_edit' },
-    title: 'usr_alice → ps_crm_edit',
+    // [ADR-0131 D4] A grant names its set; the title shows that name.
+    row: { user_id: 'usr_alice', permission_set: 'crm_edit' },
+    title: 'usr_alice → crm_edit',
   },
   {
     schema: SysUserPosition,

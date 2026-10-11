@@ -4765,8 +4765,8 @@ export class AuthManager {
         if (!resolvable) {
           const message =
             `the declared self-registration permission set '${setName}' cannot be resolved ` +
-            '(not in the security catalog, switched off in sys_metadata_activation, without a ' +
-            'sys_permission_set row to grant it by, or the store is unavailable) — ' +
+            '(not in the security catalog, switched off in sys_metadata_activation, or the store ' +
+            'is unavailable) — ' +
             'self-registration is refused rather than admitting an ungranted user. ' +
             'Declare or switch on the set, or point selfRegistrationPermissionSet at an existing one.';
           this.audienceLogError(`[audience] ${message}`);
@@ -5009,32 +5009,18 @@ export class AuthManager {
   /**
    * [ADR-0131 D3/D4] The declared set would GRANT: the security catalog holds
    * it and the activation ledger does not switch it off — the resolver's own
-   * reading ({@link permissionSetInEffect}) — and a `sys_permission_set` row
-   * carries the id the grant's required `permission_set_id` is written with
-   * ({@link settleSelfRegistrationGrant}). The row's `active` is not read.
-   * A read that fails answers `false`: the admission refuses.
+   * reading ({@link permissionSetInEffect}). The grant names the set by name
+   * ({@link settleSelfRegistrationGrant}), so no `sys_permission_set` row is
+   * read. A read that fails answers `false`: the admission refuses.
    */
   private async selfRegistrationSetResolvable(setName: string): Promise<boolean> {
     const engine = this.config.dataEngine;
     if (!engine || typeof (engine as any).find !== 'function') return false;
     try {
       const reader = withSystemReadContext(engine) as any;
-      if (!(await permissionSetInEffect(engine, (object, query) => reader.find(object, query), setName))) return false;
+      return await permissionSetInEffect(engine, (object, query) => reader.find(object, query), setName);
     } catch {
       return false;
-    }
-    const rows = await this.findPermissionSetRows(setName);
-    return rows.some((r) => typeof r?.id === 'string' && r.id);
-  }
-
-  private async findPermissionSetRows(setName: string): Promise<any[]> {
-    const engine = this.config.dataEngine;
-    if (!engine || typeof (engine as any).find !== 'function') return [];
-    try {
-      const reader = withSystemReadContext(engine) as any;
-      return await reader.find('sys_permission_set', { where: { name: setName }, limit: 50 });
-    } catch {
-      return [];
     }
   }
 
@@ -5255,58 +5241,14 @@ export class AuthManager {
       } catch {
         organizationId = null;
       }
-      // [ADR-0131 D3] The row is read for the id the grant's required
-      // `permission_set_id` is written with, and for nothing else: whether the
-      // set grants was asked at admission, of the catalog and the activation
-      // ledger, and the row's `active` is not read. A missing or blank `id` is
-      // a MALFORMED row, and dropping it silently is the
-      // opposite defect from a dead limb, wrong in two ways that both look
-      // normal from outside. (1) The family narrows to nothing and the report
-      // below blames "no row named X" while a row named X is
-      // sitting right there — and that report is the only signal, because
-      // nothing retries this. (2) Worse, when the malformed row is the
-      // ORG-SCOPED one, the `organization_id == null` arm below then resolves
-      // the GLOBAL set and grants a permission set the organization never
-      // declared, and the `rows.length === 1` arm can fire on a family that
-      // was never singular — both computed AFTER the silent removal, so the
-      // "unambiguous single row" this code believes it selected is not that.
-      // So a malformed candidate REFUSES the grant and names itself, which is
-      // the same gap-not-empty-answer direction the rest of this method takes.
-      const candidates = await this.findPermissionSetRows(staged.setName);
-      const malformed = candidates.filter((r) => !(typeof r?.id === 'string' && r.id));
-      if (malformed.length > 0) {
-        this.reportUngrantedSelfRegistrant(
-          userId,
-          staged.setName,
-          `${malformed.length} sys_permission_set row(s) named '${staged.setName}' carry no usable id, ` +
-            'so which row this grant would resolve to cannot be decided — refusing rather than ' +
-            'silently dropping them and granting whichever row is left',
-        );
-        return;
-      }
-      const rows = candidates;
-      const row =
-        (organizationId ? rows.find((r) => r?.organization_id === organizationId) : undefined) ??
-        rows.find((r) => r?.organization_id == null) ??
-        (rows.length === 1 ? rows[0] : undefined);
-      if (!row) {
-        this.reportUngrantedSelfRegistrant(
-          userId,
-          staged.setName,
-          organizationId
-            ? `no sys_permission_set row named '${staged.setName}' resolves for organization ${organizationId}`
-            : `no sys_permission_set row named '${staged.setName}' resolves`,
-        );
-        return;
-      }
-      // [ADR-0131 D4] Already held? Asked BY NAME — the grant's
-      // `permission_set`, the reference a grant keeps once its id column is
-      // dropped. A self-registrant is a user created moments ago, so every
-      // grant it holds was written with its name; any of them naming this set,
-      // in any organization, settles the question and no second grant is
-      // written.
+      // [ADR-0131 D3/D4] The grant names the declared set BY NAME — the name
+      // admission asked the security catalog and the activation ledger about —
+      // so no `sys_permission_set` row is read to write it, and none needs to
+      // exist. Already held? Asked by the same name: a self-registrant is a
+      // user created moments ago, so any grant it holds naming this set, in any
+      // organization, settles the question and no second grant is written.
       const existing: any[] = await sys.find('sys_user_permission_set', {
-        where: { user_id: userId, [GRANT_SET_NAME_FIELD]: row.name },
+        where: { user_id: userId, [GRANT_SET_NAME_FIELD]: staged.setName },
         limit: 1,
       });
       if (existing.length > 0) return;
@@ -5314,12 +5256,7 @@ export class AuthManager {
       await sys.insert('sys_user_permission_set', {
         id,
         user_id: userId,
-        permission_set_id: row.id,
-        // [ADR-0131 D4] Both columns, agreeing: the row's own name, never the
-        // declared spelling — the read above is by name, but a case-folding
-        // collation may answer with a differently-cased row, and the name the
-        // grant stores is the one its id resolves to.
-        permission_set: row.name,
+        [GRANT_SET_NAME_FIELD]: staged.setName,
         ...(organizationId ? { organization_id: organizationId } : {}),
       });
       this.config.logger?.info?.('[audience] granted the declared self-registration permission set', {
