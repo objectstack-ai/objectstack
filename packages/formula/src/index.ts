@@ -137,6 +137,11 @@ export type { UnknownFunctionCall } from './unknown-function';
 // registration, and the agent-callable validate_expression tool).
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';
 export type { FieldRole, ExprInput, ExprSchemaHint, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
+// #22727 — the declaration authoring stamps onto a formula field: its
+// `returnType`, and for a provably-money result its currency, copied from the
+// source field's own `currencyConfig`. The producer behind `returnType: 'currency'`.
+export { inferFormulaReturn } from './formula-return';
+export type { FormulaReturnDeclaration, FormulaSourceField } from './formula-return';
 // The closed set of refusal codes `validateExpression` and
 // `collectCelRootIdentifiers` carry beside their English message, with the
 // typed params each message interpolates — so a localized author surface keys

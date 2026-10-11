@@ -26,9 +26,7 @@ import { SysCapability } from './sys-capability.object';
  *
  * Platform-seeded rows carry no organization and the organization key part is
  * NULL-safe (`COALESCE(organization_id,'__global__')`, ADR-0120 D3), so they
- * remain unique among themselves — which is what
- * `bootstrapSystemCapabilities`' upsert-by-name relies on. That behaviour is
- * pinned driver-side in
+ * remain unique among themselves. That behaviour is pinned driver-side in
  * `driver-sql/src/sql-driver-declared-index-organization-respelling.test.ts`;
  * this test pins the declaration its fixture copies.
  */

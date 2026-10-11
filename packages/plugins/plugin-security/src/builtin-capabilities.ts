@@ -19,8 +19,8 @@
  *     (`GET /api/v1/meta/capability`) list them beside every package-declared
  *     capability, and `GET /api/v1/meta/capability/:name` answers each one's
  *     definition.
- *  2. `bootstrapSystemCapabilities` keeps seeding their `sys_capability` rows
- *     from the same spec list, unchanged. Nothing here writes a row.
+ *  2. No `sys_capability` row is written for them: the curated capability
+ *     seeder that did so is retired, and nothing here writes a row.
  *
  * ## Why the engine registry's item seam, and not the manifest
  *

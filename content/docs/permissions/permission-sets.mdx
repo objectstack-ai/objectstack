@@ -40,7 +40,7 @@ export const SalesUser = definePermissionSet({
   // Tab/app visibility
   tabPermissions: { app_crm: 'default_on', app_admin: 'hidden' },
 
-  // System capabilities (flat strings, resolved against sys_capability)
+  // System capabilities (flat strings, matched by capability name)
   systemPermissions: ['export_reports'],
 });
 ```
@@ -147,8 +147,12 @@ the anchor decides *which* unit `unit*` means.
 
 ## Capabilities & required permissions (ADR-0066)
 
-- **Capabilities** are first-class `sys_capability` records — named privileges
-  such as `manage_users`, `manage_metadata`, `setup.access`, `studio.access`.
+- **Capabilities** are named privileges such as `manage_users`,
+  `manage_metadata`, `setup.access`, `studio.access`. The platform's curated
+  ones are declared `capability` metadata served by the registry
+  (`GET /api/v1/meta/capability`) and have no `sys_capability` row; a
+  capability a package declares with `defineCapability` is also seeded as a
+  `sys_capability` row.
   Grant them via `systemPermissions`; declare them as prerequisites via an
   object/field/app `requiredPermissions` (an **AND**-gate checked before any
   CRUD grant).

@@ -489,8 +489,9 @@ const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> 
 
 /**
  * Currency Configuration Schema
- * Configuration for currency field type supporting multi-currency
- * 
+ * Configuration for currency field type supporting multi-currency — and, in the
+ * same shape, for a `formula` field whose `returnType` is `currency` (#22727).
+ *
  * Note: Currency codes are validated by length only (3 characters) to support:
  * - Standard ISO 4217 codes (USD, EUR, CNY, etc.)
  * - Cryptocurrency codes (BTC, ETH, etc.)
@@ -1713,9 +1714,18 @@ export const FieldSchema = lazySchema(() => {
    * measures, display formatting, validation — read a declared type instead of
    * re-parsing the expression. Authoring stamps it from the inferred CEL type;
    * absent when the type can't be proven (an ambiguous/`dyn` expression).
+   *
+   * `currency` (#22727): the result is an amount of money. It carries its
+   * currency exactly the way a `currency` field does — through the formula's
+   * OWN `currencyConfig`, the same schema and the same defaults (absent ⇒
+   * `dynamic`, the tenant default currency). Nothing is read from the fields the
+   * expression references at read time: "taken from the source field" happens
+   * at AUTHORING, where `@objectstack/formula`'s `inferFormulaReturn` proves the
+   * result is money and answers the source's currency for the stamp to copy.
+   * The value itself is a bare number, as a currency field's is.
    */
-  returnType: z.enum(['number', 'text', 'boolean', 'date']).optional()
-    .describe('Inferred value type of a formula field (number/text/boolean/date)'),
+  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency']).optional()
+    .describe('Inferred value type of a formula field (number/text/boolean/date/currency). `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency).'),
   summaryOperations: strictObject({
     surface: 'this roll-up summary',
     history: FIELD_HISTORY,
@@ -1771,8 +1781,9 @@ export const FieldSchema = lazySchema(() => {
   // comparison. See docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field prune).
   step: z.number().optional().describe('Step increment for slider (default: 1)'),
 
-  // Currency field config
-  currencyConfig: CurrencyConfigSchema.optional().describe('Configuration for currency field type'),
+  // Currency config — read for a `currency` field and for a `formula` whose
+  // `returnType` is `currency` (#22727): one shape for both, never a second one.
+  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode.'),
 
   // Vector field — flat dimensionality (the live authoring path).
   // The renderer reads this flat sibling (objectui VectorField.tsx:11).
