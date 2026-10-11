@@ -11,7 +11,7 @@ Clause-②: no (narrowing)
 
 **BREAKING**, shipped as `minor` under the repo's convention for breaking changes on this line.
 
-**Existing emoji reactions stored in `sys_comment.reactions` are gone after the upgrade.** They are not converted into `sys_comment_reaction` records, and no screen or API returns them again. Reactions now live in `sys_comment_reaction`, one row per comment, emoji and user, the reacting user's own record.
+**Existing emoji reactions stored in `sys_comment.reactions` are gone after the upgrade.** They are not converted into `sys_comment_reaction` records, and no screen or API returns them again. Reactions now live in `sys_comment_reaction`, one row per comment, emoji and user, the reacting user's own record. Where the entry that introduces `sys_comment_reaction` says the column is unchanged, this entry supersedes it: the column retires.
 
 - **`sys_comment`** (`@objectstack/plugin-audit`) no longer declares `reactions`. Nothing takes its place on the comment row: no stored aggregate, and no block computed on read. Its label leaves the four generated translation bundles.
 - **The data door refuses the field.** A create or an update of a comment that still carries `reactions`, and a list filter on it, answer `400 INVALID_FIELD` naming the field, and nothing is written. The rest of the payload is not applied either. A read of a comment no longer returns `reactions`.
