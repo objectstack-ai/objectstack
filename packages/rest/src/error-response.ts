@@ -61,6 +61,7 @@ import {
     fiveXxArmDisplacesDeclared4xx,
     isSandboxCrash,
     isSandboxOrigin,
+    isSandboxOwnFault,
     mapDataError,
     sandboxBusinessMessage,
     structuredCodeAnswer,
@@ -698,7 +699,17 @@ export function classifiedRefusalAnswer(
  *  - a refusal that DECLARED a server-band status. The doors keep the status
  *    and withhold the prose (#5437) unless the producer declared it a refusal
  *    (#16146); the families folded it into their own `500` with the wrapper,
- *    or relayed the sentence at the declared status.
+ *    or relayed the sentence at the declared status;
+ *  - [#22885] the sandbox's OWN fault ({@link isSandboxOwnFault}): a
+ *    `SandboxError` the runner raised itself, with no `innerMessage` — a
+ *    denied capability, an unavailable `ctx.api` or a missing `ctx.api`
+ *    method, a budget, an install or marshal failure, a nested body's fault
+ *    relayed one VM hop up. It is no sandbox ORIGIN, so it fell past the two
+ *    shapes above to each family's own terminal, which relayed the runner's
+ *    diagnostic text (naming the hook, the object, the capability) where the
+ *    `/data` door answers `500 INTERNAL_ERROR` (#22868). Measured: twenty-three
+ *    write rows across these families answered that text, the four external
+ *    ones at `400`.
  *
  * ## One answer, not a second fault terminal
  *
@@ -711,6 +722,11 @@ export function classifiedRefusalAnswer(
  * refusal ({@link nestedRefusalEnvelope} for the nested families), and logs
  * the original error first: the client no longer reads the words, so the
  * operator must.
+ *
+ * [#22885] The own fault takes that same terminal, recognised by the predicate
+ * `classifyDataError` asks (#22868): the producer's identity, never its text,
+ * so the same words thrown by anything else keep the catching route's answer.
+ * ⛔ Not a second rule: no own-fault branch of its own here or in a family.
  *
  * ## What it deliberately leaves alone
  *
@@ -725,6 +741,7 @@ export function classifiedRefusalAnswer(
 export function sandboxFaultAnswer(
     error: any,
 ): { status: number; body: Record<string, unknown> } | undefined {
+    if (isSandboxOwnFault(error)) return resolveErrorResponse(error);
     if (!isSandboxOrigin(error)) return undefined;
     if (!isSandboxCrash(error)) {
         const declared = declaredHttpStatus(error);

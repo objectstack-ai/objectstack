@@ -459,6 +459,16 @@ export const ERROR_CODE_LEDGER = {
     'FLOW_NO_START_NODE',
     'INVALID_OR_EXPIRED',         // share-link token
     'NEEDS_PASSWORD',             // share link requires a password
+    // [#22823] The data door's two exposure codes, stamped by `callData`'s
+    // nested-relation walk (`refuseUnservedRelationTargets`,
+    // `action-execution.ts`) when a condition's related object does not serve
+    // `list`: 404 for `apiEnabled: false`, 405 with `allowed` for a whitelist.
+    // Reached on the `query` fallback (no protocol service resolved) and on the
+    // `aggregate` arm. The protocol path's answer for the same condition is
+    // `@objectstack/metadata-protocol`'s row; `@objectstack/rest` keeps its own
+    // rows for the addressed object. Provenance, not identity (see above).
+    'OBJECT_API_DISABLED',
+    'OBJECT_API_METHOD_NOT_ALLOWED',
     // [#7557] `DELETE /packages/:id` on the DISPATCHER door — per-item failures
     // used to ride inside a 200 with a hardcoded `success: true`. Second
     // EMITTER of the code `@objectstack/rest` already registers for the

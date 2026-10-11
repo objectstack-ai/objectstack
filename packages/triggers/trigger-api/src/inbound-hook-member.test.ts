@@ -16,8 +16,9 @@
  * What this pins:
  *  1. the member, read off the started slot on a kernel with no HTTP server
  *     (the hosted shape), answers every arm of the contract, each with its
- *     `code` and `status`, in both signature forms, and enqueues nothing for
- *     a post that does not verify;
+ *     `code` and `status`: the timestamped signature form accepted, the
+ *     body-only form refused even under the hook's own secret, and nothing
+ *     enqueued for a post that does not verify;
  *  2. parity: for the same request the member answers what the self-hosted
  *     mount answers on `http.server`, status, headers and body bytes;
  *  3. the composition: the route is mounted once where a raw app exists, read
@@ -231,6 +232,7 @@ const ROWS: Row[] = [
     { label: 'a body-only signature under another secret', flowName: FLOW, hookId: HOOK_ID, body: BODY, headers: { 'x-objectstack-signature': sigBodyOnly('not-the-secret', BODY) }, status: 401, code: 'INVALID_SIGNATURE', published: false },
     { label: 'a timestamped signature under another secret', flowName: FLOW, hookId: HOOK_ID, body: BODY, headers: { 'x-objectstack-signature': sigV1('not-the-secret', BODY, NOW) }, status: 401, code: 'INVALID_SIGNATURE', published: false },
     { label: 'the right secret, a timestamp outside the window', flowName: FLOW, hookId: HOOK_ID, body: BODY, headers: { 'x-objectstack-signature': sigV1(SECRET, BODY, NOW - 3600) }, status: 401, code: 'INVALID_SIGNATURE', published: false },
+    { label: 'the right secret, in the body-only form (refused: the timestamped form is the only one accepted)', flowName: FLOW, hookId: HOOK_ID, body: BODY, headers: { 'x-objectstack-signature': sigBodyOnly(SECRET, BODY) }, status: 401, code: 'INVALID_SIGNATURE', published: false },
     { label: 'unsigned, from a signed-in caller', flowName: FLOW, hookId: HOOK_ID, body: BODY, headers: { Authorization: 'Bearer tok_admin', Cookie: 'better-auth.session_token=tok.sig' }, status: 401, code: 'INVALID_SIGNATURE', published: false },
     // The residual: an armed hook whose secret cannot be read.
     { label: 'an unreadable secret, unsigned', flowName: UNREADABLE, hookId: 'default', body: BODY, headers: {}, status: 503, code: 'SERVICE_UNAVAILABLE', published: false },
@@ -238,9 +240,8 @@ const ROWS: Row[] = [
     // Only then is the body read as JSON.
     { label: 'a verified body that is not JSON', flowName: FLOW, hookId: HOOK_ID, body: '{not json', headers: sig('{not json'), status: 400, code: 'INVALID_REQUEST', published: false },
     { label: 'a verified body that is a JSON array', flowName: FLOW, hookId: HOOK_ID, body: '[1,2]', headers: sig('[1,2]'), status: 400, code: 'INVALID_REQUEST', published: false },
-    // Accepted: both signature forms, the empty body, and bytes as the sender wrote them.
+    // Accepted: the timestamped signature form, the empty body, and bytes as the sender wrote them.
     { label: 'a timestamped signature', flowName: FLOW, hookId: HOOK_ID, body: BODY, headers: sig(BODY), status: 202, code: null, published: true },
-    { label: 'a body-only signature (deprecated, still accepted)', flowName: FLOW, hookId: HOOK_ID, body: BODY, headers: { 'x-objectstack-signature': sigBodyOnly(SECRET, BODY) }, status: 202, code: null, published: true },
     { label: 'an empty body, signed', flowName: FLOW, hookId: HOOK_ID, body: '', headers: sig(''), status: 202, code: null, published: true },
     { label: 'a hand-written body, signed over its own bytes', flowName: FLOW, hookId: HOOK_ID, body: HAND_WRITTEN_BODY, headers: sig(HAND_WRITTEN_BODY), status: 202, code: null, published: true },
 ];
