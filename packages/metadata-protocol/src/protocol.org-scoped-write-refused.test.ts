@@ -242,7 +242,11 @@ const FLOW = {
     edges: [{ id: 'e1', source: 'start', target: 'end' }],
 };
 
-/** The control specimen: `allowOrgOverride: true`, so it HAS a per-org channel. */
+/**
+ * The control specimen: one of the five overlay-enabled types, which the
+ * retired exemption gave a per-org channel. Its organization-scoped write is
+ * refused like every other since ADR-0131 D6.
+ */
 const VIEW = {
     name: 'org_grid',
     label: 'Org grid',
@@ -260,7 +264,12 @@ const PLUGIN_TYPE = 'acme_widget';
 /** Every registry type plus the plugin-registered one — the refused set, derived. */
 const ALL_TYPES = [...DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type), PLUGIN_TYPE];
 
-/** The five types the retired exemption accepted (`allowOrgOverride: true`). */
+/**
+ * The five types the retired exemption accepted — the registry's
+ * overlay-enabled set (`allowEnvironmentOverlay: true`, then spelled
+ * `allowOrgOverride`). The flag now decides no organization; it is how the set
+ * is read.
+ */
 const TIER_A = ['view', 'dashboard', 'report', 'translation', 'email_template'];
 
 const REFUSED = { code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' };
@@ -273,7 +282,7 @@ describe('[ADR-0131 D6] no organization-scoped metadata write is accepted', () =
     });
 
     it('the enumeration covers the registry, the five formerly exempt types and a plugin-registered one', () => {
-        expect(DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowOrgOverride).map((e) => e.type)).toEqual(TIER_A);
+        expect(DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowEnvironmentOverlay).map((e) => e.type)).toEqual(TIER_A);
         for (const t of TIER_A) expect(ALL_TYPES).toContain(t);
         expect(DEFAULT_METADATA_TYPE_REGISTRY.some((e) => (e.type as string) === PLUGIN_TYPE)).toBe(false);
     });

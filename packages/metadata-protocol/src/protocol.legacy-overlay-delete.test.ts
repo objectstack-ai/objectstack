@@ -6,7 +6,7 @@
  *
  * ## The defect
  *
- * Commit ee58392e1 flipped six types to `allowOrgOverride: false`. That closed
+ * Commit ee58392e1 flipped six types to `allowEnvironmentOverlay: false`. That closed
  * the WRITE door and deliberately left the READ path alone: `supportsOverlay`
  * stayed `true`, so an overlay row authored BEFORE the rollback still merges
  * overlay-wins and still shapes the effective body. Removing it was refused at
@@ -35,9 +35,9 @@
  * ## The tier boundary, which is the whole safety argument
  *
  * Two tiers reach the same two refusal points and only ONE moves. The
- * separator is `supportsOverlay`, NOT `allowOrgOverride`:
+ * separator is `supportsOverlay`, NOT `allowEnvironmentOverlay`:
  *
- *  - `supportsOverlay: true` + `allowOrgOverride: false` → the ROLLED-BACK
+ *  - `supportsOverlay: true` + `allowEnvironmentOverlay: false` → the ROLLED-BACK
  *    OVERLAYABLE tier. Delete is now allowed. Cases below.
  *  - `supportsOverlay: false` → `object` above all, whose overlay registers as
  *    its own contributor LAYER (ADR-0029 D9) rather than merging, and whose
@@ -92,11 +92,11 @@ import { isOriginGatedType } from './packaged-base-regime.js';
  * THE TIER THAT MOVES, derived from the registry and never listed by hand
  * (Prime Directive #8): the loader merges an overlay at read time
  * (`supportsOverlay: true`) while the per-org write door is shut
- * (`allowOrgOverride: false`). A registry entry flipping either flag enrols or
+ * (`allowEnvironmentOverlay: false`). A registry entry flipping either flag enrols or
  * releases a type here with nothing to keep in sync.
  */
 const ROLLED_BACK_OVERLAYABLE_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => e.supportsOverlay && !e.allowOrgOverride)
+    .filter((e) => e.supportsOverlay && !e.allowEnvironmentOverlay)
     .map((e) => e.type)
     .sort();
 
@@ -106,7 +106,7 @@ const ROLLED_BACK_OVERLAYABLE_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_R
  * `action` and `hook` are the same shape and are probed as boundary cases.
  */
 const OVERLAY_INCAPABLE_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => !e.supportsOverlay && !e.allowOrgOverride)
+    .filter((e) => !e.supportsOverlay && !e.allowEnvironmentOverlay)
     .map((e) => e.type)
     .sort();
 
@@ -129,7 +129,7 @@ const OVERLAY_INCAPABLE_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTR
  * `protocol.code-defined-datasource-door.test.ts`.
  */
 const OVERLAY_INCAPABLE_RUNTIME_CREATABLE_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => !e.supportsOverlay && !e.allowOrgOverride && e.allowRuntimeCreate)
+    .filter((e) => !e.supportsOverlay && !e.allowEnvironmentOverlay && e.allowRuntimeCreate)
     .filter((e) => !isOriginGatedType(e.type))
     .map((e) => e.type)
     .sort();
@@ -267,7 +267,7 @@ describe('#6960 — the registry is the tier boundary, and it is DATA', () => {
 
     /**
      * Auto-enrolment, the reason both sets are derived. If a registry entry
-     * flips `supportsOverlay` or `allowOrgOverride`, this assertion turns red
+     * flips `supportsOverlay` or `allowEnvironmentOverlay`, this assertion turns red
      * on the spec edit ALONE — before a line of this file is touched — which
      * is what stops the two tiers from silently merging.
      */

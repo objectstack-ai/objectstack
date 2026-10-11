@@ -33,7 +33,7 @@ import { SysJob } from './sys-job.object.js';
  *     key; a per-organization constraint would make that lookup ambiguous
  *     (an arbitrary org's row would win) rather than fix anything.
  *  2. **The `job` metadata type is closed to tenants on all three flags** —
- *     `allowOrgOverride: false`, `allowRuntimeCreate: false`,
+ *     `allowEnvironmentOverlay: false`, `allowRuntimeCreate: false`,
  *     `supportsOverlay: false`. The registry comment says the deciding half in
  *     words: *"no per-org job fork"*.
  *  3. **No generic write path exists at all.** `enable.apiMethods` is
@@ -43,7 +43,7 @@ import { SysJob } from './sys-job.object.js';
  *     installation-scoped**: `AppPlugin` on `kernel:ready` from the app
  *     bundle's declared jobs, `JobServicePlugin` replaying those registrations,
  *     the schedule / time-relative flow triggers (keyed `<prefix>:${flowName}`,
- *     and `flow` is itself `allowOrgOverride: false`), the approvals and
+ *     and `flow` is itself `allowEnvironmentOverlay: false`), the approvals and
  *     reports plugins' fixed names, and wait-node timers keyed
  *     `flow-wait:${runId}:${nodeId}` on a server-minted run id.
  *  5. **ADR-0120 names this exact key.** Its S5 row — "engine idempotency keys
@@ -131,12 +131,13 @@ describe('sys_job — declared uniqueness is installation-wide (#8578)', () => {
     });
 
     it('the `job` metadata type is closed to tenants on all three flags', () => {
-      // The deciding fact, quoted from the registry: "no per-org job fork".
-      // Opening `allowOrgOverride` or `allowRuntimeCreate` is exactly the
+      // The deciding fact, quoted from the registry: "no environment fork of a
+      // packaged job".
+      // Opening `allowEnvironmentOverlay` or `allowRuntimeCreate` is exactly the
       // "a tenant can register or shadow a job" branch the card named.
       const job = DEFAULT_METADATA_TYPE_REGISTRY.find((t: any) => t.type === 'job');
       expect(job).toBeDefined();
-      expect((job as any).allowOrgOverride).toBe(false);
+      expect((job as any).allowEnvironmentOverlay).toBe(false);
       expect((job as any).allowRuntimeCreate).toBe(false);
       expect((job as any).supportsOverlay).toBe(false);
     });
@@ -149,7 +150,7 @@ describe('sys_job — declared uniqueness is installation-wide (#8578)', () => {
       // into the cross-tenant oracle after all.
       const flow = DEFAULT_METADATA_TYPE_REGISTRY.find((t: any) => t.type === 'flow');
       expect(flow).toBeDefined();
-      expect((flow as any).allowOrgOverride).toBe(false);
+      expect((flow as any).allowEnvironmentOverlay).toBe(false);
     });
 
     it("carries NO tenant column (ADR-0131 D7) — so `'global'` is the only scope that states the truth", () => {

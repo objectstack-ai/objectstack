@@ -226,7 +226,7 @@ describe('#6808 — deleteMetaItem stops BOTH registry exits serving a deleted o
    * Seed order is deliberate: the packaged artifact is registered AFTER the
    * overlay save. Registered first, its package provenance would make
    * `isArtifactBacked` true and `saveMetaItem`'s overlay gate would refuse the
-   * write outright (`object` is `allowOrgOverride: false`), so there would be no
+   * write outright (`object` is `allowEnvironmentOverlay: false`), so there would be no
    * overlay to delete and the pin would measure nothing.
    */
   it('an object whose overlay shadows a packaged artifact STAYS registered (tier 1)', async () => {

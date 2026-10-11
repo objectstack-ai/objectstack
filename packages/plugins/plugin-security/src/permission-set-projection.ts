@@ -1390,8 +1390,8 @@ export function createPermissionSetWriteThrough(
       // the producer's gate is exactly what the documented
       // `OS_METADATA_WRITABLE=permission` hatch switches off — so on the
       // deployments this card came from there is no refusal at all — and its
-      // message ("the type has not opted into per-org overlay writes") names
-      // nothing an admin can act on. It is NOT a second copy of
+      // message then ("the type has not opted into per-org overlay writes")
+      // named nothing an admin can act on. It is NOT a second copy of
       // `isArtifactBacked` (Prime Directive #8): it reads the engine
       // SchemaRegistry, the one source this plugin already calls
       // "package-declared" in `readDeclaredBody` above. See `packaged-permission-set-lock.ts`.
