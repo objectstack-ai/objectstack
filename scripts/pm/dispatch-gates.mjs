@@ -475,6 +475,7 @@ import {
   CHANGE_KIND_ROWS,
   MANDATORY_TIER_GLOB_ROWS,
   SUSPECT_TIER_GLOB_ROWS,
+  GENERATED_MODULE_SOURCES,
 } from './dispatch-gates.data.mjs';
 
 export {
@@ -489,6 +490,7 @@ export {
   TIER_FLOOR,
   TIER_DEFAULT,
   RETIRED_TIER_WORDS,
+  GENERATED_MODULE_SOURCES,
 };
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
@@ -6966,6 +6968,12 @@ export function collapseHint(hint) {
   return hint.replace(/\*\*?/g, '').replace(/\/+$/, '');
 }
 
+/** The committed sources a collapsed hint reaches as a `GENERATED_MODULE_SOURCES` module, by either spelling, or `null`. */
+export function generatedModuleSources(plain) {
+  const row = GENERATED_MODULE_SOURCES.find((r) => plain === r.module || MODULE_SPECIFIER_EXTENSIONS.some((ext) => plain + ext === r.module));
+  return row ? row.sources : null;
+}
+
 /**
  * ## A glob in a NON-FINAL segment is not collapsible, and must not be collapsed
  *
@@ -7197,7 +7205,9 @@ export function hintCovers(hint, inputPath) {
     // the specifier resolves to, and the extension list is the shared
     // `MODULE_SPECIFIER_EXTENSIONS` rather than a second copy of it. See the
     // section above for the price and for what this deliberately cannot do.
-    MODULE_SPECIFIER_EXTENSIONS.some((ext) => inputPath === plain + ext)
+    MODULE_SPECIFIER_EXTENSIONS.some((ext) => inputPath === plain + ext) ||
+    // A generated, git-ignored module reaches its committed sources (`GENERATED_MODULE_SOURCES`, #22554).
+    (generatedModuleSources(plain)?.some((source) => inputPath === source || inputPath.startsWith(`${source}/`)) ?? false)
   );
 }
 
