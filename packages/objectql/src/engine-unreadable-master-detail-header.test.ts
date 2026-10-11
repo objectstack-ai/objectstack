@@ -42,6 +42,7 @@
  *  (b) `requiredWhen` over `parent`: insert, update by id, a repoint, bulk —
  *      an unreadable header in either state answers what a nonexistent one does;
  *  (c) `readonlyWhen` over `parent`: by id and bulk, lenient and strict;
+ *  the mechanism: the read door first, then the elevated read;
  *  CONTROLS: a readable header unchanged (its stored values judged, a masked
  *  column included); a nonexistent id; a `controlled_by_parent` detail
  *  unchanged; a system caller unchanged (no read door asked); a plain `lookup`
@@ -395,10 +396,17 @@ describe('[#22519] an unreadable master-detail header answers what a nonexistent
       expect(envelopeOf(err)).toEqual(REQUIRED);
       await engine.insert(REQ_LINE, { invoice: 'h_mine_open', quantity: 1 }, { context: ALICE } as any);
       expect([...storeFor(REQ_LINE).values()].map((r) => r.invoice)).toEqual(['h_mine_open']);
-      // The read door first, then the elevated read: one of each for the header binding.
-      expect(headerReads.slice(0, 2)).toEqual([
+    });
+
+    it('the mechanism: the caller\'s read door first, then the elevated read — for the binding and for the reference check', async () => {
+      await engine.insert(REQ_LINE, { invoice: 'h_mine_open', quantity: 1 }, { context: ALICE } as any);
+      expect(headerReads).toEqual([
+        // the `parent` binding, batched
         { operation: 'find', elevated: false },
         { operation: 'find', elevated: true },
+        // the reference check
+        { operation: 'find', elevated: false },
+        { operation: 'findOne', elevated: true },
       ]);
     });
 
@@ -422,11 +430,15 @@ describe('[#22519] an unreadable master-detail header answers what a nonexistent
       expect(envelopeOf(err)).toEqual(REQUIRED);
     });
 
-    it('control: a controlled_by_parent detail is unchanged under a readable header, and takes the rule under an unreadable one', async () => {
+    it('control: a controlled_by_parent detail is unchanged under a readable header', async () => {
       expect(envelopeOf(await refusalOf(() => engine.insert(CBP_LINE, { invoice: 'h_mine_locked', quantity: 1 }, { context: ALICE } as any)))).toEqual(REQUIRED);
       await engine.insert(CBP_LINE, { invoice: 'h_mine_open', quantity: 1 }, { context: ALICE } as any);
       expect([...storeFor(CBP_LINE).values()].map((r) => r.invoice)).toEqual(['h_mine_open']);
+    });
+
+    it('a controlled_by_parent detail takes the same rule under an unreadable header', async () => {
       const nowhere = envelopeOf(await refusalOf(() => engine.insert(CBP_LINE, { invoice: NOWHERE, quantity: 1 }, { context: ALICE } as any)));
+      expect(nowhere).toEqual(UNEVALUABLE);
       for (const header of UNREADABLE) {
         expect(envelopeOf(await refusalOf(() => engine.insert(CBP_LINE, { invoice: header, quantity: 1 }, { context: ALICE } as any)))).toEqual(nowhere);
       }
