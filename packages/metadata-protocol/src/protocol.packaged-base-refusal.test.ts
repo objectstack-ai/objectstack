@@ -45,7 +45,11 @@ const ARTIFACTS = new Map<string, Map<string, unknown>>([
     ['page', new Map([['pkg_page', shipped('pkg_page')]])],
     ['action', new Map([['pkg_action', shipped('pkg_action')]])],
     ['permission', new Map([['pkg_perm', shipped('pkg_perm')]])],
-    ['position', new Map([['pkg_position', shipped('pkg_position')]])],
+    ['position', new Map([
+        ['pkg_position', shipped('pkg_position')],
+        ['everyone', shipped('everyone')],
+        ['guest', shipped('guest')],
+    ])],
 ]);
 
 function protocolOn(environmentId: string | undefined): ObjectStackProtocolImplementation {
@@ -400,6 +404,21 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
         // removing its overlay row is repair, never refused on this ground.
         expect(refusal('permission', 'pkg_perm', 'delete')).toBeNull();
         expect(refusalOnHostConfig('permission', 'pkg_perm', 'delete')).toBeNull();
+    });
+
+    it('`position` — an audience anchor keeps the generic managed seal: the switch refuses it, so it is not named', () => {
+        // The activation door refuses `everyone` and `guest` (the row's `notFor`).
+        for (const anchor of ['everyone', 'guest']) {
+            const r = refusal('position', anchor, 'save');
+            expect(shape(r), anchor).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect(r.message, anchor).toBe(
+                `Metadata item 'position/${anchor}' is provided by a managed package and is sealed against in-place edits: `
+                + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+                + 'a managed item. Edit the source artifact and redeploy. '
+                + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.',
+            );
+            expect(r.message, anchor).not.toContain('_activation');
+        }
     });
 
     it('`position` removal is the same #6960 carve-out — its row adds no refusal where there was none', () => {

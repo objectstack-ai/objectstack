@@ -8,4 +8,4 @@ Saving over a position a managed package ships is still refused `403 NOT_OVERRID
 
 > Switch it off (POST /api/v1/security/_activation/position/:name, body {enabled: false}; operator-only where one install serves several organizations).
 
-The refused writes, the error code and the status are unchanged. A position has no clone door, so none is named. Removing a position's overlay is still not refused (a position merges its overlay at read).
+The audience anchors `everyone` and `guest` keep the generic sentence, because the activation route refuses them. The refused writes, the error code and the status are unchanged. A position has no clone door, so none is named. Removing a position's overlay is still not refused (a position merges its overlay at read).

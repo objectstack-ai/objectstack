@@ -353,7 +353,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + 'the action door. The same two authority tiers as `POST /automation/:name/toggle` and `POST /actions/_activation/:object/:action`: '
       + '`manage_metadata`, then the ADR-0126 §5 posture rule requiring the platform operator in `group`/`isolated` — one shared '
       + 'implementation in `domains/activation-gate.ts`. The name must resolve in the security catalog the resolver reads (404 '
-      + 'otherwise, 503 when no catalog is bound); switching `admin_full_access` off is refused 403 by the last-admin guard\'s '
+      + 'otherwise, 503 when no catalog is bound), and the audience anchors `everyone` / `guest` are refused 400 in either direction; switching `admin_full_access` off is refused 403 by the last-admin guard\'s '
       + 'ledger hook. The ONE `/security` route the dispatcher mounts on the wire (`registerSecurityActivationRoutes`); the rest '
       + 'of `/security` is the REST server\'s. NOT JS-SDK surface, for the action door\'s reason: its caller is the Setup console '
       + '(Deactivate on the position and permission-set pages), which calls the platform API directly; adding a client method '

@@ -62,7 +62,8 @@
  *    security catalog's activation door. ⛔ No clone: a position has no clone
  *    door. Without this row a packaged position's refusal read the generic
  *    managed seal ("edit the source artifact and redeploy") and never named the
- *    switch that exists.
+ *    switch that exists. The two audience anchors (`everyone`, `guest`) are
+ *    the row's `notFor`: the door refuses them, so they keep the generic seal.
  *
  * Every switch route is gated by the ONE §5 write-authority gate
  * (`packages/runtime/src/domains/activation-gate.ts`), so each carries the same
@@ -138,6 +139,7 @@
  */
 
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec/identity';
 
 /**
  * An ADR-0126 customization regime a packaged-base refusal speaks for — only the
@@ -162,7 +164,17 @@ export type PackagedBaseRegimeCRoutes =
  * type's sanctioned routes, or an origin-gated type's owning source.
  */
 export type PackagedBaseRegimeRow =
-    | { readonly regime: 'C'; readonly routes: PackagedBaseRegimeCRoutes }
+    | {
+        readonly regime: 'C';
+        readonly routes: PackagedBaseRegimeCRoutes;
+        /**
+         * Names the row does NOT speak for, each with why. A name listed here
+         * reads the generic managed seal ({@link managedItemSealedSentence}'s
+         * own sentence) instead of the row's routes, because those routes refuse
+         * it — a refusal must never name a path that refuses the caller too.
+         */
+        readonly notFor?: Readonly<Record<string, string>>;
+    }
     | {
         readonly regime: 'origin-gated';
         /** The type's noun, opening the sentence the way the type's own admin door opens it. */
@@ -211,6 +223,13 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
             switchOff: 'POST /api/v1/security/_activation/position/:name, body {enabled: false}; '
                 + 'operator-only where one install serves several organizations',
         },
+        // The activation door refuses the two audience anchors (ADR-0090 D5/D9),
+        // so their refusal must not name it: switching one off would remove the
+        // authenticated or anonymous baseline of every principal in one write.
+        notFor: Object.fromEntries(AUDIENCE_ANCHOR_POSITIONS.map((anchor) => [
+            anchor,
+            'an audience anchor: the activation door refuses it, so the switch is not its remedy',
+        ])),
     },
     datasource: {
         regime: 'origin-gated',
@@ -332,6 +351,9 @@ export function packagedBaseRegimeSentence(
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     const row = packagedBaseRegimeRow(singular);
     if (row === undefined) return undefined;
+    if (row.regime === 'C' && row.notFor !== undefined && Object.prototype.hasOwnProperty.call(row.notFor, name)) {
+        return undefined;
+    }
     const lock = row.regime === 'origin-gated'
         ? `${row.noun} '${name}' is code-defined and cannot be `
             + (operation === 'delete' ? 'removed' : 'edited') + ' at runtime: it is read-only. '

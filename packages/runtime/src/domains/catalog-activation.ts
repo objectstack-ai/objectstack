@@ -44,6 +44,7 @@
  * `single`, the platform operator under a wall). ⛔ No new authority.
  */
 
+import { AUDIENCE_ANCHOR_POSITIONS, GUEST_POSITION } from '@objectstack/spec/identity';
 import {
     METADATA_ACTIVATION_TABLE,
     ObjectStoreMetadataActivationStore,
@@ -118,7 +119,8 @@ function ledgerUnregistered(ql: any): boolean {
  *     names the subject the PATH asked for; a path whose type is not a catalog
  *     type is refused with the position wording, which says nothing a refused
  *     caller could not read off the route ledger.
- *  2. **Shape**: `['_activation', type, name]`, `type` a catalog type.
+ *  2. **Shape**: `['_activation', type, name]`, `type` a catalog type, and
+ *     not an audience anchor (`everyone` / `guest`), which this door refuses.
  *  3. **Body**: {@link readActivationBody}.
  *  4. **Declaration**, through the catalog reader the security plugin binds to
  *     the engine — the one `resolveUserAuthzGrants` reads, so this door and
@@ -157,6 +159,26 @@ export async function handleCatalogActivationWrite(
     }
     const type: CatalogActivationType = requestedType;
     const name = parts[2];
+
+    // ── 2b. the audience anchors ────────────────────────────────────────────
+    // [ADR-0090 D5/D9] `everyone` is the authenticated baseline every signed-in
+    // member holds implicitly, and `guest` the anonymous one. One row here
+    // would switch either off for every principal in the deployment at once.
+    // Stage 1 kept the anchors sealed against every caller-reachable write, and
+    // this door keeps that: refused in either direction, before the body is
+    // read and before any lookup or write, with the same 400 as a type that has
+    // no switch — a well-formed target this door does not switch.
+    if (type === 'position' && (AUDIENCE_ANCHOR_POSITIONS as readonly string[]).includes(name)) {
+        return {
+            handled: true,
+            response: deps.error(
+                `Position '${name}' is an audience anchor: it carries the ${name === GUEST_POSITION ? 'anonymous' : 'authenticated'} ` +
+                `baseline of every principal in the deployment, so it is not switchable through this door (ADR-0090 D5/D9). ` +
+                `Change what it grants through the permission sets bound to it instead.`,
+                400,
+            ),
+        };
+    }
 
     // ── 3. body ─────────────────────────────────────────────────────────────
     const bodyReading = readActivationBody(deps, body);

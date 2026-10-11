@@ -416,7 +416,9 @@ grant off, `true` back on). The caller needs `manage_metadata`; under a `group`
 or `isolated` tenancy posture the caller must also be the platform operator,
 because the row reaches every organization (ADR-0126 §5). The name must resolve
 in the security catalog, or the route answers `404`. It is the same authority
-as the flow and action activation switches.
+as the flow and action activation switches. The two audience anchors,
+`everyone` and `guest`, are refused with `400` in either direction: one row
+would switch the authenticated or anonymous baseline off for every principal.
 
 - A deactivated **permission set** contributes nothing: not its name, not its
   `system_permissions`, not its `tab_permissions`. As with an expired grant, a

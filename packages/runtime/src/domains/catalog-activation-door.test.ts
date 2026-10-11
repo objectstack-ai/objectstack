@@ -31,7 +31,13 @@ const SET = 'sales_access';
 const DIRECT_SET = 'report_reader';
 
 const CATALOG: TestSecurityCatalog = {
-    positions: [{ name: POSITION, permissionSets: [SET], _packageId: 'crm' }],
+    positions: [
+        { name: POSITION, permissionSets: [SET], _packageId: 'crm' },
+        // The audience anchors are DECLARED here so a refusal of them cannot be
+        // a 404 in disguise: the lookup would find them.
+        { name: 'everyone', permissionSets: [] },
+        { name: 'guest', permissionSets: [] },
+    ],
     permissions: [
         { name: SET, systemPermissions: ['cap_sales'] },
         { name: DIRECT_SET, systemPermissions: ['cap_reports'] },
@@ -270,6 +276,41 @@ describe('the catalog activation door — contract', () => {
 
         expect(statusOf(res)).toBe(400);
         expect(messageOf(res)).toContain('/security/_activation/:type/:name');
+        expect(h.writes).toEqual([]);
+    });
+
+    for (const anchor of ['everyone', 'guest']) {
+        for (const enabled of [false, true]) {
+            it(`refuses the audience anchor \`${anchor}\` with enabled: ${enabled} — 400, nothing written`, async () => {
+                const h = boot('single');
+
+                const res = await flip(h, TENANT_ADMIN(), `/_activation/position/${anchor}`, { enabled });
+
+                expect(statusOf(res)).toBe(400);
+                expect(messageOf(res)).toContain(`'${anchor}' is an audience anchor`);
+                expect(messageOf(res)).toContain('not switchable through this door');
+                expect(h.writes).toEqual([]);
+                expect(h.tables[LEDGER]).toEqual([]);
+            });
+        }
+
+        it(`the authority gates still answer first for \`${anchor}\` — a walled tenant admin gets 403, not the anchor 400`, async () => {
+            const h = boot('isolated');
+
+            const res = await flip(h, TENANT_ADMIN(), `/_activation/position/${anchor}`);
+
+            expect(statusOf(res)).toBe(403);
+            expect(codeOf(res)).toBe('PERMISSION_DENIED');
+            expect(h.writes).toEqual([]);
+        });
+    }
+
+    it('an anchor NAME under `permission` is not an anchor — it is looked up like any set (404 here)', async () => {
+        const h = boot('single');
+
+        const res = await flip(h, TENANT_ADMIN(), '/_activation/permission/everyone');
+
+        expect(statusOf(res)).toBe(404);
         expect(h.writes).toEqual([]);
     });
 
