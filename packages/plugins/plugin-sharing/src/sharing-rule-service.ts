@@ -1591,12 +1591,16 @@ export class SharingRuleService implements ISharingRuleService {
    *  2. **The verdict is deployment-wide.** The ledger carries no tenant
    *     column, so a switched-off position is off in every organization, as it
    *     is for the resolver; the rule's organization does not choose a row.
-   *  3. **A failed read still grants.** On a minimal stack the ledger may not
-   *     be registered or provisioned, and a query failure is indistinguishable
-   *     from that here. Revoking every position share because a read threw is
+   *  3. **A failed read still grants.** A composition that registers no ledger
+   *     object is not read at all; on one whose ledger table was never
+   *     provisioned a query failure is indistinguishable from that here. Revoking every position share because a read threw is
    *     the mass revocation "absence means active" exists to avoid.
    */
   private async readPositionActive(positionName: string): Promise<boolean> {
+    // A composition that registers no ledger object holds no row: the read is
+    // not issued, as the resolver's own `ledgerUnregistered` check decides.
+    const registry = (this.engine as { registry?: { getObject?: (name: string) => unknown } }).registry;
+    if (typeof registry?.getObject === 'function' && !registry.getObject(METADATA_ACTIVATION_TABLE)) return true;
     try {
       const rows = await this.engine.find(METADATA_ACTIVATION_TABLE, {
         filter: { metadata_type: 'position', name: positionName },

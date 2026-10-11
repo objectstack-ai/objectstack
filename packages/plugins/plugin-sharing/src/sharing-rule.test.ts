@@ -2037,6 +2037,20 @@ describe('#8710 — a deactivated position confers no sharing-rule shares', () =
     expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
   });
 
+  it('a composition that registers no ledger object issues no ledger read, and the position still shares', async () => {
+    const find = engine.find.bind(engine);
+    let ledgerReads = 0;
+    (engine as any).find = async (object: string, opts?: any) => {
+      if (object === 'sys_metadata_activation') ledgerReads += 1;
+      return find(object, opts);
+    };
+    (engine as any).registry = { getObject: (name: string) => (name === 'sys_metadata_activation' ? undefined : { name }) };
+    switchCfo(false); // a row the composition does not serve
+    const rule = await rules.defineRule(RULE, SYS);
+    expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
+    expect(ledgerReads).toBe(0);
+  });
+
   it('the ADDRESSING primitive stays a RAW directory read — the filter is the call site\'s', async () => {
     // ⛔ The load-bearing negative pin. `PositionGraphService` answers "who
     // holds position P" for every consumer of the graph; approval ROUTING and
