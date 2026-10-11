@@ -34,9 +34,12 @@ import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REGISTRY_PATH = path.resolve(HERE, '../src/migrations/registry.ts');
+// The file git merges: since #22554 `registry.ts` is generated whole and never
+// committed, so the hand-written step-18 rationale lives in the template, and the
+// template is what two retirement PRs edit, and what GitHub merges.
+const REGISTRY_PATH = path.resolve(HERE, '../src/migrations/registry.ts.template');
 /** Where the file sits in the fixture repo — the real relative path, so a failure names it. */
-const REL = 'packages/spec/src/migrations/registry.ts';
+const REL = 'packages/spec/src/migrations/registry.ts.template';
 
 const OPEN = 'const STEP18_RATIONALE: readonly RationaleFragment[] = [\n';
 const CLOSE = '];\n';

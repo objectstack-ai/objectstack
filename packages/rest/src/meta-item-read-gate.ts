@@ -55,6 +55,14 @@
  * `meta-list-projection-parity.test.ts` and `meta-read-org-scope-parity.test.ts`
  * in `@objectstack/runtime` drive both transports over the same fixtures and
  * hold the answers equal.
+ *
+ * [#22639] The AUDIENCE gate — `requiredPermissions`, a list of capabilities
+ * the caller must ALL hold — is asked through ONE predicate,
+ * {@link holdsRequiredPermissions}, by every arm that reads the key: an app and
+ * its navigation entries, a list view (a view item, a view container's `list`
+ * and `listViews` entries, an object's own `listViews`) and a dashboard. ⛔ No
+ * second evaluator, and no any-of form: "or" is one capability granted to
+ * several permission sets.
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
@@ -65,6 +73,7 @@ import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } f
 import {
     ObjectSchemaMaskEvaluationError,
     applyObjectSchemaMask,
+    isObjectSchemaMaskExempt,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaRuntimeView,
     type ObjectSchemaMaskPosture,
@@ -181,12 +190,17 @@ export function metaCallerOrganizationId(caller: unknown): string | undefined {
  *    absent optional service is a deployment fact, not a denial).
  *  - `app-permission` — `403 PERMISSION_DENIED`, the one withheld reason the
  *    #8013 ruling lets an app report as itself.
+ *  - `audience-permission` — [#22639] a list view's or a dashboard's own
+ *    `requiredPermissions` the caller does not all hold: the app arm's whole
+ *    refusal, carried to the two types ruling 6095014058 (letter A) gated the
+ *    same way — the same `403 PERMISSION_DENIED`, written in the same envelope.
  *  - `docs-audience` — ADR-0046 §6.7: `401 UNAUTHENTICATED` to an anonymous
  *    caller, `403 PERMISSION_DENIED` otherwise.
  */
 export type MetaItemReadRefusal =
     | { reason: 'absent' }
     | { reason: 'app-permission'; status: 403; code: 'PERMISSION_DENIED'; message: string }
+    | { reason: 'audience-permission'; status: 403; code: 'PERMISSION_DENIED'; message: string }
     | { reason: 'docs-audience'; status: 401; code: 'UNAUTHENTICATED'; message: string }
     | { reason: 'docs-audience'; status: 403; code: 'PERMISSION_DENIED'; message: string };
 
@@ -256,6 +270,15 @@ export interface MetaReadGatePolicy {
      * `/published`) and the event doors (`/history`, `/audit`) do not.
      * The census in `meta-alternate-door-read-gates.test.ts` pins both halves
      * on every door, and that the exemption reaches no other cell.
+     *
+     * [#22639] The same row governs a view CONTAINER's entries, for the same
+     * reason: a container's `list` and `listViews` entries are pruned per
+     * caller like an app's navigation entries, and Studio's designer saves
+     * back the container it loaded. A caller the door hands in with
+     * `mayWriteItem` reads the stored container whole on an `author-exempt`
+     * door; a list view or a dashboard the plain read refuses WHOLE (its own
+     * `requiredPermissions`) is refused on every door, author or not — the
+     * app's whole refusal.
      */
     app: 'gate' | 'author-exempt';
 }
@@ -611,6 +634,160 @@ export async function resolveDocsAudience(
     };
 }
 
+// ── THE audience predicate ────────────────────────────────────────────────────
+
+/**
+ * [#22639] THE `requiredPermissions` predicate: does a caller holding
+ * `sysPerms` (their `systemPermissions`) hold EVERY capability `required`
+ * names? Absent, not a list, or empty: no gate, `true`.
+ *
+ * One predicate for every carrier of the key this gate reads — an app and its
+ * navigation entries ({@link filterAppForUserWithReason}), a list view
+ * ({@link filterViewForUser}, {@link filterObjectListViewsForUser}) and a
+ * dashboard ({@link createMetaItemReadGate}, {@link createMetaListReadGate}).
+ * Ruling 6095014058 (letter A) gave the list view and the dashboard the key
+ * "with the same shape and semantics as the app, navigation-item, action
+ * (ADR-0066 D4) and record-block (#18159) keys: a list of capabilities, all
+ * required", and triage's direction for its server half was "one predicate,
+ * shared with the app arm … ⛔ No second evaluator, and ⛔ no any-of (B was not
+ * taken)". So ALL is the only reading: "or" is one capability the application
+ * grants to several permission sets.
+ *
+ * A name that is not a string is held by nobody, so it denies — the reading
+ * the app arm has always given it.
+ */
+export function holdsRequiredPermissions(required: unknown, sysPerms: ReadonlySet<string>): boolean {
+    return !Array.isArray(required) || required.every((p: unknown) => sysPerms.has(p as string));
+}
+
+/**
+ * [#22639] The capabilities {@link holdsRequiredPermissions} reads for one
+ * caller, or `null` when no user is signed in — and then no audience arm
+ * gates anything, exactly as the app arm has always answered (an anonymous
+ * caller is refused before any `/meta` read but a book's or a doc's, on both
+ * transports, so `null` here is a system caller with no user).
+ */
+function callerSystemPermissions(ctx: MetaReadGateCaller | undefined): Set<string> | null {
+    if (!ctx?.userId) return null;
+    return new Set<string>(Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : []);
+}
+
+/** [#22639] The by-name refusal of a list view or a dashboard the caller may not open — the app arm's whole refusal (#8013). */
+function audienceRefusal(kind: 'view' | 'dashboard', name: string): MetaItemReadRefusal {
+    return {
+        reason: 'audience-permission', status: 403, code: 'PERMISSION_DENIED',
+        message: `You do not have permission to open the '${name}' ${kind}.`,
+    };
+}
+
+// ── The list view and object filters ─────────────────────────────────────────
+
+/**
+ * [#22639] A `Record<key, list view>` — a view container's `listViews`, or an
+ * object's own — minus the entries whose `requiredPermissions` the caller does
+ * not all hold. The SAME record when nothing is withheld; a copy otherwise
+ * (the input is the shared cache's copy and is never mutated). An emptied
+ * record stays an empty record: filtering reports what the caller may not see,
+ * it does not tidy the metadata (the `areas[]` rule in
+ * {@link filterAppForUserWithReason}).
+ */
+function pruneListViewRecord(record: unknown, sysPerms: ReadonlySet<string>): unknown {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+    let out: Record<string, unknown> | undefined;
+    for (const [key, view] of Object.entries(record as Record<string, unknown>)) {
+        if (!view || typeof view !== 'object') continue;
+        if (holdsRequiredPermissions((view as { requiredPermissions?: unknown }).requiredPermissions, sysPerms)) continue;
+        out ??= { ...(record as Record<string, unknown>) };
+        delete out[key];
+    }
+    return out ?? record;
+}
+
+/**
+ * [#22639] Filter ONE `view` document by the caller's capabilities — the list
+ * view audience gate (`ListViewSchema.requiredPermissions`, ruling 6095014058,
+ * letter A).
+ *
+ * A `view` document is one of two things, classified by `isContainer` (the
+ * spec's `isAggregatedViewContainer`, handed in so this stays synchronous —
+ * ⛔ never a second classifier):
+ *
+ *  - **ONE view** — a view item (`viewKind` + `config`: its list body, and so
+ *    its key, sits under `config`), or a flattened overlay (the list keys at the
+ *    top level). It is served whole or not at all: `null` when the caller does
+ *    not hold every capability its body names. Each position the key is
+ *    declared at is asked; a document carries the one its shape declares.
+ *  - **A view CONTAINER** — a `defineView` document, which the registry files
+ *    under the object it binds and serves on the same type. It is never
+ *    withheld whole (it declares no audience of its own): its `list` and each
+ *    `listViews` entry the caller does not hold are pruned, like an app's
+ *    navigation entries. The views the container EXPANDS to are separate
+ *    `<object>.<key>` items, each judged as ONE view above with the same body,
+ *    so the container and its items cannot disagree.
+ *
+ * The same reference when nothing is withheld; never mutates its input.
+ */
+export function filterViewForUser(
+    item: any,
+    sysPerms: ReadonlySet<string>,
+    isContainer: (item: unknown) => boolean,
+): any | null {
+    if (!item || typeof item !== 'object') return item;
+    if (isContainer(item)) {
+        let out = item;
+        const list = item.list;
+        if (list && typeof list === 'object' && !holdsRequiredPermissions(list.requiredPermissions, sysPerms)) {
+            const { list: _withheld, ...rest } = item;
+            out = rest;
+        }
+        const listViews = pruneListViewRecord(item.listViews, sysPerms);
+        return listViews === item.listViews ? out : { ...out, listViews };
+    }
+    const config = item.config && typeof item.config === 'object' ? item.config : undefined;
+    return holdsRequiredPermissions(item.requiredPermissions, sysPerms)
+        && holdsRequiredPermissions(config?.requiredPermissions, sysPerms)
+        ? item
+        : null;
+}
+
+/**
+ * [#22639] An OBJECT document minus the `listViews` entries the caller does not
+ * hold — the list view audience gate on the door ruling 6095014058's scope
+ * note added: an object's own list views are served inside `/meta/object`,
+ * never as `/meta/view` items, and `ObjectListViewSchema` declares the same
+ * key (the scope note `6096254862`, item 1). The same reference when nothing
+ * is withheld.
+ *
+ * Asked only for a caller ADR-0106 D4 does not exempt — see the `object` arm
+ * of {@link createMetaItemReadGate}.
+ */
+export function filterObjectListViewsForUser(item: any, sysPerms: ReadonlySet<string>): any {
+    if (!item || typeof item !== 'object') return item;
+    const listViews = pruneListViewRecord(item.listViews, sysPerms);
+    return listViews === item.listViews ? item : { ...item, listViews };
+}
+
+/**
+ * [#22639] The list views the audience gate withheld from `stored` when it
+ * served `served` — `list` for a container's default list view, and
+ * `listViews.<key>` for each named one — sorted. Empty when nothing was
+ * withheld. The validator a cached read folds in (`RestServer`'s cached plain
+ * read): the gate varies the body per caller, so the shared ETag of the stored
+ * body must vary with what it withheld, exactly as ADR-0106 D3 folds a
+ * caller's field visibility.
+ */
+export function withheldListViewNames(stored: unknown, served: unknown): string[] {
+    if (!stored || typeof stored !== 'object' || stored === served) return [];
+    const before = stored as Record<string, unknown>;
+    const after = (served && typeof served === 'object' ? served : {}) as Record<string, unknown>;
+    const out: string[] = [];
+    if (before.list && typeof before.list === 'object' && !('list' in after)) out.push('list');
+    const keysOf = (v: unknown): string[] => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v) : []);
+    const kept = new Set(keysOf(after.listViews));
+    for (const key of keysOf(before.listViews)) if (!kept.has(key)) out.push(`listViews.${key}`);
+    return out.sort();
+}
+
 // ── The app and dashboard filters ─────────────────────────────────────────────
 
 /**
@@ -741,8 +918,8 @@ export function filterAppForUserWithReason(
     if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
         return { app: null, withheld: 'unpublished' };
     }
-    const reqApp = Array.isArray(item.requiredPermissions) ? item.requiredPermissions : [];
-    if (reqApp.length > 0 && !reqApp.every((p: string) => sysPerms.has(p))) {
+    // [#22639] THE audience predicate — the one every carrier of the key asks.
+    if (!holdsRequiredPermissions(item.requiredPermissions, sysPerms)) {
         return { app: null, withheld: 'permission' };
     }
     // ADR-0057 D10 — capability gate: hide when the named kernel service is
@@ -758,8 +935,7 @@ export function filterAppForUserWithReason(
         const out: any[] = [];
         for (const e of entries) {
             if (!e || typeof e !== 'object') continue;
-            const req = Array.isArray(e.requiredPermissions) ? e.requiredPermissions : [];
-            if (req.length > 0 && !req.every((p: string) => sysPerms.has(p))) continue;
+            if (!holdsRequiredPermissions(e.requiredPermissions, sysPerms)) continue;
             if (typeof e.requiresService === 'string' && serviceGate && serviceGate(e.requiresService) === false) continue;
             // [#19790] DOCS AUDIENCE — the rule `DocNavItemSchema` declares
             // and, until this arm, only a renderer honoured: a `doc` entry
@@ -1272,9 +1448,28 @@ const DOCS_HOLDER_MESSAGE = 'This documentation is limited to holders of a permi
  *    may write the app is served it as stored, unpruned, and every other
  *    caller the pruned app; an app the plain read
  *    refuses WHOLE is refused either way. See `MetaReadGatePolicy.app`.
- *  - `dashboard` — ADR-0057 D10 {@link filterDashboardForUser}. A
- *    per-DEPLOYMENT gate (which optional services are registered), never
- *    per-caller, so `arms: 'per-caller'` skips it.
+ *  - `dashboard` — [#22639] its own `requiredPermissions`, through
+ *    {@link holdsRequiredPermissions}: a caller who does not hold every
+ *    capability it names is refused it WHOLE, `403 PERMISSION_DENIED` — the
+ *    app arm's whole refusal, on every door and to an author as to anyone. A
+ *    per-CALLER gate, so it runs under both `arms`. Then ADR-0057 D10
+ *    {@link filterDashboardForUser}, a per-DEPLOYMENT gate (which optional
+ *    services are registered), never per-caller, so `arms: 'per-caller'`
+ *    skips it.
+ *  - `view` — [#22639] the list view audience, {@link filterViewForUser}: ONE
+ *    view the caller does not hold is refused whole, `403 PERMISSION_DENIED`,
+ *    on every door and to an author as to anyone; a view CONTAINER is served
+ *    minus the `list` / `listViews` entries the caller does not hold, and under
+ *    `app: 'author-exempt'` a caller who may write it reads it stored, whole —
+ *    the app arm's two rules, carried over (see `MetaReadGatePolicy.app`).
+ *  - `object` — [#22639] an object's own `listViews` entries the caller does
+ *    not hold are pruned ({@link filterObjectListViewsForUser}), on every door,
+ *    for every caller ADR-0106 D4 does not exempt (`isObjectSchemaMaskExempt`):
+ *    whoever may write a schema reads all of it — the caller property the
+ *    object mask already honours on every door, for the reason
+ *    `isObjectSchemaMaskExempt` records: a read PUT back verbatim must not
+ *    silently delete what was withheld. The field mask itself is NOT here
+ *    (below).
  *  - `book` — ADR-0046 §6.7, the book's own audience.
  *  - `doc` — ADR-0046 §6.7, the EFFECTIVE audience (union over the books
  *    that claim it, unclaimed → `org`). [#20129] Both gate inputs fail
@@ -1329,10 +1524,8 @@ export function createMetaItemReadGate(
         let inputs: Promise<AppGateInputs | null> | undefined;
         const resolveInputs = (): Promise<AppGateInputs | null> => (inputs ??= (async () => {
             const ctx = await sources.resolveCaller();
-            if (!ctx?.userId) return null;
-            const sysPerms = new Set<string>(
-                Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
-            );
+            const sysPerms = callerSystemPermissions(ctx);
+            if (!ctx || !sysPerms) return null;
             let serviceGate: ((n: string) => boolean) | undefined;
             let servabilityGate: NavServabilityGate | undefined;
             if (policy.arms === 'all') {
@@ -1396,19 +1589,69 @@ export function createMetaItemReadGate(
         };
     }
 
+    // [#22639] The caller, resolved once per judge — the layered view judges
+    // three documents, `/diff` up to three, against one caller.
+    let callerOnce: Promise<MetaReadGateCaller | undefined> | undefined;
+    const resolveCallerOnce = (): Promise<MetaReadGateCaller | undefined> => (callerOnce ??= sources.resolveCaller());
+
     if (metaType === 'dashboard') {
-        if (policy.arms !== 'all') return async (document) => serve(document);
-        // ADR-0057 D10: gate dashboard widgets by `requiresService` (mirrors
-        // the app-nav gate above) so the console never renders a tile bound
-        // to an absent optional service. [#5881] On the DEFAULT path since
-        // the plain read's cache exclusion — see the `isDashboardType`
-        // comment in `RestServer`'s plain read.
         return async (document) => {
             if (document == null) return serve(document);
-            const ctx = await sources.resolveCaller();
+            const ctx = await resolveCallerOnce();
+            // [#22639] The audience first — a per-CALLER gate, so it runs under
+            // both `arms`: a dashboard the caller may not open is refused WHOLE
+            // (its direct URL included, ruling 6095014058), the app arm's
+            // whole refusal, author or not.
+            const sysPerms = callerSystemPermissions(ctx);
+            if (sysPerms && !holdsRequiredPermissions(document.requiredPermissions, sysPerms)) {
+                return refuse(audienceRefusal('dashboard', name));
+            }
+            if (policy.arms !== 'all') return serve(document);
+            // ADR-0057 D10: gate dashboard widgets by `requiresService` (mirrors
+            // the app-nav gate above) so the console never renders a tile bound
+            // to an absent optional service. [#5881] On the DEFAULT path since
+            // the plain read's cache exclusion — see the `isDashboardType`
+            // comment in `RestServer`'s plain read.
             const registered = await resolveRegisteredServices(sources.serviceProbe(ctx), [document]);
             const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
             return serve(serviceGate ? filterDashboardForUser(document, serviceGate) : document);
+        };
+    }
+
+    if (metaType === 'view') {
+        // [#22639] The list view audience — see {@link filterViewForUser}.
+        return async (document) => {
+            if (document == null) return serve(document);
+            const ctx = await resolveCallerOnce();
+            const sysPerms = callerSystemPermissions(ctx);
+            if (!sysPerms) return serve(document);
+            const { isAggregatedViewContainer } = await import('@objectstack/spec/ui');
+            const gated = filterViewForUser(document, sysPerms, isAggregatedViewContainer);
+            // ONE view the caller does not hold: refused whole, on every door,
+            // author or not — the app arm's whole refusal.
+            if (gated == null) return refuse(audienceRefusal('view', name));
+            // A container's entries are pruned per caller; on a door that
+            // honours ruling 5856774816's author exemption, a caller who may
+            // write the container reads it as stored (see
+            // `MetaReadGatePolicy.app`), or a save of what they loaded would
+            // delete the entries withheld from them.
+            const authorExempt = policy.app === 'author-exempt' && ctx?.mayWriteItem === true;
+            return serve(authorExempt ? document : gated);
+        };
+    }
+
+    if (metaType === 'object') {
+        // [#22639] An object's own `listViews` — see {@link filterObjectListViewsForUser}.
+        return async (document) => {
+            if (document == null) return serve(document);
+            const ctx = await resolveCallerOnce();
+            const sysPerms = callerSystemPermissions(ctx);
+            // ADR-0106 D4: whoever may write a schema reads all of it — the
+            // same caller property, on every door, that serves them its fields
+            // unmasked; a pruned load saved back would delete the list views
+            // withheld from them.
+            if (!sysPerms || isObjectSchemaMaskExempt(ctx)) return serve(document);
+            return serve(filterObjectListViewsForUser(document, sysPerms));
         };
     }
 
@@ -1479,10 +1722,20 @@ export function createMetaItemReadGate(
  *    mean "not in your list" (the by-name read is where they differ, #8013).
  *    An anonymous caller's list is returned untouched, as it always was: the
  *    anonymous-deny floor answers it before this gate, on both transports.
- *  - `dashboard` — ADR-0057 D10 {@link filterDashboardForUser} over every
- *    dashboard, when the deployment can be probed (fail OPEN otherwise). A
+ *  - `dashboard` — [#22639] first its own `requiredPermissions`, through
+ *    {@link holdsRequiredPermissions}: a dashboard the caller does not hold
+ *    every capability of is left out (the by-name read refuses it `403`).
+ *    Then ADR-0057 D10 {@link filterDashboardForUser} over every dashboard
+ *    left, when the deployment can be probed (fail OPEN otherwise). A
  *    per-DEPLOYMENT gate, not a per-caller one; it rides here because the
  *    list answers what the by-name read answers.
+ *  - `view` — [#22639] {@link filterViewForUser} over every view: ONE view the
+ *    caller does not hold is left out, a view container is listed minus the
+ *    entries they do not hold. So `GET /meta/view?object=…`, the console's
+ *    view switcher, lists only the views this caller may open.
+ *  - `object` — [#22639] {@link filterObjectListViewsForUser} over every
+ *    object, for a caller ADR-0106 D4 does not exempt — the by-name read's
+ *    `object` arm.
  *  - `book` — ADR-0046 §6.7, each book's OWN audience, resolved over the
  *    listed books ({@link DocsAudience.admitsBook}).
  *  - `doc` — ADR-0046 §6.7, each doc's EFFECTIVE audience: the env's books
@@ -1516,10 +1769,8 @@ export function createMetaListReadGate(
     if (metaType === 'app') {
         return async (items) => {
             const ctx = await sources.resolveCaller();
-            if (!ctx?.userId) return items;
-            const sysPerms = new Set<string>(
-                Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
-            );
+            const sysPerms = callerSystemPermissions(ctx);
+            if (!sysPerms) return items;
             const registered = await resolveRegisteredServices(sources.serviceProbe(ctx), items);
             const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
             // [#7912] Resolved ONCE for the whole list — object metadata is a
@@ -1537,10 +1788,51 @@ export function createMetaListReadGate(
     if (metaType === 'dashboard') {
         return async (items) => {
             const ctx = await sources.resolveCaller();
-            const registered = await resolveRegisteredServices(sources.serviceProbe(ctx), items);
-            if (!registered) return items;
+            // [#22639] The audience first: a dashboard this caller may not open
+            // is not in their list.
+            const sysPerms = callerSystemPermissions(ctx);
+            const kept = sysPerms
+                ? items.filter((it: any) => !it || typeof it !== 'object'
+                    || holdsRequiredPermissions(it.requiredPermissions, sysPerms))
+                : items;
+            const audience = kept.length === items.length ? items : kept;
+            const registered = await resolveRegisteredServices(sources.serviceProbe(ctx), audience);
+            if (!registered) return audience;
             const serviceGate = (n: string) => registered.has(n);
-            return items.map((it: any) => filterDashboardForUser(it, serviceGate));
+            return audience.map((it: any) => filterDashboardForUser(it, serviceGate));
+        };
+    }
+
+    if (metaType === 'view') {
+        return async (items) => {
+            if (items.length === 0) return items;
+            const sysPerms = callerSystemPermissions(await sources.resolveCaller());
+            if (!sysPerms) return items;
+            const { isAggregatedViewContainer } = await import('@objectstack/spec/ui');
+            let changed = false;
+            const out: any[] = [];
+            for (const it of items) {
+                const gated = filterViewForUser(it, sysPerms, isAggregatedViewContainer);
+                if (gated !== it) changed = true;
+                if (gated != null) out.push(gated);
+            }
+            return changed ? out : items;
+        };
+    }
+
+    if (metaType === 'object') {
+        return async (items) => {
+            if (items.length === 0) return items;
+            const ctx = await sources.resolveCaller();
+            const sysPerms = callerSystemPermissions(ctx);
+            if (!sysPerms || isObjectSchemaMaskExempt(ctx)) return items;
+            let changed = false;
+            const out = items.map((it: any) => {
+                const gated = filterObjectListViewsForUser(it, sysPerms);
+                if (gated !== it) changed = true;
+                return gated;
+            });
+            return changed ? out : items;
         };
     }
 

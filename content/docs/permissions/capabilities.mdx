@@ -183,12 +183,14 @@ Listing each audience's own capability instead —
 `requiredPermissions: ['clm_legal.access', 'clm_admin.access']` — requires both,
 so it shuts out everyone who holds only one of them.
 
-<Callout type="warn">
-**A list view's and a dashboard's `requiredPermissions` are not enforced yet.**
-The key is declared, so it validates and is stored, but no server reads it
-today: the view or the dashboard is still served to every user who can read
-it. Do not rely on it to keep a view or a dashboard from an audience until the
-platform enforces it.
+<Callout type="info">
+**A list view's and a dashboard's `requiredPermissions` are enforced by the
+server.** A user who does not hold every capability listed is not served the
+view or the dashboard: it is left out of their lists — the view switcher
+included — and opening it by name or by its direct URL is refused. The named
+list views of a view container, and an object's own list views, are left out
+the same way; a user who may edit the object still reads all of its list views,
+so a save of what they loaded keeps them.
 </Callout>
 
 ## What the seeder does, and what it refuses

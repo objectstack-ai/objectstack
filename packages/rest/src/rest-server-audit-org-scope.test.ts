@@ -82,7 +82,11 @@ function boot(execCtx: any) {
             {
                 method: 'GET',
                 path: AUDIT,
-                params: { type: 'views', name: 'shared_grid' },
+                // [#22639] A type no per-caller gate judges. `view` is judged
+                // now (its own `requiredPermissions`), which costs this door a
+                // current-document read this stub deliberately does not serve;
+                // what these cases pin is the audit read, not the gate.
+                params: { type: 'reports', name: 'shared_grid' },
                 query: {},
                 headers: {},
                 body: {},
@@ -153,7 +157,7 @@ describe('#8747 GET /meta/:type/:name/audit scopes the read to the environment-w
         await drive({ query: { limit: '5' } });
 
         const request = requestFrom(auditMetaItem);
-        expect(request.type).toBe('views');
+        expect(request.type).toBe('reports');
         expect(request.name).toBe('shared_grid');
         expect(request.limit).toBe(5);
     });

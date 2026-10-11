@@ -2,8 +2,10 @@
 
 One TypeScript file per entry of `../registry.ts`'s three append tables (#7297, the
 registry half of #6957's ruling). `pnpm --filter @objectstack/spec gen:migration-registry`
-concatenates them into that file's marked regions, sorted by entry id;
-`check:migration-registry` proves the regions still match this directory.
+writes `../registry.ts` whole: the hand-written skeleton `../registry.ts.template` with
+these files concatenated into its marked regions, sorted by entry id. It runs on
+`pnpm install`, as the first step of `build`, and before `typecheck` and `test`, and
+`registry.ts` is git-ignored (#22554), so there is no committed copy to keep in step.
 
 | directory        | table                                | id                                     |
 | ---------------- | ------------------------------------ | -------------------------------------- |
@@ -65,9 +67,10 @@ into the registry; the run of `//` comments immediately above `export const entr
 
 ## Four rules that are not style
 
-- **Touch no other file, and never edit inside the markers.** `registry.ts`'s
-  `<os-generated …>` regions are output. A hand edit there is reverted by the next
-  `gen:` run and reported by `check:migration-registry` before that.
+- **Touch no other file for the entry, and never edit `registry.ts`.** It is output,
+  generated whole and git-ignored: a hand edit there is never committed, and the next
+  `gen:` run overwrites it. Prose outside the tables (a step's `rationale`) lives in
+  `../registry.ts.template`.
 - **There is no index, deliberately.** An index is itself a single append-only file
   every card must edit, which is the exact conflict this directory removes (PM decision
   on #6957). The directory listing is the index, and order is derived from the id.
@@ -96,9 +99,11 @@ into the registry; the run of `//` comments immediately above `export const entr
 
 ## What this does not fix
 
-The `registry.ts` lap. An entry lands with its generated regions in `registry.ts`, so
-`gen:migration-registry` regenerates that one file and the pull request commits it;
-`check:migration-registry` is its gate. Nothing else is regenerated for an entry.
+Not the template's prose. A step-18 retirement still adds its `STEP18_RATIONALE`
+fragment to `../registry.ts.template`, which is hand-written and merges as text; the
+fragments are kept sorted by key so two retirements insert at different lines (#20535).
+The `registry.ts` lap is gone (#22554): the file is generated at install and build and
+never committed, so an entry's pull request regenerates nothing for it.
 `spec-changes.json` and the protocol upgrade guide are projections of this registry, but
 neither is committed any more (#22449 B′: the guide's copy left git at #22483,
 `spec-changes.json`'s at #22485). The publish lane generates both into the package
@@ -113,8 +118,9 @@ generates. A retirement card is not faster for this file, only harder to lose.
 
 History, kept for its `registry.ts` conclusion. This section measured the two
 projections while they were committed and routed `merge=os-regen`; since #22485
-they are neither, so there is nothing of theirs left to merge. What still holds is the
-residue paragraph below: every adjacent-id collision conflicts in `registry.ts`.
+they are neither, so there is nothing of theirs left to merge. Since #22554 the residue
+paragraph's `registry.ts` conflict is history too: the registry is no longer committed,
+so an adjacent-id pair of entries no longer meets anywhere.
 
 `.gitattributes` routes both through `merge=os-regen`, and that driver is a **local**
 git facility: the GitHub merge queue rebuilds each PR server-side, where no custom

@@ -62,6 +62,12 @@ packages/*/*.tsbuildinfo
 # Generated JSON Schema (rebuilt by `pnpm gen:schema` during build)
 packages/spec/json-schema/
 
+# Generated migration registry (rebuilt by `pnpm gen:migration-registry` on
+# install and as the first step of build, from registry.ts.template + entries/),
+# and the staging file its atomic write renames into place.
+packages/spec/src/migrations/registry.ts
+packages/spec/src/migrations/registry.ts.*.tmp
+
 # Generated bundle size reports
 packages/spec/bundle-size-report.json
 
