@@ -453,7 +453,28 @@ position under as their own identity. The deprecated pre-rename prefix is no
 alias of it (ADR-0090 D3): it matches only a slot stored under that exact
 spelling, and no holder acts under it.
 Other filters: `status`, `object`, `recordId`, `submitterId`, `q`, `limit`,
-`offset`.
+`offset`, and `unstaffed`.
+
+`unstaffed=true` adds the pending requests whose slate names no person: only
+unstaffed literals such as `position:<name>`, or nothing at all. This is what
+`admin_rescue` opens. They
+are added only for a caller who may override them: an admin with override
+authority (`admin_full_access`, or `organization_admin` within their
+organization). Every such row reads `viewer.can_override: true`. For anyone else the parameter
+adds nothing. It is ORed with `approverId`, never ANDed, so one call answers
+"my pending approvals, rescues included", and its `total` counts both:
+
+```bash
+curl -b cookies.txt \
+  "https://your-app.example.com/api/v1/approvals/requests?status=pending&approverId=usr_123&unstaffed=true"
+```
+
+It reads `true` or `false` only (`false` is the same as leaving it out); any
+other value is refused with `400`. The test reads the slate, not the directory:
+a `position:<name>` slot whose position gained a holder after the request opened
+still matches (that holder also finds it under `approverId`), and a slate that
+still names a person never matches, even if that person has since left.
+Reassign such a request from the **All** view.
 
 <Callout type="warn">
 **`approverId` is a filter, not authorization.** What you may see is decided
