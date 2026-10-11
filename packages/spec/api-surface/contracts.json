@@ -163,6 +163,7 @@
     "ISmsTransport (interface)",
     "IStorageService (interface)",
     "ITeamGraphService (interface)",
+    "ITriggerApiService (interface)",
     "ImportObjectOpts (interface)",
     "ImportObjectResult (interface)",
     "InboxListResult (interface)",
