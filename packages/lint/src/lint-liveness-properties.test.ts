@@ -830,16 +830,19 @@ describe('lintLivenessProperties', () => {
     });
   });
 
-  // ── #22611: a list view's and a dashboard's audience gate ships spec-first —
-  // `planned` + `authorWarn` until the `/meta` read gate applies it (#22639).
-  // REAL LEDGER: contract tests on the two shipped rows. The enforcing change
-  // flips both rows `live` and drops `authorWarn`, which turns the two warn pins
-  // below red ON PURPOSE — re-subject them to the silence in that change.
-  // (`authorWarn` reaches a container's `list` and every dashboard; the walk
-  // flattens one level of `children`, so a named `listViews` entry is not
-  // walked — the key's describe carries the not-enforced clause for that door.)
-  describe('list-view and dashboard audience gate (#22611 — planned until the read gate enforces it)', () => {
+  // ── #22611 → #22639: a list view's and a dashboard's audience gate shipped
+  // spec-first, `planned` + `authorWarn`, and the `/meta` read gate now applies
+  // it (#22639), so both rows are `live`, citing the gate, with `authorWarn`
+  // and `authorHint` dropped. REAL LEDGER: contract tests on the two shipped
+  // rows. The two warn pins below turned red at that flip ON PURPOSE and are
+  // re-subjected to the silence — a `live` row never warns. Each authors the
+  // flipped key beside a property that IS still `authorWarn`
+  // (`object.externalSharingModel`) in the SAME call: one ledger load, one
+  // warning, so the silence is a reading and not a lint that stopped loading
+  // ledgers (which also answers []).
+  describe('list-view and dashboard audience gate (#22611 → #22639 — live, enforced by the /meta read gate)', () => {
     const GATE = ['clm_legal_workbench.view'];
+    const LIT = { objects: [{ name: 'widget', externalSharingModel: 'read' }] };
     const viewWith = (list: Record<string, unknown>) =>
       ({ object: 'clm_contract', list: { type: 'grid', columns: ['name'], ...list } });
     const boardWith = (extra: Record<string, unknown>) =>
@@ -848,41 +851,37 @@ describe('lintLivenessProperties', () => {
       const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), `${type}.json`), 'utf8'));
       return type === 'view' ? ledger.props.list.children.requiredPermissions : ledger.props.requiredPermissions;
     };
+    const lit = (findings: { message: string; rule: string }[]) =>
+      expect(ruleOf(findings, 'externalSharingModel')).toBe('liveness-planned-property');
 
     for (const [type, path, stack] of [
       ['view', 'list.requiredPermissions', { views: [viewWith({ requiredPermissions: GATE })] }],
       ['dashboard', 'requiredPermissions', { dashboards: [boardWith({ requiredPermissions: GATE })] }],
     ] as const) {
-      it(`warns on an authored \`${path}\` (${type}) — the planned rule id and the row's own authorHint`, () => {
-        const findings = lintLivenessProperties(stack);
-        const f = findings.find((x) => x.message.includes(`sets \`${path}\``));
-        expect(f).toBeDefined();
-        expect(f!.rule).toBe('liveness-planned-property');
+      it(`is silent on an authored \`${path}\` (${type}) — the row is \`live\`, cites the gate, and carries no author warning`, () => {
+        const findings = lintLivenessProperties({ ...LIT, ...stack });
+        lit(findings);
+        expect(ruleOf(findings, path)).toBeUndefined();
         const row = shippedRow(type);
-        // Anti-vacuity: the row is the shape this pin exists for.
-        expect(row.status).toBe('planned');
-        expect(row.authorWarn).toBe(true);
-        expect(f!.hint).toBe(row.authorHint);
-        expect(f!.hint).not.toMatch(/#\d+/);
-        expect(f!.hint).not.toContain('Remove it');
+        // Anti-vacuity: the row is the shape this pin now exists for.
+        expect(row.status).toBe('live');
+        expect(row).not.toHaveProperty('authorWarn');
+        expect(row).not.toHaveProperty('authorHint');
+        expect(row.evidence).toContain('packages/rest/src/meta-item-read-gate.ts#holdsRequiredPermissions');
       });
     }
 
     it('stays silent on a view and a dashboard that author no gate — in a call that still warns', () => {
-      // One stack, two halves: the gated dashboard is the lit control that
-      // proves the ledgers loaded, so the ungated view's silence is a reading.
-      const viewQuiet = lintLivenessProperties({
-        views: [viewWith({})],
-        dashboards: [boardWith({ requiredPermissions: GATE })],
-      });
-      expect(ruleOf(viewQuiet, 'requiredPermissions')).toBe('liveness-planned-property');
+      // Authored or not, the key warns nobody now; the lit control is what
+      // makes each silence a reading.
+      const viewQuiet = lintLivenessProperties({ ...LIT, views: [viewWith({})], dashboards: [boardWith({ requiredPermissions: GATE })] });
+      lit(viewQuiet);
       expect(ruleOf(viewQuiet, 'list.requiredPermissions')).toBeUndefined();
+      expect(ruleOf(viewQuiet, 'requiredPermissions')).toBeUndefined();
 
-      const boardQuiet = lintLivenessProperties({
-        views: [viewWith({ requiredPermissions: GATE })],
-        dashboards: [boardWith({})],
-      });
-      expect(ruleOf(boardQuiet, 'list.requiredPermissions')).toBe('liveness-planned-property');
+      const boardQuiet = lintLivenessProperties({ ...LIT, views: [viewWith({ requiredPermissions: GATE })], dashboards: [boardWith({})] });
+      lit(boardQuiet);
+      expect(ruleOf(boardQuiet, 'list.requiredPermissions')).toBeUndefined();
       expect(ruleOf(boardQuiet, 'requiredPermissions')).toBeUndefined();
     });
   });

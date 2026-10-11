@@ -30,11 +30,8 @@
 # self-test, and `schedule` and `push` still run it over the very changes the
 # PR path skips.
 #
-# Since #19753 it covers migration_registry, the one family that ADDS a gate
-# to the PR path: an entry, the generated registry, the generator and the two
-# package files that decide how it runs must each select it; a spec source
-# outside the migration tree, a sibling spec script and a lookalike directory
-# must not; and a deletion, an empty diff or an unresolvable base still run it.
+# It covered a tenth family, migration_registry (#19753), until #22554 retired
+# it with its gate: the migration registry it compared is no longer committed.
 #
 # The last section reads the REAL lint.yml and pins the YAML half of the
 # contract: the selector step exists under the id the `if:` lines name, every
@@ -73,7 +70,7 @@ git_q() {
   git -c user.name=selftest -c user.email=selftest@example.invalid -c commit.gpgsign=false "$@"
 }
 
-ALL='migration_registry slot_lookup query_options_erasure entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock'
+ALL='slot_lookup query_options_erasure entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock'
 
 # ── Fixture repositories ────────────────────────────────────────────────────
 # C0 carries one representative file of every class the classifier names, so
@@ -84,7 +81,7 @@ git_q -C "$UP" init -q
 git_q -C "$UP" symbolic-ref HEAD refs/heads/main
 mkdir -p "$UP/packages/a/scripts" "$UP/packages/a/src" "$UP/apps/site/src" "$UP/docs" "$UP/content/docs" \
   "$UP/scripts/pm" "$UP/scripts/ci" "$UP/.github/workflows" "$UP/.claude/agents" "$UP/skills/x" "$UP/.changeset" \
-  "$UP/packages/spec/src/migrations/entries/semantic" "$UP/packages/spec/scripts"
+  "$UP/packages/spec/src" "$UP/packages/spec/scripts"
 printf '{"name":"fixture","private":true}\n' > "$UP/package.json"
 printf 'packages:\n  - packages/*\n' > "$UP/pnpm-workspace.yaml"
 printf '{"name":"a","scripts":{"check:gate":"vitest run scripts/gate.test.ts"}}\n' > "$UP/packages/a/package.json"
@@ -126,13 +123,10 @@ printf '# rules\n' > "$UP/AGENTS.md"
 printf '# claude\n' > "$UP/CLAUDE.md"
 printf '# readme\n' > "$UP/README.md"
 printf -- '---\n"a": patch\n---\nchange\n' > "$UP/.changeset/first.md"
-# The migration_registry read-set (#19753), and its nearest neighbours outside it.
+# A spec package: its manifest, a source and package-local scripts the cases edit.
 printf '{"name":"spec"}\n' > "$UP/packages/spec/package.json"
 printf '{}\n' > "$UP/packages/spec/tsconfig.json"
 printf 'export const index = 1;\n' > "$UP/packages/spec/src/index.ts"
-printf 'export const registry = [];\n' > "$UP/packages/spec/src/migrations/registry.ts"
-printf 'export const entry = 1;\n' > "$UP/packages/spec/src/migrations/entries/semantic/17.x.ts"
-printf 'export const gen = 1;\n' > "$UP/packages/spec/scripts/build-migration-registry.ts"
 printf 'export const schemas = 1;\n' > "$UP/packages/spec/scripts/build-schemas.ts"
 printf 'export const merge = 1;\n' > "$UP/packages/spec/scripts/conversions-merge.test.ts"
 git_q -C "$UP" add -A
@@ -308,8 +302,7 @@ expect_all_run
 expect_reason pm_dispatch_gates "event 'push' is not scoped"
 expect_reason entry_guard "event 'push' is not scoped"
 expect_reason bare_root_worklist "event 'push' is not scoped"
-expect_reason migration_registry "event 'push' is not scoped"
-expect_line 'Gate families: 10 run, 0 skipped'
+expect_line 'Gate families: 9 run, 0 skipped'
 
 run_case 'schedule: every family runs (the hourly full run keeps the battery)' "$REPO" schedule '' ''
 expect_rc 0
@@ -356,7 +349,7 @@ expect_reason pm_dispatch_gates 'scripts/pm/tool.mjs (M, scripts)'
 expect_reason self_test_workflow_commands 'scripts/pm/tool.mjs (M, scripts)'
 expect_changed 'one M' "M scripts/pm/tool.mjs"
 expect_line "Gate-family diff base: $C0  (the merge group's base_sha)"
-expect_line 'Gate families: 6 run, 4 skipped'
+expect_line 'Gate families: 6 run, 3 skipped'
 
 S=$(scenario A:scripts/pm/new-tool.mjs)
 run_case 'merge_group: an ADDED file inside the read-set still runs it -- the narrowing is about the class, never the status' "$REPO" merge_group '' "$C0"
@@ -370,7 +363,7 @@ run_case 'merge_group: a scripts/pm prose change runs the tooling self-tests, an
 expect_rc 0
 expect_warnings '' ''
 expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
-expect_line 'Gate families: 5 run, 5 skipped'
+expect_line 'Gate families: 5 run, 4 skipped'
 
 S=$(scenario M:docs/guide.md M:content/docs/page.mdx M:.changeset/first.md M:README.md)
 run_case 'merge_group: a docs-only group skips every family, and prints it' "$REPO" merge_group '' "$C0"
@@ -379,13 +372,11 @@ expect_warnings '' ''
 expect_verdicts
 expect_reason pm_dispatch_gates 'no changed path is in its read-set'
 expect_reason entry_guard 'no changed path is in its read-set'
-expect_reason migration_registry 'no changed path is in its read-set'
-expect_line 'Gate families: 0 run, 10 skipped'
+expect_line 'Gate families: 0 run, 9 skipped'
 expect_line 'skip  pm_dispatch_gates'
 expect_line 'skip  comment_mask_corpus'
 expect_line 'skip  self_test_workflow_commands'
-expect_line 'skip  migration_registry'
-if grep -q '^| `pm_dispatch_gates` | skip |' "$RT/step-summary" && grep -q '^## Gate families: 0 run, 10 skipped' "$RT/step-summary"; then
+if grep -q '^| `pm_dispatch_gates` | skip |' "$RT/step-summary" && grep -q '^## Gate families: 0 run, 9 skipped' "$RT/step-summary"; then
   ok 'the step summary lists the skipped families'
 else
   bad 'the step summary lists the skipped families' "$(tr '\n' ' ' < "$RT/step-summary")"
@@ -447,7 +438,6 @@ run_case 'merge_group: an EMPTY diff runs every family rather than selecting not
 expect_rc 0
 expect_warnings '#10057' "::warning::The diff against $C0 listed no changed files; every gate family runs rather than selecting nothing (#10057)."
 expect_all_run
-expect_reason migration_registry "the diff against $C0 listed no changed files"
 expect_changed 'empty' ''
 
 S=$(scenario M:docs/guide.md)
@@ -456,14 +446,12 @@ expect_rc 0
 expect_warnings 'no base' '::warning::This merge_group event carries no base_sha, so the gate-family diff base cannot be computed; every family runs.'
 expect_all_run
 expect_reason pm_dispatch_gates 'no base_sha in the merge_group event'
-expect_reason migration_registry 'no base_sha in the merge_group event'
 
 run_case 'merge_group: an unfetchable base_sha warns twice and runs everything' "$REPO" merge_group '' "$ZEROS"
 expect_rc 0
 expect_warnings 'fetch + resolve' "::warning::Could not fetch the merge group's base $ZEROS; the resolution below will decide.
 ::warning::Could not resolve the merge group's base '$ZEROS' in this checkout; every gate family runs rather than guessing which paths changed (#16453)."
 expect_all_run
-expect_reason migration_registry "merge group base '$ZEROS' unresolvable"
 
 if git_q -C "$SHALLOW" cat-file -e "$C0^{commit}" 2>/dev/null; then
   bad 'precondition: the shallow clone lacks C0 before the fetch case'
@@ -512,8 +500,7 @@ expect_reason declared_population_live 'no changed path is in its read-set'
 expect_reason bare_root_worklist 'no changed path is in its read-set'
 expect_reason self_test_workflow_commands 'no changed path is in its read-set'
 expect_reason entry_guard 'no changed path is in its read-set'
-expect_reason migration_registry 'no changed path is in its read-set'
-expect_line 'Gate families: 3 run, 7 skipped'
+expect_line 'Gate families: 3 run, 6 skipped'
 
 S=$(scenario M:apps/site/src/page.tsx)
 run_case 'merge_group: an apps TSX edit is outside the ratchets (packages/** only) and inside the corpus alone' "$REPO" merge_group '' "$C0"
@@ -572,11 +559,10 @@ expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root
 expect_reason verify_lock '(M, verify-lock)'
 
 S=$(scenario M:scripts/helper.mjs)
-run_case 'merge_group: a top-level scripts module is imported by the ratchets AND the lock preflight, and is a masked source -- every family but the migration registry, which reads no repo-level script' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a top-level scripts module is imported by the ratchets AND the lock preflight, and is a masked source -- every family runs' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_verdicts slot_lookup query_options_erasure entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock
 expect_reason verify_lock scripts/helper.mjs
-expect_reason migration_registry 'no changed path is in its read-set'
 
 S=$(scenario M:scripts/slot-lookup-baseline.json)
 run_case 'merge_group: a ratchet baseline runs the ratchets and the families that walk scripts/, and not the PM self-test -- the battery opens no data file (#22076)' "$REPO" merge_group '' "$C0"
@@ -658,81 +644,7 @@ S=$(scenario M:docs/guide.md M:packages/a/src/index.test.ts M:.github/workflows/
 run_case 'merge_group: a mixed group runs the union of what its paths reach' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_verdicts slot_lookup query_options_erasure comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
-expect_line 'Gate families: 7 run, 3 skipped'
-
-# ── merge_group: the migration registry family (#19753) ────────────────────
-# The #19523 shape first: an entry edited and the registry NOT regenerated.
-# The entry is TypeScript under packages/, so the two ratchets and the corpus
-# walk ride along; what these cases pin is the migration_registry verdict.
-S=$(scenario M:packages/spec/src/migrations/entries/semantic/17.x.ts)
-run_case 'merge_group: an entry edited without the registry (the #19523 shape) runs the migration registry' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_warnings '' ''
-expect_verdicts migration_registry slot_lookup query_options_erasure comment_mask_corpus
-expect_reason migration_registry packages/spec/src/migrations/entries/semantic/17.x.ts
-expect_reason migration_registry '(M, workspace)'
-expect_line 'Gate families: 4 run, 6 skipped'
-
-S=$(scenario A:packages/spec/src/migrations/entries/retired-keys/17.ui__X__y.ts)
-run_case 'merge_group: an ADDED entry runs it -- a new directory under the tree is still the tree' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_warnings '' ''
-expect_verdicts migration_registry slot_lookup query_options_erasure comment_mask_corpus
-expect_reason migration_registry '(A, workspace)'
-
-S=$(scenario A:packages/spec/src/migrations/entries/semantic/notes.txt)
-run_case 'merge_group: a non-TypeScript file in an entry directory runs it and nothing else -- the gate refuses a stray file there' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_verdicts migration_registry
-expect_line 'Gate families: 1 run, 9 skipped'
-
-S=$(scenario M:packages/spec/src/migrations/registry.ts)
-run_case 'merge_group: the generated registry edited alone runs it -- a hand edit is the other half of the drift' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_verdicts migration_registry slot_lookup query_options_erasure comment_mask_corpus
-
-S=$(scenario M:packages/spec/scripts/build-migration-registry.ts)
-run_case 'merge_group: the generator runs it, and every family that reads a package-local script' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_verdicts migration_registry slot_lookup query_options_erasure comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
-expect_reason migration_registry packages/spec/scripts/build-migration-registry.ts
-
-S=$(scenario M:packages/spec/scripts/build-schemas.ts)
-run_case 'merge_group: a SIBLING spec script is not the generator -- the arm names one file' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_verdicts slot_lookup query_options_erasure comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
-expect_reason migration_registry 'no changed path is in its read-set'
-
-S=$(scenario M:packages/spec/package.json)
-run_case 'merge_group: the spec manifest runs it -- pnpm resolves the check script through it' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_verdicts migration_registry pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock
-expect_reason migration_registry '(M, workspace)'
-
-S=$(scenario M:packages/spec/tsconfig.json)
-run_case 'merge_group: the spec tsconfig runs it alone -- tsx loads it from the package directory' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_verdicts migration_registry
-expect_line 'Gate families: 1 run, 9 skipped'
-
-S=$(scenario M:packages/spec/src/index.ts)
-run_case 'merge_group: a spec source OUTSIDE the migration tree skips it' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_warnings '' ''
-expect_verdicts slot_lookup query_options_erasure comment_mask_corpus
-expect_reason migration_registry 'no changed path is in its read-set'
-
-S=$(scenario A:packages/spec/src/migrations-notes/README.md)
-run_case 'merge_group: a lookalike directory beside the tree skips it -- the arm is anchored on the separator' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_verdicts
-expect_reason migration_registry 'no changed path is in its read-set'
-
-S=$(scenario D:packages/spec/src/migrations/entries/semantic/17.x.ts)
-run_case 'merge_group: a DELETED entry runs it, with everything else (structural)' "$REPO" merge_group '' "$C0"
-expect_rc 0
-expect_all_run
-expect_reason migration_registry 'structural change (D packages/spec/src/migrations/entries/semantic/17.x.ts)'
+expect_line 'Gate families: 7 run, 2 skipped'
 
 # ── pull_request ────────────────────────────────────────────────────────────
 git_q -C "$REPO" checkout -q -B feature "$C0"
@@ -743,7 +655,6 @@ run_case 'pull_request: decided against merge-base(origin/main, HEAD)' "$REPO" p
 expect_rc 0
 expect_warnings '' ''
 expect_verdicts
-expect_reason migration_registry 'no changed path is in its read-set'
 expect_line "Gate-family diff base: $C0  (merge-base of origin/main and HEAD)"
 expect_changed 'the feature edit only, not C1' "M docs/guide.md"
 
@@ -759,7 +670,7 @@ expect_rc 0
 expect_warnings '' ''
 expect_verdicts slot_lookup query_options_erasure comment_mask_corpus
 expect_reason pm_dispatch_gates 'no changed path is in its read-set'
-expect_line 'Gate families: 3 run, 7 skipped'
+expect_line 'Gate families: 3 run, 6 skipped'
 
 # The card's pin and triage's (#22076): product code alone runs no PM
 # self-test; scripts/pm/** runs it, prose included.
@@ -797,16 +708,6 @@ expect_rc 0
 expect_warnings '' ''
 expect_verdicts slot_lookup query_options_erasure comment_mask_corpus declared_population_live bare_root_worklist self_test_workflow_commands
 expect_reason pm_dispatch_gates 'no changed path is in its read-set'
-
-git_q -C "$REPO" checkout -q -B feature-19753 "$C0"
-printf 'export const entry = 2;\n' > "$REPO/packages/spec/src/migrations/entries/semantic/17.x.ts"
-git_q -C "$REPO" commit -q -am 'F3: an entry edited on a feature branch, registry not regenerated'
-run_case 'pull_request: an entry edited on a feature branch runs the migration registry, decided against the merge base' "$REPO" pull_request main ''
-expect_rc 0
-expect_warnings '' ''
-expect_verdicts migration_registry slot_lookup query_options_erasure comment_mask_corpus
-expect_reason migration_registry '(M, workspace)'
-expect_line "Gate-family diff base: $C0  (merge-base of origin/main and HEAD)"
 git_q -C "$REPO" checkout -q -B feature "$F1"
 
 run_case 'pull_request: no base branch in the payload' "$REPO" pull_request '' ''
@@ -834,7 +735,6 @@ expect_rc 0
 expect_warnings 'fetch + #6195' '::warning::Could not fetch origin/nope; the merge-base resolution below will decide.
 ::warning::Could not resolve merge-base(origin/nope, HEAD); every gate family runs rather than guessing which paths changed (#6195).'
 expect_all_run
-expect_reason migration_registry 'merge-base(origin/nope, HEAD) unresolvable'
 
 # ── The YAML half of the contract ───────────────────────────────────────────
 # Read from the real workflow: the selector step, the `if:` spellings, and
@@ -898,11 +798,10 @@ pin_step self_test_workflow_commands 'node scripts/check-self-test-workflow-comm
 # that no workflow passes.
 pin_step verify_lock 'bash scripts/pm/os-verify-lock.sh'
 pin_step comment_mask_corpus 'node scripts/check-comment-mask-corpus.mjs'
-pin_step migration_registry 'pnpm --filter @objectstack/spec check:migration-registry'
 
 # ── Verdict ─────────────────────────────────────────────────────────────────
 # #4690: a battery that ran nothing is a failure, never a pass.
-if [ "$cases" -lt 71 ] || [ "$checks" -lt 369 ]; then
+if [ "$cases" -lt 59 ] || [ "$checks" -lt 304 ]; then
   echo "SELFTEST FAILED: only $cases case(s) / $checks check(s) ran -- the battery is short"
   exit 1
 fi
