@@ -40,6 +40,12 @@
 // classification is total, so a verb added to the explain vocabulary without a
 // door parity row fails it.
 //
+// A read is in that table too. Its door is the by-id `GET`, which scopes a
+// `controlled_by_parent` record by the master ids the principal can read
+// (ADR-0055), so the read row sits on `cpg_vault_item`, whose master is
+// private: explain's read verdict is pinned beside that door for a principal
+// who cannot read the master, for one who can, and for an id no row carries.
+//
 // ## A transfer is judged by the update policies its door is judged by
 //
 // The third block is not about the master. A transfer's door is the `PATCH`
@@ -153,6 +159,10 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
   const underAdmin: Partial<Record<ExplainOperation, string>> = {};
   /** Per verb with a by-id door: a child of the steward's own master, which the steward did not create. */
   const underSteward: Partial<Record<ExplainOperation, string>> = {};
+  /** Per verb with a by-id read door: a child of the admin's private master, which the steward cannot read. */
+  const underUnreadable: Partial<Record<ExplainOperation, string>> = {};
+  /** Per verb with a by-id read door: a child of the steward's own private master, which the steward reads. */
+  const underReadable: Partial<Record<ExplainOperation, string>> = {};
 
   /**
    * Every operation explain answers, classified against the data door. Total
@@ -164,14 +174,20 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
    *    floor over to it (step 2.7). `transfer`'s door is the `PATCH` that
    *    writes `owner_id`: the engine dispatches no `transfer` operation, and
    *    that write is where the transfer grant is enforced (step 3.5).
+   *  - `by_id_read_door`: the by-id `GET`, which scopes a `controlled_by_parent`
+   *    record by the master ids the principal can READ (ADR-0055). Asked of
+   *    `cpg_vault_item`, whose master is private, so a principal who cannot
+   *    read the master cannot read the record either.
    *  - `object_gate_refused`: step 2.8 lists the verb, but the object gate
    *    refuses it to every principal (its grant is retired until the lifecycle
    *    batch returns it) and no route dispatches it.
-   *  - `no_by_id_write`: not a write the master check judges by id — a read,
-   *    or an insert, whose master step 2.8 reads off the request body.
+   *  - `no_by_id_write`: neither — an insert, whose master step 2.8 reads off
+   *    the request body, or an export, which has no by-id door (it streams the
+   *    read's find, and explain answers it as it answers the read).
    */
   type DoorRow =
     | { kind: 'by_id_door'; door: (token: string, id: string) => Promise<Response> }
+    | { kind: 'by_id_read_door'; object: string; door: (token: string, id: string) => Promise<Response> }
     | { kind: 'object_gate_refused' }
     | { kind: 'no_by_id_write' };
   const DOORS: Record<ExplainOperation, DoorRow> = {
@@ -184,7 +200,11 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     restore: { kind: 'object_gate_refused' },
     purge: { kind: 'object_gate_refused' },
     create: { kind: 'no_by_id_write' },
-    read: { kind: 'no_by_id_write' },
+    read: {
+      kind: 'by_id_read_door',
+      object: 'cpg_vault_item',
+      door: (t, id) => stack.apiAs(t, 'GET', `/data/cpg_vault_item/${id}`),
+    },
     export: { kind: 'no_by_id_write' },
   };
   const verbsOf = (kind: DoorRow['kind']) => (Object.keys(DOORS) as ExplainOperation[]).filter((v) => DOORS[v].kind === kind);
@@ -192,6 +212,11 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     const row = DOORS[verb];
     if (row.kind !== 'by_id_door') throw new Error(`${verb} has no by-id door`);
     return row.door;
+  };
+  const readDoorOf = (verb: ExplainOperation) => {
+    const row = DOORS[verb];
+    if (row.kind !== 'by_id_read_door') throw new Error(`${verb} has no by-id read door`);
+    return row;
   };
 
   const uid = async (email: string) => (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
@@ -270,6 +295,18 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     const stewardAccountId = (
       await ql.insert('cpg_account', { name: 'steward account', owner_id: stewardId }, { context: { ...SYS } })
     ).id;
+    const adminVaultId = (await ql.insert('cpg_vault', { name: 'admin vault', owner_id: adminId }, { context: { ...SYS } })).id;
+    const stewardVaultId = (
+      await ql.insert('cpg_vault', { name: 'steward vault', owner_id: stewardId }, { context: { ...SYS } })
+    ).id;
+    for (const verb of verbsOf('by_id_read_door')) {
+      underUnreadable[verb] = (
+        await ql.insert('cpg_vault_item', { name: `${verb}: admin's vault`, vault: adminVaultId }, { context: { ...SYS } })
+      ).id;
+      underReadable[verb] = (
+        await ql.insert('cpg_vault_item', { name: `${verb}: steward's vault`, vault: stewardVaultId }, { context: { ...SYS } })
+      ).id;
+    }
     for (const verb of verbsOf('by_id_door')) {
       underAdmin[verb] = (
         await ql.insert('cpg_contract', { name: `${verb}: admin's master`, account: adminAccountId }, { context: { ...SYS } })
@@ -328,7 +365,7 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     const admitted = await patch(memberTok, 'cpg_board', boardId, 'open board');
     expect(admitted.status, `member PATCH of the board: ${admitted.body}`).toBe(200);
   });
-  describe('every write verb explain answers: its verdict is the door\'s, for the master\'s editor and for a non-editor', () => {
+  describe('every verb explain answers by id: its verdict is the door\'s, for the master\'s editor or reader and for a principal who is not', () => {
     it('the classification is total: every operation explain answers has a door row', () => {
       expect([...ExplainOperationSchema.options].sort()).toEqual(Object.keys(DOORS).sort());
     });
@@ -356,6 +393,42 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
 
         expect(explained.record, `explain ${verb}`).toMatchObject({ recordId: id, visible: true });
         expect(explained.sharing?.detail ?? '').not.toContain('master-detail write check');
+      });
+    }
+
+    for (const verb of verbsOf('by_id_read_door')) {
+      it(`${verb}: a record under a master the principal cannot read is explained not visible, as its door answers`, async () => {
+        const { object, door } = readDoorOf(verb);
+        const id = underUnreadable[verb]!;
+        const explained = await explainAs(stewardTok, verb, object, id);
+        const answered = await answer(await door(stewardTok, id));
+        expect(answered.status, `${verb} door, the master's non-reader: ${answered.body}`).toBe(404);
+        expect(answered.code).toBe('RECORD_NOT_FOUND');
+
+        expect(explained.record, `explain ${verb}`).toEqual({ recordId: id, visible: false, decidedBy: 'sharing' });
+        expect(explained.sharing?.outcome).toBe('excluded');
+      });
+
+      it(`${verb}: control, a record under a master the principal reads is explained visible and its door answers 200`, async () => {
+        const { object, door } = readDoorOf(verb);
+        const id = underReadable[verb]!;
+        const explained = await explainAs(stewardTok, verb, object, id);
+        const answered = await answer(await door(stewardTok, id));
+        expect(answered.status, `${verb} door, the master's reader: ${answered.body}`).toBe(200);
+
+        expect(explained.record, `explain ${verb}`).toMatchObject({ recordId: id, visible: true });
+        expect(explained.sharing?.outcome).not.toBe('excluded');
+      });
+
+      it(`${verb}: control, an id no row carries is explained as it was, beside its door's 404`, async () => {
+        const { object, door } = readDoorOf(verb);
+        const id = `${verb}-no-such-record`;
+        const explained = await explainAs(stewardTok, verb, object, id);
+        const answered = await answer(await door(stewardTok, id));
+        expect(answered.status, `${verb} door, an id no row carries: ${answered.body}`).toBe(404);
+        expect(answered.code).toBe('RECORD_NOT_FOUND');
+
+        expect(explained.record, `explain ${verb}`).toEqual({ recordId: id, visible: false });
       });
     }
 

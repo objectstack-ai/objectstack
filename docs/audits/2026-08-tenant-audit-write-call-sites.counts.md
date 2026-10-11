@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 239 |
-| Object name statically decidable | 160 |
+| Write call sites | 238 |
+| Object name statically decidable | 159 |
 | Object name chosen at run time | 79 |
-| Against a tenancy-enabled object | 159 |
+| Against a tenancy-enabled object | 158 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 178 |
+| Threading a tenant context | 177 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
 | Threading a decidably elevated context | 126 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 105 |
+| Threading a context of undecidable elevation | 104 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,11 +90,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-10 at `b88b35678`.
+Measured on 2026-10-11 at `a18c51496`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 631 |
+| tracked non-test sources scanned | 637 |
 | engine-shaped types recognised | 72 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 162 |
@@ -171,7 +171,6 @@ Measured on 2026-10-10 at `b88b35678`.
 | `packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts` | `update` | `GRANT_OBJECT` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/normalize-managed-by.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/permission-set-overlay-discard.ts` | `delete` | `sys_metadata` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/permission-set-projection.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/permission-set-projection.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/permission-set-projection.ts` | `delete` | `sys_permission_set` | enabled | elevated | 1 |

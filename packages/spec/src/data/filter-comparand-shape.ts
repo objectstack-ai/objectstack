@@ -423,6 +423,28 @@
  * so a stored filter carrying the shape is refused on save the day this face
  * refuses it on query.
  *
+ * ## Admitted BY DECLARATION (ADR-0139 D1): a branded `ReadableIds` as `$in`'s comparand
+ *
+ * The one non-list a list slot may hold. `ReadableIds.of('cpz_doc')`
+ * (`./readable-ids.ts`) stands for "the ids of `cpz_doc` this caller may read",
+ * a set the engine composes from the caller's read access before any driver
+ * sees the filter. This door admits it only when its caller passes
+ * `admitReadableIds: true` ({@link ListComparandShapeOptions}), only as the
+ * comparand of `$in`, and only while it carries its symbol-keyed brand:
+ *
+ * - **No request can spell it.** The brand is a symbol key, which no JSON
+ *   document carries, so `{ "$in": { "object": "cpz_doc" } }` from a request is
+ *   a plain object in a list slot and meets the non-list refusal it always
+ *   met. No operator was added and nothing new is refused at ingress.
+ * - **A copy fails closed.** JSON, a structured clone or a spread drops the
+ *   non-enumerable brand; the copy is refused here as a non-list, ⛔ never
+ *   dropped (dropping the `$in` would serve every row the rest of the branch
+ *   matches).
+ * - **Every caller but the engine's filter seam refuses it.** This door is
+ *   also the authoring lowering's ({@link parseFilterAST}), the save door's,
+ *   the analytics doors' and the RLS compiler's, and none of them composes the
+ *   leaf; they pass no option and keep refusing it.
+ *
  * ## Refusal envelope
  *
  * Every refusal carries `code: 'INVALID_FILTER'` and `status: 400` (ADR-0112
@@ -449,6 +471,32 @@ import {
   shapePreview,
 } from './filter-comparand-refusal-text';
 import { SCALAR_COMPARAND_OPERATORS } from './filter-comparand-operators';
+import { isReadableIds } from './readable-ids';
+
+/**
+ * [ADR-0139 D1] What a caller of {@link assertListComparandShapes} declares
+ * about the filter it hands the door.
+ */
+export interface ListComparandShapeOptions {
+  /**
+   * Admit a branded `ReadableIds` leaf (`./readable-ids.ts`) as a `$in`
+   * comparand instead of refusing it as a non-list.
+   *
+   * Pass it only where a composer stands behind the door: the leaf is a set
+   * the engine must compose from the caller's read access before any driver
+   * sees the filter, and no driver evaluates it as written. The engine's filter
+   * seam is the one caller that passes it. Every other caller (the authoring
+   * lowering `parseFilterAST`, the save door, the analytics doors, the RLS
+   * compiler) keeps refusing the leaf as a non-list comparand, which is what
+   * keeps a path that cannot compose the leaf from letting it through.
+   *
+   * Only the `$in` comparand is admitted, and only a value
+   * {@link isReadableIds} accepts. An unbranded copy (`{ object: 'x' }`,
+   * what the leaf becomes after JSON or a structured clone) is still a plain
+   * object in a list slot, and is refused exactly as before.
+   */
+  readonly admitReadableIds?: boolean;
+}
 
 /**
  * The operators whose comparand `FieldOperatorsSchema` declares as a list, with
@@ -890,6 +938,10 @@ function arrayScalarComparandError(
  * @param context optional caller prefix (`find('deal')`), the engine's #5346
  *                wording contract; omitted by spec-level callers.
  * @param path    the key path reported in the refusal, seeded at `where`.
+ * @param options [ADR-0139 D1] `admitReadableIds` admits a branded
+ *                `ReadableIds` leaf as a `$in` comparand — see
+ *                {@link ListComparandShapeOptions} for the one caller that may
+ *                pass it.
  *
  * [#5685] This paragraph used to carry a second reason: that
  * `FieldOperatorsSchema` was "stricter than the runtime in ways the runtime
@@ -906,6 +958,7 @@ export function assertListComparandShapes(
   node: unknown,
   context?: string,
   path = 'where',
+  options?: ListComparandShapeOptions,
 ): void {
   if (!isFilterNode(node)) return;
   for (const [key, value] of Object.entries(node)) {
@@ -915,18 +968,18 @@ export function assertListComparandShapes(
       // combinator checks; this gate only walks what it can.
       if (Array.isArray(value)) {
         value.forEach((child, index) =>
-          assertListComparandShapes(child, context, `${here}[${index}]`));
+          assertListComparandShapes(child, context, `${here}[${index}]`, options));
       }
       continue;
     }
     if (key === '$not') {
-      assertListComparandShapes(value, context, here);
+      assertListComparandShapes(value, context, here, options);
       continue;
     }
     // Any other `$` key at node level is a logical operator this gate does not
     // judge — an unknown one is already refused downstream, by name.
     if (key.startsWith('$')) continue;
-    assertFieldListComparands(context, key, value, here);
+    assertFieldListComparands(context, key, value, here, options?.admitReadableIds === true);
   }
 }
 
@@ -936,6 +989,7 @@ function assertFieldListComparands(
   field: string,
   spec: unknown,
   path: string,
+  admitReadableIds: boolean,
 ): void {
   // A spec that is not a plain object is a comparand (implicit equality) and
   // carries no operator to check — unless it is a LIST, which the equality
@@ -1026,6 +1080,13 @@ function assertFieldListComparands(
       continue;
     }
     if (!Array.isArray(comparand)) {
+      // [ADR-0139 D1] The one non-list a `$in` may hold: a BRANDED `ReadableIds`
+      // leaf, and only for a caller that composes it (`admitReadableIds`). The
+      // brand cannot survive JSON or a structured clone, so a request's
+      // `{ "$in": { "object": "x" } }` — and the leaf after any copy — still
+      // reaches the refusal below, unchanged. `$nin` admits nothing: the leaf
+      // is declared as `$in`'s comparand only.
+      if (op === '$in' && admitReadableIds && isReadableIds(comparand)) continue;
       throw nonListComparandError(context, op, field, comparand, `${path}.${op}`);
     }
     // The null-member carve-out (2026-08-31 ruling, #13357). `indexOf` is the

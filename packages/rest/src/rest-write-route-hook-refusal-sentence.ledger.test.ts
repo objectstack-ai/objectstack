@@ -30,7 +30,7 @@
  *    the debug wrapper. [#22719] EMPTY, and §3 holds it empty: its twenty rows
  *    — hand-built error arms that relayed `.message` (sharing rules, suggested
  *    bindings and the overlay discard, approvals, `packages/publish`, external
- *    datasources) — each read the hook's sentence through the shared read now
+ *    datasources; the overlay discard has since retired with its route) — each read the hook's sentence through the shared read now
  *    and sit in the first map, pinned at the status and code they answer. A
  *    write door found answering the wrapper is a defect to repair, never a row
  *    to add back here.
@@ -317,7 +317,7 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     'POST /api/v1/data/:object/deleteMany': { called: 'protocol.deleteManyData', body: { ids: ['r1'] } },
 
     // ── [#22719] Moved from ANSWERS_THE_WRAPPER ─────────────────────────────
-    // Sharing rules, suggested bindings / the overlay discard, approvals: each
+    // Sharing rules, suggested bindings, approvals: each
     // family asks `classifiedRefusalAnswer` before its 500 arm relays
     // `.message`, and emits the answer in the nested envelope. Was `500` with
     // the family's own code (`RULE_*_FAILED`, `SUGGESTION_*_FAILED` /
@@ -327,7 +327,6 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     'POST /api/v1/sharing/rules/:idOrName/evaluate': { called: 'sharingRules.evaluateRule', answers: REFUSED_400 },
     'POST /api/v1/security/suggested-bindings/:id/confirm': { called: 'security.confirmAudienceBindingSuggestion', answers: REFUSED_400 },
     'POST /api/v1/security/suggested-bindings/:id/dismiss': { called: 'security.dismissAudienceBindingSuggestion', answers: REFUSED_400 },
-    'POST /api/v1/security/permission-sets/:id/discard-overlay': { called: 'security.discardPermissionSetOverlay', answers: REFUSED_400 },
     'POST /api/v1/approvals/requests/:id/approve': { called: 'approvals.decide', body: {}, answers: REFUSED_400 },
     'POST /api/v1/approvals/requests/:id/reject': { called: 'approvals.decide', body: {}, answers: REFUSED_400 },
     'POST /api/v1/approvals/requests/:id/recall': { called: 'approvals.recall', body: {}, answers: REFUSED_400 },
@@ -387,7 +386,7 @@ describe('[#22694] §1 the REST ledger\'s write rows, each with exactly one disp
         const maps = [Object.keys(ANSWERS_THE_SENTENCE), Object.keys(ANSWERS_THE_WRAPPER), [...NO_REFUSAL_REACHES_THE_ANSWER.keys()]];
         const named = maps.flat();
         const ledgered = WRITE_ROWS.map((row) => row.route);
-        expect(ledgered.length).toBeGreaterThanOrEqual(45);
+        expect(ledgered.length).toBeGreaterThanOrEqual(44);
         for (const route of ledgered) {
             expect(named.filter((r) => r === route), `no single disposition for ${route}`).toHaveLength(1);
         }
@@ -474,7 +473,6 @@ const OWN_TERMINAL: Record<string, { status: number; code: string }> = {
     'POST /api/v1/sharing/rules/:idOrName/evaluate': { status: 500, code: 'RULE_EVALUATE_FAILED' },
     'POST /api/v1/security/suggested-bindings/:id/confirm': { status: 500, code: 'SUGGESTION_CONFIRM_FAILED' },
     'POST /api/v1/security/suggested-bindings/:id/dismiss': { status: 500, code: 'SUGGESTION_DISMISS_FAILED' },
-    'POST /api/v1/security/permission-sets/:id/discard-overlay': { status: 500, code: 'INTERNAL' },
     'POST /api/v1/approvals/requests/:id/approve': { status: 500, code: 'APPROVAL_APPROVE_FAILED' },
     'POST /api/v1/approvals/requests/:id/reject': { status: 500, code: 'APPROVAL_REJECT_FAILED' },
     'POST /api/v1/approvals/requests/:id/recall': { status: 500, code: 'APPROVAL_RECALL_FAILED' },
@@ -503,8 +501,9 @@ const declaredConflict = () => Object.assign(new Error('The rule is being evalua
 const markedSandboxRefusal = () => Object.assign(sandboxRefusal(), { code: 'MZ_LOCKED', userMessage: 'Ask an administrator to unlock it.' });
 
 describe('[#22719] §5 the repaired rows: a fault keeps its own terminal, a refusal its own status', () => {
-    it('names exactly the twenty repaired rows', () => {
-        expect(Object.keys(OWN_TERMINAL)).toHaveLength(20);
+    it('names exactly the nineteen repaired rows', () => {
+        // Twenty when repaired; the overlay-discard row retired with its route.
+        expect(Object.keys(OWN_TERMINAL)).toHaveLength(19);
         for (const route of Object.keys(OWN_TERMINAL)) expect(ANSWERS_THE_SENTENCE[route]?.answers, route).toBeDefined();
     });
 

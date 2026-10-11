@@ -67,7 +67,6 @@ import {
 } from './permission-set-projection.js';
 import { runPermissionSetDriftDiagnostics } from './permission-set-drift.js';
 import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
-import { discardPermissionSetOverlay, type PermissionSetOverlayDiscardDeps } from './permission-set-overlay-discard.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
 import {
@@ -2033,20 +2032,6 @@ export class SecurityPlugin implements Plugin {
         resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
         logger: ctx.logger,
       };
-      // [field report — rc→GA declared≠enforced surfacing] Sanctioned overlay-
-      // discard deps — same tenant-admin resolution as the suggestion surface
-      // above. `getProtocol` is lazy (mirrors `createPermissionSetWriteThrough`'s
-      // own resolver further down): the protocol service may register after
-      // this plugin's `start()` runs.
-      const overlayDiscardDeps: PermissionSetOverlayDiscardDeps = {
-        ql,
-        metadata,
-        resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
-        getProtocol: () => {
-          try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
-        },
-        logger: ctx.logger,
-      };
       // Typed against the published contract so the registered surface cannot
       // drift from what cross-package consumers are promised: a renamed method,
       // a dropped one, or a changed return type fails THIS build rather than
@@ -2287,16 +2272,10 @@ export class SecurityPlugin implements Plugin {
       const registeredSecurityService = Object.assign(securityService, {
         getMetadataReadableFields: (object: string, context?: any) =>
           this.getMetadataReadableFields(object, context),
-        // [field report — rc→GA declared≠enforced surfacing] Same extension
-        // pattern as `getMetadataReadableFields` above:
-        // `ISecurityService` lives in `packages/spec` and this seat there is a
-        // separate change. Consumers feature-detect.
-        discardPermissionSetOverlay: (callerContext: any, id: string) =>
-          discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
         // [#21729] The ownership-floor alternate seam — how a plugin that
         // installs a tighter row gate stops the platform's `created_by` floor
         // pre-empting it, registered beside that gate and nowhere else. Same
-        // extension pattern as the two above (the contract lives in
+        // extension pattern as the one above (the contract lives in
         // `packages/spec`; a contributor feature-detects the method). Keyed by
         // the contributing plugin: a second call replaces the first, an empty
         // list withdraws. Throws on a contribution the seam refuses — see
@@ -4774,8 +4753,9 @@ export class SecurityPlugin implements Plugin {
           // silently forked before the save door was locked: count + NAMES,
           // reported loudly. ⛔ Reaps nothing, merges nothing, migrates
           // nothing — disposition of an existing fork is a follow-up reading
-          // for the maintainer, and the per-set remedy is the explicit,
-          // audited "Discard Overlay" action a human invokes.
+          // for the maintainer. A deployment upgraded onto ADR-0048's
+          // cold-boot check holding such a fork does not boot at all; its
+          // remedy is the offline `os migrate security-catalog-overlays`.
           //
           // Distinct from the drift diagnostic above and deliberately run
           // beside it: drift reports a set whose grants ALREADY differ from

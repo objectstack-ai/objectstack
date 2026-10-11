@@ -43,10 +43,7 @@
  * mismatch — it re-derives the fact each boot from the current `sys_metadata`
  * / `sys_permission_set` state, the same sources the two write-doors read.
  * It also never adopts/migrates a row (out of scope by 2026-08-20 maintainer
- * ruling — "新项目还没上线，不需要清理旧数据，也没有老客户升级"; the
- * `sanctioned discard` counterpart lives in `permission-set-overlay-discard.ts`
- * and only ever touches the `sys_metadata` overlay row, never `managed_by` /
- * `package_id`).
+ * ruling — "新项目还没上线，不需要清理旧数据，也没有老客户升级").
  *
  * ⚠️ Scope note shared with `reconcilePermissionSetProjection`: only
  * ENV-WIDE overlays (`sys_metadata.organization_id IS NULL`) are considered
@@ -128,11 +125,10 @@ export async function computePermissionSetDriftDiagnostics(
 
   // [#21860] "Package-declared" is the lock's verdict for the NAME — a code
   // (artifact) package ships it — read through the one classifier the write
-  // doors, the overlay detection reading and the Discard Overlay action ask.
+  // doors and the overlay detection reading ask.
   // A package id on the item alone is not that answer: a set saved into a
   // writable runtime package carries one after the first metadata list read,
-  // and this report used to diagnose it as package-declared and name Discard
-  // Overlay as the remedy, an action that deletes its only stored definition.
+  // and this report used to diagnose it as package-declared.
   // The per-item test that follows the verdict only picks which bodies of a
   // code-shipped name are compared, exactly as before.
   const codeShipped = new Map<string, boolean>();
@@ -194,7 +190,7 @@ export async function computePermissionSetDriftDiagnostics(
       detail =
         `An environment customization overlay (sys_metadata, type:'permission', name:'${name}') is shadowing ` +
         `this package-declared set — enforced grants (${enforcedCount} object(s)) come from the overlay, not ` +
-        `the shipped artifact (${declaredCount} object(s)). Discard the overlay (Discard Overlay action) to resync.`;
+        `the shipped artifact (${declaredCount} object(s)).`;
     } else if (row.managed_by !== 'package') {
       status = 'provenance_skip';
       detail =

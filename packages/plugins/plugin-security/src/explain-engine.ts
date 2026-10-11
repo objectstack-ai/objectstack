@@ -419,6 +419,12 @@ export interface ExplainEngineDeps {
    * delete, read through {@link rlsOperationForVerb}: `update`, `delete`, and
    * the lifecycle verbs that map onto them (`transfer` and `restore` onto
    * update, `purge` onto delete).
+   *
+   * [ADR-0055] Asked for a record-grained read too, of a
+   * `controlled_by_parent` record the rest of the read's row story admits: the
+   * read door also scopes such a record by its master, a leg no other
+   * dependency here answers, so the door's own answer is what the read verdict
+   * takes ({@link applyRecordAttribution}).
    */
   recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
@@ -942,6 +948,7 @@ const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, 
 };
 
 const MASTER_DERIVED = 'Write access to this record derives from its master (controlled_by_parent, ADR-0055)';
+const MASTER_READ_DERIVED = 'Read access to this record derives from its master (controlled_by_parent, ADR-0055)';
 
 /**
  * [ADR-0055] The record-grained writes whose verdict on a `controlled_by_parent`
@@ -1516,6 +1523,41 @@ async function applyRecordAttribution(
   const masterRefusal = masterOrFault === undefined || masterOrFault === DEPENDENCY_FAULT
     ? undefined
     : masterWriteCheckRefusal(masterOrFault, engineOp);
+  // [ADR-0055] A record-grained read of a `controlled_by_parent` record meets
+  // a master leg too: the read door ANDs the record's master-derived read scope
+  // (the master ids the principal can read, the chain included) into the find,
+  // beside the row-level security above, and the sharing service imposes
+  // nothing of its own on such an object (its effective model is `public`).
+  // No other dependency answers that leg, so the read door's own by-id read is
+  // asked (`recordAbsentToCaller`, the question the by-id writes ask), with the
+  // explained context, and only where every leg this report models admits the
+  // record: there the master leg is the one left that withholds it. A record
+  // the door withholds is reported NOT visible, as the door answers, on the
+  // sharing layer, the layer the write verbs' master check names. A rejection
+  // fails the find, so it is reported fail-closed.
+  const readStoryAdmits = isRead && recordExists && owd.model === 'controlled_by_parent'
+    && !capsDeny && crudAllowed && !layeredFault && !readFilterFault
+    && tenantRecord.outcome !== 'excluded'
+    && !(layer1 != null && (isDenyAll(layer1) || matches(layer1) === false));
+  const masterReadOrFault = readStoryAdmits && deps.recordAbsentToCaller
+    ? await settle(deps.recordAbsentToCaller(object, recordId, context))
+    : undefined;
+  const masterReadFault = masterReadOrFault === DEPENDENCY_FAULT;
+  const masterReadRefusal: { outcome: ExplainRecordAttribution['outcome']; detail: string } | undefined =
+    masterReadOrFault === true
+      ? {
+          outcome: 'excluded',
+          detail: `${MASTER_READ_DERIVED}: the read door, asked by this principal, does not return the record, though ` +
+            "every row-level layer above admits it, so its master is outside the principal's read scope" +
+            (context?.onBehalfOf?.userId != null
+              ? " (on this on-behalf-of read, the delegator's read scope is composed in as well)"
+              : '') +
+            '. The record is reported NOT visible, as the read door answers.',
+        }
+      : undefined;
+  // One master leg per verb: the write check for a by-id write, the read
+  // door's master scope for a read. At most one of the two is ever asked.
+  const masterLegRefusal = masterRefusal ?? masterReadRefusal;
   // The sharing call THIS operation's row verdict rests on: the read filter for
   // a read (the sharing middleware ANDs it into every find), the per-record gate
   // for a write (the middleware gates every by-id write on it). Either one
@@ -1525,7 +1567,10 @@ async function applyRecordAttribution(
     ? (readFilterFault
         ? "The sharing service's read filter could not be evaluated: it threw, and the find fails on the same " +
           'call — so the record is reported NOT visible (fail closed), never admitted.'
-        : undefined)
+        : masterReadFault
+          ? `${MASTER_READ_DERIVED}, and the read door's own by-id read of it could not be evaluated: it threw, and ` +
+            'the find fails on the same call — so the record is reported NOT visible (fail closed), never admitted.'
+          : undefined)
     : (writeGateFault
         ? `The sharing service's per-record ${engineOp === 'delete' ? 'delete' : 'update'} gate could not be ` +
           'evaluated: it threw, and the by-id write fails on the same call — so the record is reported NOT ' +
@@ -1560,8 +1605,8 @@ async function applyRecordAttribution(
     sharingOutcome = 'not_evaluated';
   } else if (sharingFaultDetail) {
     sharingOutcome = 'not_evaluated';
-  } else if (masterRefusal) {
-    sharingOutcome = masterRefusal.outcome;
+  } else if (masterLegRefusal) {
+    sharingOutcome = masterLegRefusal.outcome;
   } else if (owd.effect !== 'private') {
     sharingOutcome = 'not_evaluated'; // baseline already grants the rows sharing would add
   } else if (canEdit !== undefined) {
@@ -1585,8 +1630,8 @@ async function applyRecordAttribution(
       matchesRecord: sharingFaultDetail ? undefined : sharingMatches,
       rules: shareRules,
       // A fault is only ever recorded against an existing record, and the
-      // master check [ADR-0055] is only ever asked of one.
-      detail: sharingFaultDetail ?? masterRefusal?.detail ?? (!recordExists
+      // master leg [ADR-0055] is only ever asked of one.
+      detail: sharingFaultDetail ?? masterLegRefusal?.detail ?? (!recordExists
         ? 'Record not found; sharing not evaluated.'
         : owd.effect !== 'private'
           ? 'Baseline is not private — sharing adds nothing beyond it for this record.'
@@ -1778,8 +1823,10 @@ async function applyRecordAttribution(
   else if (sharingFaultDetail) { visible = false; decidedBy = 'sharing'; }
   // [ADR-0055] The master check refuses after the record's own row-level
   // security (step 2.8 runs below the pre-image gate), and names its leg on
-  // the sharing layer, the record's write gate.
-  else if (masterRefusal) { visible = false; decidedBy = 'sharing'; }
+  // the sharing layer, the record's write gate. A read's master leg is asked
+  // only where the record's own row-level security admits it, and is named on
+  // the same layer.
+  else if (masterLegRefusal) { visible = false; decidedBy = 'sharing'; }
   else if (!businessRowAdmits) { visible = false; decidedBy = owd.effect === 'private' ? 'sharing' : 'owd_baseline'; }
   else {
     visible = true;

@@ -18,13 +18,10 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "objects.sys_permission_set._actions.discard_permission_set_overlay.confirmText": "02ce03bb6b6c58a2",
-  "objects.sys_permission_set._actions.discard_permission_set_overlay.label": "6523908dc7b796ed",
-  "objects.sys_permission_set._actions.discard_permission_set_overlay.successMessage": "938b7a7c989e5ff4",
   "objects.sys_permission_set._views.drifted.label": "f7b9325c31edc552",
   "objects.sys_permission_set.fields.drift_detail.help": "3572261f6d3bc8ab",
   "objects.sys_permission_set.fields.drift_detail.label": "a84ebd221c37d10b",
-  "objects.sys_permission_set.fields.drift_status.help": "b16445c654ee6cec",
+  "objects.sys_permission_set.fields.drift_status.help": "168e382c7568b1f3",
   "objects.sys_permission_set.fields.drift_status.label": "7946a54138690b86",
   "objects.sys_permission_set.fields.drift_status.options.other": "3ddcfb750014f293",
   "objects.sys_permission_set.fields.drift_status.options.overlay_shadow": "7371472481b55b52",
