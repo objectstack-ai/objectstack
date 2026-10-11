@@ -336,7 +336,13 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       // The contract: resolves by (name, locale) at delivery time…
       expect(templateDoc).toMatch(/\(name, locale\)/);
       expect(templateDoc).toMatch(/delivery time/);
-      expect(templateDoc).toContain('sys_email_template');
+      // …among the email templates themselves (ADR-0131 D6/D10): the
+      // `email_template` items the registry serves — built-in, declared by an
+      // app, or authored in Studio — and never the retired `sys_email_template`
+      // rows, which no send reads any more.
+      expect(templateDoc).toContain('`email_template`');
+      expect(templateDoc).toMatch(/built-in, declared by an app, or authored in Studio/);
+      expect(templateDoc).not.toContain('sys_email_template');
       // …with the locale named as what it IS since #13881 — resolved per
       // recipient, after fan-out, from the recipient's own `sys_user.locale`
       // with the deployment default underneath. Both rungs are pinned by
