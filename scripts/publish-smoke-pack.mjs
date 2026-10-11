@@ -33,7 +33,7 @@
  * a future exclusion cannot re-open the hole silently.
  *
  * Source of truth: the workspace itself. The Changesets `fixed` group in
- * .changeset/config.json enumerates the same 69 names, but it is a DERIVED
+ * .changeset/config.json enumerates the same 70 names, but it is a DERIVED
  * declaration validated against the workspace by scripts/check-changeset-fixed.mjs
  * (which reddens both when a public package is missing from the group and
  * when a group name no longer exists) — deriving from the group would mean
