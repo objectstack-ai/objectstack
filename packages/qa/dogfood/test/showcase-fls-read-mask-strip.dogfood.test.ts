@@ -141,7 +141,7 @@ describe('showcase FLS read side: a readable:false field is STRIPPED, not masked
     expect(memberId, 'member provisioned').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
-      { user_id: memberId, permission_set_id: ps.id },
+      { user_id: memberId, permission_set: ps.name },
       { context: SYS },
     );
 

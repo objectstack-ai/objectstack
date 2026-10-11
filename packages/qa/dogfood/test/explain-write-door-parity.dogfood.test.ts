@@ -207,7 +207,7 @@ describe('security/explain answers every write verb as its door does, on read-ab
       const userId = await uid(email);
       const row = await ql.findOne('sys_permission_set', { where: { name: set.name }, context: SYS });
       expect(row?.id, `${set.name} seeded`).toBeTruthy();
-      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: row.id }, { context: { ...SYS } });
+      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: row.name }, { context: { ...SYS } });
       tokens[axis] = token;
     }
 

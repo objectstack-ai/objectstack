@@ -189,7 +189,7 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     const adminSet = await ql.findOne('sys_permission_set', { where: { name: 'admin_full_access' }, context: SYS });
     expect(adminSet?.id, 'admin_full_access is seeded').toBeTruthy();
     await ql.insert('sys_user_permission_set', {
-      user_id: await uid(OPERATOR_EMAIL), permission_set_id: adminSet.id, organization_id: null,
+      user_id: await uid(OPERATOR_EMAIL), permission_set: adminSet.name, organization_id: null,
     }, { context: SYS });
 
     // Sign in AFTER the grants, so every session is minted by the same path
