@@ -54,9 +54,9 @@ export interface ITriggerApiService {
    *    id gets this `503`, signed or not. It stays a `503` on purpose: it is
    *    the deployment's fault, a sender retries it, and it lasts only while
    *    the secret cannot be read.
-   *  - It verifies the `x-objectstack-signature` header over the raw body
-   *    under that secret, through `@objectstack/core`'s `verifyHttpSignature`,
-   *    the one definition of the forms a sender may sign with.
+   *  - It verifies the `x-objectstack-signature` header (`sha256=` and the hex
+   *    HMAC-SHA256 of the raw body under that secret). A missing or wrong
+   *    signature gets the unverified-post refusal below.
    *  - **One refusal for every post that does not verify** (#22806): an
    *    unknown flow, a wrong hook id, an absent signature and a bad one all
    *    answer `401 INVALID_SIGNATURE`, with one body. So the answer does not
