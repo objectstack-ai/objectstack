@@ -187,8 +187,8 @@ async function boot(makeDriver: () => unknown, posture: Posture = 'isolated'): P
     { id: 'r2', user_id: 'usr_holder', position: 'qa_other_position', organization_id: OWN_ORG },
   ]);
   await seed('sys_user_permission_set', [
-    { id: 'r1', user_id: 'usr_holder', permission_set_id: 'ps_qa', organization_id: OWN_ORG },
-    { id: 'r2', user_id: 'usr_holder', permission_set_id: 'ps_qa_other', organization_id: OWN_ORG },
+    { id: 'r1', user_id: 'usr_holder', permission_set: 'qa_set', organization_id: OWN_ORG },
+    { id: 'r2', user_id: 'usr_holder', permission_set: 'qa_other_set', organization_id: OWN_ORG },
   ]);
   for (const object of ['qa_ledger', 'qa_vault']) {
     await seed(object, [

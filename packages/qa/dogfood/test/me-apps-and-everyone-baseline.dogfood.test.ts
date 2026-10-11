@@ -121,7 +121,7 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
     expect(hideSet.status, 'set authored through the data door').toBeLessThan(300);
     const hideSetId = (await ql.findOne('sys_permission_set', { where: { name: 'tab_probe_hide' }, context: SYS }))?.id;
     expect(hideSetId, 'hide set stored').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: tabUser.id, permission_set_id: hideSetId }, { context: SYS });
+    await ql.insert('sys_user_permission_set', { user_id: tabUser.id, permission_set: 'tab_probe_hide' }, { context: SYS });
 
     const hidden = await stack.apiAs(tabTok, 'GET', '/me/apps');
     const hiddenNames = (((await hidden.json()) as any)?.apps ?? []).map((a: any) => a?.name);
@@ -135,8 +135,7 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
         tab_permissions: JSON.stringify({ showcase_app: 'visible' }),
       });
     expect(showSet.status, 'set authored through the data door').toBeLessThan(300);
-    const showSetId = (await ql.findOne('sys_permission_set', { where: { name: 'tab_probe_show' }, context: SYS }))?.id;
-    await ql.insert('sys_user_permission_set', { user_id: tabUser.id, permission_set_id: showSetId }, { context: SYS });
+    await ql.insert('sys_user_permission_set', { user_id: tabUser.id, permission_set: 'tab_probe_show' }, { context: SYS });
 
     const merged = await stack.apiAs(tabTok, 'GET', '/me/apps');
     const mergedNames = (((await merged.json()) as any)?.apps ?? []).map((a: any) => a?.name);
@@ -187,7 +186,7 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
     expect(inquirySetId, 'probe set stored').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
-      { user_id: memberUser.id, permission_set_id: inquirySetId },
+      { user_id: memberUser.id, permission_set: 'baseline_inquiry_probe' },
       { context: SYS },
     );
 

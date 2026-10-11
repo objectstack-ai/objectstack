@@ -163,7 +163,7 @@ describe('controlled_by_parent parent gates: sys_attachment and sys_comment judg
 
     const domainSet = await ql.findOne('sys_permission_set', { where: { name: 'cpg_files_and_threads' }, context: SYS });
     expect(domainSet?.id, 'fixture permission set seeded').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set_id: domainSet.id }, { context: { ...SYS } });
+    await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set: domainSet.name }, { context: { ...SYS } });
 
     await assertArmed([
       principalArmed({

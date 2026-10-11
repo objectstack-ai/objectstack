@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 import { describe, it, expect } from 'vitest';
-import { isAuthGateAllowlisted, evaluateAuthGate, normalizeAuthGate } from './auth-gate';
+import { isAuthGateAllowlisted, evaluateAuthGate, normalizeAuthGate, matchInboundHookRoute } from './auth-gate';
 
 describe('auth-gate (ADR-0069 session gate)', () => {
   describe('isAuthGateAllowlisted', () => {
@@ -439,6 +439,218 @@ describe('auth-gate (ADR-0069 session gate)', () => {
       for (const p of ['/approvals/act/requests', '/api/v1/approvals/requests', '/approvals/act/act']) {
         expect(inCorpus.has(p), p).toBe(true);
         expect(isAuthGateAllowlisted(p), p).toBe(false);
+      }
+    });
+  });
+
+  // ── [#22773] The allow-list's first PARAMETERISED row ───────────────────
+  //
+  // Ruling A on #22757 (director record `6105447950`): the inbound automation
+  // hook is admitted with no session, through to the trigger's own HMAC
+  // verifier, by ONE route-exact row in the dispatcher's spelling. Condition 1
+  // binds its shape: exactly four segments (`automation`, `hooks`, one flow
+  // name, one hook id), `POST` only, no prefix and no wildcard beyond the two
+  // parameters — and `/automation/hooks`, `/automation/hooks/x`,
+  // `/automation/hooks/x/y/z` and every other `/automation` path still gated.
+  //
+  // ⛔ These pin the DECISION per (path, method), never the entry's spelling.
+  describe('[#22773] the inbound hook is exempt as the exact four-segment POST route, and nothing wider', () => {
+    it('PIN 1 — exempts POST on the exact route, unscoped or under one /environments/:id scope', () => {
+      for (const p of [
+        '/automation/hooks/stripe_orders/default',     // the dispatcher spelling: the hono adapter strips the app prefix
+        '/automation/hooks/f/h',
+        '/automation/hooks/f/h/',                      // trailing slashes stripped, as for every row
+        '/automation/hooks/f/h//',
+        '/automation/hooks/f/h?x=1',                   // query stripped, as for every row
+        '/automation/hooks/f%2Fx/h%20y',               // parameters are any one segment, raw
+        '/automation/hooks/hooks/automation',          // a parameter may spell a literal
+        '/environments/env_1/automation/hooks/f/h',    // scoped: the dispatcher gates BEFORE its scoped-URL strip
+      ]) {
+        expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(true);
+        expect(isAuthGateAllowlisted(p, 'post'), `${p} (method case)`).toBe(true);
+      }
+    });
+
+    it('PIN 2 — the method: POST only, and no method exempts nothing on this row', () => {
+      const p = '/automation/hooks/f/h';
+      for (const method of ['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'CONNECT', 'TRACE', 'POSTX', '']) {
+        expect(isAuthGateAllowlisted(p, method), method).toBe(false);
+      }
+      expect(isAuthGateAllowlisted(p)).toBe(false);
+      expect(isAuthGateAllowlisted(p, undefined)).toBe(false);
+      expect(isAuthGateAllowlisted(p, null)).toBe(false);
+      // ⭐ CONTROL: the rows that were exempt for every method still are, with
+      // a method or without one.
+      for (const method of [undefined, 'GET', 'POST', 'DELETE']) {
+        expect(isAuthGateAllowlisted('/approvals/act', method), String(method)).toBe(true);
+        expect(isAuthGateAllowlisted('/api/v1/auth/sign-out', method), String(method)).toBe(true);
+      }
+    });
+
+    it('PIN 3 — condition 1: every other segment count, and every other /automation path, stays gated', () => {
+      for (const p of [
+        // the card's own three, and the bare domain
+        '/automation/hooks', '/automation/hooks/x', '/automation/hooks/x/y/z', '/automation',
+        '/automation/hooks/x/y/z/w', '/automation/hooks/f/h/runs/r1/resume',
+        // the domain's real routes, at every depth
+        '/automation/trigger/f', '/automation/f/trigger', '/automation/f/toggle', '/automation/f/clone',
+        '/automation/f/runs', '/automation/f/runs/r1', '/automation/f/runs/r1/resume',
+        '/automation/hooks/trigger', '/automation/hooks/runs/r1/cancel',
+        // a sibling literal in either fixed position
+        '/automation/hooksx/f/h', '/automation/hook/f/h', '/automation/webhooks/f/h', '/automationx/hooks/f/h',
+        '/automation/f/hooks/h', '/hooks/automation/f/h',
+        // literals are matched unencoded and case-sensitively, as the router matches them
+        '/Automation/hooks/f/h', '/automation/HOOKS/f/h', '/automation/%68ooks/f/h', '/%61utomation/hooks/f/h',
+        '/automation/hooks%2Ff/h',
+      ]) {
+        expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(false);
+      }
+    });
+
+    it('PIN 4 — the dispatcher spelling only: no mount base, no retired scope, no empty segment', () => {
+      for (const p of [
+        // a mount base: the route exists on the dispatcher alone, whose path
+        // arrives base-stripped, so a based spelling there is a doubled prefix
+        // the router serves nothing at
+        '/api/v1/automation/hooks/f/h', '/api/automation/hooks/f/h', '/api/v1/environments/env_1/automation/hooks/f/h',
+        // the retired `projects` scope, which the dispatcher's scope strip does not remove
+        '/projects/env_1/automation/hooks/f/h',
+        // the route below a non-mount segment, whose value a tenant controls
+        '/data/automation/hooks/f/h', '/meta/automation/hooks/f/h', '/x/automation/hooks/f/h',
+        // two scopes, or a scope with no id (the id is `automation`)
+        '/environments/a/environments/b/automation/hooks/f/h', '/environments/automation/hooks/f/h',
+        // an empty segment anywhere: the scope strip and the domain claim do not drop it
+        '//automation/hooks/f/h', '/automation//hooks/f/h', '/automation/hooks//h', '/automation/hooks/f//h',
+        '/automation/hooks//f/h', '/environments//env_1/automation/hooks/f/h', '/environments/env_1//automation/hooks/f/h',
+        // not a path at all
+        'automation/hooks/f/h', '', '/',
+      ]) {
+        expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(false);
+      }
+    });
+
+    it('matchInboundHookRoute: the one reading, its parameters raw — and null wherever the row is', () => {
+      expect(matchInboundHookRoute('/automation/hooks/f/h', 'POST')).toEqual({ flowName: 'f', hookId: 'h' });
+      expect(matchInboundHookRoute('/automation/hooks/f%2Fx/h%20y', 'POST')).toEqual({ flowName: 'f%2Fx', hookId: 'h%20y' });
+      expect(matchInboundHookRoute('/environments/env_1/automation/hooks/f/h/?q=1', 'post')).toEqual({ flowName: 'f', hookId: 'h' });
+      for (const [p, m] of [
+        ['/automation/hooks/f/h', 'GET'], ['/automation/hooks/f/h', undefined], ['/automation/hooks/f', 'POST'],
+        ['/automation//hooks/f/h', 'POST'], ['/api/v1/automation/hooks/f/h', 'POST'], [undefined, 'POST'],
+      ] as const) {
+        expect(matchInboundHookRoute(p, m), `${p} ${m}`).toBeNull();
+      }
+      // The row and the reading are one: they answer the same on every spelling PIN 1-4 name.
+      for (const p of ['/automation/hooks/f/h', '/automation/hooks/x', '//automation/hooks/f/h', '/projects/e/automation/hooks/f/h']) {
+        for (const m of ['POST', 'GET', undefined]) {
+          expect(isAuthGateAllowlisted(p, m), `${p} ${m}`).toBe(matchInboundHookRoute(p, m) !== null);
+        }
+      }
+    });
+
+    it('carries through `evaluateAuthGate`: a gated session passes the POST and stays gated on every other method', () => {
+      const gated = { id: 'u1', authGate: { code: 'MFA_REQUIRED', message: 'enrol' } };
+      expect(evaluateAuthGate(gated, '/automation/hooks/f/h', 'POST')).toBeNull();
+      expect(evaluateAuthGate(gated, '/environments/env_1/automation/hooks/f/h', 'POST')).toBeNull();
+      // ⭐ The control: `GET /automation/hooks/runs/r1` is a run read of a flow
+      // named `hooks` — the reason the row is POST-only.
+      expect(evaluateAuthGate(gated, '/automation/hooks/runs/r1', 'GET')).toEqual({ code: 'MFA_REQUIRED', message: 'enrol' });
+      expect(evaluateAuthGate(gated, '/automation/hooks/f/h')).toEqual({ code: 'MFA_REQUIRED', message: 'enrol' });
+      expect(evaluateAuthGate(gated, '/automation/hooks/x', 'POST')).toEqual({ code: 'MFA_REQUIRED', message: 'enrol' });
+    });
+
+    // ⭐ CLAUSE ② — the widening, measured rather than asserted.
+    //
+    // `preEntryAllowlisted` is this file's subject as it stood before the row,
+    // transcribed from `origin/main` 12b9daf7 (it takes no method: no row read
+    // one). Over every path of up to five segments drawn from a vocabulary that
+    // mixes the new route's tokens with the existing ones, plus the six-segment
+    // scoped shape, and over methods that include none at all, the set of
+    // (path, method) answers that moved must be EXACTLY the hook route — POST,
+    // in either case — unscoped or under one `/environments/:id` scope, every
+    // move a newly exempt answer, none newly gated.
+    it('BOUNDARY — newly exempt is exactly POST on the four-segment hook route, unscoped or scoped, nothing else', () => {
+      const PRE_MOUNT_BASES: readonly (readonly string[])[] = [['api', 'v1'], ['api'], []];
+      const PRE_SCOPE_SEGMENTS: readonly string[] = ['environments', 'projects'];
+      const PRE_ALLOW_ROUTES: readonly (readonly string[])[] = [
+        ['health'], ['ready'], ['discovery'], ['me', 'apps'], ['me', 'localization'], ['approvals', 'act'],
+      ];
+      const startsWith = (segments: readonly string[], prefix: readonly string[]): boolean => {
+        if (segments.length < prefix.length) return false;
+        for (let k = 0; k < prefix.length; k++) if (segments[k] !== prefix[k]) return false;
+        return true;
+      };
+      const preEntryAllowlisted = (rawPath: string | undefined | null): boolean => {
+        if (!rawPath) return false;
+        let path = rawPath.split('?')[0] || '/';
+        let end = path.length;
+        while (end > 1 && path.charCodeAt(end - 1) === 47) end--;
+        path = path.slice(0, end) || '/';
+        const segments = path.split('/').filter((s) => s !== '');
+        for (const base of PRE_MOUNT_BASES) {
+          if (!startsWith(segments, base)) continue;
+          let i = base.length;
+          let scoped = false;
+          if (i + 1 < segments.length && PRE_SCOPE_SEGMENTS.includes(segments[i] as string)) {
+            i += 2;
+            scoped = true;
+          }
+          if (segments[i] === 'auth') {
+            if (i + 1 < segments.length) return true;
+            if (!scoped) return true;
+          }
+          for (const route of PRE_ALLOW_ROUTES) {
+            if (segments.length - i === route.length && startsWith(segments.slice(i), route)) return true;
+          }
+        }
+        return false;
+      };
+
+      const SEG = ['automation', 'hooks', 'environments', 'projects', 'env1', 'f', 'api', 'v1', 'health', 'runs'];
+      const corpus: string[] = ['', '/'];
+      const walk = (prefix: string, depth: number) => {
+        if (depth === 0) return;
+        for (const s of SEG) {
+          const p = `${prefix}/${s}`;
+          corpus.push(p);
+          walk(p, depth - 1);
+        }
+      };
+      walk('', 5);
+      // The scoped shape is six segments deep: `/environments/<id>/automation/hooks/<f>/<h>`.
+      const SCOPE_IDS = ['env1', 'hooks'];
+      for (const id of SCOPE_IDS) walk(`/environments/${id}`, 4);
+      const METHODS = ['POST', 'post', 'GET', 'DELETE', 'OPTIONS', undefined] as const;
+
+      // Built independently of the predicate: (unscoped | scope × id) × route × method.
+      const expected = new Set<string>();
+      for (const scope of [[], ...SCOPE_IDS.map((id) => ['environments', id])]) {
+        for (const a of SEG) for (const b of SEG) {
+          for (const m of ['POST', 'post']) expected.add(`${m} /${[...scope, 'automation', 'hooks', a, b].join('/')}`);
+        }
+      }
+
+      const newlyExempt: string[] = [];
+      const newlyGated: string[] = [];
+      for (const p of corpus) {
+        const before = preEntryAllowlisted(p);
+        for (const m of METHODS) {
+          const after = isAuthGateAllowlisted(p, m);
+          if (after && !before) newlyExempt.push(`${m} ${p}`);
+          if (!after && before) newlyGated.push(`${m} ${p}`);
+        }
+      }
+      expect(newlyGated).toEqual([]);
+      expect([...new Set(newlyExempt)].sort()).toEqual([...expected].sort());
+
+      // Anti-vacuity: the corpus reaches every expected path, both predicates
+      // answer both ways, and the card's own siblings are in it and gated.
+      const inCorpus = new Set(corpus);
+      for (const e of expected) expect(inCorpus.has(e.slice(e.indexOf(' ') + 1)), e).toBe(true);
+      expect(corpus.length).toBeGreaterThan(100_000);
+      expect(corpus.filter((p) => preEntryAllowlisted(p)).length).toBeGreaterThan(0);
+      for (const p of ['/automation/hooks', '/automation/hooks/f', '/automation/hooks/f/runs/health', '/automation/f/hooks/runs']) {
+        expect(inCorpus.has(p), p).toBe(true);
+        expect(isAuthGateAllowlisted(p, 'POST'), p).toBe(false);
       }
     });
   });

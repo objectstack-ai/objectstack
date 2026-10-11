@@ -137,11 +137,17 @@ export async function cleanupPackagePermissions(
       await tryFind(ql, 'sys_position_permission_set', { permission_set_id: set.id }),
       refusals,
     );
-    out.userGrants += await deleteRows(
-      ql, 'sys_user_permission_set',
-      await tryFind(ql, 'sys_user_permission_set', { permission_set_id: set.id }),
-      refusals,
-    );
+    // [ADR-0131 D4] A grant names its set BY NAME, so the grants of this set
+    // are the rows naming it; a grant written before the name column existed
+    // is still reached through its legacy id, to revoke only.
+    const grants = new Map<string, any>();
+    const byName = typeof set.name === 'string' && set.name !== ''
+      ? await tryFind(ql, 'sys_user_permission_set', { permission_set: set.name })
+      : [];
+    for (const g of [...byName, ...(await tryFind(ql, 'sys_user_permission_set', { permission_set_id: set.id }))]) {
+      if (g?.id && !grants.has(String(g.id))) grants.set(String(g.id), g);
+    }
+    out.userGrants += await deleteRows(ql, 'sys_user_permission_set', [...grants.values()], refusals);
   }
   out.sets = await deleteRows(ql, 'sys_permission_set', sets, refusals);
 

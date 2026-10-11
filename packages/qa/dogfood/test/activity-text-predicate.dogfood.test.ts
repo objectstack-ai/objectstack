@@ -258,8 +258,7 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
     const adminId = await idOf('sys_user', { email: 'admin@objectos.ai' });
     expect(adminId, 'the harness admin is seeded').toBeTruthy();
     for (const name of READERS.control) {
-      const setId = await idOf('sys_permission_set', { name });
-      await ql.insert('sys_user_permission_set', { user_id: adminId, permission_set_id: setId }, SYS);
+      await ql.insert('sys_user_permission_set', { user_id: adminId, permission_set: name }, SYS);
     }
 
     for (const who of [...Object.keys(READERS), 'writer']) {
@@ -270,7 +269,7 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
       for (const name of sets) {
         const setId = await idOf('sys_permission_set', { name });
         expect(setId, `fixture permission set ${name} seeded`).toBeTruthy();
-        await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: setId }, SYS);
+        await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
       }
       if (who === 'control') {
         // Staff the position BEFORE the subject exists: the slate resolves at request creation.

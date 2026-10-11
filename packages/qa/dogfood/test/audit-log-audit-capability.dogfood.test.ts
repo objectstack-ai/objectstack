@@ -180,7 +180,7 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     const grant = async (email: string, setName: string) => {
       const set = await ql.findOne('sys_permission_set', { where: { name: setName }, context: { ...SYS } });
       expect(set?.id, `fixture permission set ${setName} seeded`).toBeTruthy();
-      await ql.insert('sys_user_permission_set', { user_id: await userIdOf(email), permission_set_id: set.id }, { context: { ...SYS } });
+      await ql.insert('sys_user_permission_set', { user_id: await userIdOf(email), permission_set: set.name }, { context: { ...SYS } });
     };
     for (const who of ['holder', 'reader', 'writer'] as const) {
       const email = `alc-${who}@verify.test`;
@@ -407,7 +407,7 @@ describe('[#21260] the ledger audit capability is bounded by its holder’s orga
     }
     const userA = await ql.findOne('sys_user', { where: { email: 'alc-org-a@verify.test' }, context: { ...SYS } });
     const set = await ql.findOne('sys_permission_set', { where: { name: capOnly.name }, context: { ...SYS } });
-    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set_id: set.id }, { context: { ...SYS } });
+    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set: set.name }, { context: { ...SYS } });
     for (const who of ['a', 'b'] as const) {
       const res = await stack.apiAs(tok[who], 'POST', `/data/${OBJ}`, { name: `gone ${who}` });
       expect(res.status).toBeLessThan(300);

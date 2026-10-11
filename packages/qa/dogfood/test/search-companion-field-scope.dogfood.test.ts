@@ -174,7 +174,7 @@ describe('dogfood: with the pinyin search companion on, a member searches only w
     const setId = await idOf('sys_permission_set', { name: memberSet.name });
     expect(userId, 'member user seeded').toBeTruthy();
     expect(setId, 'member permission set seeded').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: setId }, SYS);
+    await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: memberSet.name }, SYS);
 
     memberRowId = await create(memberToken, ROWS, { name: CJK_NAME });
     adminRowId = await create(adminToken, ROWS, { name: CJK_NAME });

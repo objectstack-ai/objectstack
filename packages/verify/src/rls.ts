@@ -413,9 +413,9 @@ export function rlsProbeSecurity(config: any): SecurityPlugin {
  * depend on whether this deployment happens to let an admin POST a grant — a
  * second thing that can fail for reasons unrelated to RLS.
  *
- * Throws when the stack has no ObjectQL engine, the user cannot be resolved, the
- * catalog does not serve the probe set, or the boot left no catalog row whose id
- * the grant's still-required `permission_set_id` column can take.
+ * Throws when the stack has no ObjectQL engine, the user cannot be resolved, or
+ * the catalog does not serve the probe set. The grant names the set by name
+ * (ADR-0131 D4), so no `sys_permission_set` row is read or needed.
  * Callers must NOT swallow that into a weaker persona silently: run degraded and
  * say so (`RlsProbeDescriptor.degraded`), or fail.
  */
@@ -462,32 +462,12 @@ export async function provisionRlsProbePersona(
     );
   }
 
-  // `sys_user_permission_set.permission_set_id` is still a required column, and
-  // the platform derives the grant's name from it and refuses a disagreement.
-  // The boot seeds a catalog row for every set the security plugin registers
-  // (`bootstrapPlatformAdmin`), the probe set included, so its id is READ here —
-  // never minted: no resolver reads that row, and a row this function wrote
-  // would be one more copy of a definition whose home is the registry.
-  const seeded = rowsOf(
-    await ql.find('sys_permission_set', { where: { name: RLS_PROBE_PERMISSION_SET }, limit: 1 }, sysCtx),
-  );
-  const permissionSetId = seeded[0]?.id;
-  if (!permissionSetId) {
-    throw new Error(
-      `verify: cannot provision the RLS probe persona — the boot seeded no sys_permission_set row ` +
-        `named '${RLS_PROBE_PERMISSION_SET}', so the grant has no id for its required ` +
-        'permission_set_id column. The security plugin seeds one for every registered set at ' +
-        "kernel:ready; read its '[security] platform bootstrap' log lines for why it did not.",
-    );
-  }
   await ql.insert(
     'sys_user_permission_set',
     {
       id: genId('ups'),
       user_id: userId,
-      permission_set_id: permissionSetId,
-      // [ADR-0131 D4] Both columns, agreeing: the row was found under exactly
-      // this name just above.
+      // [ADR-0131 D4] The grant names its set; no id is written (D10).
       permission_set: RLS_PROBE_PERMISSION_SET,
       organization_id: null,
       granted_by: null,

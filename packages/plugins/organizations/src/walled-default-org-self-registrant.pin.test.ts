@@ -308,7 +308,7 @@ describe('walled + invite-only: the multi-org default-org bootstrap never joins 
     const store: Record<string, Row[]> = {
       sys_permission_set: seededPermissionSets(),
       sys_user_permission_set: [
-        { id: 'ups_1', permission_set_id: 'ps_admin', organization_id: null, user_id: 'usr_alice' },
+        { id: 'ups_1', permission_set: 'admin_full_access', organization_id: null, user_id: 'usr_alice' },
       ],
       sys_user: [
         { id: 'usr_alice', email: SELF_REGISTRANT_EMAIL, email_verified: true, created_at: '2026-01-01T00:00:00.000Z' },
