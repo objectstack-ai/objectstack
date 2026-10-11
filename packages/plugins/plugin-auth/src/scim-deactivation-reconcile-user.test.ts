@@ -75,6 +75,7 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -179,6 +180,9 @@ async function boot(): Promise<Harness> {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
+  // [ADR-0131 D3/D4] `admin_full_access` is a catalog definition — what the
+  // break-glass guard, like the resolver, resolves a grant's set name to.
+  bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
 
   // The two engine guards `auth-plugin.ts` registers at `kernel:ready`, in
   // the same order (ADR-0092 at priority 10, break-glass at 20).

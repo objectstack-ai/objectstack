@@ -38,6 +38,7 @@ import {
   type BooleanComparandDoorNarrowsCase,
   type BooleanComparandDoorRefusalCase,
 } from './filter-boolean-comparand-declared-type';
+import { FORMULA_RETURN_TYPE_AS_FIELD_TYPE } from './filter-text-operator-declared-type';
 import { StandardErrorCode } from '../api/errors.zod';
 
 const isRefusal = (c: BooleanComparandDoorCase): c is BooleanComparandDoorRefusalCase => c.verdict === 'door-refusal';
@@ -108,6 +109,8 @@ describe('the judged fields and positions', () => {
   it('judges a formula by its returnType, and defers on an unreadable one', () => {
     expect(booleanComparandFieldVerdict({ type: 'formula', returnType: 'boolean' })).toBe('judged');
     expect(booleanComparandFieldVerdict({ type: 'formula', returnType: 'text' })).toBe('not-judged');
+    // #22727 — a currency formula is the number door's subject, never this one's.
+    expect(booleanComparandFieldVerdict({ type: 'formula', returnType: 'currency' })).toBe('not-judged');
     expect(booleanComparandFieldVerdict({ type: 'formula' })).toBe('deferred');
     expect(booleanComparandFieldVerdict({ type: 'number' })).toBe('not-judged');
   });
@@ -120,7 +123,8 @@ describe('the judged fields and positions', () => {
   it('judges a field class disjoint from the number door\'s — at most one arm judges a key', () => {
     const metas = [
       ...FieldType.options.map((type) => ({ type })),
-      ...['number', 'text', 'boolean', 'date'].map((returnType) => ({ type: 'formula', returnType })),
+      // Every declared return type, read off the shared map — #22727's `currency` included.
+      ...[...FORMULA_RETURN_TYPE_AS_FIELD_TYPE.keys()].map((returnType) => ({ type: 'formula', returnType })),
     ];
     for (const meta of metas) {
       const booleanJudges = booleanComparandFieldVerdict(meta) === 'judged';
