@@ -1,0 +1,15 @@
+---
+"@objectstack/spec": minor
+---
+
+feat(spec): a new trigger-api service contract declares an optional, transport-neutral inbound-hook member (`ITriggerApiService.handleInboundHook`)
+
+Clause-②: yes (widening)
+
+- **What is new.** `@objectstack/spec/contracts` exports a new contract, `ITriggerApiService`, for the `trigger-api` service slot that `@objectstack/trigger-api` fills. It has one optional member, `handleInboundHook?(request: Request, hook: { flowName, hookId }): Promise<Response>`. It serves the inbound hook, `POST /api/v1/automation/hooks/:flowName/:hookId`, the door a third-party sender posts a signed event through to start an `api` flow.
+- **What it serves.** The same answers as the trigger's self-hosted route, in the same order. An unknown flow or a wrong hook id answers `404 RESOURCE_NOT_FOUND`, identically. A hook secret that cannot be read answers `503 SERVICE_UNAVAILABLE`. A missing or wrong `x-objectstack-signature` answers `401 INVALID_SIGNATURE`. Only a verified body is read as JSON: one that is not valid JSON, or not a JSON object, answers `400 INVALID_REQUEST`. An enqueued post answers `202` with `{ accepted: true, messageId }`, and the flow runs on the queue consumer, never in-band (ADR-0041 §5). No queue answers `503 SERVICE_UNAVAILABLE`, and a failed publish answers `503 ENQUEUE_FAILED`.
+- **The member is the signature boundary.** The implementer verifies inside the member, with the hook's own secret, in constant time, and before anything is enqueued. It reads the raw body from the request itself. The caller forwards the request with its body unread, and never parses, re-serialises or pre-checks it.
+- **Transport-neutral.** A web-standard `Request` goes in and a `Response` comes out: there is no Hono context, no raw app and no `http.server` type, and no execution context, because the signature is the only credential. The two path parameters arrive as the second argument, as the caller's route matched them, so the member never re-parses the URL. A hosted tenant kernel has no raw app to mount the route on, and the runtime dispatcher's exact `POST /automation/hooks/:flowName/:hookId` domain is the member's one caller.
+- **Why a trigger-api slot, not the automation service's.** The automation service holds the trigger registry that the `api` trigger registers into. The door (the hook lookup, the secret, the signature check, the body parse, the enqueue and every answer) belongs to the trigger, so the door exists exactly where `@objectstack/trigger-api` is composed.
+- **Absence.** The member is optional, so a trigger-api service without the door still satisfies the contract. Its caller answers a typed 404 or 501 when the `trigger-api` service or this member is absent, never `ROUTE_NOT_FOUND`.
+- **Nothing changes for existing code.** No existing contract or member moved. Nothing registers the `trigger-api` slot or calls the member yet: the trigger's implementation and the dispatcher domain land separately, and the trigger's self-hosted route stays as it is.
