@@ -25,7 +25,7 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (81 rows
-// / 18 families) and `packages/runtime/src/route-ledger.ts` (85 rows / 22
+// / 18 families) and `packages/runtime/src/route-ledger.ts` (86 rows / 23
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
@@ -67,9 +67,10 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 40 ledger keys, 10 are classified by rows below (re-derived when the
-// `/approvals/act` domain arrived classified, #22576, after `/i18n` left the
-// baseline, #22432); the other 30 are enumerated one by one,
+// Of the 41 ledger keys, 11 are classified by rows below (re-derived when the
+// `/webhooks/redeliver` domain arrived classified, #22755, after
+// `/approvals/act` did, #22576, and `/i18n` left the baseline, #22432); the
+// other 30 are enumerated one by one,
 // dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
 // whose MAX note dates every step down from the 34 of 40 it held on the
 // 2026-08-31 adoption day. That list can only get shorter: growth, staleness,
@@ -99,12 +100,12 @@
 // [commit 2ce1eb41b] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
-// 44 of 55 carry no `covers` key at all (11 rows, 21 keys, every one an
-// HTTP/transport pin), and 38 of the file's 48 `enforced` rows are exactly
+// 44 of 56 carry no `covers` key at all (12 rows, 22 keys, every one an
+// HTTP/transport pin), and 38 of the file's 49 `enforced` rows are exactly
 // that in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
 // grant-validity-window row among them (see their own blocks further down)
 // are the normal case, not an exception. Of the
-// 21 `covers` keys that DO exist, 7 are GATE pins tied to the enforcement call
+// 22 `covers` keys that DO exist, 7 are GATE pins tied to the enforcement call
 // itself, not merely a function name — delete `shouldDenyAnonymous` from
 // `/actions`, `/automation`, `/packages`, `/analytics` or `/i18n`, or drop the MCP
 // context-threading / stdio principal binding, and the pinned key vanishes from source, its row
@@ -329,6 +330,25 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'plugin-approvals/approval-service.ts resolveActionToken → peekActionToken (GET: validate WITHOUT consuming, never decides) / redeemActionToken (POST: consume FIRST, then decide AS the token\'s bound approver) — the ADR-0043 chain: SHA-256 token-hash lookup, not consumed, not expired, request still `pending`, approver still holding the slot; reached through IApprovalService.handleActionPage by runtime/domains/approvals.ts, which forwards the transport\'s request UNREAD and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates are aligned to token-only for the EXACT path (unscoped or environment-scoped) and nothing wider: core/security/auth-gate.ts ALLOW_ROUTES [approvals, act] (ADR-0069) and runtime/http-dispatcher.ts enforceProjectMembership → isApprovalsActPath. The self-hosted raw-app mount (plugin-approvals approvals-plugin.ts mountActionPages) runs the same chain on the same token store',
     covers: ['dispatcher-domain:route-ledger.ts:/approvals/act'],
     note: 'The DISPATCHER domain only: on a self-hosted kernel the same path is served from the raw Hono app and never reaches the dispatcher, which is why the route-ledger rows are pinned unobservable on the showcase boot. Unit- and wire-proven, not dogfood-proven: plugin-approvals action-page-member.integration.test.ts drives the member on a real kernel and store (GET never decides; POST decides as the bound approver, audited as that approver; unknown, expired and consumed tokens told on the page with 200; no cookie or Authorization read); runtime domains/approvals-act.test.ts pins the domain on the real HttpDispatcher (the request forwarded unread, HEAD answered as a bodiless GET, 501 for an absent slot or member, a SIGNED-IN non-member reaching the member exactly as an anonymous caller does while /approvals/act/x, /approvals/actx, /approvals, /approvals/requests and /data/task stay membership-checked); core/security/auth-gate.test.ts pins the exact allow-list entry; http-conformance hono-approvals-act.conformance.test.ts drives the real plugin through createHonoApp and the self-hosted mount, where a form POST redeems a live token and HEAD answers identically at both doors.' },
+
+  // #22755 — the `/webhooks/redeliver` dispatcher domain (segment 2 of #22564's
+  // stage 2; ruling A on #22438). Unlike `approval-action-token` above, the
+  // credential here IS the session: the member judges the caller from the
+  // request's own credentials through the `auth` service, so the honest class
+  // is "a signed-in caller, scoped to their active organization", and the
+  // dispatcher's two preamble gates apply to the path unexempted. ⛔ Ids stay
+  // in this comment, out of the row's strings.
+  //
+  // Not HIGH_RISK, for the list's own reason: it marks a primitive guarding
+  // object DATA through a sibling HTTP entry point, and this door serves no
+  // record read or query — it replays one outbox row the caller's organization
+  // owns. Its proofs are the plugin's member suite and the two-door wire suite,
+  // neither of which lives in this directory; a dogfood proof driving the route
+  // at its literal wire path is the honest upgrade, and would claim this row.
+  { id: 'webhook-redeliver-session', summary: 'Webhook redeliver door (`POST /webhooks/redeliver`, the operator button that replays a finished delivery) — any signed-in caller may press it, and only for a delivery row of their own active organization; an anonymous caller is refused by the member itself, exactly as the self-hosted mount refuses it', state: 'enforced',
+    enforcement: 'plugin-webhooks/webhook-outbox-plugin.ts serveRedeliver — the ONE body both faces run: the caller resolved from the request\'s own credentials through the auth service (no signed-in user: 401 UNAUTHENTICATED), the caller\'s active organization threaded into messaging.redeliverHttp as the tenant (a row outside it: 404 RESOURCE_NOT_FOUND), and the redelivery veto installed with messaging before the slot is registered (a row whose subscription or signing secret is gone: 409 DELIVERY_NOT_ELIGIBLE); reached through IWebhookService.handleRedeliver by runtime/domains/webhooks.ts, which forwards the transport\'s request UNREAD, resolves the slot per request and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates apply to the exact path with NO exemption: core/security/auth-gate.ts ALLOW_ROUTES does not list it (a session owing an authentication step is refused 403 first) and runtime/http-dispatcher.ts enforceProjectMembership does not skip it (a signed-in non-member of the environment is refused 403 PROJECT_MEMBERSHIP_REQUIRED first). The self-hosted raw-app mount (plugin-webhooks registerAdminRoutes) runs the same body on the same outbox',
+    covers: ['dispatcher-domain:route-ledger.ts:/webhooks/redeliver'],
+    note: 'The DISPATCHER domain only: on a self-hosted kernel the same path is served from the raw Hono app and never reaches the dispatcher, which is why the route-ledger row is pinned unobservable on the showcase boot. Unit- and wire-proven, not dogfood-proven: plugin-webhooks webhook-redeliver-member.test.ts drives the member on a real kernel, messaging service and outbox (every refusal the contract declares, the tenant scope, the veto, byte parity with the mount); runtime domains/webhooks-redeliver.test.ts pins the domain on the real HttpDispatcher (the request forwarded unread, POST alone claimed, 501 for an absent slot or member, the slot read per request, a signed-in non-member and a gated session stopped before the member while a member of the environment and an anonymous caller reach it); http-conformance hono-webhooks-redeliver.conformance.test.ts drives the real plugin through createHonoApp and the self-hosted mount, where a replay lands in the outbox and every refusal, anonymous first, answers the same bytes at both doors.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
   // admission). Neither surface is reachable by a client today; these rows
