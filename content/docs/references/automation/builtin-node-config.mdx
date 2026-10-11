@@ -79,7 +79,8 @@ contract since #19938 (`FlowValueSlotSchema`, the "value slots" section):
 a field value is a CEL value envelope or a literal — a `{token}` template is
 refused there since #19939 — and those maps are the expression ledger's
 `value`-role slots, as are, since #19939, the three maps a node hands to a
-callee and a `screen`'s `defaults.*`, field `defaultValue` and `recordId`.
+callee, a `screen`'s `defaults.*`, field `defaultValue` and `recordId`, and
+the list a `loop` and a `map` iterate (`FlowCollectionSlotSchema`).
 
 Deliberately absent:
  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
@@ -98,8 +99,8 @@ Deliberately absent:
 ## TypeScript Usage
 
 ```typescript
-import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, FlowValueSlotSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
-import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, FlowValueSlot, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, FlowCollectionSlotSchema, FlowValueSlotSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
+import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, FlowCollectionSlot, FlowValueSlot, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
 
 // Validate data
 const result = AssignmentConfigSchema.parse(data);
@@ -179,6 +180,38 @@ Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` eval
 
 ---
 
+## FlowCollectionSlot
+
+The list the node iterates: a CEL value envelope `{ dialect: 'cel', source }` evaluated in the run's scope to a list (anything else, null included, fails the node), or an inline array of the items, iterated as written — a string is refused, a `{…}` template token or a variable's bare name alike
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Type: `any[]`
+
+---
+
+#### Option 2
+
+CEL value envelope `{ dialect: 'cel', source }` — evaluated by the expression engine to the value the slot takes; the whole CEL stdlib (`joinNonEmpty`, …) is reachable
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dialect** | `'cel'` | ✅ |  |
+| **source** | `string` | ✅ |  |
+| **ast** | `any` | optional |  |
+| **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
+
+---
+
+
+---
+
 ## FlowValueSlot
 
 A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or a literal written as it is — a `{…}` template token in a string is refused (the template dialect is retired from value slots; a date macro is its CEL string form, `isoDate(today())` / `isoDatetime(now())`)
@@ -207,7 +240,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **collection** | `string \| any[]` | ✅ | Template/variable resolving to the array to process (an inline array is accepted) |
+| **collection** | `any[] \| { dialect: 'cel'; source: string; ast?: any; meta?: object }` | ✅ | The list the node iterates: a CEL value envelope `{ dialect: 'cel', source }` evaluated in the run's scope to a list (anything else, null included, fails the node), or an inline array of the items, iterated as written — a string is refused, a `{…}` template token or a variable's bare name alike |
 | **flowName** | `string` | ✅ | Subflow run for each item — it may pause (e.g. an approval) |
 | **iteratorVariable** | `string` | optional (default: `"item"`) | Variable holding the current item — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **indexVariable** | `string` | optional | Optional variable holding the current index — a name without a leading `$` (the `$` names are the flow engine's own) |
