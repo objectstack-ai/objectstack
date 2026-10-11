@@ -2212,6 +2212,22 @@ describe('ApprovalService — the unstaffed arm (#22725)', () => {
     expect(await read({ status: 'pending', unstaffed: true }, unscoped)).toMatchObject({ ids: [t1Stuck.id], total: 1 });
   });
 
+  it('per row, the arm returns only what the caller may override: an org-less tenant admin reaches org-less rescues only', async () => {
+    const t1Stuck = await svc.openNodeRequest(stuck('opp_literal'), CTX) as any; // organization t1
+    const globalStuck = await svc.openNodeRequest(stuck('opp_global'), SYS) as any; // no organization
+    expect(engine._tables['sys_approval_request'].find(r => r.id === globalStuck.id)?.organization_id ?? null).toBeNull();
+
+    // No organization on the context: the list read is unwalled, and the
+    // visibility read lets this caller see every row. Only the per-row
+    // override test keeps the t1 request, which this caller may NOT
+    // override, out of the arm.
+    const orgLessTenantAdmin = { userId: 'owner', positions: [], permissions: ['organization_admin'] } as any;
+    const got = await read({ status: 'pending', unstaffed: true }, orgLessTenantAdmin);
+    expect(got).toMatchObject({ ids: [globalStuck.id], total: 1 });
+    expect(got.ids).not.toContain(t1Stuck.id);
+    expect(got.rows[0].viewer).toMatchObject({ can_override: true });
+  });
+
   it('reads the slate as it stands: a slate left holding only literals joins the arm', async () => {
     const mixed = await svc.openNodeRequest({
       ...stuck('opp_mixed'),
