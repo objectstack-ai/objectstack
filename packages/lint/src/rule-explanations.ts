@@ -3115,6 +3115,11 @@ const ACTION_NAME_UNDEFINED_EXPLANATION: RuleExplanation = {
       'without a word, and the header draws no button, with only a browser-console warning. An ' +
       'error: there is no cross-package escape to soften it with, and an action another installed ' +
       'package contributes is the one legitimate miss.',
+    'To fix a miss, define the action — a `stack.actions` entry or an entry of the object\'s `actions` — ' +
+      'placed where the surface looks for it, or remove the reference. A `page:header` draws only actions ' +
+      'placed at `record_header` or `record_more`, so a header action needs one of the two in its ' +
+      '`locations`; the selection bar and an alert\'s call-to-action place an action by name, with no ' +
+      '`locations` entry.',
     // The drawn locations are held to the rule by its test, over every location.
     'A `record:related_list` is the exception, and resolves the way its renderer does: against the ' +
       'RELATED object\'s own actions (written on it, or a `stack.actions` entry bound to it by ' +
@@ -3291,7 +3296,7 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
       'of that universe starts with its prefix.',
     // The headless paths are held to the rule by its test, each one materialising.
     'An action materialises as a tool only when it opts in, `ai.exposed: true` with an ' +
-      '`ai.description` of at least 40 characters, which the model reads (ADR-0011), and has a headless ' +
+      '`ai.description` (ADR-0011) of at least 40 characters, which the model reads, and has a headless ' +
       'path: a declarative `operation: \'update\'`, a `script` action with a target or a body, or an ' +
       '`api` or `flow` action with a target. A `url`, `modal` or `form` action is UI-only and stays ' +
       'human-driven by design: that is a legitimate answer, not a gap, and the skill\'s instructions can ' +

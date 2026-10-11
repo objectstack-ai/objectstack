@@ -448,7 +448,7 @@ describe('validatePredicatePathRefs — one position, one prescription (#7696)',
     const f = rhs('data.name == type')[0];
     expect(f.hint).toMatch(/quote it: `== 'type'`/);
     expect(f.hint).toMatch(/data\.type == 'yes'/);
-    expect(f.hint).toMatch(/do NOT simply add the root in place/);
+    expect(f.hint).toMatch(/Do NOT simply add the root in place/);
     // The bar: BOTH spellings the message recommends must be clean…
     expect(rhs("data.type == 'yes'")).toEqual([]);
     expect(rhs("data.name == 'type'")).toEqual([]);

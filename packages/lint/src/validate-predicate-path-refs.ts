@@ -744,7 +744,7 @@ function checkPredicate(
         ? `If you meant the text, quote it: \`${op} '${text}'\`; if you meant the path, put it on the `
           + `LEFT with a literal on the right (two paths cannot be compared here)`
         : `If you meant the text, quote it: \`${op} '${text}'\` (what it does today); if you meant the `
-          + `field, write \`${ROOT}.${text} == 'yes'\`, path on the LEFT, and do NOT simply add the root in place`,
+          + `field, write \`${ROOT}.${text} == 'yes'\` with the path on the LEFT. Do NOT simply add the root in place`,
     });
   }
 }

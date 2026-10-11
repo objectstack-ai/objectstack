@@ -763,7 +763,12 @@ describe('[#22161] one-line verdicts — action-name-undefined', () => {
   it('the locations the explanation says a related list draws are the ones the rule accepts', () => {
     // The explanation module imports nothing, so its location list is held to
     // the rule by running the rule over every location the spec declares.
-    const text = explainRule(ACTION_NAME_UNDEFINED)!.paragraphs.join('\n');
+    // [#22161] Read from the related-list paragraph: the fix paragraph names
+    // the page header's two locations, which a related list does not draw.
+    const text = explainRule(ACTION_NAME_UNDEFINED)!.paragraphs.find((p) =>
+      p.startsWith('A `record:related_list` is the exception'),
+    )!;
+    expect(text).toBeDefined();
     const drawn = ACTION_LOCATIONS.filter((location) => validateActionNameRefsUnrecorded({
       objects: [{ name: 'crm_contact', fields: {}, actions: [{ name: 'act', type: 'script', locations: [location] }] }],
       pages: [{

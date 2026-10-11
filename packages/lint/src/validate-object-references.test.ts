@@ -289,10 +289,15 @@ describe('validateObjectReferences — artifact packages[] as resolution context
     expect(findings[0].path).toBe('objects[0].fields.contract.reference');
     // The resolution set is what the ARTIFACT provides, not only this package's
     // own objects — that is the set the author actually has to choose from.
-    // [#22161] The verdict's "Did you mean" reads it; the `fix:` line no longer
-    // echoes the list.
-    expect(findings[0].message).toContain('Did you mean "crm_account"?');
+    // [#22161] The verdict's "Did you mean" reads it (a near miss of the
+    // sibling's object below); the `fix:` line no longer echoes the list.
     expect(findings[0].hint).not.toContain('Defined objects');
+    const near = {
+      ...ORDERS_BODY,
+      objects: [{ name: 'crm_order', fields: { account: { type: 'lookup', reference: 'crm_acount' } } }],
+    };
+    const [miss] = validateObjectReferences(perPackageStack(near, [{ manifest: near }, { manifest: CORE_BODY }]));
+    expect(miss?.message).toContain('Did you mean "crm_account"?');
   });
 
   it('carries the context to every site on the rule, not only the field one', () => {

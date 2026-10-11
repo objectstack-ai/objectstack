@@ -253,11 +253,10 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
         suggestName(name, known),
       // [#22161] One remedy line. The verdict's "Did you mean" names the
       // nearest defined action, so the stack's whole action list is not
-      // echoed; that another installed package may contribute it is
-      // `os explain action-name-undefined`.
-      hint:
-        `Define an action named "${name}" (in \`stack.actions\` or the object's \`actions\`) ` +
-        `${placement}, or remove the reference`,
+      // echoed; where an action may be defined, why the header needs one of
+      // its two locations, and that another installed package may contribute
+      // it are `os explain action-name-undefined`.
+      hint: `Define an action named "${name}" ${placement}, or remove the reference`,
     });
   };
 
@@ -503,7 +502,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
             where,
             `${path}.properties.actions[${hi}]`,
             'Page-header actions',
-            'with `record_header` or `record_more` in its `locations` (the header draws only actions placed at one of the two)',
+            'with `record_header` or `record_more` in its `locations`',
             'the header draws no button for it',
           );
         }
