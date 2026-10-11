@@ -243,14 +243,18 @@ describe('install-local — the package must permit the mode (`installModes`)', 
 });
 
 describe('install-local — `unmanaged` under a walled REQUESTED posture', () => {
-    for (const posture of ['isolated', 'group', 'not-a-posture']) {
+    // An UNRECOGNISED posture value is read as walled by the same function
+    // (pinned in `package-unmanaged-install.test.ts`); at this door the
+    // install-capability admission refuses such a boot first, so it is not a
+    // case this suite can reach.
+    for (const posture of ['isolated', 'group']) {
         it(`'${posture}': 409 UNMANAGED_INSTALL_WALLED_POSTURE naming the posture, the import never called, nothing written`, async () => {
             process.env.OS_TENANCY_POSTURE = posture;
             const h = await mount(dir);
             const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged' });
             expect(res.status).toBe(409);
             expect(res.payload.error.code).toBe('UNMANAGED_INSTALL_WALLED_POSTURE');
-            expect(res.payload.error.details.posture).toBe(posture === 'not-a-posture' ? 'unrecognised' : posture);
+            expect(res.payload.error.details.posture).toBe(posture);
             expect(h.importUnmanagedPackage).not.toHaveBeenCalled();
             expect(h.register).not.toHaveBeenCalled();
             expect(h.syncSchemas).not.toHaveBeenCalled();

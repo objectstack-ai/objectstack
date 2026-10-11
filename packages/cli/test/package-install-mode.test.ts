@@ -112,7 +112,7 @@ describe('os package install --install-mode (ADR-0131 D6)', () => {
     expect(exit).toBeUndefined();
     expect(out).toMatch(/Package copied into the environment \(unmanaged\)/);
     expect(out).toContain('com.acme.crm-copy');
-    expect(out).toMatch(/Items copied\s+12/);
+    expect(out).toMatch(/Items copied:\s+12/);
     expect(out).toContain('com.acme.crm@1.0.0');
     expect(out).toContain('sample data was not loaded');
     expect(out).not.toContain('Package installed into the running kernel');
