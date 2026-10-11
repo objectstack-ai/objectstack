@@ -55,6 +55,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Writers: the enable/disable actions (ADR-0126 L2/L3). Readers: each runtime's
  * own consult point.
  *
+ * Packaged and environment-authored: flows and actions reach this ledger only
+ * when a package ships them, but the security catalog's activation door
+ * (`POST /security/_activation/:type/:name`) switches every position and
+ * permission set the catalog holds, the environment's own included — so
+ * `package_id` is empty for those (see the field).
+ *
  * @namespace sys
  */
 export const SysMetadataActivation = ObjectSchema.create({
@@ -128,11 +134,20 @@ export const SysMetadataActivation = ObjectSchema.create({
       group: 'Identity',
     }),
 
+    // Not part of the row identity (the index below is `(metadata_type,
+    // name)`), and not read by any consumer to decide anything: every reader
+    // keys a row by type and name. It records provenance, and so it is empty
+    // exactly when there is no package to record — a position or permission
+    // set the environment authored through the metadata door, which the
+    // security catalog's activation door switches as well (#22621 → A). The
+    // writer (`ObjectStoreMetadataActivationStore`) stores NO value for such
+    // an item and refuses an empty string, so a package-less row has one
+    // spelling and can never be read as a package named ''.
     package_id: Field.text({
       label: 'Package',
-      required: true,
       maxLength: 255,
-      description: 'The package that ships the base artifact.',
+      description:
+        'The package that ships the artifact. Empty when no package ships it: an item authored in this environment.',
       group: 'Identity',
     }),
 

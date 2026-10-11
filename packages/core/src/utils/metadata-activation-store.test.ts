@@ -296,6 +296,62 @@ describe('ObjectStoreMetadataActivationStore — the ADR-0126 §4 row semantics,
     });
 });
 
+// [#22621 → A] The security catalog's activation door switches a position or
+// permission set the environment authored, and no package ships those. The row
+// says so with ONE spelling — no package value — and the store refuses the
+// other spelling a caller reaches for (`?? ''`), so a reader can never take an
+// environment item for a package named ''.
+describe('ObjectStoreMetadataActivationStore — an item no package ships', () => {
+    it('INSERTS a row with no package when packageId is absent', async () => {
+        const { engine, calls } = makeStoreEngine([]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'position').setActive({
+            name: 'env_position', active: false,
+        });
+
+        expect(calls.find((c) => c.op === 'insert')?.data).toEqual({
+            metadata_type: 'position', name: 'env_position', package_id: null, active: false,
+        });
+    });
+
+    it('UPDATES its row with no package on the way back on', async () => {
+        const { engine, calls } = makeStoreEngine([
+            { id: 'r1', metadata_type: 'permission', name: 'env_set', package_id: null, active: false },
+        ]);
+
+        await new ObjectStoreMetadataActivationStore(engine, 'permission').setActive({
+            name: 'env_set', active: true,
+        });
+
+        expect(calls.filter((c) => c.op === 'insert')).toHaveLength(0);
+        expect(calls.find((c) => c.op === 'update')?.data).toEqual({ id: 'r1', active: true, package_id: null });
+    });
+
+    it('REFUSES an empty-string package before reading or writing anything', async () => {
+        const { engine, calls } = makeStoreEngine([]);
+
+        await expect(new ObjectStoreMetadataActivationStore(engine, 'position').setActive({
+            name: 'env_position', packageId: '', active: false,
+        })).rejects.toThrow(TypeError);
+        expect(calls).toEqual([]);
+    });
+
+    it('reads a package-less row back with packageId ABSENT, beside a packaged one that keeps its package', async () => {
+        const { engine } = makeStoreEngine([
+            { id: 'r1', metadata_type: 'position', name: 'env_position', package_id: null, active: false },
+            { id: 'r2', metadata_type: 'position', name: 'sales_rep', package_id: 'crm', active: false },
+        ]);
+
+        const rows = await new ObjectStoreMetadataActivationStore(engine, 'position').list();
+
+        expect(rows).toEqual([
+            { name: 'env_position', active: false },
+            { name: 'sales_rep', packageId: 'crm', active: false },
+        ]);
+        expect('packageId' in rows[0]).toBe(false);
+    });
+});
+
 describe('InMemoryMetadataActivationStore', () => {
     it('round-trips a row and reflects the latest flip', async () => {
         const store = new InMemoryMetadataActivationStore();

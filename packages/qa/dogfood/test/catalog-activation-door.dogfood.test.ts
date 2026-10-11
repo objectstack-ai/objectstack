@@ -15,7 +15,11 @@
 //     really judges switching `admin_full_access` off: refused when no
 //     administrator would be left, landing when one stands;
 //   - the resolver over the booted engine stops granting through a position
-//     the door switched off, for a holder of that position.
+//     the door switched off, for a holder of that position;
+//   - a position and a permission set saved through the metadata door — no
+//     package ships them — switch the same way (#22621 → A): the real ledger
+//     object accepts their package-less row, which the test doubles cannot
+//     measure because they enforce no field contract.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { resolveUserAuthzGrants, securityCatalogReaderOf } from '@objectstack/core';
