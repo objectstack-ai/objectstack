@@ -114,6 +114,11 @@ export * from './meta-write-capability.js';
 // surface is unchanged.
 export * from './record-organization.js';
 
+// [ADR-0131 D6] The one row-value test for a `sys_metadata` row stored in a
+// legacy organization's layer — read by `@objectstack/objectql`'s binders and
+// `@objectstack/service-datasource`'s runtime-datasource reads.
+export * from './legacy-organization-row.js';
+
 // [#16319] The field-`type` admission vocabulary — the predicate, the shared
 // sentence and the cross-package discriminator behind the ruled 「禁止加载」
 // refusal. Sunk here by the same criterion as everything above: the enforcing

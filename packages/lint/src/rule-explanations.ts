@@ -1460,9 +1460,11 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
   covers: 'why an inbound api flow needs a secret',
   paragraphs: [
     'An inbound api hook is armed only with a per-flow secret that every post is HMAC-verified against ' +
-      '(ADR-0041): the `x-objectstack-signature` header carries \'sha256=\' and the hex HMAC-SHA256 of ' +
-      'the raw body. A usable secret is a string that is not blank after trimming, on the start node\'s ' +
-      '`config.secret`; absent, blank and non-string are one verdict.',
+      '(ADR-0041): the `x-objectstack-signature` header carries `t=<unix seconds>,v1=<hex>`, where the hex ' +
+      'is the HMAC-SHA256 of `<t>.<raw body>` under the secret, and the door refuses a `t` more than 300 ' +
+      'seconds from its own clock, so a captured post stops verifying. A usable secret is a string that is ' +
+      'not blank after trimming, on the start node\'s `config.secret`; absent, blank and non-string are one ' +
+      'verdict.',
     'The automation engine refuses to register a flow bound to the api trigger without one — a ' +
       'hardcoded check in `registerFlow`, before any trigger is consulted and whatever the flow\'s ' +
       '`status` — and the trigger refuses to arm it, so the flow never receives a post. The `/automation` ' +
@@ -2041,10 +2043,14 @@ const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'An approval node opens its request on the people its approvers expand to at runtime. When ' +
       'EVERY approver on the node routes to a group whose membership is runtime data — a ' +
-      '`position`, a `team` or a `department` — and none is staffed, the request opens on an empty ' +
-      '`pending_approvers` slate: no user can act, so it waits forever, and under the default ' +
-      '`lockRecord: true` the record stays locked with it, with no in-product recovery. An approver ' +
-      'of any other type on the node is a non-group route, so a mixed slate is not judged.',
+      '`position`, a `team` or a `department` — and none is staffed, no person the node names can ' +
+      'act. Under the default `onEmptyApprovers: \'admin_rescue\'` the request then opens on the ' +
+      "organization's administrators (the people holding its organization-admin capability) " +
+      'instead, and under the default `lockRecord: true` the record stays locked until one of them ' +
+      'decides. Declare `onEmptyApprovers: \'fallback\'` with a `fallbackApprovers` list to name who ' +
+      'decides instead; only an organization with no administrator leaves the request on an empty ' +
+      '`pending_approvers` slate, for a platform administrator\'s override. An approver of any ' +
+      'other type on the node is a non-group route, so a mixed slate is not judged.',
     'The `manager` arm is the same dead end with a cause the product cannot repair. ' +
       '`{ type: \'manager\' }` resolves from `sys_user.manager_id` of the user the record names ' +
       '(the field `value` names, else the owner), and returns nobody where that column is unset; a ' +

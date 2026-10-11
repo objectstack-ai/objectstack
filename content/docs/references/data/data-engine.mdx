@@ -221,7 +221,7 @@ Options for DataEngine.count operations
 | :--- | :--- | :--- | :--- |
 | **method** | `'count'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; filter?: Record<string, any> \| any }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; search?: string \| object; searchFields?: string[]; … }` | optional |  |
 
 ### Nested Shape: `DataEngineCountRequest.query`
 
@@ -229,6 +229,8 @@ Options for DataEngine.count operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 
@@ -684,7 +686,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **method** | `'count'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; filter?: Record<string, any> \| any }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; search?: string \| object; searchFields?: string[]; … }` | optional |  |
 
 ### Nested Shape: `DataEngineRequest[method='count'].query`
 
@@ -692,6 +694,8 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 
 ---
@@ -994,6 +998,8 @@ QueryAST-aligned options for DataEngine.count operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy?: boolean; operator?: Enum<'and' \| 'or'>; … }` | optional |  |
+| **searchFields** | `string[]` | optional |  |
 
 ### Nested Shape: `EngineCountOptions.context`
 
@@ -1032,6 +1038,19 @@ QueryAST-aligned options for DataEngine.count operations
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |
 | **traceId** | `string` | optional |  |
+
+### Nested Shape: `EngineCountOptions.search`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **query** | `string` | ✅ | Search query text |
+| **fields** | `string[]` | optional | Fields to search in (if not specified, searches all text fields) |
+| **fuzzy** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Fuzzy matching (tolerate typos). The ADR-0061 expansion reads only `query` + `fields`; no executor receives this flag. |
+| **operator** | `Enum<'and' \| 'or'>` | optional (default: `"or"`) | [EXPERIMENTAL — not enforced] Logical operator between terms. The ADR-0061 expansion applies its own term semantics; no executor receives this flag. |
+| **boost** | `Record<string, number>` | optional | [EXPERIMENTAL — not enforced] Field-specific relevance boosting (field name -> boost factor). No executor scores results. |
+| **minScore** | `number` | optional | [EXPERIMENTAL — not enforced] Minimum relevance score threshold. No executor scores results. |
+| **language** | `string` | optional | [EXPERIMENTAL — not enforced] Language for text analysis (e.g., "en", "zh", "es"). No executor selects an analyzer. |
+| **highlight** | `boolean` | optional (default: `false`) | [EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights. |
 
 
 ---

@@ -89,14 +89,15 @@
  *
  * ## Parity
  *
- * This rule calls the SAME `extractHookBody` that `lowerCallables` calls, on
- * the same normalized input. It therefore cannot drift from what `os build`
- * would do to the same handler — the #3782 class (two surfaces disagreeing
- * about what an author is told) is closed by construction here, not by a
- * second implementation kept in sync by hand.
+ * This rule calls the SAME `extractLoweredBody` that `lowerCallables` calls, on
+ * the same normalized input and with the same face (`hook` for a hook handler,
+ * `action` for an action target — #22837 made the two lower differently). It
+ * therefore cannot drift from what `os build` would do to the same handler — the
+ * #3782 class (two surfaces disagreeing about what an author is told) is closed
+ * by construction here, not by a second implementation kept in sync by hand.
  */
 
-import { extractHookBody, HookBodyExtractionError } from '../utils/extract-hook-body.js';
+import { extractLoweredBody, HookBodyExtractionError, type LoweringFace } from '../utils/extract-hook-body.js';
 
 /** Mirrors `LintIssue` in `../commands/lint.ts` (structurally compatible). */
 export interface HookBodyLintIssue {
@@ -127,13 +128,13 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 type AnyFn = (...args: unknown[]) => unknown;
 
 /**
- * Run `extractHookBody` over one callable and turn a refusal into an issue.
+ * Run `extractLoweredBody` over one callable and turn a refusal into an issue.
  * Returns `null` when the body extracts cleanly — i.e. the callable really does
  * ship as metadata.
  */
-function judge(fn: AnyFn, originLabel: string, path: string): HookBodyLintIssue | null {
+function judge(fn: AnyFn, originLabel: string, path: string, face: LoweringFace): HookBodyLintIssue | null {
   try {
-    extractHookBody(fn, originLabel);
+    extractLoweredBody(fn, originLabel, face);
     return null;
   } catch (err: unknown) {
     const kind = err instanceof HookBodyExtractionError ? err.kind : 'unknown';
@@ -240,7 +241,7 @@ export function checkHookBodyLowering(config: Record<string, unknown>): HookBody
       if (raw.body) return; // author supplied the body themselves
       const name =
         typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : 'anon_hook';
-      const issue = judge(raw.handler as AnyFn, `hook '${name}'`, `hooks[${i}].handler`);
+      const issue = judge(raw.handler as AnyFn, `hook '${name}'`, `hooks[${i}].handler`, 'hook');
       if (issue) issues.push(issue);
     });
   }
@@ -258,6 +259,7 @@ export function checkHookBodyLowering(config: Record<string, unknown>): HookBody
         raw.target as AnyFn,
         `action '${baseName}'`,
         `${pathPrefix}[${i}].target`,
+        'action',
       );
       if (issue) issues.push(issue);
     });

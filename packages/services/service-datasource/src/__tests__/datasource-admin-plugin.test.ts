@@ -732,4 +732,60 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
       expect(row().checksum).toBe(hashSpec(JSON.parse(row().metadata as string), 'datasource'));
     });
   });
+
+  // [#22835 · ADR-0131 D6] Every read here of a stored `datasource` row reads
+  // the environment's rows only: a row stored in a legacy organization's layer
+  // is never restored, served, pooled, updated or deleted. A legacy row under
+  // the same name as an environment row is inserted FIRST, so a read that
+  // picked the first row it found would pick it.
+  describe('[#22835] a legacy organization-scoped row is read by none of the plugin\'s reads', () => {
+    const row = (name: string, organizationId: string | null, host: string) => ({
+      id: `meta_${name}_${organizationId ?? 'env'}`, name, type: 'datasource', organization_id: organizationId,
+      metadata: JSON.stringify({ name, label: host, origin: 'runtime', driver: 'postgres', config: { host, database: 'db' } }),
+      state: 'active', version: 1,
+    });
+    const host = async (rows: Array<Record<string, unknown>>) => {
+      const data = Object.assign(fakeSysMetadataEngine(), { drivers: [] as any[] });
+      (data as any).registerDriver = (d: any) => data.drivers.push(d);
+      (data as any).getDriverByName = (n: string) => data.drivers.find((d) => d.name === n);
+      data.rows.push(...rows);
+      const built: any[] = [];
+      const factory: IDatasourceDriverFactory = {
+        supports: (id: string) => id === 'postgres',
+        create: async (spec) => { built.push(spec); return { connect: async () => {}, disconnect: async () => {} }; },
+      };
+      const projectors = new Map<string, (evt: unknown) => Promise<void>>();
+      const protocol = { registerMutationProjector: (t: string, p: (evt: unknown) => Promise<void>) => projectors.set(t, p) };
+      const b = await boot({ driverFactory: factory, services: { data, protocol } });
+      await b.plugin.start(b.ctx);
+      const metaDoorWrote = (name: string) => projectors.get('datasource')!({ type: 'datasource', name, state: 'active' });
+      return { ...b, data, built, metaDoorWrote };
+    };
+    const LEGACY = row('dup', 'org_legacy', 'legacy-host');
+
+    it('the boot restore registers and pools environment rows only', async () => {
+      const b = await host([row('org_ds', 'org_legacy', 'org-host'), row('env_ds', null, 'env-host'), row('blank_ds', '', 'blank-host')]);
+      expect(await b.metadata.get('datasource', 'org_ds')).toBeUndefined();
+      expect((await b.service.listDatasources()).map((d) => d.name).sort()).toEqual(['blank_ds', 'env_ds']);
+      expect(b.built.map((s) => s.name).sort()).toEqual(['blank_ds', 'env_ds']);
+      expect(b.data.rows.find((r) => r.name === 'org_ds')).toEqual(row('org_ds', 'org_legacy', 'org-host'));
+    });
+
+    it('the by-name reads skip a legacy row: projection and admin writes reach the environment row, and the legacy row is kept as it was', async () => {
+      const b = await host([LEGACY, row('dup', null, 'env-host'), row('only_legacy', 'org_legacy', 'l-host')]);
+      await b.metaDoorWrote('dup');
+      await b.metaDoorWrote('only_legacy');
+      expect(await b.metadata.get('datasource', 'dup')).toMatchObject({ label: 'env-host' });
+      expect(await b.metadata.get('datasource', 'only_legacy')).toBeUndefined();
+      expect([...new Set(b.built.map((s) => s.config.host))]).toEqual(['env-host']);
+
+      await b.service.updateDatasource('dup', { label: 'edited' });
+      expect(JSON.parse(String(b.data.rows.find((r) => r.id === 'meta_dup_env')!.metadata)).label).toBe('edited');
+      await b.service.removeDatasource('dup');
+      expect(b.data.rows.some((r) => r.id === 'meta_dup_env')).toBe(false);
+      await b.service.createDatasource({ name: 'dup', driver: 'postgres', config: { host: 'new-host', database: 'db' } });
+      expect(b.data.rows.filter((r) => r.name === 'dup' && r.organization_id == null)).toHaveLength(1);
+      expect(b.data.rows.find((r) => r.id === LEGACY.id)).toEqual(LEGACY);
+    });
+  });
 });

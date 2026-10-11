@@ -255,6 +255,7 @@
     "EngineAggregateOptionsParsed (type)",
     "EngineAggregateOptionsSchema (const)",
     "EngineCountOptions (type)",
+    "EngineCountOptionsParsed (type)",
     "EngineCountOptionsSchema (const)",
     "EngineDeleteOptions (type)",
     "EngineDeleteOptionsSchema (const)",

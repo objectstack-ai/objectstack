@@ -187,10 +187,16 @@ describe('[#20964] approval snapshot field served masked on the data plane', () 
         expect(submitterId && memberId && unmaskerId).toBeTruthy();
 
         // Staff the position BEFORE the record exists: the slate resolves at
-        // request creation.
+        // request creation. The assignments carry the holders' organization,
+        // as a write through a door does: an unstamped row is UNKNOWN tenancy,
+        // which the slate's position expansion does not read, and an
+        // all-literal slate would then open on the organization's
+        // administrators instead (#22824).
+        const membership = await ql.findOne('sys_member', { where: { user_id: memberId }, context: { isSystem: true } });
+        const organization_id = membership?.organization_id;
         await ql.insert('sys_position', { id: 'pos_snapmask', name: POSITION, label: 'Reviewer', active: true }, SYS);
-        await ql.insert('sys_user_position', { id: 'hold_snapmask_m', user_id: memberId, position: POSITION }, SYS);
-        await ql.insert('sys_user_position', { id: 'hold_snapmask_u', user_id: unmaskerId, position: POSITION }, SYS);
+        await ql.insert('sys_user_position', { id: 'hold_snapmask_m', user_id: memberId, position: POSITION, organization_id }, SYS);
+        await ql.insert('sys_user_position', { id: 'hold_snapmask_u', user_id: unmaskerId, position: POSITION, organization_id }, SYS);
         const unmask = await ql.findOne('sys_permission_set', { where: { name: unmaskSet.name }, context: { isSystem: true } });
         expect(unmask?.id, 'fixture permission set seeded').toBeTruthy();
         for (const userId of [unmaskerId, submitterId]) {

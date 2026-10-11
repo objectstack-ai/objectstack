@@ -140,11 +140,10 @@ export function actorAddresses(actorId: string, caller: ActingCaller | null): st
  * slate is a `type:value` literal, left by an approver target that resolved to
  * no holder (`position:<p>`, `team:<t>`, a stored `role:<p>`).
  *
- * `false` is the slate the open path calls "decidable only by a privileged
- * admin" (the `onEmptyApprovers` policies decide it there). The
- * `unstaffed` arm of the inbox list reads the same test on the slate as it
- * stands (#22725). One test, so the slate the open path warns about and the
- * slate that arm returns cannot drift apart.
+ * `false` is the slate the open path hands to the node's `onEmptyApprovers`
+ * policy, and the one it re-tests after a `fallback` before the default
+ * `admin_rescue` opens on the organization's administrators (#22824). One
+ * test, so every one of those decisions reads the same slate shape.
  *
  * This is a test of the slate's SHAPE. It compares no slot with a caller, so it
  * is not a reader of the equivalence above.

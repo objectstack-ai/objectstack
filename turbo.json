@@ -251,7 +251,9 @@
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts",
         "$TURBO_ROOT$/packages/spec/src/data/field.zod.ts",
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/objectstack.config.ts",
-        "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/src/**"
+        "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/src/**",
+        "$TURBO_ROOT$/packages/spec/src/data/hook.zod.ts",
+        "$TURBO_ROOT$/packages/runtime/src/sandbox/body-runner.ts"
       ]
     },
     "@objectstack/client#test": {

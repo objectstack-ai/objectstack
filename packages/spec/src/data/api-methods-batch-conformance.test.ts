@@ -61,7 +61,24 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `0df67f237`, re-read there 2026-10-11:
+  // (`.objectui-sha` = `499799502`, re-read there 2026-10-11:
+  // in `packages/plugin-grid`, on the hop off `0df67f237`, `ObjectGrid.tsx`
+  // changed again (89 insertions, 44 deletions: objectui#12081 item 3's
+  // whole-set footer and objectui#12082 leg A), none of it inside the
+  // selection block, which only MOVED by +84: `ObjectGrid.tsx:4981-5008` here
+  // (`4897-4924` at `0df67f237`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
+  // re-READ with the same reading below. Two hunks sit beside that reading and
+  // were re-READ as well: objectui#12081 item 3 moved the `bulkFanoutParams`
+  // and `resolvedTotalMatching` declarations, their code byte-identical, above
+  // the footer's hook; and objectui#12082 now also withholds a bulk `update`
+  // def unless the edit verdict (`rowEditVerdict`) allows it, which narrows the
+  // declared defs and adds no implicit one. The `delete` verdict line MOVED
+  // `:1786` -> `:1787` and the promoted def's params `:5097-5116` ->
+  // `:5165-5184` (called at `:5132` -> `:5200`), each byte-identical.
+  // `hooks/useBulkExecutor.ts` is byte-identical to `0df67f237` and its
+  // `:298-303` still hashes to `01083348330f10a201cdf1078b4c21c236402b6a`. At
+  // `0df67f237`, re-read there 2026-10-11:
   // in `packages/plugin-grid`, on the hop off `20c6d351a`, `ObjectGrid.tsx`
   // changed again (82 insertions, 32 deletions: objectui#12082's
   // affordance-to-grant map, objectui#12103's per-column write grant and

@@ -2,92 +2,77 @@
 
 /**
  * Suggested audience bindings (ADR-0090 D5/D9) — the queryable surface and
- * confirm/dismiss flow for a package's `isDefault: true` install-time
- * suggestion ("bind this set to the `everyone` position — accept?").
+ * the deployment-level accept/dismiss flow for a package's `isDefault: true`
+ * install-time suggestion ("give this set to every signed-in member —
+ * accept?").
  *
- * The suggestion itself is declaration-only (spec `PermissionSetSchema
- * .isDefault`); this module materializes it as `sys_audience_binding_suggestion`
- * rows so an admin can see and act on it after install:
+ * ## What an acceptance does (#22801 → A)
+ *
+ * A package's `isDefault: true` permission set reaches every signed-in user
+ * only through ONE explicit, deployment-level acceptance by a caller holding
+ * `manage_metadata` — under a wall, only the platform operator — and that
+ * acceptance takes effect: the security plugin derives the `everyone`
+ * anchor's definition as the deployment's baseline plus the accepted package
+ * defaults ({@link readAcceptedEveryoneSets}), and derives it again on every
+ * accept, revoke, uninstall and package publish.
+ *
+ * The anchor stays sealed (2c): no caller writes `everyone`'s definition. An
+ * acceptance changes the derivation's INPUT — one row here — and the plugin,
+ * the definition's only declarer, re-declares it. Packages suggest, admins
+ * confirm, nothing is auto-bound (ADR-0090 D5, unchanged).
  *
  *  - `syncAudienceBindingSuggestions` is CONVERGENT and idempotent: it reads
- *    every currently-declared `isDefault` set — boot-declared stack metadata
- *    AND installed package manifests (which the registry updates at
- *    `installPackage` time, so a runtime install is visible immediately,
- *    no reboot needed) — and reconciles the table: missing → pending row, or
- *    a `confirmed` (observed) row when the binding is already present;
- *    binding observed under an existing pending row → confirmed (observed);
- *    declaration gone (uninstall / flag dropped) → pending row pruned. It runs
- *    at boot, after a package-door `permission` publish, and on every list
- *    call. Every declaration is represented either way — an `isDefault` set
- *    the boot baseline auto-binds before the first sync is surfaced as
- *    confirmed/observed, never omitted (#7677).
- *  - `confirmAudienceBindingSuggestion` creates the anchor binding **with the
- *    caller's execution context**, so the ADR-0090 write gates do the real
- *    enforcement: the D5/D9 audience-anchor gate (no high-privilege set on
- *    `everyone`/`guest`) and the D12 delegated-admin gate (anchors are
- *    tenant-level only). Never auto-bound, never `isSystem`.
- *  - `dismissAudienceBindingSuggestion` records the admin's "no".
+ *    every `isDefault` set the security catalog serves with an owning package
+ *    and reconciles the table against the `everyone` DEFINITION: a set the
+ *    definition already names (the deployment's baseline) is `confirmed`
+ *    (observed); an unanswered one is `pending`; a pending row whose
+ *    declaration is gone is pruned. It runs at boot, after a package-door
+ *    `permission` publish, and on every list call.
+ *  - `confirmAudienceBindingSuggestion` is the acceptance. It refuses a set
+ *    carrying a bit the `everyone` anchor forbids (ADR-0090 D7's high-risk
+ *    gate, on the definition side), records the decision, and re-derives
+ *    `everyone`.
+ *  - `dismissAudienceBindingSuggestion` records the "no" — on a pending row —
+ *    or REVOKES an acceptance, which re-derives `everyone` without the set.
  *
- * All three service methods are additionally pre-gated on tenant-level
- * admin (the ADR-0066 superuser wildcard) so the read surface and the
- * no-write dismiss/idempotent-confirm paths are as strict as the bind write.
+ * ## The record is the DEPLOYMENT's, owned by the Default Organization
  *
- * ## The surface is PER ORGANIZATION, and so is every call in this module
+ * `sys_audience_binding_suggestion` is tenant-scoped storage, and ADR-0131
+ * owns a deployment-level row by the Default Organization (D3/D5). So every
+ * read and write here carries `{ isSystem: true, tenantId: <Default
+ * Organization> }` ({@link resolveDefaultOrganizationId}), and a row any
+ * other organization owns — or none — is not this surface's.
  *
- * `sys_audience_binding_suggestion` declares `organization_id` with no tenancy
- * opt-out, and ADR-0090 D5/D9 resolves a row when a TENANT admin confirms — so
- * a row belongs to exactly one organization, and an organization-less row is
- * invalid state, not a platform-wide default. Every read and write below
- * therefore carries `{ isSystem: true, tenantId }`, and
- * {@link reconcileAudienceBindingSuggestions} runs one pass PER organization.
+ * ## Rows written before the acceptance was deployment-level
  *
- * ⚠️ Threading the tenant is necessary but NOT sufficient, which is why
- * {@link reapOrganizationLessSuggestions} exists. Measured on a real
- * `ObjectQL` + `SqlDriver` engine under `OS_TENANCY_POSTURE=isolated`:
+ * Until #22801 a TENANT administrator confirmed per organization, and that
+ * confirm granted nothing. ⛔ Such a decision is never promoted into a
+ * deployment-wide grant: only a `manage_metadata` holder's act widens
+ * `everyone`. A row carries `deployment_decision: true` only when that act
+ * resolved it, so:
  *
- * | call | result |
- * |---|---|
- * | insert under `{ isSystem: true }` | stores `organization_id` NULL |
- * | insert under `{ isSystem: true, tenantId: X }` | stores `organization_id` = X |
- * | find under `{ isSystem: true }` | sees every organization's rows |
- * | find under `{ isSystem: true, tenantId: X }` | sees X's rows **and** the NULL ones |
- *
- * The last row is ADR-0120 D3's platform bucket — declared driver behaviour,
- * not a bug: a tenant predicate expands to
- * `organization_id = :tenant OR organization_id IS NULL`. So a single
- * pre-fix organization-less row is still visible to EVERY tenant, and the
- * per-organization pass finds it, treats the key as already represented and
- * creates nothing — measured `{ created: 0 }` for both organizations. The
- * reap is what makes the tenant scoping observable at all on an installation
- * that ran the old code.
- *
- * Under a `single` posture nothing is walled and the organization-less row IS
- * the correct one; `reconcileAudienceBindingSuggestions` runs exactly one
- * organization-less pass there and never reaps.
+ *  - a Default-Organization row resolved without it is RE-OPENED (`pending`)
+ *    by the sync, unless the `everyone` definition already names its set —
+ *    the decision passes to a holder of the authority;
+ *  - a row owned by any other organization, or by none, is not read; the
+ *    boot reconciliation reports how many there are, once
+ *    ({@link reconcileAudienceBindingSuggestions}). They grant nothing, as
+ *    they never did.
  */
 
 import {
   createSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './write-refusals.js';
-import type { PermissionSet, TenancyPosture } from '@objectstack/spec/security';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import { describeAnchorForbiddenBits, postureEnforcesWall } from '@objectstack/spec/security';
-import { EVERYONE_POSITION, AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
+import { EVERYONE_POSITION } from '@objectstack/spec';
+import { securityCatalogReaderOf } from '@objectstack/core';
+import { METADATA_AUTHORING_CAPABILITY } from '@objectstack/metadata-core';
 import { PermissionDeniedError } from './errors.js';
-import { readDeclared, upsertPackagePermissionSet } from './bootstrap-declared-permissions.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
-import { isTenantAdmin } from './delegated-admin-gate.js';
 
-/**
- * The execution context every read and write in this module carries.
- *
- * `isSystem` is the RBAC bypass (this is platform reconciliation, not a user
- * action); `tenantId` is the ORGANIZATION SCOPE, and it is the half that was
- * missing. Passing no `organizationId` is meaningful and correct in exactly
- * one place — a `single`-posture deployment, which has no organization to
- * scope to — so the parameter is optional rather than required, and the
- * caller that decides is {@link reconcileAudienceBindingSuggestions}.
- */
+/** The execution context every read and write of the record carries. */
 function scopedSystemCtx(organizationId?: string): { isSystem: true; tenantId?: string } {
   return organizationId ? { isSystem: true, tenantId: organizationId } : { isSystem: true };
 }
@@ -96,15 +81,15 @@ const SUGGESTION_OBJECT = 'sys_audience_binding_suggestion';
 const ORGANIZATION_OBJECT = 'sys_organization';
 
 /**
- * How many organizations one boot-time reconciliation pass enumerates.
- *
- * Bounded because this runs on `kernel:ready` and each organization costs a
- * handful of queries. Overflow is not silent: the enumeration warns and names
- * what still converges — `listAudienceBindingSuggestions` reconciles the
- * caller's OWN organization on every call, so an organization past the bound
- * is reconciled the first time its admin opens the surface.
+ * The refusal when the deployment has no Default Organization to own the
+ * record — a walled deployment with several organizations and none with
+ * `slug='default'`.
  */
-const ORGANIZATION_SCAN_LIMIT = 500;
+const NO_RECORD_OWNER_MESSAGE =
+  'The audience-binding acceptance is recorded once per deployment and owned by the Default Organization ' +
+  "(ADR-0131 D3/D5), and this deployment has none: no organization has slug 'default' and there is more " +
+  "than one organization. Remedy: create the Default Organization (slug 'default') — the organizations " +
+  "plugin's bootstrap creates it for the platform administrator.";
 
 /** Thrown when the referenced suggestion row does not exist → HTTP 404. */
 export class SuggestionNotFoundError extends Error {
@@ -116,8 +101,8 @@ export class SuggestionNotFoundError extends Error {
   }
 }
 
-/** Thrown when a confirm/dismiss hits a non-pending row or an unresolvable
- *  precondition (set not materialized, anchor missing) → HTTP 409. */
+/** Thrown when a confirm/dismiss hits a row in the wrong state or an
+ *  unresolvable precondition (set not served, no record owner) → HTTP 409. */
 export class SuggestionStateError extends Error {
   readonly code = 'SUGGESTION_STATE';
   readonly statusCode = 409;
@@ -130,10 +115,20 @@ export class SuggestionStateError extends Error {
 export interface SuggestionDeps {
   /** ObjectQL engine handle. */
   ql: any;
-  /** Metadata service (fallback source for boot-declared sets). */
+  /** Metadata service (the declared-capability read of the high-risk gate). */
   metadata?: any;
-  /** Shared permission-set resolution (same path as the CRUD middleware). */
-  resolveSets: (context: any) => Promise<PermissionSet[]>;
+  /**
+   * [ADR-0105 D1] The deployment's tenancy posture, read at call time. Under a
+   * wall the acceptance is the platform operator's alone (ADR-0126 §5's rule
+   * for every install-wide row).
+   */
+  posture: () => TenancyPosture | undefined;
+  /**
+   * Re-derive the `everyone` anchor's definition from the baseline and the
+   * accepted package defaults. The security plugin owns the definition, so it
+   * owns this; an accept or a revoke calls it once the record is written.
+   */
+  rederiveEveryone: () => Promise<void>;
   logger?: { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void };
 }
 
@@ -141,6 +136,11 @@ export interface SuggestionSyncOutcome {
   created: number;
   confirmedObserved: number;
   pruned: number;
+  /**
+   * Rows resolved before the acceptance was deployment-level, sent back to
+   * `pending` so a `manage_metadata` holder decides them (module doc).
+   */
+  reopened: number;
   /**
    * [#12981] Suggestion-row writes the store REFUSED this pass, EXCLUDING the
    * documented benign race (see below).
@@ -163,33 +163,14 @@ export interface SuggestionSyncOutcome {
   refused: number;
 }
 
-/** What one whole-installation reconciliation did. */
+/** What one boot or publish reconciliation did. */
 export interface SuggestionReconcileOutcome extends SuggestionSyncOutcome {
   /**
-   * How many TENANT-SCOPED passes ran. `0` under a `single` posture, where
-   * exactly one organization-less pass runs instead — so `organizations: 0`
-   * with a non-zero `created` is the single-organization deployment, not a
-   * failed enumeration (which returns zeros and warns).
+   * Rows some OTHER organization (or none) owns — written while a tenant
+   * administrator confirmed per organization. Not read, never promoted;
+   * counted and reported once per reconciliation.
    */
-  organizations: number;
-  /** Pre-fix organization-less rows deleted before the passes (see the reap). */
-  reaped: number;
-}
-
-/** Which organizations one reconciliation covers. */
-export interface SuggestionReconcileScope {
-  /**
-   * [ADR-0105 D1] The tenancy posture in force. `single` ⇒ one
-   * organization-less pass and no reap; `group`/`isolated` ⇒ per-organization
-   * passes, because the rows are walled and an organization-less one is
-   * invalid state.
-   */
-  posture: TenancyPosture;
-  /**
-   * Reconcile only this organization — the publishing tenant on the
-   * package-door path. Omitted under a walled posture ⇒ every organization.
-   */
-  organizationId?: string;
+  unread: number;
 }
 
 export interface SuggestionListFilter {
@@ -362,31 +343,26 @@ function reportDroppedManifestPermissions(
 }
 
 /**
- * Collect every currently-declared audience-binding suggestion from BOTH
- * declaration sources:
- *
- *  1. boot-declared stack metadata (the app bundle's `permissions`, registered
- *     into the SchemaRegistry / metadata service at boot) — provenance via
- *     `_packageId` (ADR-0010) with spec `packageId` (ADR-0086 D3) as fallback;
- *  2. installed package manifests (`registry.getAllPackages()`), which the
- *     registry updates synchronously at `installPackage` time — this is what
- *     makes a runtime `POST /api/v1/packages` install queryable immediately.
+ * Collect every currently-declared audience-binding suggestion: each
+ * `isDefault: true` permission set the security catalog serves
+ * (`securityCatalogReaderOf`, ADR-0131 D3 — the engine registry, then the
+ * metadata service) with an owning package (`_packageId`, ADR-0010; spec
+ * `packageId`, ADR-0086 D3). The catalog is what the authorization resolver
+ * reads a set's body from, so a set it does not serve could grant nothing
+ * once accepted, and is not offered.
  *
  * Today the only declarable suggestion is `isDefault: true` → `everyone`
- * (ADR-0090 D5); the shape is anchor-keyed so the D9 `guest` generalization
- * slots in without a schema change.
+ * (ADR-0090 D5).
  *
- * `logger` is optional and carries ONE report: source 2 reads its key at the
- * assembled stage while the same key has an authoring-stage meaning, and a
- * manifest carrying the authoring one is skipped — see
- * {@link reportDroppedManifestPermissions}. Passing no logger is silent, which
- * is why every in-repo caller passes one.
+ * `logger` is optional and carries ONE report: an installed package record's
+ * `manifest.permissions` read at the authoring stage contributes nothing
+ * here — see {@link reportDroppedManifestPermissions}. Passing no logger is
+ * silent, which is why every in-repo caller passes one.
  */
-export function collectDeclaredSuggestions(
+export async function collectDeclaredSuggestions(
   ql: any,
-  metadata?: any,
   logger?: SuggestionDeps['logger'],
-): DeclaredSuggestion[] {
+): Promise<DeclaredSuggestion[]> {
   const out = new Map<string, DeclaredSuggestion>();
 
   const consider = (ps: any, packageId: string | undefined) => {
@@ -398,29 +374,20 @@ export function collectDeclaredSuggestions(
     if (!out.has(key)) out.set(key, { packageId, set: ps, anchor });
   };
 
-  // Source 1 — boot-declared stack metadata.
-  for (const ps of readDeclared(ql, 'permission')) {
-    consider(ps, (ps as any)._packageId ?? (ps as any).packageId ?? undefined);
+  const reader = securityCatalogReaderOf(ql);
+  for (const entry of reader ? await reader.list('permission') : []) {
+    consider(entry.definition, declaredOwnerOf(entry));
   }
-  try {
-    const listed = metadata?.list?.('permission');
-    if (Array.isArray(listed)) {
-      for (const ps of listed) consider(ps, (ps as any)._packageId ?? (ps as any).packageId ?? undefined);
-    }
-  } catch { /* metadata facade optional */ }
 
-  // Source 2 — installed package manifests (live at install time).
+  // The installed package records, asked one question only: does a manifest
+  // carry `permissions` in the ADR-0025 reading, which no catalog entry comes
+  // from? Reported, never read as a declaration.
   const dropped: DroppedManifestPermissions[] = [];
   try {
     const packages: any[] = ql?.registry?.getAllPackages?.() ?? [];
     for (const pkg of packages) {
       if (pkg?.enabled === false) continue;
       const manifest = pkg?.manifest;
-      const declared = Array.isArray(manifest?.permissions) ? manifest.permissions : [];
-      for (const ps of declared) consider(ps, manifest?.id);
-      // The same value, asked the OTHER question: was any of it unreadable
-      // here? An unowned package still counts — its declaration is dropped by
-      // this reader either way, and naming it is how an operator finds it.
       const drop = classifyManifestPermissions(manifest?.permissions);
       if (drop) dropped.push({ packageId: manifest?.id ?? manifest?.name ?? '(unidentified package)', ...drop });
     }
@@ -430,46 +397,111 @@ export function collectDeclaredSuggestions(
   return [...out.values()];
 }
 
-/**
- * Resolve the anchor position rows by name → `{ everyone: row?, guest: row? }`,
- * **in one organization's scope**.
- *
- * Tenant-blind, this resolved whichever organization's `everyone` row the
- * driver happened to return first under `limit 1` — so the anchor a suggestion
- * was checked against could belong to a different tenant entirely.
- *
- * Scoping it does not cost the stock deployment its anchor: measured, the
- * `everyone` row the retired built-in seeder wrote with a bare system context
- * (`organization_id` NULL) IS visible under `{ isSystem: true, tenantId: X }`,
- * because ADR-0120 D3's platform bucket expands the tenant predicate to
- * `organization_id = :tenant OR organization_id IS NULL`. What the scope
- * removes is the ability to resolve ANOTHER tenant's anchor.
- */
-async function findAnchorPositions(ql: any, organizationId?: string): Promise<Record<string, any>> {
-  const anchors: Record<string, any> = {};
-  for (const name of AUDIENCE_ANCHOR_POSITIONS) {
-    anchors[name] = (await tryFind(ql, 'sys_position', { name }, 1, organizationId))[0] ?? null;
-  }
-  return anchors;
+/** The package a catalog entry's set is declared by (module doc of {@link collectDeclaredSuggestions}). */
+function declaredOwnerOf(entry: { packageId?: string; definition: Readonly<Record<string, unknown>> }): string | undefined {
+  const spec = entry.definition.packageId;
+  return entry.packageId ?? (typeof spec === 'string' && spec !== '' ? spec : undefined);
 }
 
 /**
- * True when the set is already bound to the anchor (rows resolved by name),
- * **as this organization sees it** — the question is "does THIS tenant already
- * have the binding?", and answered tenant-blind it was another tenant's answer.
+ * The deployment's Default Organization — the owner of every row of this
+ * record (ADR-0131 D3/D5). The one with `slug='default'`, else the only
+ * organization there is; `undefined` when neither exists.
+ *
+ * The same derivation as plugin-auth's Default Organization boot invariant
+ * (`default-organization-invariant.ts`), read-only: this module never creates
+ * one.
  */
-async function bindingExists(
+export async function resolveDefaultOrganizationId(ql: any): Promise<string | undefined> {
+  const read = async (where: Record<string, unknown>, limit: number): Promise<any[]> => {
+    const rows = await ql.find(ORGANIZATION_OBJECT, { where, fields: ['id'], limit, context: scopedSystemCtx() });
+    return Array.isArray(rows) ? rows : [];
+  };
+  const bySlug = await read({ slug: 'default' }, 1);
+  if (typeof bySlug[0]?.id === 'string' && bySlug[0].id !== '') return bySlug[0].id;
+  const all = await read({}, 2);
+  return all.length === 1 && typeof all[0]?.id === 'string' && all[0].id !== '' ? all[0].id : undefined;
+}
+
+/** Is `row` this record's — owned by the Default Organization? (module doc) */
+function ownedBy(row: any, organizationId: string): boolean {
+  return row?.organization_id === organizationId;
+}
+
+/** Was `row` resolved by the deployment-level decision (module doc)? */
+function isDeploymentDecision(row: any): boolean {
+  return row?.deployment_decision === true || row?.deployment_decision === 1;
+}
+
+/**
+ * The permission-set names the `everyone` anchor's definition names now — the
+ * definition the authorization resolver reads. "Reconciliation reads the
+ * definition": the sync's observed check and the confirm's `bindingCreated`
+ * both ask this, never a binding row.
+ */
+async function everyoneDefinitionSets(ql: any): Promise<Set<string>> {
+  const entry = await securityCatalogReaderOf(ql)?.resolve('position', EVERYONE_POSITION);
+  const sets = entry?.definition.permissionSets;
+  return new Set(Array.isArray(sets) ? sets.filter((n): n is string => typeof n === 'string') : []);
+}
+
+/** The Default Organization's suggestion rows, matching `where`. */
+async function recordRows(ql: any, organizationId: string, where: Record<string, unknown>): Promise<any[]> {
+  return (await tryFind(ql, SUGGESTION_OBJECT, where, 1000, organizationId)).filter((r) => ownedBy(r, organizationId));
+}
+
+/** One accepted set the derivation leaves out, and why. */
+export interface WithheldAcceptance {
+  set: string;
+  packageId: string;
+  reason: string;
+  /** The set carries a bit the `everyone` anchor forbids (ADR-0090 D7). */
+  forbidden: boolean;
+}
+
+/**
+ * The derivation's input: the permission sets a `manage_metadata` holder
+ * ACCEPTED for `everyone`, as the security catalog serves them now.
+ *
+ * An accepted row grants only while its set is served by the catalog under
+ * the accepting package, still declares `isDefault: true`, and passes the
+ * `everyone` anchor's high-risk gate (ADR-0090 D7, `describeAnchorForbiddenBits`
+ * — the gate the acceptance itself ran, asked again of the definition as it
+ * stands). A set failing any of these is WITHHELD and returned with its
+ * reason, never dropped in silence: the caller reports it.
+ *
+ * Read errors propagate. An unreadable record is not an empty one, and the
+ * caller decides what a derivation it could not complete leaves in force.
+ */
+export async function readAcceptedEveryoneSets(
   ql: any,
-  anchorRow: any,
-  setRow: any,
-  organizationId?: string,
-): Promise<boolean> {
-  if (!anchorRow?.id || !setRow?.id) return false;
-  const rows = await tryFind(ql, 'sys_position_permission_set', {
-    position_id: anchorRow.id,
-    permission_set_id: setRow.id,
-  }, 1, organizationId);
-  return rows.length > 0;
+  metadata?: any,
+): Promise<{ accepted: string[]; withheld: WithheldAcceptance[] }> {
+  const out = { accepted: [] as string[], withheld: [] as WithheldAcceptance[] };
+  const organizationId = await resolveDefaultOrganizationId(ql);
+  if (!organizationId) return out;
+  const rows = await ql.find(SUGGESTION_OBJECT, {
+    where: { status: 'confirmed', anchor: EVERYONE_POSITION },
+    limit: 1000,
+    context: scopedSystemCtx(organizationId),
+  });
+  const accepted = (Array.isArray(rows) ? rows : []).filter((r) => ownedBy(r, organizationId) && isDeploymentDecision(r));
+  if (accepted.length === 0) return out;
+  const reader = securityCatalogReaderOf(ql);
+  const capabilities = await readDeclaredCapabilityContext(ql, metadata);
+  for (const row of accepted) {
+    const set = String(row.permission_set_name);
+    const packageId = String(row.package_id);
+    const withhold = (reason: string, forbidden = false) => out.withheld.push({ set, packageId, reason, forbidden });
+    const entry = await reader?.resolve('permission', set);
+    if (!entry) { withhold('the security catalog serves no set of that name (package uninstalled or disabled)'); continue; }
+    if (declaredOwnerOf(entry) !== packageId) { withhold(`the set is declared by '${declaredOwnerOf(entry) ?? 'no package'}' now`); continue; }
+    if (entry.definition.isDefault !== true) { withhold('the set no longer declares isDefault: true'); continue; }
+    const offending = describeAnchorForbiddenBits(entry.definition, EVERYONE_POSITION, capabilities);
+    if (offending) { withhold(`it carries ${offending}, which the everyone anchor forbids (ADR-0090 D7)`, true); continue; }
+    if (!out.accepted.includes(set)) out.accepted.push(set);
+  }
+  return out;
 }
 
 /**
@@ -512,27 +544,22 @@ function reportSuggestionWriteRefusals(
   logger: SuggestionDeps['logger'],
   refusals: SeedWriteRefusals,
   organizationId?: string,
-  leg: 'sync' | 'reap' = 'sync',
 ): number {
   const entries = refusals.report();
   const real = entries.filter((e) => e.class !== 'unique-violation');
   const refused = real.reduce((n, e) => n + e.count, 0);
   if (refused === 0) return 0;
   const scope = organizationId ? { organization: organizationId } : {};
-  const consequence = leg === 'reap'
-    ? 'those organization-less rows SURVIVE. Each one is readable by EVERY tenant through the ' +
-      'ADR-0120 D3 platform bucket and carries one confirm/dismiss decision on behalf of all of ' +
-      'them, and while one stands the per-organization passes that follow create NOTHING for any ' +
-      'organization — every one of them sees the key as already represented — so no tenant gets ' +
-      'its own row and the first tenant to have answered goes on answering for everyone'
-    : "those suggestion rows do NOT reflect the declarations. A refused CREATE leaves a declared " +
-      "isDefault set with no suggestion at all, so no admin is ever prompted to bind it; a refused " +
-      'CONFIRM leaves a pending prompt over a binding that already exists, so the console nags for ' +
-      'a decision already made; a refused PRUNE leaves a pending prompt for a declaration that is ' +
-      'GONE, so an admin can accept a binding no installed package declares any more';
+  const consequence =
+    "those suggestion rows do NOT reflect the declarations. A refused CREATE leaves a declared " +
+      "isDefault set with no suggestion at all, so no admin is ever prompted to accept it; a refused " +
+      'OBSERVATION leaves a pending prompt over a set the everyone definition already names, so the ' +
+      'console nags for a decision already made; a refused RE-OPEN leaves a decision a tenant ' +
+      'administrator recorded standing where a manage_metadata holder should decide; a refused PRUNE ' +
+      'leaves a pending prompt for a declaration that is GONE';
   logger?.warn?.(
     `[security] ${refused} sys_audience_binding_suggestion write(s) were REFUSED during the ` +
-      `${leg === 'reap' ? 'organization-less reap' : 'suggestion reconciliation'} — ${consequence}. ` +
+      `suggestion reconciliation — ${consequence}. ` +
       `THE DEPLOYMENT WILL GO ON LOOKING HEALTHY: this pass is convergent, so it reports what it ` +
       `wrote and nothing else fails. Refusals that were unique-constraint violations are EXCLUDED ` +
       `from this count on purpose — on this object that is the benign race with a concurrent ` +
@@ -548,363 +575,234 @@ function reportSuggestionWriteRefusals(
   return refused;
 }
 
+
 /**
- * Reconcile ONE organization's `sys_audience_binding_suggestion` rows against
- * the current declarations. Idempotent; system-context **scoped to
- * `organizationId`**; never touches confirmed or dismissed rows except to
- * prune nothing (they are audit history).
+ * Reconcile the deployment's `sys_audience_binding_suggestion` rows against
+ * the current declarations and the `everyone` DEFINITION. Idempotent;
+ * system-context, scoped to the Default Organization (module doc).
  *
- * `organizationId` omitted = the organization-less surface of a `single`-posture
- * deployment. Under a walled posture the caller is
- * {@link reconcileAudienceBindingSuggestions}, which always supplies one.
+ * Per declared set:
+ *  - no row → `confirmed` (observed) when the definition already names the
+ *    set — the deployment's baseline — else `pending`;
+ *  - a row the deployment-level decision resolved → left as it is;
+ *  - any other row → `confirmed` (observed) when the definition names the
+ *    set, else `pending`: a pending row stays, and a row resolved before the
+ *    acceptance was deployment-level is RE-OPENED.
+ *
+ * A pending row whose declaration is gone (uninstall, flag dropped) is
+ * pruned; a decided one stays as audit history and grants nothing without
+ * its declaration ({@link readAcceptedEveryoneSets}).
+ *
+ * Throws {@link SuggestionStateError} when something is declared and the
+ * deployment has no Default Organization to own the rows.
  */
 export async function syncAudienceBindingSuggestions(
   ql: any,
-  metadata?: any,
   logger?: SuggestionDeps['logger'],
-  organizationId?: string,
 ): Promise<SuggestionSyncOutcome> {
-  const out: SuggestionSyncOutcome = { created: 0, confirmedObserved: 0, pruned: 0, refused: 0 };
+  const out: SuggestionSyncOutcome = { created: 0, confirmedObserved: 0, pruned: 0, reopened: 0, refused: 0 };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
 
+  const declared = await collectDeclaredSuggestions(ql, logger);
+  const organizationId = await resolveDefaultOrganizationId(ql);
+  if (!organizationId) {
+    if (declared.length === 0) return out;
+    throw new SuggestionStateError(NO_RECORD_OWNER_MESSAGE);
+  }
+
   // [#12981] ONE refusal log for the whole pass, reported once at the end.
-  // Every write below used to answer a bare `catch`, so a pass in which the
-  // store refused everything returned the same all-zero outcome as the
-  // steady-state boot — and the summary line is gated on that same zero.
   const refusals = createSeedWriteRefusals();
+  const now = () => new Date().toISOString();
+  const update = async (data: Record<string, unknown>, counter: 'confirmedObserved' | 'reopened') => {
+    try {
+      await ql.update(SUGGESTION_OBJECT, data, { context: scopedSystemCtx(organizationId) });
+      out[counter] += 1;
+    } catch (e) {
+      refusals.record(SUGGESTION_OBJECT, e);
+    }
+  };
 
-  const declared = collectDeclaredSuggestions(ql, metadata, logger);
   const declaredKeys = new Set(declared.map((d) => suggestionKey(d.packageId, d.set.name, d.anchor)));
-
-  const anchors = await findAnchorPositions(ql, organizationId);
-  const existing = await tryFind(ql, SUGGESTION_OBJECT, {}, 1000, organizationId);
+  const everyone = await everyoneDefinitionSets(ql);
+  const existing = await recordRows(ql, organizationId, {});
   const byKey = new Map<string, any>(
     existing.map((row) => [suggestionKey(row.package_id, row.permission_set_name, row.anchor), row]),
   );
 
   for (const d of declared) {
-    const key = suggestionKey(d.packageId, d.set.name, d.anchor);
-    const row = byKey.get(key);
-    const setRow = (await tryFind(ql, 'sys_permission_set', { name: d.set.name }, 1, organizationId))[0] ?? null;
-    const bound = await bindingExists(ql, anchors[d.anchor], setRow, organizationId);
+    const row = byKey.get(suggestionKey(d.packageId, d.set.name, d.anchor));
+    const observed = everyone.has(d.set.name);
 
-    if (row) {
-      if (row.status === 'pending' && bound) {
-        // Bound outside the prompt (boot baseline, admin by hand) — record the
-        // observation so the surface never nags about a satisfied suggestion.
-        try {
-          await ql.update(SUGGESTION_OBJECT, {
-            id: row.id, status: 'confirmed', resolved_at: new Date().toISOString(),
-          }, { context: scopedSystemCtx(organizationId) });
-          out.confirmedObserved += 1;
-        } catch (e) {
-          // [#12981] Still non-fatal — one row must not abort the pass — but
-          // counted. A refused observation leaves a `pending` row over a
-          // binding that already exists, so the console goes on prompting an
-          // admin to accept something already in force.
-          refusals.record(SUGGESTION_OBJECT, e);
-        }
+    if (!row) {
+      // [#7677] A declaration the definition already satisfies is recorded as
+      // `confirmed` (observed) — `resolved_by` empty — rather than skipped,
+      // so the stock baseline is surfaced and never offered as a prompt.
+      try {
+        await ql.insert(SUGGESTION_OBJECT, {
+          id: genId('sug'),
+          package_id: d.packageId,
+          permission_set_name: d.set.name,
+          anchor: d.anchor,
+          status: observed ? 'confirmed' : 'pending',
+          deployment_decision: false,
+          ...(observed ? { resolved_at: now() } : {}),
+        }, { context: scopedSystemCtx(organizationId) });
+        out.created += 1;
+      } catch (e) {
+        // [#12981] The benign unique-index race with a concurrent sync is
+        // classified (and excluded) by the accumulator; every other cause is
+        // counted and reported.
+        refusals.record(SUGGESTION_OBJECT, e);
       }
       continue;
     }
 
-    // No row yet. A declaration that is ALREADY satisfied is recorded as
-    // `confirmed` (observed) rather than skipped — the same end state the
-    // pending→confirmed branch above reaches, just arrived at without ever
-    // passing through `pending`. [#7677] Skipping it entirely left the whole
-    // surface empty on stock: the security plugin binds the app's `isDefault`
-    // set to `everyone` at boot BEFORE the first sync runs, so "already bound"
-    // is the normal stock case, not the exception, and the declaration was
-    // only ever surfaced after someone deleted the binding by hand.
-    //
-    // `confirmed` and not `pending` because a bound declaration is not
-    // awaiting an admin decision: `pending` is the actionable-prompt state
-    // (the console panel lists exactly `status=pending` and offers
-    // confirm/dismiss, and both service methods 409 on anything else), so a
-    // pending row here would prompt an admin to "accept" a binding that
-    // already exists. `resolved_by` is left empty, which is precisely how the
-    // object schema defines an observed row: "Empty on a confirmed row means
-    // the binding was observed (e.g. bound at boot or by hand), not confirmed
-    // through the prompt."
-    const observed = bound;
-
-    try {
-      await ql.insert(SUGGESTION_OBJECT, {
-        id: genId('sug'),
-        package_id: d.packageId,
-        permission_set_name: d.set.name,
-        anchor: d.anchor,
-        status: observed ? 'confirmed' : 'pending',
-        ...(observed ? { resolved_at: new Date().toISOString() } : {}),
-      }, { context: scopedSystemCtx(organizationId) });
-      out.created += 1;
-    } catch (e) {
-      // [#12981] The comment this replaces named ONE cause — "unique-index
-      // race with a concurrent sync — benign" — and then absorbed EVERY cause
-      // into it. The race is real and genuinely benign (the other pass created
-      // the row this one wanted), but a store outage, a missing table or a
-      // rejected column reach this same `catch`, and under the old spelling
-      // they were all filed as the benign race and never counted.
-      //
-      // ⭐ This is where the shared accumulator earns its keep instead of a
-      // blanket escalation: it classifies with the SHIPPED
-      // `isUniqueViolationError` predicate, so the documented race is still
-      // recognised as benign and excluded from `refused` (see
-      // {@link SuggestionSyncOutcome.refused}), while everything else is
-      // counted and reported.
-      refusals.record(SUGGESTION_OBJECT, e);
+    if (isDeploymentDecision(row)) continue;
+    if (observed) {
+      if (row.status !== 'confirmed') {
+        await update({ id: row.id, status: 'confirmed', resolved_by: null, resolved_at: now() }, 'confirmedObserved');
+      }
+    } else if (row.status !== 'pending') {
+      await update({ id: row.id, status: 'pending', resolved_by: null, resolved_at: null }, 'reopened');
     }
   }
 
   // Prune PENDING rows whose declaration is gone (package uninstalled or the
-  // flag dropped on upgrade). Confirmed/dismissed rows stay as audit history.
+  // flag dropped on upgrade). Decided rows stay as audit history.
   for (const row of existing) {
     if (row.status !== 'pending') continue;
-    const key = suggestionKey(row.package_id, row.permission_set_name, row.anchor);
-    if (declaredKeys.has(key)) continue;
+    if (declaredKeys.has(suggestionKey(row.package_id, row.permission_set_name, row.anchor))) continue;
     try {
       await ql.delete(SUGGESTION_OBJECT, { where: { id: row.id }, context: scopedSystemCtx(organizationId) });
       out.pruned += 1;
     } catch (e) {
-      // [#12981] Still non-fatal, now counted. A refused prune leaves a
-      // `pending` row for a declaration that is GONE (package uninstalled, or
-      // the flag dropped on upgrade), so the console keeps offering an admin a
-      // binding no installed package declares any more.
       refusals.record(SUGGESTION_OBJECT, e);
     }
   }
 
   out.refused = reportSuggestionWriteRefusals(logger, refusals, organizationId);
-  // [#12981] `|| out.refused > 0` is the widening. The gate was written for a
-  // convergent pass with nothing to do — the common boot — and a wholly
-  // refused pass hit it identically, so the one boot that needed a line was
-  // the one boot that printed none.
-  if (out.created + out.confirmedObserved + out.pruned > 0 || out.refused > 0) {
+  if (out.created + out.confirmedObserved + out.pruned + out.reopened > 0 || out.refused > 0) {
     logger?.info?.('[security] audience-binding suggestions reconciled (ADR-0090 D5/D9)', {
-      ...out, ...(organizationId ? { organization: organizationId } : {}),
+      ...out, organization: organizationId,
     });
   }
   return out;
 }
 
 /**
- * Enumerate the organizations whose suggestion surfaces need reconciling.
- *
- * Returns `null` — not `[]` — when the read FAILS, because the two mean
- * opposite things and the caller must not conflate them: zero organizations is
- * "nothing to reconcile", while an unreadable `sys_organization` is "we do not
- * know", and both are silent if they share a value. A failure is warned, never
- * swallowed into an empty sweep.
- */
-export async function listSuggestionOrganizationIds(
-  ql: any,
-  logger?: SuggestionDeps['logger'],
-): Promise<string[] | null> {
-  let rows: any;
-  try {
-    rows = await ql.find(ORGANIZATION_OBJECT, {
-      fields: ['id'],
-      limit: ORGANIZATION_SCAN_LIMIT,
-      context: scopedSystemCtx(),
-    });
-  } catch (e) {
-    logger?.warn?.(
-      '[security] could not enumerate organizations — audience-binding suggestions were NOT reconciled ' +
-        'at this call; each organization still reconciles on its first list call (ADR-0090 D5/D9)',
-      { object: ORGANIZATION_OBJECT, error: (e as Error)?.message },
-    );
-    return null;
-  }
-  const ids = (Array.isArray(rows) ? rows : [])
-    .map((r: any) => r?.id)
-    .filter((id: unknown): id is string => typeof id === 'string' && id !== '');
-  if (ids.length >= ORGANIZATION_SCAN_LIMIT) {
-    logger?.warn?.(
-      '[security] organization scan hit its bound — organizations past it are reconciled lazily, ' +
-        'on the first list call by each of their admins (ADR-0090 D5/D9)',
-      { scanned: ids.length, limit: ORGANIZATION_SCAN_LIMIT },
-    );
-  }
-  return ids;
-}
-
-/**
- * Delete every ORGANIZATION-LESS suggestion row, returning how many went.
- *
- * Under a walled posture an `organization_id`-less row on this object is
- * invalid state: the object declares the column with no tenancy opt-out and
- * ADR-0090 D5/D9 resolves a row when a TENANT admin confirms, so a row that
- * belongs to no organization carries a decision nobody can attribute — and,
- * through ADR-0120 D3's platform bucket, one that every tenant reads.
- *
- * **This is why the fix is a reap and not only a scope.** Measured: with one
- * pre-fix organization-less row present, a per-organization pass over two
- * organizations creates NOTHING for either (`{ created: 0 }` twice) — the row
- * is visible to both, so both see the key as already represented. Threading a
- * tenant without reaping leaves the defect exactly where it was.
- *
- * What the reap can and cannot restore, measured rather than assumed:
- *
- * - it never touches `sys_position_permission_set`, so NO grant changes and no
- *   principal gains or loses access;
- * - the immediately following passes regenerate each organization's row from
- *   the declaration — `confirmed` (observed) where that organization really
- *   holds the binding, `pending` where it does not;
- * - what cannot survive is a decision that was never attributable to an
- *   organization in the first place: an organization-less `dismissed` row, and
- *   `resolved_by`/`resolved_at` on an organization-less `confirmed` one. Those
- *   admins are prompted again, per organization — which is the repair, not a
- *   regression: one row cannot carry N tenants' decisions, and the shipped
- *   behaviour was that the FIRST tenant to answer answered for everyone.
- */
-export async function reapOrganizationLessSuggestions(
-  ql: any,
-  logger?: SuggestionDeps['logger'],
-): Promise<number> {
-  // A bare (organization-less) system context is deliberate here and nowhere
-  // else in this module: it is the only scope that can see rows belonging to
-  // no organization, which is exactly the set being reaped.
-  const orphans = await tryFind(ql, SUGGESTION_OBJECT, { organization_id: null }, 1000);
-  // [#12981] One refusal log for the reap, reported once below. ⛔ The return
-  // value stays `Promise<number>` — `reapOrganizationLessSuggestions` is
-  // exported from this package's `index.ts`, so widening it to an object is a
-  // published-shape change this repair has no mandate for. The refusal is
-  // reported on the log channel instead, which is what the silence cost.
-  const refusals = createSeedWriteRefusals();
-  let reaped = 0;
-  for (const row of orphans) {
-    if (!row?.id) continue;
-    try {
-      await ql.delete(SUGGESTION_OBJECT, { where: { id: row.id }, context: scopedSystemCtx() });
-      reaped += 1;
-    } catch (e) {
-      // [#12981] Still non-fatal and the next reconciliation still retries —
-      // but counted, because "retried later" and "reported never" are
-      // different promises and only the first was kept. See the report below
-      // for what an unreported failure here leaves standing.
-      refusals.record(SUGGESTION_OBJECT, e);
-    }
-  }
-  reportSuggestionWriteRefusals(logger, refusals, undefined, 'reap');
-  if (reaped > 0) {
-    logger?.warn?.(
-      '[security] reaped organization-less audience-binding suggestion rows — they were readable by ' +
-        'every tenant and carried one decision for all of them; each organization is reconciled its ' +
-        'own row on the pass that follows (ADR-0090 D5/D9). No permission binding was touched.',
-      { reaped },
-    );
-  }
-  return reaped;
-}
-
-/**
- * Reconcile the WHOLE installation's suggestion surface — the entry point the
- * runtime calls at boot and after a package-door `permission` publish.
- *
- * `single` posture ⇒ one organization-less pass, byte for byte the pre-fix
- * behaviour. `group`/`isolated` ⇒ reap the invalid organization-less rows,
- * then one tenant-scoped pass per organization (or just the publishing
- * organization, when `scope.organizationId` names it).
+ * The boot and package-publish entry point: one deployment-level
+ * {@link syncAudienceBindingSuggestions}, plus a count of the rows it does not
+ * read — owned by another organization, or by none, because a tenant
+ * administrator confirmed per organization before the acceptance was
+ * deployment-level. Those rows grant nothing (they never did), are never
+ * promoted and are not deleted; the count is reported once per call so an
+ * operator knows the decisions they hold were not carried over.
  */
 export async function reconcileAudienceBindingSuggestions(
   ql: any,
-  metadata: any,
-  logger: SuggestionDeps['logger'] | undefined,
-  scope: SuggestionReconcileScope,
+  logger?: SuggestionDeps['logger'],
 ): Promise<SuggestionReconcileOutcome> {
   const out: SuggestionReconcileOutcome = {
-    created: 0, confirmedObserved: 0, pruned: 0, refused: 0, organizations: 0, reaped: 0,
+    created: 0, confirmedObserved: 0, pruned: 0, reopened: 0, refused: 0, unread: 0,
   };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
+  Object.assign(out, await syncAudienceBindingSuggestions(ql, logger));
 
-  if (!postureEnforcesWall(scope.posture)) {
-    const single = await syncAudienceBindingSuggestions(ql, metadata, logger);
-    return { ...out, ...single };
-  }
-
-  out.reaped = await reapOrganizationLessSuggestions(ql, logger);
-
-  const organizationIds = scope.organizationId
-    ? [scope.organizationId]
-    : await listSuggestionOrganizationIds(ql, logger);
-  if (!organizationIds) return out; // enumeration failed — already warned
-
-  for (const organizationId of organizationIds) {
-    const one = await syncAudienceBindingSuggestions(ql, metadata, logger, organizationId);
-    out.created += one.created;
-    out.confirmedObserved += one.confirmedObserved;
-    out.pruned += one.pruned;
-    // [#12981] Summed across the passes like every other counter — a whole-
-    // installation reconcile that refused every write in every organization
-    // must not report a clean zero at the top level either.
-    out.refused += one.refused;
-    out.organizations += 1;
+  const organizationId = await resolveDefaultOrganizationId(ql);
+  // A bare system context is deliberate: it is the only scope that reads every
+  // organization's rows, and this read only counts them.
+  const unread = (await tryFind(ql, SUGGESTION_OBJECT, {}, 1000)).filter((r) => !ownedBy(r, organizationId ?? ''));
+  out.unread = unread.length;
+  if (unread.length > 0) {
+    logger?.warn?.(
+      `[security] ${unread.length} audience-binding suggestion row(s) are owned by an organization other than ` +
+        'the Default Organization, or by none. They were confirmed or dismissed per organization by a tenant ' +
+        'administrator, granted nothing then and grant nothing now, and are not read: the acceptance is ' +
+        'deployment-level and only a manage_metadata holder makes it (ADR-0090 D5). Remedy: a manage_metadata ' +
+        'holder — the platform operator under a wall — decides each suggestion once, in Setup.',
+      { unread: unread.length, organizations: [...new Set(unread.map((r) => r?.organization_id ?? null))] },
+    );
   }
   return out;
 }
 
 /**
- * Tenant-admin pre-gate shared by all three service methods. The anchors are
- * tenant-level only (ADR-0090 D12 — no delegated scope can touch them), so
- * the whole suggestion surface requires the ADR-0066 superuser wildcard.
+ * The authority the whole surface requires: `manage_metadata` (#22621 → A —
+ * definitions belong to metadata authors, and an acceptance changes what the
+ * `everyone` definition derives to), and under a walled posture the platform
+ * operator, read as the ADR-0095 posture rung (ADR-0126 §5's rule for an
+ * install-wide row; never a position name). A tenant administrator is
+ * refused. System self-invocation passes.
  */
-async function assertTenantAdmin(deps: SuggestionDeps, callerCtx: any, action: string): Promise<void> {
+function assertDeploymentAuthority(deps: SuggestionDeps, callerCtx: any, action: string): void {
   if (callerCtx?.isSystem) return;
   if (!callerCtx?.userId) {
     throw new PermissionDeniedError(
-      `[Security] Access denied: ${action} requires an authenticated tenant administrator (ADR-0090 D5/D12).`,
+      `[Security] Access denied: ${action} requires an authenticated caller holding \`manage_metadata\` (ADR-0090 D5).`,
     );
   }
-  let sets: PermissionSet[] = [];
-  try { sets = await deps.resolveSets(callerCtx); } catch { sets = []; }
-  if (!isTenantAdmin(sets)) {
+  const systemPermissions = callerCtx.systemPermissions;
+  if (!Array.isArray(systemPermissions) || !systemPermissions.includes(METADATA_AUTHORING_CAPABILITY)) {
     throw new PermissionDeniedError(
-      `[Security] Access denied: ${action} requires a tenant-level administrator — ` +
-        `audience anchors stay tenant-level only (ADR-0090 D12).`,
+      `[Security] Access denied: ${action} requires the \`manage_metadata\` capability. The acceptance is made ` +
+        `once for the whole deployment, so a tenant administrator cannot make it (ADR-0090 D5).`,
+      { userId: callerCtx.userId },
+    );
+  }
+  const posture = deps.posture();
+  if (posture && postureEnforcesWall(posture) && callerCtx.posture !== 'PLATFORM_ADMIN') {
+    throw new PermissionDeniedError(
+      `[Security] Access denied: ${action} decides what every signed-in member of every organization holds, and ` +
+        `this deployment runs the '${posture}' tenancy posture, so it requires the platform operator (ADR-0126 §5).`,
       { userId: callerCtx.userId },
     );
   }
 }
 
-/**
- * The organization a service call acts in — the caller's own active
- * organization (`ExecutionContext.tenantId`), never a scan over all of them.
- *
- * A `single`-posture caller carries none, which lands on the organization-less
- * surface that posture correctly has.
- */
-function callerOrganizationId(callerCtx: any): string | undefined {
-  const id = callerCtx?.tenantId;
-  return typeof id === 'string' && id !== '' ? id : undefined;
+/** The Default Organization, or the loud refusal when there is none. */
+async function requireRecordOwner(ql: any): Promise<string> {
+  const organizationId = await resolveDefaultOrganizationId(ql);
+  if (!organizationId) throw new SuggestionStateError(NO_RECORD_OWNER_MESSAGE);
+  return organizationId;
 }
 
-/** List suggestions (tenant-admin only), reconciling first so a package
- *  installed a moment ago is already visible.
- *
- *  Both halves run in the CALLER's organization: the pre-gate already decided
- *  this caller is a tenant admin, and reconciling installation-wide from a
- *  tenant's list call is what let one tenant's read resolve — and mutate —
- *  another tenant's suggestion state. */
+/** One row of the record by id, or {@link SuggestionNotFoundError}. */
+async function recordRow(ql: any, organizationId: string, id: string): Promise<any> {
+  const row = (await recordRows(ql, organizationId, { id }))[0];
+  if (!row) throw new SuggestionNotFoundError(id);
+  return row;
+}
+
+/** List suggestions, reconciling first so a package installed a moment ago is
+ *  already visible. Requires the deployment authority. */
 export async function listAudienceBindingSuggestions(
   deps: SuggestionDeps,
   callerCtx: any,
   filter: SuggestionListFilter = {},
 ): Promise<{ suggestions: any[]; synced: SuggestionSyncOutcome }> {
-  await assertTenantAdmin(deps, callerCtx, 'listing audience-binding suggestions');
-  const organizationId = callerOrganizationId(callerCtx);
-  const synced = await syncAudienceBindingSuggestions(deps.ql, deps.metadata, deps.logger, organizationId);
+  assertDeploymentAuthority(deps, callerCtx, 'listing audience-binding suggestions');
+  const synced = await syncAudienceBindingSuggestions(deps.ql, deps.logger);
+  const organizationId = await resolveDefaultOrganizationId(deps.ql);
+  if (!organizationId) return { suggestions: [], synced };
   const where: Record<string, unknown> = {};
   if (filter.status) where.status = filter.status;
   if (filter.packageId) where.package_id = filter.packageId;
-  const suggestions = await tryFind(deps.ql, SUGGESTION_OBJECT, where, 1000, organizationId);
-  return { suggestions, synced };
+  return { suggestions: await recordRows(deps.ql, organizationId, where), synced };
 }
 
 /**
- * Confirm a pending suggestion: create the anchor binding **as the caller**
- * (so the D5/D9 anchor gate and D12 delegated-admin gate run against the real
- * principal — this is the "admin confirms" moment of ADR-0090 D5), then mark
- * the row confirmed with the resolver's identity.
+ * Accept a pending suggestion for the whole deployment: the set joins the
+ * `everyone` anchor's derived definition (module doc).
+ *
+ * Refuses, before anything is written: a caller without the deployment
+ * authority (403); a `guest`-anchor row (409 — the `guest` anchor's sets are
+ * not derived from acceptances, so recording one would grant nothing); a set
+ * the security catalog does not serve under the suggesting package, or that
+ * no longer declares `isDefault` (409); a set carrying a bit the `everyone`
+ * anchor forbids (403 — ADR-0090 D7's high-risk gate, on the definition).
+ *
+ * `bindingCreated` answers whether the `everyone` definition names the set
+ * now and did not before — `false` when the baseline already named it.
  */
 export async function confirmAudienceBindingSuggestion(
   deps: SuggestionDeps,
@@ -912,134 +810,115 @@ export async function confirmAudienceBindingSuggestion(
   id: string,
 ): Promise<{ suggestion: any; bindingCreated: boolean }> {
   const { ql } = deps;
-  await assertTenantAdmin(deps, callerCtx, 'confirming an audience-binding suggestion');
-  const organizationId = callerOrganizationId(callerCtx);
+  assertDeploymentAuthority(deps, callerCtx, 'accepting an audience-binding suggestion');
+  const organizationId = await requireRecordOwner(ql);
 
-  const row = (await tryFind(ql, SUGGESTION_OBJECT, { id }, 1, organizationId))[0];
-  if (!row) throw new SuggestionNotFoundError(id);
+  const row = await recordRow(ql, organizationId, id);
   if (row.status !== 'pending') {
     throw new SuggestionStateError(
-      `Audience-binding suggestion '${id}' is already ${row.status} — only pending suggestions can be confirmed.`,
+      `Audience-binding suggestion '${id}' is already ${row.status} — only pending suggestions can be accepted.`,
+    );
+  }
+  if (row.anchor !== EVERYONE_POSITION) {
+    throw new SuggestionStateError(
+      `Audience-binding suggestion '${id}' targets the '${row.anchor}' anchor, and only an 'everyone' suggestion ` +
+        `can be accepted: the '${row.anchor}' anchor's sets are not derived from acceptances, so accepting it ` +
+        `would record a grant that never takes effect.`,
     );
   }
 
-  const anchorRow = (await tryFind(ql, 'sys_position', { name: row.anchor }, 1, organizationId))[0];
-  if (!anchorRow?.id) {
+  const entry = await securityCatalogReaderOf(ql)?.resolve('permission', row.permission_set_name);
+  if (!entry) {
     throw new SuggestionStateError(
-      `The '${row.anchor}' audience anchor position is not seeded yet — cannot bind.`,
+      `Permission set '${row.permission_set_name}' is not served by the security catalog — is package ` +
+        `'${row.package_id}' still installed and enabled?`,
     );
   }
-
-  // Resolve — or, for a package installed this session, materialize — the set
-  // row. Materialization goes through the SAME provenance-checked upsert as
-  // the boot seeder and the publish materializer (ADR-0086 D4), so a foreign-
-  // or env-owned name is refused, never clobbered.
-  let setRow = (await tryFind(ql, 'sys_permission_set', { name: row.permission_set_name }, 1, organizationId))[0] ?? null;
-  if (!setRow) {
-    const declared = collectDeclaredSuggestions(ql, deps.metadata, deps.logger).find(
-      (d) => d.packageId === row.package_id && d.set.name === row.permission_set_name && d.anchor === row.anchor,
-    );
-    if (declared) {
-      const seedLogger = {
-        info: (m: string, meta?: Record<string, any>) => deps.logger?.info?.(m, meta),
-        warn: (m: string, meta?: Record<string, any>) => deps.logger?.warn?.(m, meta),
-      };
-      await upsertPackagePermissionSet(ql, declared.set, row.package_id, seedLogger);
-      setRow = (await tryFind(ql, 'sys_permission_set', { name: row.permission_set_name }, 1, organizationId))[0] ?? null;
-    }
-  }
-  if (!setRow?.id) {
+  const owner = declaredOwnerOf(entry);
+  if (owner !== row.package_id) {
     throw new SuggestionStateError(
-      `Permission set '${row.permission_set_name}' is not materialized in sys_permission_set — ` +
-        `is package '${row.package_id}' still installed?`,
+      `Permission set '${row.permission_set_name}' is declared by '${owner ?? 'no package'}', not the suggesting ` +
+        `package '${row.package_id}' — refusing to accept it (ADR-0086 D4).`,
     );
   }
-  if (setRow.package_id && setRow.package_id !== row.package_id) {
+  if (entry.definition.isDefault !== true) {
     throw new SuggestionStateError(
-      `Permission set '${row.permission_set_name}' is owned by package '${setRow.package_id}', ` +
-        `not the suggesting package '${row.package_id}' — refusing to bind (ADR-0086 D4).`,
+      `Permission set '${row.permission_set_name}' no longer declares isDefault: true — nothing is suggested.`,
     );
   }
-
-  // Early, friendly rendition of the anchor gate so the caller gets the
-  // decision without a write attempt; the engine middleware re-enforces it
-  // unconditionally on the insert below.
-  // [#18535, ADR-0090 D5] With the stack's declared `capabilities:` — the same
-  // source the boot binding and the engine-side gate read. This check is the
-  // FRIENDLY EARLY RENDITION of the gate the insert below re-enforces
-  // unconditionally, so the two must ask the identical question: a context here
-  // that the middleware does not also see would answer "confirmed" and then
-  // have the write refused under it.
+  // [ADR-0090 D7] The definition-side high-risk gate — the same predicate, and
+  // the same declared-capability context, the derivation asks again on every
+  // re-derive (`readAcceptedEveryoneSets`), so an accepted set cannot carry a
+  // bit the derivation would then withhold.
   const offending = describeAnchorForbiddenBits(
-    setRow,
-    row.anchor as 'everyone' | 'guest',
+    entry.definition,
+    EVERYONE_POSITION,
     await readDeclaredCapabilityContext(ql, deps.metadata),
   );
   if (offending) {
     throw new PermissionDeniedError(
-      `[Security] Access denied: permission set '${row.permission_set_name}' cannot be bound to the ` +
-        `'${row.anchor}' audience anchor — it carries ${offending} (ADR-0090 D5/D9).`,
-      { suggestion: id, anchor: row.anchor },
+      `[Security] Access denied: permission set '${row.permission_set_name}' cannot be given to the ` +
+        `'${EVERYONE_POSITION}' audience anchor — it carries ${offending} (ADR-0090 D5/D7).`,
+      { suggestion: id, anchor: EVERYONE_POSITION },
     );
   }
 
-  let bindingCreated = false;
-  if (!(await bindingExists(ql, anchorRow, setRow, organizationId))) {
-    // The caller's context — NOT isSystem — so the audience-anchor gate and
-    // the delegated-admin gate evaluate the real principal.
-    await ql.insert('sys_position_permission_set', {
-      id: genId('pps'),
-      position_id: anchorRow.id,
-      permission_set_id: setRow.id,
-    }, { context: callerCtx });
-    bindingCreated = true;
-  }
-
+  const before = await everyoneDefinitionSets(ql);
   await ql.update(SUGGESTION_OBJECT, {
     id: row.id,
     status: 'confirmed',
+    deployment_decision: true,
     resolved_by: callerCtx?.userId ?? null,
     resolved_at: new Date().toISOString(),
   }, { context: scopedSystemCtx(organizationId) });
+  await deps.rederiveEveryone();
+  const bindingCreated = !before.has(row.permission_set_name)
+    && (await everyoneDefinitionSets(ql)).has(row.permission_set_name);
 
-  deps.logger?.info?.('[security] audience-binding suggestion confirmed (ADR-0090 D5)', {
+  deps.logger?.info?.('[security] audience-binding suggestion accepted for the deployment (ADR-0090 D5)', {
     id: row.id, package: row.package_id, set: row.permission_set_name, anchor: row.anchor,
-    by: callerCtx?.userId, organization: organizationId, bindingCreated,
+    by: callerCtx?.userId, bindingCreated,
   });
-  const updated = (await tryFind(ql, SUGGESTION_OBJECT, { id: row.id }, 1, organizationId))[0] ?? row;
-  return { suggestion: updated, bindingCreated };
+  return { suggestion: await recordRow(ql, organizationId, row.id), bindingCreated };
 }
 
-/** Dismiss a pending suggestion (tenant-admin only). The set stays available
- *  for ordinary position binding — dismissal only retires the prompt. */
+/**
+ * Dismiss a pending suggestion, or REVOKE an accepted one — the set leaves the
+ * `everyone` anchor's derived definition. Refuses a row the definition names
+ * only through the baseline (`confirmed`, observed): this surface does not
+ * decide the baseline. Requires the deployment authority.
+ */
 export async function dismissAudienceBindingSuggestion(
   deps: SuggestionDeps,
   callerCtx: any,
   id: string,
 ): Promise<{ suggestion: any }> {
   const { ql } = deps;
-  await assertTenantAdmin(deps, callerCtx, 'dismissing an audience-binding suggestion');
-  const organizationId = callerOrganizationId(callerCtx);
+  assertDeploymentAuthority(deps, callerCtx, 'dismissing an audience-binding suggestion');
+  const organizationId = await requireRecordOwner(ql);
 
-  const row = (await tryFind(ql, SUGGESTION_OBJECT, { id }, 1, organizationId))[0];
-  if (!row) throw new SuggestionNotFoundError(id);
-  if (row.status !== 'pending') {
+  const row = await recordRow(ql, organizationId, id);
+  const revoke = row.status === 'confirmed' && isDeploymentDecision(row);
+  if (row.status !== 'pending' && !revoke) {
     throw new SuggestionStateError(
-      `Audience-binding suggestion '${id}' is already ${row.status} — only pending suggestions can be dismissed.`,
+      row.status === 'confirmed'
+        ? `Audience-binding suggestion '${id}' is observed, not accepted: the deployment's baseline gives the set ` +
+          `to everyone, and this surface does not decide the baseline.`
+        : `Audience-binding suggestion '${id}' is already ${row.status} — only a pending or accepted suggestion can be dismissed.`,
     );
   }
 
   await ql.update(SUGGESTION_OBJECT, {
     id: row.id,
     status: 'dismissed',
+    deployment_decision: true,
     resolved_by: callerCtx?.userId ?? null,
     resolved_at: new Date().toISOString(),
   }, { context: scopedSystemCtx(organizationId) });
+  if (revoke) await deps.rederiveEveryone();
 
-  deps.logger?.info?.('[security] audience-binding suggestion dismissed (ADR-0090 D5)', {
-    id: row.id, package: row.package_id, set: row.permission_set_name,
-    by: callerCtx?.userId, organization: organizationId,
+  deps.logger?.info?.(`[security] audience-binding suggestion ${revoke ? 'revoked' : 'dismissed'} (ADR-0090 D5)`, {
+    id: row.id, package: row.package_id, set: row.permission_set_name, by: callerCtx?.userId,
   });
-  const updated = (await tryFind(ql, SUGGESTION_OBJECT, { id: row.id }, 1, organizationId))[0] ?? row;
-  return { suggestion: updated };
+  return { suggestion: await recordRow(ql, organizationId, row.id) };
 }
