@@ -7,7 +7,7 @@ feat(plugin-security)!: the security plugin's own readers (set resolution, the d
 
 Clause-②: yes
 
-<!-- adr-0087: registered position-permission-sets-declared -->
+<!-- adr-0087: not-required (already-registered position-permission-sets-declared) stage 1 registered this cutover: row-only catalog items confer nothing, and this changeset carries that rule to the security plugin's own readers -->
 
 **BREAKING** (enforcement stops reading `sys_permission_set` rows), shipped as `minor` under the launch-window convention for breaking changes. This is the second step of the cutover that `position-permission-sets-declared` registers: the authorization resolver already reads the catalog; now the security plugin's readers read the same catalog.
 
