@@ -159,7 +159,12 @@ export interface IdentityImportDeps {
   /** better-auth server api (createUser + requestPasswordReset). */
   getAuthApi(): Promise<any>;
   getDataEngine(): IdentityImportEngine | undefined;
-  /** Optional metadata reader for field coercion (best-effort). */
+  /**
+   * Optional object-declaration reader. It feeds field coercion (best-effort:
+   * without it no cell is coerced and none is a reference), and [#22800] it is
+   * the run protocol's `getMetaItem`, so each lookup target is asked its
+   * declared exposure before a cell is matched against it.
+   */
   getMetaItem?(ref: { type: string; name: string }): Promise<any>;
   phoneNumberEnabled(): boolean;
   emailServiceAvailable(): boolean;
@@ -441,6 +446,17 @@ export async function runAdminImportUsers(
   const engine = deps.getDataEngine();
   if (!engine) return fail(503, 'SERVICE_UNAVAILABLE', 'Data engine unavailable');
 
+  // [#22800] The ONE object-declaration reader this import holds, handed to
+  // both halves that read declarations: the parser, which reads `sys_user`'s
+  // fields (so lookup cells become references at all), and the run protocol
+  // below, through which `runImport`'s reference resolution asks each lookup
+  // TARGET its declared exposure (`servesReferenceTarget`, #22739). One
+  // binding, so the two can never disagree: whenever a cell is a reference,
+  // its target is judged. "Reads run under the system identity" is no
+  // exemption from that decision, which takes no caller.
+  const metaReader: Pick<ImportProtocolLike, 'getMetaItem'> =
+    deps.getMetaItem ? { getMetaItem: deps.getMetaItem } : {};
+
   // ── Payload parsing (shared generic-import parser) ───────────────────
   const prep = await prepareImportRequest(
     {
@@ -453,7 +469,7 @@ export async function runAdminImportUsers(
       skipBlankMatchKey: true,
     },
     {
-      p: { ...(deps.getMetaItem ? { getMetaItem: deps.getMetaItem } : {}) },
+      p: metaReader,
       objectName: 'sys_user',
       maxRows: IMPORT_USERS_MAX_ROWS,
     },
@@ -507,6 +523,13 @@ export async function runAdminImportUsers(
   }
 
   const protocol: ImportProtocolLike = {
+    // [#22800] The declaration reader the parser was handed above. With it,
+    // a lookup cell's target is asked its exposure for `list` before any
+    // `findData` matches the cell; a target that refuses answers as one the
+    // caller cannot read (`reference_not_found`), as for every other
+    // `runImport` caller.
+    ...metaReader,
+
     // [#16638] findExisting path: the CANONICAL QueryAST against sys_user.
     // `runImport` hands this handle a `FindDataRequest`, and the `QuerySchema`
     // that request declares carries `where` / `limit` — it declares neither

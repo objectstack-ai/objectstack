@@ -22,6 +22,11 @@ through the `{ success, data }` envelope (`http-dispatcher.ts`), so each
 schema declares the `data` payload, envelope-free — the same convention as
 `PublishPackageDraftsResponseSchema` and its ledger row.
 
+One pair is the exception: `ImportUnmanagedPackageRequestSchema` /
+`ImportUnmanagedPackageResponseSchema` (ADR-0131 D6) declare a protocol verb
+no route serves yet, and the request half is parsed by its producer rather
+than transcribed — see their own docblocks.
+
 `packages.publish`'s contract is NOT here: its producer
 (`MetadataManager.publishPackage`) already has an exact published schema,
 `PackagePublishResultSchema` in `@objectstack/spec/system` — re-exported
@@ -43,8 +48,8 @@ authored after that retirement per the ruling's sequencing (3A).
 ## TypeScript Usage
 
 ```typescript
-import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
-import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, ListPackageCommitsResponse, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
+import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
+import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = DiscardPackageDraftsResponseSchema.parse(data);
@@ -110,6 +115,42 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | **type** | `string` | ✅ | Metadata type of the failing item. |
 | **name** | `string` | ✅ | Name of the failing item. |
 | **error** | `string` | ✅ | Why copying it failed. |
+
+
+---
+
+## ImportUnmanagedPackageRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `Record<string, any>` | ✅ | The package to import: ONE package's assembled body, flattened — its manifest fields beside its metadata collections (`objects`, `views`, …), the shape the install door hands the manifest service. An artifact carrying `packages` is refused: import each package body on its own. |
+| **targetPackageId** | `string` | optional | Id of the NEW writable base the items are written into, in reverse-domain form. It must differ from the source id and name no installed package. Defaults to `<manifest.id>-copy`. |
+| **targetName** | `string` | optional | Display name of the new base. Defaults to the source package's `name`. |
+
+
+---
+
+## ImportUnmanagedPackageResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sourcePackageId** | `string` | ✅ | The id of the package the items were copied from. |
+| **sourceVersion** | `string` | optional | The version the imported body declared, when it declared one. |
+| **targetPackageId** | `string` | ✅ | The new writable base that owns every copied item. Nothing is registered under the source id. |
+| **namespace** | `string` | ✅ | The base's namespace — the SOURCE package's, kept so every copied object name stays valid. |
+| **copiedCount** | `number` | ✅ | How many items were copied. |
+| **copied** | `{ type: string; name: string }[]` | ✅ | Every item that was copied, in the order it was written. |
+
+### Nested Shape: `ImportUnmanagedPackageResponse.copied[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the copied item. |
+| **name** | `string` | ✅ | Name of the copied item. |
 
 
 ---

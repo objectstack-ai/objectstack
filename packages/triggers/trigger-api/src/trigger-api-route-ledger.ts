@@ -6,9 +6,10 @@
  * (#11863, in the #3636 pattern).
  *
  * WHY THIS EXISTS. This plugin mounts its inbound-hooks endpoint on the HOST
- * Hono app: it resolves the `http-server` service at `kernel:ready`, takes the
- * framework-native handle through `getRawApp()`, and registers `POST` straight
- * on it. That mount is outside every ledger the platform had:
+ * Hono app: it resolves the `http.server` service (then its deprecated
+ * `http-server` alias, #22774) at `kernel:ready`, takes the framework-native
+ * handle through `getRawApp()`, and registers `POST` straight on it. That
+ * mount is outside every ledger the platform had:
  *
  *  - the dispatcher ledger (`packages/runtime/src/route-ledger.ts`) sees
  *    `RouteManager` branches; this is not one, and

@@ -66,6 +66,9 @@ import {
 // `isScriptFaultMessage` / `UNCLASSIFIED_FAULT`, so this door's crash reading
 // cannot drift from the `/data` door's. ⛔ Never re-inline either.
 import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage } from '@objectstack/types';
+// [ADR-0029 D9.6] The ONE "does a code package ship this?" reading, which the
+// activation write below asks to name the ledger row's package.
+import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import * as actionExec from '../action-execution.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { validationFailureDetails } from '../validation-failure.js';
@@ -141,13 +144,19 @@ function isActionActivationWrite(parts: string[], method: string): boolean {
  *     (§4). Two objects declaring the same action name therefore address ONE
  *     row, so this refuses instead of silently switching both off.
  *  5. **The durable write**, through the engine, which writes the row before
- *     touching its projection.
+ *     touching its projection. The row names the package that ships the
+ *     action, and no package when none does ({@link shippingPackageOf}).
  *
- * ⛔ It does not require the action to be PACKAGED. Neither does the flow
- * toggle: a row for a runtime-authored artifact is harmless (absence means
- * active, and the row records a real administrator choice), while a
- * provenance test here would refuse the flip for anything the registry cannot
- * classify — failing closed on the wrong axis.
+ * ⛔ It does not require the action to be PACKAGED. An action the environment
+ * authored through the metadata door is switched exactly like a shipped one,
+ * and its row names no package. The flow toggle draws the other line — it
+ * refuses a flow no package ships — because such a flow has a server-side
+ * switch of its own, its definition's `status`. An action has none: `visible`
+ * and `disabled` are rendering predicates that no dispatch door reads, so the
+ * ledger row is the only switch an environment-authored action has. The row
+ * is harmless (absence means active, and the row records a real administrator
+ * choice), while a provenance test here would refuse the flip for anything the
+ * registry cannot classify — failing closed on the wrong axis.
  */
 async function handleActionActivationWrite(
     deps: DomainHandlerDeps,
@@ -220,11 +229,7 @@ async function handleActionActivationWrite(
     if (ambiguity) return ambiguity;
 
     // ── 5. the durable write ────────────────────────────────────────────────
-    const packageId = String(
-        (declaration.action as { _packageId?: unknown })?._packageId ??
-        (declaration.obj as { _packageId?: unknown } | undefined)?._packageId ??
-        '',
-    );
+    const packageId = shippingPackageOf(declaration);
     if (typeof ql.setActionActive !== 'function') {
         // An engine too old to carry the projection cannot make this durable,
         // and a 200 here would report a switch that never existed.
@@ -238,19 +243,56 @@ async function handleActionActivationWrite(
         };
     }
     try {
-        await ql.setActionActive({ name: actionName, packageId, active: enabled });
-    } catch (err: any) {
-        // The engine declares its own class for the one refusal it raises (no
-        // ledger attached → 503 SERVICE_UNAVAILABLE); anything else is a store
-        // failure, and a failed write must never read as a successful flip.
-        const status = typeof err?.status === 'number' ? err.status : 503;
-        const code = typeof err?.code === 'string' ? err.code : 'SERVICE_UNAVAILABLE';
-        return {
-            handled: true,
-            response: deps.error(err?.message ?? String(err), status, { code }),
-        };
+        // An action no package ships carries NO package key: absent is the
+        // ledger's one spelling for it, and the store writes `null`.
+        await ql.setActionActive({
+            name: actionName,
+            ...(packageId !== undefined ? { packageId } : {}),
+            active: enabled,
+        });
+    } catch (err: unknown) {
+        // A failed write must never read as a successful flip, and its code and
+        // status must say the same thing (ADR-0112). The one shared rule
+        // decides both (`resolveThrownHttpError`): the engine's own refusal
+        // keeps its pair (no ledger attached: 503 SERVICE_UNAVAILABLE), a
+        // record validation refusal is 400 VALIDATION_FAILED, and anything that
+        // declares no status is a store failure, 503 SERVICE_UNAVAILABLE.
+        return { handled: true, response: deps.errorFromThrown(err, 503) };
     }
     return { handled: true, response: deps.success({ name: actionName, objectName, enabled }) };
+}
+
+/**
+ * [ADR-0126 §4] The package that SHIPS a resolved action declaration — the
+ * ledger row's `package_id` — or `undefined` when no package does.
+ *
+ * Asked through the one "does a code package ship this?" reading,
+ * `isCodeArtifactBody` (ADR-0029 D9.6: a real `_packageId`, not the
+ * `'sys_metadata'` sentinel a package-less row carries, and not tenant
+ * provenance), never through a bare `_packageId` read:
+ *
+ *   - the action's own package, when the action is a code artifact;
+ *   - for an action declared INSIDE its object's `actions`, the object's
+ *     package when the object is a code artifact. The platform's own objects
+ *     ship their actions that way, unstamped (`sys_user`'s `invite_user`,
+ *     `sys_approval_request`'s `approval_approve`, …), so their rows keep
+ *     naming the package that ships the object;
+ *   - otherwise none. ⛔ A STANDALONE action is never credited to its route
+ *     object's package: an action the environment saved through the metadata
+ *     door and bound to a packaged object is not shipped by that package, and
+ *     neither is a tenant-authored action wherever it is declared.
+ *
+ * "Declared inside" is reference identity with the object's `actions` entry,
+ * which is what `resolveRouteActionDeclaration` returns for an embedded action.
+ */
+function shippingPackageOf(declaration: { action: unknown; obj: unknown }): string | undefined {
+    const action = declaration.action as { _packageId?: unknown } | undefined;
+    const obj = declaration.obj as { _packageId?: unknown; actions?: unknown } | undefined;
+    if (isTenantAuthored(action)) return undefined;
+    if (isCodeArtifactBody(action)) return String(action!._packageId);
+    const embedded = Array.isArray(obj?.actions) && obj.actions.includes(action);
+    if (embedded && isCodeArtifactBody(obj)) return String(obj!._packageId);
+    return undefined;
 }
 
 /**

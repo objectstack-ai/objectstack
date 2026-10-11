@@ -17,6 +17,11 @@
  * schema declares the `data` payload, envelope-free — the same convention as
  * `PublishPackageDraftsResponseSchema` and its ledger row.
  *
+ * One pair is the exception: `ImportUnmanagedPackageRequestSchema` /
+ * `ImportUnmanagedPackageResponseSchema` (ADR-0131 D6) declare a protocol verb
+ * no route serves yet, and the request half is parsed by its producer rather
+ * than transcribed — see their own docblocks.
+ *
  * `packages.publish`'s contract is NOT here: its producer
  * (`MetadataManager.publishPackage`) already has an exact published schema,
  * `PackagePublishResultSchema` in `@objectstack/spec/system` — re-exported
@@ -216,6 +221,61 @@ export const DuplicatePackageResponseSchema = lazySchema(() => z.object({
   })).describe('Every item the clone could not copy.'),
 }));
 
+/**
+ * The request of `importUnmanagedPackage` — the copy-once import behind the
+ * `unmanaged` install mode (ADR-0131 D6): every metadata item of ONE package
+ * is written into a NEW writable base in the environment ledger, editable from
+ * then on, never upgraded.
+ *
+ * Unlike the transcriptions above, this declaration is ENFORCED: the producer
+ * (`@objectstack/metadata-protocol` `protocol.ts`) parses its request through
+ * it, so a key it does not declare is refused rather than ignored. No route
+ * serves the verb yet; the install door that reads an `installMode` calls it.
+ * The actor is stated by that door, never by a body, so it is not declared
+ * here.
+ */
+export const ImportUnmanagedPackageRequestSchema = lazySchema(() => z.object({
+  manifest: z.record(z.string(), z.unknown()).describe(
+    'The package to import: ONE package\'s assembled body, flattened — its manifest fields beside its '
+    + 'metadata collections (`objects`, `views`, …), the shape the install door hands the manifest '
+    + 'service. An artifact carrying `packages` is refused: import each package body on its own.',
+  ),
+  targetPackageId: z.string().optional().describe(
+    'Id of the NEW writable base the items are written into, in reverse-domain form. It must differ '
+    + 'from the source id and name no installed package. Defaults to `<manifest.id>-copy`.',
+  ),
+  targetName: z.string().optional().describe(
+    'Display name of the new base. Defaults to the source package\'s `name`.',
+  ),
+}).strict());
+
+/**
+ * The answer of `importUnmanagedPackage`.
+ *
+ * Transcribed from the producer's declared return. The import is
+ * all-or-nothing: every judgeable refusal is raised before the base exists,
+ * and a write that fails deletes the base, so a returned answer always means
+ * every item was copied. There is no `failed[]` and no `success` verdict to
+ * read — a failure is a thrown ADR-0112 error, never a partial answer.
+ */
+export const ImportUnmanagedPackageResponseSchema = lazySchema(() => z.object({
+  sourcePackageId: z.string().describe('The id of the package the items were copied from.'),
+  sourceVersion: z.string().optional().describe(
+    'The version the imported body declared, when it declared one.',
+  ),
+  targetPackageId: z.string().describe(
+    'The new writable base that owns every copied item. Nothing is registered under the source id.',
+  ),
+  namespace: z.string().describe(
+    'The base\'s namespace — the SOURCE package\'s, kept so every copied object name stays valid.',
+  ),
+  copiedCount: z.number().describe('How many items were copied.'),
+  copied: z.array(z.object({
+    type: z.string().describe('Metadata type of the copied item.'),
+    name: z.string().describe('Name of the copied item.'),
+  })).describe('Every item that was copied, in the order it was written.'),
+}));
+
 export type DiscardPackageDraftsResponse = z.input<typeof DiscardPackageDraftsResponseSchema>;
 /** Post-parse shape of {@link DiscardPackageDraftsResponse} — defaults applied, transforms run (ADR-0122). */
 export type DiscardPackageDraftsResponseParsed = z.infer<typeof DiscardPackageDraftsResponseSchema>;
@@ -237,3 +297,9 @@ export type ReassignOrphanedMetadataResponseParsed = z.infer<typeof ReassignOrph
 export type DuplicatePackageResponse = z.input<typeof DuplicatePackageResponseSchema>;
 /** Post-parse shape of {@link DuplicatePackageResponse} — defaults applied, transforms run (ADR-0122). */
 export type DuplicatePackageResponseParsed = z.infer<typeof DuplicatePackageResponseSchema>;
+export type ImportUnmanagedPackageRequest = z.input<typeof ImportUnmanagedPackageRequestSchema>;
+/** Post-parse shape of {@link ImportUnmanagedPackageRequest} — defaults applied, transforms run (ADR-0122). */
+export type ImportUnmanagedPackageRequestParsed = z.infer<typeof ImportUnmanagedPackageRequestSchema>;
+export type ImportUnmanagedPackageResponse = z.input<typeof ImportUnmanagedPackageResponseSchema>;
+/** Post-parse shape of {@link ImportUnmanagedPackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type ImportUnmanagedPackageResponseParsed = z.infer<typeof ImportUnmanagedPackageResponseSchema>;

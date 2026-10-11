@@ -242,8 +242,14 @@ function pathLiteralsIn(file: string): string[] {
 /** Absolute-path-shaped string literals, in any of the three quote styles. */
 const ABSOLUTE_PATH_LITERAL = /(['"`])(\/[A-Za-z0-9._~:@-][^'"`\s]*)\1/g;
 
-/** The two spellings by which a module in this package reaches the HOST app. */
-const HOST_APP_REACH = /getRawApp|['"`]http-server['"`]/;
+/**
+ * The spellings by which a module in this package reaches the HOST app: the
+ * raw-app accessor, and the server's service key under its canonical name
+ * `http.server` and its deprecated alias `http-server` (#22774: `plugin.ts`
+ * reads the canonical name first, so a census that knew only the alias would
+ * miss a second module reaching the same server the way the plugin now does).
+ */
+const HOST_APP_REACH = /getRawApp|['"`]http[.-]server['"`]/;
 
 /**
  * Does `source` reach for the host app IN CODE?
@@ -381,6 +387,7 @@ describe('comment-stripper (the scan machinery, pinned in both directions)', () 
         expect(reachesHostApp("const s = ctx.getService('http-server');\n")).toBe(true);
         expect(reachesHostApp('const s = ctx.getService("http-server");\n')).toBe(true);
         expect(reachesHostApp('const s = ctx.getService(`http-server`);\n')).toBe(true);
+        expect(reachesHostApp("const s = ctx.getService('http.server');\n")).toBe(true);
         expect(reachesHostApp('const app = server.getRawApp();\n')).toBe(true);
     });
 
@@ -391,10 +398,11 @@ describe('comment-stripper (the scan machinery, pinned in both directions)', () 
             'plugin.ts': 'const app = http.getRawApp();\n',
             'prose-only.ts': '// getRawApp() is reached in plugin.ts, never here\n',
             'zzz-second-reacher.ts': "const s = ctx.getService('http-server');\n",
+            'zzz-third-reacher.ts': "const s = ctx.getService('http.server');\n",
         };
         expect(
             filesReachingHostApp(Object.keys(fake).sort(), (f) => fake[f]),
-        ).toEqual(['plugin.ts', 'zzz-second-reacher.ts']);
+        ).toEqual(['plugin.ts', 'zzz-second-reacher.ts', 'zzz-third-reacher.ts']);
     });
 
     it('drops paths that only appear in prose, and keeps every path in code', () => {
