@@ -17,7 +17,7 @@
  *   1. the built-in platform capabilities (`PLATFORM_CAPABILITY_NAMES`),
  *   2. every capability the stack DECLARES via `defineCapability`
  *      (`stack.capabilities`) — the explicit, package-provenanced declaration
- *      (ADR-0066 D1), materialized at boot by `bootstrapDeclaredCapabilities`,
+ *      (ADR-0066 D1), served at runtime by the registry (ADR-0131 D3),
  *   3. every capability a permission set in this stack GRANTS via
  *      `systemPermissions` (granting a capability also declares it), and
  *   4. any `sys_capability` row shipped as seed data.

@@ -31,7 +31,7 @@ The user spellings are told to write `current_user`, with the guard for a flow t
   - a `type: 'flow'` action launching the flow on an undeclared object;
   - a `map` node feeding the flow whose `itemObject` is undeclared or absent;
   - a `subflow` or `map` parent that is itself such a flow.
-- **The runtime publish gate:** a flow write there is not judged for unbound roots yet. Its per-write snapshot carries no actions or other flows, so it cannot see those entrances. Every other expression verdict at that door is unchanged.
+- **The runtime publish gate:** a flow write there is not judged for unbound roots, by design (rulings `5791822697` item 3 and `6104584601`). Its per-write snapshot carries no actions or other flows, so it cannot see those entrances. Every other expression verdict at that door is unchanged.
 
 A `$` name has no CEL spelling (`$runId == "x"` does not parse), so the `$` roots stay the text-slot rule's.
 

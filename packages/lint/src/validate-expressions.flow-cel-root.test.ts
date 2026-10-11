@@ -294,6 +294,22 @@ describe('the entrances the stack declares (A′)', () => {
     expect(userRefusals(flowStack({ edgeCondition: USER, objectName: 'acct' }))).toHaveLength(1);
   });
 
+  it('a record trigger that names no start config.objectName stands down; the same trigger on a declared object is judged', () => {
+    // With no `objectName` the record-change trigger registers its hook with no
+    // object filter (`record-change-trigger.ts`), so it fires on a write to ANY
+    // object — one this stack does not declare included — and hands that row.
+    expect(userRefusals(flowStack({ edgeCondition: USER, triggerType: 'record-after-update' }))).toEqual([]);
+    expect(userRefusals(flowStack({ edgeCondition: USER, triggerType: 'record-after-update', objectName: 'acct' }))).toHaveLength(1);
+    // And with no `record-*` trigger there is no such entrance: the flow is judged.
+    expect(userRefusals(flowStack({ edgeCondition: USER }))).toHaveLength(1);
+    const entrance = flowCelEntrances(
+      { flows: [{ name: 'f', type: 'autolaunched', nodes: [{ id: 'start', type: 'start', config: { triggerType: 'record-after-create' } }] }] },
+      new Map([['acct', ['status']]]),
+    ).get('f');
+    expect(entrance?.openedBy).toContain("'record-after-create'");
+    expect(entrance?.bound).toEqual(['record']);
+  });
+
   it('a time-relative sweep: an undeclared config.timeRelative.object stands down; a declared one is judged', () => {
     const sweep = (object: string): AnyRec => {
       const stack = flowStack({ edgeCondition: USER });
@@ -361,6 +377,25 @@ describe('the entrances the stack declares (A′)', () => {
     expect(userRefusals(withFlows(flowStack({ edgeCondition: USER }), judgedParent))).toHaveLength(1);
   });
 
+  it('a parent that is itself open: its `map` child stands down, to a fixpoint; a judged parent leaves the child judged', () => {
+    // `map-node.ts` sets the child's `record` only for an id-bearing item; any
+    // other item leaves the child holding the parent's record. The declared
+    // `itemObject` keeps the node from opening `f` itself, so only the parent's
+    // openness can.
+    const each = (child: string): AnyRec => ({ id: 'each', type: 'map', config: { collection: '{rows}', flowName: child, itemObject: 'acct' } });
+    const openParent = parentFlow({ type: 'api', node: each('f') });
+    expect(userRefusals(withFlows(flowStack({ edgeCondition: USER }), openParent))).toEqual([]);
+    expect(flowCelEntrances(
+      { flows: [{ name: 'f', type: 'autolaunched', nodes: [{ id: 'start', type: 'start' }] }, openParent] },
+      new Map([['acct', ['status']]]),
+    ).get('f')?.openedBy).toMatch(/^map node 'each' in flow 'g' .*'g' is itself open$/);
+    // Two levels: g (the inbound hook) → map → h → map → f.
+    const middle = { ...parentFlow({ node: each('f') }), name: 'h', label: 'H' };
+    expect(userRefusals(withFlows(flowStack({ edgeCondition: USER }), parentFlow({ type: 'api', node: each('h') }), middle))).toEqual([]);
+    // RED CONTROL — the same `map` node in a parent no entrance opens leaves the child judged.
+    expect(userRefusals(withFlows(flowStack({ edgeCondition: USER }), parentFlow({ node: each('f') })))).toHaveLength(1);
+  });
+
   it('the reader names the entrance', () => {
     const entrances = flowCelEntrances(
       {
@@ -377,9 +412,14 @@ describe('the entrances the stack declares (A′)', () => {
  * S (triage `6094850599`): at the runtime publish gate the per-write snapshot
  * holds the written flow alone, so no entrance is visible and this one judgment
  * stands down there. Every other expression verdict at that door is unchanged.
- * #22636 widens the snapshot; when it lands, this stand-down goes.
+ * By design, not a hold-out: who launches a flow and what record it is handed
+ * are read from other items of the stack, a whole-stack judgment that belongs to
+ * `objectstack validate` (ADR-0109 Decision §3's boundary), and the snapshot
+ * stays as it is (ruling `5791822697` on #19527, item 3; ruling `6104584601` on
+ * #22636, letter B). These pins hold the asymmetry: the gate stands down, the
+ * build door refuses.
  */
-describe('the runtime publish gate (S)', () => {
+describe('the runtime publish gate stands down by design (S)', () => {
   const written = {
     name: 'f',
     label: 'F',
@@ -415,7 +455,8 @@ describe('the runtime publish gate (S)', () => {
  * binds `context.record` and `celScope` binds no `record` of its own. So the
  * build door binds it only where an entrance the stack declares hands the flow a
  * record, or the flow binds a variable named `record`; otherwise `record.X` is
- * refused. The runtime publish gate's stand-down (S) covers it until #22636.
+ * refused. The runtime publish gate's stand-down (S) covers it, by design (the S
+ * block above).
  */
 describe('`record` — bound only where an entrance hands the flow a record (#22677)', () => {
   const READ = 'record.status == "open"';
