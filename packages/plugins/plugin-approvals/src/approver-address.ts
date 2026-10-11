@@ -135,6 +135,25 @@ export function actorAddresses(actorId: string, caller: ActingCaller | null): st
 }
 
 /**
+ * Does `slate` name a PERSON? A concrete approver address is a user id or an
+ * email: a slot one person takes by being who they are. Anything else on a
+ * slate is a `type:value` literal, left by an approver target that resolved to
+ * no holder (`position:<p>`, `team:<t>`, a stored `role:<p>`).
+ *
+ * `false` is the slate the open path calls "decidable only by a privileged
+ * admin" (the `onEmptyApprovers` policies decide it there). The
+ * `unstaffed` arm of the inbox list reads the same test on the slate as it
+ * stands (#22725). One test, so the slate the open path warns about and the
+ * slate that arm returns cannot drift apart.
+ *
+ * This is a test of the slate's SHAPE. It compares no slot with a caller, so it
+ * is not a reader of the equivalence above.
+ */
+export function slateNamesAPerson(slate: readonly string[]): boolean {
+  return slate.some((address) => !!address && !address.includes(':'));
+}
+
+/**
  * THE slot test: the pending slot `actorId` takes on `pending`, or `undefined`
  * when it holds none — the first of {@link actorAddresses} the slate holds, so
  * a concrete user-id slot is taken before a position slot the same caller

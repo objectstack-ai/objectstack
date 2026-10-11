@@ -247,10 +247,15 @@ describe('buildFieldMetaMap — presentation keys only (#6536)', () => {
     'displayField', 'label', 'multiple', 'name', 'options', 'reference', 'type',
   ];
 
-  /** One field declaring every retired constraint key alongside the presentation ones. */
+  /**
+   * One field declaring every retired constraint key alongside the presentation
+   * ones. A reference type, because `reference` is read through the spec's
+   * arbiter `referenceTargetOf` (#22739), which answers no target for a
+   * non-reference type.
+   */
   const FIELD = {
     name: 'amount',
-    type: 'number',
+    type: 'lookup',
     label: '金额',
     reference: 'contracts',
     displayField: 'title',
@@ -282,7 +287,7 @@ describe('buildFieldMetaMap — presentation keys only (#6536)', () => {
     const meta = buildFieldMetaMap({ fields: { amount: FIELD } }).get('amount')!;
     expect(meta).toEqual({
       name: 'amount',
-      type: 'number',
+      type: 'lookup',
       label: '金额',
       options: undefined,
       reference: 'contracts',

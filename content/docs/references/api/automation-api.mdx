@@ -135,7 +135,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Variable name |
+| **name** | `string` | ✅ | Variable name — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **type** | `string` | ✅ | Data type (text, number, boolean, object, list) |
 | **isInput** | `boolean` | optional (default: `false`) | Is input parameter |
 | **isOutput** | `boolean` | optional (default: `false`) | Is output parameter |
