@@ -381,21 +381,14 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * (ADR-0070 D2). Revert asks it only after the protocol's stored-row answer, so
  * a `sys_metadata` row bound to the package keeps its own answer.
  *
- * [#14451] The remedy it names is customisation BESIDE the package, and it
- * used to name `POST /packages/:id/duplicate` instead. That sentence sent a
- * caller holding a read-only package at a route which — for exactly the
- * packages this refusal fires on — cannot help: duplicate clones a base's
- * `sys_metadata` rows, a code package owns none, and until
- * {@link requireDuplicableSource} the trip ended in a 200 reporting
- * `copiedCount: 0` (the #14451 measurement). A refusal that prescribes a dead
- * end is worse than one that prescribes nothing, so the two doors agree.
- *
- * [ADR-0131 D6] Both remedies once named "an ADR-0005 org overlay" — itself a
- * dead end since the per-organization overlay axis retired (an
- * organization-scoped metadata write answers `403 NOT_OVERRIDABLE`). They now
- * name D6's environment-level regimes — overlay, disable + clone, extend — and
- * the duplicate refusal adds the one way to own an editable copy of a whole
- * package: the `unmanaged` install mode.
+ * [#14451] The remedy it names is ADR-0005 org overlay, and it used to name
+ * `POST /packages/:id/duplicate` instead. That sentence sent a caller holding a
+ * read-only package at a route which — for exactly the packages this refusal
+ * fires on — cannot help: duplicate clones a base's `sys_metadata` rows, a code
+ * package owns none, and until {@link requireDuplicableSource} the trip ended
+ * in a 200 reporting `copiedCount: 0` (the #14451 measurement). A refusal that
+ * prescribes a dead end is worse than one that prescribes nothing, so the two
+ * doors now agree: overlay is how a code package is customised.
  *
  * ⛔ Deliberately NOT caller-sensitive — there is no `isSystem` bypass, unlike
  * {@link requireManageMetadata}. Read-only is a property of the PACKAGE. Engine
@@ -425,9 +418,7 @@ function requireWritablePackage(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
             + `the deployment, not over this API — ${action} a package you own, or customise what `
-            + `this one provides beside it, at environment level (ADR-0131 D6): an environment `
-            + `overlay of a view, dashboard, report, translation or email template, a disabled and `
-            + `cloned flow or action, or an extension of an object or app.`,
+            + `this one provides in place, with an ADR-0005 org overlay.`,
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
@@ -529,12 +520,8 @@ function requireDuplicableSource(
             + `(provided by code or an installed app), and duplicate clones a writable base's `
             + `stored metadata rows. A code package's metadata is delivered as code, so there are `
             + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
-            + `Duplicate a base you own, or customise what this package provides beside it, at `
-            + `environment level (ADR-0131 D6): an environment overlay, a disabled and cloned flow `
-            + `or action, or an extension. To own an editable copy of the whole package instead, `
-            + `install it unmanaged (\`installMode: 'unmanaged'\`) where its manifest's `
-            + `\`installModes\` permits that and the deployment does not wall organizations — `
-            + `after uninstalling it here, since the copy keeps the package's namespace.`,
+            + `Duplicate a base you own, or customise what this package provides in place, with an `
+            + `ADR-0005 org overlay.`,
             422,
             {
                 code: 'DUPLICATE_SOURCE_NOT_A_BASE',

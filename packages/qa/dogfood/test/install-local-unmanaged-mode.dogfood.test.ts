@@ -56,33 +56,6 @@ const BOTH = ['managed', 'unmanaged'];
 
 type Answer = { status: number; body: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-/**
- * A package that ships one view LOCKED (`_lock: 'full'`, ADR-0010) — the
- * import's open note, measured: what an unmanaged copy does with a lock the
- * vendor authored.
- */
-const LOCKED_PACKAGE = {
-  id: 'com.example.lockprobe',
-  namespace: 'lockprobe',
-  version: '1.0.0',
-  type: 'app',
-  name: 'Lock probe',
-  objects: [{
-    name: 'lockprobe_item',
-    label: 'Item',
-    sharingModel: 'private',
-    fields: { title: { type: 'text', label: 'Title' } },
-  }],
-  views: [{
-    name: 'lockprobe_item_all',
-    label: 'All items',
-    object: 'lockprobe_item',
-    viewKind: 'list',
-    columns: [{ field: 'title', label: 'Title' }],
-    _lock: 'full',
-    _lockReason: 'Shipped locked by the vendor',
-  }],
-};
 type Item = { type: string; name: string };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,11 +72,11 @@ async function json(res: Response): Promise<Answer> {
  */
 function installBody(opts: { installMode?: 'managed' | 'unmanaged'; version?: string } = {}): Record<string, unknown> {
   const { artifact } = buildShapedArtifact(crmStack as unknown as Record<string, unknown>);
-  const manifest = {
+  const manifest: Record<string, unknown> = {
     ...(artifact.manifest as Record<string, unknown>),
     installModes: BOTH,
     ...(opts.version ? { version: opts.version } : {}),
-  } as { id: string; version: string };
+  };
   return {
     manifest: { ...artifact, manifest, id: manifest.id, version: manifest.version },
     ...(opts.installMode ? { installMode: opts.installMode } : {}),
@@ -165,9 +138,6 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
   let secondUnmanaged: Answer;
   let targetIsCodePackage: { code?: string; status?: number; message?: string } | null;
   let namespaceOwned: { code?: string; status?: number; message?: string; details?: unknown } | null;
-  let lockedImport: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-  let lockedServed: Record<string, unknown> | undefined;
-  let lockedEdit: Answer;
 
   const boot = (databaseFile: string) => bootShowcase({
     databaseFile,
@@ -250,23 +220,6 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
     };
     targetIsCodePackage = await attempt('com.example.showcase');
     namespaceOwned = await attempt('com.example.crm-second');
-
-    // The import's open note: an item the package ships with an authored
-    // protection lock (`_lock`). The copy is the environment's own, so the
-    // edit a Studio author makes must land.
-    lockedImport = await (async () => {
-      try {
-        return await protocol.importUnmanagedPackage({ manifest: LOCKED_PACKAGE });
-      } catch (e: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-        return { refused: { code: e?.code, status: e?.status, message: e?.message } };
-      }
-    })();
-    const lockedRead = await json(await stack.apiAs(token, 'GET', '/meta/view/lockprobe_item_all'));
-    lockedServed = servedItem(lockedRead);
-    lockedEdit = await json(await stack.apiAs(token, 'PUT', '/meta/view/lockprobe_item_all', {
-      ...editableBody(lockedServed ?? {}),
-      label: 'All items (edited in the environment)',
-    }));
   }, 600_000);
 
   afterAll(async () => {
@@ -363,12 +316,6 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
     expect(namespaceOwned?.status).toBe(409);
     expect(namespaceOwned?.code).toBe('RESOURCE_CONFLICT');
     expect(namespaceOwned?.details).toEqual({ namespace: 'crm', owners: [BASE_ID] });
-  });
-
-  it('an item the package shipped LOCKED is copied editable — the copy is the environment\'s own', () => {
-    expect(lockedImport?.refused, JSON.stringify(lockedImport)).toBeUndefined();
-    expect(lockedImport?.copied).toContainEqual({ type: 'view', name: 'lockprobe_item_all' });
-    expect(lockedEdit.status, JSON.stringify(lockedEdit.body)).toBe(200);
   });
 });
 

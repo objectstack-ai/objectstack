@@ -3,7 +3,6 @@
 '@objectstack/cloud-connection': minor
 '@objectstack/cli': minor
 '@objectstack/metadata-protocol': minor
-'@objectstack/runtime': patch
 ---
 
 A package declares how it may be installed — `installModes: ['managed', 'unmanaged']` — and `os package install --install-mode unmanaged` copies it into the environment as editable metadata (ADR-0131 D6)
@@ -21,6 +20,5 @@ A package installs one of two ways. **Managed**: it is registered as code, stays
   An unmanaged install writes no install-ledger entry, registers nothing under the package's id and does not load its sample data (the answer says so under `seeded`). The answer names the new base, the items copied and `installedFrom` (the source package id and version, for information only). The package's translation bundles are copied as `translation` items, so they reload at every boot with the environment's own translations.
 - **`os package install --install-mode managed|unmanaged`** (`@objectstack/cli`). Without the option, nothing is sent and the runtime installs managed. An unmanaged answer prints the base, the item count and the source. A runtime that predates the install mode ignores the option and installs managed; the command then exits 1 and says so. The command's help now calls the catalog and the air-gapped artifact the two *sources*, so "mode" means one thing.
 - **Copy semantics** (`@objectstack/metadata-protocol`). `importUnmanagedPackage` copies `translations` (each locale of each bundle as one `translation` item named `<namespace>_<locale>`, bundles merged in order), reads `installModes` without writing it onto the base, and no longer refuses an empty code container (`functions: {}`, `plugins: []`). `unmanagedInstallPostureRefusal` is exported, so the door and the import answer the walled posture with one sentence.
-- **Refusal text** (`@objectstack/runtime`). `WRITABLE_PACKAGE_REQUIRED` and `DUPLICATE_SOURCE_NOT_A_BASE` on `/api/v1/packages` no longer prescribe the retired per-organization overlay (an organization-scoped metadata write answers `403 NOT_OVERRIDABLE`). They name the environment-level customisation ADR-0131 D6 keeps — an overlay, a disabled and cloned flow or action, an extension — and the duplicate refusal names the unmanaged install as the way to own an editable copy of a whole package. Codes and statuses are unchanged.
 
 Nothing existing is removed or narrowed: every new key, field and option is optional, and an install that does not name a mode behaves exactly as before.
