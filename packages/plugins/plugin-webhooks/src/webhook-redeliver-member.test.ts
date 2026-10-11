@@ -22,7 +22,11 @@
  *     from `http.server` before the `http-server` alias, and never where none
  *     does; the slot is registered everywhere the veto is, and nowhere else;
  *  4. the veto no longer needs realtime or auto-enqueue: a redelivery of a
- *     delivery whose subscription is gone is refused by both faces.
+ *     delivery whose subscription is gone is refused by both faces;
+ *  5. [#22804] a delivery whose subscription is inactive is refused by both
+ *     faces, `409 DELIVERY_NOT_ELIGIBLE` with a reason naming the state and the
+ *     remedy, beside its controls: active and signed replays, gone keeps its
+ *     own refusal, and the same delivery replays once re-activated.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -39,6 +43,10 @@ const PATH = '/api/v1/webhooks/redeliver';
 const ORIGIN = 'http://webhooks.test';
 const SUBSCRIPTION = 'wh_live';
 const GONE_SUBSCRIPTION = 'wh_gone';
+/** [#22804] A subscription an operator switched off: `active: false`. */
+const INACTIVE_SUBSCRIPTION = 'wh_off';
+/** [#22804] An active subscription that stores a signing secret which resolves. */
+const SIGNED_SUBSCRIPTION = 'wh_signed';
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
 const silentLogger = { info() {}, warn() {}, error() {}, debug() {} } as any;
@@ -54,6 +62,10 @@ function fakeEngine(subscriptions: Map<string, Record<string, unknown>>) {
         },
         registerHook() { /* provenance stamp + headers gate + cleartext gate */ },
         unregisterHooksByPackage() { return 0; },
+        /** [#22804] The privileged dereference: only the signed subscription's key resolves. */
+        async resolveSecretField(_object: string, id: string) {
+            return id === SIGNED_SUBSCRIPTION ? 'whsec_live' : null;
+        },
     };
 }
 
@@ -88,6 +100,10 @@ class FixturePlugin implements Plugin {
     version = '1.0.0';
     readonly subscriptions = new Map<string, Record<string, unknown>>([
         [SUBSCRIPTION, { id: SUBSCRIPTION, name: 'orders_hook', active: true }],
+        [INACTIVE_SUBSCRIPTION, { id: INACTIVE_SUBSCRIPTION, name: 'paused_hook', active: false }],
+        [SIGNED_SUBSCRIPTION, {
+            id: SIGNED_SUBSCRIPTION, name: 'signed_hook', active: true, signing_secret: 'secret:sec_22804',
+        }],
     ]);
     readonly outbox = new MemoryHttpOutbox();
     readonly messaging = new MessagingService({ logger: silentLogger });
@@ -243,6 +259,7 @@ describe('[#22756] handleRedeliver — the redeliver door from a Request, on a k
         const { member, attempted, pending, parked, statusOf } = await boot();
         const crossOrg = await attempted(ORG_B);
         const vetoed = await attempted(ORG_A, GONE_SUBSCRIPTION);
+        const inactive = await attempted(ORG_A, INACTIVE_SUBSCRIPTION);
         const neverSent = await parked(ORG_A);
         const notFinished = await pending(ORG_A);
 
@@ -257,6 +274,7 @@ describe('[#22756] handleRedeliver — the redeliver door from a Request, on a k
             ['a delivery not yet finished', redeliver({ deliveryId: notFinished }), 409, 'DELIVERY_NOT_ELIGIBLE'],
             ['a parked delivery, never sent', redeliver({ deliveryId: neverSent }), 409, 'DELIVERY_NEVER_SENT'],
             ['a delivery whose subscription is gone (the veto)', redeliver({ deliveryId: vetoed }), 409, 'DELIVERY_NOT_ELIGIBLE'],
+            ['a delivery whose subscription is inactive (the veto)', redeliver({ deliveryId: inactive }), 409, 'DELIVERY_NOT_ELIGIBLE'],
         ];
         for (const [label, request, status, code] of cases) {
             const answer = await snapshot(await member(request));
@@ -269,6 +287,7 @@ describe('[#22756] handleRedeliver — the redeliver door from a Request, on a k
         // Every refusal wrote nothing.
         expect(await statusOf(crossOrg)).toBe('dead');
         expect(await statusOf(vetoed)).toBe('dead');
+        expect(await statusOf(inactive)).toBe('dead');
         expect(await statusOf(neverSent)).toBe('dead');
         expect(await statusOf(notFinished)).toBe('pending');
     });
@@ -308,6 +327,7 @@ describe('[#22756] parity — the member answers what the self-hosted mount answ
         const app = fixture.canonicalApp;
         const crossOrg = await attempted(ORG_B);
         const vetoed = await attempted(ORG_A, GONE_SUBSCRIPTION);
+        const inactive = await attempted(ORG_A, INACTIVE_SUBSCRIPTION);
         const neverSent = await parked(ORG_A);
         const notFinished = await pending(ORG_A);
 
@@ -323,6 +343,7 @@ describe('[#22756] parity — the member answers what the self-hosted mount answ
             ['409 not finished', () => redeliver({ deliveryId: notFinished })],
             ['409 never sent', () => redeliver({ deliveryId: neverSent })],
             ['409 veto', () => redeliver({ deliveryId: vetoed })],
+            ['409 veto, inactive', () => redeliver({ deliveryId: inactive })],
         ];
         for (const [label, make] of requests) {
             const viaMember = await snapshot(await member(make()));
@@ -399,5 +420,78 @@ describe('[#22756] the veto is installed without realtime or auto-enqueue, and t
         const { slot, plugin } = await boot({ guardable: false });
         expect(slot()).toBeUndefined();
         expect(plugin.lines('error', 'exposes no registerRedeliverGuard')).toHaveLength(1);
+    });
+});
+
+/**
+ * [#22804] The veto refuses a delivery whose subscription is inactive.
+ *
+ * `active: false` is the operator's off switch for an endpoint, and the field
+ * declares that an inactive webhook is skipped by the dispatcher; an explicit
+ * replay is the dispatcher too. The refusal is the gone case's: `409
+ * DELIVERY_NOT_ELIGIBLE`, the row untouched, and a reason an operator can act
+ * on — it names the webhook, says it is inactive, and names the remedy.
+ * Each control below is what a refuse-everything veto would fail.
+ */
+describe('[#22804] the veto refuses a delivery whose subscription is inactive, at the door', () => {
+    const faces = (fixture: FixturePlugin, member: (r: Request) => Promise<Response>) => [
+        ['member', member],
+        ['mount', (r: Request) => fixture.canonicalApp.fetch(r)],
+    ] as const;
+
+    it('inactive: 409 DELIVERY_NOT_ELIGIBLE naming the webhook, its state and the remedy, on both faces', async () => {
+        const { fixture, member, attempted, statusOf } = await boot({ server: 'both' });
+        const inactive = await attempted(ORG_A, INACTIVE_SUBSCRIPTION);
+
+        for (const [face, send] of faces(fixture, member)) {
+            const answer = await snapshot(await send(redeliver({ deliveryId: inactive })));
+            expect(answer.status, face).toBe(409);
+            const body = json(answer);
+            expect(body, face).toMatchObject({ success: false, error: { code: 'DELIVERY_NOT_ELIGIBLE' } });
+            expect(body.error.message, face).toContain("webhook 'paused_hook'");
+            expect(body.error.message, face).toMatch(/\binactive\b/);
+            expect(body.error.message, face).toMatch(/re-activate the webhook, then redeliver/);
+        }
+        expect(await statusOf(inactive)).toBe('dead');
+    });
+
+    it('control: an active, signed subscription is replayed by both faces', async () => {
+        const { fixture, member, attempted, statusOf } = await boot({ server: 'both' });
+        for (const [face, send] of faces(fixture, member)) {
+            const id = await attempted(ORG_A, SIGNED_SUBSCRIPTION);
+            const answer = await snapshot(await send(redeliver({ deliveryId: id })));
+            expect(answer.status, face).toBe(200);
+            expect(json(answer), face).toEqual({ success: true, data: { id, status: 'pending' } });
+            expect(await statusOf(id), face).toBe('pending');
+        }
+    });
+
+    it('control: a gone subscription keeps its own refusal, unchanged', async () => {
+        const { fixture, member, attempted, statusOf } = await boot({ server: 'both' });
+        const gone = await attempted(ORG_A, GONE_SUBSCRIPTION);
+        for (const [face, send] of faces(fixture, member)) {
+            const answer = await snapshot(await send(redeliver({ deliveryId: gone })));
+            expect(answer.status, face).toBe(409);
+            const body = json(answer);
+            expect(body.error.code, face).toBe('DELIVERY_NOT_ELIGIBLE');
+            expect(body.error.message, face).toContain(GONE_SUBSCRIPTION);
+            expect(body.error.message, face).toContain('no longer exists');
+            expect(body.error.message, face).not.toMatch(/\binactive\b/);
+        }
+        expect(await statusOf(gone)).toBe('dead');
+    });
+
+    it('control: the same delivery is replayed once its webhook is re-activated', async () => {
+        const { fixture, member, attempted, statusOf } = await boot({ server: 'both' });
+        const id = await attempted(ORG_A, INACTIVE_SUBSCRIPTION);
+        expect((await member(redeliver({ deliveryId: id }))).status).toBe(409);
+        expect(await statusOf(id)).toBe('dead');
+
+        fixture.subscriptions.get(INACTIVE_SUBSCRIPTION)!.active = true;
+
+        const answer = await snapshot(await member(redeliver({ deliveryId: id })));
+        expect(answer.status).toBe(200);
+        expect(json(answer)).toEqual({ success: true, data: { id, status: 'pending' } });
+        expect(await statusOf(id)).toBe('pending');
     });
 });
