@@ -33,7 +33,7 @@ import { NON_BLANK_STRING } from '../shared/refinement-projection';
 // so this module's import graph gains nothing. ⛔ Never restate either here.
 import { STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
-import { FLOW_NODE_EXPRESSION_PATHS } from './flow-node-expression-paths';
+import { FLOW_NODE_EXPRESSION_PATHS, isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 import type { FlowNodeConfigRefusal, FlowSlotRefusalParams, NodeConfigValueKind } from './flow-node-expression-paths';
 // The executor contracts. Read only inside `getBuiltinNodeConfigContracts`,
 // never at module load: `control-flow.zod.ts` sits in the flow-schema import
@@ -229,17 +229,19 @@ function insideRegion(nodeType: string, path: ReadonlyArray<PropertyKey>): boole
 
 /**
  * Does an issue path descend INTO a ledger `value` slot (`fields.total.source`
- * under `fields.*`)? Such a slot holds an authored VALUE — a literal, a
- * `{token}` template, or an expression envelope — and a key missing inside it
- * is a malformed value, judged at `registerFlow` and `objectstack validate` by
- * the value-envelope pass with its own refusal, never a config key left out.
+ * under `fields.*`; since #19939 `fields[0].defaultValue.source` under a
+ * screen's `fields[].defaultValue`)? Such a slot holds an authored VALUE — a
+ * literal, a `{token}` template, or an expression envelope — and a key missing
+ * inside it is a malformed value, judged at `registerFlow` and `objectstack
+ * validate` by the value-envelope pass with its own refusal, never a config
+ * key left out. Matched segment by segment ({@link startsWithLedgerSlot}), so
+ * a slot under an array (`[]`) is recognised as well as one under a map.
  */
 function insideValueSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
   return FLOW_NODE_EXPRESSION_PATHS.some((entry) => {
     if (entry.nodeType !== nodeType || entry.role !== 'value') return false;
-    const segments = entry.path.split('.');
-    if (path.length <= segments.length) return false;
-    return segments.every((segment, i) => segment === '*' || segment === path[i]);
+    const segments = ledgerSlotSegments(entry.path);
+    return path.length > segments.length && startsWithLedgerSlot(segments, path);
   });
 }
 
@@ -308,22 +310,41 @@ function ledgerSlotSegments(path: string): string[] {
   return segments;
 }
 
+/** Does `path` begin with the ledger slot `segments` spell — `*` any key, `[]` any index? */
+function startsWithLedgerSlot(segments: readonly string[], path: ReadonlyArray<PropertyKey>): boolean {
+  if (path.length < segments.length) return false;
+  return segments.every((segment, i) =>
+    segment === '*' ? typeof path[i] === 'string'
+      : segment === '[]' ? typeof path[i] === 'number'
+        : segment === path[i]);
+}
+
 /**
  * [#21898] Does an issue path sit AT or INSIDE a `predicate` or `value` slot the
- * expression ledger declares for this node type? Those slots have judges of
- * their own: `predicateSlotRefusal` (whose non-strings the flow parse leaves to
- * `registerFlow` and `objectstack validate` by ruling — `flow.zod.ts`), and the
- * value-envelope pass.
+ * expression ledger declares for this node type, where that slot's own judge
+ * owns the finding? A `predicate` slot always has one: `predicateSlotRefusal`
+ * (whose non-strings the flow parse leaves to `registerFlow` and `objectstack
+ * validate` by ruling — `flow.zod.ts`).
+ *
+ * A `value` slot has two, and (#19939) only for the two forms they judge: the
+ * value-envelope pass owns a slot whose value is an envelope, and the
+ * value-slot judge owns a `{token}` in a literal — which the token carve-out in
+ * {@link builtinValueJudged} skips anyway. A LITERAL the contract refuses for
+ * its type has no other judge, so it stays this arm's: a screen's `recordId`
+ * takes a string literal and refuses `42` (`ScreenConfigSchema`), as it did
+ * when it was not a value slot. Every other value slot's literal arm refuses
+ * nothing but a token, so their verdicts do not move.
  */
-function atOrInsideJudgedLedgerSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): boolean {
+function atOrInsideJudgedLedgerSlot(
+  nodeType: string,
+  authored: Readonly<Record<string, unknown>>,
+  path: ReadonlyArray<PropertyKey>,
+): boolean {
   return FLOW_NODE_EXPRESSION_PATHS.some((entry) => {
     if (entry.nodeType !== nodeType || !LEDGER_JUDGED_ROLES.has(entry.role)) return false;
     const segments = ledgerSlotSegments(entry.path);
-    if (path.length < segments.length) return false;
-    return segments.every((segment, i) =>
-      segment === '*' ? typeof path[i] === 'string'
-        : segment === '[]' ? typeof path[i] === 'number'
-          : segment === path[i]);
+    if (!startsWithLedgerSlot(segments, path)) return false;
+    return entry.role !== 'value' || isExpressionEnvelopeShaped(authoredAt(authored, path.slice(0, segments.length)));
   });
 }
 
@@ -348,8 +369,8 @@ interface ContractIssue {
  *    spelling before the doors that convert first;
  *  - an ADR-0031 region slot, the slot itself included (`try: 5`): a region's
  *    shape is `validateControlFlow`'s, and its nodes are the region walk's;
- *  - a `predicate` or `value` ledger slot, at or inside it
- *    ({@link atOrInsideJudgedLedgerSlot});
+ *  - a `predicate` ledger slot, at or inside it, and a `value` one whose value
+ *    is an envelope ({@link atOrInsideJudgedLedgerSlot});
  *  - a run-resolved key ({@link RUN_RESOLVED_KEYS});
  *  - a value carrying a `{token}` anywhere inside it: it is never refused for
  *    its pre-interpolation type, even where the executor parses the authored
@@ -366,7 +387,7 @@ function builtinValueJudged(
   if (issue.code === 'unrecognized_keys') return false;
   if (isRetiredKeyIssue(issue)) return false;
   if ((FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).some((slot) => slot.key === issue.path[0])) return false;
-  if (atOrInsideJudgedLedgerSlot(nodeType, issue.path)) return false;
+  if (atOrInsideJudgedLedgerSlot(nodeType, authored, issue.path)) return false;
   if ((RUN_RESOLVED_KEYS[nodeType] ?? []).includes(issue.path[0] as string)) return false;
   if (carriesInterpolationToken(authoredAt(authored, issue.path))) return false;
   if (PARSED_AFTER_INTERPOLATION.has(nodeType) && issue.code === 'custom' && carriesInterpolationToken(authored)) return false;
@@ -605,8 +626,9 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    contract below uses. Kept only where {@link builtinValueJudged} holds —
  *    key MEMBERSHIP is not judged by this bullet (an undeclared key is the
  *    next one's, a tombstoned key nobody's here), nor a region slot, a
- *    `predicate` / `value` ledger slot, a run-resolved key, or any value
- *    carrying a `{token}`: never refused for its pre-interpolation type.
+ *    `predicate` ledger slot, a `value` ledger slot holding an envelope, a
+ *    run-resolved key, or any value carrying a `{token}`: never refused for
+ *    its pre-interpolation type.
  *  - (#21982) A key the contract does not declare, on every builtin
  *    {@link builtinNodeConfigKeysJudged} judges (every one, `try_catch`
  *    included since #22343) → `node-config-refused-by-contract`, anchored at

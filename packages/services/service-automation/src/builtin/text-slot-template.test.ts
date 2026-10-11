@@ -195,13 +195,15 @@ describe('#22110 — the doors around a text slot', () => {
         expect(emitted[0]!.payload).toMatchObject({ title: 'Push failed for Acme Corp', body: 'Reason: connection refused' });
     });
 
-    it('a screen renders its title / description holes, and its `recordId` keeps the single-brace dialect', async () => {
+    // [#19939] `recordId` is a value slot now: the id is a CEL envelope,
+    // evaluated before the screen goes on the wire (`screen-value-slots.test.ts`).
+    it('a screen renders its title / description holes, and its `recordId` envelope is evaluated to the id', async () => {
         const { engine } = harness();
         engine.registerFlow('edit', {
             name: 'edit', label: 'edit', type: 'screen',
             nodes: [
                 { id: 'start', type: 'start', label: 'Start' },
-                { id: 'form', type: 'screen', label: 'Edit', config: { objectName: 'account', mode: 'edit', recordId: '{record.id}', title: 'Edit {{ record.name }}', description: 'Tier {{ record.meta.tier | upper }}' } },
+                { id: 'form', type: 'screen', label: 'Edit', config: { objectName: 'account', mode: 'edit', recordId: { dialect: 'cel', source: 'record.id' }, title: 'Edit {{ record.name }}', description: 'Tier {{ record.meta.tier | upper }}' } },
             ],
             edges: [{ id: 'e0', source: 'start', target: 'form' }],
         } as never);

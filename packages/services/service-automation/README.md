@@ -188,7 +188,7 @@ a CEL value envelope, and text is a `{{ }}` template.**
 | Start-node `condition` | CEL — bare, no braces | `record.amount > 500` |
 | Edge `condition` | CEL — bare, no braces | `record.status == 'open'` |
 | Decision `conditions[].expression` | CEL — bare, no braces | `order_amount > 10000` |
-| Value slots — `create_record` / `update_record` `fields`, `assignment` values, and the maps handed to a callee: `subflow` / `map` `input`, `script` `inputs` | CEL value envelope; a plain string is the literal text it spells | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'` |
+| Value slots — `create_record` / `update_record` `fields`, `assignment` values, the maps handed to a callee: `subflow` / `map` `input`, `script` `inputs`, and a `screen`'s `defaults`, field `defaultValue` and `recordId`, each evaluated before the screen is served | CEL value envelope; a plain string is the literal text it spells (`recordId`'s literal is the id, a string) | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'` |
 | Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
 
 A value slot refuses every `{…}` template token — `registerFlow()` and
@@ -208,8 +208,8 @@ Inside an object or list value, and in the legacy `assignment` shapes, an
 envelope is data: build the whole value as one envelope (a CEL map or list
 literal, its mixed values wrapped in `dyn(…)`), or move the assignment into the
 `assignments` map. Other value-like positions — a `filter`, `recipients`, an
-`http` payload, a screen's `defaults` — still read the single-brace dialect
-(`{record.id}`).
+`http` payload, a `map` or `loop` `collection` — still read the single-brace
+dialect (`{record.id}`).
 
 A `subflow` or `map` `input`, and a `script`'s `inputs`, hand their values to a
 callee: each envelope is evaluated in the calling flow's scope (on a `map`, once
