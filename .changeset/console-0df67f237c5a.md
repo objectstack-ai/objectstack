@@ -65,7 +65,7 @@ Clause-②: yes (widening: the html-page save gate and `os validate` read the SD
      gate does not refuse). Nothing that passed before is refused now.
      The range carries one declared-breaking objectui change, by its author's breaking
      annotation and not by a declared `major`: objectui#6349 batch 10 (`12ff25631`), the
-     row type of `@object-ui/collaboration`'s `VersionHistory` timeline is declared as
+     row type of `@object-ui/plugin-designer`'s `VersionHistory` timeline is declared as
      `VersionHistoryEntry` instead of `VersionEntry`. An objectui TypeScript type; no
      ObjectStack key. No commit subject in the range carries `!`. -->
 
