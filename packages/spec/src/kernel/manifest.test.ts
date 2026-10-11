@@ -831,14 +831,10 @@ describe('ManifestSchema.installModes (ADR-0131 D6)', () => {
     expect(parsed).not.toHaveProperty('installModes');
   });
 
-  it('refuses an empty list, a mode named twice and an unknown mode', () => {
+  it('refuses an empty list and an unknown mode', () => {
     const empty = ManifestSchema.safeParse({ ...legal, installModes: [] });
     expect(empty.success).toBe(false);
     expect(empty.error?.issues[0]?.message).toContain("omit the key for the default, ['managed']");
-
-    const twice = ManifestSchema.safeParse({ ...legal, installModes: ['managed', 'managed'] });
-    expect(twice.success).toBe(false);
-    expect(twice.error?.issues[0]?.message).toContain('more than once');
 
     const unknown = ManifestSchema.safeParse({ ...legal, installModes: ['template'] });
     expect(unknown.success).toBe(false);

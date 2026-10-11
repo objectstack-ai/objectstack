@@ -451,11 +451,6 @@ export function resolveInstallModes(
   return manifest?.installModes ?? DEFAULT_INSTALL_MODES;
 }
 
-/** The refusal of an `installModes` list naming one mode twice. */
-const INSTALL_MODES_DUPLICATE =
-  '`installModes` names the same install mode more than once — list each mode the package permits once, '
-  + "e.g. ['managed', 'unmanaged'].";
-
 export const ManifestSchema = strictObject({
   surface: 'this package manifest',
   history:
@@ -615,10 +610,11 @@ export const ManifestSchema = strictObject({
    * {@link INSTALL_MODES} for what each one does.
    *
    * Optional, with NO parse-time default: absent means `['managed']`, and every
-   * reader asks {@link resolveInstallModes} for that answer. Non-empty, each
-   * mode at most once. A package may permit `unmanaged` alone (a starter app a
-   * customer takes over wholesale); a deployment that walls organizations then
-   * refuses it outright.
+   * reader asks {@link resolveInstallModes} for that answer. Non-empty (omit the
+   * key instead of writing an empty list); naming a mode twice changes nothing,
+   * since a reader asks only whether a mode is listed. A package may permit
+   * `unmanaged` alone (a starter app a customer takes over wholesale); a
+   * deployment that walls organizations then refuses it outright.
    *
    * ⭐ Declared is enforced, at both ends:
    *  - at AUTHORING: `defineStack` (so `os validate` and `os build`) refuses a
@@ -635,7 +631,6 @@ export const ManifestSchema = strictObject({
    */
   installModes: z.array(InstallModeSchema)
     .min(1, '`installModes` lists at least one install mode — omit the key for the default, [\'managed\'].')
-    .refine((modes) => new Set(modes).size === modes.length, { message: INSTALL_MODES_DUPLICATE })
     .optional()
     .describe('Install modes this package permits (ADR-0131 D6): managed | unmanaged. Absent means [\'managed\'].'),
 
