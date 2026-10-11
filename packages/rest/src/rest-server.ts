@@ -414,6 +414,7 @@ import {
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
     nestedRefusalEnvelope,
+    sandboxFaultAnswer,
     boundedDeclaredUserMessage,
     boundedDeclaredRefusalMessage,
     declaredHttpStatus,
@@ -11283,7 +11284,17 @@ export class RestServer {
                     // now carry is the one they declare and the one the sibling
                     // face has always shipped. `ANALYTICS_QUERY_FAILED` remains
                     // this route's answer for an UNDECLARED fault, below.
-                    const declaredFault = declaredServerFaultAnswer(error);
+                    //
+                    // [#22764] A sandboxed body the doors answer as a FAULT is
+                    // asked first, for the order the doors ask it in: a body
+                    // that CRASHED is a fault whatever status it declared
+                    // (#17273), so it must not reach the declared-5xx relay, and
+                    // it never reaches ③b, whose `clientMsg` is the QuickJS
+                    // wrapper around the native error text for a crash (the
+                    // business read declines one). A sandboxed refusal that
+                    // declared a 5xx answers here too, the same bytes ③a gives
+                    // it: one classification, `/data`'s.
+                    const declaredFault = sandboxFaultAnswer(error) ?? declaredServerFaultAnswer(error);
                     if (declaredFault) {
                         return res.status(declaredFault.status).json({ ...declaredFault.body, ...markExtra });
                     }
@@ -11539,6 +11550,15 @@ export class RestServer {
                     return respondError(res, refusal.status, code, String(refusal.body.error ?? ''));
                 }
                 logError('[REST] Security explain error:', error);
+                // [#22764] A sandboxed body the doors answer as a fault (a
+                // crash, or a refusal declaring a 5xx) answers as the doors do,
+                // instead of the QuickJS wrapper relayed below. Status, code
+                // and message only, the refusal arm's scope above.
+                const fault = sandboxFaultAnswer(error);
+                if (fault) {
+                    const nested = nestedRefusalEnvelope(fault);
+                    return respondError(res, nested.status, nested.code, nested.message);
+                }
                 // The 500 arm keeps its 500-char cap: an unexpected fault's
                 // message is not a contract, and truncating it stays a
                 // sanitization step — only the position of the words moves.
@@ -12158,6 +12178,16 @@ export class RestServer {
                 return sendEnvelopeError(res, nested.status, nested.code, nested.message, nested.extra);
             }
             logError(`[REST] sharing-rule ${defaultCode}:`, err);
+            // [#22764] …and a sandboxed body the doors answer as a FAULT — one
+            // that crashed, or a refusal that declared a 5xx — answers as the
+            // doors do, logged above and withheld from the caller. The 500
+            // below relayed the QuickJS wrapper around the native error text.
+            // Nested, for the classified arm's reason.
+            const fault = sandboxFaultAnswer(err);
+            if (fault) {
+                const nested = nestedRefusalEnvelope(fault);
+                return sendEnvelopeError(res, nested.status, nested.code, nested.message, nested.extra);
+            }
             return res.status(500).json({ code: defaultCode, error: msg.slice(0, 500) });
         };
 
@@ -12365,6 +12395,14 @@ export class RestServer {
                 return respondError(res, nested.status, nested.code, nested.message, nested.extra);
             }
             logError(`[REST] suggested-bindings ${defaultCode}:`, err);
+            // [#22764] A sandboxed body the doors answer as a fault (a crash, or
+            // a refusal declaring a 5xx) answers as the doors do, through this
+            // family's one emitter, instead of the wrapper relayed below.
+            const fault = sandboxFaultAnswer(err);
+            if (fault) {
+                const nested = nestedRefusalEnvelope(fault);
+                return respondError(res, nested.status, nested.code, nested.message, nested.extra);
+            }
             // The 500 arm keeps its 500-char cap: an unexpected fault's message
             // is not a contract, and truncating it stays a sanitization step.
             return respondError(res, 500, defaultCode, String(err?.message ?? err).slice(0, 500));
@@ -12573,6 +12611,19 @@ export class RestServer {
             const refusal = classifiedRefusalAnswer(err);
             if (refusal) {
                 const nested = nestedRefusalEnvelope(refusal);
+                sendEnvelopeError(res, nested.status, nested.code, nested.message, nested.extra);
+                return true;
+            }
+            // [#22764] A sandboxed body the doors answer as a FAULT — one that
+            // crashed, or a refusal that declared a 5xx — answers as the doors
+            // do rather than reaching the caller's outer `500
+            // APPROVAL_*_FAILED`, which relayed the QuickJS wrapper around the
+            // native error text. Logged here because answering it skips the
+            // outer arm's log line, and the operator is now the only reader.
+            const fault = sandboxFaultAnswer(err);
+            if (fault) {
+                logError('[REST] approval error:', err);
+                const nested = nestedRefusalEnvelope(fault);
                 sendEnvelopeError(res, nested.status, nested.code, nested.message, nested.extra);
                 return true;
             }
