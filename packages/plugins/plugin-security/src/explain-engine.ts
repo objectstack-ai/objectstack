@@ -2242,20 +2242,12 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   let recordVerdict: ExplainDecision['record'] | undefined;
   let posture: AuthzPosture | undefined;
   if (input.recordId) {
-    const out = await applyRecordAttribution({
-      deps, object, recordId: input.recordId, engineOp: dataOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed,
-      vamaEffective, vamaSets, declaredColumns, depthScope: scope,
-    });
-    recordVerdict = out.record;
-    posture = out.posture;
     // [#21771] Ruling A on the write doors: a row the principal cannot READ is
     // a row that does not exist, so an update or delete of it answers what a
-    // nonexistent id answers. The record verdict says so in its own vocabulary
-    // — the missing-record shape, `visible: false` with no decider — wherever
-    // enforcement reaches that question: past the capability and object CRUD
-    // gates (which answer first, as they do here), for a principal with an
-    // identity, on a record that exists. (A system principal reads every row,
-    // so the question cannot change its verdict.)
+    // nonexistent id answers, wherever enforcement reaches that question: past
+    // the capability and object CRUD gates (which answer first, as they do
+    // here), for a principal with an identity. (A system principal reads every
+    // row, so the question cannot change its answer.)
     //
     // [#22571] The door asks that question of the by-id `update` and `delete`
     // the caller addresses (`addressedByIdWriteId` in `security-plugin.ts`),
@@ -2265,19 +2257,30 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     // ({@link rlsOperationForVerb}), never the verb as asked: keyed on the raw
     // verb, a transfer of a row the caller cannot read was reported visible
     // beside the transfer door's 404. `restore` and `purge` map the same way
-    // and are refused at the object gate first, so the rewrite never reaches
+    // and are refused at the object gate first, so the question never reaches
     // them while their grants are retired.
-    if (
+    //
+    // [#22761] The WHOLE record story answers it, not the record verdict
+    // alone. The question is asked before the row story is written, and a row
+    // the caller cannot read is then attributed exactly as an id no row
+    // carries: the decision's `record` (the missing-record shape,
+    // `visible: false` with no decider), every row-scoped layer's `record` and
+    // the tenant layer's verdict all come from that one path, so no part of the
+    // answer is written from the stored row the door withholds.
+    const readAbsent =
       (rlsOp === 'update' || rlsOp === 'delete') &&
-      deps.recordAbsentToCaller &&
-      context?.userId &&
-      recordVerdict.decidedBy !== 'required_permissions' &&
-      recordVerdict.decidedBy !== 'object_crud' &&
-      !(recordVerdict.visible === false && recordVerdict.decidedBy === undefined) &&
-      (await deps.recordAbsentToCaller(object, input.recordId, context))
-    ) {
-      recordVerdict = { recordId: input.recordId, visible: false };
-    }
+      !capsDeny &&
+      crudAllowed &&
+      Boolean(context?.userId) &&
+      deps.recordAbsentToCaller !== undefined &&
+      (await deps.recordAbsentToCaller(object, input.recordId, context));
+    const out = await applyRecordAttribution({
+      deps: readAbsent ? { ...deps, fetchRecord: async () => null } : deps,
+      object, recordId: input.recordId, engineOp: dataOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed,
+      vamaEffective, vamaSets, declaredColumns, depthScope: scope,
+    });
+    recordVerdict = out.record;
+    posture = out.posture;
   }
 
   const decision: ExplainDecision = {

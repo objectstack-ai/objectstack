@@ -31,6 +31,9 @@ export * from './metadata-service.js';
 export * from './metadata-service-roundtrip-conformance.js';
 export * from './auth-service.js';
 export * from './automation-service.js';
+// The inbound-hook trigger's own slot (`trigger-api`), beside the automation
+// service it registers its `api` trigger into (#22772).
+export * from './trigger-api-service.js';
 export * from './analytics-service.js';
 export * from './realtime-service.js';
 export * from './job-service.js';
