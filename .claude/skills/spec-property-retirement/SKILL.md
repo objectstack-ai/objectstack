@@ -210,10 +210,12 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       「没有 alias 窗口,故意的」;对**默认值翻转**,只有确知输入早于翻转的 seam 才可重
       放,其余按 id 退订 `excludeConversionIds` —— `app-hidden-to-unpublished` 在 artifact
       门即如此。
-- [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts`;`conversion.toMajor` **必须等于**该步的
-      major。**18 步**:conversion 只进 `conversions/registry.ts` 的 `MAJOR_18_CONVERSIONS`,照其头注按
-      标识符排序插入,本步 `conversionIds` 由它派生;`rationale` 只加一个 `STEP18_RATIONALE` 片段,
-      按其头注插在你 D3 semantic id 的排序位;尾部追加被两处头注点名的 merge 测试拒收。
+- [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts.template`(`registry.ts` 由
+      `gen:migration-registry` 从它与 `entries/` 整文件生成并被 git 忽略,在 `registry.ts` 里手改不会
+      进提交);`conversion.toMajor` **必须等于**该步的 major。**18 步**:conversion 只进
+      `conversions/registry.ts` 的 `MAJOR_18_CONVERSIONS`,照其头注按标识符排序插入,本步 `conversionIds`
+      由它派生;`rationale` 只加一个 `STEP18_RATIONALE` 片段,按其头注插在你 D3 semantic id 的排序
+      位;尾部追加被两处头注点名的 merge 测试拒收。
       **更早的步**:id 加进 `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步 `rationale`。⚠ 没有东西
       直接断言「每个 conversion 都接进了某一步」,拼错的 id 在 replay 时被**静默跳过**;
       chain-replay 测试抓得到它,只因为没接线的 fixture 永远到不了自己的 `after`。
@@ -257,7 +259,7 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       无墓碑删键 → 该行**消失**,这是门 (a) 的绊线,所以同一个 PR 里有意删掉它)与
       `json-schema.manifest/<category>.json`。#5837 起两者都按 category 分片 —— 门
       禁把整个目录读成一个集合,退役流程不变;变的只是那一行住在哪个文件。然后
-      `gen:spec-changes`、`gen:upgrade-guide`、`gen:api-surface`、`gen:docs`。
+      `gen:api-surface`、`gen:docs`;新条目跑 `gen:migration-registry`;D4 投影不提交,本地不重生成。
       「改了 X → 重新生成 Y」的表见 AGENTS.md。
 - [ ] **Forms** —— 从 `packages/spec/src/**/*.form.ts` 剪掉 `{ field: '<key>' }` 输
       入。未强制能力的表单输入是假合规的 UI 半边。原位留一行注释。
@@ -332,6 +334,4 @@ pnpm check:i18n && pnpm --filter @objectstack/spec test
 - **截断的 grep 漏掉编写者。** `| head -8` 藏掉了 `SKILL.md` 的 `defineSkill` 示
   例;`examples/` 有三处 `template: true`,不是一处。先按上下文找文件,再进文件里
   grep 键 —— 且把 `tsc` 和门禁当权威清扫器。
-- **只改 conversion 的 `summary` 也会过期。** 那个字符串被逐字抄进
-  `spec-changes.json` 的 `to` 字段与 upgrade guide 的表行,所以纯散文改动也要
-  `gen:spec-changes` + `gen:upgrade-guide`,和任何别的改动一样。
+- **只改 conversion 的 `summary` 不欠重生成。** 它逐字进两条 D4 投影,都不提交;PR 渲染其 diff。
