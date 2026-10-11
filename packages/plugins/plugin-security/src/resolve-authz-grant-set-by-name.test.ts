@@ -96,7 +96,10 @@ async function boot(opts: { walled?: boolean } = {}): Promise<Engine> {
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ([...defaultPermissionSets] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [...defaultPermissionSets],
     },
     ...(opts.walled
@@ -175,12 +178,24 @@ describe('[ADR-0131 D4] a grant whose id names another organization’s set conf
     }
   });
 
-  it('CONTROL — an organization’s own grant of that set confers it, in that organization only', async () => {
+  // [ADR-0131 D3/D4] The set is the catalog's definition of its name: a set
+  // only an organization's ROW carries confers nothing, to that organization's
+  // own grant too (#15196 Q3 A) — and declared, it confers.
+  it('an organization’s own grant of a set only its row carries confers nothing, even in that organization', async () => {
     const engine = await world();
     await engine.insert('sys_user_permission_set',
       { id: 'g_own', user_id: 'usr_x', permission_set_id: 'ps_b_tools', organization_id: ORG_B },
       { context: SYS } as any);
     expect((await grant(engine, 'g_own'))?.permission_set).toBe('b_tools');
+    expect((await resolveUserAuthzGrants(engine, 'usr_x', { tenantId: ORG_B })).systemPermissions).not.toContain('cap_b');
+  });
+
+  it('CONTROL — the same grant of a set the catalog declares confers it, in that organization only', async () => {
+    const engine = await world();
+    engine.registry.registerItem('permission', { name: 'b_tools', systemPermissions: ['cap_b'] } as any, 'name' as any, CATALOG_PACKAGE);
+    await engine.insert('sys_user_permission_set',
+      { id: 'g_own', user_id: 'usr_x', permission_set_id: 'ps_b_tools', organization_id: ORG_B },
+      { context: SYS } as any);
     expect((await resolveUserAuthzGrants(engine, 'usr_x', { tenantId: ORG_B })).systemPermissions).toContain('cap_b');
     expect((await resolveUserAuthzGrants(engine, 'usr_x', { tenantId: ORG_A })).systemPermissions).not.toContain('cap_b');
   });
@@ -220,7 +235,10 @@ describe('[ADR-0131 D4] the upgrade boot — no request reaches the resolver bef
       engine.registry.registerItem('permission', structuredClone(ps) as any, 'name' as any, CATALOG_PACKAGE);
     }
     engine.registry.registerItem(
-      'permission', { name: 'upgrade_reviewer', label: 'Reviewer', objects: {} } as any, 'name' as any, CATALOG_PACKAGE,
+      'permission',
+      { name: 'upgrade_reviewer', label: 'Reviewer', objects: {}, systemPermissions: ['cap_review'] } as any,
+      'name' as any,
+      CATALOG_PACKAGE,
     );
     // Stored before this boot: the set row, and a grant with no name.
     await engine.insert('sys_permission_set',
@@ -234,7 +252,10 @@ describe('[ADR-0131 D4] the upgrade boot — no request reaches the resolver bef
 
     const seen: Record<string, string[]> = {};
     const metadata = {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ([...defaultPermissionSets] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [...defaultPermissionSets],
     };
     const kernel = new LiteKernel({ logger: { level: 'silent' } });

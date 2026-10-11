@@ -139,7 +139,10 @@ async function boot(posture: Posture, opts: { ledger?: boolean } = {}): Promise<
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ([...defaultPermissionSets, QA_ADMIN] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [...defaultPermissionSets, QA_ADMIN],
     },
     ...(posture === 'isolated'
@@ -623,7 +626,10 @@ describe('[ADR-0131 D4] grant name backfill — on a real kernel boot', () => {
     expect((await grant(engine, 'g_late'))?.permission_set).toBeNull();
 
     const metadata = {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ([...defaultPermissionSets] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [...defaultPermissionSets],
     };
     const kernel = new LiteKernel({ logger: { level: 'silent' } });

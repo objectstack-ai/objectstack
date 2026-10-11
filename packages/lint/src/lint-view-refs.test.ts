@@ -2,13 +2,27 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  lintViewRefs,
+  lintViewRefs as lintViewRefsUnrecorded,
   VIEW_KEY_COLLISION,
   VIEW_REF_FORM_TARGET_MISSING,
   VIEW_REF_FORM_TARGET_KIND,
   VIEW_REF_NAV_VIEW_MISSING,
 } from './lint-view-refs.js';
 import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the two converted ids is one verdict sentence; the
+// reasoning it used to carry is the id's `os explain` entry. Every direct call
+// below records what it fired, and the last cases in this file hold each
+// recorded verdict of those ids to one line of at most 200 characters — every
+// firing variant this suite exercises, not a chosen few. Run the whole file:
+// those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const lintViewRefs: typeof lintViewRefsUnrecorded = (...args) => {
+  const findings = lintViewRefsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 const listView = (object: string) => ({
   type: 'grid',
@@ -405,4 +419,86 @@ describe('#14108 acceptance — a nav viewName miss gates `validate` AND `build`
       expect([...errors, ...advisories].filter((f) => f.rule === VIEW_REF_NAV_VIEW_MISSING)).toEqual([]);
     });
   }
+});
+
+describe('[#22161] one-line verdicts — view-ref-nav-view-missing, view-key-collision', () => {
+  const CONVERTED = [VIEW_REF_NAV_VIEW_MISSING, VIEW_KEY_COLLISION];
+
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => CONVERTED.includes(f.rule));
+    // The coverage control first: both ids fired, and the nav id on both arms.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...CONVERTED].sort());
+    const nav = converted.filter((f) => f.rule === VIEW_REF_NAV_VIEW_MISSING);
+    expect(nav.some((f) => f.message.includes('resolves to a FORM view'))).toBe(true);
+    expect(nav.some((f) => !f.message.includes('resolves to a FORM view'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence, and keeps the list views — they are the fix', () => {
+    const [miss] = navFindings(
+      navStack({ id: 'nav_schedule', type: 'object', objectName: 'duly_task', viewName: 'A4_no_such_view', label: 'S' }),
+    );
+    expect(miss!.message).toBe(
+      "Navigation entry opens view 'A4_no_such_view' on object 'duly_task', which has no such list view, " +
+        'so it silently opens the default view. List views: board, default, schedule',
+    );
+    const [form] = navFindings(navStack({ id: 'n', type: 'object', objectName: 'duly_task', viewName: 'edit', label: 'E' }));
+    expect(form!.message).toBe(
+      "Navigation entry opens view 'edit' on object 'duly_task', which has no such list view (the name " +
+        'resolves to a FORM view), so it silently opens the default view. List views: board, default, ' +
+        'schedule',
+    );
+    const [collision] = lintViewRefs({
+      views: [{ name: 'task', list: listView('task'), formViews: { default: formView('task') } }],
+    }).filter((f) => f.rule === VIEW_KEY_COLLISION);
+    expect(collision!.message).toBe(
+      "View key collision: the form view 'task.default' was renamed to 'task.default_2', so every " +
+        "reference to 'task.default' resolves to the OTHER view",
+    );
+  });
+
+  it('quotes at most three list views, then counts the rest', () => {
+    const many = {
+      ...NAV_OBJECT,
+      listViews: {
+        ...NAV_OBJECT.listViews,
+        archive: navListView('duly_task', 'Archive', 'title'),
+        mine: navListView('duly_task', 'Mine', 'title'),
+      },
+    };
+    const [miss] = navFindings({
+      objects: [many],
+      apps: [{ name: 'duly', navigation: [{ id: 'n', type: 'object', objectName: 'duly_task', viewName: 'nope', label: 'N' }] }],
+    });
+    expect(miss!.message).toMatch(/List views: archive, board, default \(and 2 more\)$/);
+  });
+
+  it('`os explain` carries what the verdicts no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [VIEW_REF_NAV_VIEW_MISSING]: [
+        'authored label and icon',
+        'browser-console warning',
+        '`resolveViewId`',
+        '`all` is not special-cased',
+        'view switcher never offers one',
+        '`requiresObject`',
+        '`recordId`',
+      ],
+      [VIEW_KEY_COLLISION]: [
+        '`OBJECT.KEY_2`',
+        "`type: 'form'` action target",
+        'navigation `viewName`',
+        '`view-ref-form-target-kind`',
+      ],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
+  });
 });

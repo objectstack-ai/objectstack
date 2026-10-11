@@ -296,13 +296,26 @@ export function createPositionWriteThrough(
   const environmentOwns = (name: unknown): name is string =>
     typeof name === 'string' && name !== '' && !packageHoldsPosition(ql, name);
 
-  const saveDefinition = (door: PositionMetadataDoor, row: Record<string, unknown>, actor?: string) =>
-    door.saveMetaItem({
+  /**
+   * [ADR-0131 D3/D4] Save the definition a row carries. `permissionSets` has no
+   * row column, so the list the stored definition under `carriedFrom` names
+   * (the row's name before this write) travels into the saved body — a row
+   * edit never clears a binding the metadata door declared. A registry that
+   * cannot be read throws, and the caller undoes the row write.
+   */
+  const saveDefinition = (door: PositionMetadataDoor, row: Record<string, unknown>, actor?: string, carriedFrom?: unknown) => {
+    const item = positionBodyFromRow(row);
+    const stored = typeof carriedFrom === 'string' && carriedFrom !== ''
+      ? (ql?.registry?.getItem?.(POSITION_METADATA_TYPE, carriedFrom) as { permissionSets?: unknown } | undefined)?.permissionSets
+      : undefined;
+    if (Array.isArray(stored) && stored.length > 0) item.permissionSets = [...stored];
+    return door.saveMetaItem({
       type: POSITION_METADATA_TYPE,
       name: String(row.name),
-      item: positionBodyFromRow(row),
+      item,
       ...(actor ? { actor } : {}),
     });
+  };
 
   /**
    * Delete `name`'s environment definition once no row carries the name any
@@ -460,7 +473,7 @@ export function createPositionWriteThrough(
       // stage and can have no definition — the edit stays a row write.
       if (!renamed && !metadataDoorAcceptsPositionName(post.name)) continue;
       try {
-        await saveDefinition(door, post, actor);
+        await saveDefinition(door, post, actor, pre.name);
         saved.push(pair);
       } catch (e) {
         await undoUpdate(targets, patch);
@@ -501,7 +514,7 @@ export function createPositionWriteThrough(
       if (pre.name !== post.name) {
         await door.deleteMetaItem({ type: POSITION_METADATA_TYPE, name: String(post.name), ...(actor ? { actor } : {}) });
       } else {
-        await saveDefinition(door, pre, actor);
+        await saveDefinition(door, pre, actor, pre.name);
       }
     } catch (e) {
       logError(

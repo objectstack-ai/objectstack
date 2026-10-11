@@ -2365,6 +2365,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       description: {
         label: "描述"
       },
+      permissionSets: {
+        label: "权限集",
+        helpText: "该岗位分配的权限集，按名称填写（snake_case）。"
+      },
       delegatable: {
         label: "可自助委派",
         helpText: "持有者可自行委派该岗位，需限定时段并填写理由（ADR-0091 D3）。默认 false——委派仅限管理员。"

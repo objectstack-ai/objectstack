@@ -98,6 +98,14 @@ const RESERVED_OUTPUT_KEYS = new Set(['decision', 'requestId']);
 const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
 
 /**
+ * [#22161] The closing clause both empty-slate verdicts share under the
+ * default `lockRecord: true` — one wording, so the two arms cannot drift. What
+ * recovers such a record is the `approval-approvers-may-resolve-empty`
+ * explanation's text (`os explain`), not the verdict's.
+ */
+const STAYS_LOCKED = ', and (lockRecord) the record stays locked';
+
+/**
  * How an operator actually populates `sys_user.manager_id` (#16748 / #16678).
  *
  * ⚠️ STILL NOT "edit the user in the Console". The column is `readonly: true`
@@ -272,8 +280,9 @@ const TYPE_FIX: Record<string, string> = {
  * non-empty `manager_id` demonstrably knows about the column and populates it,
  * so the advisory below would be noise there. A stack that seeds none has given
  * the linter nothing, which is not the same as the column being unset at
- * runtime — hence the advisory's wording, which flags the SHAPE and explicitly
- * does not assert the slate is empty.
+ * runtime — hence the advisory's wording, which flags the SHAPE and is
+ * conditional ("where … is unset"): it does not assert the slate is empty, and
+ * its `os explain` entry says why.
  *
  * ⛔ This is deliberately NOT "every seeded user has a manager": the top of any
  * real reporting chain legitimately has none, so an all-rows test would fire on
@@ -443,10 +452,11 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             rule: APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
             where,
             path: `${path}.value`,
+            // [#22161] One verdict; what the type resolves against and why a
+            // business role is a position is `os explain` text.
             message:
-              `approver { type: '${type}', value: '${value}' } resolves against the better-auth ` +
-              `org-membership tier (sys_member.role: ${MEMBERSHIP_TIER_LIST}) — '${value}' is not ` +
-              `a membership tier, so this approver matches nobody and the request stalls.`,
+              `approver { type: '${type}', value: '${value}' } names no org-membership tier ` +
+              `(${MEMBERSHIP_TIER_LIST}), so it matches nobody and the request stalls`,
             hint:
               `If '${value}' is an org position, author { type: 'position', value: '${value}' } ` +
               `(resolved via sys_user_position, ADR-0090 D3). Keep type 'org_membership_level' ` +
@@ -533,11 +543,12 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           rule: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
           where,
           path: `${nodePath}.config.approvers`,
+          // [#22161] One verdict sentence; why staffing is unreadable here and
+          // what recovers a stuck request is `os explain` text.
           message:
-            `every approver on this node routes to a group (position/team/department) whose ` +
-            `members are runtime data — if none is staffed, the request resolves to an empty ` +
-            `slate and waits forever` +
-            (locks ? `, and (lockRecord) the record stays locked with no in-product recovery.` : `.`),
+            `every approver on this node routes to a group (position/team/department), so if ` +
+            `none is staffed the request opens on an empty slate and waits forever` +
+            (locks ? STAYS_LOCKED : ''),
           hint:
             `Make sure at least one target is always staffed, or add a guaranteed-staffed ` +
             `approver entry, e.g. { type: 'org_membership_level', value: 'owner' }, or declare ` +
@@ -568,9 +579,9 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
       // verdict, mixed slates included, exactly as it was.
       //
       // Advisory (`info`), the same tier as its sibling: this reads the SHAPE.
-      // It does not read row data, and the message says so rather than
+      // It does not read row data, so the message is conditional rather than
       // asserting a slate is empty — a lint rule must not claim a runtime fact
-      // it did not read. `stackWiresManagerChain` is the one manager-chain fact
+      // it did not read (the explanation states that limit in full). `stackWiresManagerChain` is the one manager-chain fact
       // a stack CAN put in front of it, and it silences the advisory.
       if (
         !managerChainWired &&
@@ -583,13 +594,13 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
           rule: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
           where,
           path: `${nodePath}.config.approvers`,
+          // [#22161] Conditional on purpose — the rule cannot read the column,
+          // so the verdict says what happens WHERE it is unset and asserts no
+          // runtime fact; that reasoning is `os explain` text.
           message:
-            `every approver on this node is { type: 'manager' }, resolved at runtime from ` +
-            `sys_user.manager_id of the record's owner — a static check cannot read that column, ` +
-            `so this does not assert the slate IS empty; it reports that nothing else on the node ` +
-            `can approve if it is. Where manager_id is unset the expansion returns nobody, the ` +
-            `request resolves to an empty slate and waits forever` +
-            (locks ? `, and (lockRecord) the record stays locked with no in-product recovery.` : `.`),
+            `every approver on this node is { type: 'manager' }, so where sys_user.manager_id ` +
+            `is unset the request opens on an empty slate and waits forever` +
+            (locks ? STAYS_LOCKED : ''),
           hint:
             `${MANAGER_ONLY_REMEDY} ${MANAGER_ONLY_ROUTES} Populate it for everyone who submits ` +
             `this request, or take the other escape that needs none of that: add a second approver ` +

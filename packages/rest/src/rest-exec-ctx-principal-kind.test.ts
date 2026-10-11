@@ -24,6 +24,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { hashApiKey } from '@objectstack/core';
 import { runWithPerfDisclosure, type PerfDisclosureGate } from '@objectstack/observability';
 import { RestServer } from './rest-server';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const TASK = {
     name: 'task',
@@ -46,7 +47,7 @@ const RAW_API_KEY = 'osk_6071_rest_face';
  * `admin_full_access` grant for `admin1` (→ PLATFORM_ADMIN). Everything else
  * resolves empty.
  */
-const makeQl = () => ({
+const makeQl = () => bindTestSecurityCatalog({
     find: async (object: string, opts: any) => {
         const where = opts?.where ?? {};
         if (object === 'sys_api_key') {
@@ -70,7 +71,7 @@ const makeQl = () => ({
         }
         return [];
     },
-});
+}, { permissions: [{ name: 'admin_full_access' }, { name: 'member_default' }] });
 
 /** A fake auth service whose session is keyed off the request's `cookie` header. */
 const makeAuth = () => ({

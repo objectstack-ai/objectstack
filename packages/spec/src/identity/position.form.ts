@@ -6,7 +6,7 @@ import { defineForm } from '../ui/view.zod';
  * Position — canonical FormView layout.
  *
  * Positions are flat capability-distribution groups (ADR-0090 D3): name,
- * label, optional description. No hierarchy — the org tree lives on
+ * label, optional description, and the permission sets they distribute. No hierarchy — the org tree lives on
  * business units. Single section is enough; the FormView gives the editor
  * friendly labels and required markers.
  */
@@ -17,12 +17,15 @@ export const positionForm = defineForm({
     {
       label: 'Position',
       description:
-        'A position is a flat, assignable bundle of permission sets (e.g. sales_rep, sales_manager). Capability lives on permission sets; visibility depth lives on the business-unit tree.',
+        'A position is a flat, assignable bundle of permission sets (e.g. sales_rep, sales_manager): it names the sets it distributes. Capability lives on permission sets; visibility depth lives on the business-unit tree.',
       columns: 2,
       fields: [
         { field: 'name', required: true, helpText: 'snake_case' },
         { field: 'label', required: true },
         { field: 'description', colSpan: 2 },
+        // [ADR-0131 D3/D4] The sets a holder of this position holds, by name —
+        // what the authorization resolver reads (the junction rows grant nothing).
+        { field: 'permissionSets', type: 'tags', colSpan: 2, helpText: 'Permission sets this position distributes, by name (snake_case).' },
         // #19331 — `delegatable` is declared by PositionSchema and was offered by
         // no control, so the only door to an ADR-0091 D3 self-service delegation
         // was the Source tab's free-text JSON. A boolean node takes the boolean

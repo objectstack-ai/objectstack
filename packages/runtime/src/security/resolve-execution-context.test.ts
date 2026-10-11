@@ -6,6 +6,7 @@ import { ObjectKernel, isAuthzStoreUnavailableError, isServiceNotRegisteredError
 
 import { resolveExecutionContext } from './resolve-execution-context.js';
 import { hashApiKey } from './api-key.js';
+import { bindCatalogFromTables } from './security-catalog.testkit.js';
 
 /**
  * Minimal ObjectQL stub. Only `sys_api_key` is populated; every other object
@@ -329,7 +330,7 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
       sys_position_permission_set: [],
       sys_user_position: [],
     };
-    return {
+    return bindCatalogFromTables({
       async find(object, opts) {
         const rows = tables[object] ?? [];
         const where = opts?.where ?? {};
@@ -344,7 +345,7 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
           return true;
         }), opts);
       },
-    };
+    }, tables);
   }
   const opts = (ql) => ({ getService: async () => undefined, getQl: async () => ql, request: { headers: { 'x-api-key': RAW } } });
 
@@ -505,7 +506,7 @@ describe('resolveExecutionContext — ADR-0090 D10 agent principal (OAuth on /mc
       sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access', system_permissions: '["manage_users","manage_platform_settings"]', object_permissions: '{}' }],
       sys_position: [], sys_position_permission_set: [], sys_user_position: [],
     };
-    return {
+    return bindCatalogFromTables({
       async find(object: string, opts: any) {
         return bounded((tables[object] ?? []).filter((row) =>
           Object.entries(opts?.where ?? {}).every(([k, v]) =>
@@ -515,7 +516,7 @@ describe('resolveExecutionContext — ADR-0090 D10 agent principal (OAuth on /mc
           ),
         ), opts);
       },
-    };
+    }, tables);
   };
   const agentWithQl = (scopes: string[], ql: any) => ({
     acceptOAuthAccessToken: true,

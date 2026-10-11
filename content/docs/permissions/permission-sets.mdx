@@ -211,7 +211,8 @@ process reload.
 
 ## Assigning permission sets
 
-Grants are plain data rows:
+A direct grant is a data row; a position's sets are declared on the position's
+definition:
 
 ```typescript
 // Grant a set to a single user (direct grant)
@@ -220,12 +221,20 @@ await objectql.object('sys_user_permission_set').insert({
   permission_set_id: psId,
 });
 
-// Bind a set to a position (everyone holding it gets the set)
-await objectql.object('sys_position_permission_set').insert({
-  position_id: positionId,
-  permission_set_id: psId,
+// A position names the sets it distributes (everyone holding it gets them)
+import { definePosition } from '@objectstack/spec/identity';
+
+export const salesRep = definePosition({
+  name: 'sales_rep',
+  label: 'Sales Representative',
+  permissionSets: ['crm_sales_user'],
 });
 ```
+
+Each name in `permissionSets` is resolved in the environment's catalog when a
+holder's grants are resolved; a name the catalog does not hold confers nothing.
+A `sys_position_permission_set` row confers nothing either: the position's
+definition is the only binding that grants.
 
 These writes are **governed** (ADR-0090 D12): tenant-level admins pass
 through to the ordinary checks; a delegated admin needs a covering
@@ -264,9 +273,11 @@ accepted set — it previously reached the query as a filter nothing matched, so
 a mistyped status returned an empty list that read as "no suggestions".
 
 All three require a tenant-level administrator (the anchors are tenant-level
-only — D12). Confirm writes the `sys_position_permission_set` row **as the
+only — D12). Confirm writes a `sys_position_permission_set` row **as the
 caller**, so the audience-anchor gate re-checks the forbidden-bits predicate
-at the data layer; a suggestion whose binding was created out-of-band (boot
+at the data layer. That row does not grant the set: what `everyone` grants is
+the `permissionSets` its definition names, so a confirmed suggestion changes no
+one's access until the set is named there. A suggestion whose binding was created out-of-band (boot
 baseline, manual bind) is marked `confirmed` automatically, and uninstalling
 the package prunes its pending suggestions. Studio surfaces pending
 suggestions after marketplace installs and in the Access pillar.

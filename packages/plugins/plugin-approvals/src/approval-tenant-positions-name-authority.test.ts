@@ -75,6 +75,7 @@ import { resolveUserAuthzGrants } from '@objectstack/core';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
 import { ApprovalService, type ApprovalNodeAutoOutcome } from './approval-service.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 interface FakeRow { [k: string]: any }
 
@@ -156,12 +157,12 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
       if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
-  return {
+  return bindCatalogFromTables({
     async find(object: string, opts: any) {
       const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
       return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },
-  };
+  }, tables);
 }
 
 type Shape = 'row-org-owner' | 'row-org-admin' | 'genuine' | 'plain';

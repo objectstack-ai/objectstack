@@ -16,13 +16,16 @@ import path from 'node:path';
 
 import {
   ARTIFACT_NAME,
+  BASE_REGISTRY,
   SUMMARY_DIFF_CAP,
   describeDeltas,
   fenceFor,
+  generateBaseRegistry,
   idDeltas,
   renderProjectionDiff,
   renderSummary,
   type Generate,
+  type RunScript,
 } from './render-projection-diff';
 
 let tmp: string;
@@ -146,6 +149,113 @@ describe('render-projection-diff — the generated diff on a pull request', () =
 
     expect(result.code).toBe(1);
     expect(result.headline).toContain('wrote neither');
+  });
+});
+
+describe('render-projection-diff — a base whose migration registry is git-ignored', () => {
+  /** A base `packages/spec` laid out as its archive would be: the generator and/or the registry, or neither. */
+  function baseSpecDir(has: { generator: boolean; registry: boolean }): string {
+    const dir = path.join(tmp, 'base-tree', 'packages', 'spec');
+    fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+    if (has.generator) fs.writeFileSync(path.join(dir, 'scripts', BASE_REGISTRY.generator), '');
+    if (has.registry) {
+      fs.mkdirSync(path.dirname(path.join(dir, BASE_REGISTRY.file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, BASE_REGISTRY.file), '// committed\n');
+    }
+    return dir;
+  }
+
+  /** A fake runner that records each call and, unless told otherwise, writes the registry the way the generator does. */
+  function recorder(result: { status: number; write: boolean; output?: string }) {
+    const calls: [string, string][] = [];
+    const run: RunScript = (dir, script) => {
+      calls.push([dir, script]);
+      if (result.write) fs.writeFileSync(path.join(dir, BASE_REGISTRY.file), '// generated\n');
+      return { status: result.status, output: result.output ?? '' };
+    };
+    return { calls, run };
+  }
+
+  it('an archive with the generator but no registry runs the BASE generator in the base tree', () => {
+    const dir = baseSpecDir({ generator: true, registry: false });
+    fs.mkdirSync(path.dirname(path.join(dir, BASE_REGISTRY.file)), { recursive: true });
+    const { calls, run } = recorder({ status: 0, write: true });
+
+    expect(generateBaseRegistry(dir, run)).toBe(true);
+    expect(calls).toEqual([[dir, 'build-migration-registry.ts']]);
+    expect(fs.readFileSync(path.join(dir, BASE_REGISTRY.file), 'utf8')).toBe('// generated\n');
+  });
+
+  it('a base that committed its registry keeps it, and a base without the generator is left as it is', () => {
+    for (const has of [{ generator: true, registry: true }, { generator: false, registry: true }, { generator: false, registry: false }]) {
+      fs.rmSync(path.join(tmp, 'base-tree'), { recursive: true, force: true });
+      const dir = baseSpecDir(has);
+      const { calls, run } = recorder({ status: 0, write: true });
+
+      expect(generateBaseRegistry(dir, run)).toBe(false);
+      expect(calls).toEqual([]);
+      if (has.registry) expect(fs.readFileSync(path.join(dir, BASE_REGISTRY.file), 'utf8')).toBe('// committed\n');
+    }
+  });
+
+  it('a base registry generator that fails, or exits 0 without writing, is thrown with its output', () => {
+    const dir = baseSpecDir({ generator: true, registry: false });
+
+    // First line names the generator and its exit; the generator's output follows it — the
+    // shape the failure summary splits on.
+    expect(() => generateBaseRegistry(dir, recorder({ status: 1, write: false, output: 'entry failed to parse' }).run)).toThrow(
+      /^build-migration-registry\.ts exited 1\b[^\n]*\nentry failed to parse$/,
+    );
+    expect(() => generateBaseRegistry(dir, recorder({ status: 0, write: false }).run)).toThrow(
+      /^build-migration-registry\.ts exited 0\b[^\n]*src\/migrations\/registry\.ts/,
+    );
+  });
+
+  it('a base whose registry cannot be generated is RED, named as the base', () => {
+    const dir = baseSpecDir({ generator: true, registry: false });
+    const generate: Generate = (_dir, script, out) => {
+      fs.writeFileSync(out, script === 'build-spec-changes.ts' ? BASE.json : BASE.guide);
+      return { status: 0, output: '' };
+    };
+    const head = path.join(tmp, 'head-tree', 'packages', 'spec');
+    fs.mkdirSync(head, { recursive: true });
+    const outDir = path.join(tmp, 'out');
+    const result = renderProjectionDiff({
+      repoRoot: tmp,
+      baseSha: 'b'.repeat(40),
+      baseLabel: 'HEAD^1 = bbbbbbbbbb',
+      outDir,
+      headSpecDir: head,
+      generate,
+      materializeBase: () => {
+        generateBaseRegistry(dir, recorder({ status: 1, write: false, output: 'entry failed to parse' }).run);
+        return dir;
+      },
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.headline).toContain('base HEAD^1 = bbbbbbbbbb: build-migration-registry.ts exited 1');
+    expect(result.summary).toContain('entry failed to parse');
+  });
+
+  it('the default runner executes the base generator by its own path, with the base package as cwd', () => {
+    const dir = baseSpecDir({ generator: true, registry: false });
+    // Resolves its package root from its own path, as the real generator does.
+    fs.writeFileSync(
+      path.join(dir, 'scripts', BASE_REGISTRY.generator),
+      [
+        "import { mkdirSync, writeFileSync } from 'node:fs';",
+        "import { dirname, join } from 'node:path';",
+        "import { fileURLToPath } from 'node:url';",
+        "const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');",
+        "mkdirSync(join(pkgRoot, 'src', 'migrations'), { recursive: true });",
+        "writeFileSync(join(pkgRoot, 'src', 'migrations', 'registry.ts'), `// cwd ${process.cwd()}\\n`);",
+        '',
+      ].join('\n'),
+    );
+
+    expect(generateBaseRegistry(dir)).toBe(true);
+    expect(fs.readFileSync(path.join(dir, BASE_REGISTRY.file), 'utf8')).toBe(`// cwd ${fs.realpathSync(dir)}\n`);
   });
 });
 

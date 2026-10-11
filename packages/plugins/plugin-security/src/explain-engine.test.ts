@@ -9,6 +9,7 @@ import { explainAccess, buildContextForUser, resolveDelegatorContext, type Expla
 import { RLS_DENY_FILTER } from './rls-compiler';
 import { unresolvedPostureRemedy } from './unresolved-posture';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import { bindCatalogFromTables, ledgerFromTables } from './__tests__/security-catalog.testkit.js';
 
 // [commit a68c61267] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
 // (ADR-0122), in which every `.default([])` member is OPTIONAL before a parse:
@@ -869,10 +870,15 @@ type Rows = Record<string, any[]>;
 
 /** Minimal `where`-honouring ObjectQL stand-in: scalar equality and `$in`. */
 function makeGrantQl(tables: Rows) {
-  return {
+  return bindCatalogFromTables({
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
-      return (tables[object] ?? []).filter((row) =>
+      // [ADR-0131 D3] The resolver reads deactivation from the activation
+      // ledger: a fixture's `active: false` rows reach it as the ledger rows the
+      // upgrade ceremony converts them to. The explainer's own "deactivated"
+      // annotation still reads the row (stage 2 moves it).
+      const stored = object === 'sys_metadata_activation' && !tables[object] ? ledgerFromTables(tables) : tables[object];
+      return (stored ?? []).filter((row) =>
         Object.entries(where).every(([key, cond]) => { if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`); 
           const cell = row[key];
           // `null` matches a null-valued AND a key-absent cell — the memory
@@ -885,7 +891,7 @@ function makeGrantQl(tables: Rows) {
         }),
       );
     },
-  };
+  }, tables);
 }
 
 const NOW = Date.parse('2026-07-10T12:00:00Z');
@@ -1457,11 +1463,11 @@ describe('buildContextForUser bypasses the #11971 grants cache (ruled bypass lis
         return () => { listeners.delete(l); };
       },
     };
-    return {
+    return bindCatalogFromTables({
       ...makeGrantQl(tables),
       writeEpoch: epoch,
       registerMiddleware(fn: Middleware): void { middlewares.push(fn); },
-    };
+    }, tables);
   }
 
   it('with the cache ON and provably stale, the explainer still observes the revocation immediately', async () => {
@@ -1827,14 +1833,14 @@ describe('[#20515] buildContextForUser and resolveDelegatorContext resolve in an
   describe('resolveDelegatorContext: the delegator is resolved in the live principal\'s organization', () => {
     const delegatorQl = () => {
       const t = tables();
-      return {
+      return bindCatalogFromTables({
         ...makeGrantQl(t),
         async findOne(object: string, opts: EngineFindOneQueryInput) {
           assertEngineFindOnePredicate(object, opts);
           const id = (opts as any)?.where?.id;
           return (t[object] ?? []).find((r) => r.id === id) ?? null;
         },
-      };
+      }, t);
     };
 
     it('live principal in org_alpha → the delegator\'s org_alpha grant applies, its org_beta grant does not', async () => {

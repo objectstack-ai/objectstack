@@ -126,6 +126,23 @@ export type ObjectDeclarationProvider = (objectName: string) => ObjectDeclaratio
 const ANALYTICS_OPERATION = 'aggregate';
 
 /**
+ * [#22661] The operation a dimension LABEL's target is judged as: `get`, not
+ * {@link ANALYTICS_OPERATION}.
+ *
+ * A label turns an id the grid already holds into the display name of the
+ * record it names — the read `GET /data/{target}/{id}` performs, judged `get`
+ * on the data routes. It aggregates nothing over the target: the bridge's
+ * `group by (id, name)` is a per-record read dressed as an aggregate (one row
+ * per id, bounded to `id $in` the grouped values). A relationship-hop
+ * dimension (`<lookup>.<column>`) is the different read — it groups the base
+ * rows by a target column — and the query face judges it `aggregate` over
+ * `queryObjects`, unchanged. `get` is also the operation the data door's
+ * `$expand` asks of the same target, so a lookup renders its name, or its
+ * stored id, alike on both doors for every `apiMethods` shape.
+ */
+const LABEL_TARGET_OPERATION = 'get';
+
+/**
  * The data door's two exposure codes, the same pair the REST data routes and
  * the MCP data tools answer. Typed against the ledger so a misspelling fails
  * `tsc`.
@@ -309,6 +326,45 @@ export function assertDefinitionExposed(
     if (reason === null) continue;
     throw unexposedDefinitionError(kind, name, object, reason, enable!);
   }
+}
+
+/**
+ * [#22661] The LABEL face: may the dimension-label passes read `target` — the
+ * object a reference-class dimension (`lookup` / `master_detail` / `user` /
+ * `tree`) points at — to turn a grouped id into the target record's display
+ * name?
+ *
+ * Both label passes (the display pass, `resolveDimensionLabels`, and the
+ * sort-key pass, `createOrderLabelResolver`) read a SECOND object the query
+ * faces above never ask about: the dataset's base object and its hops are
+ * judged, the label target was not, so a dataset over an exposed object
+ * rendered the display names of an object every data route refuses. Asked the
+ * spec's one decision, for {@link LABEL_TARGET_OPERATION} (`get`, which says
+ * why), and it takes no caller.
+ *
+ * Withheld, not refused, and that is the precedent measured on this door: a
+ * label the target's row scope hides, or whose scope cannot be resolved, is
+ * not fetched and the stored id renders. An unexposed target answers the same
+ * way, and a provider that THROWS answers it too — no label is read on a
+ * declaration nobody could read (fail-closed, reported at `warn`: a display
+ * degradation, not a refused query).
+ */
+export function servesLabelTarget(
+  target: string,
+  provider: ObjectDeclarationProvider,
+  logger?: ExposureLogger,
+): boolean {
+  let enable: EnableLike | null | undefined;
+  try {
+    enable = (provider(target) ?? undefined)?.enable as EnableLike | null | undefined;
+  } catch (e) {
+    logger?.warn(
+      `[Analytics] the API exposure declaration of "${target}" could not be resolved — its display ` +
+        `labels are not read and the stored ids render (fail-closed): ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return false;
+  }
+  return apiExposureDenialReason(enable, LABEL_TARGET_OPERATION) === null;
 }
 
 /**
