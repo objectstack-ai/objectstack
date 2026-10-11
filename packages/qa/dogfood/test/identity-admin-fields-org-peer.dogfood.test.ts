@@ -47,6 +47,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { SysUser } from '@objectstack/platform-objects/identity';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const DOMAIN = 'org-peer-21237.verify.test';
@@ -149,8 +150,8 @@ describe('[#21237] the identity object Admin group at the HTTP door: org peers a
       await memberOf(uid[who], role);
     }
 
-    const [activitySet] = await findRows(ql, 'sys_permission_set', { name: activityReadSet.name }, 1);
-    expect(activitySet, 'fixture permission set seeded').toBeTruthy();
+    const activitySet = await catalogPermissionSet(ql, activityReadSet.name);
+    expect(activitySet, 'fixture permission set served by the security catalog').toBeTruthy();
     for (const who of ['member', 'owner', 'admin']) {
       await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: activitySet.name }, { context: SYS });
     }

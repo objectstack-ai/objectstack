@@ -238,10 +238,12 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
     it('[control] finds a set that really seeded — so its negative reading is a real negative', async () => {
       const verdict = await seededArmed({
         stack: outside,
-        object: 'sys_permission_set',
-        where: { name: 'member_default' },
-        control: 'the platform baseline permission set',
-        disarmedBy: 'a permission set that failed to seed grants the principal nothing',
+        // [C3 stage 6b-2] A row that really landed: the member this suite
+        // signed up. No boot writes a `sys_permission_set` row any more.
+        object: 'sys_user',
+        where: { email: 'armed-outside@verify.test' },
+        control: 'the signed-up member',
+        disarmedBy: 'a sign-up that never landed holds nothing',
       }).read();
       expect(verdict.armed).toBe(true);
       expect(verdict.observed).toContain('is seeded');
@@ -262,8 +264,8 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
     it('reports DISARMED when the row exists but fails its own predicate', async () => {
       const verdict = await seededArmed({
         stack: outside,
-        object: 'sys_permission_set',
-        where: { name: 'member_default' },
+        object: 'sys_user',
+        where: { email: 'armed-outside@verify.test' },
         armed: () => false,
         control: 'a seeded row that must also carry something',
         disarmedBy: 'the row seeded but not the part the control rides on',
@@ -383,10 +385,10 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
           }),
           seededArmed({
             stack: inside,
-            object: 'sys_permission_set',
-            where: { name: 'member_default' },
-            control: 'the platform baseline permission set',
-            disarmedBy: 'a set that failed to seed grants the principal nothing',
+            object: 'sys_user',
+            where: { email: 'armed-inside@verify.test' },
+            control: 'the signed-up member',
+            disarmedBy: 'a sign-up that never landed holds nothing',
           }),
         ]),
       ).resolves.toBeUndefined();

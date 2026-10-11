@@ -44,6 +44,7 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 
 import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { SysPosition } from './objects/sys-position.object.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
@@ -158,6 +159,8 @@ async function grantsByPrincipal(posture: Posture): Promise<Record<string, unkno
   await user('usr_member', 'member@eq.example', '2025-03-01T00:00:00.000Z');
 
   // The catalog and (single) the platform-admin promotion — the promote writer.
+  // An existing database: the platform-bucket rows an earlier release seeded.
+  await seedLegacyPlatformBucket(engine, defaultPermissionSets);
   const boot = await bootstrapPlatformAdmin(engine, defaultPermissionSets);
   expect(boot.adminPromoted).toBe(posture === 'single');
 

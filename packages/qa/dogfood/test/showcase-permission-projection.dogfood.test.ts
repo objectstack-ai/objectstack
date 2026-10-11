@@ -33,6 +33,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { ensureLegacyPermissionSetRow } from './catalog-permission-set.js';
 
 describe('sys_permission_set pure projection (ADR-0094)', () => {
   let stack: VerifyStack;
@@ -45,6 +46,11 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
     protocol = await stack.kernel.getServiceAsync('protocol');
+    // [C3 stage 6b-2] The declared-set cases run on an EXISTING database:
+    // no boot writes these rows any more, but an earlier one did, and the
+    // data door still guards them.
+    await ensureLegacyPermissionSetRow(ql, 'showcase_contributor', { managedBy: 'package' });
+    await ensureLegacyPermissionSetRow(ql, 'member_default', { managedBy: 'platform' });
   }, 60_000);
   afterAll(async () => { await stack?.stop(); });
 

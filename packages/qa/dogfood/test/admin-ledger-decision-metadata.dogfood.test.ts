@@ -71,6 +71,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const LEDGER = 'sys_audit_log';
 const USER = 'sys_user';
@@ -264,8 +265,7 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
       token[who] = await stack.signUp(email);
       const userId = await idOf(USER, { email });
       for (const name of READERS[who]) {
-        const setId = await idOf('sys_permission_set', { name });
-        expect(setId, `fixture permission set ${name} seeded`).toBeTruthy();
+        expect(await catalogPermissionSet(ql, name), `fixture permission set ${name} served by the security catalog`).toBeTruthy();
         await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
       }
     }

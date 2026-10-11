@@ -62,6 +62,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ensureLegacyPermissionSetRow } from './catalog-permission-set.js';
 
 /** Package-relative refs resolve against the cwd — see the sibling cold-boot files. */
 const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
@@ -163,7 +164,11 @@ describe('[#21789] the permission-set lock reads the row\'s provenance — the t
         expect(created.status, JSON.stringify(await created.clone().json().catch(() => ({})))).toBe(201);
 
         // Shape 3: a clone, made the way the Setup dialog makes it — the payload
-        // is built from the shipped action's own declaration.
+        // is built from the shipped action's own declaration. [C3 stage 6b-2]
+        // On an EXISTING database: no boot writes the shipped set's row any
+        // more, but an earlier one did (the server clone door, stage CD, is
+        // what reaches a fresh database).
+        await ensureLegacyPermissionSetRow(ql, SHIPPED, { managedBy: 'package' });
         const [base] = await ql.find('sys_permission_set', { where: { name: SHIPPED }, limit: 1 }, SYS);
         const read = await stack.apiAs(token, 'GET', `/data/sys_permission_set/${base.id}`);
         const served: any = await read.json();

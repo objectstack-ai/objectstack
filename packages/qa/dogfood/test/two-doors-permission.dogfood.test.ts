@@ -26,6 +26,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { getSharedShowcase } from './shared-showcase.js';
+import { ensureLegacyPermissionSetRow } from './catalog-permission-set.js';
 
 describe('two-doors permission separation (ADR-0086 P2)', () => {
   let stack: VerifyStack;
@@ -38,45 +39,18 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
     adminToken = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
     protocol = await stack.kernel.getServiceAsync('protocol');
+    await ensureLegacyPermissionSetRow(ql, 'showcase_contributor', { managedBy: 'package' });
+    await ensureLegacyPermissionSetRow(ql, 'member_default', { managedBy: 'platform' });
   }, 60_000);
 
   const findSet = async (name: string) =>
     (await ql.find('sys_permission_set', { where: { name } }, { context: { isSystem: true } }))?.[0];
 
-  // ── 块1 — package door: draft → publish → materialize ────────────────────
-  it('块1: publishing a package permission draft materializes a package-managed row', async () => {
-    // An unregistered authoring-workspace id is a WRITABLE base (isWritablePackage),
-    // standing in for the package the studio package door edits.
-    const PKG = 'com.example.twodoors_ws';
-    const NAME = 'twodoors_pkgset';
-
-    await protocol.saveMetaItem({
-      type: 'permission',
-      name: NAME,
-      mode: 'draft',
-      packageId: PKG,
-      item: {
-        name: NAME,
-        label: 'Two Doors Set',
-        objects: { crm_lead: { allowRead: true, allowCreate: true } },
-      },
-    });
-
-    // Draft only — enforcement/admin-surface must NOT see it yet.
-    expect(await findSet(NAME), 'a draft must not materialize a data row').toBeFalsy();
-
-    const pub = await protocol.publishMetaItem({ type: 'permission', name: NAME });
-    expect(pub.materializeApplied, 'publish surfaces the materialize result').toBeTruthy();
-    expect(pub.materializeApplied.success).toBe(true);
-
-    const row = await findSet(NAME);
-    expect(row, 'published set is now a real record').toBeTruthy();
-    expect(row.managed_by).toBe('package');
-    expect(row.package_id).toBe(PKG);
-    expect(JSON.parse(row.object_permissions || '{}')).toEqual({
-      crm_lead: { allowRead: true, allowCreate: true },
-    });
-  });
+  // [C3 stage 6b-2] 块1 — a package-door publish materializing a
+  // `managed_by:'package'` row — retired with the publish materializer
+  // (ADR-0131 D3: the boot and the publish write no catalog row). The 块2
+  // cases below run on an EXISTING database, where the rows an earlier boot
+  // seeded still stand and the data door still guards them.
 
   // ── 块2 — admin door: artifact-backed rows now REFUSE the overlay (commit ee58392e1) ─
   it('块2: an admin edit of a package-managed set is refused — no env overlay is minted (#6483)', async () => {

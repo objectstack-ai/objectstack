@@ -68,6 +68,7 @@ import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plug
 import { ExplainOperationSchema, PermissionSetSchema, type ExplainOperation, type PermissionSet } from '@objectstack/spec/security';
 import { cpgStack, cpgBaselineSet, cpgFilesAndThreadsSet } from './fixtures/cbp-parent-gates-fixture.js';
 import { assertArmed, principalArmed } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -257,8 +258,8 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     memberId = await uid('cpe-member@verify.test');
     stewardTok = await stack.signUp('cpe-steward@verify.test');
     stewardId = await uid('cpe-steward@verify.test');
-    const stewardSet = await ql.findOne('sys_permission_set', { where: { name: contractStewardSet.name }, context: SYS });
-    expect(stewardSet?.id, 'fixture permission set seeded').toBeTruthy();
+    const stewardSet = await catalogPermissionSet(ql, contractStewardSet.name);
+    expect(stewardSet, 'fixture permission set served by the security catalog').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: stewardId, permission_set: stewardSet.name }, { context: { ...SYS } });
 
     await assertArmed([
@@ -472,8 +473,8 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     beforeAll(async () => {
       boardStewardTok = await stack.signUp('cpe-board-steward@verify.test');
       const boardStewardId = await uid('cpe-board-steward@verify.test');
-      const set = await ql.findOne('sys_permission_set', { where: { name: boardStewardSet.name }, context: SYS });
-      expect(set?.id, 'board steward permission set seeded').toBeTruthy();
+      const set = await catalogPermissionSet(ql, boardStewardSet.name);
+      expect(set, 'board steward permission set served by the security catalog').toBeTruthy();
       await ql.insert('sys_user_permission_set', { user_id: boardStewardId, permission_set: set.name }, { context: { ...SYS } });
       await assertArmed([
         principalArmed({

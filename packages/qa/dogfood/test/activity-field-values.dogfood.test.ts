@@ -47,6 +47,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const OBJ = 'afv_item';
 const CAP_UNMASK = 'afv_unmask';
@@ -177,8 +178,7 @@ describe('[#21081] activity rows serve a parent field value only to a reader ser
       const userId = await idOf('sys_user', { email });
       const sets = who === 'writer' ? READERS.control : READERS[who as keyof typeof READERS];
       for (const name of sets) {
-        const setId = await idOf('sys_permission_set', { name });
-        expect(setId, `fixture permission set ${name} seeded`).toBeTruthy();
+        expect(await catalogPermissionSet(ql, name), `fixture permission set ${name} served by the security catalog`).toBeTruthy();
         await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
       }
     }
