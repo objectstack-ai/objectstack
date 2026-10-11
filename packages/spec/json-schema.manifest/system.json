@@ -217,7 +217,6 @@
     "system/SettingsManifest",
     "system/SettingsNamespacePayload",
     "system/Sha256Digest",
-    "system/SmsProvider",
     "system/SocialProviderConfig",
     "system/Span",
     "system/SpanAttributeValue",

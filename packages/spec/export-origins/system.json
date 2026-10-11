@@ -589,8 +589,6 @@
     "SettingsUnsubscribe": "src/system/settings-client.zod.ts#SettingsUnsubscribe (type)",
     "Sha256Digest": "src/system/environment-artifact.zod.ts#Sha256Digest (type)",
     "Sha256DigestSchema": "src/system/environment-artifact.zod.ts#Sha256DigestSchema (const)",
-    "SmsProvider": "src/system/sms-config.zod.ts#SmsProvider (type)",
-    "SmsProviderSchema": "src/system/sms-config.zod.ts#SmsProviderSchema (const)",
     "SocialProviderConfig": "src/system/auth-config.zod.ts#SocialProviderConfig (type)",
     "SocialProviderConfigParsed": "src/system/auth-config.zod.ts#SocialProviderConfigParsed (type)",
     "SocialProviderConfigSchema": "src/system/auth-config.zod.ts#SocialProviderConfigSchema (const)",

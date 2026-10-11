@@ -398,8 +398,6 @@
     "SettingsNamespacePayloadSchema": "system/SettingsNamespacePayload",
     "Sha256Digest": "system/Sha256Digest",
     "Sha256DigestSchema": "system/Sha256Digest",
-    "SmsProvider": "system/SmsProvider",
-    "SmsProviderSchema": "system/SmsProvider",
     "SocialProviderConfig": "system/SocialProviderConfig",
     "SocialProviderConfigSchema": "system/SocialProviderConfig",
     "Span": "system/Span",

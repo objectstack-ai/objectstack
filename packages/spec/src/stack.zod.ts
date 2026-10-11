@@ -618,15 +618,16 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     ),
 
   /**
-   * SMS configuration — {@link StackSmsConfigSchema}: the non-secret members
-   * `resolveSmsCapabilityArg` reads. Provider credentials (`providerOptions`)
-   * are refused here by name; they live in the `sms` settings namespace and
-   * its `OS_SMS_*` environment overrides.
+   * SMS configuration — {@link StackSmsConfigSchema}: `retries`, the one
+   * member `resolveSmsCapabilityArg` reads that a stack can deliver. The
+   * provider and its credentials (`provider`, `providerOptions`) are refused
+   * here by name: the delivering transport is built by the `sms` settings
+   * namespace from its own settings and their `OS_SMS_*` environment overrides.
    */
   sms: StackSmsConfigSchema.optional()
     .describe(
-      'SMS configuration (provider tag and retries; OS_SMS_PROVIDER env wins). Provider credentials are not '
-      + 'authorable here: Setup → Settings → SMS Delivery, or its OS_SMS_* env overrides',
+      'SMS configuration — retries only. The provider and its credentials are not authorable here: '
+      + 'Setup → Settings → SMS Delivery, or OS_SMS_PROVIDER and the other OS_SMS_* env overrides',
     ),
 
   /**

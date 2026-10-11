@@ -1,8 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // A `defineStack`-built `email` / `sms` / `appName` reaches the providers
-// `objectstack serve` constructs — and the SMS provider vocabulary the stack
-// declares is the one the transports can build.
+// `objectstack serve` constructs.
 //
 // The stack definition used to refuse all three keys while the mail and SMS
 // readers read them, so the configuration arm of both readers was reachable
@@ -17,23 +16,16 @@
 // pinned by the source scan in `serve-auth-app-name.contract.test.ts`; the two
 // files together are the reading from authored stack to constructed provider.
 //
-// The second half is a CROSS-PACKAGE vocabulary assertion, for the reason
-// `@objectstack/plugin-email`'s `spec-provider-parity.contract.test.ts` gives
-// for mail: `SmsProviderSchema` (the authoring contract) and
-// `SMS_TRANSPORT_PROVIDERS` (the array `makeSmsTransport` switches on) are two
-// literals describing one vocabulary, and two literals left alone drift. It
-// lives here because this package depends on both `@objectstack/spec` and
-// `@objectstack/service-sms`; the SMS package's own tests read no spec value.
-// This package's `tsconfig.json` includes `src`, tests and all, so the
-// compile-time half below is real.
+// `sms` carries `retries` alone: the stack refuses `sms.provider` by name,
+// because the delivering SMS transport is built by the `sms` settings
+// namespace from its own provider setting (`OS_SMS_PROVIDER`), so the provider
+// below always comes from the environment.
 
 import { describe, it, expect } from 'vitest';
 import { resolveCapabilityArgument } from '@objectstack/core';
 import { defineStack } from '@objectstack/spec';
-import { SmsProviderSchema, type SmsProvider } from '@objectstack/spec/system';
 import * as pluginEmail from '@objectstack/plugin-email';
 import * as serviceSms from '@objectstack/service-sms';
-import { SMS_TRANSPORT_PROVIDERS, type SmsProviderTag } from '@objectstack/service-sms';
 
 const manifest = {
   id: 'com.example.mailer',
@@ -79,17 +71,17 @@ describe('a defineStack-built email / sms / appName reaches the providers serve 
     expect(pluginEmail.resolveDeploymentAppName(stack.email ?? {}, {}, stack.appName)).toBe('Acme');
   });
 
-  it('sms { provider, retries } reaches the SMS provider', () => {
-    const stack = defineStack({ manifest, sms: { provider: 'twilio', retries: 3 } });
-    expect(argumentFor('sms', stack, {})).toEqual({ provider: 'twilio', retries: 3 });
+  it('sms { retries } reaches the SMS provider, beside the provider OS_SMS_PROVIDER names', () => {
+    const stack = defineStack({ manifest, sms: { retries: 3 } });
+    expect(argumentFor('sms', stack, {})).toEqual({ provider: 'log', retries: 3 });
+    expect(argumentFor('sms', stack, { OS_SMS_PROVIDER: 'twilio' })).toEqual({ provider: 'twilio', retries: 3 });
   });
 
-  it('OS_EMAIL_* / OS_SMS_PROVIDER still override the stack per key', () => {
-    const stack = defineStack({ manifest, email: { provider: 'log', retries: 1 }, sms: { provider: 'log' } });
+  it('OS_EMAIL_* still override the stack per key', () => {
+    const stack = defineStack({ manifest, email: { provider: 'log', retries: 1 } });
     const email = argumentFor('email', stack, { OS_EMAIL_PROVIDER: 'smtp', OS_EMAIL_SMTP_HOST: 'relay.example', OS_EMAIL_RETRIES: '4' });
     expect(email.provider).toBe('smtp');
     expect(email.retries).toBe(4);
-    expect(argumentFor('sms', stack, { OS_SMS_PROVIDER: 'aliyun' }).provider).toBe('aliyun');
   });
 
   it('CONTROL — env-only configuration is unchanged: a stack with no block builds what the reader builds from no config', () => {
@@ -108,26 +100,5 @@ describe('a defineStack-built email / sms / appName reaches the providers serve 
     expect(email.defaultTemplateContext.appName).toBe('Env Name');
     expect(argumentFor('sms', stack, env)).toEqual(serviceSms.resolveSmsCapabilityArg({}, env).options);
     expect(argumentFor('sms', stack, env)).toEqual({ provider: 'aliyun' });
-  });
-});
-
-/**
- * Compile-time halves of the vocabulary invariant: each union must be
- * assignable to the other, so a member added on one side only makes `true`
- * unassignable — a type error in this package's `typecheck`.
- */
-type SpecAssignableToTransport = SmsProvider extends SmsProviderTag ? true : never;
-type TransportAssignableToSpec = SmsProviderTag extends SmsProvider ? true : never;
-const MUTUALLY_ASSIGNABLE: [SpecAssignableToTransport, TransportAssignableToSpec] = [true, true];
-
-describe('SmsProviderSchema ↔ SMS_TRANSPORT_PROVIDERS', () => {
-  it('declares exactly the providers the SMS transports can build, both directions', () => {
-    expect(MUTUALLY_ASSIGNABLE).toEqual([true, true]);
-    const declared = [...SmsProviderSchema.options].sort();
-    const buildable = [...SMS_TRANSPORT_PROVIDERS].sort();
-    expect(declared.filter((p) => !buildable.includes(p as SmsProviderTag))).toEqual([]);
-    expect(buildable.filter((p) => !declared.includes(p))).toEqual([]);
-    // Anti-vacuity: two empty lists would agree.
-    expect(buildable.length).toBeGreaterThan(1);
   });
 });

@@ -272,12 +272,9 @@ import type * as M185 from './shared/epoch.zod.js';
 import type * as M187 from './shared/duration.zod.js';
 // [#18451] The build-progress PHASE vocabulary -- new module, next free index.
 import type * as M188 from './ai/build-progress.zod.js';
-// [#22748] The stack definition's SMS block and its provider vocabulary -- new
-// module, next free index.
-import type * as M189 from './system/sms-config.zod.js';
 
 // ---------------------------------------------------------------------------
-// 777 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 776 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1377,9 +1374,6 @@ export type Iso_system_settingsManifest__SpecifierScopeSchema = Assert<Eq< z.inp
 export type Iso_system_settingsManifest__SpecifierType = Assert<Eq< z.input< typeof M147.SpecifierType >, z.infer< typeof M147.SpecifierType > >>;
 export type Iso_system_settingsManifest__SpecifierValueDomainSchema = Assert<Eq< z.input< typeof M147.SpecifierValueDomainSchema >, z.infer< typeof M147.SpecifierValueDomainSchema > >>;
 
-// system/sms-config.zod.ts
-export type Iso_system_smsConfig__SmsProviderSchema = Assert<Eq< z.input< typeof M189.SmsProviderSchema >, z.infer< typeof M189.SmsProviderSchema > >>;
-
 // system/supplier-security.zod.ts
 export type Iso_system_supplierSecurity__SupplierAssessmentStatusSchema = Assert<Eq< z.input< typeof M148.SupplierAssessmentStatusSchema >, z.infer< typeof M148.SupplierAssessmentStatusSchema > >>;
 export type Iso_system_supplierSecurity__SupplierRiskLevelSchema = Assert<Eq< z.input< typeof M148.SupplierRiskLevelSchema >, z.infer< typeof M148.SupplierRiskLevelSchema > >>;
@@ -1680,7 +1674,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 777 isomorphic pins', () => {
+  it('still declares all 776 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2461,13 +2455,7 @@ describe('ADR-0122 type-alias convention', () => {
     // tree, so it is pinned here
     // (Iso_data_dataEngine__ValidationAdvisoryEventSchema) rather than given a
     // `ValidationAdvisoryEventParsed` synonym. +1 added.
-    //
-    // 776 -> 777 is #22748: the stack definition's new `sms` block types its
-    // provider with the new exported `SmsProviderSchema`, a bare enum with no
-    // default and no transform, so it is pinned here
-    // (Iso_system_smsConfig__SmsProviderSchema) rather than given an
-    // `SmsProviderParsed` synonym. +1 added.
-    expect(pins).toHaveLength(777);
+    expect(pins).toHaveLength(776);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

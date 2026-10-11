@@ -615,8 +615,6 @@
     "SettingsUnsubscribe (type)",
     "Sha256Digest (type)",
     "Sha256DigestSchema (const)",
-    "SmsProvider (type)",
-    "SmsProviderSchema (const)",
     "SocialProviderConfig (type)",
     "SocialProviderConfigParsed (type)",
     "SocialProviderConfigSchema (const)",

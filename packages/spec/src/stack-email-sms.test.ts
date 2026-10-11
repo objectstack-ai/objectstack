@@ -13,7 +13,10 @@
  * The delta is: the three keys are writable, carrying the NON-SECRET members the
  * readers read, and the credentials are refused BY NAME with the environment
  * variable that carries them. A stack definition is compiled into the
- * published artifact, which is why the credentials stop here.
+ * published artifact, which is why the credentials stop here. `sms` carries
+ * `retries` alone: `sms.provider` is refused by name too, because a stack
+ * cannot select the delivering SMS transport — the `sms` settings namespace
+ * builds it from its own provider setting (`OS_SMS_PROVIDER`).
  *
  * ## Why the refusals assert the envelope and the issue, never `toThrow()`
  *
@@ -33,7 +36,7 @@ import {
   STACK_DEFINITION_KEYS,
 } from './stack.zod';
 import { EmailServiceConfigSchema, StackEmailConfigSchema } from './system/email-config.zod';
-import { SmsProviderSchema, StackSmsConfigSchema } from './system/sms-config.zod';
+import { StackSmsConfigSchema } from './system/sms-config.zod';
 
 const manifest = {
   id: 'com.example.mailer',
@@ -95,9 +98,9 @@ describe('accept — appName, email and sms carry the non-secret configuration',
     expect(stack.email).toEqual(email);
   });
 
-  it('carries the SMS provider tag and retries', () => {
-    const stack = defineStack({ manifest, sms: { provider: 'twilio', retries: 1 } });
-    expect(stack.sms).toEqual({ provider: 'twilio', retries: 1 });
+  it('carries the SMS retries — the one SMS member a stack can deliver', () => {
+    const stack = defineStack({ manifest, sms: { retries: 1 } });
+    expect(stack.sms).toEqual({ retries: 1 });
   });
 
   it('the email block is DERIVED from EmailServiceConfigSchema: every member except the credential apiKey', () => {
@@ -153,8 +156,23 @@ describe('refuse — a credential on the stack names itself and its environment 
     expect(issue?.message).toContain('OS_EMAIL_API_KEY');
   });
 
+  it('sms.provider is refused by name, prescribing OS_SMS_PROVIDER and Settings — a stack cannot select the delivering transport', () => {
+    const raw = { manifest, sms: { provider: 'twilio', retries: 1 } };
+    const issue = unrecognized(parse(raw));
+    expect(issue?.path).toEqual(['sms']);
+    expect(issue?.keys).toEqual(['provider']);
+    expect(issue?.message).toContain('OS_SMS_PROVIDER');
+    expect(issue?.message).toContain('Settings → SMS Delivery');
+
+    const err = refusalOf(raw);
+    expect(err.code).toBe('STACK_SCHEMA_INVALID');
+    expect(err.status).toBe(422);
+    expect(err.message).toContain('`provider`');
+    expect(err.message).toContain('OS_SMS_PROVIDER');
+  });
+
   it('sms.providerOptions is refused by name, prescribing the sms settings namespace and its OS_SMS_* overrides', () => {
-    const raw = { manifest, sms: { provider: 'twilio', providerOptions: { accountSid: 'AC1', authToken: 'secret', from: '+15005550006' } } };
+    const raw = { manifest, sms: { providerOptions: { accountSid: 'AC1', authToken: 'secret', from: '+15005550006' } } };
     const issue = unrecognized(parse(raw));
     expect(issue?.path).toEqual(['sms']);
     expect(issue?.keys).toEqual(['providerOptions']);
@@ -167,17 +185,9 @@ describe('refuse — a credential on the stack names itself and its environment 
   });
 
   it('an SMS credential written flat on the block gets the same prescription', () => {
-    const issue = unrecognized(parse({ manifest, sms: { provider: 'twilio', authToken: 'secret' } }));
+    const issue = unrecognized(parse({ manifest, sms: { authToken: 'secret' } }));
     expect(issue?.keys).toEqual(['authToken']);
     expect(issue?.message).toContain('OS_SMS_TWILIO_AUTH_TOKEN');
-  });
-
-  it('an SMS provider tag no transport builds is refused at authoring', () => {
-    const verdict = parse({ manifest, sms: { provider: 'twilo' } });
-    expect(verdict.success).toBe(false);
-    if (verdict.success) return;
-    expect(verdict.error.issues.map((i) => `${i.code} @ ${i.path.map(String).join('.')}`)).toContain('invalid_value @ sms.provider');
-    expect(SmsProviderSchema.options).toEqual(['log', 'aliyun', 'twilio']);
   });
 
   it('`from` is pointed at `defaultFrom`', () => {
@@ -210,7 +220,7 @@ describe('control — the door opened for exactly these keys', () => {
   it('the narrowed blocks are closed: an undocumented key is refused, not shipped into the artifact', () => {
     expect(unrecognized(parse({ manifest, email: { options: { transportOptions: { auth: { pass: 'x' } } } } }))?.keys)
       .toEqual(['transportOptions']);
-    expect(StackSmsConfigSchema.safeParse({ provider: 'log', bogus: 1 }).success).toBe(false);
+    expect(StackSmsConfigSchema.safeParse({ retries: 1, bogus: 1 }).success).toBe(false);
   });
 });
 

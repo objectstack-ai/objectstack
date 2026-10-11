@@ -1125,7 +1125,6 @@
     "system/StackServerConfig:security",
     "system/StackServerConfig:trustProxy",
     "system/StackServerSecurity:rateLimit",
-    "system/StackSmsConfig:provider",
     "system/StackSmsConfig:retries",
     "system/StorageConnection:accessKeyId",
     "system/StorageConnection:accountKey",
