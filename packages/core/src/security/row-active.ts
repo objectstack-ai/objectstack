@@ -20,13 +20,12 @@
  * predicate. The Deactivate dialog's promise is kept by that ledger row, not by
  * this column.
  *
- * What still reads the column through this predicate, on `main`: the
- * last-administrator guard's enumeration (`plugin-auth` `last-admin-guard.ts`),
- * the explain engine's "deactivated" label (`plugin-security`
- * `explain-engine.ts`), the security plugin's set loader (`plugin-security`
- * `security-plugin.ts`) and the sharing-rule position check (`plugin-sharing`
- * `sharing-rule-service.ts`). The reasoning below is about reading the column
- * at all, and holds for each of them.
+ * What still reads the column through this predicate, on `main`: the explain
+ * engine's "deactivated" label (`plugin-security` `explain-engine.ts`) and the
+ * security plugin's set loader (`plugin-security` `security-plugin.ts`). The
+ * last-administrator guard and the sharing-rule position check read the ledger
+ * instead. The reasoning below is about reading the column at all, and holds
+ * for each remaining reader.
  *
  * ## Why the predicate is "explicitly deactivated", not "explicitly active"
  *

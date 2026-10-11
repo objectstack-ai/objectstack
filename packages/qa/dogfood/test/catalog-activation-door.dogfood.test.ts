@@ -12,7 +12,8 @@
 //   - the name is checked against the catalog the security plugin really binds
 //     (a declared position, a declared permission set, a name nobody declares);
 //   - the write goes through the engine, so the last-admin guard's ledger hook
-//     really refuses switching `admin_full_access` off;
+//     really judges switching `admin_full_access` off: refused when no
+//     administrator would be left, landing when one stands;
 //   - the resolver over the booted engine stops granting through a position
 //     the door switched off, for a holder of that position.
 
@@ -36,6 +37,7 @@ const HOLDER_EMAIL = 'exec.holder@example.com';
 interface Engine {
     find(object: string, options?: unknown): Promise<Array<Record<string, unknown>>>;
     insert(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
+    update(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
 }
 
 describe('the catalog activation door, on a booted showcase', () => {
@@ -113,13 +115,52 @@ describe('the catalog activation door, on a booted showcase', () => {
         expect(rows[0].active === true || rows[0].active === 1).toBe(true);
     });
 
-    it('switching `admin_full_access` off is refused 403 by the last-admin guard, and no row lands', async () => {
-        const res = await flip('permission', 'admin_full_access', { enabled: false });
-        const body = await res.json() as { error?: { code?: string } };
+    // [ADR-0135 D5.2] The last-administrator guard refuses a ledger switch-off
+    // of `admin_full_access` only when it would leave nobody who can sign in as
+    // an administrator. Standing here is the seeded admin's unscoped
+    // `admin_full_access` grant (the `single` posture declares no owner email)
+    // plus the default organization's owner membership, which the same admin
+    // holds. So the pair: with the owner membership demoted the grant is the
+    // last standing and the switch-off is refused; with it standing the
+    // switch-off lands. Every change is undone in `finally`, so a failed
+    // assertion leaves the shared boot as it found it.
+    it('switching `admin_full_access` off with no administrator left standing is refused 403, and no row lands', async () => {
+        const owners = await ql.find('sys_member', { where: { role: 'owner' }, context: SYSTEM_CTX });
+        // Anti-vacuity: the boot really has an owner to demote.
+        expect(owners.length, 'no owner membership on this boot').toBeGreaterThan(0);
+        try {
+            for (const m of owners) await ql.update('sys_member', { id: m.id, role: 'member' }, { context: SYSTEM_CTX });
 
-        expect(res.status).toBe(403);
-        expect(body.error?.code).toBe('PERMISSION_DENIED');
-        expect(await rowsOf('permission', 'admin_full_access')).toEqual([]);
+            const res = await flip('permission', 'admin_full_access', { enabled: false });
+            const body = await res.json() as { error?: { code?: string } };
+
+            expect(res.status).toBe(403);
+            expect(body.error?.code).toBe('PERMISSION_DENIED');
+            expect(await rowsOf('permission', 'admin_full_access')).toEqual([]);
+        } finally {
+            for (const m of owners) await ql.update('sys_member', { id: m.id, role: 'owner' }, { context: SYSTEM_CTX });
+        }
+    });
+
+    it('CONTROL: switching `admin_full_access` off with the organization owner still standing lands 200', async () => {
+        try {
+            const res = await flip('permission', 'admin_full_access', { enabled: false });
+            const text = await res.clone().text();
+
+            expect(res.status, text).toBe(200);
+            const rows = await rowsOf('permission', 'admin_full_access');
+            expect(rows).toHaveLength(1);
+            expect(rows[0].active === false || rows[0].active === 0).toBe(true);
+        } finally {
+            // Restored through the engine, not the door: with the set off the
+            // caller may no longer hold `manage_metadata`. Switching it back on
+            // is never refused by the guard.
+            for (const row of await rowsOf('permission', 'admin_full_access')) {
+                await ql.update(LEDGER, { id: row.id, active: true }, { context: SYSTEM_CTX });
+            }
+        }
+        const restored = await rowsOf('permission', 'admin_full_access');
+        expect(restored.every((r) => r.active === true || r.active === 1)).toBe(true);
     });
 
     it('a name nobody declares is 404 and writes nothing', async () => {
