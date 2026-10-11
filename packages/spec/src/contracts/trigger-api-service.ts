@@ -43,21 +43,28 @@ export interface ITriggerApiService {
    * What it serves, exactly as the plugin's self-hosted mount serves it
    * today, in this order:
    *  - It looks up the hook armed for `hook.flowName` and compares
-   *    `hook.hookId` with it in constant time. An unknown flow and a wrong
-   *    hook id answer identically, `404 RESOURCE_NOT_FOUND`. The hook is
-   *    matched BEFORE the signature is verified, so an unsigned post that
-   *    names an armed flow and its hook id gets the `503` or `401` below
-   *    instead of that `404`: the hook id, not the flow name, is what keeps
-   *    an armed flow unprobeable. A flow left on the default hook id
-   *    (`default`, when its start node's `config.hookId` names none) can be
-   *    probed that way. Whether every unverified post should get one uniform
-   *    refusal is the hardening card's question (#22769), not this contract's.
+   *    `hook.hookId` with it in constant time. A post that names no armed
+   *    flow, or the wrong hook id, gets the unverified-post refusal below,
+   *    before any secret is read.
    *  - It reads that hook's own secret, at this moment, so a rotation applies
    *    to the next post. A secret that cannot be read answers
    *    `503 SERVICE_UNAVAILABLE`. ⛔ It never verifies against no secret.
+   *    This `503` is the one residual of the refusal below: while an armed
+   *    hook's secret cannot be read, a post that names that flow and its hook
+   *    id gets this `503`, signed or not. It stays a `503` on purpose: it is
+   *    the deployment's fault, a sender retries it, and it lasts only while
+   *    the secret cannot be read.
    *  - It verifies the `x-objectstack-signature` header (`sha256=` and the hex
    *    HMAC-SHA256 of the raw body under that secret). A missing or wrong
-   *    signature answers `401 INVALID_SIGNATURE`.
+   *    signature gets the unverified-post refusal below.
+   *  - **One refusal for every post that does not verify** (#22806): an
+   *    unknown flow, a wrong hook id, an absent signature and a bad one all
+   *    answer `401 INVALID_SIGNATURE`, with one body. So the answer does not
+   *    tell an armed flow name from an unarmed one, whichever hook id a flow
+   *    is armed with. The cause (which of those four) goes to the server log,
+   *    ⛔ never to the sender. FROM → TO: an unknown flow and a wrong hook id
+   *    used to answer `404 RESOURCE_NOT_FOUND`; they now answer the same
+   *    `401 INVALID_SIGNATURE` an absent or bad signature always has.
    *  - Only then does it read the body as JSON. A body that is not valid JSON,
    *    or not a JSON object, answers `400 INVALID_REQUEST`; an empty body is
    *    the empty object.

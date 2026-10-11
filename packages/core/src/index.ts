@@ -180,6 +180,12 @@ export * from './utils/record-not-found.js';
 // resolve with it (one name space for both doors).
 export * from './utils/object-not-found.js';
 
+// [#22777] The one walk that finds a filter's nested-relation conditions and
+// their target objects: the data door (`@objectstack/metadata-protocol`) and
+// the MCP stdio data bridge (`@objectstack/mcp`) ask each target its exposure
+// before the engine evaluates the condition, and share no other package.
+export * from './utils/relation-condition-sites.js';
+
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';
 
