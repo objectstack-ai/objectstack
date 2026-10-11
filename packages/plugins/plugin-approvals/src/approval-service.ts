@@ -79,6 +79,7 @@ import {
   equivalentApproverAddresses,
   heldSlot,
   positionAddresses,
+  slateNamesAPerson,
   type ActingCaller,
 } from './approver-address.js';
 import {
@@ -3110,8 +3111,9 @@ export class ApprovalService implements IApprovalService {
 
     // Empty-slate policy (#3447 P2). "Empty" = no CONCRETE person — an
     // unstaffed position / empty expression result leaves only `type:value`
-    // literal slots, decidable by nobody.
-    if (!approvers.some(a => a && !a.includes(':'))) {
+    // literal slots, decidable by nobody. `slateNamesAPerson` is the one
+    // spelling of that test: the inbox's `unstaffed` arm reads it too (#22725).
+    if (!slateNamesAPerson(approvers)) {
       const emptyPolicy = (input.config as any).onEmptyApprovers ?? 'admin_rescue';
       if (emptyPolicy === 'fail') {
         throw new Error(
@@ -3160,7 +3162,7 @@ export class ApprovalService implements IApprovalService {
           for (const [k, v] of Object.entries(fallbackResolvedFrom)) {
             resolvedFrom[`fallback:${k}`] = v;
           }
-          if (fallbackApprovers.some(a => a && !a.includes(':'))) {
+          if (slateNamesAPerson(fallbackApprovers)) {
             this.logger?.warn?.(
               `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
               + `concrete approver — opening on the declared fallbackApprovers per onEmptyApprovers: 'fallback'.`,
@@ -3203,7 +3205,7 @@ export class ApprovalService implements IApprovalService {
       // Re-tested rather than assumed: a `fallback` that landed people above
       // has already turned this into a normal request, and warning "decidable
       // only by a privileged admin" about it would be false.
-      if (!approvers.some(a => a && !a.includes(':'))) {
+      if (!slateNamesAPerson(approvers)) {
         this.logger?.warn?.(
           `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete approver`
           + ' — the request is decidable only by a privileged admin. Check that the approver target(s) are staffed.',
@@ -6820,6 +6822,97 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * The "who acts next" constraint of a list or count read: the request ids
+   * its two arms match together, or `null` when the filter asked neither
+   * (callers then skip the id constraint, exactly as before #22725).
+   *
+   *   - `approverId`: requests where one of those addresses holds a pending
+   *     slot ({@link ApprovalService.approverRequestIds});
+   *   - `unstaffed: true`: pending requests nobody on the slate can decide,
+   *     which this caller may override
+   *     ({@link ApprovalService.unstaffedOverridableRequestIds}).
+   *
+   * The arms are ORed, never ANDed. The contract states this on the
+   * `unstaffed` member: one request answers "my pending approvals, rescues
+   * included", and the paged total counts both. `listRequests` and
+   * `countRequests` both call this, so the list and the total it pages
+   * cannot disagree about either arm.
+   */
+  private async awaitingRequestIds(
+    filter: { approverId?: string | string[]; unstaffed?: boolean } | undefined,
+    context: ExecutionContext,
+    tenantOrg: string | null,
+  ): Promise<string[] | null> {
+    const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
+      .map(t => String(t).trim())
+      .filter(Boolean);
+    const byApprover = await this.approverRequestIds(approverTargets, tenantOrg);
+    if (filter?.unstaffed !== true) return byApprover;
+    const unstaffed = await this.unstaffedOverridableRequestIds(context, tenantOrg);
+    return [...new Set<string>([...(byApprover ?? []), ...unstaffed])];
+  }
+
+  /**
+   * [#22725] The `unstaffed` arm. These are the PENDING requests whose slate
+   * names no person and which this caller may override. This is the queue an
+   * `onEmptyApprovers: 'admin_rescue'` request waits in. Before this arm it
+   * waited in none: `approverRequestIds` matches a slot against the addresses
+   * a caller names, and an override actor's own addresses never equal an
+   * unstaffed `position:<p>` literal. So no "My Pending" listed the request
+   * and no bell counted it. A `lockRecord: true` record stayed locked until
+   * someone browsed the unfiltered list.
+   *
+   * "Names no person" is {@link slateNamesAPerson}, the test the open path
+   * applies before it warns "decidable only by a privileged admin". It is read
+   * off the stored slate as it stands now, never off a flag written at open
+   * time. So a slate that loses its last named approver to a decision and
+   * keeps only literals is caught as well. A slate that still names a person
+   * is not, even if that person has left: proving they left needs a directory
+   * read per slot, which neither this arm nor the open path makes.
+   *
+   * "May override" is {@link ApprovalService.isOverrideActor} and nothing else.
+   * There is no second notion of "admin" here. It is asked twice:
+   *   - first as the visibility read asks it (`visibleRequestIds`' first line,
+   *     the caller's organization). A caller who may override nothing pays no
+   *     read, and gets nothing;
+   *   - then per row, as `attachViewers` asks it for `viewer.can_override`
+   *     (the row's organization). So every row this arm adds reads
+   *     `can_override: true`, and a tenant admin's rescue queue never reaches
+   *     past their organization.
+   *
+   * Read with `SYSTEM_CTX`, like every probe in this file. The scan is the
+   * live pending queue inside the caller's organization wall, bounded by the
+   * same window as the approver index. A failed read throws; it is not read as
+   * an empty queue.
+   */
+  private async unstaffedOverridableRequestIds(
+    context: ExecutionContext,
+    tenantOrg: string | null,
+  ): Promise<string[]> {
+    if (!this.isOverrideActor(context, tenantOrg)) return [];
+    const where: any = { status: 'pending' };
+    if (tenantOrg) where.organization_id = tenantOrg;
+    const rows = await this.engine.find('sys_approval_request', {
+      where, fields: ['id', 'pending_approvers', 'organization_id'],
+      limit: ApprovalService.APPROVER_INDEX_CAP, context: SYSTEM_CTX,
+    });
+    const list: any[] = Array.isArray(rows) ? rows : [];
+    if (list.length >= ApprovalService.APPROVER_INDEX_CAP) {
+      this.logger?.warn?.('[approvals] unstaffed-request probe hit its window — results may be truncated', {
+        cap: ApprovalService.APPROVER_INDEX_CAP,
+      });
+    }
+    const ids: string[] = [];
+    for (const row of list) {
+      if (row?.id == null) continue;
+      if (slateNamesAPerson(csvSplit(row.pending_approvers))) continue;
+      if (!this.isOverrideActor(context, row.organization_id ?? null)) continue;
+      ids.push(String(row.id));
+    }
+    return ids;
+  }
+
+  /**
    * The request ids this caller is a PARTICIPANT of, or `null` for a caller
    * who may see everything in scope (#3590).
    *
@@ -7110,6 +7203,7 @@ export class ApprovalService implements IApprovalService {
       recordId?: string;
       status?: ApprovalStatus | ApprovalStatus[];
       approverId?: string | string[];
+      unstaffed?: boolean;
       submitterId?: string;
       q?: string;
       limit?: number;
@@ -7118,14 +7212,13 @@ export class ApprovalService implements IApprovalService {
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow[]> {
     const { where, tenantOrg } = await this.buildRequestWhere(filter, context);
-    const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
-      .map(t => String(t).trim())
-      .filter(Boolean);
 
     // Every filter now pushes into the engine (issue #1745): approver via
     // the normalized index, status arrays via $in — so the page window is
-    // always engine-side and correct at any table size.
-    const ids = await this.approverRequestIds(approverTargets, tenantOrg);
+    // always engine-side and correct at any table size. [#22725] The
+    // `unstaffed` arm joins the approver arm as an id set too, so a rescue
+    // request pages exactly like any other row.
+    const ids = await this.awaitingRequestIds(filter, context, tenantOrg);
     if (ids) {
       if (ids.length === 0) return [];
       where.id = ids.length === 1 ? ids[0] : { $in: ids };
@@ -7168,11 +7261,9 @@ export class ApprovalService implements IApprovalService {
     context: ExecutionContext,
   ): Promise<number> {
     const { where, tenantOrg } = await this.buildRequestWhere(filter, context);
-    const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
-      .map(t => String(t).trim())
-      .filter(Boolean);
 
-    const ids = await this.approverRequestIds(approverTargets, tenantOrg);
+    // [#22725] The same two arms `listRequests` reads, from the same helper.
+    const ids = await this.awaitingRequestIds(filter, context, tenantOrg);
     if (ids) {
       if (ids.length === 0) return 0;
       where.id = ids.length === 1 ? ids[0] : { $in: ids };
