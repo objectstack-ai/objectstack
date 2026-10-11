@@ -57,11 +57,18 @@
  *    (`packaged-permission-set-lock.ts`), so one condition reads one way at
  *    every door.
  *
- * Both switch routes are gated by the ONE §5 write-authority gate
- * (`packages/runtime/src/domains/activation-gate.ts`), so both carry the same
+ *  - `position` — the switch only (pre-charted on the regime, ADR-0131 D6):
+ *    `POST /security/_activation/position/:name`, body `{ enabled }`, the
+ *    security catalog's activation door. ⛔ No clone: a position has no clone
+ *    door. Without this row a packaged position's refusal read the generic
+ *    managed seal ("edit the source artifact and redeploy") and never named the
+ *    switch that exists.
+ *
+ * Every switch route is gated by the ONE §5 write-authority gate
+ * (`packages/runtime/src/domains/activation-gate.ts`), so each carries the same
  * operator-only clause. Still absent: ADR-0126 §3's pre-charted `tool` /
- * `skill` / `position` — no sanctioned path is built for them, and a row with no
- * route does not compile ({@link PackagedBaseRegimeCRoutes}).
+ * `skill` — no sanctioned path is built for them, and a row with no route does
+ * not compile ({@link PackagedBaseRegimeCRoutes}).
  *
  * ## The one origin-gated row
  *
@@ -198,6 +205,13 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
                 + 'or POST /api/v1/data/sys_permission_set with a new name',
         },
     },
+    position: {
+        regime: 'C',
+        routes: {
+            switchOff: 'POST /api/v1/security/_activation/position/:name, body {enabled: false}; '
+                + 'operator-only where one install serves several organizations',
+        },
+    },
     datasource: {
         regime: 'origin-gated',
         noun: 'Datasource',
@@ -307,7 +321,7 @@ export function isOriginGatedType(type: string): boolean {
  * Kept under the REST door's 500-character client-message bound
  * (`truncateClientMessage`, `packages/rest/src/error-response.ts`), past which
  * the tail is truncated. Characters outside the item's name, save / removal:
- * `flow` 395 / 388, `action` 349 / 342, `permission` 301 / 294,
+ * `flow` 395 / 388, `action` 349 / 342, `permission` 301 / 294, `position` 307 / 300,
  * `datasource` 192 / 193 — so a name of up to 88 characters arrives whole for
  * every row (pinned). [#21944] A row's `hostOwned` name is a fixed, short name
  * with its own remedy (`default`: under 300 characters whole).

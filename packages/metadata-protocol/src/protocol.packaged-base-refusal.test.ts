@@ -45,6 +45,7 @@ const ARTIFACTS = new Map<string, Map<string, unknown>>([
     ['page', new Map([['pkg_page', shipped('pkg_page')]])],
     ['action', new Map([['pkg_action', shipped('pkg_action')]])],
     ['permission', new Map([['pkg_perm', shipped('pkg_perm')]])],
+    ['position', new Map([['pkg_position', shipped('pkg_position')]])],
 ]);
 
 function protocolOn(environmentId: string | undefined): ObjectStackProtocolImplementation {
@@ -379,11 +380,32 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
         });
     }
 
+    for (const environmentId of [undefined, 'env_1']) {
+        it(`\`position\` — save names the security catalog's activation switch and no clone `
+            + `(${environmentId ? 'environment' : 'host-config'} kernel)`, () => {
+            // [ADR-0131 D6] Without its row a packaged position read the generic
+            // managed seal ("edit the source artifact and redeploy"), naming no switch.
+            const message = expectRegimeC(refusalOn(environmentId, 'position', 'pkg_position', 'save'), 'position', 'pkg_position', 'save');
+            expect(message).toBe(
+                `${LOCKED('position', 'pkg_position', 'save')} `
+                + 'Switch it off (POST /api/v1/security/_activation/position/:name, body {enabled: false}; '
+                + `${OPERATOR_ONLY}). See ${ADR_0126}.`,
+            );
+            expect(message.toLowerCase()).not.toContain('clone');
+        });
+    }
+
     it('`permission` removal stays the #6960 carve-out — the row adds no refusal where there was none', () => {
         // `permission` merges its overlay at read (`supportsOverlay: true`), so
         // removing its overlay row is repair, never refused on this ground.
         expect(refusal('permission', 'pkg_perm', 'delete')).toBeNull();
         expect(refusalOnHostConfig('permission', 'pkg_perm', 'delete')).toBeNull();
+    });
+
+    it('`position` removal is the same #6960 carve-out — its row adds no refusal where there was none', () => {
+        // `position` merges its overlay at read (`supportsOverlay: true`), like `permission`.
+        expect(refusal('position', 'pkg_position', 'delete')).toBeNull();
+        expect(refusalOnHostConfig('position', 'pkg_position', 'delete')).toBeNull();
     });
 
     it('the /meta doors throw the row\'s sentence for an action, on save and on removal (one emitter)', async () => {
@@ -436,11 +458,12 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
         expect(longName).toHaveLength(88);
         const registry = {
             getArtifactItem: (type: string, name: string) =>
-                (['flow', 'action', 'permission'].includes(type) && name === longName ? shipped(name) : undefined),
+                (['flow', 'action', 'permission', 'position'].includes(type) && name === longName ? shipped(name) : undefined),
         };
         const p = new ObjectStackProtocolImplementation({ registry } as never, () => new Map(), 'env_1');
         for (const [type, operation] of [
             ['flow', 'save'], ['flow', 'delete'], ['action', 'save'], ['action', 'delete'], ['permission', 'save'],
+            ['position', 'save'],
         ] as const) {
             const message = String((p.packagedBaseRefusal({ type, name: longName, operation }) as any).message);
             expect(message.length, `${type} ${operation}`).toBeLessThan(500);

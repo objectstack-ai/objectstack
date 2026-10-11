@@ -132,15 +132,16 @@ See [ADR-0005](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/
 
 ### Packaged flows, actions and permission sets (ADR-0126)
 
-`flow`, `action` and `permission` are behavioral types, in Regime C of [ADR-0126](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0126-packaged-metadata-customization-model.md). A packaged item of one of these types is locked against in-place edits (and, for a flow or an action, against removal). The refusal names the type's sanctioned path, not a redeploy or `OS_METADATA_WRITABLE`, and each type names only the routes it has:
+`flow`, `action` and `permission` are behavioral types, in Regime C of [ADR-0126](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0126-packaged-metadata-customization-model.md), and `position` is pre-charted there ([ADR-0131](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0131-total-organization-ownership-no-null-organization-id.md) D6). A packaged item of one of these types is locked against in-place edits (and, for a flow or an action, against removal). The refusal names the type's sanctioned path, not a redeploy or `OS_METADATA_WRITABLE`, and each type names only the routes it has:
 
 | Type | Sanctioned path the refusal names |
 | :--- | :--- |
 | `flow` | Clone it under a new name (`POST /api/v1/automation/:name/clone`, body `{name, label}`), or switch it off (`POST /api/v1/automation/:name/toggle`, body `{enabled: false}`). A flow that holds a credential (an inbound hook's `secret`, an `http` node's `signingSecret`) is not cloned in one step: the clone door refuses it with `409`, because a copy would share the secret, and the copy is authored as a new flow with its own. |
 | `action` | Switch it off (`POST /api/v1/actions/_activation/:object/:action`, body `{enabled: false}`; `:object` is `global` for an object-less action). No clone is offered. |
 | `permission` | Clone it under a new name: the "Clone" action on the permission set, or `POST /api/v1/data/sys_permission_set` with a new name. |
+| `position` | Switch it off (`POST /api/v1/security/_activation/position/:name`, body `{enabled: false}`). No clone is offered. |
 
-A permission set also has a switch, outside the refusal: `POST /api/v1/security/_activation/permission/:name`, body `{enabled: false}`, switches it off for the deployment (a position takes `:type` = `position` on the same route). The refusal does not name it yet.
+A permission set also has a switch, outside the refusal: `POST /api/v1/security/_activation/permission/:name`, body `{enabled: false}`, switches it off for the deployment. The refusal does not name it yet.
 
 The switches are operator-only where one install serves several organizations. The refusal names the same path whichever layer answers it: `403 NOT_OVERRIDABLE` for a write that names no base, and `403 ITEM_LOCKED` for one that names the read-only package. Which writes are refused, and with which code, is unchanged.
 
