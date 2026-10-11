@@ -247,25 +247,77 @@ const MetadataTypeRegistryEntryBaseSchema = z.object({
   filePatterns: z.array(z.string()).describe('Glob patterns to discover files of this type'),
 
   /**
-   * Whether this type supports the customization overlay system.
-   * When true, platform/user overlays can be applied on top of package-delivered metadata.
+   * Whether a stored overlay row of an item a managed package ships may be
+   * REMOVED through the ordinary delete door without the type's
+   * environment-overlay permission ({@link allowEnvironmentOverlay}), because
+   * removing it restores the managed definition (the repair carve-out for
+   * overlay rows stored before a type's permission was rolled back).
+   *
+   * It opens no save and it decides no read: whether an environment overlay of
+   * a packaged item is written or served is decided by
+   * `allowEnvironmentOverlay` alone (ADR-0131 D6). Its readers are the delete
+   * tier of the metadata protocol and the repository's delete gate.
    */
-  supportsOverlay: z.boolean().default(true).describe('Whether overlay customization is supported'),
+  supportsOverlay: z.boolean().default(true).describe(
+    'Whether a stored overlay row of an item a managed package ships may be removed through the '
+    + 'ordinary delete door without the type\'s environment-overlay permission, because removing it '
+    + 'restores the managed definition; it opens no save and it decides no read'
+  ),
 
   /**
-   * Whether end-user organizations may write per-org overlay rows for this
-   * type via the runtime metadata API (`PUT /api/v1/meta/:type/:name`).
+   * Whether an environment may overlay an item of this type that a managed
+   * package ships — ADR-0131 D6 regime O, ADR-0005's environment layer: an
+   * environment row of the same name replaces the packaged item whole.
    *
-   * This is the **runtime opt-in gate** for ADR-0005 metadata customization.
-   * `supportsOverlay` describes the *capability* (the loader can merge overlays);
-   * `allowOrgOverride` is the explicit *permission* to actually accept writes
-   * from a tenant. Defaults to `false` for safety — plugin authors must
-   * deliberately opt in. The runtime returns HTTP 403 `not_overridable` when
-   * a write targets a type with this flag unset.
+   * This is the single decider of that question at every door: the metadata
+   * protocol's save door, the managed-content seal on write AND on read (a
+   * stored environment overlay of a packaged item of a type without it is
+   * withheld from the served read), the repository's put gate, and Studio's
+   * write gate (`GET /api/v1/meta/types` carries it per entry). The
+   * `OS_METADATA_WRITABLE` hatch elevates the advertised value but never
+   * opens a managed item. Defaults to `false`: a type opts in deliberately,
+   * and a write against a packaged item of a type without it is refused with
+   * HTTP 403 `NOT_OVERRIDABLE`. Which types opt in is
+   * `DEFAULT_METADATA_TYPE_REGISTRY` below, and only there (ADR-0005: no
+   * parallel whitelists).
    *
-   * As of ADR-0005 Phase 1, only `view` and `dashboard` opt in.
+   * Renamed from `allowOrgOverride` in 18: ADR-0131 D6 retired the
+   * per-organization overlay axis, and the key now names the one scope it
+   * governs.
    */
-  allowOrgOverride: z.boolean().default(false).describe('Allow per-org overlay writes via runtime metadata API'),
+  allowEnvironmentOverlay: z.boolean().default(false).describe(
+    'Whether an environment may overlay an item of this type that a managed package ships '
+    + '(ADR-0131 D6 regime O). Decides the save door, the managed-content seal on write and on '
+    + 'read, and Studio\'s write gate; the OS_METADATA_WRITABLE hatch does not reach a managed '
+    + 'item. Default false.'
+  ),
+
+  /**
+   * RENAMED in 18 to {@link allowEnvironmentOverlay} — tombstoned, not deleted.
+   *
+   * ADR-0131 D6 retired the per-organization overlay axis, so the key that
+   * said "per-org" was renamed to say the one scope it governs (ruling C on
+   * the ADR-0131 C5 split: no second key, and not the old name with a new
+   * meaning). `MetadataTypeRegistryEntryBaseSchema` is a plain `z.object`,
+   * so a bare deletion would strip an authored old key in silence (the
+   * ADR-0104 shape); the tombstone refuses it at `tsc` and at the parse with
+   * the rename. No D2 conversion: no manifest, stack, plugin configuration or
+   * stored row carries a registry entry — the registry is a TypeScript
+   * literal — so a conversion would have no seam that ever runs. Registered
+   * in `RETIRED_KEYS_BY_MAJOR[18]` with the D3 semantic entry
+   * `metadata-type-registry-allow-org-override-renamed`.
+   *
+   * ⚠️ A truthiness READER of the old key still compiles against this
+   * tombstone (the output is an optional `undefined`) and silently reads
+   * `undefined`, which closes every type. Read `allowEnvironmentOverlay`.
+   */
+  allowOrgOverride: retiredKey(
+    '`MetadataTypeRegistryEntry.allowOrgOverride` was renamed to `allowEnvironmentOverlay` in '
+    + '@objectstack/spec 18 (ADR-0131 D6) — the per-organization overlay axis was retired, and '
+    + 'the key now names the one scope it governs: whether an environment may overlay an item '
+    + 'of this type that a managed package ships. Rename the key to `allowEnvironmentOverlay`; '
+    + 'the value is unchanged.',
+  ),
 
   /**
    * Whether metadata of this type can be created at runtime via API.
@@ -516,9 +568,10 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
     '(ADR-0049 enforce-or-remove) — it never had an effect: no code ever read a ' +
     'customization policy, and the overlay protocol it configured was itself unreachable from any ' +
     'served surface (ADR-0126 supersedes it on the record). Delete the key. What a customization ' +
-    "may touch is governed by the real mechanisms: ADR-0005's org-scoped overlay (opt-in via " +
-    '`allowOrgOverride` on `DEFAULT_METADATA_TYPE_REGISTRY`, enforced at the REST meta write ' +
-    "doors) and ADR-0126's packaged-metadata model (clone + ledger disable).",
+    "may touch is governed by the real mechanisms: ADR-0005's environment overlay (opt-in via " +
+    '`allowEnvironmentOverlay` on `DEFAULT_METADATA_TYPE_REGISTRY`, enforced at the metadata ' +
+    "protocol's write doors and its served read) and ADR-0126's packaged-metadata model (clone + " +
+    'ledger disable).',
   ),
 
   /**
@@ -711,11 +764,15 @@ export type MetadataPluginManifestParsed = z.infer<typeof MetadataPluginManifest
  * manifest's `contributes.kinds` registers kind descriptors as ITEMS of the
  * `kind` type, not entries here. A plugin's kind reaches the live set as a
  * side effect of registering an item of that kind.
+ *
+ * The `allowEnvironmentOverlay` column was spelled `allowOrgOverride` before
+ * 18; the rationale notes below name it by its current spelling, including
+ * where they record a decision taken under the old one.
  */
 export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] = [
   // Data Protocol (load first)
   //
-  // `object` and `field`: packaged items are LOCKED (`allowOrgOverride: false`).
+  // `object` and `field`: packaged items are LOCKED (`allowEnvironmentOverlay: false`).
   // Runtime API rejects overlay writes against artifact-backed objects/fields
   // with `403 not_overridable`. Tenants CAN create brand-new OBJECTS
   // (`allowRuntimeCreate: true`); `field` is the exception and the entry below
@@ -724,7 +781,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // multi-tenant schema drift. New tenant-owned objects live in their own
   // namespace and are free to evolve. (Mirrors Salesforce: standard objects
   // are not modifiable per-org beyond layout/label; custom objects are full).
-  { type: 'object', label: 'Object', filePatterns: ['**/*.object.ts', '**/*.object.yml', '**/*.object.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 10, domain: 'data' },
+  { type: 'object', label: 'Object', filePatterns: ['**/*.object.ts', '**/*.object.yml', '**/*.object.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 10, domain: 'data' },
   // [#7893] `field` — the STANDALONE runtime-create door is RETIRED
   // (`allowRuntimeCreate: false`), maintainer ruling 2026-08-12.
   //
@@ -785,14 +842,14 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // declaration second. (3) DOCUMENT it as inert — precisely the shape ADR-0049
   // forbids.
   //
-  // ⚠️ `allowOrgOverride: false` is UNCHANGED and #7743's overlay refusal
+  // ⚠️ `allowEnvironmentOverlay: false` is UNCHANGED and #7743's overlay refusal
   // STAYS: an artifact-backed field is still refused `403 NOT_OVERRIDABLE` via
   // `isNestedArtifactField`. Making field OVERRIDES legal is a separate
   // decision from making field CREATES work; this entry touches only the
   // create tier. `OS_METADATA_WRITABLE=field` remains the one operator escape
   // hatch, and `deleteMetaItem` is deliberately NOT gated by this refusal, so
   // repair of rows written through the retired channel stays possible.
-  { type: 'field', label: 'Field', filePatterns: ['**/*.field.ts', '**/*.field.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 20, domain: 'data' },
+  { type: 'field', label: 'Field', filePatterns: ['**/*.field.ts', '**/*.field.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 20, domain: 'data' },
   // ADR-0088 (#4509) — the `validation` kind is RETIRED. It failed the
   // admission test on its first clause: no independent lifecycle. A rule only
   // means anything against an object, and the only shape the engine evaluates
@@ -800,7 +857,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // name its object with (and, being `.strict()` in all six variants, could not
   // be given one by an author). Its `filePatterns` and `allowRuntimeCreate`
   // retire with it. Author rules as `validations:` on the object.
-  { type: 'hook', label: 'Hook', filePatterns: ['**/*.hook.ts', '**/*.hook.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 30, domain: 'data' },
+  { type: 'hook', label: 'Hook', filePatterns: ['**/*.hook.ts', '**/*.hook.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 30, domain: 'data' },
   // `seed`: fixture / initialization data (SeedSchema = object + records + mode +
   // externalId). Runtime-draftable so the AI (and any author) can stage seed
   // rows as a DRAFT (ADR-0033) and PUBLISH them like any other artifact;
@@ -808,23 +865,24 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // via SeedLoaderService — see runtime publish-drafts handler). loadOrder is
   // last in the data domain so every referenced object/field already exists.
   // NOTE: distinct from the (analytics-bound) `dataset` name — see ADR.
-  { type: 'seed', label: 'Seed Data', description: 'Fixture / initialization data applied on publish', filePatterns: ['**/*.seed.ts', '**/*.seed.yml', '**/*.seed.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 95, domain: 'data' },
+  { type: 'seed', label: 'Seed Data', description: 'Fixture / initialization data applied on publish', filePatterns: ['**/*.seed.ts', '**/*.seed.yml', '**/*.seed.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 95, domain: 'data' },
   // `mapping` (#2611, admitted per ADR-0088): reusable import/export field
   // mappings, consumed by the import endpoint via `mappingName`.
   // `allowRuntimeCreate: true` so the import wizard can SAVE a hand-built
   // mapping as a named artifact; packaged mappings stay locked
-  // (`allowOrgOverride: false`) like every artifact-backed item.
+  // (`allowEnvironmentOverlay: false`) like every artifact-backed item.
   // `picklist`: a shared option list select fields reference by name
   // (`Field.select({ picklist })`, `data/picklist.zod.ts`). PACKAGE-OWNED, so
   // both runtime doors are closed: `allowRuntimeCreate: false` refuses a
   // runtime create with 403 `not_creatable` and reads the prescription back
-  // from `filePatterns[0]`, and `allowOrgOverride: false` refuses a per-org
-  // overlay — an organization appending values is a later phase with its own
-  // admission (ADR-0005, additive only), not declared here. Another package
+  // from `filePatterns[0]`, and `allowEnvironmentOverlay: false` refuses an
+  // environment overlay of a packaged picklist — a deployment appending values
+  // is a later phase with its own admission (ADR-0005, additive only), not
+  // declared here. Another package
   // adds values through `picklistExtensions`, on the artifact route.
   // `loadOrder: 8` — before `object` (10), whose fields reference it.
-  { type: 'picklist', label: 'Picklist', description: 'Shared option list that select fields reference by name', filePatterns: ['**/*.picklist.ts', '**/*.picklist.yml', '**/*.picklist.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 8, domain: 'data' },
-  { type: 'mapping', label: 'Import Mapping', description: 'Reusable import/export field mapping (rename + transforms), referenced by name at import', filePatterns: ['**/*.mapping.ts', '**/*.mapping.yml', '**/*.mapping.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 96, domain: 'data' },
+  { type: 'picklist', label: 'Picklist', description: 'Shared option list that select fields reference by name', filePatterns: ['**/*.picklist.ts', '**/*.picklist.yml', '**/*.picklist.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 8, domain: 'data' },
+  { type: 'mapping', label: 'Import Mapping', description: 'Reusable import/export field mapping (rename + transforms), referenced by name at import', filePatterns: ['**/*.mapping.ts', '**/*.mapping.yml', '**/*.mapping.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 96, domain: 'data' },
 
   // UI Protocol
   // `view/page/dashboard/action/report`: UI artifacts benefit from version
@@ -832,7 +890,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // `app`: tenants may author custom navigation apps (Salesforce Lightning App
   // parity), so `allowRuntimeCreate: true`.
   //
-  // `allowOrgOverride` in this section is governed by ADR-0005's amendment
+  // `allowEnvironmentOverlay` in this section is governed by ADR-0005's amendment
   // table (`docs/adr/0005-metadata-customization-overlay.md:53-64`), which
   // whitelists exactly `view`/`dashboard`/`report` ("Pure presentation. Safe
   // per-org override.") and says ❌ for `page`/`app`/`action` ("Conservative
@@ -842,7 +900,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // ADR-0005, landed in commit ee58392e1 (same verdict family as `flow`, #6283): no promotion ADR exists,
   // and no live org-scoped overlay rows were found in-repo. `dataset` is
   // absent from the table, so it takes the amendment's default for new types
-  // — `allowOrgOverride: false` until an admission pair (overlay schema + a
+  // — `allowEnvironmentOverlay: false` until an admission pair (overlay schema + a
   // WRITTEN render-only rationale) is ratified. Promotion of any of these is
   // an ADR-0005 revision, not a registry edit.
   //
@@ -853,18 +911,18 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // (`runtime/domains/packages.ts`) keeps working: it rewrites apps
   // MATERIALIZED into `sys_metadata` (DB-only provenance), which rides the
   // `allowRuntimeCreate` tier, not this flag.
-  { type: 'view', label: 'View', filePatterns: ['**/*.view.ts', '**/*.view.yml', '**/*.view.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
-  { type: 'page', label: 'Page', filePatterns: ['**/*.page.ts', '**/*.page.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
-  { type: 'dashboard', label: 'Dashboard', filePatterns: ['**/*.dashboard.ts', '**/*.dashboard.yml', '**/*.dashboard.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
-  { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },
+  { type: 'view', label: 'View', filePatterns: ['**/*.view.ts', '**/*.view.yml', '**/*.view.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  { type: 'page', label: 'Page', filePatterns: ['**/*.page.ts', '**/*.page.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  { type: 'dashboard', label: 'Dashboard', filePatterns: ['**/*.dashboard.ts', '**/*.dashboard.yml', '**/*.dashboard.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
+  { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },
   // `action` was additionally the #6283 `flow` shape exactly: its own row
-  // declares `supportsOverlay: false`, so `allowOrgOverride: true` granted a
+  // declares `supportsOverlay: false`, so `allowEnvironmentOverlay: true` granted a
   // write nothing could ever read back — the #6190 phantom. (ADR-0005, commit ee58392e1)
-  { type: 'action', label: 'Action', filePatterns: ['**/*.action.ts', '**/*.action.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
-  { type: 'report', label: 'Report', filePatterns: ['**/*.report.ts', '**/*.report.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
+  { type: 'action', label: 'Action', filePatterns: ['**/*.action.ts', '**/*.action.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  { type: 'report', label: 'Report', filePatterns: ['**/*.report.ts', '**/*.report.yml'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
   // ADR-0021: dataset is the analytics semantic layer that report/dashboard bind to.
   // loadOrder 55 < report/dashboard (60) so datasets register before their consumers.
-  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'ui' },
+  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'ui' },
 
   // Automation Protocol — flow is executionPinned (ADR-0009).
   // ADR-0019: there is no `approval` metadata type — approvals are Approval
@@ -872,7 +930,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // ADR-0020: there is no `workflow` metadata type — record state machines are
   // a `state_machine` validation rule on the object, not a standalone artifact.
   //
-  // `allowOrgOverride: false` — ROLLED BACK from `true` (#6283, settling the
+  // `allowEnvironmentOverlay: false` — ROLLED BACK from `true` (#6283, settling the
   // contract half of #6155 Q1=B; the unreviewed flip itself is recorded in
   // #6191, commit ba252da0b). ADR-0005's amendment table
   // (`docs/adr/0005-metadata-customization-overlay.md:57`) has never said
@@ -895,8 +953,8 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // NOT closed by this flag: `allowRuntimeCreate` stays `true`, so a tenant may
   // still author a BRAND-NEW flow through the runtime API (the two-tier model —
   // that write overlays no code-shipped automation and is what ADR-0005 means by
-  // "a deployment"). What is closed is overlaying a PACKAGED flow per org.
-  { type: 'flow', label: 'Flow', filePatterns: ['**/*.flow.ts', '**/*.flow.yml', '**/*.flow.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
+  // "a deployment"). What is closed is overlaying a PACKAGED flow.
+  { type: 'flow', label: 'Flow', filePatterns: ['**/*.flow.ts', '**/*.flow.yml', '**/*.flow.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
   // `job`: A JOB IS A CODE ARTIFACT, and the flags now say so (#4509).
   //
   // `JobSchema.handler` is the name of a function in the compiled bundle's
@@ -915,7 +973,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // handler-binding design.
   //
   // Hence allowRuntimeCreate:false (no "create job" in Studio / PUT /meta) and
-  // allowOrgOverride:false (no per-org job fork). Unlike `agent`, which is
+  // allowEnvironmentOverlay:false (no environment fork of a packaged job). Unlike `agent`, which is
   // closed to third-party AUTHORING entirely (ADR-0063 §2), `job` stays a
   // first-class authorable type: `*.job.ts` and `defineStack({ jobs })` are the
   // supported doors, and they work — the file loader is genuinely consumed, so
@@ -931,7 +989,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // or a named, separately-governed function — and then building the bridge
   // from job metadata to `IJobService.schedule`. Opening the flag without that
   // work just restores the silent no-op.
-  { type: 'job', label: 'Background Job', filePatterns: ['**/*.job.ts', '**/*.job.yml', '**/*.job.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 80, domain: 'automation' },
+  { type: 'job', label: 'Background Job', filePatterns: ['**/*.job.ts', '**/*.job.yml', '**/*.job.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 80, domain: 'automation' },
 
   // System Protocol
   // `datasource`: runtime-creatable (ADR-0015 Addendum) — the Studio wizard
@@ -962,7 +1020,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
     label: 'Datasource',
     filePatterns: ['**/*.datasource.ts', '**/*.datasource.yml'],
     supportsOverlay: false,
-    allowOrgOverride: false,
+    allowEnvironmentOverlay: false,
     allowRuntimeCreate: true,
     supportsVersioning: false,
     executionPinned: false,
@@ -978,7 +1036,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   },
   // RUNTIME-CREATED (ADR-0062/0088): produced by the datasource Sync wizard —
   // a derived snapshot; packages never ship one (it would be stale on arrival).
-  { type: 'external_catalog', label: 'External Catalog', filePatterns: ['**/*.external-catalog.ts', '**/*.external-catalog.yml', '**/*.external-catalog.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 6, domain: 'system' },
+  { type: 'external_catalog', label: 'External Catalog', filePatterns: ['**/*.external-catalog.ts', '**/*.external-catalog.yml', '**/*.external-catalog.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 6, domain: 'system' },
   // [#5271, part of #5206] `api` — declarative HTTP endpoints (ADR-0121).
   //
   // WHY THE FLAGS ARE THESE VALUES (the decision this entry records):
@@ -1040,7 +1098,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   //     path. What is withdrawn is only the runtime-authored draft, which had no
   //     servable destination to be judged toward.
   //
-  // `allowRuntimeCreate: false` + `allowOrgOverride: false` therefore makes
+  // `allowRuntimeCreate: false` + `allowEnvironmentOverlay: false` therefore makes
   // `api` CODE-ONLY (the `job` / `agent` / `capability` shape): the #5086 inlet
   // refuses `PUT /api/v1/meta/api/:name` before persistence, on every kernel,
   // in draft mode as well as active, with `code: 'NOT_CREATABLE'`, `status: 403`
@@ -1049,9 +1107,9 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // it through `publishPackage`. `OS_METADATA_WRITABLE` remains the one
   // operator escape hatch, unchanged.
   //
-  // `allowOrgOverride: false` (also unchanged from today's effective value): an
-  // endpoint is an OUTWARD URL contract owned by the declaring package. A
-  // per-org fork could move `path`, flip `authRequired` or drop `rateLimit` on
+  // `allowEnvironmentOverlay: false` (also unchanged from today's effective value): an
+  // endpoint is an OUTWARD URL contract owned by the declaring package. An
+  // environment fork could move `path`, flip `authRequired` or drop `rateLimit` on
   // the publisher's own URL, and ADR-0005 defaults this flag to false precisely
   // so that opt-in is deliberate. Same posture as `datasource`.
   //
@@ -1067,20 +1125,20 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // run at publish (stack schema, `publishPackage`, `publishPackageDrafts`) and
   // again at load (`buildEndpointIndex`). This entry adds a SHAPE check in
   // front of them, never a second opinion about servability.
-  { type: 'api', label: 'API Endpoint', description: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
-  { type: 'translation', label: 'Translation', filePatterns: ['**/*.translation.ts', '**/*.translation.yml', '**/*.translation.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 90, domain: 'system' },
-  { type: 'email_template', label: 'Email Template', filePatterns: ['**/*.email-template.ts', '**/*.email-template.yml', '**/*.email-template.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'system' },
+  { type: 'api', label: 'API Endpoint', description: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
+  { type: 'translation', label: 'Translation', filePatterns: ['**/*.translation.ts', '**/*.translation.yml', '**/*.translation.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 90, domain: 'system' },
+  { type: 'email_template', label: 'Email Template', filePatterns: ['**/*.email-template.ts', '**/*.email-template.yml', '**/*.email-template.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'system' },
   // ADR-0046: package documentation. Inert data — no runtime behavior, no
   // overlay (a manual is the publisher's voice; tenants don't patch it).
   // Runtime-creatable so AI/authors can draft docs via saveMetaItem
   // (ADR-0033). Collected from flat `src/docs/*.md` by the CLI; the kernel
   // never parses `content`. loadOrder is last: nothing references docs.
-  { type: 'doc', label: 'Documentation', description: 'Package documentation — flat Markdown items (ADR-0046)', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  { type: 'doc', label: 'Documentation', description: 'Package documentation — flat Markdown items (ADR-0046)', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
   // Navigation spine over docs (ADR-0046 §6): ordered groups, membership derived
   // by rule. Overlay-mergeable at read (`supportsOverlay: true`); runtime-
   // creatable for AI/authors. loadOrder last (references docs).
   //
-  // `allowOrgOverride: false` — ROLLED BACK from an unratified `true` (commit ee58392e1,
+  // `allowEnvironmentOverlay: false` — ROLLED BACK from an unratified `true` (commit ee58392e1,
   // ADR-0005). The "render-time like view/dashboard" argument that used to
   // sit here is only half of ADR-0005's admission pair; the WRITTEN
   // render-only rationale ratified into the whitelist table was never filed,
@@ -1089,11 +1147,11 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // Zero live org-scoped book overlay rows in-repo at rollback. Studio's
   // drag-edit of a PACKAGED book now answers `403 not_overridable`;
   // authoring a BRAND-NEW book keeps working (`allowRuntimeCreate`).
-  { type: 'book', label: 'Documentation Book', description: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  { type: 'book', label: 'Documentation Book', description: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
 
   // Security Protocol
   //
-  // `permission` / `position`: `allowOrgOverride: false` — ROLLED BACK from
+  // `permission` / `position`: `allowEnvironmentOverlay: false` — ROLLED BACK from
   // an unratified `true` (commit ee58392e1, 2026-08-08 maintainer ruling; same verdict
   // family as `flow`, #6283). ADR-0005's security row says ❌ outright:
   // "Authorization correctness; overlays would create silent privilege
@@ -1114,8 +1172,8 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // ADR-0094's "customize packaged sets via env overlay" direction
   // (2026-07-14) is to be restored, that is an ADR-0005 whitelist revision —
   // file it there; do not flip this flag back ad hoc.
-  { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },
-  { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
+  { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },
+  { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
   // [#5961] Package-declared authorization capabilities (ADR-0066 D1).
   //
   // ⛔ CODE-ONLY, and that is the whole point of the entry. ADR-0066 D1 says
@@ -1126,7 +1184,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // three-way separation: nothing in code would ever require the name, so the
   // row would be an unreferenced grant target sitting in the SAME namespace
   // `systemPermissions` / `requiredPermissions` resolve by string. Hence
-  // `allowRuntimeCreate: false` AND `allowOrgOverride: false`, which together
+  // `allowRuntimeCreate: false` AND `allowEnvironmentOverlay: false`, which together
   // are #5086's code-only declaration — `saveMetaItem` refuses
   // `PUT /api/v1/meta/capability/:name` with 403 `not_creatable` on EVERY
   // kernel, and `codeOnlySourceHint` reads `filePatterns[0]` back to tell the
@@ -1146,7 +1204,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // declaration would let it re-scope `org` → `platform`.
   // `loadOrder: 12` — before `permission`/`position` (15), so a set's
   // `systemPermissions` resolves against capabilities that already exist.
-  { type: 'capability', label: 'Capability', description: 'Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
+  { type: 'capability', label: 'Capability', description: 'Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
 
   // AI Protocol
   // `agent`: executionPinned — long-running conversations must stick to the
@@ -1157,7 +1215,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // exactly two platform-owned agents (`ask`/`build`); tenants extend the
   // platform by authoring skills + tools, never agents. Hence
   // allowRuntimeCreate:false (no runtime "create agent") and
-  // allowOrgOverride:false (no per-org agent fork). The runtime catalog
+  // allowEnvironmentOverlay:false (no environment fork of a packaged agent). The runtime catalog
   // additionally filters out any non-platform agent record (see service-ai).
   //
   // FOR AGENTS, THE CODE IS THE RECORD — and that is the whole answer to
@@ -1197,18 +1255,18 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // If `agent` is ever OPENED to tenant authoring, this note stops applying:
   // an author-owned definition has no git to fall back on, so opening the
   // type and giving it a real history path are the same piece of work.
-  { type: 'agent', label: 'AI Agent', filePatterns: ['**/*.agent.ts', '**/*.agent.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: true, executionPinned: true, loadOrder: 90, domain: 'ai' },
-  // `tool` / `skill`: `allowOrgOverride: false` — ROLLED BACK from an
+  { type: 'agent', label: 'AI Agent', filePatterns: ['**/*.agent.ts', '**/*.agent.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: true, executionPinned: true, loadOrder: 90, domain: 'ai' },
+  // `tool` / `skill`: `allowEnvironmentOverlay: false` — ROLLED BACK from an
   // unratified `true` (commit ee58392e1, 2026-08-08 maintainer ruling). ADR-0005's ai
   // row says ❌: "Behavioural contracts with model providers; treat like
   // flows" — and `flow` itself was rolled back by #6283 on that very row.
   // ADR-0063 §2's model (tenants extend the platform by AUTHORING skills +
   // tools) is the `allowRuntimeCreate: true` tier, which stays open; what
-  // closes is per-org overlay of a PACKAGE-SHIPPED tool/skill, now a loud
+  // closes is an overlay of a PACKAGE-SHIPPED tool/skill, now a loud
   // `403 not_overridable`. Zero live org-scoped overlay rows for either
   // type in-repo at rollback; zero production write sites found.
-  { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
-  { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },
+  { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
+  { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },
 ];
 
 // ==========================================

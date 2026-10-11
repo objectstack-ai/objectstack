@@ -7065,8 +7065,10 @@ export class RestServer {
                     // door admits lands environment-wide (`organization_id`
                     // NULL), its audit row included, whatever the caller's
                     // active organization. Until this stage the door threaded
-                    // the active organization for the five types the registry
-                    // declared `allowOrgOverride`; a single-posture Studio save
+                    // the active organization for the five types whose registry
+                    // flag opened an overlay (then spelled `allowOrgOverride`,
+                    // `allowEnvironmentOverlay` since 18, which decides no
+                    // organization); a single-posture Studio save
                     // of those types therefore sits under the Default
                     // Organization, and is not served again until ADR-0131 C7
                     // promotes it to the environment layer.

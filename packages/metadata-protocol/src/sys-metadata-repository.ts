@@ -19,7 +19,7 @@
  *     (invariant 6). With no `since` the subscriber is owed live events
  *     only — see `watch()` for why that is not an oversight.
  *   - whitelist enforcement: refuses to persist types whose registry
- *     entry has `allowOrgOverride: false` (Prime Directive #8)
+ *     entry has `allowEnvironmentOverlay: false` (Prime Directive #8)
  *   - **M1**: every successful put/delete appends a durable row to
  *     `sys_metadata_history` inside the same engine.transaction() as the
  *     parent `sys_metadata` write. No-op puts (identical content — see
@@ -349,14 +349,14 @@ export interface SysMetadataRepositoryOptions {
 /** Derived from registry — single source of truth (Prime Directive #8). */
 const OVERLAY_ALLOWED_TYPES: ReadonlySet<string> = new Set(
   DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => e.allowOrgOverride)
+    .filter((e) => e.allowEnvironmentOverlay)
     .map((e) => e.type),
 );
 
 /**
  * Types that opt into runtime creation of brand-new items (two-tier
  * model — ADR-0005 extension). These items live only in `sys_metadata`;
- * there is no artifact backing them and `allowOrgOverride` need not be
+ * there is no artifact backing them and `allowEnvironmentOverlay` need not be
  * granted on the type. Used by `assertAllowed()` when called with
  * `intent: 'runtime-only'` — a signal from the protocol layer that it
  * has already verified the absence of an artifact-shadowing collision.
@@ -379,11 +379,14 @@ const RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = new Set(
 );
 
 /**
- * [#6960] Types whose LOADER merges an overlay row on top of the artifact at
- * read time — `supportsOverlay: true`. Derived from the same registry as the
- * two sets above (Prime Directive #8), and deliberately a different question
- * from {@link OVERLAY_ALLOWED_TYPES}: `supportsOverlay` is a capability of the
- * READ path, `allowOrgOverride` a permission on the WRITE path. Read only by
+ * [#6960] Types whose stored overlay row of an item a managed package ships
+ * may be REMOVED without the type's environment-overlay permission —
+ * `supportsOverlay: true`. Derived from the same registry as the two sets
+ * above (Prime Directive #8), and deliberately a different question from
+ * {@link OVERLAY_ALLOWED_TYPES}: `allowEnvironmentOverlay` decides whether an
+ * environment may overlay a packaged item at all, `supportsOverlay` only that
+ * removing such a row restores the managed definition, so it is repair. It
+ * opens no save and decides no read. Read only by
  * {@link SysMetadataRepository.assertDeleteAllowed}.
  */
 const OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = new Set(
@@ -1726,7 +1729,7 @@ export class SysMetadataRepository implements MetadataRepository {
    * behavior). The protocol layer passes `'runtime-only'` after it has
    * verified — via the schema registry — that no artifact item exists
    * at `(type, name)`. In that case we accept types with
-   * `allowRuntimeCreate: true`, even when `allowOrgOverride` is false.
+   * `allowRuntimeCreate: true`, even when `allowEnvironmentOverlay` is false.
    *
    * The env-var escape hatch (`OS_METADATA_WRITABLE`) applies to the
    * `runtime-only` intent ONLY. [ADR-0131 D6] Managed content is sealed: an
@@ -1893,7 +1896,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // declares below, so a bracketed restatement duplicates onto the prose
     // axis a fact the envelope already carries.
     const err: any = new Error(
-      `'${type}' has neither allowOrgOverride nor allowRuntimeCreate in the registry. ` +
+      `'${type}' has neither allowEnvironmentOverlay nor allowRuntimeCreate in the registry. ` +
       `Overlay-allowed: ${Array.from(new Set(allowed)).join(', ') || '(none)'}. ` +
       `Set OS_METADATA_WRITABLE to enable additional types at runtime.`,
     );
@@ -2005,7 +2008,7 @@ export class SysMetadataRepository implements MetadataRepository {
       ? `Cannot overlay '${type}' in package '${packageId}': that package is read-only, and its packaged base `
         + `is locked against in-place edits. ${regimePrescription}`
       : `Cannot overlay '${type}' in package '${packageId}': that package is read-only (a managed package) `
-      + `and the type has no environment overlay channel (allowOrgOverride=false), so this item is sealed `
+      + `and the type has no environment overlay channel (allowEnvironmentOverlay=false), so this item is sealed `
       + `against runtime edits, and OS_METADATA_WRITABLE does not open a managed item. `
       + `Edit the source artifact and redeploy. See docs/adr/0010-metadata-protection-model.md.`);
     err.code = 'ITEM_LOCKED';
@@ -2023,11 +2026,11 @@ export class SysMetadataRepository implements MetadataRepository {
    * ## Why the divergence exists
    *
    * `assertAllowed` refuses an `override-artifact` write on any type without
-   * `allowOrgOverride`, and it is TOPOLOGY-INDEPENDENT — a control-plane
+   * `allowEnvironmentOverlay`, and it is TOPOLOGY-INDEPENDENT — a control-plane
    * kernel (`environmentId === undefined`) skips the protocol's own two-tier
    * block entirely and lands here instead. That made it the second of the two
    * refusal points #6960 measured: on an environment carrying an overlay row
-   * authored BEFORE commit ee58392e1 rolled `allowOrgOverride` back to
+   * authored BEFORE commit ee58392e1 rolled `allowEnvironmentOverlay` back to
    * `false`, the row kept merging overlay-wins at read time while the ordinary
    * "Reset to package default" answered 403 — the removal reachable only
    * through `OS_METADATA_WRITABLE`. Maintainer ruling, 2026-08-10: the delete
@@ -2037,13 +2040,14 @@ export class SysMetadataRepository implements MetadataRepository {
    * ## The boundary, which is the whole safety argument
    *
    * Keyed on `supportsOverlay` ({@link OVERLAY_CAPABLE_TYPES}), NOT on
-   * `allowOrgOverride`:
+   * `allowEnvironmentOverlay`:
    *
-   *  - `supportsOverlay: true` — the loader merges the row, so a row under
-   *    this name really is a customization sitting on top of a code-declared
-   *    default, and subtracting it restores that default. This is the tier
-   *    commit ee58392e1 rolled back (`permission` / `position` / `page` / `app` /
-   *    `dataset` / `book`).
+   *  - `supportsOverlay: true` — the removal carve-out: a row under this
+   *    name is a customization sitting on top of a code-declared default
+   *    (served for `permission`, withheld from the read by ADR-0131 D6's seal
+   *    for every other such type), and subtracting it restores that default.
+   *    This is the tier commit ee58392e1 rolled back (`permission` /
+   *    `position` / `page` / `app` / `dataset` / `book`).
    *  - `supportsOverlay: false` — `object` above all, whose overlay registers
    *    as its own contributor LAYER (ADR-0029 D9) rather than merging, and
    *    whose reset refusal is D9.6's declared, maintainer-approved cost. It

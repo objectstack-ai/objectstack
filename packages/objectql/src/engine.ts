@@ -3443,7 +3443,7 @@ const METADATA_ARRAY_KEYS = [
   // decides "a code package ships this" from exactly that entry
   // (`isArtifactBacked` → `getArtifactItem`), so a save over a package's
   // position took the runtime-create tier and was accepted, although the type
-  // registry declares `position` `allowOrgOverride: false`. With the entry
+  // registry declares `position` `allowEnvironmentOverlay: false`. With the entry
   // present the door's type-level refusal covers it like every other
   // `security`-domain type (`engine-security-catalog-package-door.test.ts`).
   // `roles` stays in the list as the inert retired spelling it already was.

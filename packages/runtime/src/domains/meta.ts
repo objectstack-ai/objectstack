@@ -943,7 +943,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts[0] === 'types') {
         // PRIORITY 1: Try protocol service — it returns BOTH legacy
         // `types: string[]` AND the richer `entries` array (with
-        // JSON Schemas, allowOrgOverride flags, domain, etc) needed by
+        // JSON Schemas, allowEnvironmentOverlay flags, domain, etc) needed by
         // the metadata admin UI. It internally also merges
         // MetadataService runtime types, so this path is strictly richer.
         const protocol = await resolveProtocol(deps, _context);

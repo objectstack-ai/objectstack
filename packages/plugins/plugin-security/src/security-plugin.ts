@@ -2474,7 +2474,7 @@ export class SecurityPlugin implements Plugin {
       // ADR-0094 write-through, which TRANSLATES them into a metadata write.
       // Whether that write is ACCEPTED is ADR-0005's call, not this gate's,
       // and since ADR-0094 D5-R (commit ee58392e1 rolled `permission` back to
-      // `allowOrgOverride: false`) a CODE-DECLARED set is refused there with
+      // `allowEnvironmentOverlay: false`) a CODE-DECLARED set is refused there with
       // 403 `NOT_OVERRIDABLE` — the 2026-07-14 "customize / reset via an env
       // overlay" direction this comment used to state is RETIRED.
       // Placed BEFORE the principal-less refusal and the CRUD check so the
@@ -7136,7 +7136,7 @@ export class SecurityPlugin implements Plugin {
     // refused HERE: the write-through middleware (which runs after this gate
     // + the delegated-admin gate + the CRUD checks) translates them into a
     // metadata write, and the refusal is LEFT TO THAT PRODUCER. Since commit
-    // ee58392e1 rolled `permission` back to `allowOrgOverride: false`, a
+    // ee58392e1 rolled `permission` back to `allowEnvironmentOverlay: false`, a
     // CODE-DECLARED (artifact-backed) set is refused there with 403
     // `NOT_OVERRIDABLE`; a `sys_metadata`-backed set rides
     // `allowRuntimeCreate` and still lands. The 2026-07-14 "customize / reset
