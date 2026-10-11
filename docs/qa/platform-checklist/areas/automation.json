@@ -332,7 +332,7 @@
         {
           "clause": "the child-row filter is settable in Studio's visual filter editor on a writable base package (create a scratch base via POST /api/v1/packages and author the parent+summary there), and persists per the meta API; duplicate of the code showcase package is refused DUPLICATE_SOURCE_NOT_A_BASE (#14451).",
           "oracle": "screenshot",
-          "verify": "POST /api/v1/packages creates the scratch base; author the parent with a filtered summary field and its child there; open the summary field in Studio's visual filter editor, edit its child-row filter, save, and confirm the persisted metadata via the meta API. An org overlay is NOT an alternative route: the object type declares supportsOverlay and allowOrgOverride false (DEFAULT_METADATA_TYPE_REGISTRY). The duplicate route's 422 DUPLICATE_SOURCE_NOT_A_BASE on the code showcase package is the expected refusal (requireDuplicableSource), not a blocker",
+          "verify": "POST /api/v1/packages creates the scratch base; author the parent with a filtered summary field and its child there; open the summary field in Studio's visual filter editor, edit its child-row filter, save, and confirm the persisted metadata via the meta API. An org overlay is NOT an alternative route: the object type declares supportsOverlay and allowEnvironmentOverlay false (DEFAULT_METADATA_TYPE_REGISTRY). The duplicate route's 422 DUPLICATE_SOURCE_NOT_A_BASE on the code showcase package is the expected refusal (requireDuplicableSource), not a blocker",
           "evidence": "editor screenshot + saved metadata read"
         }
       ],
