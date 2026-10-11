@@ -62,7 +62,7 @@ import { METADATA_ITEM_NAME_PATTERN, PLURAL_TO_SINGULAR } from '@objectstack/spe
 import { ASSEMBLED_VIEW_ITEMS_KEY, expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
-import { deriveViewContainerObject } from '@objectstack/metadata';
+import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 
 /**
  * How the import treats one top-level key of a package body that is NOT a
