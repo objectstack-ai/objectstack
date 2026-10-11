@@ -156,6 +156,15 @@ const UNEXERCISED_BY_THIS_BOOT: Record<string, string> = {
   // `rawApp.post()` on the Hono app — never through the port.
   'POST /api/v1/webhooks/redeliver':
     'self-hosted, plugin-webhooks mounts the redeliver door with rawApp.post() directly on Hono, so it never passes through the IHttpServer port; the dispatcher domain this row ledgers serves only a kernel with no raw app. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-webhooks-redeliver.conformance.test.ts',
+  // [#22773] Two doors, one path, a third time. This row ledgers the inbound
+  // hook as the DISPATCHER's `/automation` domain serves it, the door for a
+  // kernel with NO raw app. Self-hosted, `@objectstack/trigger-api`'s
+  // `ApiTriggerPlugin` serves the same path from `rawApp.post()` on the Hono
+  // app where it is composed — never through the port — and the dispatcher
+  // bridge mounts nothing there, which this pin's second half checks on every
+  // run: the path is never mounted twice.
+  'POST /api/v1/automation/hooks/:flowName/:hookId':
+    'self-hosted, the inbound-hook trigger (ApiTriggerPlugin) mounts this path with rawApp.post() directly on Hono, so it never passes through the IHttpServer port, and the dispatcher bridge mounts no route that answers it; the dispatcher domain this row ledgers serves only a kernel with no raw app. Pinned on the real HttpDispatcher by packages/runtime/src/domains/automation-hooks.test.ts',
 };
 
 /** Segments a probe path uses for `:params` — must match no literal segment. */
