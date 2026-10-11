@@ -27,7 +27,7 @@
  *  - **Case 2** — an injected sink still gets the line, with its receiver and
  *    its structured meta, and the console stays out of it. That is the half the
  *    pre-existing suites (`bootstrap-seed-round-trips`,
- *    `bootstrap-system-capabilities`, `permission-set-projection`) already pin
+ *    `permission-set-projection`) already pin
  *    from the seeder side; it is restated here because this file is what a
  *    later author edits.
  *  - **Case 3** — a read that ANSWERED is silent on every channel with no sink.

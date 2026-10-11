@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 241 |
+| Write call sites | 239 |
 | Object name statically decidable | 160 |
-| Object name chosen at run time | 81 |
+| Object name chosen at run time | 79 |
 | Against a tenancy-enabled object | 159 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 180 |
+| Threading a tenant context | 178 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 128 |
+| Threading a decidably elevated context | 126 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 105 |
 
@@ -90,13 +90,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-09 at `5551f8d8d`.
+Measured on 2026-10-10 at `b88b35678`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 625 |
+| tracked non-test sources scanned | 631 |
 | engine-shaped types recognised | 72 |
-| declared objects in the registry | 116 |
+| declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 162 |
 
 ## Every site
@@ -165,8 +165,6 @@ Measured on 2026-10-09 at `5551f8d8d`.
 | `packages/plugins/plugin-security/src/bootstrap-declared-positions.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts` | `insert` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/cleanup-package-permissions.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |

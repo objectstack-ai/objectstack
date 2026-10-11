@@ -204,10 +204,10 @@ to write into another package's capability.
 
 This **replaces the implicit back-door** where a capability existed only as an
 untitled placeholder derived from whatever a permission set happened to reference
-in `systemPermissions[]`. That derivation still runs for back-compat (a
-reference with no declaration keeps resolving as a `managed_by:'platform'`
-placeholder), but an explicit `defineCapability` takes precedence and — for a
-pre-existing derived placeholder — **claims** it, upgrading the row to package
+in `systemPermissions[]`. That derivation is retired: a reference with no
+declaration still matches by name at runtime but gets no `sys_capability` row.
+An explicit `defineCapability` takes precedence and — for a derived placeholder
+an older database still holds — **claims** it, upgrading the row to package
 provenance with the authored label/description/scope. This is the ADR-0066 D1
 direction: retire the implicit `managed_by`-guessing back-doors in favour of
 explicit, attributable declarations.
@@ -430,7 +430,8 @@ an expiry: deactivation is an incident-response control, installation-wide,
 and there is no date on the user's own grant row to notice — without the
 state, the admin diagnosing "why did access disappear" would get the same
 answer as for a user who never held the grant, with no pointer to the
-catalogue row somebody switched off. Reported for the grant rows explain
+`sys_metadata_activation` row somebody switched off — the explainer reads the
+same ledger the resolver does, so explain and enforce agree. Reported for the grant rows explain
 already walks: `sys_user_position` rows and direct `sys_user_permission_set`
 grants (a deactivated set reached only through an active position's linkage is
 not re-derived — that would replicate the resolver's aggregation).
@@ -455,9 +456,12 @@ Deactivation is an incident-response control, so what it does **not** touch is
 deliberate. Administration surfaces keep listing and editing a deactivated
 position — an admin must still be able to unbind and clean up what they just
 switched off — and the write gates that judge audience-anchor bindings and a
-delegated administrator's blast radius keep reading every row, deactivated
-included: dropping rows there would make a refused binding *permitted* and a
-delegate's boundary *narrower*, which is the opposite of switching access off.
+delegated administrator's blast radius do not consult the activation ledger:
+they judge every binding and assignment in front of them — including the
+permission sets a position's definition names — whether or not the ledger
+switched it off, because skipping a switched-off one would make a refused
+binding *permitted* and a delegate's boundary *narrower*, which is the
+opposite of switching access off.
 
 ## Governance: how "declared = enforced" is kept true
 
@@ -545,15 +549,17 @@ The complete, prioritized gap map lives in issue **#2561** (the production
 
 - **Deny/muting layer** (ADR-0066 ⑦⑧) — union-only grants can't take access
   away; needed for large-org governance and packaged-set adjustment.
-- **Capability registry** (ADR-0066 D1) — **landed**: capabilities are seeded
-  as first-class `sys_capability` records from the canonical list in
+- **Capability registry** (ADR-0066 D1, ADR-0131 D3) — **landed**: the
+  platform's curated capabilities, from the canonical list in
   `@objectstack/spec` (`security/capabilities.ts` → `PLATFORM_CAPABILITIES`),
-  seeded by `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts`.
+  are declared `capability` metadata served by the registry
+  (`registerBuiltinCapabilities`, `GET /api/v1/meta/capability`), with no
+  `sys_capability` row.
   A **package** now DEFINES its own capabilities explicitly via
   [`defineCapability` / `stack.capabilities`](#package-capability-declaration-adr-0066-d1),
   seeded with `managed_by:'package'` + `package_id` provenance by
   `bootstrap-declared-capabilities.ts` — replacing the implicit
-  derive-from-`systemPermissions` back-door (which stays for back-compat).
+  derive-from-`systemPermissions` back-door (now retired).
   The authoring lint (ADR-0066 ⑨) is also **landed**: `validateCapabilityReferences`
   (`@objectstack/lint`) warns at author time (`os validate` / `os lint`) when a
   `requiredPermissions` names a capability registered nowhere — no built-in, no

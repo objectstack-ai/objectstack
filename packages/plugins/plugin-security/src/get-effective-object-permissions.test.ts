@@ -103,19 +103,6 @@ const SCHEMAS: Record<string, any> = {
   report: { name: 'report', label: 'Report', enable: { apiMethods: ['get', 'list'] }, fields: { id: { name: 'id' } } },
 };
 
-/** `where` matcher: scalar equality plus the `$in` form the resolver sends; any other operator REFUSES. */
-function matches(row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean {
-  return Object.entries(where ?? {}).every(([key, cond]) => {
-    if (key.startsWith('$')) throw new Error(`fake engine: unsupported operator ${key}`);
-    const value = row[key] ?? null;
-    if (cond && typeof cond === 'object' && Array.isArray((cond as { $in?: unknown }).$in)) {
-      return ((cond as { $in: unknown[] }).$in).includes(value);
-    }
-    if (cond && typeof cond === 'object') throw new Error(`fake engine: unsupported condition on ${key}`);
-    return value === (cond ?? null);
-  });
-}
-
 function bootPlugin(
   opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?: boolean; schemas?: Record<string, any> } = {},
 ) {
@@ -123,17 +110,33 @@ function bootPlugin(
   const schemas = opts.schemas ?? SCHEMAS;
   const permissionSetReads: string[][] = [];
   const registered: Array<(context: unknown) => Promise<unknown>> = [];
+  // [ADR-0131 D3/D4] The sets are the security catalog's definitions — each
+  // row above as the registry holds it once saved through the metadata door —
+  // read live, so a set taken away is gone from the next resolution.
+  const definitionOf = (row: Record<string, unknown>) => ({
+    name: row.name,
+    label: row.label,
+    objects: JSON.parse(String(row.object_permissions ?? '{}')),
+    fields: JSON.parse(String(row.field_permissions ?? '{}')),
+    systemPermissions: JSON.parse(String(row.system_permissions ?? '[]')),
+    tabPermissions: JSON.parse(String(row.tab_permissions ?? '{}')),
+  });
   const ql: any = {
     registerMiddleware: () => {},
-    registry: { getAllObjects: () => Object.values(schemas) },
-    getSchema: (name: string) => schemas[name] ?? null,
-    find: async (object: string, query: any) => {
-      const tables: Record<string, Array<Record<string, unknown>>> = { sys_permission_set: dbRows };
-      if (object === 'sys_permission_set') permissionSetReads.push(query?.where?.name?.$in ?? []);
-      const rows = (tables[object] ?? []).filter((r) => matches(r, query?.where));
-      // Hold the caller's bound (`check:objectql-double-limit`).
-      return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
+    registry: {
+      getAllObjects: () => Object.values(schemas),
+      getItem: (type: string, name: string) => {
+        if (type !== 'permission') return undefined;
+        permissionSetReads.push([name]);
+        const row = dbRows.find((r) => r.name === name);
+        return row ? definitionOf(row) : undefined;
+      },
+      listItems: (type: string) => (type === 'permission' ? dbRows.map(definitionOf) : []),
+      isPackageDisabled: () => false,
     },
+    getSchema: (name: string) => schemas[name] ?? null,
+    // No table answers here: every set is the catalog's (above).
+    find: async () => [],
   };
   if (opts.engineSeam !== false) {
     ql.registerEffectiveObjectPermissionsResolver = (fn: (context: unknown) => Promise<unknown>) => registered.push(fn);

@@ -661,6 +661,22 @@ describe('attachments permission matrix (#2755)', () => {
 // security plugin (whose seam is present and unused), org-bound members — and
 // no gate. A parent-record editor's delete of another member's attachment is
 // refused by the floor; the row's creator, whom the floor admits, may delete it.
+//
+// [#22301] `bootStack` mounts the always-on slate `objectstack serve` mounts for
+// every app, `storage` included, so a composition WITHOUT service-storage is
+// now one the boot is told about rather than one it falls into: a stand-in
+// under service-storage's registered name in `extraPlugins` takes the
+// provider's place by identity (the caller-wins rule), registers nothing, and
+// keeps the real plugin — its objects and its floor alternate — out, the shape
+// `serve --preset minimal` (no slate) or a host that mounts no storage boots.
+/** Holds service-storage's identity so the boot does not mount it, and provides nothing. */
+const noStorageService = {
+  name: 'com.objectstack.service.storage',
+  type: 'standard' as const,
+  version: '0.0.0',
+  async init() {},
+  async start() {},
+};
 /** Registers `sys_attachment` the way service-storage does, and installs nothing else. */
 const sysAttachmentWithoutStorage = {
   name: 'com.dogfood.sys-attachment-without-storage',
@@ -687,7 +703,7 @@ describe('attachments without service-storage (a′)', () => {
   beforeAll(async () => {
     stack = await bootStack(attachmentsFixtureStack as never, {
       security: attachmentsFixtureSecurity(),
-      extraPlugins: [sysAttachmentWithoutStorage as never],
+      extraPlugins: [noStorageService as never, sysAttachmentWithoutStorage as never],
       orgContext: true,
     });
     ql = await stack.kernel.getServiceAsync('objectql');

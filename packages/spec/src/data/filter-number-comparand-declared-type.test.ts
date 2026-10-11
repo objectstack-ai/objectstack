@@ -139,6 +139,8 @@ describe('the judged fields', () => {
       expect(numberComparandFieldVerdict({ type: t }), t).toBe(NUMERIC_VALUE_TYPES.has(t) ? 'judged' : 'not-judged');
     }
     expect(numberComparandFieldVerdict({ type: 'formula', returnType: 'number' })).toBe('judged');
+    // #22727 — a currency formula is judged as the currency field it reads like.
+    expect(numberComparandFieldVerdict({ type: 'formula', returnType: 'currency' })).toBe('judged');
     for (const rt of ['text', 'boolean', 'date']) {
       expect(numberComparandFieldVerdict({ type: 'formula', returnType: rt }), rt).toBe('not-judged');
     }
@@ -380,13 +382,13 @@ describe('numberComparandRefusalMessage', () => {
 // ── The fixture ──────────────────────────────────────────────────────────────
 
 describe('the fixture', () => {
-  it('carries one field per FieldType member (f_<type>), four typed formulas and one untyped', () => {
+  it('carries one field per FieldType member (f_<type>), five typed formulas and one untyped', () => {
     const names = NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.map((f) => f.name);
     expect(new Set(names).size).toBe(names.length);
     const plain = NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.filter((f) => f.type !== 'formula').map((f) => f.type);
     expect(sorted(plain)).toEqual(sorted(FieldType.options.filter((t) => t !== 'formula')));
     const formulas = NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.filter((f) => f.type === 'formula');
-    expect(sorted(formulas.map((f) => f.returnType ?? '(none)'))).toEqual(['(none)', 'boolean', 'date', 'number', 'text']);
+    expect(sorted(formulas.map((f) => f.returnType ?? '(none)'))).toEqual(['(none)', 'boolean', 'currency', 'date', 'number', 'text']);
   });
 
   it('every field is a legal FieldSchema input, and the object a legal ObjectSchema input', () => {
@@ -459,11 +461,11 @@ describe('NUMBER_COMPARAND_DOOR_CASES', () => {
     }
   });
 
-  it('the census covers every fixture field, refusing exactly the numeric class and formula returning number', () => {
+  it('the census covers every fixture field, refusing exactly the numeric class and formulas returning number or currency', () => {
     const census = NUMBER_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[census]'));
     expect(sorted(census.map((c) => c.key))).toEqual(sorted(NUMBER_COMPARAND_DOOR_FIXTURE_FIELDS.map((f) => f.name)));
     expect(sorted(census.filter(isRefusal).map((c) => c.key)))
-      .toEqual(sorted([...[...NUMERIC_VALUE_TYPES].map((t) => `f_${t}`), 'f_formula_number']));
+      .toEqual(sorted([...[...NUMERIC_VALUE_TYPES].map((t) => `f_${t}`), 'f_formula_number', 'f_formula_currency']));
     expect(census.filter((c) => c.verdict === 'deferred').map((c) => c.key)).toEqual(['f_formula_untyped']);
     expect(census.filter(isNarrows)).toEqual([]);
   });

@@ -771,8 +771,13 @@ function ledgerUnregistered(ql: any): boolean {
  * engine answers "object not found" rather than a missing table — so the
  * registry is asked first, as `ObjectQLPlugin`'s own ledger hydration does,
  * and the read is not issued. An engine with no registry to ask is read.
+ *
+ * Exported so every other reader of "is this switched off" — the permission
+ * explainer's dropped-grant report, the security plugin's position-name fold —
+ * asks this one read instead of a second copy, and explain and enforce cannot
+ * disagree about deactivation.
  */
-async function readDisabledCatalogNames(
+export async function readDisabledCatalogNames(
   ql: any,
   positions: readonly string[],
   sets: readonly string[],
