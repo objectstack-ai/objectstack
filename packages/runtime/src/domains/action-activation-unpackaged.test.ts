@@ -32,11 +32,7 @@
 // already does that for the packaged case.
 
 import { describe, it, expect } from 'vitest';
-import {
-    ActionActivationProjection,
-    ObjectStoreActionActivationStore,
-    assertEngineUpdateDispatch,
-} from '@objectstack/objectql';
+import { ActionActivationProjection, ObjectStoreActionActivationStore } from '@objectstack/objectql';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -80,59 +76,68 @@ function matches(row: Row, where: Row | undefined): boolean {
     });
 }
 
+/**
+ * The in-memory `sys_metadata_activation` the durable store writes into: the
+ * store's keyed `find` and its `insert`, and nothing else. At module scope, on
+ * its own, so `pnpm check:objectql-double-limit` can lift and drive the `find`.
+ *
+ * `writeError` is thrown from every write — a store or record-validation
+ * failure arriving through the door's own `catch`.
+ *
+ * ⛔ No `update`: every case here writes a FIRST row, which the store inserts.
+ * The store's update leg for a package-less row is core's to pin
+ * (`metadata-activation-store.test.ts`, "UPDATES its row with no package on the
+ * way back on"); a second update double here would pin nothing that one does not.
+ */
+function makeLedgerTable(writeError?: Error) {
+    const rows: Row[] = [];
+    let nextId = 1;
+    const engine = {
+        async find(object: string, options?: any) {
+            const found = object === 'sys_metadata_activation' ? rows.filter((r) => matches(r, options?.where)) : [];
+            // The caller's bound, AFTER the filter, by presence: the store's
+            // table probe reads `limit: 1`.
+            return typeof options?.limit === 'number' ? found.slice(0, options.limit) : found;
+        },
+        async insert(object: string, data: Row) {
+            if (writeError) throw writeError;
+            const row = { id: `act_${nextId++}`, ...data };
+            if (object === LEDGER) rows.push(row);
+            return row;
+        },
+    };
+    return { rows, engine };
+}
+
 interface Harness {
     dispatcher: HttpDispatcher;
     rows: Row[];
-    executeAction: () => Promise<unknown>;
     executed: () => number;
 }
 
 /**
  * One deployment: the route object is a code artifact shipped by `crm`, the
  * engine carries the REAL action activation projection over the REAL durable
- * store, and that store writes into an in-memory `sys_metadata_activation`.
- *
- * `writeError` is thrown from every ledger write — a store or record-validation
- * failure arriving through the door's own `catch`.
+ * store, and that store writes into {@link makeLedgerTable}.
  */
 function boot(opts: { writeError?: Error } = {}): Harness {
-    const rows: Row[] = [];
+    const { rows, engine: ledger } = makeLedgerTable(opts.writeError);
     let executed = 0;
-    let nextId = 1;
     const objectDef = {
         name: OBJECT, _packageId: PACKAGE, _provenance: 'package', actions: [PACKAGED, EMBEDDED_UNSTAMPED],
     };
     const projection = new ActionActivationProjection();
-    const executeAction = async () => {
-        executed++;
-        return { ran: 'script' };
-    };
     const ql: any = {
-        executeAction,
+        ...ledger,
+        executeAction: async () => {
+            executed++;
+            return { ran: 'script' };
+        },
         getSchema: (name: string) => (name === OBJECT ? objectDef : undefined),
         registry: {
             getObject: (name: string) => (name === OBJECT ? objectDef : undefined),
             getItem: (type: string, name: string) =>
                 (type === 'action' ? STANDALONE.find((a) => a.name === name) : undefined),
-        },
-        async find(object: string, options?: any) {
-            return object === LEDGER ? rows.filter((r) => matches(r, options?.where)) : [];
-        },
-        async insert(object: string, data: Row) {
-            if (opts.writeError) throw opts.writeError;
-            const row = { id: `act_${nextId++}`, ...data };
-            if (object === LEDGER) rows.push(row);
-            return row;
-        },
-        async update(object: string, data: Row, options?: any) {
-            // The real engine's dispatch: the store updates by id, and nothing
-            // looser may pass here (`check:engine-double-contract`).
-            const dispatch = assertEngineUpdateDispatch(data, options);
-            if (dispatch.kind !== 'by-id') throw new Error('fake engine: only by-id updates are modelled');
-            if (opts.writeError) throw opts.writeError;
-            const row = rows.find((r) => r.id === dispatch.id);
-            if (object === LEDGER && row) Object.assign(row, data);
-            return row;
         },
         isActionEnabled: (name: string) => projection.isEnabled(name),
         describeDisabledAction: (name: string) => projection.describeDisabled(name),
@@ -154,7 +159,7 @@ function boot(opts: { writeError?: Error } = {}): Harness {
         getServiceAsync: async (name: string) => resolve(name),
         context: { getService: resolve },
     };
-    return { dispatcher: new HttpDispatcher(kernel as never), rows, executeAction, executed: () => executed };
+    return { dispatcher: new HttpDispatcher(kernel as never), rows, executed: () => executed };
 }
 
 /** A single-tenant administrator holding `manage_metadata`: every authority gate passes. */
@@ -189,10 +194,9 @@ describe('#22817 — an action no package ships is switched, and its row names n
         ]);
     });
 
-    it('…and back on: the same row is UPDATED, still with no package', async () => {
+    it('…and switching it ON first writes the same package-less row, armed', async () => {
         const h = boot();
 
-        await flip(h, 'global', ENV_GLOBAL.name, false);
         const res = await flip(h, 'global', ENV_GLOBAL.name, true);
 
         expect(statusOf(res), bodyOf(res)).toBe(200);
