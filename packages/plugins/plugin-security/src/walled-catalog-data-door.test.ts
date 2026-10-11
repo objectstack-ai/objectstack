@@ -151,7 +151,7 @@ async function outcomeOf(run: Promise<unknown>): Promise<{ ok: true } | { ok: fa
 const REFUSED = { ok: false, code: 'PERMISSION_DENIED', status: 403 } as const;
 
 async function storedNames(engine: ObjectQL, object: string, name: string): Promise<number> {
-  const rows = await engine.find(object, { where: { name }, context: { isSystem: true } } as any);
+  const rows = await engine.find(object, { where: { name }, context: { isSystem: true } });
   return Array.isArray(rows) ? rows.length : 0;
 }
 
@@ -176,7 +176,7 @@ for (const posture of ['isolated', 'group'] as const) {
         .toEqual(REFUSED);
       expect(await outcomeOf(engine.delete('sys_permission_set', { where: { id: 'ps_existing' }, context: tenant } as any)))
         .toEqual(REFUSED);
-      const [row] = await engine.find('sys_position', { where: { id: 'pos_existing' }, context: { isSystem: true } } as any) as any[];
+      const [row] = (await engine.find('sys_position', { where: { id: 'pos_existing' }, context: { isSystem: true } })) as any[];
       expect(row?.label).toBe('Existing');
       expect(await storedNames(engine, 'sys_permission_set', 'qa_existing_set')).toBe(1);
     });

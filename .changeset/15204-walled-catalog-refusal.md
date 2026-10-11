@@ -3,13 +3,14 @@
 '@objectstack/rest': minor
 '@objectstack/runtime': minor
 '@objectstack/plugin-security': minor
+'@objectstack/spec': minor
 ---
 
 Under a walled posture the security catalog is the platform operator's: tenants are refused creating, changing or deleting positions, permission sets and capabilities, and may only assign them
 
 Clause-②: yes (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) An authority narrowing on four write doors: no key of any metadata schema, no export and no configuration field is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. Items saved before this change keep their bytes. What changes is who may write a catalog item on a `group` or `isolated` deployment. The packages publish (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+<!-- adr-0087: registered walled-catalog-tenant-writes-retired -->
 
 **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3: "Shared-DB multi-tenant (`group` / `isolated`): tenant admins cannot create or edit catalog items; the operator defines the catalog for every tenant … Creation through Setup or the API is refused with a message naming the posture and the capability.").
 
@@ -22,4 +23,4 @@ Clause-②: yes (narrowing)
 
 **Unchanged.** Assignments: `sys_user_position` and `sys_user_permission_set` rows stay organization rows that an organization's administrators write for their own members. The platform operator and the engine's own writes (seeders, installers, migrations) write the catalog as before. Every other metadata type is untouched. Under `single` (and with no `tenancy` service), catalog writes stay with `manage_metadata` holders, exactly as before. The catalog activation door already required the platform operator under a wall.
 
-**The remedy.** A tenant that needs a position or permission set asks the platform operator to define it in Studio, or through a managed package. The tenant's administrators then assign it to their members. `@objectstack/metadata-core` exports the one predicate every door asks, `walledCatalogWriteVerdict`, beside `isSecurityCatalogType`, `SECURITY_CATALOG_TYPES` and `PLATFORM_OPERATOR_POSTURE`. A custom door that writes catalog items asks it after `metaWriteCapabilityVerdict`.
+**The remedy.** A tenant that needs a position or permission set asks the platform operator to define it in Studio, or through a managed package. The tenant's administrators then assign it to their members. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-catalog-tenant-writes-retired`. `@objectstack/metadata-core` exports the one predicate every door asks, `walledCatalogWriteVerdict`, beside `isSecurityCatalogType`, `SECURITY_CATALOG_TYPES` and `PLATFORM_OPERATOR_POSTURE`. A custom door that writes catalog items asks it after `metaWriteCapabilityVerdict`.
