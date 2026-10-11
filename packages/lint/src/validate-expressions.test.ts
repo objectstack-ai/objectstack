@@ -16,6 +16,7 @@ import {
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   PREDICATE_SLOT_STRING_REFUSAL,
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
+  VALUE_SLOT_TEMPLATE_REFUSAL,
   flowNodeConfigRefusals,
   predicateSlotRefusal,
 } from '@objectstack/spec/automation';
@@ -594,7 +595,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
               id: 'sweep',
               type: 'loop',
               config: {
-                collection: { dialect: 'cel', source: 'items' },
+                collection: ['a', 'b'],
                 iteratorVariable: 'status',
                 body: { nodes: [{ id: 'inner', type: 'assignment', config: { assignments: {} } }], edges: [] },
               },
@@ -2771,7 +2772,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
 
       it('flags a brace-in-CEL predicate inside a loop body, naming the region', () => {
         const issues = validateStackExpressions(flowWith({
-          id: 'loop_1', type: 'loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: badRegion() },
+          id: 'loop_1', type: 'loop', config: { collection: ['a', 'b'], body: badRegion() },
         }));
         // Both the body node's `config.condition` and the body edge's condition.
         expect(issues).toHaveLength(2);
@@ -2795,9 +2796,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         const issues = validateStackExpressions(flowWith({
           id: 'outer', type: 'loop',
           config: {
-            collection: { dialect: 'cel', source: 'rows' },
+            collection: ['a', 'b'],
             body: {
-              nodes: [{ id: 'inner', type: 'loop', config: { collection: { dialect: 'cel', source: 'cols' }, body: badRegion() } }],
+              nodes: [{ id: 'inner', type: 'loop', config: { collection: ['x'], body: badRegion() } }],
               edges: [],
             },
           },
@@ -2810,7 +2811,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(validateStackExpressions(flowWith({
           id: 'loop_1', type: 'loop',
           config: {
-            collection: { dialect: 'cel', source: 'rows' },
+            collection: ['a', 'b'],
             body: {
               nodes: [
                 { id: 'gate', type: 'decision', config: { condition: 'record.rating >= 4' } },
@@ -4889,7 +4890,7 @@ describe('a blank string in a ledger predicate slot (#17493)', () => {
   it('reaches a `decision` inside an ADR-0031 region body', () => {
     const found = errorsOf(flowStack({
       id: 'sweep', type: 'loop',
-      config: { collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', body: { nodes: [decision('   ')], edges: [] } },
+      config: { collection: ['a', 'b'], iteratorVariable: 'item', body: { nodes: [decision('   ')], edges: [] } },
     }));
     expect(found).toHaveLength(1);
     expect(found[0].where).toContain("loop 'sweep' body");
@@ -5011,6 +5012,58 @@ describe('a decision branch with no `expression` (#19961)', () => {
  * This pass answers for a stack handed to `validateStackExpressions` directly,
  * and it is what these pins drive.
  */
+/**
+ * [#19939, stage S3] A `loop`'s (with a `body`) and a `map`'s `collection` is a
+ * value slot: a CEL value envelope or an inline array. `objectstack validate`
+ * refuses a `{token}` there (the value-slot judge, naming the envelope and the
+ * list it must evaluate to) and a variable's bare name (the contract, naming
+ * the same envelope), and reads an envelope's roots like any value slot's. A
+ * body-less `loop` is the legacy flat-graph form, judged nowhere.
+ */
+describe('the loop and map collection is a value slot (#19939)', () => {
+  const BODY = { nodes: [{ id: 'b', type: 'assignment' }], edges: [] };
+  const stackWith = (node: Record<string, unknown>, variables: unknown[] = [{ name: 'rows', type: 'list' }]) => ({
+    flows: [{ name: 'f', variables, nodes: [{ id: 'start', type: 'start' }, { id: 'n', ...node }], edges: [] }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+  const POSITIONS = [
+    ['loop', { body: BODY }],
+    ['map', { flowName: 'child_flow' }],
+  ] as const;
+
+  it.each(POSITIONS)('%s: a `{token}` is refused, naming the envelope and the list it must evaluate to', (type, base) => {
+    const found = errorsOf(stackWith({ type, config: { ...base, collection: '{rows}' } }));
+    expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (${type}) ${type} collection at config.collection`]);
+    expect(found[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(found[0]!.message).toContain("Write `{rows}` as { dialect: 'cel', source: 'rows' }.");
+    expect(found[0]!.message).toContain('`has(vars.rows) ? vars.rows : []`');
+  });
+
+  it.each(POSITIONS)('%s: a bare variable name is refused in the contract\'s words, naming that variable in an envelope', (type, base) => {
+    const found = errorsOf(stackWith({ type, config: { ...base, collection: 'rows' } }));
+    expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (${type}) config.collection`]);
+    expect(found[0]!.message).toContain("A variable's bare name, `rows`, is not one");
+    expect(found[0]!.message).toContain("`{ dialect: 'cel', source: 'rows' }`");
+  });
+
+  it.each(POSITIONS)('%s: an envelope naming a declared variable, and an inline array, are clean', (type, base) => {
+    expect(errorsOf(stackWith({ type, config: { ...base, collection: { dialect: 'cel', source: 'rows' } } }))).toEqual([]);
+    expect(errorsOf(stackWith({ type, config: { ...base, collection: ['{rows}', 'b'] } }))).toEqual([]);
+  });
+
+  it('loop: an envelope reading a root the flow never binds is refused — the run would fault on it', () => {
+    const found = errorsOf(stackWith({ type: 'loop', config: { body: BODY, collection: { dialect: 'cel', source: 'rows' } } }, []));
+    expect(found.map((i) => [i.where, i.source])).toEqual([["flow 'f' · node 'n' (loop) loop collection at config.collection", 'rows']]);
+    expect(found[0]!.message).toContain('`rows` is not bound in this flow\'s expression scope');
+  });
+
+  it('a body-less loop — the legacy flat-graph form — is judged nowhere: a bare name is its spelling', () => {
+    expect(errorsOf(stackWith({ type: 'loop', config: { collection: 'rows' } }))).toEqual([]);
+    expect(errorsOf(stackWith({ type: 'loop', config: { collection: '{rows}' } }))).toEqual([]);
+  });
+});
+
 describe('node config an executor requires (#20316)', () => {
   const stackWith = (node: Record<string, unknown>) => ({
     flows: [{ name: 'config_flow', nodes: [{ id: 'start', type: 'start' }, { id: 'n', ...node }], edges: [] }],
@@ -5019,8 +5072,8 @@ describe('node config an executor requires (#20316)', () => {
     validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
 
   it.each([
-    { type: 'loop', whole: { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [{ id: 'b', type: 'assignment' }], edges: [] } }, key: 'collection' },
-    { type: 'map', whole: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'child_flow' }, key: 'collection' },
+    { type: 'loop', whole: { collection: ['a', 'b'], body: { nodes: [{ id: 'b', type: 'assignment' }], edges: [] } }, key: 'collection' },
+    { type: 'map', whole: { collection: ['a', 'b'], flowName: 'child_flow' }, key: 'collection' },
     { type: 'get_record', whole: { objectName: 'account' }, key: 'objectName' },
     { type: 'http', whole: { url: 'https://example.com/hook' }, key: 'url' },
     { type: 'subflow', whole: { flowName: 'child_flow' }, key: 'flowName' },
