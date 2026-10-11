@@ -703,7 +703,7 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 
 ### Touched `packages/spec`? Regenerate its artifacts BEFORE pushing
 
-`packages/spec` has **eight** checked-in generated artifacts, each with its own CI
+`packages/spec` has **six** checked-in generated artifacts, each with its own CI
 gate. All of them live in one job — `TypeScript Type Check` in `lint.yml`, which is
 required and has no paths filter, so no gate can go dormant on the PR that breaks it.
 That job runs its gates **sequentially**, so the first stale artifact masks every one
@@ -714,7 +714,7 @@ behind it. Match the change to the gate and regenerate up front:
 | A `.describe()` / TSDoc on any schema | `check:docs` | `gen:schema && gen:docs` |
 | A public export (added / removed / renamed) | `check:api-surface` | `gen:api-surface` |
 | An authorable key on a metadata schema | `check:authorable-surface` | `gen:schema` |
-| An ADR-0087 conversion / migration registry | `check:spec-changes`, `check:upgrade-guide` | `gen:spec-changes`, `gen:upgrade-guide` |
+| An ADR-0087 conversion / migration registry entry | `check:spec-changes`, `check:upgrade-guide` — in memory, red only when the registries do not project | nothing to commit — `gen:migration-registry` (install, build and test run it too) writes the gitignored `registry.ts` |
 | A `SKILL.md` (frontmatter or body) | `check:skill-docs`, `check:skill-refs` | `gen:skill-docs`, `gen:skill-refs` |
 | The react-blocks contract | `check:react-blocks` | `gen:react-blocks` |
 
