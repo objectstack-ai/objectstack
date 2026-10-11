@@ -7,7 +7,7 @@ feat(spec,metadata-protocol)!: the metadata type registry's `allowOrgOverride` i
 
 Clause-②: yes (narrowing)
 
-<!-- adr-0087: registered kernel/MetadataTypeRegistryEntry:allowOrgOverride, metadata-type-registry-allow-org-override-renamed -->
+<!-- adr-0087: registered metadata-type-registry-allow-org-override-renamed -->
 
 **BREAKING**: a renamed authorable key and a renamed response field, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
 
