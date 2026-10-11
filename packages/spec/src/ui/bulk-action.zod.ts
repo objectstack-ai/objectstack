@@ -161,8 +161,10 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * `accept` and `maxSize`, plus a reference-bearing field's `reference`,
  * `displayField` and `dependsOn`. From THIS list only `accept` and `maxSize`
  * make the trip. The lookup settings `lookupFilters` / `lookupColumns` /
- * `lookupPageSize` / `descriptionField` / `idField` are resolved and then
- * dropped by the bulk adapter, and the rest are never read off the field. So
+ * `lookupPageSize` / `descriptionField` are resolved and then dropped by the
+ * bulk adapter, and the rest are never read off the field (`idField` has no
+ * `FieldSchema` spelling to declare; the resolver's snake `id_field` read is
+ * dropped with the lookup settings). So
  * "declare it on the field and let the dialog inherit" is right for `accept` /
  * `maxSize` on a promoted def, and a confidently wrong answer for every other
  * key here, the shape this campaign has already shipped more than once.
@@ -259,8 +261,8 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
         + 'text), `placeholder`, `defaultValue`, `multiple`, `accept` and `maxSize`, plus a '
         + 'reference field\'s `reference`, `displayField` and `dependsOn`. ⛔ So of these keys only '
         + '`accept` / `maxSize` arrive that way: the picker settings `lookupFilters` / '
-        + '`lookupColumns` / `lookupPageSize` / `descriptionField` / `idField` are dropped on the '
-        + 'bulk path, and the rest are never read off the field. Remove the key, or for `accept` / '
+        + '`lookupColumns` / `lookupPageSize` / `descriptionField` are dropped on the bulk path, '
+        + 'and the rest are never read off the field. Remove the key, or for `accept` / '
         + '`maxSize` move the param onto a promoted action; open an issue if a bulk param '
         + 'genuinely needs a key declared here.',
     }],
