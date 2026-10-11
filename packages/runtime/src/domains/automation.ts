@@ -12,7 +12,10 @@
 
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+    matchInboundHookRoute,
 } from '@objectstack/core';
+// [#22773] The inbound-hook door, handed the one route the floor admits.
+import { handleInboundHookRequest } from './automation-hooks.js';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the measurement behind it (commit 02b41232d).
@@ -2276,14 +2279,34 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // metadata-declared `type: 'flow'` endpoint keeps its own policy chain and
     // is untouched here. Internal engine triggers (record-change, schedule)
     // never speak HTTP at all.
+    //
+    // [#22773] The floor reads the shared allow-list with this route's path and
+    // method (ruling A on #22757). Its one parameterised row admits the inbound
+    // hook — `POST /automation/hooks/:flowName/:hookId`, exactly four segments
+    // — and no other `/automation` path or method, so for every other request
+    // this decision is the one it always was. The admitted route is handed off
+    // on the very next statement, below.
+    const routePath = `/automation${path === '' || path.startsWith('/') ? '' : '/'}${path}`;
     {
         const ec: any = (context as any)?.executionContext;
-        if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem, method })) {
+        if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem, method, path: routePath })) {
             return {
                 handled: true,
                 response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
             };
         }
+    }
+    // [#22773] THE INBOUND HOOK — the route the floor above admits with no
+    // session, served by the trigger's own HMAC verifier and by nothing in this
+    // domain: it is handed off BEFORE the run-read gate, the authoring gate and
+    // the `automation` service probe below, so nothing sits between the
+    // allow-list and the verifier (ruling A, condition 2). One reading of the
+    // route, core's `matchInboundHookRoute`, is the one the allow-list row
+    // matches through, so the floor and this branch agree on every spelling.
+    // See `./automation-hooks.ts`.
+    {
+        const hook = matchInboundHookRoute(routePath, method);
+        if (hook) return handleInboundHookRequest(deps, context, hook);
     }
     const m = method.toUpperCase();
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);

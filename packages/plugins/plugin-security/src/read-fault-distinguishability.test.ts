@@ -288,7 +288,7 @@ async function seedStandingGrantAwaitingRevoke(engine: any): Promise<void> {
   );
   await engine.insert(
     'sys_user_permission_set',
-    { id: 'ups_standing', user_id: ADMIN, permission_set_id: 'ps_orgadmin', organization_id: ORG, granted_by: null },
+    { id: 'ups_standing', user_id: ADMIN, permission_set: ORGANIZATION_ADMIN_NO_BYPASS, organization_id: ORG, granted_by: null },
     SYS,
   );
 }
@@ -446,7 +446,7 @@ describe('[#15840] reading 2 — auto-org-admin-grant tryFind', () => {
     );
     await (engine as any).insert(
       'sys_user_permission_set',
-      { id: 'ups_superseded', user_id: ADMIN, permission_set_id: 'ps_superseded', organization_id: ORG, granted_by: null },
+      { id: 'ups_superseded', user_id: ADMIN, permission_set: ORGANIZATION_ADMIN, organization_id: ORG, granted_by: null },
       SYS,
     );
 
@@ -458,7 +458,7 @@ describe('[#15840] reading 2 — auto-org-admin-grant tryFind', () => {
     // Faulted round: re-seed the superseded grant, then fault the member read.
     await (engine as any).insert(
       'sys_user_permission_set',
-      { id: 'ups_superseded2', user_id: ADMIN, permission_set_id: 'ps_superseded', organization_id: ORG, granted_by: null },
+      { id: 'ups_superseded2', user_id: ADMIN, permission_set: ORGANIZATION_ADMIN, organization_id: ORG, granted_by: null },
       SYS,
     );
     const { proxy, deletes } = watchDeletes(engine, { faultMemberRead: 'throw' });

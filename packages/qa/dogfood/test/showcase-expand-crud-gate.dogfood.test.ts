@@ -79,7 +79,7 @@ describe('showcase: $expand honours the referenced object’s CRUD gate + OWD (#
     expect(contribSet?.id, 'the app’s contributor set is seeded').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
-      { user_id: contribId, permission_set_id: contribSet.id },
+      { user_id: contribId, permission_set: contribSet.name },
       { context: SYS },
     );
 

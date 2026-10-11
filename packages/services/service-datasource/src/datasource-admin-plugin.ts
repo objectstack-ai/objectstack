@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { hashSpec } from '@objectstack/metadata-core';
+import { hashSpec, isLegacyOrganizationRow } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { registerMetadataTypeActions } from '@objectstack/spec/kernel';
 import type {
@@ -68,7 +68,7 @@ interface MetadataServiceLike {
  * dropped rather than moved so there is one declaration of them, not two.
  */
 type DataEngineLike = Partial<
-  Pick<IDataEngine, 'findOne' | 'find' | 'insert' | 'update' | 'delete'>
+  Pick<IDataEngine, 'find' | 'insert' | 'update' | 'delete'>
 >;
 
 /**
@@ -112,6 +112,27 @@ function newMetaId(): string {
 }
 
 /**
+ * [#22835 · ADR-0131 D6] The environment's active `datasource` rows — every
+ * one, or one name's. EVERY read below of a stored datasource row goes through
+ * here: the boot restore, the by-name read behind convergence and the `/meta`
+ * projection, and the existence probes behind this plugin's own writes. A row
+ * stored in a legacy organization's layer ({@link isLegacyOrganizationRow},
+ * the one test the metadata reads apply) is therefore never restored, served,
+ * pooled, updated or deleted here; the boot report names it, and it stays at
+ * rest. A `find` filtered here, never a `findOne`: a single row picked by the
+ * store could be the legacy one while the environment's row exists.
+ */
+async function findEnvironmentRows(
+  engine: DataEngineLike | undefined,
+  name?: string,
+): Promise<Array<Record<string, unknown>>> {
+  if (!engine?.find) return [];
+  const where = { type: DS_META_TYPE, ...(name === undefined ? {} : { name }), state: 'active' };
+  const rows = await engine.find(SYS_METADATA, { where }, { context: SYSTEM_CTX });
+  return (rows ?? []).filter((row) => !isLegacyOrganizationRow(row));
+}
+
+/**
  * [#21923] Write a runtime datasource's durable row — WITH the `checksum` the
  * metadata door's repository stamps on every row it writes
  * (`SysMetadataRepository.put`: `hashSpec(body, ref.type)`, the one
@@ -123,14 +144,10 @@ function newMetaId(): string {
  * answered `409 METADATA_CONFLICT` — the two doors disagreeing on one record.
  */
 async function persistDatasourceRow(engine: DataEngineLike | undefined, record: { name: string }): Promise<void> {
-  if (!engine?.insert || !engine.findOne) return; // no durable store — in-memory only
+  if (!engine?.insert || !engine.find) return; // no durable store — in-memory only
   const now = new Date().toISOString();
   const checksum = hashSpec(record, DS_META_TYPE);
-  const existing = await engine.findOne(
-    SYS_METADATA,
-    { where: { type: DS_META_TYPE, name: record.name, state: 'active' } },
-    { context: SYSTEM_CTX },
-  );
+  const [existing] = await findEnvironmentRows(engine, record.name);
   if (existing) {
     await engine.update?.(
       SYS_METADATA,
@@ -154,22 +171,16 @@ async function persistDatasourceRow(engine: DataEngineLike | undefined, record: 
 }
 
 async function deleteDatasourceRow(engine: DataEngineLike | undefined, name: string): Promise<void> {
-  if (!engine?.findOne) return;
-  const existing = await engine.findOne(
-    SYS_METADATA,
-    { where: { type: DS_META_TYPE, name, state: 'active' } },
-    { context: SYSTEM_CTX },
-  );
+  if (!engine?.find) return;
+  const [existing] = await findEnvironmentRows(engine, name);
   if (!existing) return;
   if (engine.delete) await engine.delete(SYS_METADATA, { where: { id: existing.id }, context: SYSTEM_CTX });
   else await engine.update?.(SYS_METADATA, { state: 'inactive' }, { where: { id: existing.id }, context: SYSTEM_CTX });
 }
 
 async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<Array<Record<string, unknown>>> {
-  if (!engine?.find) return [];
-  const rows = await engine.find(SYS_METADATA, { where: { type: DS_META_TYPE, state: 'active' } }, { context: SYSTEM_CTX });
   const out: Array<Record<string, unknown>> = [];
-  for (const r of rows ?? []) {
+  for (const r of await findEnvironmentRows(engine)) {
     const raw = (r as { metadata?: unknown }).metadata;
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
@@ -192,7 +203,7 @@ async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<A
  * [#13805] The SHARED read behind cluster convergence: one runtime
  * datasource's durable row, by name — the same store {@link loadDatasourceRows}
  * reads at boot, narrowed to the address a peer's signal names. `undefined`
- * when no active row exists (deleted, or never persisted).
+ * when no active environment row exists (deleted, or never persisted).
  *
  * A row that exists but cannot be parsed THROWS rather than answering
  * `undefined`: "gone" is a verdict the caller evicts a live pool on, and a
@@ -204,13 +215,8 @@ async function loadDatasourceRow(
   engine: DataEngineLike | undefined,
   name: string,
 ): Promise<StoredDatasource | undefined> {
-  if (!engine?.findOne) return undefined;
-  const row = await engine.findOne(
-    SYS_METADATA,
-    { where: { type: DS_META_TYPE, name, state: 'active' } },
-    { context: SYSTEM_CTX },
-  );
-  const raw = (row as { metadata?: unknown } | null | undefined)?.metadata;
+  const [row] = await findEnvironmentRows(engine, name);
+  const raw = (row as { metadata?: unknown } | undefined)?.metadata;
   if (raw == null) return undefined;
   let parsed: Record<string, unknown>;
   try {

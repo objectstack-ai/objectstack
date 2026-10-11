@@ -46,10 +46,6 @@ import { SysPositionPermissionSet } from './objects/sys-position-permission-set.
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import {
-  registerGrantPermissionSetNameHooks,
-  unregisterGrantPermissionSetNameHooks,
-} from './grant-permission-set-name.js';
-import {
   collectCatalogReferences,
   reportCatalogReferences,
   type CatalogReferenceReport,
@@ -207,14 +203,14 @@ async function insertRows(b: Booted, object: string, rows: Array<Record<string, 
   }
 }
 
-/** Grants stored the way a grant with no name is stored: the name hooks unbound, the name NULL. */
+/**
+ * Grants stored the way a grant written before the name column is stored: the
+ * name NULL, written beneath the engine, which refuses a grant naming nothing
+ * (ADR-0131 D4).
+ */
 async function insertUnnamedGrants(b: Booted, rows: Array<Record<string, unknown>>): Promise<void> {
-  unregisterGrantPermissionSetNameHooks(b.engine as any);
-  try {
-    await insertRows(b, 'sys_user_permission_set', rows.map((r) => ({ ...r, permission_set: null })));
-  } finally {
-    registerGrantPermissionSetNameHooks(b.engine as any);
-  }
+  const driver: any = (b.engine as any).getDriver('sys_user_permission_set');
+  for (const r of rows) await driver.knex('sys_user_permission_set').insert({ ...r, permission_set: null });
 }
 
 async function insertUser(b: Booted, id: string): Promise<void> {
@@ -252,7 +248,7 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
     ]);
     await insertRows(b, 'sys_permission_set', [{ id: 'ps_auditor', name: AUDITOR.name, label: 'Auditor' }]);
     await insertRows(b, 'sys_user_permission_set', [
-      { id: 'g_auditor', user_id: 'usr_a', permission_set_id: 'ps_auditor', organization_id: ORG },
+      { id: 'g_auditor', user_id: 'usr_a', permission_set: AUDITOR.name, organization_id: ORG },
     ]);
 
     const report = await b.report();
@@ -276,7 +272,7 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
     await insertRows(b, 'sys_permission_set', [{ id: 'ps_auditor', name: AUDITOR.name, label: 'Auditor' }]);
     await insertRows(b, 'sys_user_permission_set', [
       { id: 'g_ghost', user_id: 'usr_a', permission_set_id: 'ps_gone', permission_set: 'ghost_set', organization_id: ORG },
-      { id: 'g_ok', user_id: 'usr_a', permission_set_id: 'ps_auditor', organization_id: ORG },
+      { id: 'g_ok', user_id: 'usr_a', permission_set: AUDITOR.name, organization_id: ORG },
     ]);
 
     const report = await b.report();
@@ -438,7 +434,7 @@ describe('[ADR-0131 D4] a removed declaration is reported; re-adding it clears t
       { id: 'pps_field', position_id: 'pos_field', permission_set_id: 'ps_auditor' },
     ]);
     await insertRows(b, 'sys_user_permission_set', [
-      { id: 'g_auditor', user_id: 'usr_holder', permission_set_id: 'ps_auditor', organization_id: ORG },
+      { id: 'g_auditor', user_id: 'usr_holder', permission_set: AUDITOR.name, organization_id: ORG },
     ]);
     await insertRows(b, 'sys_user_position', [
       { id: 'up_field', user_id: 'usr_holder', position: FIELD_LEAD.name, organization_id: ORG },

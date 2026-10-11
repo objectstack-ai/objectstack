@@ -9,6 +9,10 @@ import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopin
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
 import { unclaimedTopLevel } from '@objectstack/metadata';
+// [ADR-0131 D6] The one row-value test for a legacy organization's
+// `sys_metadata` row: no metadata read serves one, so the authored hook and
+// action binders skip it too.
+import { isLegacyOrganizationRow } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -114,17 +118,6 @@ function unclaimedTopLevelObjects(
   return objects.length > 0
     ? { ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, objects }
     : undefined;
-}
-
-/**
- * [ADR-0131 D6] A `sys_metadata` row stored in a legacy organization's layer:
- * no metadata read serves one, so the authored hook and action binders skip it
- * too. Judged off the row in hand — `sys_metadata` is a platform table, never a
- * federated object.
- */
-function isLegacyOrganizationRow(row: { organization_id?: unknown } | null | undefined): boolean {
-  const organizationId = row?.organization_id;
-  return organizationId !== null && organizationId !== undefined && organizationId !== '';
 }
 
 /**

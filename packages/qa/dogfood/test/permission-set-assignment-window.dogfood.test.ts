@@ -60,7 +60,6 @@ describe('a permission-set assignment grants only inside its validity window (AD
   let stack: VerifyStack;
   let ql: any;
   let adminTok: string;
-  let setId: string;
   const tok: Record<string, string> = {};
   const uid: Record<string, string> = {};
 
@@ -72,7 +71,7 @@ describe('a permission-set assignment grants only inside its validity window (AD
     expect(uid[who], `${who} signed up`).toBeTruthy();
   };
   const grant = async (who: string, window: { valid_from?: string; valid_until?: string } = {}) => {
-    await ql.insert(GRANTS, { user_id: uid[who], permission_set_id: setId, ...window }, { context: SYS });
+    await ql.insert(GRANTS, { user_id: uid[who], permission_set: SET, ...window }, { context: SYS });
   };
   const door = async (who: string) => (await stack.apiAs(tok[who], 'GET', `${DOOR}?$top=1`)).status;
 
@@ -83,7 +82,6 @@ describe('a permission-set assignment grants only inside its validity window (AD
 
     const set = await ql.findOne('sys_permission_set', { where: { name: SET }, context: SYS });
     expect(set?.id, `the showcase seeded ${SET}`).toBeTruthy();
-    setId = String(set.id);
 
     for (const who of ['bare', 'open', 'before', 'inside', 'after', 'edited', 'falls', 'rises']) await sign(who);
     const now = Date.now();
@@ -172,7 +170,7 @@ describe('a permission-set assignment grants only inside its validity window (AD
 
     const at = Date.now() + DAY;
     const res = await stack.apiAs(adminTok, 'POST', `/data/${GRANTS}`, {
-      user_id: uid.bare, permission_set_id: setId, valid_from: iso(at), valid_until: iso(at - HOUR),
+      user_id: uid.bare, permission_set: SET, valid_from: iso(at), valid_until: iso(at - HOUR),
     });
     const body = (await res.json()) as any;
     expect([res.status, body?.code]).toEqual([400, 'VALIDATION_FAILED']);

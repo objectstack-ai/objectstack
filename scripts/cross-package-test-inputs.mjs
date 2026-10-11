@@ -651,6 +651,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // roster, which is why the glob carries a witness below.
       'packages/create-objectstack/src/templates/blank/objectstack.config.ts',
       'packages/create-objectstack/src/templates/blank/src/**',
+      // The two faces test/lowered-body-face-enumeration.test.ts derives and
+      // compares (#22837, the closing card of the "passes in-process, fails
+      // once lowered" family): the members `HookContextSchema` declares for an
+      // in-process hook handler, and the members `buildSandboxContext` hands a
+      // lowered body. The pin READS both sources at test time, so a member
+      // added to either one is exactly the change that must re-run this suite
+      // -- undeclared, a spec- or runtime-only diff would hash
+      // `@objectstack/cli#test` the same and replay a cached green over the
+      // new, unclassified member the pin exists to catch. Single files, not
+      // their trees: the pin reads nothing else from either package.
+      'packages/spec/src/data/hook.zod.ts',
+      'packages/runtime/src/sandbox/body-runner.ts',
     ],
     heldBy: {
       // The parity pin joins each barrel path from `SCAFFOLD_WIRED_BARRELS`, a

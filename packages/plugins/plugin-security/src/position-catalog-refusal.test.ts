@@ -290,7 +290,7 @@ describe('a position spelled as the catalog row ID is refused, and the account i
     // distributes reads rows at once, so the account, the set and the object
     // are fine — the refused edge was the whole difference.
     await h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_holder', permission_set_id: 'ps_auditor' }, { context: ADMIN } as any,
+      'sys_user_permission_set', { user_id: 'u_holder', permission_set: 'qa_auditor_set' }, { context: ADMIN } as any,
     );
     expect(await rowsReadBy(h, 'u_holder')).toBe(3);
   });

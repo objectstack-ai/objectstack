@@ -1,18 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// Minimal booted-app fixture for the #22725 pin: the approvals inbox's
-// `unstaffed` arm, read through the REST door on a real boot.
+// Minimal booted-app fixture for the #22824 pin: an approval step whose
+// approvers resolve to no one opens, under the default
+// `onEmptyApprovers: 'admin_rescue'`, on the organization's administrators,
+// read through the REST door on a real boot.
 //
 // Two objects, each with one autolaunched `approval` flow that fires on insert:
 //
-//   - `unstaffed_arm_stuck` routes to a POSITION nothing in this fixture ever
+//   - `admin_rescue_stuck` routes to a POSITION nothing in this fixture ever
 //     staffs. Its node declares no `onEmptyApprovers`, so the default,
-//     `admin_rescue`, opens the request on the literal `position:<p>` slot:
-//     decidable only by a privileged admin, and before #22725 in nobody's
-//     queue.
-//   - `unstaffed_arm_staffed` routes to one named user, by email. Its slate
-//     names a person, so it is the CONTROL: the arm must never claim it, and
-//     its approver's queue must read the same with the arm and without it.
+//     `admin_rescue`, opens the request on the organization's administrators.
+//   - `admin_rescue_staffed` routes to one named user, by email. Its slate
+//     names a person, so it is the CONTROL: no administrator is added to it.
 //
 // Two objects rather than two flows on one: one pending request per record,
 // and a record that started both flows would refuse the second.
@@ -27,25 +26,25 @@ import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/secur
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 /** A position nothing in this fixture ever staffs. */
-export const UNSTAFFED_POSITION = 'unstaffed_arm_nobody';
+export const UNSTAFFED_POSITION = 'admin_rescue_nobody';
 
 /** The one person the staffed flow routes to (by email, the slot it stores). */
-export const STAFFED_APPROVER_EMAIL = 'unstaffed-arm-approver@example.com';
+export const STAFFED_APPROVER_EMAIL = 'admin-rescue-approver@example.com';
 
-export const UnstaffedArmStuck = ObjectSchema.create({
-  name: 'unstaffed_arm_stuck',
-  label: 'Unstaffed Arm Stuck',
-  pluralLabel: 'Unstaffed Arm Stuck',
+export const AdminRescueStuck = ObjectSchema.create({
+  name: 'admin_rescue_stuck',
+  label: 'Admin Rescue Stuck',
+  pluralLabel: 'Admin Rescue Stuck',
   sharingModel: 'public_read_write',
   fields: {
     name: Field.text({ label: 'Name', required: true }),
   },
 });
 
-export const UnstaffedArmStaffed = ObjectSchema.create({
-  name: 'unstaffed_arm_staffed',
-  label: 'Unstaffed Arm Staffed',
-  pluralLabel: 'Unstaffed Arm Staffed',
+export const AdminRescueStaffed = ObjectSchema.create({
+  name: 'admin_rescue_staffed',
+  label: 'Admin Rescue Staffed',
+  pluralLabel: 'Admin Rescue Staffed',
   sharingModel: 'public_read_write',
   fields: {
     name: Field.text({ label: 'Name', required: true }),
@@ -83,45 +82,45 @@ function approvalFlow(name: string, objectName: string, approver: { type: 'posit
   });
 }
 
-export const unstaffedArmStack = defineStack({
+export const adminRescueStack = defineStack({
   manifest: {
-    id: 'com.dogfood.unstaffed-arm',
-    namespace: 'unstaffed_arm',
+    id: 'com.dogfood.admin-rescue-slate',
+    namespace: 'admin_rescue',
     version: '0.0.0',
     type: 'app',
-    name: 'Unstaffed Arm Fixture',
+    name: 'Admin Rescue Slate Fixture',
     description: 'One request routed to a position nobody holds, one routed to a named user.',
   },
   // ADR-0097: the flows' `record-after-create` start nodes need the trigger
   // capability, and `defineStack` refuses `triggers` without `automation`.
   requires: ['automation', 'triggers'],
-  objects: [UnstaffedArmStuck, UnstaffedArmStaffed],
+  objects: [AdminRescueStuck, AdminRescueStaffed],
   flows: [
-    approvalFlow('unstaffed_arm_stuck_flow', 'unstaffed_arm_stuck', { type: 'position', value: UNSTAFFED_POSITION }),
-    approvalFlow('unstaffed_arm_staffed_flow', 'unstaffed_arm_staffed', { type: 'user', value: STAFFED_APPROVER_EMAIL }),
+    approvalFlow('admin_rescue_stuck_flow', 'admin_rescue_stuck', { type: 'position', value: UNSTAFFED_POSITION }),
+    approvalFlow('admin_rescue_staffed_flow', 'admin_rescue_staffed', { type: 'user', value: STAFFED_APPROVER_EMAIL }),
   ],
 });
 
-const FIXTURE_SUBMITTER_SET = 'unstaffed_arm_submitter';
+const FIXTURE_SUBMITTER_SET = 'admin_rescue_submitter';
 
 /**
  * The fallback set a fresh member resolves to: create + read on both objects,
- * and nothing that confers override standing. So the submitter is a plain
- * member, which is what the "it does not appear for a member" half needs.
+ * and nothing that confers administrator standing. So a fresh sign-up is a
+ * plain member, which is what the "a member sees nothing" half needs.
  */
-export const unstaffedArmSubmitterSet: PermissionSet = PermissionSetSchema.parse({
+export const adminRescueSubmitterSet: PermissionSet = PermissionSetSchema.parse({
   name: FIXTURE_SUBMITTER_SET,
-  label: 'Unstaffed Arm Submitter — create + read on the two fixture objects only',
+  label: 'Admin Rescue Submitter — create + read on the two fixture objects only',
   objects: {
-    unstaffed_arm_stuck: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: false },
-    unstaffed_arm_staffed: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: false },
+    admin_rescue_stuck: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: false },
+    admin_rescue_staffed: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: false },
   },
 });
 
 /** SecurityPlugin whose fresh-member fallback is the submitter-only set above. */
-export function unstaffedArmSecurity(): SecurityPlugin {
+export function adminRescueSecurity(): SecurityPlugin {
   return new SecurityPlugin({
-    defaultPermissionSets: [...securityDefaultPermissionSets, unstaffedArmSubmitterSet],
-    fallbackPermissionSet: unstaffedArmSubmitterSet.name,
+    defaultPermissionSets: [...securityDefaultPermissionSets, adminRescueSubmitterSet],
+    fallbackPermissionSet: adminRescueSubmitterSet.name,
   });
 }

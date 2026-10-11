@@ -5,12 +5,22 @@
  *
  * ## Why this entry exists (#15325)
  *
- * `extractHookBody` decides whether a hook or script action is still shippable
+ * `extractHookBody` decides whether a hook handler is still shippable
  * **body-only**: it peels the handler to its statements, refuses the forbidden
  * tokens, infers capabilities, and throws a `HookBodyExtractionError` carrying
  * `kind` / `freeIdentifiers` / `nodeOnlyIdentifiers`. `os build` applies it to
  * lower a handler, `os lint` calls the same function so its verdict cannot
- * drift from the build's. An app that wants to assert "my hooks are still
+ * drift from the build's.
+ *
+ * It is the HOOK face (#22837): the handler's one parameter is re-emitted as
+ * `var <param> = ctx;` ahead of the body, because a hook body runs with `ctx`
+ * bound and nothing else, and a parameter list that cannot be re-emitted that
+ * way (two parameters, a default, a rest parameter) is refused. A script
+ * action's `target` runs in a different wrapper, `(input, ctx)`, and the build
+ * lowers it without that rebind, so an `(input, ctx)` target passed here is
+ * refused for its second parameter where `os build` lowers it.
+ *
+ * An app that wants to assert "my hooks are still
  * metadata-only" — and to RUN the lowered `source` through the real QuickJS
  * runner in a test — needs this exact function, not a lookalike: a local
  * reimplementation passes its own tests while diverging from the rule the

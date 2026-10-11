@@ -916,19 +916,23 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * #3447 P2: what happens when approver resolution yields NO concrete person
    * at node entry (an empty expression result, an unstaffed position, an empty
    * multi-select field, …):
-   *  - `admin_rescue` (default) — open the request anyway and warn loudly; a
-   *    privileged admin can take it over via Reassign (#3424). The only option
-   *    that neither waves the record through nor kills the run — approval's job
-   *    is to gatekeep, so an empty slate must never silently pass.
+   *  - `admin_rescue` (default) — open the request on the request
+   *    organization's administrators instead: the people holding its
+   *    organization-admin capability (ADR-0095 D3), as ordinary approvers in
+   *    their inbox, told on opening, deciding with an ordinary approval. Warns
+   *    loudly. The only option that neither waves the record through nor kills
+   *    the run — approval's job is to gatekeep, so an empty slate must never
+   *    silently pass. An organization with no administrator leaves the request
+   *    on the empty slate, decidable only by a privileged admin's override
+   *    (#3424).
    *  - `fail` — the node fails (fault edge / run failure). Choose when an empty
    *    slate can only mean a configuration bug.
    *  - `auto_approve` — skip the request and continue down the `approve` edge
    *    with `output.autoApproved = true`. The DingTalk/Feishu default; opt-in
    *    here because it silently waves the record through.
    *  - `fallback` — open the request on {@link ApprovalNodeConfig.fallbackApprovers}
-   *    instead. The only policy that NAMES people, so it is the only one that
-   *    turns an empty slate into a request someone can actually decide rather
-   *    than a state an operator has to recover from. Measured elsewhere as
+   *    instead: the way to NAME who decides, rather than leave it to the
+   *    organization's administrators. Measured elsewhere as
    *    Entra's "Add fallback" and Odoo's "If empty, the approval is done by an
    *    Administrator or Approver" — taken here at the NODE, not on the
    *    `manager` rung: all five graph approver types share the same dead end
@@ -944,7 +948,8 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
   onEmptyApprovers: z.enum(['admin_rescue', 'fail', 'auto_approve', 'fallback']).default('admin_rescue')
     .describe(
       'Behavior when no concrete approver resolves at node entry — '
-      + "'fallback' opens the request on fallbackApprovers instead",
+      + "'admin_rescue' (default) opens the request on the organization's administrators; "
+      + "'fallback' opens it on fallbackApprovers instead, naming who decides",
     ),
 
   /**

@@ -158,10 +158,8 @@ async function findRows(engine: ObjectQL, object: string, where: any = {}): Prom
 }
 
 async function adminGrantHolders(engine: ObjectQL): Promise<string[]> {
-  const sets = await findRows(engine, 'sys_permission_set', { name: 'admin_full_access' });
-  const adminPsId = sets[0]?.id;
-  expect(adminPsId, 'ANTI-VACUITY: admin_full_access must have been seeded').toBeTruthy();
-  const links = await findRows(engine, 'sys_user_permission_set', { permission_set_id: adminPsId });
+  // [ADR-0131 D4] A grant names its set; the holder is read by that name.
+  const links = await findRows(engine, 'sys_user_permission_set', { permission_set: 'admin_full_access' });
   return links.map((l) => String(l.user_id));
 }
 

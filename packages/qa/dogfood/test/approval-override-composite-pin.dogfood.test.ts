@@ -13,8 +13,11 @@
 // ## What this measures, on the wire, on a real boot
 //
 // A plain member (never the platform admin) submits a record into a flow
-// whose sole node routes to a POSITION NOBODY HOLDS — the "stranded" shape:
-// an unresolved approver slate, `lockRecord: true`, otherwise undecidable.
+// whose sole node routes to a NAMED APPROVER WHO IS NOT THERE TO ACT — the
+// "stranded" shape: a slate no one present can decide, `lockRecord: true`,
+// otherwise undecidable. (Not a position nobody holds: under the default
+// `admin_rescue` that slate now opens on the organization's administrators,
+// #22824, so it is no longer stranded.)
 // The platform admin then reads the SAME request the console's approvals
 // inbox would, on both faces (`listRequests` / `getRequest`), and the SAME
 // `sys_approval_request` action metadata `GET /meta/object` serves — then
@@ -48,7 +51,11 @@ import { celEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
-import { overrideCompositeStack, overrideCompositeSecurity } from './fixtures/override-composite-fixture.js';
+import {
+  overrideCompositeStack,
+  overrideCompositeSecurity,
+  DEPARTED_APPROVER,
+} from './fixtures/override-composite-fixture.js';
 
 /** The four #3424 override-admitted decision levers — served `visible` must OR in `can_override`. */
 const OVERRIDE_LEVERS = ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_recall'] as const;
@@ -123,7 +130,7 @@ describe('approval override composite (#16679)', () => {
         expect(listBody.data.length).toBe(1);
         const listRow = listBody.data[0];
         expect(listRow.status).toBe('pending');
-        expect(listRow.pending_approvers).toEqual(['position:override_composite_unstaffed']);
+        expect(listRow.pending_approvers).toEqual([DEPARTED_APPROVER]);
         expect(listRow.lock_record).toBe(true);
         expect(listRow.viewer).toBeTruthy();
 
