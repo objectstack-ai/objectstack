@@ -22,12 +22,10 @@ export default defineConfig({
     env: { OS_REGISTRY_LOG: 'warn' },
   },
   resolve: {
-    // [#8577] Both entries exist for `suggested-audience-bindings-install-path.test.ts`,
-    // the one suite here that imports sibling packages as VALUES: it drives the real
+    // [#8577] Both entries were added for the suite that drove the real
     // `syncAudienceBindingSuggestions` against a real `ObjectQL` engine over a real
-    // `SqlDriver`, because the question it answers — does the SECOND organization to
-    // install a package get its own binding-suggestion row? — cannot be asked of a
-    // fake engine at all.
+    // `SqlDriver` (retired with the deployment-level acceptance, #22801 → A); every
+    // suite here that imports these sibling packages as VALUES still relies on them.
     //
     // Unaliased, those two specifiers resolve through the workspace link to `dist/` —
     // a BUILD ARTIFACT — which would make this suite's verdict a function of build

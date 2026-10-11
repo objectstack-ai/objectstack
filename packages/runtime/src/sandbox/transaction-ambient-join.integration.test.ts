@@ -206,28 +206,52 @@ describe('#6406 sandbox ctx.api.transaction joins the host transaction (real eng
     expect(committedNames('thing')).toEqual([]);
   }, 30000);
 
-  it('with NO host transaction the sandbox still OPENS one — unchanged behaviour', async () => {
+  it("with NO host transaction the door's unit owns the one begin, the sandbox body joins it, and the door commits both rows (#22782)", async () => {
     await wire(TX_BODY);
 
     await engine.insert('thing', { name: 'outer' });
 
-    // The outer write is not in any transaction; the body's is, and owns it.
+    // Since #22782 the begin belongs to the WRITE DOOR, not the body: the hook
+    // declares no `onError`, so its `afterInsert` can abort and the door opens a
+    // unit around the outer write. The body's `ctx.api.transaction` JOINS that
+    // unit (#6406) and the door commits it once. Before #22782 the outer write
+    // was in no transaction and the body opened and owned this one.
     expect(seen.begins).toHaveLength(1);
     expect(seen.commits).toHaveLength(1);
     expect(seen.commits[0]).toBe(seen.begins[0]);
     expect(committedNames('thing')).toEqual(['inner', 'outer']);
   }, 30000);
 
-  it('with NO host transaction a throwing body still ROLLS BACK its own — unchanged', async () => {
+  /**
+   * #22782 (triage 6106449072): an `after*` hook whose `onError` is `abort` — the
+   * default, which this body's hook takes — rolls the write back on the default
+   * write door, as `HookSchema.onError` says.
+   *
+   *   FROM: the outer write ran in no unit; the body opened and owned its own
+   *         transaction and rolled back only `inner`, so `outer` stayed
+   *         committed while the caller was refused.
+   *   TO:   the door opens a unit around the outer write; the body's
+   *         `ctx.api.transaction` JOINS it, its `__txRollback` ABSTAINS for the
+   *         joined handle and re-throws, and the abort rolls the door's unit
+   *         back — `outer` and `inner` together.
+   *
+   * The #6406 subject is unchanged and asserted here: one begin (no second
+   * connection), the body's write on that same handle, and exactly one
+   * rollback — the owner's, never the joined body's.
+   */
+  it("with NO host transaction the door's unit owns the begin, the body joins it, and the abort rolls the outer row back too (#22782)", async () => {
     await wire(THROWING_TX_BODY);
 
     await expect(engine.insert('thing', { name: 'outer' })).rejects.toThrow(/body boom/);
 
-    expect(seen.begins).toHaveLength(1);
-    expect(seen.rollbacks).toHaveLength(1);
+    expect(seen.begins).toHaveLength(1);                            // one begin: no second connection
+    expect(seen.creates).toHaveLength(2);
+    expect(seen.creates[0].transaction).toBe(seen.begins[0]);      // the outer write is inside the door's unit
+    expect(seen.creates[1].transaction).toBe(seen.begins[0]);      // the body's write JOINED it
+    expect(seen.rollbacks).toHaveLength(1);                         // the joined rollback abstained
+    expect(seen.rollbacks[0]).toBe(seen.begins[0]);                 // the one rollback is the owner's
     expect(seen.commits).toHaveLength(0);
-    // The body's write is discarded; the outer one was never transactional.
-    expect(committedNames('thing')).toEqual(['outer']);
+    expect(committedNames('thing')).toEqual([]);                    // FROM ['outer'] — the refused write left its row
   }, 30000);
 
   /**

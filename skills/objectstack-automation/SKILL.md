@@ -48,7 +48,7 @@ A **Flow** is a directed graph of nodes — the primary automation building bloc
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** (daily cleanup, weekly reports) — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete (bind via the `start` node's `triggerType`). `autolaunched` + the same `record-*` binding behaves identically — the engine reads the start node either way; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — every `api` flow is bound to its hook endpoint and needs a start-node `secret` (see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+| `api` | Inbound **webhook** — needs a start-node `secret` (see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
 
 ### Flow Node Types
 
@@ -348,9 +348,9 @@ node `config`** (the start `config` is a free-form record with no Zod shape):
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
 | `secret` | HMAC-SHA256 shared secret. **Required** — without a non-blank one the flow is refused at registration (`os validate` too) and never armed at boot; the signature goes in `x-objectstack-signature` |
 
-- **Signature:** `sha256=<hex>` (GitHub/Stripe style).
+- **Signature:** `t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under `secret`; refused when `t` is over 300 s from the server clock.
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
-- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer, never in-band. Requires the `queue` service (see prerequisite).
+- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer, never in-band.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
 
 ### Trigger Types (start-node `config.triggerType`)
