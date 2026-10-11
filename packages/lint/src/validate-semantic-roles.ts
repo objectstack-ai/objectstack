@@ -105,11 +105,13 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
       rule: SEMANTIC_ROLE_FIELD_UNPROVISIONED,
       where,
       path: `${path}.${slot}`,
+      // [#22161] One verdict sentence; `where` names the object. Why an
+      // injected anchor on an external object has no storage, and how this
+      // differs from a pointer that names no field, are
+      // `os explain semantic-role-field-unprovisioned`.
       message:
-        `${objName}: ${slot} points at "${entry}", an injected system column with no storage ` +
-        `behind it — this object is external (ADR-0015), so the platform registers the anchor ` +
-        `but the remote schema owns the table and no column backs it. Every consumer renders ` +
-        `it empty on every record.`,
+        `${slot} points at "${entry}", an injected system column this external object stores ` +
+        `nothing behind, so every consumer renders it empty on every record`,
       hint:
         `If the remote table really carries "${entry}", declare it in the object's own fields ` +
         `(mapped through the external binding's columnMap); otherwise point ${slot} at a real ` +

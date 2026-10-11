@@ -2,13 +2,28 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateSemanticRoles,
+  validateSemanticRoles as validateSemanticRolesUnrecorded,
   FIELD_GROUP_UNDECLARED,
   FIELD_GROUP_EMPTY,
   FIELD_GROUP_SHADOWED,
   SEMANTIC_ROLE_FIELD_UNKNOWN,
   SEMANTIC_ROLE_FIELD_UNPROVISIONED,
 } from './validate-semantic-roles';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each `semantic-role-field-unprovisioned` finding is one verdict
+// sentence; the reasoning it used to carry is
+// `os explain semantic-role-field-unprovisioned`. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict of that id to one line of at most 200 characters — every firing
+// variant this suite exercises, not a chosen few. Run the whole file: those
+// cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateSemanticRoles: typeof validateSemanticRolesUnrecorded = (...args) => {
+  const findings = validateSemanticRolesUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 const stack = (objects: unknown) => ({ objects });
 
@@ -397,5 +412,60 @@ describe('validateSemanticRoles — unprovisioned anchors on external objects (#
     ]));
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(SEMANTIC_ROLE_FIELD_UNKNOWN);
+  });
+});
+
+describe('[#22161] one-line verdicts — semantic-role-field-unprovisioned', () => {
+  const externalObject = (extra: Record<string, unknown>) => ({
+    name: 'ext_customer',
+    external: { remoteName: 'customers' },
+    fields: { email: { type: 'email' } },
+    ...extra,
+  });
+
+  it('reads as one sentence per role, the object left to `where`', () => {
+    const [highlight] = validateSemanticRoles(stack([externalObject({ highlightFields: ['owner_id'] })]));
+    expect(highlight.where).toBe('object "ext_customer"');
+    expect(highlight.message).toBe(
+      'highlightFields points at "owner_id", an injected system column this external object stores nothing '
+        + 'behind, so every consumer renders it empty on every record',
+    );
+    const [stage] = validateSemanticRoles(stack([externalObject({ stageField: 'created_by' })]));
+    expect(stage.message).toBe(
+      'stageField points at "created_by", an injected system column this external object stores nothing '
+        + 'behind, so every consumer renders it empty on every record',
+    );
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(SEMANTIC_ROLE_FIELD_UNPROVISIONED);
+    expect(entry, 'no `os explain semantic-role-field-unprovisioned` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    // The external arm, the local twin and the author-declared column are
+    // each held to the rule by the cases above.
+    for (const fact of [
+      'ADR-0085',
+      '`stageField`',
+      '`highlightFields`',
+      'ADR-0015',
+      'the remote schema owns the table',
+      '`columnMap`',
+      'never reported',
+      '`object-field-ref-unknown`',
+      '`semantic-role-field-unknown`',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === SEMANTIC_ROLE_FIELD_UNPROVISIONED);
+    // The coverage control first: both roles fired.
+    expect(converted.some((f) => f.message.startsWith('highlightFields points at'))).toBe(true);
+    expect(converted.some((f) => f.message.startsWith('stageField points at'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

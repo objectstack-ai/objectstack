@@ -2,9 +2,23 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateAiSurfaceAffinity,
+  validateAiSurfaceAffinity as validateAiSurfaceAffinityUnrecorded,
   AI_SKILL_SURFACE_MISMATCH,
 } from './validate-ai-surface-affinity.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain ai-skill-surface-mismatch`. Every direct call below
+// records what it fired, and the last cases in this file hold each recorded
+// verdict to one line of at most 200 characters — every firing variant this
+// suite exercises, not a chosen few. Run the whole file: those cases read what
+// the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateAiSurfaceAffinity: typeof validateAiSurfaceAffinityUnrecorded = (...args) => {
+  const findings = validateAiSurfaceAffinityUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 describe('validate-ai-surface-affinity', () => {
   // ── The false-positive floor, read per branch (#3806 lesson) ──────────────
@@ -135,5 +149,50 @@ describe('validate-ai-surface-affinity', () => {
         skills: [null, { surface: 'build' }, { name: 'y', surface: 'build' }],
       } as never),
     ).toHaveLength(1);
+  });
+});
+
+describe('[#22161] one-line verdicts — ai-skill-surface-mismatch', () => {
+  it('reads as one sentence', () => {
+    const findings = validateAiSurfaceAffinity({
+      agents: [{ name: 'helper', surface: 'ask', skills: ['metadata_authoring'] }],
+      skills: [{ name: 'metadata_authoring', surface: 'build', tools: [] }],
+    });
+    expect(findings.map((f) => f.message)).toEqual([
+      'Agent "helper" (surface \'ask\') references skill "metadata_authoring" (surface \'build\'), so the '
+        + 'runtime refuses the binding and chatting with this agent fails at request time',
+    ]);
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(AI_SKILL_SURFACE_MISMATCH);
+    expect(entry, 'no `os explain ai-skill-surface-mismatch` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    // The defaults, the `both` arm and the skipped unresolved name are each
+    // held to the rule by the cases above.
+    for (const fact of [
+      'ADR-0063 §1',
+      'ADR-0063 §3',
+      'ADR-0064 §3',
+      '`both` attaches to either',
+      'defaults to `ask`',
+      '`resolveActiveSkills()` throws',
+      'parsed, validated and deployed cleanly',
+      'skipped, not reported',
+      '`schema_reader`',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === AI_SKILL_SURFACE_MISMATCH);
+    // The coverage control first: both directions of the mismatch fired.
+    expect(converted.some((f) => f.message.includes("(surface 'ask') references skill"))).toBe(true);
+    expect(converted.some((f) => f.message.includes("(surface 'build') references skill"))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });

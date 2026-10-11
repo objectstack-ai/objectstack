@@ -85,6 +85,16 @@ function fsmRulesByObject(objects: AnyRec[]): Map<string, FsmRule[]> {
   return map;
 }
 
+/**
+ * [#22161] The first three names of a sorted list, then `(and N more)`: a
+ * state machine declares as many states as it likes, and the verdict is one
+ * line. Message-only.
+ */
+function atMostThree(names: readonly string[]): string {
+  const shown = names.slice(0, 3).join(', ');
+  return names.length > 3 ? `${shown} (and ${names.length - 3} more)` : shown;
+}
+
 /** Best-effort label for a seed record — its externalId value(s), else its index. */
 function recordLabel(record: AnyRec, externalId: unknown, index: number): string {
   const keys = Array.isArray(externalId)
@@ -140,11 +150,13 @@ export function validateSeedStateMachine(stack: AnyRec): SeedStateMachineFinding
           rule: SEED_VALUE_OUTSIDE_STATE_MACHINE,
           where: `seed "${objectName}" (${recordLabel(record, seed.externalId, j)})`,
           path: `data[${i}].records[${j}].${rule.field}`,
+          // [#22161] One verdict sentence, the declared states cut at three; the
+          // seed exemption, what counts as a declared state and what is not
+          // judged are `os explain seed-value-outside-state-machine`.
           message:
             `seeds '${rule.field}=${value}', which the '${objectName}' state machine does not declare ` +
-            `(known states: ${[...rule.states].sort().join(', ')}). Seed writes are exempt from the ` +
-            'state_machine rule (a seed records established facts rather than walking the lifecycle), so ' +
-            'this is NOT rejected at write time — a typo lands silently.',
+            `(known states: ${atMostThree([...rule.states].sort())}), and seed writes skip that rule, ` +
+            'so a typo lands silently',
           hint:
             `If '${value}' is a real state, add it to the state machine (as an initial state or a ` +
             `transition endpoint). If it is a typo, correct it to a declared state. The exemption lets ` +
