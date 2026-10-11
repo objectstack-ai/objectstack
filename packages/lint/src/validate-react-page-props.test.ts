@@ -41,7 +41,7 @@ const ONE_LINE_IDS: readonly string[] = [
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
   REACT_PAGE_SOURCE_UNPARSEABLE,
 ];
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateReactPageProps: typeof validateReactPagePropsUnrecorded = (...args) => {
   const findings = validateReactPagePropsUnrecorded(...args);
   fired.push(...findings);
@@ -1252,8 +1252,11 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
     expect(hit.length).toBe(1);
     expect(hit[0].severity).toBe('warning');
     expect(hit[0].message).toContain('aggregate.groupBy is not set');
-    expect(hit[0].hint).toContain('groupBy stays required, and a single number belongs in an object-metric block instead');
+    // [#22161] One line now; the ruling stays on it, and why the finding is
+    // still only a warning is the explanation's.
+    expect(hit[0].hint).toContain('a single number belongs in an object-metric block instead');
     expect(hit[0].hint, 'the hint must carry the RULING, not an open question').toContain('NOT a supported');
+    expect(explanationOf(REACT_CHART_AGGREGATE_INVALID)).toContain('promoting it is its own step');
     expect(
       validateReactPageProps(agg(`{ function: 'count' }`)).filter((x) => x.severity === 'error'),
       'nothing about this aggregate may gate the build',
@@ -1704,5 +1707,41 @@ describe('[#22161] one-line verdicts — the five react-page ids', () => {
       expect(refusalOf({ function: 'count', groupBy: { field: 'status', [key]: 'x' } }), key).toContain('•');
       expect(text, key).toContain(`\`${key}\``);
     }
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. The two chart ids' hints said "the
+// rejection above carries the fix" after the verdict had been cut to the
+// schema refusal's head; each now names the remedy itself, in one line, and
+// the absent-`groupBy` arm's ruling fits one line too.
+describe('[#22161] one-line fixes — react-chart-drilldown-invalid, react-chart-aggregate-invalid', () => {
+  const FIX_IDS: readonly string[] = [REACT_CHART_DRILLDOWN_INVALID, REACT_CHART_AGGREGATE_INVALID];
+
+  it('every `fix:` line of the two ids the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => FIX_IDS.includes(f.rule));
+    // Coverage control: both ids fired on their schema-refusal arm, and the
+    // aggregate id on its absent-groupBy arm, so the bound cannot pass over one.
+    for (const id of FIX_IDS) {
+      expect(converted.some((f) => f.rule === id && f.hint.startsWith('Correct the ')), `${id} refusal arm`).toBe(true);
+    }
+    expect(converted.some((f) => f.hint.startsWith('Add aggregate.groupBy'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint, f.rule).not.toMatch(/\babove\b/);
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('each schema-refusal arm names its remedy', () => {
+    const drill = fired.find((f) => f.rule === REACT_CHART_DRILLDOWN_INVALID && f.hint.startsWith('Correct the '));
+    expect(drill?.hint).toBe(
+      'Correct the drillDown key or value the verdict names to ChartDrillDownSchema (@objectstack/spec/ui): use ' +
+        'the rename it suggests, or delete a key that is real only on another surface',
+    );
+    const agg = fired.find((f) => f.rule === REACT_CHART_AGGREGATE_INVALID && f.hint.startsWith('Correct the '));
+    expect(agg?.hint).toBe(
+      'Correct the aggregate key or value the verdict names to ChartAggregateSchema (@objectstack/spec/ui): use ' +
+        'the rename it suggests, or move a key that is real one layer out to that layer',
+    );
   });
 });

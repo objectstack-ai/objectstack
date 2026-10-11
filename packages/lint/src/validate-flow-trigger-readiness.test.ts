@@ -31,7 +31,7 @@ const NEVER_FIRE_IDS: readonly string[] = [
   FLOW_API_TRIGGER_SECRET_MISSING,
   FLOW_TRIGGER_UNKNOWN_EVENT,
 ];
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateFlowTriggerReadiness: typeof validateFlowTriggerReadinessUnrecorded = (...args) => {
   const findings = validateFlowTriggerReadinessUnrecorded(...args);
   fired.push(...findings);
@@ -1712,5 +1712,30 @@ describe('[#22161] one-line verdicts — the never-fire family', () => {
     expect(refusal.success).toBe(false);
     expect(refusal.error!.issues.map((i) => i.message).join('\n')).toContain('`runAs` is a FLOW-level key');
     expect(explanationOf(FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID)).toContain('`runAs` is a FLOW-level key');
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. `flow-time-relative-descriptor-invalid`'s
+// hint said "satisfies each message above"; the verdict quotes ONE issue and
+// counts the rest, so the hint now names the remedy in one line, and why a
+// descriptor the schema accepts binds is the explanation's.
+describe('[#22161] one-line fixes — flow-time-relative-descriptor-invalid', () => {
+  it('every `fix:` line of the id the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID);
+    expect(converted.length).toBeGreaterThan(0);
+    for (const f of converted) {
+      expect(f.hint).toBe(
+        'Correct config.timeRelative to TimeRelativeTriggerSchema, starting with the key the verdict names, ' +
+          'and re-run until the schema accepts it: a descriptor the schema accepts binds',
+      );
+      expect(f.hint.length).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` line no longer says', () => {
+    const text = explanationOf(FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID);
+    expect(text).toContain('the same schema the trigger safeParses at bind time');
+    expect(text).toContain('an unrecognized key names the declared key it was probably meant to be');
+    expect(text).toContain('content/docs/references/automation/time-relative-trigger.mdx');
   });
 });

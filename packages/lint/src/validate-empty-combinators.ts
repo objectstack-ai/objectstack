@@ -238,15 +238,17 @@ function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ct
         : '`$not: {}` negates an EMPTY node, which is TRUE, so it ' +
           `${rows(VERDICT_OF.$not)}: the opposite of the "no filter" an empty operand looks like`;
 
+  // [#22161] One remedy line per shape. The declared match-none spelling and
+  // what a programmatic producer keeps are `os explain filter-empty-combinator`.
   const hint =
     key === '$and'
-      ? `${OMIT_THE_KEY} To express a constraint, put the conditions in the array. ${MATCH_NONE_SPELLING}`
+      ? 'To express "no filter", delete the key (an absent `filter` runs identically); to express a ' +
+        'constraint, put the conditions in the array'
       : key === '$or'
-        ? 'If you meant "no filter", this is its OPPOSITE: emptying the array does not relax the filter, ' +
-          `it closes it. ${OMIT_THE_KEY} If you meant to offer alternatives, put the branches in the ` +
-          `array. ${MATCH_NONE_SPELLING}`
-        : 'Put the condition you are negating inside `$not` (`{ $not: { status: \'closed\' } }`). ' +
-          `${OMIT_THE_KEY} ${MATCH_NONE_SPELLING}`;
+        ? 'Emptying the array closes the filter instead of relaxing it: delete the key to express "no filter", ' +
+          'or put the branches in the array to offer alternatives'
+        : 'Put the condition you are negating inside `$not` (`{ $not: { status: \'closed\' } }`), or delete ' +
+          'the key to express "no filter"';
 
   ctx.out.push({
     severity: 'error',
@@ -254,9 +256,7 @@ function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ct
     where: ctx.where,
     path,
     message,
-    hint:
-      `${hint} A PROGRAMMATIC producer that loops to zero operands keeps the runtime identity ` +
-      'unchanged — this rule judges only what is written in the metadata.',
+    hint,
   });
 }
 

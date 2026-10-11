@@ -538,13 +538,13 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           // whole list, and why the sweep is never installed is
           // `os explain flow-time-relative-descriptor-invalid`.
           message: `config.timeRelative never binds, so the flow never runs: ${descriptorRefusal(parsed.error.issues)}`,
-          // [#22161] `hint` is the CLI's `fix:` line: the instruction first, the
-          // reason it is sufficient after it.
+          // [#22161] `hint` is the CLI's `fix:` line, one remedy line: it said
+          // "satisfies each message above", and the verdict quotes ONE issue
+          // and counts the rest. Why a descriptor the schema accepts binds,
+          // and where its keys are documented, is the explanation's.
           hint:
-            `Correct config.timeRelative until it satisfies each message above: they are ` +
-            `TimeRelativeTriggerSchema's own, the same schema the trigger safeParses at bind time, so a ` +
-            `descriptor that satisfies them binds. An unrecognized key names the declared key it was ` +
-            `probably meant to be; see content/docs/references/automation/time-relative-trigger.mdx.`,
+            'Correct config.timeRelative to TimeRelativeTriggerSchema, starting with the key the verdict names, ' +
+            'and re-run until the schema accepts it: a descriptor the schema accepts binds',
         });
       }
     }

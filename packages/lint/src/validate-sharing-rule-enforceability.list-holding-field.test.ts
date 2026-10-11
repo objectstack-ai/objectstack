@@ -35,7 +35,7 @@ import { explainRule } from './rule-explanations.js';
 // fired, and the last case in this file holds each recorded verdict to one
 // line of at most 200 characters. Run the whole file: that case reads what the
 // cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateSharingRuleEnforceability: typeof validateSharingRuleEnforceabilityUnrecorded = (...args) => {
   const findings = validateSharingRuleEnforceabilityUnrecorded(...args);
   fired.push(...findings);
@@ -116,7 +116,7 @@ describe('validateSharingRuleEnforceability — a condition comparing a field wi
             `condition compares \`record.${left} ${quoted} record.${right}\`, where \`${field}\` holds a list or an ` +
               `object, ${CONSEQUENCE}`,
           );
-          expect(findings[0].hint).toMatch(/^A field compared with a `json` or `multiple` field has no row-filter form/);
+          expect(findings[0].hint).toMatch(/^Compare with a single-valued column or a literal/);
         });
       }
     }
@@ -280,5 +280,15 @@ describe('[#22161] one-line verdicts', () => {
     const text = explainRule(SHARING_RULE_UNLOWERABLE_CONDITION)?.paragraphs.join('\n') ?? '';
     expect(text).toContain('`SharingRuleService` reads a refused query as matching no record');
     expect(text).toContain('at boot or on any later write');
+  });
+
+  // [#22161] Slice 11: the `fix:` line, one remedy sentence; what it stopped
+  // saying is `os explain sharing-rule-unlowerable-condition`.
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    expect(fired.some((f) => f.message.includes('holds a list or an object'))).toBe(true);
+    for (const f of fired) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
   });
 });
