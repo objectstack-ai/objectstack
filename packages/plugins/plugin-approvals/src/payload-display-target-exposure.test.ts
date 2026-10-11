@@ -37,20 +37,27 @@ const tables: Record<string, Row[]> = {
   ...Object.fromEntries(Object.keys(TARGETS).map((k) => [`t_${k}`, [{ id: `${k}_1`, name: `${k} title` }]])),
 };
 
-function makeService(unreadable?: string) {
+/** The two engine members the enrichment reads; `unreadable` names a target whose declaration throws. */
+function makeEngine(rows: Record<string, Row[]>, unreadable?: string) {
   const reads: string[] = [];
-  const warn = vi.fn();
   const engine = {
     getSchema(object: string) {
       if (object === unreadable) throw new Error('declaration unavailable');
       return schemas[object];
     },
-    async find(object: string, options?: { where?: { id?: { $in?: string[] } } }) {
+    // Each table holds the one row a read can ask for, so the double answers the
+    // table whole: what is pinned is WHICH objects are read, not the query.
+    async find(object: string) {
       reads.push(object);
-      const wanted = options?.where?.id?.$in;
-      return (tables[object] ?? []).filter((r) => !wanted || wanted.includes(String(r.id)));
+      return rows[object] ?? [];
     },
   };
+  return { engine, reads };
+}
+
+function makeService(unreadable?: string) {
+  const warn = vi.fn();
+  const { engine, reads } = makeEngine(tables, unreadable);
   const service = new ApprovalService({ engine: engine as any, logger: { info() {}, warn, error() {}, debug() {} } });
   // `enrichRows` is private; its public callers drag the whole request lifecycle in.
   const enrich = (rows: Row[]) => (service as unknown as { enrichRows(r: Row[]): Promise<void> }).enrichRows(rows);
