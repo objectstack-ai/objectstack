@@ -149,6 +149,13 @@ const UNEXERCISED_BY_THIS_BOOT: Record<string, string> = {
     'self-hosted, plugin-approvals mounts the ADR-0043 action page with rawApp.get() directly on Hono, so it never passes through the IHttpServer port; the dispatcher domain this row ledgers serves only a kernel with no raw app. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-approvals-act.conformance.test.ts',
   'POST /api/v1/approvals/act':
     'self-hosted, plugin-approvals mounts the ADR-0043 redemption with rawApp.post() directly on Hono, so it never passes through the IHttpServer port; the dispatcher domain this row ledgers serves only a kernel with no raw app. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-approvals-act.conformance.test.ts',
+  // [#22755] Two doors, one path, again. This row ledgers the DISPATCHER's
+  // `/webhooks/redeliver` domain, the door for a kernel with NO raw app. The
+  // showcase `requires` the `webhooks` capability, so this self-hosted boot
+  // composes plugin-webhooks, which serves the same path itself from
+  // `rawApp.post()` on the Hono app — never through the port.
+  'POST /api/v1/webhooks/redeliver':
+    'self-hosted, plugin-webhooks mounts the redeliver door with rawApp.post() directly on Hono, so it never passes through the IHttpServer port; the dispatcher domain this row ledgers serves only a kernel with no raw app. Both doors are driven, on the real plugin, by packages/qa/http-conformance/src/hono-webhooks-redeliver.conformance.test.ts',
 };
 
 /** Segments a probe path uses for `:params` — must match no literal segment. */

@@ -3437,16 +3437,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts",
-      "verb": "delete",
-      "pinned": 2
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts",
-      "verb": "update",
-      "pinned": 2
-    },
-    {
       "file": "packages/plugins/plugin-security/src/tenant-layer0-verdict-on-operation.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3659,6 +3649,11 @@
     {
       "file": "packages/plugins/plugin-webhooks/src/webhook-signing-secret.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/qa/http-conformance/src/hono-webhooks-redeliver.conformance.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

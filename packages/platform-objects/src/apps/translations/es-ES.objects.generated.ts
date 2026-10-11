@@ -170,9 +170,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "Número de teléfono",
             helpText: "Número de teléfono para iniciar sesión (E.164, p. ej. +8613800000000). Obligatorio si no se indica un correo."
           },
-          generatePassword: {
-            label: "Generar contraseña temporal"
-          },
           password: {
             label: "Contraseña (dejar en blanco para generarla)"
           },
@@ -195,9 +192,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Establecer contraseña",
         successMessage: "Contraseña actualizada",
         params: {
-          generatePassword: {
-            label: "Generar contraseña temporal"
-          },
           newPassword: {
             label: "Nueva contraseña (dejar en blanco para generarla)"
           },

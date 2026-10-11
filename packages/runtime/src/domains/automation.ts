@@ -3195,7 +3195,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // wrong gate for this route (it would refuse the end user the flow
         // paused for) — and left the door authenticated-only as a result. The
         // residual it named was measured and is real: a `ScreenSpec` carries
-        // `defaults` / `defaultValue` interpolated against the live flow
+        // `defaults` / `defaultValue` resolved against the live flow
         // variables (`builtin/screen-nodes.ts`), so a real screen flow over
         // `{record.email}` / `{record.phone}` answered those values to ANY
         // authenticated caller who knew a run id. The ruling of 2026-08-12

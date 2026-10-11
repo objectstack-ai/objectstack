@@ -585,10 +585,9 @@ export function apiAccessDenialFromEnable(
  *
  * Measured from the handler's own reads, not from the card or the docs: the
  * five filters (`object`, `recordId`, `status`, `approverId`, `submitterId`),
- * the `unstaffed` arm (#22725), the free-text `q`, the paging pair (`limit`,
- * `offset`), and the snake_case alias spellings the handler honours for the
- * three camelCase filters. A name outside this set is refused with a located
- * `400` instead of being dropped.
+ * the free-text `q`, the paging pair (`limit`, `offset`), and the snake_case
+ * alias spellings the handler honours for the three camelCase filters. A name
+ * outside this set is refused with a located `400` instead of being dropped.
  *
  * Exported so the pin tests assert against THIS array rather than a
  * hand-copied second list that can drift away from what the route accepts.
@@ -598,7 +597,6 @@ export const APPROVAL_REQUEST_LIST_PARAMS: readonly string[] = [
     'recordId', 'record_id',
     'status',
     'approverId', 'approver_id',
-    'unstaffed',
     'submitterId', 'submitter_id',
     'q',
     'limit', 'offset',
@@ -809,45 +807,6 @@ function readDeclaredQueryNumber(
         `Invalid \`${param}\` query parameter: ${fields[0]?.message ?? 'not a readable number'}`,
         fields,
     );
-}
-
-/**
- * [#22725] Read ONE boolean query parameter on a door whose request has no
- * declared schema: `true` or `false`, and nothing else.
- *
- * The bare form `q.x === 'true'` is the defect this refuses to write. It does
- * not fail; it reads every other spelling as `false`. `?unstaffed=1` or
- * `?unstaffed=TRUE` would then answer `200` without the arm the caller asked
- * for, and that answer is shaped exactly like "there is nothing to rescue".
- * So a third spelling is refused, never guessed. This is the rule
- * `@objectstack/runtime`'s `parseBooleanParam` applies on the notifications
- * inbox's `?read=`; this package cannot import it (runtime depends on rest).
- * The accepted set and the field code are the same.
- *
- * Absent is `undefined`. A present-but-empty `?x=` is refused: no answer was
- * ever given for it, so there is none to preserve (contrast the per-door
- * judgement in {@link readDeclaredQueryNumber}). A real boolean, which an
- * in-process delegation can hand over, is itself.
- *
- * THROWN as `validationFailure`, never written here, so the door's
- * `handleRouteError` answers `400 VALIDATION_FAILED` with `fields[0]`
- * `{ field: <param>, code: 'invalid_boolean' }`. That is the envelope its
- * `limit` / `offset` refusals answer. Call it AFTER
- * `refuseRepeatedQueryParams` has run for `param`.
- */
-function readDeclaredQueryBoolean(
-    queryParams: Record<string, unknown> | undefined,
-    param: string,
-): boolean | undefined {
-    const raw = queryParams?.[param];
-    if (raw === undefined || raw === null) return undefined;
-    if (raw === true || raw === 'true') return true;
-    if (raw === false || raw === 'false') return false;
-    const received = typeof raw === 'string'
-        ? JSON.stringify(raw.length > 40 ? `${raw.slice(0, 40)}…` : raw)
-        : 'a structured value';
-    const message = `Invalid \`${param}\` query parameter: expected \`true\` or \`false\`, received ${received}`;
-    throw validationFailure(message, [{ field: param, code: 'invalid_boolean', message }]);
 }
 
 /**
@@ -12313,12 +12272,12 @@ export class RestServer {
     /**
      * Register the security admin endpoints (ADR-0090 D5/D9) — suggested
      * audience bindings. A package permission set declaring `isDefault: true`
-     * is an install-time SUGGESTION to bind it to the `everyone` position;
-     * these routes surface pending suggestions and let a tenant admin resolve
-     * them. The `security` service (plugin-security) does the real gating:
-     * tenant-admin pre-check on all three, and confirm writes the binding
-     * with the caller's execution context so the audience-anchor and
-     * delegated-admin gates enforce it — never auto-bound, never system.
+     * is an install-time SUGGESTION to give it to every signed-in member;
+     * these routes surface the suggestions and let a `manage_metadata` holder
+     * (under a wall, the platform operator) decide each once for the whole
+     * deployment. The `security` service (plugin-security) does the real
+     * gating on all three, and an accept takes effect: the `everyone` anchor's
+     * definition is re-derived with the set (#22801 → A) — never auto-bound.
      *
      *   GET  {basePath}/security/suggested-bindings?status=&packageId=
      *   POST {basePath}/security/suggested-bindings/:id/confirm
@@ -12451,7 +12410,7 @@ export class RestServer {
             metadata: { summary: 'List suggested audience bindings (ADR-0090 D5/D9)', tags: ['security'] },
         });
 
-        // CONFIRM — creates the anchor binding as the caller (gated write)
+        // CONFIRM — the deployment-level acceptance; `everyone` is re-derived
         this.routeManager.register({
             method: 'POST',
             path: `${dataPath}/security/suggested-bindings/:id/confirm`,
@@ -12466,10 +12425,10 @@ export class RestServer {
                     res.json({ data: result });
                 } catch (err: any) { handleError(err, res, 'SUGGESTION_CONFIRM_FAILED'); }
             },
-            metadata: { summary: 'Confirm a suggested audience binding (creates the everyone/guest binding)', tags: ['security'] },
+            metadata: { summary: 'Accept a suggested audience binding for the deployment (everyone carries the set)', tags: ['security'] },
         });
 
-        // DISMISS — records the admin's decline; nothing is bound
+        // DISMISS — declines a pending suggestion, or revokes an accepted one
         this.routeManager.register({
             method: 'POST',
             path: `${dataPath}/security/suggested-bindings/:id/dismiss`,
@@ -12484,7 +12443,7 @@ export class RestServer {
                     res.json({ data: result });
                 } catch (err: any) { handleError(err, res, 'SUGGESTION_DISMISS_FAILED'); }
             },
-            metadata: { summary: 'Dismiss a suggested audience binding', tags: ['security'] },
+            metadata: { summary: 'Dismiss a suggested audience binding, or revoke an accepted one', tags: ['security'] },
         });
     }
 
@@ -12496,7 +12455,7 @@ export class RestServer {
      * are no process-authoring or submit routes anymore.
      *
      * Routes (all under {basePath}/approvals):
-     *   GET    /requests                        — list (filters: status, object, recordId, approverId, unstaffed, submitterId)
+     *   GET    /requests                        — list (filters: status, object, recordId, approverId, submitterId)
      *   GET    /requests/:id                    — get request
      *   POST   /requests/:id/approve            — record an approve decision (resumes the flow)
      *   POST   /requests/:id/reject             — record a reject decision (resumes the flow)
@@ -12662,7 +12621,7 @@ export class RestServer {
                     // PURPOSE. Everything else here narrows the list to one
                     // value and is declared single-valued.
                     if (refuseRepeatedQueryParams(req, res, [
-                        'object', 'recordId', 'record_id', 'status', 'unstaffed',
+                        'object', 'recordId', 'record_id', 'status',
                         'submitterId', 'submitter_id', 'q', 'limit', 'offset',
                     ])) return;
                     const q = req.query ?? {};
@@ -12691,18 +12650,11 @@ export class RestServer {
                     // door cannot read is the caller's `400`.
                     let limit: number | undefined;
                     let offset: number | undefined;
-                    // [#22725] The `unstaffed` arm: the pending requests whose
-                    // slate names no person, for a caller who may override
-                    // them, ORed with `approverId` by the service
-                    // (the contract's member docblock). Read `true` / `false`
-                    // only: a guessed `false` would be a 200 without the arm.
-                    let unstaffed: boolean | undefined;
                     try {
                         limit = readDeclaredQueryNumber(q, 'limit',
                             UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
                         offset = readDeclaredQueryNumber(q, 'offset',
                             UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
-                        unstaffed = readDeclaredQueryBoolean(q, 'unstaffed');
                     } catch (refusal: any) {
                         handleRouteError(res, refusal);
                         return;
@@ -12712,7 +12664,6 @@ export class RestServer {
                         recordId: q.recordId ?? q.record_id,
                         status: q.status,
                         approverId: approverIds.length ? approverIds : undefined,
-                        unstaffed,
                         submitterId: q.submitterId ?? q.submitter_id,
                         q: typeof q.q === 'string' ? q.q : undefined,
                         limit,

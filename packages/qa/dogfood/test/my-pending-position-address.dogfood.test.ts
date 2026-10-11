@@ -39,6 +39,7 @@ import {
   myPendingSecurity,
   ROUTED_POSITION,
   OTHER_POSITION,
+  CO_APPROVER,
 } from './fixtures/my-pending-position-fixture.js';
 
 const SYS = { context: { isSystem: true } } as const;
@@ -72,7 +73,8 @@ describe('"My Pending" lists a position-routed request under position: (#21350; 
         const reviewerId = await idOf(REVIEWER);
         const bystanderId = await idOf(BYSTANDER);
 
-        // Opens while NOBODY holds the routed position → the literal slot.
+        // Opens while NOBODY holds the routed position → the literal slot,
+        // beside the named co-approver (see the fixture's header).
         const createRes = await stack.apiAs(submitterToken, 'POST', '/data/my_pending_request', { name: 'r1' });
         expect(createRes.status).toBe(201);
 
@@ -95,7 +97,7 @@ describe('"My Pending" lists a position-routed request under position: (#21350; 
         const adminToken = await stack.signIn();
         const all = await myPending(adminToken, [`position:${ROUTED_POSITION}`]);
         expect(all.length).toBe(1);
-        expect(all[0].pending_approvers).toEqual([`position:${ROUTED_POSITION}`]);
+        expect(all[0].pending_approvers).toEqual([`position:${ROUTED_POSITION}`, CO_APPROVER]);
         const requestId = all[0].id;
 
         // ⭐ `position:<p>`, for the reviewer (the participant gate's half)

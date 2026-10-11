@@ -143,6 +143,12 @@ export type FlowNodeExpressionRole =
    * `input`) — again declared and evaluated in the same change: the three
    * executors resolve the map through the one per-key resolver the CRUD
    * `fields` map uses (`service-automation`'s `resolveValueSlotMap`).
+   *
+   * And for a `screen`'s three positions that hand a value to the client — an
+   * object form's `defaults` map, a field's `defaultValue` and an object
+   * form's `recordId` — again declared and evaluated in the same change: the
+   * `screen` executor evaluates each before the screen goes on the wire,
+   * through the same resolver.
    */
   | 'value';
 
@@ -202,8 +208,8 @@ export interface FlowNodeExpressionPath {
  *
  * Also deliberately absent: the config values that still INTERPOLATE
  * `{token}` templates — the positions the #19939 retirement has not reached
- * yet (a `screen`'s `defaults`, a `notify` `recipients` entry, an `http` body,
- * a CRUD `filter` value, and so on) — and the TEXT slots, which render `{{ }}`
+ * yet (a `notify` `recipients` entry, an `http` body, a CRUD `filter` value,
+ * and so on) — and the TEXT slots, which render `{{ }}`
  * holes since #22110 (a notify `title` / `message`, a screen `title` /
  * `description`, an `end` `message`; their one judge and list is
  * `flow-text-slot-template.ts`). Those are text-with-holes,
@@ -221,20 +227,25 @@ export interface FlowNodeExpressionPath {
  * that form is resolved. Six maps are such slots: the `assignment` node's
  * `assignments` (#14149), the `create_record` / `update_record` `fields`
  * (#19938), and — since #19939 — the three maps a node hands to a callee as
- * its inputs: `subflow.input`, `map.input` and `script.inputs`. Their strings
+ * its inputs: `subflow.input`, `map.input` and `script.inputs`. So are, since
+ * #19939, a `screen`'s three positions that hand a value to the client: the
+ * object form's `defaults` map, a field's `defaultValue` and the object form's
+ * `recordId` (a single value each, not a map: `fields[].defaultValue`,
+ * `recordId`). Their strings
  * are NOT the generic text-with-holes case above: since #19939 a `{token}` in
  * a value slot is refused (`flow-value-slot-template.ts`), and a token-free
  * string is a literal. Each is declared through the spec Zod channel — the
- * map value is `FlowValueSlotSchema` (or `AssignmentValueSchema`, the same
- * rule), whose `.meta({ xExpression: 'value' })` the ratchet reads. For
+ * value is `FlowValueSlotSchema` (or `AssignmentValueSchema`, the same rule;
+ * `recordId` takes it with a string literal), whose
+ * `.meta({ xExpression: 'value' })` the ratchet reads. For
  * `subflow` and `script`, which publish no descriptor `configSchema`, that is
- * their contract in `SCHEMALESS_NODE_CONFIG_SCHEMAS`. For the other four it is
+ * their contract in `SCHEMALESS_NODE_CONFIG_SCHEMAS`. For the other five it is
  * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` (`AssignmentConfigSchema`,
- * `CreateRecordConfigSchema`, `UpdateRecordConfigSchema`, `MapConfigSchema`),
- * because each of those nodes' descriptors declares the map as
- * `additionalProperties: true` with no marker; the ratchet walks an
- * object-valued `additionalProperties` as the `*` segment and maps the `value`
- * marker to this role.
+ * `CreateRecordConfigSchema`, `UpdateRecordConfigSchema`, `MapConfigSchema`,
+ * `ScreenConfigSchema`), because each of those nodes' descriptors declares the
+ * position with no marker — a map as `additionalProperties: true`; the
+ * ratchet walks an object-valued `additionalProperties` as the `*` segment and
+ * maps the `value` marker to this role.
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -356,6 +367,38 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     path: 'inputs.*',
     role: 'value',
     label: 'script input value',
+  },
+  {
+    // [#19939] A `screen`'s three positions that hand a VALUE to the client
+    // (#11182 ruling D; ADR-0032 Decision 2). Each is evaluated by the
+    // executor in the run's scope BEFORE the screen goes on the wire, so the
+    // client receives the value, never the envelope. Declared through the
+    // spec Zod channel (`ScreenConfigSchema`, carried to the ratchet by
+    // `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor declares
+    // `defaults` as `additionalProperties: true` and the other two with no
+    // marker, the shape its Studio form renders.
+    //
+    // An object form's prefill, keyed by the object's field names.
+    nodeType: 'screen',
+    path: 'defaults.*',
+    role: 'value',
+    label: 'screen form default',
+  },
+  {
+    // A flat screen field's prefill.
+    nodeType: 'screen',
+    path: 'fields[].defaultValue',
+    role: 'value',
+    label: 'screen field default value',
+  },
+  {
+    // The record an object form's `edit` mode opens. Its literal is narrower
+    // than the other value slots': a string, the id itself, and an envelope
+    // must evaluate to one (`ScreenConfigSchema.recordId`).
+    nodeType: 'screen',
+    path: 'recordId',
+    role: 'value',
+    label: 'screen record id',
   },
 ];
 

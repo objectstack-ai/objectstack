@@ -1,13 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import { defineActionDescriptor, ScreenConfigSchema, ScriptConfigSchema } from '@objectstack/spec/automation';
+import { defineActionDescriptor, isExpressionEnvelopeShaped, ScreenConfigSchema, ScriptConfigSchema } from '@objectstack/spec/automation';
 import type { ScreenConfigParsed, ScriptConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
 import { flowScreenCopyKey, type FlowScreenCopyKey } from '@objectstack/spec/system';
-import { interpolate, renderTextSlot } from './template.js';
+import { renderTextSlot } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
-import { resolveValueSlotMap } from './value-slot-map.js';
+import { resolveValueSlot, resolveValueSlotMap } from './value-slot-map.js';
 import { judgeHeadlessScreen } from '../screen-input-contract.js';
 
 /**
@@ -73,6 +73,16 @@ const LOOKUP_TARGET_COLUMN = {
   description: "Object whose records a `lookup` field picks from. Required on a `lookup` field — a picker with no target object resolves nothing.",
 };
 
+/** How a refusal names a value that is not a record id — `null`, a number (`42`), a map. */
+function valueKindOf(value: unknown): string {
+    if (value === null) return '`null`';
+    if (value === undefined) return 'nothing';
+    if (typeof value === 'string') return 'a blank string';
+    if (Array.isArray(value)) return 'a list';
+    if (typeof value === 'object') return 'a map';
+    return `a ${typeof value} (\`${String(value)}\`)`;
+}
+
 export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext): void {
     // screen — server-side pass-through (input vars already injected by engine).
     engine.registerNodeExecutor({
@@ -90,8 +100,12 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         resumeAuthority: 'any',
         // Designer form (ADR-0018, #3304) — mirrors objectui's hardcoded `screen`
         // field group: flat input list OR an object form, plus title/description.
-        // `visibleWhen` is bare CEL (xExpression), `defaults` a free-form keyValue
-        // map (values may be `{var}` templates → `true`-permissive).
+        // `visibleWhen` is bare CEL (xExpression). `defaults` is a free-form
+        // keyValue map, and it, a field's `defaultValue` and `recordId` are
+        // value slots (#19939): their marker rides the spec Zod
+        // (`ScreenConfigSchema`, carried to the expression ledger by
+        // `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`), so the form keeps the inputs
+        // the Studio renders for them.
         configSchema: {
           type: 'object',
           properties: {
@@ -124,7 +138,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
                       },
                     },
                   },
-                  defaultValue: { title: 'Default', description: 'Prefilled value. Interpolates {var} references.' },
+                  defaultValue: { title: 'Default', description: 'Prefilled value: a literal, or a CEL value envelope evaluated when the screen is served.' },
                   placeholder: { type: 'string', title: 'Placeholder' },
                   // Declared in #17306 — the bound pair, the help text and the
                   // lookup target, spelled as the object field spells them.
@@ -148,20 +162,22 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             // Declared in #4045: `mode: 'edit'` needs a record to edit, and the
             // executor reads exactly this key for it — but the form declared the
             // mode while offering no way to name its target.
-            recordId: { type: 'string', title: 'Record to edit', description: 'Object form only: id of the record `edit` mode opens. Interpolates {var} references.' },
-            defaults: { type: 'object', additionalProperties: true, title: 'Form defaults', description: 'Object form only: prefilled values (e.g. account → {account_id}).' },
+            recordId: { type: 'string', title: 'Record to edit', description: 'Object form only: id of the record `edit` mode opens — a string, or a CEL value envelope evaluated to the id when the screen is served.' },
+            defaults: { type: 'object', additionalProperties: true, title: 'Form defaults', description: 'Object form only: prefilled values — each a literal, or a CEL value envelope evaluated when the screen is served (e.g. account → { dialect: \'cel\', source: \'account_id\' }).' },
           },
         },
       }),
       async execute(node, variables, context) {
-        // Parsed BEFORE interpolation: the contract's typed slots are strings
-        // (or `unknown`, for the interpolatable `defaultValue`/`defaults`), so
-        // `{var}` templates pass the parse and resolve below as always.
+        // Parsed before anything is resolved: the text slots refuse a
+        // single-brace token (#22110), and the value slots — `recordId`,
+        // `defaults.*`, a field's `defaultValue` — refuse one too (#19939), so
+        // what reaches the resolution below is a `{{ }}` template, an envelope
+        // or a literal.
         const parsedCfg = parseNodeConfig<ScreenConfigParsed>('screen', node.id, ScreenConfigSchema, node.config);
         if (!parsedCfg.ok) return parsedCfg.refusal;
         const cfg = parsedCfg.config;
         // Screen config resolves against the live flow variables here (the
-        // engine does NOT pre-interpolate node config) — so a step's
+        // engine does NOT pre-resolve node config) — so a step's
         // title/description/record id/field-default/object-form-default can pull
         // from prior nodes.
         //
@@ -169,9 +185,14 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         // `{{ }}` holes (`{{ lead_record.company }}`) through
         // {@link renderTextSlot} — the ONE text renderer the refusing `end`
         // node's `message` and a notification share (#15788: never a copy).
-        // The rest keep the single-brace dialect (`{account_id}`): `recordId`
-        // names a record and `defaults` / a field's `defaultValue` hand their
-        // resolved values over, not text.
+        // [#19939] The rest are VALUE slots, not text: `recordId` names a
+        // record and `defaults` / a field's `defaultValue` hand a value over.
+        // Each envelope is evaluated in the run's scope BEFORE the screen goes
+        // on the wire, so the client receives the value it computes — a record
+        // as a map, a list as a list, the id as a string — never the envelope;
+        // every other value is a literal, served as written. ⛔ No fallback to
+        // the single-brace interpolator: the dispatch is by shape
+        // (`resolveValueSlot`).
         //
         // [#22507] …in the run's language. Maintainer ruling A: a user-read
         // flow string the server renders per run is translated where it is
@@ -210,9 +231,23 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             typeof cfg.description === 'string' && cfg.description.length > 0
                 ? screenText('description', cfg.description, 'the body text')
                 : undefined;
-        const ref = (v: unknown): string | undefined => {
-            const resolved = interpolate(v, variables, context);
-            return resolved == null ? undefined : String(resolved);
+        // [#19939] The record an `edit` form opens. A literal is the contract's
+        // string, served as written. An envelope must evaluate to the record's
+        // id, a non-blank string: anything else — `null` included — fails the
+        // node here, naming its source, ⛔ never `String(value)` and never a
+        // screen served with no record (an `edit` form then opens with nothing
+        // read, and its save is refused).
+        const recordIdOf = (raw: unknown): string | undefined => {
+            if (raw === undefined) return undefined;
+            const id = resolveValueSlot(engine, raw, variables, 'recordId', context);
+            if (!isExpressionEnvelopeShaped(raw)) return id as string;
+            if (typeof id === 'string' && id.trim() !== '') return id;
+            throw new Error(
+                `recordId: the value expression evaluated to ${valueKindOf(id)}, not a record id. \`recordId\` names `
+                + 'the record an `edit` form opens, so it must evaluate to that record\'s id, a non-blank string; '
+                + 'where the record may be absent, route around this screen with a `decision` on the value — source: '
+                + `\`${String((raw as { source?: unknown }).source ?? '')}\`.`,
+            );
         };
 
         // ── Object-form screen (master-detail wizards) ──────────────────────
@@ -227,7 +262,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         if (objectName) {
           const defaults =
             cfg.defaults && typeof cfg.defaults === 'object'
-              ? (interpolate(cfg.defaults, variables, context) as Record<string, unknown>)
+              ? resolveValueSlotMap(engine, cfg.defaults, variables, 'defaults', context)
               : undefined;
           const idVariable =
             typeof cfg.idVariable === 'string' && cfg.idVariable.trim() ? cfg.idVariable.trim() : undefined;
@@ -241,7 +276,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
               description: body(),
               objectName,
               mode: cfg.mode === 'edit' ? 'edit' : 'create',
-              recordId: cfg.recordId != null ? ref(cfg.recordId) : undefined,
+              recordId: recordIdOf(cfg.recordId),
               defaults,
               idVariable,
               fields: [],
@@ -284,13 +319,15 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         if (!shouldPause) {
           return { success: true };
         }
-        const fields = rawFields.map((f) => ({
+        const fields = rawFields.map((f, index) => ({
           name: f.name,
           label: f.label,
           type: f.type,
           required: f.required === true,
           options: f.options as Array<{ value: unknown; label: string }> | undefined,
-          defaultValue: f.defaultValue !== undefined ? interpolate(f.defaultValue, variables, context) : undefined,
+          defaultValue: f.defaultValue !== undefined
+            ? resolveValueSlot(engine, f.defaultValue, variables, `fields[${index}].defaultValue`, context)
+            : undefined,
           placeholder: f.placeholder,
           // #17306. `min`/`max` go on the wire for the client to apply at the
           // input, and are re-checked server-side on resume

@@ -4,11 +4,11 @@
  * `/security` domain — extracted dispatcher body (ADR-0076 D11 step ③,
  * PR-2). The security admin surface (ADR-0090 D5/D9): suggested audience
  * bindings. A package's `isDefault: true` permission set is an install-time
- * SUGGESTION to bind it to the `everyone` position; these routes let an
- * admin see and resolve those suggestions. The `security` service does the
- * real gating (tenant-admin pre-check, and the confirm write runs under the
- * audience-anchor + delegated-admin gates with the caller's execution
- * context — never auto-bound, never system).
+ * SUGGESTION to give it to every signed-in member; these routes let a
+ * `manage_metadata` holder (under a wall, the platform operator) decide each
+ * once for the deployment. The `security` service does the real gating, and
+ * an accept re-derives the `everyone` anchor's definition with the set
+ * (#22801 → A) — never auto-bound.
  *
  * NOTE (cross-repo, see #2462 step-① re-scope): cloud's per-env kernels can
  * reach this via `dispatch()` delegation (`/share-links` pattern), so the
@@ -16,8 +16,8 @@
  *
  * Routes:
  *   GET  /security/suggested-bindings?status=&packageId=   → list (reconciles first)
- *   POST /security/suggested-bindings/:id/confirm          → create the anchor binding
- *   POST /security/suggested-bindings/:id/dismiss          → decline the suggestion
+ *   POST /security/suggested-bindings/:id/confirm          → accept it for the deployment
+ *   POST /security/suggested-bindings/:id/dismiss          → decline it, or revoke an acceptance
  *   POST /security/_activation/:type/:name                 → switch a position (`position`) or a
  *                                                            permission set (`permission`) on/off
  *                                                            for this deployment (`./catalog-activation.ts`)

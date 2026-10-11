@@ -274,8 +274,15 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
       }
       if (who === 'control') {
         // Staff the position BEFORE the subject exists: the slate resolves at request creation.
+        // The assignment carries the holder's organization, as a write through a
+        // door does: an unstamped row is UNKNOWN tenancy, which the slate's
+        // position expansion does not read, and an all-literal slate would then
+        // open on the organization's administrators instead (#22824).
+        const membership = await ql.findOne('sys_member', { where: { user_id: userId }, context: { isSystem: true } });
         await ql.insert('sys_position', { id: 'pos_atp', name: POSITION, label: 'Reviewer', active: true }, SYS);
-        await ql.insert('sys_user_position', { id: 'hold_atp', user_id: userId, position: POSITION }, SYS);
+        await ql.insert('sys_user_position', {
+          id: 'hold_atp', user_id: userId, position: POSITION, organization_id: membership?.organization_id,
+        }, SYS);
       }
     }
 

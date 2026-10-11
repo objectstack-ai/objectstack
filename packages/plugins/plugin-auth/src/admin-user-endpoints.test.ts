@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { SysUser } from '@objectstack/platform-objects/identity';
 import {
   runAdminCreateUser,
   runAdminSetUserPassword,
@@ -146,9 +147,13 @@ describe('runAdminCreateUser', () => {
   });
 
   it('rejects when neither password nor generatePassword is provided', async () => {
+    // CONTROL for the Setup dialog's one password rule: a caller that is not
+    // the dialog and sends neither still gets the 400 — the endpoint's
+    // contract did not move when the dialog started sending the constant.
     const m = makeDeps();
     const res = await runAdminCreateUser(m.deps, makeRequest({ email: 'a@b.co' }), ACTOR);
     expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('INVALID_REQUEST');
     expect(m.createUser).not.toHaveBeenCalled();
   });
 
@@ -703,6 +708,130 @@ describe('runAdminSetUserPassword', () => {
     expect(meta.event).toBe('user.admin_password_set');
     expect(meta.passwordGenerated).toBe(true);
   });
+
+  it('prefers an explicit newPassword over generatePassword (the dialog sends both)', async () => {
+    const m = makeDeps();
+    const res = await runAdminSetUserPassword(
+      m.deps,
+      makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    expect(m.authCtx.internalAdapter.updatePassword).toHaveBeenCalledWith('user-9', 'hashed(Str0ng!Pass)');
+    expect((res.body.data as any).temporaryPassword).toBeUndefined();
+  });
+
+  it('generates when generatePassword is true and newPassword is empty', async () => {
+    const m = makeDeps();
+    const res = await runAdminSetUserPassword(
+      m.deps,
+      makeRequest({ userId: 'user-9', newPassword: '', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const temp = (res.body.data as any).temporaryPassword as string;
+    expect(typeof temp).toBe('string');
+    expect(m.authCtx.internalAdapter.updatePassword).toHaveBeenCalledWith('user-9', `hashed(${temp})`);
+  });
+
+  it('rejects when neither newPassword nor generatePassword is provided', async () => {
+    // CONTROL, as for create-user: a caller that is not the dialog and sends
+    // neither still gets the 400, and nothing is written.
+    const m = makeDeps();
+    const res = await runAdminSetUserPassword(m.deps, makeRequest({ userId: 'user-9' }), ACTOR);
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('INVALID_REQUEST');
+    expect(m.authCtx.internalAdapter.updatePassword).not.toHaveBeenCalled();
+    expect(m.authCtx.internalAdapter.createAccount).not.toHaveBeenCalled();
+  });
+});
+
+// ── The Setup dialogs: the password field is the one rule ──────────────────
+//
+// `sys_user`'s `create_user` and `set_user_password` actions are this
+// endpoint's first-party callers. Their dialog offers one rule — the password
+// field's own label, "leave empty to generate" — so `generatePassword` is not a
+// control the admin sees: it rides in `bodyExtra` as a constant, and the
+// explicit-wins rule above turns that into the label's behaviour. A ticked box
+// beside a typed password was a control the server ignored.
+//
+// These pins read the DECLARED actions and compose the request body the way
+// the console does for a `type: 'api'` action: the values the dialog collected,
+// the `recordIdParam`, then `bodyExtra` merged last (the spec's documented
+// semantics for that key). The dialog submits only the params it shows, so a
+// param left out of `params` is never on the wire — `bodyExtra` is the one
+// place a constant the admin does not see can come from.
+describe('Setup dialogs: one password rule (sys_user create_user / set_user_password)', () => {
+  function declaredAction(name: string) {
+    const action = (SysUser.actions ?? []).find((a) => a.name === name);
+    if (!action) throw new Error(`sys_user declares no action named "${name}"`);
+    return action;
+  }
+
+  function dialogBody(name: string, collected: Record<string, unknown>, recordId?: string) {
+    const action = declaredAction(name);
+    const body: Record<string, unknown> = { ...collected };
+    if (action.recordIdParam && recordId !== undefined) body[action.recordIdParam] = recordId;
+    return { ...body, ...(action.bodyExtra ?? {}) };
+  }
+
+  const DIALOGS = [
+    {
+      action: 'create_user',
+      explicitKey: 'password',
+      base: { email: 'a@b.co', mustChangePassword: true },
+      recordId: undefined,
+      run: (m: ReturnType<typeof makeDeps>, body: Record<string, unknown>) =>
+        runAdminCreateUser(m.deps, makeRequest(body), ACTOR),
+      appliedPassword: (m: ReturnType<typeof makeDeps>) =>
+        callsOf(m.createUser).map((c) => (c[0] as unknown as { body: { password: string } }).body.password),
+    },
+    {
+      action: 'set_user_password',
+      explicitKey: 'newPassword',
+      base: { mustChangePassword: true },
+      recordId: 'user-9',
+      run: (m: ReturnType<typeof makeDeps>, body: Record<string, unknown>) =>
+        runAdminSetUserPassword(m.deps, makeRequest(body), ACTOR),
+      appliedPassword: (m: ReturnType<typeof makeDeps>) =>
+        callsOf(m.authCtx.password.hash).map((c) => c[0]),
+    },
+  ] as const;
+
+  for (const d of DIALOGS) {
+    it(`${d.action}: offers no generatePassword control and sends it as a constant`, () => {
+      const action = declaredAction(d.action);
+      const offered = (action.params ?? []).map((p) => p.name ?? p.field);
+      expect(offered).toContain(d.explicitKey);
+      expect(offered).not.toContain('generatePassword');
+      expect(action.bodyExtra?.generatePassword).toBe(true);
+    });
+
+    it(`${d.action}: a typed password is the one applied, and nothing is generated`, async () => {
+      const m = makeDeps();
+      const body = dialogBody(d.action, { ...d.base, [d.explicitKey]: 'Explicit1!' }, d.recordId);
+      const res = await d.run(m, body);
+      expect(res.status).toBe(200);
+      expect(d.appliedPassword(m)).toEqual(['Explicit1!']);
+      expect((res.body.data as any).temporaryPassword).toBeUndefined();
+    });
+
+    for (const [shape, collected] of [
+      ['left untouched (absent)', {}],
+      ['typed then cleared (empty string)', { [d.explicitKey]: '' }],
+    ] as const) {
+      it(`${d.action}: a password ${shape} generates a temporary one, returned once`, async () => {
+        const m = makeDeps();
+        const body = dialogBody(d.action, { ...d.base, ...collected }, d.recordId);
+        const res = await d.run(m, body);
+        expect(res.status).toBe(200);
+        const temp = (res.body.data as any).temporaryPassword as string;
+        expect(typeof temp).toBe('string');
+        expect(d.appliedPassword(m)).toEqual([temp]);
+        expectNoPasswordLeak(m, temp);
+      });
+    }
+  }
 });
 
 // ── The ledger row records the admin's decisions, never a field value ──────

@@ -212,7 +212,8 @@ describe('ScreenConfigSchema / ScreenFieldConfigSchema — an unknown key is ref
       fields: [{ name: 'amount', label: 'Amount', type: 'number', required: true, defaultValue: 0, placeholder: '0.00', visibleWhen: "type == 'x'" }],
     }).success).toBe(true);
     expect(ScreenConfigSchema.safeParse({
-      objectName: 'showcase_task', mode: 'edit', recordId: '{record.id}', idVariable: 'savedId', defaults: { status: 'open' },
+      // [#19939] `recordId` is a value slot: the id is a string, or a CEL envelope.
+      objectName: 'showcase_task', mode: 'edit', recordId: { dialect: 'cel', source: 'record.id' }, idVariable: 'savedId', defaults: { status: 'open' },
     }).success).toBe(true);
   });
 
@@ -580,8 +581,9 @@ describe('assignment value contract — a CEL envelope beside literals; the `{to
     // `SCHEMALESS_NODE_CONFIG_SCHEMAS`, whose meaning ("publishes no
     // descriptor") other readers depend on.
     // #19938 — the CRUD write map joined through the same channel; #19939 —
-    // the `map` node's per-item `input` map.
-    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment', 'create_record', 'update_record', 'map']);
+    // the `map` node's per-item `input` map, then the `screen`'s prefill and
+    // record id.
+    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment', 'create_record', 'update_record', 'map', 'screen']);
     expect(Object.keys(SCHEMALESS_NODE_CONFIG_SCHEMAS).sort()).toEqual(['decision', 'script', 'subflow']);
     const projected = getSchemalessNodeConfigJsonSchemas().assignment as
       { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
@@ -909,5 +911,102 @@ describe('CRUD `fields` value contract — the CEL value envelope beside literal
     expect(projected.properties?.fields?.additionalProperties?.xExpression).toBe('value');
     // `update_record.filter` is a match map, not a value slot — no marker.
     expect(projected.properties?.filter?.additionalProperties?.xExpression).toBeUndefined();
+  });
+});
+
+/**
+ * [#19939, stage S2] A `screen`'s three positions that hand a value to the
+ * client are VALUE slots: an object form's `defaults.*`, a field's
+ * `defaultValue` and an object form's `recordId`. Each takes a CEL value
+ * envelope (evaluated by the executor before the screen is served) or a
+ * literal; the `{token}` dialect is refused at all three. `recordId`'s literal
+ * stays what it was — a string — and it gains the envelope arm.
+ */
+describe('screen value slots — `defaults.*`, a field\'s `defaultValue`, `recordId`', () => {
+  const REC = { dialect: 'cel', source: 'rec' };
+  const ROWS = { dialect: 'cel', source: 'rows' };
+  const ID = { dialect: 'cel', source: 'record.id' };
+  const issuesOf = (config: unknown) => {
+    const result = ScreenConfigSchema.safeParse(config);
+    return result.success ? [] : result.error.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message }));
+  };
+
+  it('accepts an envelope at each position, stored verbatim — the executor evaluates it', () => {
+    const config = {
+      objectName: 'account', mode: 'edit', recordId: ID,
+      defaults: { parent: REC, contacts: ROWS },
+      fields: [{ name: 'note', defaultValue: { dialect: 'cel', source: "'Hi ' + rec.name" } }],
+    };
+    const result = ScreenConfigSchema.safeParse(config);
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject(config);
+  });
+
+  it('PRESERVATION: every literal still parses, unchanged — a string id, any prefill value', () => {
+    const literals = {
+      objectName: 'account', mode: 'edit', recordId: 'acc_1',
+      defaults: { stage: 'qualification', amount: 0, active: false, nothing: null, tags: ['a', { dialect: 'cel' }], meta: { source: 'x' } },
+      fields: [
+        { name: 'priority', defaultValue: 'normal' }, { name: 'n', defaultValue: 0 },
+        { name: 'b', defaultValue: false }, { name: 'list', defaultValue: ['x'] }, { name: 'none' },
+      ],
+    };
+    const result = ScreenConfigSchema.safeParse(literals);
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject(literals);
+  });
+
+  it.each([
+    ['recordId', { objectName: 'account', mode: 'edit', recordId: '{record.id}' }, 'recordId', "{ dialect: 'cel', source: 'record.id' }"],
+    ['defaults', { objectName: 'account', defaults: { name: '{lead.company}' } }, 'defaults.name', "{ dialect: 'cel', source: 'lead.company' }"],
+    ['defaults, nested', { objectName: 'account', defaults: { tags: ['{lead.tag}'] } }, 'defaults.tags.0', "source: '[lead.tag]'"],
+    ['defaultValue', { fields: [{ name: 'email', defaultValue: '{lead.email}' }] }, 'fields.0.defaultValue', "{ dialect: 'cel', source: 'lead.email' }"],
+  ] as const)('refuses a `{token}` in %s, at its path, naming the CEL spelling', (_what, config, path, spelling) => {
+    const issues = issuesOf(config);
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', path]]);
+    expect(issues[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(issues[0]!.message).toContain(spelling);
+  });
+
+  it.each([
+    ['a number', 42], ['null', null], ['a list', ['acc_1']], ['a plain object', { id: 'acc_1' }], ['a boolean', true],
+  ] as const)('recordId: refuses %s — an id is a string, or an envelope that evaluates to one', (_what, recordId) => {
+    const issues = issuesOf({ objectName: 'account', mode: 'edit', recordId });
+    expect(issues.map((i) => i.path)).toEqual(['recordId']);
+    expect(issues[0]!.message).toBe(
+      '`recordId` names the record an `edit` form opens: write the record\'s id as a string, or compute it with a CEL '
+      + 'value envelope that evaluates to one, `{ dialect: \'cel\', source: \'record.id\' }`.',
+    );
+  });
+
+  it.each([
+    ['recordId', (e: unknown) => ({ objectName: 'a', mode: 'edit', recordId: e }), 'recordId'],
+    ['defaults', (e: unknown) => ({ objectName: 'a', defaults: { k: e } }), 'defaults.k'],
+    ['defaultValue', (e: unknown) => ({ fields: [{ name: 'k', defaultValue: e }] }), 'fields.0.defaultValue'],
+  ] as const)('%s: a malformed envelope is refused, led by the slot-neutral envelope sentence', (_what, configOf, at) => {
+    for (const envelope of [{ dialect: 'cel' }, { dialect: 'template', source: 'Hi {{ name }}' }]) {
+      const issues = issuesOf(configOf(envelope));
+      expect(issues.length, JSON.stringify(envelope)).toBeGreaterThan(0);
+      for (const issue of issues) {
+        expect(issue.path.startsWith(at), JSON.stringify(envelope)).toBe(true);
+        expect(issue.message.startsWith(VALUE_ENVELOPE_REFUSAL), JSON.stringify(envelope)).toBe(true);
+      }
+    }
+  });
+
+  it('declares the three slots to the expression ledger — `xExpression: \'value\'` on the spec Zod, never on `visibleWhen`', () => {
+    type Node = { properties?: Record<string, Node>; items?: Node; additionalProperties?: Node; anyOf?: Node[]; type?: string; xExpression?: string };
+    for (const json of [
+      z.toJSONSchema(ScreenConfigSchema, { target: 'draft-2020-12', io: 'input', unrepresentable: 'any' }) as Node,
+      getSchemalessNodeConfigJsonSchemas().screen as Node,
+    ]) {
+      expect(json.properties?.defaults?.additionalProperties?.xExpression).toBe('value');
+      expect(json.properties?.fields?.items?.properties?.defaultValue?.xExpression).toBe('value');
+      expect(json.properties?.recordId?.xExpression).toBe('value');
+      // The id's literal stays a string in the published shape, beside the envelope arm.
+      expect(json.properties?.recordId?.anyOf?.map((arm) => arm.type)).toEqual(['string', 'object']);
+      // `visibleWhen` keeps arriving through the descriptor channel alone.
+      expect(json.properties?.fields?.items?.properties?.visibleWhen?.xExpression).toBeUndefined();
+    }
   });
 });

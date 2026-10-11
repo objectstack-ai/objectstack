@@ -17,11 +17,15 @@
  * Each hook is driven on both boots, the source configuration (the handler,
  * in-process) and its artifact (the body, in the runtime's QuickJS sandbox):
  *
- *  - `lbd_stash` writes to `ctx.dispatch.scope`, the cross-phase scratch the
- *    hook contract names (`HookContextSchema.dispatch`). The sandbox hands a
- *    body `ctx.dispatch` as `{ mode, index }`, without `scope`, so the body
- *    throws a TypeError and the write is refused. The handler passes. This is
- *    the divergence.
+ *  - `lbd_param` names its parameter `hookCtx` rather than `ctx`, and
+ *    `lbd_destructure` destructures it (`async ({ input }) => …`). The sandbox
+ *    runs a body with `ctx` bound and nothing else, so until #22837 the
+ *    lowering — which ships the handler's BODY and dropped its parameter list —
+ *    shipped a body whose `hookCtx` / `input` was unbound: a ReferenceError,
+ *    `500` over REST, nothing stored, while the handler stored the row. The
+ *    hook face now re-emits the parameter as `var <param> = ctx;` ahead of the
+ *    body, so both boots store the same row. This is the rebind, proved at the
+ *    door it failed at.
  *  - `lbd_refuse` refuses a short name with a declared `VALIDATION_FAILED` /
  *    400. Both boots refuse. In-process the caller gets the handler's own
  *    error; on the body-only path it gets a `SandboxError` that carries the
@@ -30,8 +34,24 @@
  *    the control.
  *
  * Measured before the door (`origin/main` a8f24b092c): `bootStack` always
- * mounted the source configuration, so the first hook passed every handle
+ * mounted the source configuration, so a divergent hook passed every handle
  * test while the artifact it ships refuses every insert.
+ *
+ * Two handlers the lowering REFUSES ride with the source boot and the refusal
+ * pins, and are kept OUT of the booted artifact: `lbd_stash` (#22810, writes
+ * `ctx.dispatch.scope`, which the sandbox does not marshal by declared
+ * contract) and `lbd_two` (#22837's residue: a second parameter has nothing in
+ * the sandbox to bind to). The lowering bundles each and ships no body, so
+ * neither can diverge at this door; this stand-in writes no runtime module, so
+ * a bundled handler would have nothing to resolve against here, where a real
+ * `objectstack build` ships it in the `.mjs` and it runs in-process.
+ *
+ * This pin has moved with the family: `lbd_stash` was the measured divergence
+ * until #22810 refused it, and `lbd_param` was until #22837 rebound it. The
+ * family's remaining members are classified — refused, or a recorded
+ * exception — by `packages/cli/test/lowered-body-face-enumeration.test.ts`,
+ * which derives them rather than waiting for the next report. When a new
+ * divergence is measured, move this pin to it; ⛔ never delete it.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -40,9 +60,10 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { defineStack } from '@objectstack/spec';
-import { writeBuildShapedArtifact, type BuildShapedArtifact } from './build-shaped-artifact.js';
+import { buildShapedArtifact, writeBuildShapedArtifact, type BuildShapedArtifact } from './build-shaped-artifact.js';
 
 type HookCtx = { input: Record<string, unknown>; dispatch: { scope: Record<string, unknown> } };
+type HookRow = Record<string, unknown>;
 
 const text = (name: string, label: string) => ({ name, type: 'text', label });
 const object = (name: string) => ({
@@ -53,19 +74,59 @@ const object = (name: string) => ({
   fields: { name: { ...text('name', 'Name'), required: true }, note: text('note', 'Note') },
 });
 
-/** The configuration, BUILT AGAIN on each call: each boot, and the build, gets its own. */
-const buildApp = (): Record<string, unknown> =>
+/**
+ * The configuration, BUILT AGAIN on each call: each boot, and the build, gets
+ * its own. `withRefused` adds `lbd_stash` and `lbd_two`, which only the source
+ * boot and the refusal pins carry (see the header for why the booted artifact
+ * does not).
+ */
+const buildApp = ({ withRefused = false }: { withRefused?: boolean } = {}): Record<string, unknown> =>
   defineStack({
     manifest: { id: 'com.example.lowered-body-door', name: 'Lowered Body Door', namespace: 'lbd', version: '1.0.0', type: 'app' },
-    objects: [object('lbd_stash_note'), object('lbd_refuse_note'), object('lbd_derive_note')],
+    objects: [
+      object('lbd_stash_note'),
+      object('lbd_two_note'),
+      object('lbd_param_note'),
+      object('lbd_destructure_note'),
+      object('lbd_refuse_note'),
+      object('lbd_derive_note'),
+    ],
     hooks: [
+      ...(withRefused
+        ? [
+            {
+              name: 'lbd_stash',
+              object: 'lbd_stash_note',
+              events: ['beforeInsert'],
+              handler: async (ctx: HookCtx) => {
+                ctx.dispatch.scope.stashed = ctx.input.name;
+                ctx.input.note = 'stashed';
+              },
+            },
+            {
+              name: 'lbd_two',
+              object: 'lbd_two_note',
+              events: ['beforeInsert'],
+              handler: async (ctx: HookCtx, suffix?: string) => {
+                ctx.input.note = 'two:' + String(ctx.input.name) + String(suffix ?? '');
+              },
+            },
+          ]
+        : []),
       {
-        name: 'lbd_stash',
-        object: 'lbd_stash_note',
+        name: 'lbd_param',
+        object: 'lbd_param_note',
         events: ['beforeInsert'],
-        handler: async (ctx: HookCtx) => {
-          ctx.dispatch.scope.stashed = ctx.input.name;
-          ctx.input.note = 'stashed';
+        handler: async (hookCtx: HookCtx) => {
+          hookCtx.input.note = 'named:' + String(hookCtx.input.name);
+        },
+      },
+      {
+        name: 'lbd_destructure',
+        object: 'lbd_destructure_note',
+        events: ['beforeInsert'],
+        handler: async ({ input }: HookCtx) => {
+          input.note = 'destructured:' + String(input.name);
         },
       },
       {
@@ -91,6 +152,7 @@ const buildApp = (): Record<string, unknown> =>
 
 let tempDir: string;
 let built: BuildShapedArtifact;
+let refusedBuild: BuildShapedArtifact;
 let source: VerifyStack;
 let lowered: VerifyStack;
 let sourceToken: string;
@@ -100,7 +162,8 @@ beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'dogfood-lowered-body-door-'));
   const artifactPath = join(tempDir, 'objectstack.json');
   built = writeBuildShapedArtifact(buildApp(), artifactPath);
-  source = await bootStack(buildApp());
+  refusedBuild = buildShapedArtifact(buildApp({ withRefused: true }));
+  source = await bootStack(buildApp({ withRefused: true }));
   lowered = await bootStack(buildApp(), { artifact: artifactPath });
   sourceToken = await source.signIn();
   loweredToken = await lowered.signIn();
@@ -125,39 +188,83 @@ const rejection = async (call: Promise<unknown>): Promise<Record<string, unknown
 const insert = (stack: VerifyStack, object: string, name: string) =>
   stack.hooks.run(object, 'insert', { name }, { system: true });
 
+const hookNamed = (artifact: BuildShapedArtifact, name: string): HookRow | undefined =>
+  ((artifact.artifact.hooks ?? []) as HookRow[]).find((h) => h.name === name);
+
 describe('the artifact under test is what the build lowers', () => {
   it('every hook reaches the artifact as a body the real lowering extracted from its handler', () => {
-    const hooks = (built.artifact.hooks ?? []) as Array<Record<string, unknown>>;
-    expect(hooks.map((h) => h.name).sort()).toEqual(['lbd_derive', 'lbd_refuse', 'lbd_stash']);
+    const hooks = (built.artifact.hooks ?? []) as HookRow[];
+    expect(hooks.map((h) => h.name).sort()).toEqual(['lbd_derive', 'lbd_destructure', 'lbd_param', 'lbd_refuse']);
     for (const hook of hooks) {
       expect((hook.body as { source?: unknown } | undefined)?.source, `${String(hook.name)} lowered`).toEqual(
         expect.any(String),
       );
     }
-    expect(built.refs).toEqual(['lbd_derive', 'lbd_refuse', 'lbd_stash']);
+    expect(built.refs).toEqual(['lbd_derive', 'lbd_destructure', 'lbd_param', 'lbd_refuse']);
+  });
+
+  // Anti-vacuity: the body still names the handler's own parameter — the case
+  // that used to be unbound — and now binds it, as its first statement.
+  it("the body still names the handler's own parameter, now bound to the sandbox's `ctx`", () => {
+    const param = String((hookNamed(built, 'lbd_param')?.body as { source?: unknown }).source);
+    expect(param.startsWith('var hookCtx = ctx;')).toBe(true);
+    expect(param).toContain('hookCtx.input');
+    const destructure = String((hookNamed(built, 'lbd_destructure')?.body as { source?: unknown }).source);
+    expect(destructure.startsWith('var { input } = ctx;')).toBe(true);
+  });
+
+  it('a handler already naming its parameter `ctx` gets no binding emitted', () => {
+    expect(String((hookNamed(built, 'lbd_derive')?.body as { source?: unknown }).source)).not.toMatch(/^\s*var /);
   });
 });
 
-describe('the divergence: a handler that passes in-process and refuses once lowered', () => {
-  it('in-process, the handler stashes on `ctx.dispatch.scope` and the insert is stored', async () => {
-    const row = await insert(source, 'lbd_stash_note', 'alpha');
-    expect(row.note).toBe('stashed');
+describe('the rebind: a renamed or destructured parameter, in-process and lowered (#22837)', () => {
+  for (const [hook, object, note] of [
+    ['lbd_param', 'lbd_param_note', 'named:'],
+    ['lbd_destructure', 'lbd_destructure_note', 'destructured:'],
+  ] as const) {
+    it(`${hook}: both boots run the handler and store the same row`, async () => {
+      const inProcess = await insert(source, object, 'alpha');
+      const loweredRow = await insert(lowered, object, 'alpha');
+      expect(inProcess.note).toBe(`${note}alpha`);
+      expect(loweredRow.note).toBe(inProcess.note);
+    });
+
+    it(`${hook}: over REST, created on both boots, with the same stored note`, async () => {
+      const ok = await source.apiAs(sourceToken, 'POST', `/data/${object}`, { name: 'beta' });
+      expect(ok.status).toBe(201);
+      const okLowered = await lowered.apiAs(loweredToken, 'POST', `/data/${object}`, { name: 'beta' });
+      expect(okLowered.status).toBe(201);
+      const notes = async (stack: VerifyStack) =>
+        (await stack.rows(object)).filter((r) => r.name === 'beta').map((r) => r.note);
+      expect(await notes(lowered)).toEqual([`${note}beta`]);
+      expect(await notes(lowered)).toEqual(await notes(source));
+    });
+  }
+});
+
+describe('what the lowering refuses is bundled, and never diverges at this door', () => {
+  it('`lbd_stash` (#22810) and `lbd_two` (#22837) ship no body, while the other hooks still lower', () => {
+    for (const name of ['lbd_stash', 'lbd_two']) {
+      const hook = hookNamed(refusedBuild, name);
+      expect(hook?.body, `${name} ships no body`).toBeUndefined();
+      expect(hook?.handler).toBe(name);
+      expect(typeof refusedBuild.functions[name]).toBe('function');
+    }
+    for (const name of ['lbd_param', 'lbd_destructure', 'lbd_refuse', 'lbd_derive']) {
+      expect((hookNamed(refusedBuild, name)?.body as { source?: unknown } | undefined)?.source, `${name} lowered`).toEqual(
+        expect.any(String),
+      );
+    }
   });
 
-  it('lowered, the body meets a `ctx.dispatch` without `scope`: a TypeError, and the insert is refused', async () => {
-    const e = await rejection(insert(lowered, 'lbd_stash_note', 'alpha'));
-    expect(e.name).toBe('SandboxError');
-    expect(String(e.message)).toMatch(/^hook 'lbd_stash' threw: TypeError/);
-    expect(e.code).toBeUndefined();
-    expect(await lowered.rows('lbd_stash_note')).toEqual([]);
-  });
-
-  it('over REST: created in-process, a 500 once lowered', async () => {
-    const ok = await source.apiAs(sourceToken, 'POST', '/data/lbd_stash_note', { name: 'beta' });
-    expect(ok.status).toBeLessThan(300);
-    const refused = await lowered.apiAs(loweredToken, 'POST', '/data/lbd_stash_note', { name: 'beta' });
-    expect(refused.status).toBe(500);
-    expect(await refused.json()).toMatchObject({ code: 'INTERNAL_ERROR' });
+  it('in-process, the same handlers still run and the inserts are stored', async () => {
+    expect((await insert(source, 'lbd_stash_note', 'alpha')).note).toBe('stashed');
+    expect((await insert(source, 'lbd_two_note', 'alpha')).note).toBe('two:alpha');
+    for (const object of ['lbd_stash_note', 'lbd_two_note']) {
+      const ok = await source.apiAs(sourceToken, 'POST', `/data/${object}`, { name: 'beta' });
+      expect(ok.status).toBeLessThan(300);
+    }
   });
 });
 
