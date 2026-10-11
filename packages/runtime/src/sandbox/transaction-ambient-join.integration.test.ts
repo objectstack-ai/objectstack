@@ -206,7 +206,7 @@ describe('#6406 sandbox ctx.api.transaction joins the host transaction (real eng
     expect(committedNames('thing')).toEqual([]);
   }, 30000);
 
-  it('with NO host transaction the sandbox still OPENS one — unchanged behaviour', async () => {
+  it("with NO host transaction the door's unit owns the one begin, the sandbox body joins it, and the door commits both rows (#22782)", async () => {
     await wire(TX_BODY);
 
     await engine.insert('thing', { name: 'outer' });

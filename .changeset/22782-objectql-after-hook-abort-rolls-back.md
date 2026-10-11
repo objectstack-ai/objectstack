@@ -8,7 +8,7 @@ Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) A change to what the write door stores when a hook aborts: no key of the hook schema or of any other metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. A hook that loaded before keeps its authored shape; what changes is that the refused write no longer leaves its row behind. No ADR-0087 id covers this rule and this diff adds none. -->
 
-**BREAKING** stored-outcome narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3, D9).
+**BREAKING** stored-outcome narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0087, the ratified pre-launch launch-window exemption, as amended 2026-09-13, #18003).
 
 - **FROM:** `insert` / `update` / `delete` (REST `createData` / `updateData` / `deleteData`, `ctx.api`, the engine door) on an object with a blocking (not `async`) `after*` hook bound from metadata whose `onError` is `abort` or omitted. When that hook threw, the caller was refused, but the row stayed stored, changed or deleted, and so did every write the hook chain had already made through `ctx.api`. A client that retried the refused create made a duplicate.
 - **TO:** that write runs inside a unit of work, so the abort rolls back the row and the hook chain's engine writes together. The caller is refused exactly as before. Hook count and order are unchanged.
