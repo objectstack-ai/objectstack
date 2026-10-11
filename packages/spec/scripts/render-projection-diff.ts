@@ -27,6 +27,8 @@
  *   base  `<ref>`'s own generators, run in a `git archive` of `<ref>` that
  *         borrows this checkout's `node_modules` — so the base side is what the
  *         base's code generated, never this change's generator applied to it.
+ *         A base whose migration registry is git-ignored gets it written first,
+ *         by its own generator (`generateBaseRegistry`).
  *
  * ⚠️ A base whose generators predate `--out` writes its committed path instead
  * (inside the throwaway archive, never this checkout). That is read in its
@@ -86,14 +88,55 @@ export interface GeneratorRun {
 /** Runs `<specDir>/scripts/<script> --out <out>` — injected by the tests. */
 export type Generate = (specDir: string, script: string, out: string) => GeneratorRun;
 
-function realGenerate(specDir: string, script: string, out: string): GeneratorRun {
-  const r = spawnSync(TSX, [join(specDir, 'scripts', script), '--out', out], {
+/** Runs `<specDir>/scripts/<script>` with no arguments — injected by the tests. */
+export type RunScript = (specDir: string, script: string) => GeneratorRun;
+
+function runTsx(specDir: string, args: string[]): GeneratorRun {
+  const r = spawnSync(TSX, args, {
     cwd: specDir,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
   });
   return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}${r.error ? String(r.error) : ''}` };
+}
+
+function realGenerate(specDir: string, script: string, out: string): GeneratorRun {
+  return runTsx(specDir, [join(specDir, 'scripts', script), '--out', out]);
+}
+
+function realRunScript(specDir: string, script: string): GeneratorRun {
+  return runTsx(specDir, [join(specDir, 'scripts', script)]);
+}
+
+/** The base's git-ignored migration registry and the generator that writes it, relative to its `packages/spec`. */
+export const BASE_REGISTRY = { file: 'src/migrations/registry.ts', generator: 'build-migration-registry.ts' } as const;
+
+/**
+ * Write a base tree's migration registry with the BASE's own generator, when the
+ * archive carries the generator but not the registry. Returns whether it ran.
+ *
+ * Both projection generators import `../src/migrations/registry`. Since #22554
+ * ruling B that file is git-ignored and generated at install and build, so a
+ * `git archive` of a base at or after that change has only its template and
+ * entries — the base generators would die on a missing module. The generator
+ * resolves its package root from its own path, so run from the base tree it
+ * writes the base's registry from the base's entries, never this checkout's.
+ * A base that committed the registry keeps it untouched. A generator that fails,
+ * or exits 0 without writing the file, is thrown: the caller reports the base red.
+ */
+export function generateBaseRegistry(specDir: string, run: RunScript = realRunScript): boolean {
+  const registry = join(specDir, BASE_REGISTRY.file);
+  if (existsSync(registry)) return false;
+  if (!existsSync(join(specDir, 'scripts', BASE_REGISTRY.generator))) return false;
+  const r = run(specDir, BASE_REGISTRY.generator);
+  if (r.status !== 0) {
+    throw new Error(`${BASE_REGISTRY.generator} exited ${r.status}, so the base has no ${BASE_REGISTRY.file}:\n${r.output.trim()}`);
+  }
+  if (!existsSync(registry)) {
+    throw new Error(`${BASE_REGISTRY.generator} exited 0 but wrote no ${BASE_REGISTRY.file}:\n${r.output.trim()}`);
+  }
+  return true;
 }
 
 function git(args: string[], cwd: string): { status: number; stdout: string; stderr: string } {
@@ -130,7 +173,9 @@ function realMaterializeBase(repoRoot: string, sha: string, dest: string): strin
   mkdirSync(join(tree, 'docs'), { recursive: true });
   symlinkSync(join(repoRoot, 'node_modules'), join(tree, 'node_modules'));
   symlinkSync(join(repoRoot, 'packages', 'spec', 'node_modules'), join(tree, 'packages', 'spec', 'node_modules'));
-  return join(tree, 'packages', 'spec');
+  const specDir = join(tree, 'packages', 'spec');
+  generateBaseRegistry(specDir);
+  return specDir;
 }
 
 /** One side's generated file for one projection, or why there is none. */
