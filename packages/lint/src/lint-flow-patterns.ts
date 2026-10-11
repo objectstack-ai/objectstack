@@ -658,16 +658,17 @@ function scanFilterForDateEquality(
 
 // Three kinds of flow node config string, each with its own reading:
 //   - the VALUE slots (`create_record` / `update_record` `fields.*`,
-//     `assignment` values — #19939): a CEL value envelope computes the value,
+//     `assignment` values, a notify node's `recipients` and its other computed
+//     values — #19939): a CEL value envelope computes the value,
 //     and a string is the literal text it spells; a `{…}` token there is
 //     refused at `error` by the build door (`validate-expressions`, the spec's
-//     one judge), except the date macros, which CEL cannot spell yet;
-//   - the TEXT slots (#22110, ADR-0032 D3: a notify `title` / `message`, a
-//     screen `title` / `description`, an `end` `message` —
+//     one judge);
+//   - the TEXT slots (#22110, ADR-0032 D3: a notify `title` / `message` /
+//     `actionUrl`, a screen `title` / `description`, an `end` `message` —
 //     `FLOW_NODE_TEXT_SLOTS`): they render the `{{ }}` holes of the formula
 //     template dialect;
-//   - every other config string (a `filter`, `recipients`, an `http` payload,
-//     `subflow.input`, …): it keeps the SINGLE-brace dialect (`{var}` /
+//   - every other config string (a `filter`, an `http` payload, …): it
+//     keeps the SINGLE-brace dialect (`{var}` /
 //     `{rec.field}` / `{$User.Id}`).
 // Two wrong-syntax mistakes AI/human authors carry over between them, or from
 // other platforms:
@@ -811,7 +812,7 @@ function valueSlotDoubleBraceHint(text: string, at: ValueSlotPosition): string {
     'A value slot reads a CEL value envelope, `{ dialect: \'cel\', source: \'…\' }`, and no template: a string in it '
     + 'is the literal text it spells, and `{{ }}` is no hole — the value-slot refusal reads its outer braces as '
     + `literal text. Written as the holes it means: ${valueSlotSpellingAt(at, meant)} Double-brace \`{{ }}\` is the `
-    + 'template dialect of the text slots only — a notify `title` / `message`, a screen `title` / `description`, '
+    + 'template dialect of the text slots only — a notify `title` / `message` / `actionUrl`, a screen `title` / `description`, '
     + 'an `end` `message`.'
   );
 }
@@ -1945,7 +1946,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
               hint: valueSlot === undefined
                 ? `Use \`{var}\` (e.g. \`{record.title}\`): this flow node value is a string template in which only ` +
                   `single-brace \`{…}\` tokens resolve and all other text is literal. Double-brace \`{{ }}\` is ` +
-                  `the template dialect of the text slots only — a notify \`title\` / \`message\`, a screen ` +
+                  `the template dialect of the text slots only — a notify \`title\` / \`message\` / \`actionUrl\`, a screen ` +
                   `\`title\` / \`description\`, an \`end\` \`message\`.`
                 : valueSlotDoubleBraceHint(str, at),
               rule: FLOW_DOUBLE_BRACE_INTERP,

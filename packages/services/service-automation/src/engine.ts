@@ -12269,9 +12269,11 @@ export class AutomationEngine implements IAutomationService {
      * `update_record` `fields` map (top-level field values only); and since
      * #19939 the maps a node hands to a callee (`subflow` and `map` `input`,
      * `script` `inputs`), a `screen`'s `defaults`, field `defaultValue` and
-     * `recordId`, and the list a `loop` (with a `body`) and a `map` iterate,
-     * their `collection` — every one but `assignments` through
-     * `builtin/value-slot-map.ts`, the one per-slot resolver
+     * `recordId`, the list a `loop` (with a `body`) and a `map` iterate,
+     * their `collection`, and a `notify` node's `recipients` (the value, or
+     * each entry of a list), `templateData` and `payload` maps,
+     * `sourceObject`, `sourceId` and `actorId` — every one but `assignments`
+     * through `builtin/value-slot-map.ts`, the one per-slot resolver
      * (`resolveValueSlotMap`, `resolveValueSlot`, `resolveCollectionSlot`).
      * The two legacy
      * `assignment` shapes the executor still normalizes (the

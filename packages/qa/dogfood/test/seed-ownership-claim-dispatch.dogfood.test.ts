@@ -114,12 +114,12 @@ const ScdFlow = defineFlow({
       label: 'Notify the owner',
       config: {
         topic: 'scd.deal_updated',
-        recipients: '{record.owner_id}',
+        recipients: { dialect: 'cel', source: 'record.owner_id' },
         title: 'Deal updated: {{ record.name }}',
         message: '{{ record.name }} was updated.',
         channels: ['inbox'],
         sourceObject: OBJECT,
-        sourceId: '{record.id}',
+        sourceId: { dialect: 'cel', source: 'record.id' },
       },
     },
     {

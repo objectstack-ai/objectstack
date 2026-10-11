@@ -15,7 +15,11 @@ import type { SemanticMigration } from '../../types.js';
 // evaluated before the screen goes on the wire, and to the list a loop with a
 // body and a map iterate (collection), whose literal is an inline array and
 // where a variable's bare name, which the structured loop and map never read,
-// is refused too.
+// is refused too, and to a notify node's computed values (its recipients,
+// the value or each entry of a list; the templateData and payload maps'
+// values; sourceObject, sourceId and actorId), each evaluated before the
+// notification is handed to the messaging service, where an entry that
+// evaluates to a list adds each of its recipients.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -24,8 +28,9 @@ export const entry: SemanticMigration = {
     'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
     + 'legacy bare config), of create_record and update_record nodes (the fields map), and of the nodes that hand '
     + 'a map to a callee: a subflow node and a map node (the input map, evaluated per item on a map node) and a '
-    + 'script node (the inputs map), and of a screen node (an object form\'s defaults map and its recordId, and '
-    + 'each field\'s defaultValue) — a string value, or a '
+    + 'script node (the inputs map), of a screen node (an object form\'s defaults map and its recordId, and '
+    + 'each field\'s defaultValue), and of a notify node (recipients, the value or each entry of a list; the '
+    + 'templateData and payload maps; sourceObject, sourceId and actorId) — a string value, or a '
     + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
     + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included; and the '
     + 'collection of a loop node with a body and of a map node — any string value: a single-brace template token, '
@@ -64,7 +69,13 @@ export const entry: SemanticMigration = {
     + '"cel", source: "tasks" }, or the items written as an inline array, iterated as written (its strings are '
     + 'data, never interpolated); a variable\'s bare name there is that name in an envelope. Anything the envelope '
     + 'evaluates to but a list fails the node, null included, as a token that resolved to nothing did, so where the '
-    + 'list may be absent write a guard answering [] to iterate nothing (has(vars.tasks) ? vars.tasks : [])',
+    + 'list may be absent write a guard answering [] to iterate nothing (has(vars.tasks) ? vars.tasks : []). A '
+    + 'notify node\'s recipients holds a recipient — a user id or an audience selector such as team:ID — or a '
+    + 'list of them, each a string or an envelope; an envelope evaluates, per run, to a recipient, to null or a '
+    + 'blank string, which adds none, as the template dropped a token that resolved to nothing, or to a list, whose '
+    + 'every recipient is added, so a recipient field that may be unset is guarded to null '
+    + '(has(record.assignee) ? record.assignee : null). Its sourceObject, sourceId and actorId evaluate to a '
+    + 'string, null leaving the key unset, and its templateData and payload values are handed on as evaluated',
   reason:
     'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
     + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -92,7 +103,11 @@ export const entry: SemanticMigration = {
     + 'variable\'s bare name there — the spelling the contract declared — was handed to the interpolator, which '
     + 'returned it unchanged, so the structured loop and map failed every run that reached them, while the '
     + 'same name in an envelope iterates: rewriting it would change what the flow does. A legacy loop with no '
-    + 'body is not touched: it reads collection as a bare variable name, unparsed and unjudged. A '
+    + 'body is not touched: it reads collection as a bare variable name, unparsed and unjudged. In a notify '
+    + 'node\'s recipients a whole token holding a list, written as an entry of a list, was handed on as one '
+    + 'recipient joined with commas (u1,u2), which reached nobody, where an envelope entry evaluating to that '
+    + 'list adds each recipient: rewriting it changes who is notified; and an absent variable there dropped the '
+    + 'recipient under the template, where CEL fails the run unless the value is guarded. A '
     + 'flow carrying '
     + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
     + 'carrying one is skipped at boot with a warn naming it.',
@@ -112,7 +127,10 @@ export const entry: SemanticMigration = {
     + 'screen\'s recordId, find the paths where the record can be absent and route them around the screen. For a '
     + 'loop\'s or a map\'s collection, write the list\'s variable in the envelope; a bare name there never '
     + 'iterated, so decide whether the loop should run at all before rewriting it, and where the list may be '
-    + 'absent and the node should iterate nothing, guard it to answer []. Re-run '
-    + 'the flow paths that write those fields, serve those screens and iterate those lists, and compare the '
-    + 'stored and served values and the iterations with the ones the template produced.',
+    + 'absent and the node should iterate nothing, guard it to answer []. For a notify node\'s recipients, guard '
+    + 'each recipient field that may be unset so an absent one is dropped, as the template dropped it, and check '
+    + 'that an entry which held a list now reaches each of its recipients. Re-run '
+    + 'the flow paths that write those fields, serve those screens, iterate those lists and send those '
+    + 'notifications, and compare the stored and served values, the iterations and the audiences with the ones '
+    + 'the template produced.',
 };

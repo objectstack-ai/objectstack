@@ -233,9 +233,12 @@ registered function's `input`). Those maps — `assignments`, `fields`, `input`,
 `inputs` — are the flow's **value slots**, and so are a `screen` node's three
 positions that hand a value to the client: an object form's `defaults` (each
 field's prefill), a field's `defaultValue`, and an object form's `recordId`,
-and the list a `loop` (with a `body`) and a `map` iterate, their `collection`.
-Each value takes a CEL value envelope or a literal — a `collection`'s literal is
-an inline array, never a string. Only a slot's top-level
+the list a `loop` (with a `body`) and a `map` iterate, their `collection`, and a
+`notify` node's computed values: its `recipients`, its `templateData` and
+`payload` maps, and its `sourceObject`, `sourceId` and `actorId`. Each value
+takes a CEL value envelope or a literal — a `collection`'s literal is an inline
+array, never a string, and a `recipients` list holds one entry per recipient,
+each a string or an envelope. Only a slot's top-level
 value is an expression — an object nested inside a JSON value or an array is
 data, whatever keys it carries.
 
@@ -332,10 +335,28 @@ string is refused there whatever it holds, a variable's **bare name** included
 every run failed at the node. A `loop` with no `body` is the legacy flat-graph
 form, which still reads `collection` as a bare variable name, unjudged.
 
+**A `notify` node's recipients: a list adds each recipient.** `recipients`
+holds one recipient — a user id, or an audience selector such as `team:ID` — or
+a list of them, each a string or an envelope:
+`recipients: ['team:ops', { dialect: 'cel', source: 'record.assignee' }]`. An
+envelope may evaluate to a recipient; to a list of them — a multi-user field, a
+list variable — whose every recipient is added; or to `null` or a blank string,
+which adds none, as the template dropped a token that resolved to nothing. A
+node left with no recipient fails, naming the expressions that evaluated to
+nothing. The template handed a whole token holding a list, written as a list
+entry (`['{owners}']`), on as **one** recipient joined with commas (`'u1,u2'`),
+which reached nobody. Guard a recipient field that may be unset —
+`has(record.assignee) ? record.assignee : null` — so it is dropped rather than
+failing the run. `sourceObject`, `sourceId` and `actorId` take a string or an
+envelope evaluating to one: `null` leaves the key unset, and a half-specified
+click-through pair is dropped, as before. The node's `actionUrl` is a text slot
+(below).
+
 **Where an envelope is data, the remedy names none there.** An envelope
 evaluates only as the top-level value of a value slot — `fields`,
 `assignments`, a callee's `input` / `inputs`, a screen's `defaults`,
-`defaultValue` or `recordId`, or a `collection`. Inside an object or list value, and in the two legacy `assignment` shapes
+`defaultValue` or `recordId`, a `collection`, or a `notify` value (each entry of
+a `recipients` list among them). Inside an object or list value, and in the two legacy `assignment` shapes
 (an `assignments: [{ variable, value }]` array, variables as the config's own
 keys), it is stored as the object it spells — so the refusal there names what
 does evaluate:
@@ -355,9 +376,10 @@ does evaluate:
 
 ### Text slots read double-brace holes
 
-A flow's **text** slots — a `notify` node's `title` and `message`, a `screen`
-node's `title` and `description`, and a refusing `end` node's `message` —
-render through the formula template engine ([#22110], ADR-0032 §3): each
+A flow's **text** slots — a `notify` node's `title`, `message` and `actionUrl`
+(the link, since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939)), a `screen` node's `title` and `description`, and a
+refusing `end` node's `message` — render through the formula template engine
+([#22110], ADR-0032 §3): each
 `{{ }}` hole is a **variable path** with an optional **formatter**, and every
 other character is literal.
 
@@ -365,9 +387,10 @@ other character is literal.
 {
   id: 'notify_won', type: 'notify', label: 'Deal won',
   config: {
-    recipients: '{record.owner}',                         // not a text slot: single brace
+    recipients: { dialect: 'cel', source: 'record.owner' }, // a value slot: a CEL envelope
     title: 'Deal won: {{ record.name }}',
     message: '{{ record.amount | currency }} closed on {{ record.close_date | date:long }}.',
+    actionUrl: '/crm_opportunity/{{ record.id }}',          // a text slot: a link with holes
   },
 }
 ```
@@ -843,7 +866,7 @@ processed, and the run completes.
               nodes: [
                 {
                   id: 'notify_owner', type: 'notify', label: 'Notify owner',
-                  config: { title: 'SLA breach', recipients: ['{currentCase.owner}'] },
+                  config: { title: 'SLA breach', recipients: [{ dialect: 'cel', source: 'currentCase.owner' }] },
                 },
               ],
               edges: [],
@@ -2064,11 +2087,11 @@ failures so one broken flow does not abort startup.
 
 A flow computes with **one expression dialect, CEL**: every condition is bare
 CEL, and every computed value (a field value, an assignment value) is a CEL
-value envelope. **Text** slots — a `notify` title or message, a screen title or
-description, a refusing `end` node's message — are `{{ }}` templates (see
-[text slots](#text-slots-read-double-brace-holes)). Single braces remain only on the
-value-like positions that hand a resolved value over and that the retirement
-has not reached yet (`recipients`, `sourceId`, an `http` body, …).
+value envelope. **Text** slots — a `notify` title, message or link, a screen
+title or description, a refusing `end` node's message — are `{{ }}` templates
+(see [text slots](#text-slots-read-double-brace-holes)). Single braces remain
+only on the value-like positions that hand a resolved value over and that the
+retirement has not reached yet (an `http` body, a CRUD `filter` value, …).
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
@@ -2077,7 +2100,7 @@ has not reached yet (`recipients`, `sourceId`, an `http` body, …).
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, `vars.*` and `current_user` |
 | Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), `{$User.*}` and the date macros `{NOW()}` / `{TODAY() ± N}` included: a date is `isoDate(today())` / `isoDatetime(now())` in an envelope) |
 | Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, `vars.*` and `current_user` — the whole CEL stdlib (`joinNonEmpty`, …) |
-| Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | **template** (`{{ }}` holes) | `'Deal won: {{ record.name }} ({{ record.amount \| currency }})'` | flow variables by name (`$`-named ones too: `{{ $error.message }}`) — a path and an optional formatter, never logic |
+| Text slots — `notify` `title` / `message` / `actionUrl`, `screen` `title` / `description`, `end` `message` | **template** (`{{ }}` holes) | `'Deal won: {{ record.name }} ({{ record.amount \| currency }})'` | flow variables by name (`$`-named ones too: `{{ $error.message }}`) — a path and an optional formatter, never logic |
 
 A value slot takes either form, chosen by shape: an object naming a `dialect`
 is a CEL envelope, everything else is a literal. The `{token}` template dialect
@@ -2359,7 +2382,7 @@ export const hotLeadFollowUp: Flow = {
       type: 'notify',
       label: 'Notify Owner',
       config: {
-        recipients: '{record.owner}',
+        recipients: { dialect: 'cel', source: 'record.owner' },
         title: 'New hot lead',
         message: 'Hot lead created: {{ record.name }}',
         channels: ['inbox'],

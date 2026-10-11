@@ -2,11 +2,12 @@
 
 import type { PluginContext } from '@objectstack/core';
 import type { AutomationContext } from '@objectstack/spec/contracts';
-import { defineActionDescriptor, NotifyConfigSchema } from '@objectstack/spec/automation';
+import { defineActionDescriptor, isExpressionEnvelopeShaped, NotifyConfigSchema } from '@objectstack/spec/automation';
 import type { NotifyConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
-import { interpolate, renderTextSlot, type VariableMap } from './template.js';
+import { renderTextSlot, type VariableMap } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { resolveValueSlot, resolveValueSlotMap } from './value-slot-map.js';
 
 /**
  * Structural view of `@objectstack/service-messaging`'s service (ADR-0012),
@@ -57,15 +58,8 @@ export interface MessagingServiceSurface {
 }
 
 /**
- * Coerce a config value (string | string[]) into a clean string[].
- *
- * Entries that resolved to nothing are DROPPED, not stringified (framework#3582).
- * `String(undefined)` is the six-character string `"undefined"`, which survives
- * `.filter(Boolean)` and was handed to the messaging service as an audience
- * member — so `to: ['{record.owner.manager}']` addressed a user id literally
- * named "undefined": no delivery, no error, and a `sys_notification` row
- * pointing at nobody. Dropping the entry instead lets the empty-recipients
- * guard below report the real problem.
+ * Coerce `channels` (string | string[], read RAW — static routing, never
+ * evaluated) into a clean string[]: blank entries are dropped.
  */
 function toStringList(value: unknown): string[] {
     if (Array.isArray(value)) {
@@ -78,56 +72,114 @@ function toStringList(value: unknown): string[] {
     return [];
 }
 
-/**
- * The `{…}` templates an author wrote in the recipient config, for the
- * diagnostic when none of them resolved. Reading them off the RAW config (not
- * the interpolated result) is the whole point: after interpolation an
- * unresolved token is indistinguishable from an author who configured nothing.
- */
-function recipientTemplates(raw: unknown): string[] {
-    const out: string[] = [];
-    const walk = (v: unknown): void => {
-        if (typeof v === 'string') {
-            for (const m of v.matchAll(/\{[^{}]+\}/g)) out.push(m[0]);
-            return;
-        }
-        if (Array.isArray(v)) v.forEach(walk);
-    };
-    walk(raw);
-    return [...new Set(out)];
-}
-
-/** Coerce an interpolated config value to a non-empty trimmed string, else undefined. */
+/** A non-empty trimmed string, else undefined. */
 function toStr(value: unknown): string | undefined {
     if (value == null) return undefined;
     const s = String(value).trim();
     return s.length > 0 ? s : undefined;
 }
 
+/** How a returned failure names what a value expression evaluated to — `null`, a map, a number (`42`). */
+function evaluatedKindOf(value: unknown): string {
+    if (value === null) return '`null`';
+    if (value === undefined) return 'nothing';
+    if (Array.isArray(value)) return 'a list';
+    if (typeof value === 'object') return 'a map';
+    return `a ${typeof value} (\`${String(value)}\`)`;
+}
+
+/** The `source` of a value envelope, for a failure that names it. */
+function sourceOf(envelope: unknown): string {
+    const source = (envelope as { source?: unknown } | null)?.source;
+    return typeof source === 'string' ? source : '';
+}
+
+/** One value slot's resolved value, or the returned failure that refuses it. */
+type Resolved<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string };
+
 /**
- * Resolve the click-through target record from the node config, if any.
+ * [#19939] Who the notification goes to — `recipients`, a value slot holding one
+ * value or a list of them (`NotifyConfigSchema`; the expression ledger's
+ * `eachElement`), resolved to the audience entries handed to the messaging
+ * service:
  *
- * Reads the canonical flat `sourceObject`/`sourceId` keys only — they mirror the
- * `sys_notification.source_object`/`source_id` columns. A target is produced
- * only when BOTH object and id resolve; a half-specified link is dropped so the
- * inbox never renders a dead deep-link.
+ *  - a string is one recipient as written (a user id or an audience selector);
+ *  - a CEL value envelope — the whole value, or one entry of a list — is
+ *    evaluated in the run's scope through the one per-slot resolver every
+ *    value slot shares (`resolveValueSlot`; `recipients`, `recipients[1]`
+ *    names it in a fault), and may evaluate to a recipient, to `null` or a blank string (no
+ *    recipient, as a token that resolved to nothing was dropped —
+ *    framework#3582), or to a LIST of them, whose every recipient is added.
+ *    The 17.x interpolator handed a whole token holding a list, written as a
+ *    list entry, on as ONE recipient joined with commas (`'u1,u2'`): the
+ *    phantom recipient this reading retires.
  *
- * The nested `source: { object, id }` form (the messaging `emit()` surface) used
- * to be tolerated here by a bare `cfg.sourceObject ?? src?.object`. It has
- * graduated into the ADR-0087 D2 conversion layer
- * (`flow-node-notify-config-aliases`, #4045), which lifts it onto the flat pair
- * at load — including the `registerFlow` rehydration seam — so no consumer-side
- * fallback survives and the alias is declared, tested and retirable on schedule
- * (Prime Directive #12). Same graduation path as `object` → `objectName` (#3796).
+ * Anything else an envelope evaluates to — a map, a number, a list holding
+ * one — fails the node, naming what it evaluated to and its source; it is
+ * never `String(value)`. A `{…}` token never arrives: the contract parse
+ * refused it. `empty` names each envelope that evaluated to no recipient, for
+ * the guard that fails a node left with none.
  */
-function resolveSource(
-    cfg: Pick<NotifyConfigParsed, 'sourceObject' | 'sourceId'>,
+function resolveRecipients(
+    engine: AutomationEngine,
+    value: unknown,
     variables: VariableMap,
     context: AutomationContext,
-): { object: string; id: string } | undefined {
-    const object = toStr(interpolate(cfg.sourceObject, variables, context));
-    const id = toStr(interpolate(cfg.sourceId, variables, context));
-    return object && id ? { object, id } : undefined;
+): Resolved<{ recipients: string[]; empty: string[] }> {
+    const recipients: string[] = [];
+    const empty: string[] = [];
+    const entries: Array<[string, unknown]> = Array.isArray(value)
+        ? value.map((entry, index) => [`recipients[${index}]`, entry])
+        : value === undefined ? [] : [['recipients', value]];
+    for (const [where, raw] of entries) {
+        const evaluated = resolveValueSlot(engine, raw, variables, where, context);
+        const before = recipients.length;
+        const items: Array<[string, unknown]> = Array.isArray(evaluated)
+            ? evaluated.map((item, index) => [`${where} evaluated to a list whose entry [${index}] is`, item])
+            : [[`${where} evaluated to`, evaluated]];
+        for (const [what, item] of items) {
+            if (item == null) continue;
+            if (typeof item !== 'string') {
+                return {
+                    ok: false,
+                    error:
+                        `notify: ${what} ${evaluatedKindOf(item)}, not a recipient — a recipient is a user id or an `
+                        + 'audience selector such as `team:ID`, as a string, and a value expression may evaluate to '
+                        + `one, to a list of them, or to \`null\` for none — source: \`${sourceOf(raw)}\``,
+                };
+            }
+            const recipient = toStr(item);
+            if (recipient !== undefined) recipients.push(recipient);
+        }
+        if (isExpressionEnvelopeShaped(raw) && recipients.length === before) empty.push(sourceOf(raw));
+    }
+    return { ok: true, value: { recipients, empty } };
+}
+
+/**
+ * [#19939] A notify value slot holding one string — `sourceObject`, `sourceId`,
+ * `actorId`: the string as written, or a CEL value envelope evaluated in the
+ * run's scope to one, through the shared per-slot resolver
+ * (`resolveValueSlot`). `null` or a blank string leaves the key unset, as a
+ * token that resolved to nothing did; anything else fails the node, naming
+ * what it evaluated to — never `String(value)`.
+ */
+function resolveStringSlot(
+    engine: AutomationEngine,
+    key: 'sourceObject' | 'sourceId' | 'actorId',
+    raw: unknown,
+    variables: VariableMap,
+    context: AutomationContext,
+): Resolved<string | undefined> {
+    const evaluated = resolveValueSlot(engine, raw, variables, key, context);
+    if (evaluated == null || typeof evaluated === 'string') return { ok: true, value: toStr(evaluated) };
+    return {
+        ok: false,
+        error:
+            `notify: ${key} evaluated to ${evaluatedKindOf(evaluated)}, not a string — write a value expression that `
+            + `evaluates to the ${key === 'sourceObject' ? 'object name' : key === 'sourceId' ? 'record id' : 'user id'}, `
+            + `or to \`null\` to leave it unset — source: \`${sourceOf(raw)}\``,
+    };
 }
 
 /**
@@ -176,8 +228,13 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                 // at the load seam ('flow-node-notify-config-aliases', #3796).
                 type: 'object',
                 properties: {
+                    // [#19939] A VALUE slot holding one value or a list, offered
+                    // with no `type` (the contract takes a string, a list of
+                    // strings and envelopes, or one envelope) and no marker: the
+                    // Studio form keeps its recipients picker, and the marker
+                    // rides `NotifyConfigSchema` (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`).
                     recipients: {
-                        description: 'Recipient user id(s) / audience selector(s)',
+                        description: 'Who the notification goes to: a user id or an audience selector (such as team:ID) as a string, or a list of them — each entry a string or a CEL value envelope { dialect: \'cel\', source } evaluated per run; an entry that evaluates to a list adds each of its recipients. A single-brace {token} is refused.',
                     },
                     // The form edits the bare-string spelling of these two
                     // template slots; the contract (`NotifyConfigSchema`) also
@@ -211,7 +268,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     },
                     templateData: {
                         type: 'object',
-                        description: 'Render context for the referenced template\'s {{var}} placeholders; values interpolate {token} templates per run. Only valid together with template.',
+                        description: 'Render context for the referenced template\'s {{var}} placeholders — each value a CEL value envelope { dialect: \'cel\', source } evaluated per run, or a literal; a single-brace {token} is refused. Only valid together with template.',
                     },
                     channels: {
                         type: 'array', items: { type: 'string' },
@@ -228,27 +285,36 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                         description: 'Severity forwarded to the messaging service',
                     },
                     // ── Click-through target (#2675) ─────────────────────────
+                    // [#19939] These three are VALUE slots: a string, or a CEL
+                    // value envelope evaluated per run. `type` stays `string`
+                    // because the form's control is a text box (the authoring
+                    // surface, as for a screen's `recordId`); the contract is
+                    // `NotifyConfigSchema`.
                     sourceObject: {
                         type: 'string',
-                        description: 'Object name of the record the notification links to (writes sys_notification.source_object). Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.',
+                        description: 'Object name of the record the notification links to (writes sys_notification.source_object) — a string, or a CEL value envelope evaluated per run to one; a single-brace {token} is refused. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.',
                     },
                     sourceId: {
                         type: 'string',
-                        description: 'Record id the notification links to (writes sys_notification.source_id). Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. The inbox synthesizes a `/{object}/{id}` deep-link from these.',
+                        description: 'Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope evaluated per run to one, such as { dialect: \'cel\', source: \'record.id\' }; a single-brace {token} is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. The inbox synthesizes a `/{object}/{id}` deep-link from these.',
                     },
                     actorId: {
                         type: 'string',
-                        description: 'User id that caused the event (writes sys_notification.actor_id)',
+                        description: 'User id that caused the event (writes sys_notification.actor_id) — a string, or a CEL value envelope evaluated per run to one; a single-brace {token} is refused.',
                     },
                     // `actionUrl` (not `url`) is the deliberate canonical: it is the
                     // name the whole downstream chain uses (sys_notification.action_url,
                     // the channel contract, the REST read model), while `url` elsewhere
                     // in the platform means "HTTP endpoint to call" (#3796).
+                    // [#19939] A TEXT slot, rendered with {{ }} holes like `title`.
                     actionUrl: {
                         type: 'string',
-                        description: 'Explicit click-through URL; overrides the link synthesized from sourceObject/sourceId.',
+                        description: 'Explicit click-through URL, rendered per run with {{ }} placeholders like title (e.g. /crm_case/{{ record.id }}); a single-brace {token} is refused. Overrides the link synthesized from sourceObject/sourceId.',
                     },
-                    payload: { type: 'object', description: 'Extra template inputs merged into the notification payload' },
+                    payload: {
+                        type: 'object',
+                        description: 'Extra values merged into the notification payload — each a CEL value envelope { dialect: \'cel\', source } evaluated per run, or a literal; a single-brace {token} is refused.',
+                    },
                 },
             },
         }),
@@ -256,17 +322,21 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // The historical aliases (`to`/`subject`/`body`/`url`) are canonicalized
             // at load by the ADR-0087 D2 conversion 'flow-node-notify-config-aliases'
             // (#3796), so the parse sees only canonical keys. Parsed BEFORE
-            // rendering — the contract's slots are string- or template-typed, so
-            // templates pass (and a single-brace token in `title` / `message` is
-            // refused, #22110); the post-rendering guards below still own
-            // "title/recipients resolved to nothing" (#3582), which no static
-            // parse can see.
+            // rendering and evaluating — the text slots take `{{ }}` holes and
+            // the value slots a CEL value envelope or a literal, and a
+            // single-brace token in either is refused (#22110, #19939); the
+            // guards below still own "title/recipients resolved to nothing"
+            // (#3582), which no static parse can see.
             const parsed = parseNodeConfig<NotifyConfigParsed>('notify', node.id, NotifyConfigSchema, node.config);
             if (!parsed.ok) return parsed.refusal;
             const cfg = parsed.config;
 
-            const recipientCfg = cfg.recipients ?? [];
-            const recipients = toStringList(interpolate(recipientCfg, variables, context));
+            // [#19939] `recipients` is a VALUE slot holding one value or a list:
+            // each envelope is evaluated in the run's scope, a list it
+            // evaluates to adds each of its recipients (see `resolveRecipients`).
+            const audience = resolveRecipients(engine, cfg.recipients, variables, context);
+            if (!audience.ok) return { success: false, error: audience.error };
+            const { recipients, empty: emptyRecipients } = audience.value;
             // `title`/`message` are template slots (`templateExpressionInput`,
             // the input `TemplateExpressionInputSchema` is built from): the parse
             // above normalizes a bare string to the
@@ -284,29 +354,46 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             const body = renderTextSlot(cfg.message?.source, variables) ?? '';
             // #9205 — the localizable content path. `template` is read RAW (a
             // static metadata cross-reference, like `topic`/`channels`);
-            // `templateData` VALUES interpolate per run, so flow state can feed
-            // the template's `{{var}}` holes at delivery time.
+            // `templateData` is a VALUE slot per key (#19939), so flow state
+            // feeds the template's `{{var}}` holes at delivery time: an envelope
+            // is evaluated in the run's scope, a literal handed on as written —
+            // the resolver every value-slot map shares.
             const template = toStr(cfg.template);
             const templateData = cfg.templateData
-                ? (interpolate(cfg.templateData, variables, context) as Record<string, unknown>)
+                ? resolveValueSlotMap(engine, cfg.templateData, variables, 'templateData', context)
                 : undefined;
             const channels = toStringList(cfg.channels);
             const topic = cfg.topic ? String(cfg.topic) : undefined;
             const severity = cfg.severity ? String(cfg.severity) : undefined;
-            const urlCfg = cfg.actionUrl;
-            const actionUrl = urlCfg
-                ? String(interpolate(urlCfg, variables, context) ?? '')
-                : undefined;
+            // [#19939] `actionUrl` is a TEXT slot: rendered through the one text
+            // renderer, like `title`, with `{{ }}` holes. A link that renders no
+            // text is no link (`undefined`), so the synthesized one below still
+            // applies — as an empty one did.
+            const actionUrl = renderTextSlot(cfg.actionUrl, variables);
             const payload = cfg.payload
-                ? (interpolate(cfg.payload, variables, context) as Record<string, unknown>)
+                ? resolveValueSlotMap(engine, cfg.payload, variables, 'payload', context)
                 : undefined;
 
             // Click-through target: forwarding `source` lets the messaging
             // service persist sys_notification.source_object/source_id and
             // synthesize a `/{object}/{id}` deep-link for the inbox (#2675). An
-            // explicit `actionUrl` still wins over the synthesized link.
-            const source = resolveSource(cfg, variables, context);
-            const actorId = toStr(interpolate(cfg.actorId, variables, context));
+            // explicit `actionUrl` still wins over the synthesized link. Read off
+            // the canonical flat pair only — the nested `source: { object, id }`
+            // form is lifted onto it at load by the ADR-0087 D2 conversion
+            // `flow-node-notify-config-aliases` (#4045), so no consumer-side
+            // fallback survives — and produced only when BOTH halves resolve: a
+            // half-specified link is dropped so the inbox never renders a dead
+            // deep-link. [#19939] Each half, and `actorId`, is a VALUE slot.
+            const sourceObject = resolveStringSlot(engine, 'sourceObject', cfg.sourceObject, variables, context);
+            if (!sourceObject.ok) return { success: false, error: sourceObject.error };
+            const sourceId = resolveStringSlot(engine, 'sourceId', cfg.sourceId, variables, context);
+            if (!sourceId.ok) return { success: false, error: sourceId.error };
+            const source = sourceObject.value && sourceId.value
+                ? { object: sourceObject.value, id: sourceId.value }
+                : undefined;
+            const actor = resolveStringSlot(engine, 'actorId', cfg.actorId, variables, context);
+            if (!actor.ok) return { success: false, error: actor.error };
+            const actorId = actor.value;
 
             // With a `template` reference the content lives in the template
             // bundle, resolved by `(name, locale)` at delivery — per recipient,
@@ -316,20 +403,19 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // and one carrying BOTH).
             if (!title && !template) return { success: false, error: 'notify: title is required' };
             if (recipients.length === 0) {
-                // Name the templates that came up empty (framework#3582). The
-                // dominant cause is a cross-object hop — `{record.owner.manager}`
-                // walks `.manager` on a scalar foreign-key id — which used to
-                // deliver to a phantom "undefined" audience instead of failing.
-                const templates = recipientTemplates(recipientCfg);
+                // Name the value expressions that came up empty (framework#3582):
+                // a recipient that evaluates to nothing is dropped rather than
+                // handed on as a phantom audience member, so a node left with
+                // none must say which ones did — an empty field, a guard's
+                // `null`, an empty list.
                 return {
                     success: false,
-                    error: templates.length > 0
-                        ? `notify: at least one recipient is required, but every recipient template ` +
-                          `resolved to nothing: ${templates.join(', ')}. A flow template reads the ` +
-                          `trigger record as it was written — a relation field holds a scalar id, not ` +
-                          `an expanded record, so \`{record.<lookup>.<field>}\` resolves to nothing. ` +
-                          `Add the relation to the start node's \`config.expand\` so the engine ` +
-                          `hydrates it, or address the id directly (\`{record.<lookup>}\`).`
+                    error: emptyRecipients.length > 0
+                        ? `notify: at least one recipient is required, but every recipient value expression ` +
+                          `evaluated to nothing: ${emptyRecipients.map((source) => `\`${source}\``).join(', ')}. ` +
+                          `\`null\`, a blank string and an empty list add no recipient — an empty field on the ` +
+                          `record, or a guard's answer for an absent value. Check those values in this run, or ` +
+                          `route around this node with a \`decision\` where no recipient is expected.`
                         : 'notify: at least one recipient is required',
                 };
             }
