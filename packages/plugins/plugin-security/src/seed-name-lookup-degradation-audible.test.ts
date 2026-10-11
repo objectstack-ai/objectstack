@@ -199,3 +199,48 @@ describe('[#18570] batched seed existence read — its own failure is audible wi
     expect(String(seen[0]?.[0])).toContain(BATCHED_READ_FAILED);
   });
 });
+
+/**
+ * [#11451, commit c33f18592] A caller that passes no `equals` predicate emits
+ * exactly the `where` key set it emitted before the predicate existed:
+ * `['name']`, not `['name']` plus `undefined`-valued keys that `toEqual`
+ * would quietly accept. `permission-set-projection.ts`' overlay pass is such
+ * a caller. The fence used to ride the declared-permission seeder's suite and
+ * is pinned here, at the function, now that the seeder is retiring.
+ *
+ * Both reads are pinned: the batched page and the per-item degradation read
+ * it falls back to. The predicate-carrying case is the positive control: it
+ * proves this instrument sees a spread key when one is there.
+ */
+describe('#11451: a caller that passes no predicate emits its old key set', () => {
+  it('the batched read emits only `name`', async () => {
+    const ql = emptyPageQl();
+    await buildExistingByName(ql as any, 'sys_permission_set', ['alpha', 'beta']);
+    expect(ql.calls).toHaveLength(1);
+    expect(Object.keys((ql.calls[0]![1] as any).where)).toEqual(['name']);
+  });
+
+  it('the per-item degradation read emits only `name`', async () => {
+    const wheres: Record<string, unknown>[] = [];
+    // The batched `$in` read is refused, so the per-item path is taken; each
+    // per-item read is recorded and answered "no such row".
+    const ql = {
+      find: async (_object: string, q?: { where?: Record<string, unknown> }) => {
+        const name = q?.where?.name;
+        if (name && typeof name === 'object' && '$in' in (name as object)) throw new Error('batched read refused (trigger)');
+        wheres.push(q?.where ?? {});
+        return [] as any[];
+      },
+    };
+    const index = await buildExistingByName(ql as any, 'sys_permission_set', ['alpha'], { warn: () => {} });
+    expect((await index.get('alpha')).status).toBe('absent');
+    expect(wheres).toHaveLength(1);
+    expect(Object.keys(wheres[0]!)).toEqual(['name']);
+  });
+
+  it('positive control: a caller that passes a predicate emits it', async () => {
+    const ql = emptyPageQl();
+    await buildExistingByName(ql as any, 'sys_permission_set', ['alpha'], undefined, undefined, { managed_by: 'platform' });
+    expect(Object.keys((ql.calls[0]![1] as any).where)).toEqual(['name', 'managed_by']);
+  });
+});
