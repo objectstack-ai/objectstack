@@ -618,9 +618,6 @@
     "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts": {
       "blind": 1
     },
-    "packages/plugins/plugin-security/src/permission-set-active.test.ts": {
-      "unjudged": 1
-    },
     "packages/plugins/plugin-security/src/permission-set-drift.test.ts": {
       "unjudged": 1
     },

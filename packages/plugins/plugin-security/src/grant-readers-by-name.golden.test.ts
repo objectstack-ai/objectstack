@@ -39,6 +39,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
+import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin } from './bootstrap-platform-admin.js';
@@ -50,6 +51,9 @@ import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+
+/** The environment-authored set the member holds a grant of, as the security catalog declares it. */
+const LEGACY_REPORTS = { name: 'legacy_reports', label: 'Legacy reports' };
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -128,6 +132,8 @@ async function readersByPrincipal(posture: Posture): Promise<Record<string, unkn
     objects: [
       SysUser, SysAccount, SysMember, SysOrganization,
       SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet,
+      // The activation ledger deactivation is read from (ADR-0131 D3).
+      SysMetadataActivation,
     ],
   } as any);
   await engine.syncSchemas();
@@ -139,9 +145,9 @@ async function readersByPrincipal(posture: Posture): Promise<Record<string, unkn
     metadata: {
       get: async (type: string, name: string) =>
         type === 'permission'
-          ? ([...defaultPermissionSets, QA_ADMIN] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+          ? ([...defaultPermissionSets, QA_ADMIN, LEGACY_REPORTS] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
           : engine.getSchema(name) ?? null,
-      list: async () => [...defaultPermissionSets, QA_ADMIN],
+      list: async () => [...defaultPermissionSets, QA_ADMIN, LEGACY_REPORTS],
     },
     ...(walled
       ? { 'org-scoping': { name: 'com.objectstack.org-scoping' }, tenancy: { posture } }
@@ -186,7 +192,14 @@ async function readersByPrincipal(posture: Posture): Promise<Record<string, unkn
       await engine.insert('sys_permission_set', { ...rest, id: `ps_${name}_${ORG}`, organization_id: ORG }, { context: orgCtx } as any);
     }
   }
-  // A deactivated set the member still holds a grant of (ADR-0049).
+  // A deactivated set the member still holds a grant of (ADR-0049): declared in
+  // the catalog (`LEGACY_REPORTS`), switched off in the activation ledger —
+  // its row's own `active: false` is not what is read (ADR-0131 D3).
+  await engine.insert(
+    'sys_metadata_activation',
+    { metadata_type: 'permission', name: 'legacy_reports', package_id: 'com.objectstack.qa.grant-readers-by-name', active: false },
+    { context: SYS } as any,
+  );
   await engine.insert(
     'sys_permission_set',
     {

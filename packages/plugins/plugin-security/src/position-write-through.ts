@@ -67,6 +67,27 @@
  *   `packagedBaseRefusal`) keeps the stand-down below, as the `/automation`
  *   doors keep theirs.
  *
+ * ## One namespace — a name the environment catalog already holds is not taken either (ruling Q (a))
+ *
+ * Under `single` a position name is unique per DEPLOYMENT (the cutover's
+ * ruling Q (a): "the write door refuses a second holder"), while the row's own
+ * index is unique per organization only. So a Setup **create**, or a **rename
+ * into** a name, that the security catalog already resolves to a definition
+ * no package or built-in holds (S10 above answers those) — an environment
+ * definition another organization's row wrote, one an author saved through
+ * the metadata door, or one an application stack declares in memory — is
+ * refused, and the row write is undone. Before this, the definition save that
+ * follows overwrote the existing definition with this row's label and
+ * description and dropped its `permissionSets`: two holders silently merged
+ * into one. The refusal is `409 UNIQUE_VIOLATION` (`PositionNameConflictError`)
+ * — the answer a second row of the same name in one organization already gets
+ * over HTTP — so an author meets one dialect for "this name is taken". The read is the
+ * catalog the resolver grants through (`securityCatalogReaderOf`), asked
+ * before any definition is saved; a catalog that cannot be read refuses (the
+ * row goes and that failure is the answer), because accepting would merge
+ * blind. The upgrade ceremony reports a pair that already exists as
+ * `conflicting` and never merges it (`convertPositionBindingRows`).
+ *
  * ## Where it stands down — the write proceeds exactly as before
  *
  * - **a system write** (`isSystem`): the seeders and the package door write
@@ -100,9 +121,11 @@
  * because the row is still the row the data door wrote.
  */
 
+import { securityCatalogReaderOf } from '@objectstack/core';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { PositionSchema } from '@objectstack/spec/identity';
+import { PositionNameConflictError } from './errors.js';
 
 /** The catalog object this module is registered on. */
 export const POSITION_OBJECT = 'sys_position';
@@ -273,6 +296,24 @@ async function nameStillCarried(ql: any, name: string): Promise<boolean> {
   return Array.isArray(rows) && rows.length > 0;
 }
 
+/**
+ * [ruling Q (a)] The refusal of a create, or a rename into `name`, when the
+ * security catalog already holds a definition of that name (module note, "a
+ * name the environment catalog already holds"). `null` when it holds none,
+ * when the name is a package's or a built-in's (S10's
+ * {@link heldPositionNameRefusal} answers those, first), or when no catalog is
+ * bound to this engine. A catalog read that fails throws its own loud error,
+ * and the caller undoes the write.
+ */
+async function environmentHeldPositionNameRefusal(ql: any, name: unknown): Promise<Error | null> {
+  if (typeof name !== 'string' || name === '' || packageHoldsPosition(ql, name)) return null;
+  const catalog = securityCatalogReaderOf(ql);
+  if (!catalog) return null;
+  const held = await catalog.resolve(POSITION_METADATA_TYPE, name);
+  if (!held) return null;
+  return new PositionNameConflictError(name, held.packageId);
+}
+
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 function logError(logger: PositionWriteThroughLogger | undefined, message: string, cause: unknown, meta: Record<string, unknown>): void {
@@ -409,6 +450,12 @@ export function createPositionWriteThrough(
           const refusal = heldPositionNameRefusal(door, row.name);
           if (refusal) throw refusal;
         }
+        // [ruling Q (a)] …nor a name the environment catalog already holds:
+        // one holder per name per deployment, never a silent merge.
+        for (const row of createdRows) {
+          const refusal = await environmentHeldPositionNameRefusal(ql, row.name);
+          if (refusal) throw refusal;
+        }
       } catch (e) {
         await undoInsert(written);
         throw e;
@@ -456,6 +503,12 @@ export function createPositionWriteThrough(
     try {
       for (const { pre, post } of posts) {
         const refusal = pre.name !== post.name ? heldPositionNameRefusal(door, post.name) : null;
+        if (refusal) throw refusal;
+      }
+      // [ruling Q (a)] A rename into a name the environment catalog holds is a
+      // second holder too.
+      for (const { pre, post } of posts) {
+        const refusal = pre.name !== post.name ? await environmentHeldPositionNameRefusal(ql, post.name) : null;
         if (refusal) throw refusal;
       }
     } catch (e) {

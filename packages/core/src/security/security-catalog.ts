@@ -67,13 +67,14 @@
  *
  * ## What this read does NOT answer
  *
- *  - ⛔ **Whether an item is in effect.** Deactivation lives on the catalog
- *    ROW (`sys_position.active`, `sys_permission_set.active`; standing ruling:
- *    the row flag stays authoritative), and no definition carries it. An entry
- *    here says a definition EXISTS under that name — never that it grants. A
- *    caller that drops the row flag because it now reads definitions would let
- *    a deactivated set grant again: the one widening this card must never
- *    open. Read the flag with `isRowActive` (`row-active.ts`) as before.
+ *  - ⛔ **Whether an item is in effect.** No definition carries the switch:
+ *    deactivation is the activation ledger's (`sys_metadata_activation`, one
+ *    row per `(metadata_type, name)`; ADR-0126 §3 regime C as ADR-0131 D6
+ *    amends it), read through `readDisabledCatalogNames`
+ *    (`resolve-authz-context.ts`) — never a catalog row's `active` column. An
+ *    entry here says a definition EXISTS under that name — never that it
+ *    grants. A caller that reads a definition and skips the ledger would let a
+ *    deactivated set grant again: the one widening this read must never open.
  *  - **The position → permission-set binding as a separate fact.** It is part
  *    of the position definition (`PositionSchema.permissionSets`, ADR-0131
  *    D3/D4); the resolver reads it from the entry this module answers, and no

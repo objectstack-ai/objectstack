@@ -36,6 +36,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const ORG_A = 'org_a_acme';
 /** Sorts BEFORE every `org_a` / `*_a_*` id, like the sibling suites. */
@@ -155,6 +156,12 @@ async function hold(
 }
 
 function gateOn(engine: ObjectQL) {
+  // [ADR-0131 D3/D4] The position and the set are the security catalog's
+  // definitions (environment-level); the rows above are each organization's.
+  bindTestSecurityCatalog(engine, {
+    positions: [{ name: 'field_lead', delegatable: true }],
+    permissions: [{ name: 'sales_user' }],
+  });
   return new DelegatedAdminGate({
     ql: engine,
     resolveSets: async (context: any) => (context?.principal === 'binder' ? BINDER_SETS : []),

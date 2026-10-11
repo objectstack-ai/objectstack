@@ -44,7 +44,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
-/** Resolvable from metadata, so only `custom_role` below reaches the db loader. */
+/** Resolvable from metadata, so only `custom_role` below reaches the catalog loader. */
 const baselineSet: PermissionSet = {
   name: 'member_default',
   label: 'Member',
@@ -52,8 +52,11 @@ const baselineSet: PermissionSet = {
 } as never;
 
 /**
- * The db-loader harness. `find` is the SOLE observable: every call it records is
- * one `sys_permission_set` round trip the deployment would really have made.
+ * The catalog-loader harness. The engine registry's by-name read of
+ * `custom_role` is the SOLE observable: every call it records is one catalog
+ * resolution of that set the deployment would really have made (ADR-0131
+ * D3/D4 — the loader reads the security catalog, never a `sys_permission_set`
+ * row).
  */
 const makeHarness = () => {
   const fields: Record<string, unknown> = {};
@@ -69,11 +72,17 @@ const makeHarness = () => {
       ? [{ id: 'ps-1', name: 'custom_role', label: 'Custom', object_permissions: '{}' }]
       : [],
   );
+  const getItem = vi.fn((type: string, name: string) =>
+    type === 'permission' && name === 'custom_role'
+      ? { name: 'custom_role', label: 'Custom', objects: {} }
+      : undefined,
+  );
   const ql = {
     registerMiddleware: (mw: never) => {
       if (!middleware) middleware = mw;
     },
     getSchema: () => baseSchema,
+    registry: { getItem, listItems: () => [], isPackageDisabled: () => false },
     find,
     findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
   };
@@ -94,21 +103,13 @@ const makeHarness = () => {
     ctx,
     find,
     /**
-     * How many reads THE DB LOADER has issued so far.
-     *
-     * Matched on the loader's own predicate shape (`name: { $in: [...] }`)
-     * rather than on the object name: several unrelated probes read
-     * `sys_permission_set` by single name on this path (the ADR-0095
-     * auto-org-admin grant, the ADR-0090 audience-binding suggestions), and
-     * counting those would make the number mean "reads of a table" instead of
-     * "resolutions of this context" — the quantity under test.
+     * How many catalog set resolutions THE LOADER has issued so far — the
+     * registry's by-name reads of type `permission` (the baseline set answers
+     * from metadata and never reaches it), so a read of another type does not
+     * count: the number means "resolutions of this context", the quantity
+     * under test.
      */
-    permissionSetReads: () =>
-      find.mock.calls.filter((c) => {
-        if (c[0] !== 'sys_permission_set') return false;
-        const where = (c[1] as { where?: { name?: unknown } } | undefined)?.where;
-        return Array.isArray((where?.name as { $in?: unknown[] } | undefined)?.$in);
-      }).length,
+    permissionSetReads: () => getItem.mock.calls.filter((c) => c[0] === 'permission').length,
     run: async (opCtx: unknown) => {
       if (!middleware) throw new Error('middleware never registered');
       await middleware(opCtx, async () => {});

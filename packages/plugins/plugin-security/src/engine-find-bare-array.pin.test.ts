@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#15598] What `ObjectQL.find` actually resolves at the seven seams that used
+ * [#15598] What `ObjectQL.find` actually resolves at the seams that used
  * to normalize it — one pin per seam, each driven against a REAL engine.
  *
  * ## The class, and why a type was not allowed to settle it
@@ -17,7 +17,7 @@
  * Every seam answered `[object Array]`, with no own `records` key, on a
  * populated page and an empty one alike.
  *
- * ⚠️ These are seven pins, not one pin repeated. A single reading of "the engine
+ * ⚠️ These are six pins, not one pin repeated. A single reading of "the engine
  * returns an array" would say nothing about whether a given seam is even
  * reachable — six of them sit behind a trigger (a truncated page, a refused
  * bulk write, a publish-materializer call path), and a seam nothing reaches is
@@ -25,15 +25,12 @@
  * through the real function and asserts the answer that block produced, and
  * {@link assertBareArrayPage} then reads back the value the engine handed it.
  *
- * ## The seventh is the opposite defect, and its legs say so
- *
- * `security-plugin.ts`'s `sys_permission_set` loader was not merely carrying a
- * dead limb: it swallowed a THROWN read into `[]` and mapped an unreadable
- * result to `[]` as well, so three different facts left as one value. On the
- * enforcement plane that is a silent withdrawal of grants that exist. Its legs
- * below pin the repaired direction — the fault PROPAGATES, the refusal carries
- * an envelope, and `PermissionEvaluator`'s #2565 warn (unreachable while the
- * loader swallowed) fires while the request stays fail-closed.
+ * The seventh seam, `security-plugin.ts`'s `sys_permission_set` loader, is
+ * gone: the plugin takes a set's body from the security catalog
+ * (ADR-0131 D3/D4) and reads no `sys_permission_set` row, so it has no
+ * engine page to pin. Its fault direction (a read that did not answer
+ * propagates, and `PermissionEvaluator`'s #2565 warn fires) is pinned on the
+ * catalog loader in `security-readers-catalog.test.ts`.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -58,8 +55,6 @@ import { upsertPackagePermissionSet } from './bootstrap-declared-permissions.js'
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
-import { SecurityPlugin } from './security-plugin.js';
-import { PermissionEvaluator } from './permission-evaluator.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const ORG = 'org_a';
@@ -340,126 +335,5 @@ describe('[#15598] block 6 — normalize-managed-by tryFind', () => {
     expect(counts.positions).toBe(1);
     const rows = await (engine as any).find('sys_position', { where: { name: 'pos_legacy' } }, SYS);
     expect(rows[0].managed_by).toBe('platform');
-  }, 120_000);
-});
-
-describe('[#15598] block 7 — security-plugin sys_permission_set loader (the DROP shape)', () => {
-  /** Boot the real plugin against `engine`, and hand back its private loader. */
-  async function loaderOver(engine: any, seen: Seen, findOverride?: (o: string, q?: any, opt?: any) => Promise<any>) {
-    const plugin = new SecurityPlugin();
-    const svc = observed(engine, seen, findOverride ? { find: findOverride } : {});
-    const { warns, logger } = recordingLogger();
-    const ctx: any = {
-      logger,
-      registerService: () => { /* noop */ },
-      registerMiddleware: () => { /* noop */ },
-      getService: (n: string) => {
-        if (n === 'objectql') return svc;
-        if (n === 'metadata') return { list: async () => [] };
-        if (n === 'manifest') return { register: () => { /* noop */ } };
-        return undefined;
-      },
-    };
-    await plugin.init(ctx);
-    await plugin.start(ctx);
-    const loader = (plugin as any).dbLoaderFor?.(ORG);
-    expect(typeof loader, 'the loader was never built — the boot bailed out').toBe('function');
-    return { loader: loader as (names: string[]) => Promise<any[]>, warns };
-  }
-
-  it('loads the DB-authored set out of one bare array', async () => {
-    const engine = await boot();
-    await (engine as any).insert(
-      'sys_permission_set',
-      { name: 'ps_db', label: 'DB authored', managed_by: 'admin', organization_id: ORG, active: true },
-      SYS,
-    );
-    const seen: Seen = [];
-    const { loader } = await loaderOver(engine, seen);
-    seen.length = 0;                       // isolate the loader's OWN read
-
-    const sets = await loader(['ps_db']);
-
-    assertBareArrayPage(seen, 'dbLoaderFor');
-    expect(sets.map((s: any) => s.name)).toEqual(['ps_db']);
-  }, 120_000);
-
-  it('PROPAGATES a thrown read instead of swallowing it into "no permission sets"', async () => {
-    const engine = await boot();
-    const seen: Seen = [];
-    const outage = Object.assign(new Error("Datasource 'primary' is declared but not connected"), {
-      code: 'ERR_DATASOURCE_UNAVAILABLE',
-    });
-    const { loader } = await loaderOver(engine, seen, async (o: string, q?: any, opt?: any) => {
-      if (o === 'sys_permission_set' && q?.where?.name?.$in) throw outage;
-      return engine.find(o, q, opt);
-    });
-
-    // The whole repair: this used to resolve `[]`. An outage and an empty
-    // catalog are different facts and must not leave by the same door.
-    await expect(loader(['ps_db'])).rejects.toBe(outage);
-  }, 120_000);
-
-  it('REFUSES a non-array result with an envelope, rather than inventing an empty page', async () => {
-    const engine = await boot();
-    const seen: Seen = [];
-    const { loader } = await loaderOver(engine, seen, async (o: string, q?: any, opt?: any) => {
-      // The #13706 shape, planted deliberately: a `find()` that resolves an
-      // ENVELOPE. It is what the removed limb claimed to handle, and the point
-      // of the repair is that it is refused rather than silently normalized.
-      if (o === 'sys_permission_set' && q?.where?.name?.$in) return { records: [{ name: 'ps_db' }] } as any;
-      return engine.find(o, q, opt);
-    });
-
-    // ⛔ Not `toThrow()` alone — the envelope is the assertion. A bare "it threw"
-    // passes against any accident on this path.
-    await expect(loader(['ps_db'])).rejects.toMatchObject({
-      code: 'DATABASE_ERROR',
-      status: 500,
-      name: 'PermissionSetReadUnansweredError',
-    });
-  }, 120_000);
-
-  it('REFUSES a page carrying a non-row, which the trailing filter used to drop in silence', async () => {
-    const engine = await boot();
-    const seen: Seen = [];
-    const { loader } = await loaderOver(engine, seen, async (o: string, q?: any, opt?: any) => {
-      if (o === 'sys_permission_set' && q?.where?.name?.$in) return ['ps_db'] as any;
-      return engine.find(o, q, opt);
-    });
-
-    await expect(loader(['ps_db'])).rejects.toMatchObject({
-      code: 'DATABASE_ERROR',
-      status: 500,
-      name: 'PermissionSetReadUnansweredError',
-    });
-  }, 120_000);
-
-  it('stays FAIL-CLOSED through the evaluator, and re-arms the #2565 warn the swallow had made unreachable', async () => {
-    const engine = await boot();
-    const seen: Seen = [];
-    const outage = Object.assign(new Error("Datasource 'primary' is declared but not connected"), {
-      code: 'ERR_DATASOURCE_UNAVAILABLE',
-    });
-    const { loader } = await loaderOver(engine, seen, async (o: string, q?: any, opt?: any) => {
-      if (o === 'sys_permission_set' && q?.where?.name?.$in) throw outage;
-      return engine.find(o, q, opt);
-    });
-
-    const warns: Array<{ msg: string; meta: any }> = [];
-    const resolved = await new PermissionEvaluator().resolvePermissionSets(
-      ['ps_db'],
-      { list: async () => [] },
-      [],
-      loader,
-      { logger: { warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); } } },
-    );
-
-    // Enforcement is UNCHANGED — the unresolved set still grants nothing.
-    expect(resolved).toEqual([]);
-    // What changed is that the loss is now sayable. While the loader swallowed
-    // its own read failure this warn could never fire, so a DB outage and an
-    // empty catalog produced identical, undiagnosable 403s.
-    expect(warns.map((w) => w.msg).join('\n')).toContain('db lookup failed');
   }, 120_000);
 });

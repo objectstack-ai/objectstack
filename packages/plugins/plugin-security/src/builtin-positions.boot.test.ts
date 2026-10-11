@@ -397,14 +397,20 @@ async function tenantPositionWrites(engine: ObjectQL): Promise<Record<string, Wr
   const everyone = await own('everyone');
   const platformAdmin = await own('platform_admin');
   return {
-    'assign a position no catalog row carries': await outcome(engine.insert(
+    'assign a position the security catalog does not hold': await outcome(engine.insert(
       'sys_user_position', { user_id: 'usr_member', position: 'zz_dangling' }, { context: tenant } as any,
     )),
-    'control: create a position': await outcome(engine.insert(
+    'control: create a position row': await outcome(engine.insert(
       'sys_position', { name: 'zz_tenant_post', label: 'Tenant Post' }, { context: tenant } as any,
     )),
-    'control: assign it': await outcome(engine.insert(
+    // [ADR-0131 D3/D4] This harness mounts no metadata door, so the row gets
+    // no definition: a position only a row carries grants nothing, and an
+    // assignment naming it is refused like a dangling name.
+    'assign the row-only position': await outcome(engine.insert(
       'sys_user_position', { user_id: 'usr_member', position: 'zz_tenant_post' }, { context: tenant } as any,
+    )),
+    'control: assign a stack-declared position (no row needed)': await outcome(engine.insert(
+      'sys_user_position', { user_id: 'usr_member', position: DECLARED_POSITIONS[0].name }, { context: tenant } as any,
     )),
     'delete the everyone row': await outcome(engine.delete('sys_position', { where: { id: everyone?.id }, context: tenant } as any)),
     'relabel the platform_admin row': await outcome(engine.update(
@@ -487,21 +493,27 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
 }
 
 /**
- * The tenant position writes — the same in both postures. The dangling name is
+ * The tenant position writes — the same in both postures. A name the security
+ * catalog does not hold, a dangling one or a row with no definition alike, is
  * the position catalog refusal's envelope (`reference_not_found` at
- * `position`); the two built-in rows are refused on their `platform`
- * provenance.
+ * `position`); a stack-declared position is assigned with no row; the two
+ * built-in rows are refused on their `platform` provenance.
  */
 const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
-  'assign a position no catalog row carries': {
+  'assign a position the security catalog does not hold': {
     ok: false,
     code: 'VALIDATION_FAILED',
     fields: ['position:reference_not_found'],
   },
-  'control: create a position': {
+  'control: create a position row': {
     ok: true,
   },
-  'control: assign it': {
+  'assign the row-only position': {
+    ok: false,
+    code: 'VALIDATION_FAILED',
+    fields: ['position:reference_not_found'],
+  },
+  'control: assign a stack-declared position (no row needed)': {
     ok: true,
   },
   'delete the everyone row': {
