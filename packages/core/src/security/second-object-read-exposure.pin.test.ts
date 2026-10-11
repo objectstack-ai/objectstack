@@ -41,7 +41,14 @@
  * for `aggregate` over `queryObjects`); and the reads whose target is a FIXED
  * platform object rather than an authored one (a file field's `sys_file`
  * hydration, the `sys_user` display names the approvals and audit surfaces
- * resolve). They are named here, not held.
+ * resolve). They are named here, not held. Nor does it see a door that reaches a
+ * classified read through the shared condition walk rather than calling the
+ * arbiter itself: the MCP stdio data bridge hands a caller's filter to the
+ * engine's relation lowering (the `relation-filter-lowering.ts` row), and its
+ * targets are resolved inside `relationConditionSites` (`@objectstack/core`),
+ * which is the caller classified below. The bridge asks each target the
+ * decision for `list` (`enforceRelationTargetExposure`, #22777), held by its
+ * own package's pin rather than by a row here.
  *
  * The scan surface and its prefilter follow `row-serving-door-exposure.pin.test.ts`
  * in this directory: git's authored-file list, never a directory crawl, and `.ts`
@@ -160,6 +167,13 @@ const CALLERS: Record<string, Classification> = {
     decision: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', fn: 'servesSummaryTitleTarget' },
     wiring: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', call: 'servesSummaryTitleTarget(objectName' },
     pin: 'packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts',
+  },
+  'packages/core/src/utils/relation-condition-sites.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "finds a filter's nested-relation conditions and each one's target; reads no record. Both doors that call it ask " +
+      "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget` and the MCP " +
+      "stdio data bridge's `enforceRelationTargetExposure`",
   },
   'packages/lint/src/object-graph.ts': {
     kind: 'not-a-served-read',
