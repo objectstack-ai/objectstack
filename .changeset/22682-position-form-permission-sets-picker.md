@@ -6,6 +6,6 @@
 
 Clause-②: no
 
-- **The key.** `ref-multi:<type>` is the list form of the forms' `ref:<type>` pickers (`ref:object`, `ref:dataset`, `ref:component`, all single-valued). A distinct key, as `field-ref` / `field-multi` already are, because a single `ref:` picker writes one string and the widget registry declares one labelling per key.
+- **The key.** `ref-multi:` followed by a metadata type is the list form of the forms' `ref:` pickers (`ref:object`, `ref:dataset`, `ref:component`, all single-valued). A distinct key, as `field-ref` / `field-multi` already are, because a single `ref:` picker writes one string and the widget registry declares one labelling per key.
 - **Which renderer honours it.** A console whose metadata-admin widget registry has no `ref-multi:permission` entry renders this row as its announced fallback: a JSON editor with the note that no custom renderer is registered. The stored value is the same list of names either way.
 - ⛔ Only this one form row changes. No schema, parse, export or accept-set change: `PositionSchema.permissionSets` stays a list of snake_case names, and `FormField.widget` stays a free string.
