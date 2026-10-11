@@ -52,12 +52,15 @@
  * - **an id whose set row belongs to another organization** (`warn`) — its
  *   name is never written: a name carries no organization, so writing another
  *   organization's name would point the grant at whatever this organization
- *   calls by that name. The authorization resolver still reads a grant's set
- *   row by id without a wall, so such a grant grants by id today; the pass
- *   does not carry that answer into the name;
+ *   calls by that name. The authorization resolver reads a grant's set by
+ *   name, so such a grant confers nothing;
  * - **a set row whose name the catalog read does not resolve** (`error`) —
- *   the grant points at a definition the catalog does not hold, so it would
- *   fail closed once readers read the name.
+ *   the grant points at a definition the catalog does not hold, so it is left
+ *   unnamed and confers nothing until a later pass names it.
+ *
+ * Every grant left unnamed is also listed, by organization, at every boot by
+ * the catalog reference report (`catalog-reference-report.ts`) — including
+ * after this pass has recorded its verdict and no longer runs.
  *
  * ## Once, and remembered
  *
@@ -361,10 +364,10 @@ function reportPass(result: GrantNameBackfillResult, unresolvedNames: string[], 
       logger,
       `[security] ${result.unresolved.length} ${GRANT_OBJECT} grant(s) were NOT given a ${GRANT_SET_NAME_FIELD}: ` +
         `the ${PERMISSION_SET_CATALOG_OBJECT} row each one points at carries a name the security catalog does not ` +
-        `resolve at this boot, so the name cannot be shown to name a definition. These grants still resolve by ` +
-        `id today, and would fail closed once readers read the name. Fix: register the permission set ` +
-        `definition (its package or environment metadata), or re-point the grants; the backfill runs again on ` +
-        `the next boot.`,
+        `resolve at this boot, so the name cannot be shown to name a definition. These grants confer nothing ` +
+        `until a later boot names them: the authorization resolver reads a grant's permission set by name, and ` +
+        `a grant with no name grants nothing. Fix: register the permission set definition (its package or ` +
+        `environment metadata), or re-point the grants; the backfill runs again on the next boot.`,
       { count: result.unresolved.length, names: unresolvedNames, grants: listed(result.unresolved) },
     );
   }
@@ -372,8 +375,9 @@ function reportPass(result: GrantNameBackfillResult, unresolvedNames: string[], 
     logError(
       logger,
       `[security] ${result.failed.length} ${GRANT_OBJECT} name write(s) did NOT land, so those grants still ` +
-        `carry no ${GRANT_SET_NAME_FIELD} while every other line of this backfill reads clean. The backfill runs ` +
-        `again on the next boot; if it fails again, check that ${GRANT_OBJECT} is writable by the system context.`,
+        `carry no ${GRANT_SET_NAME_FIELD} and confer nothing until a later boot names them, while every other ` +
+        `line of this backfill reads clean. The backfill runs again on the next boot; if it fails again, check ` +
+        `that ${GRANT_OBJECT} is writable by the system context.`,
       { count: result.failed.length, grants: listed(result.failed) },
     );
   }

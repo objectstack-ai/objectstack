@@ -438,17 +438,19 @@ not re-derived — that would replicate the resolver's aggregation).
 
 **Absent is ACTIVE.** Only a ledger row whose `active` reads false takes a
 grant away; a permission set or position with no ledger row is in effect. The
-last-administrator guard's enumeration still reads the catalogue row's
-`active`, so it counts a row-deactivated `admin_full_access` as off and refuses
-more than it must, never less.
+last-administrator guard reads the same two places the resolver does: whether
+the catalogue holds `admin_full_access`, and whether the ledger switches it
+off. It reads no catalogue row, so a row's `active` changes nothing it counts.
 
-**Switching the break-glass set off is refused.** A ledger row switching
-`admin_full_access` off would un-make every platform admin who holds it
-*through a grant row*, in one write — and switching it back on needs the
-permission just lost. The last-administrator guard refuses such a ledger
-write outright, whatever the administrator population (ADR-0135 D5.2), and
-refuses one whose target row it cannot read. Switching it back on is never
-refused.
+**Switching the break-glass set off is refused while it would leave no
+administrator.** A ledger row switching `admin_full_access` off un-makes every
+platform admin who holds it *through a grant row*, in one write — and
+switching it back on needs the permission just lost. The last-administrator
+guard judges such a ledger write like every other write that can take
+standing away (ADR-0135 D5.2): it is refused only when nobody who can sign in
+would still administer the environment. A configured administrator or an
+organization owner or admin still standing permits it. A ledger read that
+fails refuses the write. Switching it back on is never refused.
 
 Deactivation is an incident-response control, so what it does **not** touch is
 deliberate. Administration surfaces keep listing and editing a deactivated
