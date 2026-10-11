@@ -19571,7 +19571,8 @@ export class ObjectQL implements IObjectQLEngine {
    * query already complete"). Emptying the entry ends the ambient way;
    * {@link openedUnits} ends the explicit one, because
    * {@link buildDriverOptions} treats a closed unit's handle as absent. The
-   * work then runs unenrolled, on its own connection, as outside any unit.
+   * work then runs unenrolled, on its own connection. (`opensAfterAbortUnit`
+   * still reads the raw context handle, so such a write opens no door unit.)
    *
    * A primitive handle cannot key {@link openedUnits}, so it keeps only the
    * ambient half.
