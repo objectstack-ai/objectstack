@@ -84,10 +84,31 @@ All validation types share these base properties:
 | Severity | Behavior |
 | :--- | :--- |
 | `error` | Prevents the record from being saved |
-| `warning` | Allows the save; advisory only — logged server-side, not returned to the caller |
-| `info` | Informational message, no blocking |
+| `warning` | Allows the save; advisory only — returned to the caller in the write answer's `warnings`, and logged server-side |
+| `info` | Informational message, no blocking; returned and logged the same way as `warning` |
 
 Advisory rules (`warning` / `info`) are reported, never enforced: on an ordinary write each hit is logged as it happens; on a seed/boot load a run's hits are folded into **one summary line per rule**; and an `update` touching only platform-injected system columns does not re-evaluate them at all, so a row is reported once rather than once per write (#13889).
+
+The write's caller sees them too. A create, an update or a clone whose record trips an advisory rule still succeeds, and its answer carries `warnings`, one entry per rule hit: the rule's `name` as `rule`, its `severity`, the `field` it is about (`_record` for an object-level rule), the finding `code` and your `message`. A client shows that message to the person who saved. A write with no hit has no `warnings` key at all.
+
+```json
+{
+  "object": "task",
+  "id": "tsk_001",
+  "record": { "id": "tsk_001", "name": "Internal chore", "related_to": null },
+  "warnings": [
+    {
+      "rule": "related_to_required",
+      "severity": "warning",
+      "field": "_record",
+      "code": "rule_violation",
+      "message": "At least one related record should be selected."
+    }
+  ]
+}
+```
+
+Only the hits of that one write are listed: a record a hook or a flow writes while handling it reports its own hits to its own caller, not into this answer. The validate-only preview (`validateData`, and an import's dry run) appends the same entries to each accepted row's `warnings`, after any value-shape findings the deployment admits. A rule whose condition could not be evaluated is not a hit: it is reported in the server log only.
 
 ## Validation Types
 

@@ -464,10 +464,11 @@ const DISPATCHER_DOMAIN_DIR = 'packages/runtime/src/domains';
 const DISPATCHER_DOMAINS = {
   'actions.ts': { handBuilt: 0 },
   // [#12160] Not a domain either — the ADR-0126 §5 activation write-authority
-  // gates, shared by the `/automation` toggle door and the `/actions`
-  // activation door so one security policy has one implementation. Like
-  // `unavailable.ts` it answers refusals through `deps.error`, which is this
-  // check's own thesis applied to a refusal that two domains emit.
+  // gates, shared by the `/automation` toggle door, the `/actions` activation
+  // door and the `/security` catalog activation door so one security policy
+  // has one implementation. Like `unavailable.ts` it answers refusals through
+  // `deps.error`, which is this check's own thesis applied to a refusal that
+  // three domains emit.
   'activation-gate.ts': { handBuilt: 0 },
   'analytics.ts': { handBuilt: 0 },
   // [#22576] The `/approvals/act` bridge: the approvals member's own HTML
@@ -476,6 +477,10 @@ const DISPATCHER_DOMAINS = {
   // `deps.error`.
   'approvals.ts': { handBuilt: 0 },
   'automation.ts': { handBuilt: 0 },
+  // The `/security` domain's catalog activation door (ADR-0126 §3 regime C,
+  // ADR-0131 D6), split out of `security.ts` beside the gate it calls. Every
+  // answer it gives goes through `deps.success` / `deps.error`.
+  'catalog-activation.ts': { handBuilt: 0 },
   'data.ts': { handBuilt: 0 },
   'i18n.ts': { handBuilt: 0 },
   'notifications.ts': { handBuilt: 0 },

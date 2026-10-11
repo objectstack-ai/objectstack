@@ -68,12 +68,13 @@ import {
 import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage } from '@objectstack/types';
 import * as actionExec from '../action-execution.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
-import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
+import { validationFailureDetails } from '../validation-failure.js';
 // [ADR-0126 §5] The shared activation write-authority gates — the same two
 // tiers `/automation`'s toggle door passes, one implementation.
 import {
     refuseUngrantedActivationWrite,
     refuseUngrantedActivationAuthoring,
+    readActivationBody,
     ACTION_ACTIVATION_SUBJECT,
 } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -178,43 +179,12 @@ async function handleActionActivationWrite(
     const actionName = parts[2];
 
     // ── 2. body ─────────────────────────────────────────────────────────────
-    // Built through the shared `validationFailure` constructor and its own
-    // `details` reader, so this door's 400s carry the same `VALIDATION_FAILED`
-    // envelope and `fields[]` shape as every other one — ⛔ never a hand-rolled
-    // details literal that agrees with them by eye (#3878/#3899).
-    const invalidBody = (
-        message: string,
-        fields: Array<{ field: string; code: string; message: string }>,
-    ): HttpDispatcherResult => ({
-        handled: true,
-        response: deps.error(message, VALIDATION_FAILED_STATUS, validationFailureDetails(validationFailure(message, fields))),
-    });
-
-    const toggleBody = body ?? {};
-    if (typeof toggleBody !== 'object' || Array.isArray(toggleBody)) {
-        return invalidBody('Invalid activation body — expected { enabled?: boolean }', [
-            { field: '(body)', code: 'invalid_type', message: 'expected an object' },
-        ]);
-    }
-    const unknownKeys = Object.keys(toggleBody).filter((k) => k !== 'enabled');
-    if (unknownKeys.length > 0) {
-        return invalidBody(
-            `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the activation body is { enabled?: boolean }`,
-            // `unknown_field` — the ADR-0114 catalog member for "a key the
-            // target does not declare".
-            unknownKeys.map((k) => ({
-                field: k,
-                code: 'unknown_field',
-                message: 'not an activation field — did you mean `enabled`?',
-            })),
-        );
-    }
-    if ('enabled' in toggleBody && typeof (toggleBody as Record<string, unknown>).enabled !== 'boolean') {
-        return invalidBody('`enabled` must be a boolean (JSON true/false, not a string)', [
-            { field: 'enabled', code: 'invalid_type', message: 'expected a boolean' },
-        ]);
-    }
-    const enabled = (toggleBody as { enabled?: boolean }).enabled ?? true;
+    // The one activation body reader every `_activation` door shares, so this
+    // door's 400s carry the same `VALIDATION_FAILED` envelope and `fields[]`
+    // shape as every other one (#3878/#3899).
+    const bodyReading = readActivationBody(deps, body);
+    if (bodyReading.refusal) return bodyReading.refusal;
+    const enabled = bodyReading.enabled;
 
     // ── 3. declaration ──────────────────────────────────────────────────────
     const declaration = await actionExec.resolveRouteActionDeclaration(deps, context, {

@@ -18,12 +18,16 @@
  *   GET  /security/suggested-bindings?status=&packageId=   → list (reconciles first)
  *   POST /security/suggested-bindings/:id/confirm          → create the anchor binding
  *   POST /security/suggested-bindings/:id/dismiss          → decline the suggestion
+ *   POST /security/_activation/:type/:name                 → switch a position (`position`) or a
+ *                                                            permission set (`permission`) on/off
+ *                                                            for this deployment (`./catalog-activation.ts`)
  */
 
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
     isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
 } from '@objectstack/core';
+import { isCatalogActivationWrite, handleCatalogActivationWrite } from './catalog-activation.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -80,6 +84,18 @@ export async function handleSecurityRequest(
             handled: true,
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
         };
+    }
+
+    // [ADR-0126 §3 regime C, ADR-0131 D3/D6] THE CATALOG ACTIVATION DOOR —
+    // switch a position or a permission set on/off for this deployment, which
+    // is a `sys_metadata_activation` row and nothing else. Answered ahead of
+    // the `security` service probe because it does not use that service: it
+    // writes the ledger through the engine, behind the same two authority
+    // gates as the flow and action doors (`./catalog-activation.ts`).
+    // split+filter, as below, so no regex runs over request-controlled input.
+    const activationParts = path.split('/').filter(Boolean);
+    if (isCatalogActivationWrite(activationParts, method.toUpperCase())) {
+        return handleCatalogActivationWrite(deps, activationParts, _body, context);
     }
 
     // [#4127 batch 3] The `as any` was the only thing between this call and

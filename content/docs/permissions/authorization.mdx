@@ -408,6 +408,17 @@ A catalogue row's own `active` column (`sys_permission_set.active`,
 Deactivate action writes today, so a Deactivate in Setup does not switch the
 grant off.
 
+The ledger row is written through
+`POST /api/v1/security/_activation/:type/:name`, with `:type` either
+`position` or `permission` and the body `{ enabled }` (`false` switches the
+grant off, `true` back on). The caller needs `manage_metadata`; under a `group`
+or `isolated` tenancy posture the caller must also be the platform operator,
+because the row reaches every organization (ADR-0126 §5). The name must resolve
+in the security catalog, or the route answers `404`. It is the same authority
+as the flow and action activation switches. The two audience anchors,
+`everyone` and `guest`, are refused with `400` in either direction: one row
+would switch the authenticated or anonymous baseline off for every principal.
+
 - A deactivated **permission set** contributes nothing: not its name, not its
   `system_permissions`, not its `tab_permissions`. As with an expired grant, a
   deactivated unscoped `admin_full_access` no longer derives `platform_admin`

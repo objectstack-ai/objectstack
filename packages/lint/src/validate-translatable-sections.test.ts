@@ -2,9 +2,10 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateTranslatableSections,
+  validateTranslatableSections as validateTranslatableSectionsUnrecorded,
   TRANSLATION_SECTION_NAME_MISSING,
 } from './validate-translatable-sections.js';
+import { explainRule } from './rule-explanations.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
 import { Contact } from '../../../examples/app-showcase/src/data/objects/contact.object.js';
 import { ContactViews } from '../../../examples/app-showcase/src/ui/views/contact.view.js';
@@ -20,6 +21,18 @@ import {
   SnapshotTaskViews,
   SnapshotTranslationBundle,
 } from './showcase-shape.fixtures.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to carry
+// is the id's `os explain` entry. Every direct call below records what it
+// fired, and the last cases in this file hold each recorded verdict to one line
+// of at most 200 characters — every firing variant this suite exercises, not a
+// chosen few. Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string; path: string }> = [];
+const validateTranslatableSections: typeof validateTranslatableSectionsUnrecorded = (...args) => {
+  const findings = validateTranslatableSectionsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /** A `crm_case` object with the two fields the fixtures below lay out. */
 const crmCase = {
@@ -92,7 +105,10 @@ describe('validateTranslatableSections — the HotCRM shape (#5417)', () => {
     expect(first.message).toContain('objects.crm_case._sections.<name>.label');
     // The coverage half of the invisibility, said out loud: #5405's walker is
     // keyed on `sections[].name`, so it cannot report this as missing either.
-    expect(first.message).toContain('walks `sections[].name`');
+    // [#22161] Said in the explanation now, which `os explain` prints.
+    expect(explainRule(TRANSLATION_SECTION_NAME_MISSING)!.paragraphs.join('\n')).toContain(
+      'walks `sections[].name`',
+    );
   });
 
   it('suggests a snake_case name derived from the heading — as a hint, never a key', () => {
@@ -509,4 +525,48 @@ describe('validateTranslatableSections — the showcase contact surface (#5415)'
       }),
     ).toEqual([]);
   }, 60_000);
+});
+
+describe('[#22161] one-line verdict — translation-section-name-missing', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === TRANSLATION_SECTION_NAME_MISSING);
+    // The coverage control first: the id fired, on a view's form sections and
+    // on a page's `record:details` sections.
+    expect(converted.some((f) => f.path.startsWith('views['))).toBe(true);
+    expect(converted.some((f) => f.path.includes('.properties.sections['))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence', () => {
+    const [first] = validateTranslatableSections({
+      objects: [crmCase],
+      views: [{ name: 'case_views', formViews: { edit: { type: 'simple', data, sections: hotcrmSections } } }],
+      translations: caseTranslated,
+    });
+    expect(first!.message).toBe(
+      'Section "Case" declares a label but no `name`, so no `objects.crm_case._sections.<name>.label` key ' +
+        'can address it and its heading stays in the source locale in every locale',
+    );
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(TRANSLATION_SECTION_NAME_MISSING);
+    expect(entry, 'no `os explain translation-section-name-missing` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'every neighbouring label resolves',
+      '`translation-target-unknown` has no key to report',
+      'walks `sections[].name`',
+      '`record:details`',
+      'a second contract',
+      'monolingual stack',
+      'name-keyed map',
+      '`fieldGroups[].key`',
+    ]) {
+      expect(text, fact).toContain(fact);
+    }
+  });
 });
