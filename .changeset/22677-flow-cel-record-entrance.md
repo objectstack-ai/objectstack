@@ -17,7 +17,7 @@ Clause-②: no (narrowing)
 
 A start `config.objectName` alone is no entrance: with no `record-*` trigger nothing hands the run a row. A parent's own `record` variable is not handed on either: a child gets its parent's context, not its variables. Everywhere else `record.X` is refused as `expression-invalid`, `error`, with the remedy below.
 
-**Not judged.** The stand-downs of the unbound-root rule are unchanged. At the runtime publish gate this judgment still stands down: its per-write snapshot carries no actions and no other flows, so it cannot see an entrance, and a flow write there is not refused for `record` until that snapshot carries them.
+**Not judged.** The stand-downs of the unbound-root rule are unchanged. At the runtime publish gate this judgment still stands down: its per-write snapshot carries no actions and no other flows, so it cannot see an entrance, and a flow write there is not refused for `record`, by design (rulings `5791822697` item 3 and `6104584601`).
 
 ## FROM → TO
 

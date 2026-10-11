@@ -40,7 +40,9 @@
 // ## Why a source scan rather than a boot
 //
 // Same reason as this directory's `serve-verify-security-parity.contract.test.ts`
-// and `serve-email-config-parity.contract.test.ts`: the failure mode is an EDIT
+// and `@objectstack/plugin-email`'s `capability-arg.config-parity.contract.test.ts`
+// (this directory's `serve-email-config-parity.contract.test.ts` until #22301):
+// the failure mode is an EDIT
 // to these files, and every one of the three facts above is invisible to a
 // behavioural test. `serve.ts`'s audit block is reachable only from a live
 // `objectstack serve` boot with `@objectstack/plugin-auth` and

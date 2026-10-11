@@ -163,6 +163,12 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
   ], SYS);
   await engine.insert('sys_position', [{ id: 'pos_rep', name: 'qa_rep', label: 'Rep', active: true }], SYS);
   await engine.insert('sys_position_permission_set', [{ id: 'pps_rep', position_id: 'pos_rep', permission_set_id: 'ps_plain' }], SYS);
+  // [ADR-0131 D3/D4] The security catalog the gate and the assignment refusal
+  // read: the position's definition names the set; the rows above are the
+  // grant id lookup's, nothing more.
+  const QA_PKG = 'com.objectstack.qa.granted-by';
+  engine.registry.registerItem('permission', { name: 'qa_plain', label: 'Plain' } as any, 'name' as any, QA_PKG);
+  engine.registry.registerItem('position', { name: 'qa_rep', label: 'Rep', permissionSets: ['qa_plain'] } as any, 'name' as any, QA_PKG);
 
   let placement: InvitationPlacementService | undefined;
   if (opts.security) {

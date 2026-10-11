@@ -25,8 +25,9 @@
 // Neither can see THIS file's failure mode, which is the one that actually
 // happened: nothing in the repo pins `serve.ts`'s side, so re-open-coding the
 // wiring here — or dropping it — would be green everywhere while the paths
-// separate again. Hence a source scan, in the shape of this package's
-// `serve-email-config-parity.contract.test.ts`: the grep that would have caught
+// separate again. Hence a source scan, in the shape of `@objectstack/plugin-email`'s
+// `capability-arg.config-parity.contract.test.ts` (this package's
+// `serve-email-config-parity.contract.test.ts` until #22301): the grep that would have caught
 // it, mechanised, so the second divergence fails a build instead of waiting for
 // someone to run it.
 //

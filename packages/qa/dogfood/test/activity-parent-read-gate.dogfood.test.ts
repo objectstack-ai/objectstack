@@ -109,7 +109,15 @@ describe('sys_activity: a member reads the activity of records it can read, and 
       const parent = await stack.apiAs(memberTok, 'GET', `/data/${r.object_name}/${r.record_id}`);
       expect(parent.status, `activity row ${r.id} is about ${r.object_name}/${r.record_id}`).toBe(200);
     }
-  });
+    // [#22301] One request per readable row, and the rows are every write the
+    // boot mirrored — platform objects included (the header). `bootStack` mounts
+    // the always-on slate `objectstack serve` mounts, and the email service it
+    // brings seeds its built-in templates at boot (24 `sys_activity` rows about
+    // `sys_email_template` on this fixture), so this case outgrew vitest's
+    // 5000 ms default under a loaded run: measured 4372 ms alone, against
+    // 2690 ms with the slate ablated, on one shared box. The bound is the
+    // work, not a stall.
+  }, 30_000);
 
   it('list: the total is narrowed exactly like the rows', async () => {
     const body = (await (await stack.apiAs(memberTok, 'GET', '/data/sys_activity?limit=1000')).json()) as any;
