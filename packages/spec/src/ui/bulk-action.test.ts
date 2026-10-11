@@ -75,9 +75,13 @@ describe('BulkActionDefSchema — the def shape is typed, not `z.any()`', () => 
       }).join('\n');
       expect(issues).toContain('min');
       expect(issues).toContain('FieldSchema');
-      // ⛔ The prescription must NOT send the author to the field-backed route:
-      // the bulk surface has none, so that answer would be confidently wrong.
-      expect(issues).toContain('no field-backed param route');
+      // ⛔ The prescription must NOT send this author to the field: a key
+      // declared there reaches the bulk dialog only through a PROMOTED action
+      // (`bulkActions`), and of this family only `accept` / `maxSize` make that
+      // trip. Both are named by subject, so the rejection says which route and
+      // which keys rather than implying `min` would follow.
+      expect(issues).toContain('`bulkActions`');
+      expect(issues).toContain('`accept` / `maxSize`');
     });
 
     // ── DELIBERATE OPENNESS — DO NOT "FIX" THIS INTO A STRICT SITE ──────────
@@ -413,10 +417,15 @@ describe('BulkActionDefSchema — the def shape is typed, not `z.any()`', () => 
       expect(paramIssues({ displayField: 'name' })).toContain('`displayField` → `labelField`');
     });
 
-    it('answers `field` with the route that does not exist rather than a spelling hint', () => {
+    it('answers `field` with the two routes that do exist rather than a spelling hint', () => {
       const issues = paramIssues({ field: 'owner' });
-      expect(issues).toContain('FIELD-BACKED');
-      expect(issues).toContain('Declare the param inline');
+      // Not a rename: `field` has no spelling on an authored bulk param.
+      expect(issues).not.toContain('`field` →');
+      // Both remedies, each named by its subject: the inline param's picker
+      // target, and the view key that promotes a declared action whose
+      // field-backed param IS resolved against the object's fields.
+      expect(issues).toContain('`object`');
+      expect(issues).toContain('`bulkActions');
     });
 
     it('sends a param-level `visible` to the DEF, where the predicate is really read', () => {

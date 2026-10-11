@@ -147,11 +147,25 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * to name it beside min/max/step, and the sweep found no FORM widget reading it
  * at all.
  *
- * ⚠️ The prescription deliberately refuses the obvious-sounding remedy. There
- * is no field-backed param route on the bulk surface — `toBulkParam` never
- * consults the object's field definitions — so "declare it on the field and let
- * the dialog inherit" would be a confidently wrong answer, the shape this
- * campaign has already shipped more than once.
+ * ⚠️ The prescription refuses the obvious-sounding remedy for all but two of
+ * these keys. An AUTHORED def's params reach the dialog as written: nothing on
+ * that path consults the object's field definitions. The bulk surface's
+ * field-backed route is the PROMOTED def, an action the object declares, named
+ * in the view's `bulkActions`. Its `{ field }` params are resolved when the
+ * dialog opens, through the single-record dialog's own resolver (objectui
+ * `29b99490`: plugin-grid's `resolvePromotedBulkParams` calls
+ * `resolveActionParams` from `@object-ui/fields`, then renames the result onto
+ * the bulk vocabulary). Measured on objectui `main` `dca25aff2`, that route
+ * carries the field's `type`, translated `label`, `options`, `required`,
+ * `description` (as the help text), `placeholder`, `defaultValue`, `multiple`,
+ * `accept` and `maxSize`, plus a reference-bearing field's `reference`,
+ * `displayField` and `dependsOn`. From THIS list only `accept` and `maxSize`
+ * make the trip. The lookup settings `lookupFilters` / `lookupColumns` /
+ * `lookupPageSize` / `descriptionField` / `idField` are resolved and then
+ * dropped by the bulk adapter, and the rest are never read off the field. So
+ * "declare it on the field and let the dialog inherit" is right for `accept` /
+ * `maxSize` on a promoted def, and a confidently wrong answer for every other
+ * key here, the shape this campaign has already shipped more than once.
  */
 const BULK_PARAM_WIDGET_CONFIG_KEYS = [
   'min', 'max', 'step', 'precision', 'scale', 'rows',
@@ -193,10 +207,16 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
     },
     guidance: {
       field:
-        '`field` declares a FIELD-BACKED param, and the bulk surface has no such route: '
-        + '`resolveActionParams` consults the object\'s field definitions for the single-record '
-        + 'dialog, `resolveBulkActions`\'s `toBulkParam` never does. Declare the param inline '
-        + 'instead — `name` + `type`, plus `object` (and optionally `labelField`) for a picker.',
+        '`field` declares a FIELD-BACKED param, and an authored `bulkActionDefs[].params` entry '
+        + 'has no such route: it reaches the dialog as written, and nothing on this path resolves '
+        + 'it against the object\'s field definitions. Two ways to fix it. Declare the param '
+        + 'inline: `name` + `type`, plus `object` (and optionally `labelField`) for a picker. Or '
+        + 'declare the action on the object with this field-backed param (`{ field }`, plus '
+        + '`objectOverride` for another object\'s field) and name it in the view\'s '
+        + '`bulkActions: [\'<action_name>\']`. A promoted action\'s params are resolved through '
+        + 'the single-record dialog\'s resolver when the bulk dialog opens, so the param inherits '
+        + 'the field\'s type, label, options and picker target. The promoted form runs the action '
+        + 'once per selected record.',
       objectOverride:
         '`objectOverride` belongs to a field-backed ACTION param, which names the object owning '
         + 'the referenced field. A bulk param is always inline; the object a picker searches is '
@@ -232,9 +252,17 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
         + 'FIELD (`FieldSchema`, `data/field.zod.ts`), not of a bulk action param — this shape '
         + 'declares none of them. Until it was closed they rode through onto the renderer\'s field '
         + 'bag and whichever widget read one honoured it; that door is shut, so the value is '
-        + 'refused rather than silently forwarded. ⛔ Declaring the key on the object\'s FIELD does '
-        + 'not reach this dialog either: the bulk surface has no field-backed param route. Remove '
-        + 'the key, and open an issue if a bulk param genuinely needs it declared here.',
+        + 'refused rather than silently forwarded. A key declared on the object\'s FIELD reaches '
+        + 'this dialog only through a PROMOTED action: an action the object declares with a '
+        + 'field-backed param (`{ field }`), named in the view\'s `bulkActions`. That route '
+        + 'carries the field\'s `type`, `label`, `options`, `required`, `description` (as the help '
+        + 'text), `placeholder`, `defaultValue`, `multiple`, `accept` and `maxSize`, plus a '
+        + 'reference field\'s `reference`, `displayField` and `dependsOn`. ⛔ So of these keys only '
+        + '`accept` / `maxSize` arrive that way: the picker settings `lookupFilters` / '
+        + '`lookupColumns` / `lookupPageSize` / `descriptionField` / `idField` are dropped on the '
+        + 'bulk path, and the rest are never read off the field. Remove the key, or for `accept` / '
+        + '`maxSize` move the param onto a promoted action; open an issue if a bulk param '
+        + 'genuinely needs a key declared here.',
     }],
     history:
       'Until this shape was closed, `params[]` was `.passthrough()` — every unknown key rode through '
@@ -265,9 +293,14 @@ export const BulkActionParamSchema = lazySchema(() => strictObject(
    * `FieldSchema.dependsOn` (`data/field.zod.ts`), NOT `ActionParamSchema`,
    * which declares no `dependsOn` at all: the single-record dialog reaches the
    * key through the FIELD-BACKED route (`resolveActionParams` resolves the
-   * object's field definitions), which is the very route the bulk surface does
-   * not have. So one vocabulary, two doors — and on this door the key has to be
-   * written on the param itself.
+   * object's field definitions). The bulk surface has that route for a PROMOTED
+   * def only, an action the object declares, named in the view's `bulkActions`:
+   * since objectui `29b99490` its field-backed params are resolved by the same
+   * resolver when the dialog opens, so a reference-bearing field's `dependsOn`
+   * arrives on the bulk param from the field. An AUTHORED def (this shape) has
+   * no such route. So one vocabulary, two doors: the FIELD, read by the
+   * single-record dialog and by a promoted bulk def, and this param, which is
+   * where the key has to be written on an authored def.
    *
    * Live on BOTH widget families reachable from the bulk dialog, measured on
    * the renderer rather than inferred from this schema:
