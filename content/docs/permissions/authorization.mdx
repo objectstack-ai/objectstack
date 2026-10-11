@@ -426,6 +426,18 @@ as the flow and action activation switches. The two audience anchors,
 `everyone` and `guest`, are refused with `400` in either direction: one row
 would switch the authenticated or anonymous baseline off for every principal.
 
+The anchors are sealed against every caller-reachable write: this door, the
+metadata door and an organization overlay all refuse them. A package's
+`isDefault` set still reaches every signed-in member, and the seal reads this
+way: an **acceptance changes the input of a derivation, and no caller writes
+the anchor's definition**. The security plugin is the only declarer of
+`everyone`'s definition. It derives it as the deployment's baseline plus each
+package default a `manage_metadata` holder accepted, and re-declares it on
+every accept, revoke, uninstall and package publish. The acceptance record is
+one row per suggestion, owned by the Default Organization, and the
+high-privilege gate runs on the definition each time it is derived. See
+[Permission sets](./permission-sets).
+
 - A deactivated **permission set** contributes nothing: not its name, not its
   `system_permissions`, not its `tab_permissions`. As with an expired grant, a
   deactivated unscoped `admin_full_access` no longer derives `platform_admin`
