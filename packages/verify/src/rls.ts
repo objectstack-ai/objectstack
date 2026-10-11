@@ -376,12 +376,12 @@ export function rlsProbePermissionSet(config: any): PermissionSet {
  * above.
  *
  * The probe set must be REGISTERED at boot, not written as a bare
- * `sys_permission_set` row: `PermissionEvaluator.resolvePermissionSets` resolves
- * a name from metadata first, the bootstrap list second, and the DB row only as
- * a last resort — and that last-resort loader hydrates `objects` / `fields` /
- * `systemPermissions` / `tabPermissions` but NOT `rowLevelSecurity`. A row-only
- * probe set would therefore grant the object bits and silently drop the
- * narrowing, which is the one thing that makes the persona a probe at all.
+ * `sys_permission_set` row: [ADR-0131 D3/D4] a set's definition comes from the
+ * registry alone — `PermissionEvaluator.resolvePermissionSets` reads metadata,
+ * then the bootstrap list, then the security catalog, and none of the three
+ * reads a `sys_permission_set` row. A row-only probe set would resolve nowhere
+ * and grant nothing, narrowing included, which is the one thing that makes the
+ * persona a probe at all.
  *
  * `appSecurityPluginOptions(config)` is carried through verbatim so the app's
  * declared default profile still resolves exactly as it does under `bootStack`'s

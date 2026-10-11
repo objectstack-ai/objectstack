@@ -134,7 +134,7 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
     type SearchFieldMeta,
-    canServeApiOperation,
+    canServeApiOperation, apiExposureDenialReason, effectiveOperationsArray, resolveEffectiveApiMethods,
     classifyDottedFilterHead,
     foldQueryAliasSlots,
     QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
@@ -4462,6 +4462,17 @@ const INTERNAL_FIELD_WALK_DEPTH = 8;
  * its stored id, alike on both doors.
  */
 const EXPANSION_TARGET_OPERATION = 'get';
+
+/**
+ * [#22737] The operation a NESTED-RELATION condition's TARGET object is judged
+ * as, by the same decision: `list`. Not {@link EXPANSION_TARGET_OPERATION}'s
+ * `get`, because the read is not the same one: a condition is a PREDICATE over
+ * the target. The engine runs `find(target, { where: condition })` across the
+ * whole object, bounded by a match cap rather than by ids the source rows hold
+ * (`ObjectQL.lowerRelationConditions`), which is the read
+ * `GET /data/{target}?filter=…` performs, and that route is judged `list`.
+ */
+const RELATION_CONDITION_TARGET_OPERATION = 'list';
 
 /**
  * [#22646] The NESTED-RELATION conditions a filter holds — a key naming a
@@ -12523,7 +12534,9 @@ export class ObjectStackProtocolImplementation implements
      *    record matched, so a related `internal` field there is the same
      *    confirmation oracle one hop away. Judged here, at the door, rather than
      *    in the engine's relation-site walk, so the engine's privileged callers
-     *    keep the #7823 split (none of them reaches this door).
+     *    keep the #7823 split (none of them reaches this door). The RELATED
+     *    object's exposure is asked first, at the same hop
+     *    ({@link refuseUnservedRelationTarget}, #22737).
      *  - every `expand` entry's own `where` / `orderBy`, at EVERY depth of the
      *    expand tree, judged against that level's TARGET object: the nested
      *    sub-read's row strip already withholds the column, but a nested filter
@@ -12566,7 +12579,8 @@ export class ObjectStackProtocolImplementation implements
     /**
      * One filter's internal-field judgement: every column it reads on `object`
      * ({@link collectFilterReads}), then each nested-relation condition it holds,
-     * recursively, on the related object. `param` names the position, extended
+     * recursively, on the related object, once that object's exposure serves the
+     * condition ({@link refuseUnservedRelationTarget}). `param` names the position, extended
      * by the relation field at each hop (`filter.owner_id`).
      */
     private refuseInternalInFilter(object: string, where: unknown, param: string, depth: number): void {
@@ -12581,8 +12595,47 @@ export class ObjectStackProtocolImplementation implements
             this.refuseInternalNames(object, [...reads], internal, param);
         }
         for (const site of relationConditionSites(gate.fields, condition)) {
-            this.refuseInternalInFilter(site.target, site.condition, `${param}.${site.field}`, depth + 1);
+            const position = `${param}.${site.field}`;
+            // [#22737] The target's exposure before anything of it is judged.
+            this.refuseUnservedRelationTarget(site.target, position);
+            this.refuseInternalInFilter(site.target, site.condition, position, depth + 1);
         }
+    }
+
+    /**
+     * [#22737] A NESTED-RELATION condition is evaluated on its TARGET object
+     * (`ObjectQL.lowerRelationConditions` reads it as the caller), so the
+     * target is asked the spec's one exposure decision for
+     * {@link RELATION_CONDITION_TARGET_OPERATION}. A target it does not serve
+     * is REFUSED in the data door's own exposure answer: `404
+     * OBJECT_API_DISABLED` for the off switch, `405
+     * OBJECT_API_METHOD_NOT_ALLOWED` with the effective operation set for a
+     * whitelist. Refused, not withheld as {@link servedExpand} withholds:
+     * dropping a condition would widen the result, and a related object the
+     * caller may not read already answers this position with a refusal. The
+     * decision takes no caller. The target is named, as the `internal: true`
+     * refusal at this hop names it: it is the lookup's declared target.
+     */
+    private refuseUnservedRelationTarget(target: string, param: string): void {
+        const enable = this.engine?.registry?.getObject?.(target)?.enable;
+        const reason = apiExposureDenialReason(enable, RELATION_CONDITION_TARGET_OPERATION);
+        if (reason === null) return;
+        const consequence = `, so the condition on it at '${param}' was not evaluated and the query was not run. `
+            + 'Filter on the lookup\'s stored id instead, or remove the condition.';
+        const err: any = new Error(reason === 'api-disabled'
+            ? `Object '${target}' is not exposed via the API${consequence}`
+            : `API operation '${RELATION_CONDITION_TARGET_OPERATION}' is not allowed on object '${target}'${consequence}`);
+        if (reason === 'api-disabled') {
+            err.code = 'OBJECT_API_DISABLED';
+            err.status = 404;
+        } else {
+            err.code = 'OBJECT_API_METHOD_NOT_ALLOWED';
+            err.status = 405;
+            err.allowed = effectiveOperationsArray(resolveEffectiveApiMethods(enable));
+        }
+        err.object = target;
+        err.param = param;
+        throw err;
     }
 
     /**

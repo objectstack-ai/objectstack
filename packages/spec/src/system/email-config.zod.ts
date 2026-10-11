@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * Email Service Configuration Protocol
@@ -11,9 +12,17 @@ import { lazySchema } from '../shared/lazy-schema';
  * + provider-specific settings; concrete `IEmailTransport`
  * implementations live in `@objectstack/plugin-email/transports/*`.
  *
- * Resolution order in `serve.ts`:
- *   1. `config.email.*` from objectstack.config.ts
- *   2. `OS_EMAIL_*` environment variables (override per setting)
+ * Resolution order in `resolveEmailCapabilityArg` (`@objectstack/plugin-email`,
+ * the one reader; `objectstack serve` and `bootStack` both construct the email
+ * provider through it):
+ *   1. `config.email.*` from objectstack.config.ts — the NON-SECRET members
+ *      only. A config file is compiled into the published artifact, so the
+ *      stack definition carries {@link StackEmailConfigSchema}: every member
+ *      below except `apiKey`, with `options` narrowed to host / port / secure /
+ *      user / messageStream. `apiKey` and the SMTP `options.password` are
+ *      refused there by name; they are environment-only.
+ *   2. `OS_EMAIL_*` environment variables (override per setting) — the only
+ *      carrier of `OS_EMAIL_API_KEY` and `OS_EMAIL_SMTP_PASSWORD`
  *   3. Default → provider='log' (LogTransport, no real send)
  *
  * `appName` is the one key whose env layer is not `OS_EMAIL_*` — it is
@@ -30,7 +39,9 @@ import { lazySchema } from '../shared/lazy-schema';
  * SMTP delivery is built in (ADR-0012): select it with provider='smtp'
  * and supply the connection through `options` (host / port / secure /
  * user / password) or the matching OS_EMAIL_SMTP_HOST / _PORT /
- * _SECURE / _USER / _PASSWORD environment variables.
+ * _SECURE / _USER / _PASSWORD environment variables. From a config file the
+ * password always arrives through OS_EMAIL_SMTP_PASSWORD, which the reader
+ * layers over the host / port / secure / user the file carries.
  */
 
 /**
@@ -217,3 +228,105 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
 export type EmailServiceConfig = z.input<typeof EmailServiceConfigSchema>;
 /** Post-parse shape of {@link EmailServiceConfig} — defaults applied, transforms run (ADR-0122). */
 export type EmailServiceConfigParsed = z.infer<typeof EmailServiceConfigSchema>;
+
+/**
+ * The one prescription for a provider API key written into a stack definition,
+ * shared by the two places an author can write one (`email.apiKey`, and
+ * `email.options.apiKey`, which `makeTransport` spreads over the key for
+ * resend / postmark).
+ */
+const STACK_EMAIL_API_KEY_PRESCRIPTION =
+  'Not authorable here. A provider API key is a credential, and a stack definition is compiled into the '
+  + 'published artifact — set OS_EMAIL_API_KEY in the deployment environment instead (required for provider '
+  + 'resend / postmark).';
+
+/**
+ * `email.options` of a stack definition — the NON-SECRET provider extras.
+ *
+ * {@link EmailServiceConfigSchema}'s `options` is a free-form record whose
+ * TSDoc names the keys each transport reads: smtp `host` / `port` / `secure` /
+ * `user` / `password`, postmark `messageStream`. A stack definition is what
+ * `objectstack build` compiles into the artifact, and artifacts are published,
+ * so this block declares those keys minus the credential: the SMTP `password`
+ * (and an `apiKey`, which `makeTransport` would spread over the real one) is
+ * refused by name with its environment variable. The reader layers
+ * `OS_EMAIL_SMTP_*` over this block per key, so a file that carries host and
+ * user and an environment that carries `OS_EMAIL_SMTP_PASSWORD` compose into
+ * one working SMTP connection.
+ *
+ * Strict, unlike the record it narrows: a key no transport documents (raw
+ * `transportOptions`, `timeout`, `endpoint`) is refused rather than shipped
+ * into an artifact unexamined — `transportOptions` in particular is the SMTP
+ * escape hatch that can carry credentials of its own.
+ */
+export const StackEmailProviderOptionsSchema = lazySchema(() => strictObject(
+  {
+    surface: 'the stack `email.options` block',
+    history:
+      'This block is strict from birth — a stack definition carried no `email` key before it, so an unknown '
+      + 'key here was never accepted.',
+    guidance: {
+      password:
+        'Not authorable here. The SMTP password is a credential, and a stack definition is compiled into the '
+        + 'published artifact — set OS_EMAIL_SMTP_PASSWORD in the deployment environment instead; it is layered '
+        + 'over the host / port / secure / user this block carries.',
+      apiKey: STACK_EMAIL_API_KEY_PRESCRIPTION,
+    },
+  },
+  {
+    host: z.string().optional()
+      .describe('SMTP server hostname (OS_EMAIL_SMTP_HOST env wins). Required for provider smtp unless the env supplies it'),
+    port: z.number().int().optional()
+      .describe('SMTP port (OS_EMAIL_SMTP_PORT env wins). Default 587; 465 selects implicit TLS'),
+    secure: z.boolean().optional()
+      .describe('Require TLS (OS_EMAIL_SMTP_SECURE env wins). Default true'),
+    user: z.string().optional()
+      .describe('SMTP AUTH username (OS_EMAIL_SMTP_USER env wins). Its password is environment-only: OS_EMAIL_SMTP_PASSWORD'),
+    messageStream: z.string().optional()
+      .describe('Postmark message stream. Default outbound'),
+  },
+));
+export type StackEmailProviderOptions = z.input<typeof StackEmailProviderOptionsSchema>;
+/** Post-parse shape of {@link StackEmailProviderOptions} — defaults applied, transforms run (ADR-0122). */
+export type StackEmailProviderOptionsParsed = z.infer<typeof StackEmailProviderOptionsSchema>;
+
+/**
+ * `email` of a stack definition — what `objectstack.config.ts` may carry of
+ * {@link EmailServiceConfigSchema}.
+ *
+ * DERIVED, not transcribed: every member of that schema except the credential
+ * `apiKey`, with `options` narrowed to {@link StackEmailProviderOptionsSchema}.
+ * A key added to the operator contract therefore arrives here the day it
+ * lands; a secret one has to be omitted here on purpose, in this expression.
+ *
+ * Why the credentials stop at this door: the stack definition is what
+ * `objectstack build` compiles into the artifact, and artifacts are published
+ * (the marketplace ingest stores them). So a credential is refused BY NAME,
+ * with the environment variable that carries it, rather than as a bare unknown
+ * key — the same answer the stack gives `storage`. Everything else the reader
+ * reads (`resolveEmailCapabilityArg` in `@objectstack/plugin-email`, which
+ * `objectstack serve` and `bootStack` both construct the email provider
+ * through) is authorable here, and `OS_EMAIL_*` still overrides it per key.
+ */
+export const StackEmailConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: 'the stack `email` block',
+    history:
+      'This block is strict from birth — a stack definition carried no `email` key before it, so an unknown '
+      + 'key here was never accepted.',
+    aliases: { from: 'defaultFrom' },
+    guidance: { apiKey: STACK_EMAIL_API_KEY_PRESCRIPTION },
+  },
+  {
+    ...EmailServiceConfigSchema.omit({ apiKey: true, options: true }).shape,
+    options: StackEmailProviderOptionsSchema.optional()
+      .describe(
+        'Provider-specific extras, non-secret members only. smtp: host / port / secure / user, mirroring '
+        + 'OS_EMAIL_SMTP_HOST / _PORT / _SECURE / _USER (the password is OS_EMAIL_SMTP_PASSWORD only). '
+        + 'postmark: messageStream',
+      ),
+  },
+));
+export type StackEmailConfig = z.input<typeof StackEmailConfigSchema>;
+/** Post-parse shape of {@link StackEmailConfig} — defaults applied, transforms run (ADR-0122). */
+export type StackEmailConfigParsed = z.infer<typeof StackEmailConfigSchema>;

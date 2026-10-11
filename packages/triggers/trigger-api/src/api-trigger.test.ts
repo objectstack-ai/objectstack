@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHmac } from 'node:crypto';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ApiTrigger, verifySignature } from './api-trigger.js';
 import type { QueueServiceSurface } from './api-trigger.js';
 
@@ -219,5 +219,141 @@ describe('ApiTrigger — a secret read at verification time', () => {
         const res = await t.handleRequest({ flowName: 'held_intake', hookId: 'wrong', rawBody: '{}', signatureHeader: sig(HELD, '{}') });
         expect(res.status).toBe(404);
         expect(reads).toBe(0);
+    });
+});
+
+/**
+ * The timestamped signature form beside the body-only one. A third-party
+ * sender computes it on its own, so the helper below derives it with
+ * `createHmac` directly from the published recipe rather than through
+ * `@objectstack/core`: these pins check the receiver against the wire form,
+ * not against the function it verifies with.
+ *
+ *   x-objectstack-signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">
+ *
+ * Every refusal asserts the whole bad-signature envelope — `401`, code
+ * `INVALID_SIGNATURE` — and that nothing reached the queue.
+ */
+describe('ApiTrigger — the timestamped signature form', () => {
+    const NOW = 1760000000;
+    const WINDOW = 300;
+    const SECRET = 'pin-trigger-v1-3f9a';
+    const BODY = JSON.stringify({ event: 'invoice.paid', id: 'evt_77' });
+    const REFUSED = { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
+
+    function sigV1(secret: string, body: string, t: number): string {
+        return `t=${t},v1=` + createHmac('sha256', secret).update(`${t}.${body}`, 'utf8').digest('hex');
+    }
+
+    let queue: ReturnType<typeof makeFakeQueue>;
+    let log: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
+    let trigger: ApiTrigger;
+    let runs: any[];
+
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(NOW * 1000);
+        queue = makeFakeQueue();
+        log = { info: vi.fn(), warn: vi.fn() };
+        trigger = new ApiTrigger(() => queue, log as any);
+        runs = [];
+        trigger.start({ flowName: 'invoice_intake', config: { hookId: 'hk_v1', secret: SECRET } }, async (ctx) => { runs.push(ctx); });
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    const post = (signatureHeader: string | undefined, rawBody = BODY) =>
+        trigger.handleRequest({ flowName: 'invoice_intake', hookId: 'hk_v1', rawBody, signatureHeader });
+
+    /** The deprecation lines this trigger has logged so far. */
+    const deprecationLines = () =>
+        log.warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('deprecated'));
+
+    it('accepts a fresh timestamped post: 202, enqueued, the flow runs — and no deprecation line', async () => {
+        const res = await post(sigV1(SECRET, BODY, NOW));
+        expect(res.status).toBe(202);
+        expect(res.body).toEqual({ accepted: true, messageId: 'msg_1' });
+        expect(await queue.deliver()).toBe(1);
+        expect(runs[0].record).toEqual({ event: 'invoice.paid', id: 'evt_77' });
+        expect(deprecationLines()).toEqual([]);
+    });
+
+    it('refuses a replay outside the window: the post it accepted, sent again later, is a 401 and is not enqueued', async () => {
+        const header = sigV1(SECRET, BODY, NOW);
+        expect((await post(header)).status).toBe(202);
+        expect(queue.published).toHaveLength(1);
+
+        vi.setSystemTime((NOW + WINDOW + 1) * 1000);
+        expect(await post(header)).toEqual(REFUSED);
+        expect(queue.published).toHaveLength(1);
+    });
+
+    it('refuses a stale timestamp the HMAC genuinely covers, and a future one past the window; accepts the edges', async () => {
+        expect(await post(sigV1(SECRET, BODY, NOW - WINDOW - 1))).toEqual(REFUSED);
+        expect(await post(sigV1(SECRET, BODY, NOW + WINDOW + 1))).toEqual(REFUSED);
+        expect(queue.published).toEqual([]);
+        expect((await post(sigV1(SECRET, BODY, NOW - WINDOW))).status).toBe(202);
+        expect((await post(sigV1(SECRET, BODY, NOW + WINDOW))).status).toBe(202);
+    });
+
+    it('refuses a stale timestamp carried with a valid BODY-ONLY signature — a timestamp claims the versioned form, with no fallback', async () => {
+        const bodyOnlyHex = sig(SECRET, BODY).slice('sha256='.length);
+        for (const t of [NOW - WINDOW - 1, NOW - 3600, NOW]) {
+            expect(await post(`t=${t},v1=${bodyOnlyHex}`), `v1 at ${t}`).toEqual(REFUSED);
+            expect(await post(`t=${t},sha256=${bodyOnlyHex}`), `sha256 at ${t}`).toEqual(REFUSED);
+        }
+        expect(queue.published).toEqual([]);
+        expect(deprecationLines()).toEqual([]);
+    });
+
+    it('refuses a malformed timestamped value with the same envelope a bad signature gets', async () => {
+        const hex = sigV1(SECRET, BODY, NOW).split(',v1=')[1]!;
+        for (const malformed of [
+            `t=${NOW}`,
+            `t=${NOW},v1=${hex.slice(2)}`,
+            `t=${NOW},v1=${hex.toUpperCase()}`,
+            `v1=${hex},t=${NOW}`,
+            `t=0${NOW},v1=${hex}`,
+            `t=abc,v1=${hex}`,
+            `t=${NOW},v1=${hex},v0=${hex}`,
+        ]) {
+            expect(await post(malformed), malformed).toEqual(REFUSED);
+        }
+        // The same envelope as a plain bad signature.
+        expect(await post(sig('not-the-secret', BODY))).toEqual(REFUSED);
+        expect(queue.published).toEqual([]);
+    });
+
+    it('refuses the timestamped form under the wrong secret, or over a body other than the one received', async () => {
+        expect(await post(sigV1('not-the-secret', BODY, NOW))).toEqual(REFUSED);
+        expect(await post(sigV1(SECRET, BODY, NOW), `${BODY}\n`)).toEqual(REFUSED);
+        expect(queue.published).toEqual([]);
+    });
+
+    it('CONTROL: still accepts a body-only signature, and logs its deprecation once per armed hook, naming the flow and the hook', async () => {
+        expect((await post(sig(SECRET, BODY))).status).toBe(202);
+        expect((await post(sig(SECRET, BODY))).status).toBe(202);
+        expect(queue.published).toHaveLength(2);
+
+        const lines = deprecationLines();
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("flow 'invoice_intake'");
+        expect(lines[0]).toContain("hook 'hk_v1'");
+        expect(lines[0]).toContain('t=<unix seconds>,v1=');
+
+        // A timestamped post adds nothing to it; re-arming the hook says it once more.
+        expect((await post(sigV1(SECRET, BODY, NOW))).status).toBe(202);
+        expect(deprecationLines()).toHaveLength(1);
+        trigger.stop('invoice_intake');
+        trigger.start({ flowName: 'invoice_intake', config: { hookId: 'hk_v1', secret: SECRET } }, async () => {});
+        expect((await post(sig(SECRET, BODY))).status).toBe(202);
+        expect(deprecationLines()).toHaveLength(2);
+    });
+
+    it('verifySignature, the exported check, accepts both forms and refuses a stale one', () => {
+        expect(verifySignature(SECRET, BODY, sigV1(SECRET, BODY, NOW))).toBe(true);
+        expect(verifySignature(SECRET, BODY, sig(SECRET, BODY))).toBe(true);
+        expect(verifySignature(SECRET, BODY, sigV1(SECRET, BODY, NOW - WINDOW - 1))).toBe(false);
     });
 });

@@ -618,6 +618,13 @@ export const ERROR_CODE_LEDGER = {
     'NOT_ATTEMPTED',              // data-batch row never ran — an earlier row's failure stopped the batch, to roll back (atomic, #4793) or because continueOnError was unset (#7539)
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
+    // [#22737] The data door's two exposure codes, stamped by `findData`'s
+    // nested-relation walk (`refuseUnservedRelationTarget`) when a condition's
+    // related object does not serve `list`: 404 for `apiEnabled: false`, 405
+    // with `allowed` for a whitelist. Served on the list and query routes.
+    // `@objectstack/rest` keeps its own rows for the addressed object.
+    'OBJECT_API_DISABLED',
+    'OBJECT_API_METHOD_NOT_ALLOWED',
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
     'OBJECT_PACKAGE_DISABLED',    // [#7557] object is registered but its owning package is disabled — data plane refuses rather than serving rows
     // [#8846] the query body's convenience `object` key names a different

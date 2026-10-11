@@ -126,7 +126,7 @@ Stored as JSON on the parent row — no separate table / FK:
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `formula` | Computed from an expression referencing other fields | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date'`) |
+| `formula` | Computed from an expression referencing other fields | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
 | `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field, function, relationshipField?, filter? }) |
 | `autonumber` | Auto-incrementing display format ({0000} counter + optional date / {field} tokens, resets per scope) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"`, `"AD{YYYYMMDD}{0000}"` |
 
@@ -249,8 +249,8 @@ import { F } from '@objectstack/spec';
 
 const total = {
   type: 'formula',
-  expression: F`record.amount * record.tax_rate`,  // CEL — `record.` prefixes required
-  returnType: 'number',   // 'number' | 'text' | 'boolean' | 'date' (no 'currency')
+  expression: F`record.amount * record.tax_rate`,
+  returnType: 'number',   // 'number' | 'text' | 'boolean' | 'date' | 'currency' (money; own currencyConfig)
 };
 ```
 

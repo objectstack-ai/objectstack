@@ -216,6 +216,7 @@
     "system/Span:kind = \"internal\"",
     "system/Span:links = []",
     "system/Specifier:required = false",
+    "system/StackEmailConfig:provider = \"log\"",
     "system/StackServerConfig:trustProxy = false",
     "system/StorageConnection:useSSL = true",
     "system/SupplierSecurityPolicy:enabled = true",

@@ -1268,6 +1268,29 @@ function structuredCodeAnswer(
             },
         };
     }
+    // [#22737] The data door's two exposure codes, refusing a SECOND object: the
+    // error names an object other than the one the route addressed (a
+    // nested-relation condition's target, `metadata-protocol`'s
+    // `refuseUnservedRelationTarget`). The generic passthrough would stamp the
+    // ROUTE's object beside a code saying that object is switched off, so this
+    // names the error's own object and relays `allowed`, the body the REST door
+    // sends for these codes itself (`apiAccessDenialFromEnable`). An error naming
+    // the route's own object, or a door given none, keeps the passthrough's
+    // answer byte for byte.
+    if ((error?.code === 'OBJECT_API_DISABLED' || error?.code === 'OBJECT_API_METHOD_NOT_ALLOWED')
+        && typeof error?.object === 'string' && error.object.length > 0
+        && typeof object === 'string' && object.length > 0 && error.object !== object) {
+        const disabled = error.code === 'OBJECT_API_DISABLED';
+        return {
+            status: disabled ? 404 : 405,
+            body: {
+                error: armSentence(error) ?? `The API does not serve object '${error.object}'`,
+                code: error.code,
+                object: error.object,
+                ...(!disabled && Array.isArray(error.allowed) ? { allowed: error.allowed } : {}),
+            },
+        };
+    }
     return undefined;
 }
 

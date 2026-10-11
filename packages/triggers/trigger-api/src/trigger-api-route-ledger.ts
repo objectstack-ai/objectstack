@@ -115,8 +115,9 @@ export const TRIGGER_API_ROUTE_LEDGER: readonly TriggerApiRouteLedgerEntry[] = [
         family: 'inbound-hooks',
         disposition: 'server-only',
         note:
-            'the door a third-party sender posts through, not an SDK call: GitHub/Stripe-style HMAC over the raw body '
-            + '(`x-objectstack-signature`, constant-time) against the flow start-node `secret`, then ENQUEUE + 202 — the flow '
+            'the door a third-party sender posts through, not an SDK call: GitHub/Stripe-style HMAC over the raw body, or over '
+            + 'a signed timestamp and the raw body checked against a tolerance window (`x-objectstack-signature`, '
+            + 'constant-time, through core\'s `verifyHttpSignature`) against the flow start-node `secret`, then ENQUEUE + 202 — the flow '
             + 'runs on the queue consumer, never in-band (ADR-0041 §5). Measured, not assumed: `@objectstack/client`\'s whole '
             + '`automation` namespace targets the dispatcher domain `/api/v1/automation`, and no client method builds a '
             + '`/automation/hooks/*` URL. Not `public` either — that disposition means an anonymous BROWSER surface (public '
