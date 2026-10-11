@@ -693,6 +693,23 @@ async function absentUnderCallerRead(read: () => Promise<unknown>): Promise<bool
 }
 
 /**
+ * [#22851, ruling C] The same caller-context by-id read, classified for an
+ * explain asker who is NOT the principal being explained: does the read leave
+ * this caller without the row? No row, and a declared 4xx refusal (the
+ * object's read grant withheld, a predicate the driver will not compile), are
+ * both "cannot read": neither gives the caller the record, so neither may let
+ * an explanation say it exists. A store fault propagates, as in
+ * {@link absentUnderCallerRead}. Only the classification of a refusal differs
+ * from that predicate, and only for a third-party asker: a principal
+ * explaining itself keeps the write path's notion, so its explanation shows
+ * what its own doors do.
+ */
+async function unreadableUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
+  const answer = await readUnlessRefused(read);
+  return answer.refused || answer.value == null;
+}
+
+/**
  * [#21771 / #21829] The one classification of a caller-context read that the
  * write doors ask the read door's question with — the read's answer, or
  * `refused`:
@@ -5105,7 +5122,10 @@ export class SecurityPlugin implements Plugin {
    * [#22792] ...and with the CALLER as the asker. Whether the explanation may
    * say a record exists is decided by the caller's read of it, never by the
    * explained user's: a caller the read door does not return the record to is
-   * answered exactly as for an id no row carries, whoever it explains.
+   * answered exactly as for an id no row carries. [#22851, ruling C] A caller
+   * explaining ANOTHER user whose read of the record is refused (a declared
+   * 4xx) is answered so too; a caller explaining itself keeps the write path's
+   * notion (no row), so its explanation shows what its own doors do.
    */
   async explainAccessForCaller(
     request: { object: string; operation: string; userId?: string; recordId?: string },
@@ -5320,8 +5340,13 @@ export class SecurityPlugin implements Plugin {
       { object, operation, context: targetContext, recordId },
       // The asker: the caller, whose read of the record decides whether this
       // explanation discloses that the record exists. On a self-explanation it
-      // is the explained context itself.
-      callerContext,
+      // is the explained context itself, and the engine asks it the write
+      // path's question; explaining another user, the engine asks `cannotRead`,
+      // the same read with a refusal counted as "cannot read" (ruling C).
+      {
+        context: callerContext,
+        cannotRead: (o: string, rid: string) => unreadableUnderCallerRead(() => this.readRowById(o, rid, callerContext)),
+      },
     );
   }
 

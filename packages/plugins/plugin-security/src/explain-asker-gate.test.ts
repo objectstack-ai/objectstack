@@ -58,7 +58,7 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
-import { explainAccess, explainAccessForAsker, type ExplainEngineDeps } from './explain-engine.js';
+import { explainAccess, explainAccessForAsker, type ExplainEngineDeps, type ExplainInput } from './explain-engine.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -359,6 +359,16 @@ describe('the read question, engine level: who it is asked of, and how often', (
   });
   /** The read door: `absent` lists the contexts it does not return the record to. */
   const door = (...absent: unknown[]) => vi.fn(async (_o: string, _id: string, c: unknown) => absent.includes(c));
+  /**
+   * The internal entry, asked by `askerContext`, whose own read is the deps
+   * bag's door asked with its context: a door that never refuses, so the
+   * third-party classification (ruling C) answers what the door answers.
+   */
+  const explainFor = (d: ExplainEngineDeps, input: ExplainInput, askerContext: unknown) =>
+    explainAccessForAsker(d, input, {
+      context: askerContext,
+      cannotRead: (o, id) => (d.recordAbsentToCaller ? d.recordAbsentToCaller(o, id, askerContext) : Promise.resolve(false)),
+    });
 
   it('a self-explanation asks the explained context, once, whatever the verb', async () => {
     for (const verb of VERBS) {
@@ -372,7 +382,7 @@ describe('the read question, engine level: who it is asked of, and how often', (
   it('another asker is asked with its own context, and the explained principal only for a by-id write', async () => {
     for (const verb of VERBS) {
       const question = door();
-      await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER);
+      await explainFor(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER);
       const asked = question.mock.calls.map((c) => c[2]);
       expect(asked[0], `${verb}: the asker first`).toBe(ASKER);
       expect(asked.filter((c) => c === ASKER), `${verb}: the asker, once`).toHaveLength(1);
@@ -383,7 +393,7 @@ describe('the read question, engine level: who it is asked of, and how often', (
   it('a write of a row the explained principal cannot read asks each context once, its read pass included', async () => {
     for (const verb of WRITE_VERBS) {
       const question = door(EXPLAINED);
-      const d = await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER);
+      const d = await explainFor(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER);
       expect(d.record, verb).toMatchObject({ recordId: STORED.id, visible: false });
       expect(question.mock.calls.map((c) => c[2]), verb).toEqual([ASKER, EXPLAINED]);
     }
@@ -398,9 +408,9 @@ describe('the read question, engine level: who it is asked of, and how often', (
     });
     for (const verb of WRITE_VERBS) {
       const input = { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id };
-      const writeAlone = await explainAccessForAsker(readOnlyRls(door()), input, ASKER);
+      const writeAlone = await explainFor(readOnlyRls(door()), input, ASKER);
       expect(writeAlone.record, `${verb}, a principal who reads the row`).toMatchObject({ visible: true });
-      const unreadable = await explainAccessForAsker(readOnlyRls(door(EXPLAINED)), input, ASKER);
+      const unreadable = await explainFor(readOnlyRls(door(EXPLAINED)), input, ASKER);
       expect(unreadable.record, `${verb}, a principal who cannot read the row`).toEqual({ recordId: STORED.id, visible: false, decidedBy: 'rls' });
       const rls = layerRecord(unreadable, 'rls');
       expect(rls?.outcome, verb).toBe('excluded');
@@ -412,7 +422,7 @@ describe('the read question, engine level: who it is asked of, and how often', (
   it('a system asker is asked like any other asker: there is no exemption beside the read door\'s own answer', async () => {
     for (const verb of VERBS) {
       const question = door();
-      const bySystem = await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, SYSTEM_CONTEXT);
+      const bySystem = await explainFor(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, SYSTEM_CONTEXT);
       expect(question.mock.calls[0][2], verb).toBe(SYSTEM_CONTEXT);
       expect(bySystem.record, verb).toMatchObject({ recordId: STORED.id, visible: true });
     }
@@ -423,7 +433,7 @@ describe('the read question, engine level: who it is asked of, and how often', (
     for (const verb of VERBS) {
       const question = vi.fn(async () => { throw fault; });
       await expect(
-        explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER),
+        explainFor(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER),
         verb,
       ).rejects.toBe(fault);
     }
@@ -432,8 +442,8 @@ describe('the read question, engine level: who it is asked of, and how often', (
   it('an asker the door does not return the row to gets the stored row\'s explanation as the nonexistent id\'s', async () => {
     for (const verb of VERBS) {
       const question = door(ASKER);
-      const stored = await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER);
-      const missing = await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: 'r_missing' }, ASKER);
+      const stored = await explainFor(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, ASKER);
+      const missing = await explainFor(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: 'r_missing' }, ASKER);
       expect(stored.record, verb).toEqual({ recordId: STORED.id, visible: false });
       expect(withoutRecordId(stored), verb).toEqual(withoutRecordId(missing));
     }

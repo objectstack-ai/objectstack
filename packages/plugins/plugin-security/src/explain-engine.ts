@@ -426,11 +426,14 @@ export interface ExplainEngineDeps {
    * dependency here answers, so the door's own answer is what the read verdict
    * takes ({@link applyRecordAttribution}).
    *
-   * [#22792] Asked first of the ASKER, for every record-grained explanation:
-   * whether the explanation may say the record exists is decided by the read
-   * access of whoever asked for it, not by the explained principal's (the
-   * asker gate in the engine's record pass). One question, one notion of "can read":
-   * the same caller-context by-id read, asked with the asker's context.
+   * [#22792] Asked first of the ASKER, for every record-grained
+   * self-explanation: whether the explanation may say the record exists is
+   * decided by the read access of whoever asked for it, not by the explained
+   * principal's (the asker gate in the engine's record pass). [#22851] An
+   * asker explaining ANOTHER principal is asked the same caller-context by-id
+   * read through the security service's own binding, where a declared refusal
+   * counts as "cannot read" too (ruling C); this dependency keeps the write
+   * path's notion, which a principal explaining itself is asked.
    */
   recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
@@ -1870,10 +1873,29 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
 }
 
 /**
- * [#22792] Explain `input.context`'s access, asked by `askerContext`: the
- * principal that requested the explanation, which is not the principal being
- * explained when an administrator explains another user (ADR-0090 D6/D12).
- * `undefined` means the explained principal asks for itself.
+ * [#22792] The principal that asked for an explanation. Module-internal, as
+ * {@link explainAccessForAsker} is.
+ */
+export interface ExplainAsker {
+  /** The asking principal's context; `undefined` or the explained context itself is a self-explanation. */
+  context: any;
+  /**
+   * [#22851, ruling C] The asker's own caller-context by-id read, classified
+   * for an asker who is NOT the explained principal: `true` when the read
+   * leaves the asker without the row, by returning none OR by refusing (a
+   * declared 4xx); a store fault rejects. Asked only for such an asker. A
+   * principal explaining itself is asked the write path's question
+   * (`recordAbsentToCaller`: absent means no row) instead, so a
+   * self-explanation shows what that principal's own doors do.
+   */
+  cannotRead: (object: string, recordId: string) => Promise<boolean>;
+}
+
+/**
+ * [#22792] Explain `input.context`'s access, asked by `asker`: the principal
+ * that requested the explanation, which is not the principal being explained
+ * when an administrator explains another user (ADR-0090 D6/D12). `undefined`
+ * means the explained principal asks for itself.
  *
  * Ruling A of the explain-asker decision: whether an explanation may disclose
  * that a record exists is decided by the ASKER's read access, never by the
@@ -1881,6 +1903,11 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
  * operation, exactly what an id no row carries gets: the record verdict and
  * every layer's per-record attribution. An asker who can read it learns
  * nothing new about its existence, and gets the full record story.
+ *
+ * [#22851] Ruling C settles what "cannot read" means for each asker, on the
+ * one caller-context by-id read: for an asker explaining ANOTHER principal,
+ * no row or a declared refusal (`asker.cannotRead`); for a principal
+ * explaining itself, no row (`recordAbsentToCaller`, the write path's notion).
  *
  * Module-internal on purpose: the package publishes {@link explainAccess},
  * whose signature and self-explanation answer this leaves as they are. The
@@ -1890,13 +1917,30 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
 export async function explainAccessForAsker(
   deps: ExplainEngineDeps,
   input: ExplainInput,
-  askerContext: any,
+  asker: ExplainAsker | undefined,
 ): Promise<ExplainDecision> {
   // One explanation asks the read question of at most two principals (the
   // asker and the explained), from up to three places (the asker gate, the
   // by-id write guard, the master leg of a read), and the principal's READ
   // pass below asks it again: each (principal, record) pair is read once.
-  return explainOnce({ ...deps, recordAbsentToCaller: askedOnce(deps.recordAbsentToCaller) }, input, askerContext);
+  const askerOnce: ExplainAsker | undefined = asker && { context: asker.context, cannotRead: oncePerRecord(asker.cannotRead) };
+  return explainOnce({ ...deps, recordAbsentToCaller: askedOnce(deps.recordAbsentToCaller) }, input, askerOnce);
+}
+
+/** One answer per (object, record) for the length of one explanation; a rejection stays the rejection it was. */
+function oncePerRecord(
+  question: (object: string, recordId: string) => Promise<boolean>,
+): (object: string, recordId: string) => Promise<boolean> {
+  const asked = new Map<string, Promise<boolean>>();
+  return (object, recordId) => {
+    const key = JSON.stringify([object, recordId]);
+    let answer = asked.get(key);
+    if (!answer) {
+      answer = question(object, recordId);
+      asked.set(key, answer);
+    }
+    return answer;
+  };
 }
 
 /**
@@ -1908,20 +1952,14 @@ function askedOnce(
   question: ExplainEngineDeps['recordAbsentToCaller'],
 ): ExplainEngineDeps['recordAbsentToCaller'] {
   if (question === undefined) return undefined;
-  const asked = new Map<unknown, Map<string, Promise<boolean>>>();
+  const byContext = new Map<unknown, (object: string, recordId: string) => Promise<boolean>>();
   return (object, recordId, context) => {
-    let byRecord = asked.get(context);
-    if (!byRecord) {
-      byRecord = new Map();
-      asked.set(context, byRecord);
+    let ask = byContext.get(context);
+    if (!ask) {
+      ask = oncePerRecord((o, r) => question(o, r, context));
+      byContext.set(context, ask);
     }
-    const key = JSON.stringify([object, recordId]);
-    let answer = byRecord.get(key);
-    if (!answer) {
-      answer = question(object, recordId, context);
-      byRecord.set(key, answer);
-    }
-    return answer;
+    return ask(object, recordId);
   };
 }
 
@@ -1952,7 +1990,7 @@ function attributeThePrincipalsRead(layers: ExplainLayer[], read: ExplainDecisio
   }
 }
 
-async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, askerContext: any): Promise<ExplainDecision> {
+async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: ExplainAsker | undefined): Promise<ExplainDecision> {
   const { object, operation, context } = input;
   const engineOp = EXPLAIN_TO_ENGINE_OP[operation];
   // [#3544] The gate operation (`engineOp`) and the data operation may differ —
@@ -2393,14 +2431,22 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, askerCo
     // whether this explanation may say the record exists. An asker the read
     // door does not return the record to gets, for every operation, the whole
     // answer an id no row carries gets: the record verdict and every layer's
-    // `record`, all from the one missing-record path below. The question is
-    // the read door's own (`recordAbsentToCaller`), asked with the asker's
-    // context, so there is one notion of "can read" and no exemption beside
-    // it: a system asker is asked too, and the door returns it every row.
-    const asker = askerContext ?? context;
-    const askerCannotRead =
-      readQuestion !== undefined &&
-      (await readQuestion(object, recordId, asker));
+    // `record`, all from the one missing-record path below. The read is the
+    // read door's own caller-context by-id read, asked with the asker's
+    // context, and no exemption sits beside it: a system asker is asked too,
+    // and the door returns it every row.
+    //
+    // [#22851] Ruling C: what "cannot read" means differs by asker, on that one
+    // read. A principal explaining itself is asked the write path's question
+    // (`recordAbsentToCaller`: absent means no row), so its explanation shows
+    // what its own doors do; an asker explaining ANOTHER principal is asked
+    // `asker.cannotRead`, where a declared refusal of its read counts as
+    // "cannot read" too. A store fault fails the explanation either way.
+    const askerContext = asker?.context ?? context;
+    const askerIsPrincipal = askerContext === context;
+    const askerCannotRead = askerIsPrincipal
+      ? readQuestion !== undefined && (await readQuestion(object, recordId, context))
+      : await asker!.cannotRead(object, recordId);
     // [#21771] Ruling A on the write doors: a row the principal cannot READ is
     // a row that does not exist, so an update or delete of it answers what a
     // nonexistent id answers, wherever enforcement reaches that question: past
@@ -2436,7 +2482,7 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, askerCo
     // view bypass.
     const principalCannotRead =
       !askerCannotRead &&
-      asker !== context &&
+      !askerIsPrincipal &&
       (rlsOp === 'update' || rlsOp === 'delete') &&
       !capsDeny &&
       crudAllowed &&
@@ -2451,7 +2497,7 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, askerCo
     recordVerdict = out.record;
     posture = out.posture;
     if (principalCannotRead) {
-      const read = await explainOnce(deps, { object, operation: 'read', context, recordId }, askerContext);
+      const read = await explainOnce(deps, { object, operation: 'read', context, recordId }, asker);
       attributeThePrincipalsRead(layers, read, operation);
       // A read story that reaches no refusal names no decider: the door's
       // answer stands, `visible: false`, and no layer is credited with it.

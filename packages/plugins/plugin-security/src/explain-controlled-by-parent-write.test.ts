@@ -306,7 +306,11 @@ const askedOf = (readDoor: ReadDoor) => (readDoor as ReturnType<typeof vi.fn>).m
 
 /** `null` asks the object-level question (no `recordId`). */
 const explainToAsker = (d: ExplainEngineDeps, operation: ExplainOperation, recordId: string | null = 'r1') =>
-  explainAccessForAsker(d, { object: OBJECT, operation, context: EXPLAINED, ...(recordId !== null ? { recordId } : {}) }, ASKER);
+  explainAccessForAsker(d, { object: OBJECT, operation, context: EXPLAINED, ...(recordId !== null ? { recordId } : {}) }, {
+    context: ASKER,
+    // The asker's own read is the same door, asked with its context; the door never refuses here.
+    cannotRead: (o, id) => (d.recordAbsentToCaller ? d.recordAbsentToCaller(o, id, ASKER) : Promise.resolve(false)),
+  });
 
 describe('[ADR-0055] a read of a controlled_by_parent record takes the read door\'s answer on the master leg', () => {
   for (const verb of READ_DOOR_ASKED) {
