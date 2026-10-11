@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 233 |
-| Object name statically decidable | 158 |
+| Write call sites | 231 |
+| Object name statically decidable | 156 |
 | Object name chosen at run time | 75 |
-| Against a tenancy-enabled object | 157 |
+| Against a tenancy-enabled object | 155 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 172 |
+| Threading a tenant context | 170 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
 | Threading a decidably elevated context | 126 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 99 |
+| Threading a context of undecidable elevation | 97 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,7 +90,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-11 at `64e53f1d0`.
+Measured on 2026-10-11 at `f6bce8aaf`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
@@ -173,10 +173,9 @@ Measured on 2026-10-11 at `64e53f1d0`.
 | `packages/plugins/plugin-security/src/position-environment-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/position-write-through.ts` | `delete` | `sys_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/position-write-through.ts` | `update` | `sys_position` | enabled | elevated | 1 |
-| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 2 |
+| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 3 |
-| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_position_permission_set` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
 | `packages/plugins/plugin-sharing/src/primary-bu-projection.ts` | `update` | `sys_user` | enabled | elevated | 2 |
 | `packages/plugins/plugin-sharing/src/record-orphan-cleanup.ts` | `delete` | `table` | undecidable | options unreadable | 2 |

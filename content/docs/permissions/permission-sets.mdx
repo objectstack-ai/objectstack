@@ -253,22 +253,24 @@ hand.
 ## Package suggestion — `isDefault` (ADR-0090 D5)
 
 A package may mark one of its sets `isDefault: true`: an **install-time
-suggestion** to bind it to the `everyone` anchor. The admin confirms each
-suggestion individually; nothing auto-binds, and the D7 linter rejects an
+suggestion** to give it to every signed-in member through the `everyone`
+anchor. An admin holding `manage_metadata` accepts each suggestion once, for
+the whole deployment; nothing auto-binds, and the D7 linter rejects an
 `isDefault` set that carries anchor-forbidden bits (VAMA, destructive bits,
 system permissions). A plain `'*'` wildcard grant is *not* an anchor-forbidden
 bit for `everyone` — the platform's own `member_default` baseline is exactly
 that shape; the wildcard ban is the stricter `guest` tier's rule.
 
-Pending suggestions are materialized as `sys_audience_binding_suggestion`
-rows (one per organization × package × set × anchor, read-only over the data
-API) and resolved through the security surface — both installing a package at
-runtime and declaring the set in the stack produce them:
+Suggestions are materialized as `sys_audience_binding_suggestion` rows (one
+per package × set × anchor for the deployment, owned by the Default
+Organization, read-only over the data API) and resolved through the security
+surface — any `isDefault` set the security catalog serves with an owning
+package produces one:
 
 ```http
 GET  /api/v1/security/suggested-bindings?status=pending   # list (reconciles first)
-POST /api/v1/security/suggested-bindings/:id/confirm      # create the everyone binding
-POST /api/v1/security/suggested-bindings/:id/dismiss      # decline the prompt
+POST /api/v1/security/suggested-bindings/:id/confirm      # accept: everyone carries the set
+POST /api/v1/security/suggested-bindings/:id/dismiss      # decline, or revoke an acceptance
 ```
 
 `status` accepts `pending`, `confirmed` or `dismissed`, and may be omitted to
@@ -276,15 +278,30 @@ list every suggestion. Any other value is rejected with a `400` naming the
 accepted set — it previously reached the query as a filter nothing matched, so
 a mistyped status returned an empty list that read as "no suggestions".
 
-All three require a tenant-level administrator (the anchors are tenant-level
-only — D12). Confirm writes a `sys_position_permission_set` row **as the
-caller**, so the audience-anchor gate re-checks the forbidden-bits predicate
-at the data layer. That row does not grant the set: what `everyone` grants is
-the `permissionSets` its definition names, so a confirmed suggestion changes no
-one's access until the set is named there. A suggestion whose binding was created out-of-band (boot
-baseline, manual bind) is marked `confirmed` automatically, and uninstalling
-the package prunes its pending suggestions. Studio surfaces pending
-suggestions after marketplace installs and in the Access pillar.
+All three require the `manage_metadata` capability, and under a walled
+tenancy posture the platform operator: the decision reaches every member of
+every organization, so a tenant administrator cannot make it. An acceptance
+takes effect at once. What `everyone` grants is the `permissionSets` its
+definition names, and the security plugin derives that definition as the
+deployment's baseline plus every accepted set — again on each accept, revoke,
+uninstall and package publish. No caller writes the definition itself (see
+[Authorization](./authorization)).
+
+- **The high-risk gate is on the definition.** Accepting a set that carries a
+  bit the `everyone` anchor forbids is refused with `403 PERMISSION_DENIED`;
+  if a later publish adds such a bit to an accepted set, the derivation
+  withholds it and logs why.
+- **Revoke** an acceptance by dismissing the accepted suggestion; uninstalling
+  the package removes its suggestions and its sets leave `everyone`.
+- A set the baseline already names (the served app's own `isDefault` set) is
+  marked `confirmed` without a resolver — observed, not accepted — and cannot
+  be dismissed here.
+- Only an `everyone` suggestion can be accepted. A decision a tenant
+  administrator recorded per organization before acceptances were
+  deployment-level is never carried over: the suggestion is pending again.
+
+Studio surfaces pending suggestions after marketplace installs and in the
+Access pillar.
 
 ## Delegated administration — `adminScope` (ADR-0090 D12)
 

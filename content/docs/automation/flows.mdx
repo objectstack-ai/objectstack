@@ -230,9 +230,12 @@ The same rules hold for the field values of `create_record` / `update_record`
 `map` node's `input` (the child flow's input variables — on a `map`, evaluated
 once per item with the item variable bound) and a `script` node's `inputs` (the
 registered function's `input`). Those maps — `assignments`, `fields`, `input`,
-`inputs` — are the flow's **value slots**, and each value takes a CEL value
-envelope or a literal. Only a slot's top-level value is an expression — an
-object nested inside a JSON value or an array is data, whatever keys it carries.
+`inputs` — are the flow's **value slots**, and so are a `screen` node's three
+positions that hand a value to the client: an object form's `defaults` (each
+field's prefill), a field's `defaultValue`, and an object form's `recordId`.
+Each value takes a CEL value envelope or a literal. Only a slot's top-level
+value is an expression — an object nested inside a JSON value or an array is
+data, whatever keys it carries.
 
 <Callout type="info" title="Where a malformed envelope is refused">
 
@@ -295,9 +298,29 @@ the key out of `input` where the value is never meant to be supplied. A `script`
 function is handed `null` there, where the template handed `undefined`. The
 refusal at those positions says so.
 
+**A screen's prefill and record id: evaluated before the screen is served.** On
+a `screen` node, each envelope in `defaults`, a field's `defaultValue` and
+`recordId` is evaluated in the run's scope before the screen goes to the client,
+so the client receives the value — a record as a map, a list as a list — never
+the envelope. Where a whole token resolved to nothing, the template served
+nothing there; the guarded form serves `null`:
+
+- in an object form's `defaults`, the form keeps a `null` prefill as a value and
+  opens the field blank — over the object field's own `defaultValue`, which it
+  applied when the prefill left the field out. Write that default in the guard
+  (`has(vars.x) ? vars.x : 'prospecting'`) to keep it;
+- a field's `defaultValue` seeds the field with `null`;
+- `recordId` names the record an `edit` form opens, so its envelope must
+  evaluate to the record's id, a non-blank string: anything else, `null`
+  included, **fails the run at the screen**. The template served such a screen
+  with no record id, and its `edit` form opened with no record and could not
+  save. Where the record may be absent, route around the screen with a
+  `decision` on the value instead of guarding the id.
+
 **Where an envelope is data, the remedy names none there.** An envelope
-evaluates only as the top-level value of a value slot's map — `fields`,
-`assignments`, or a callee's `input` / `inputs`. Inside an object or list value, and in the two legacy `assignment` shapes
+evaluates only as the top-level value of a value slot — `fields`,
+`assignments`, a callee's `input` / `inputs`, or a screen's `defaults`,
+`defaultValue` or `recordId`. Inside an object or list value, and in the two legacy `assignment` shapes
 (an `assignments: [{ variable, value }]` array, variables as the config's own
 keys), it is stored as the object it spells — so the refusal there names what
 does evaluate:
@@ -645,9 +668,9 @@ bound to `config.idVariable` so a later step can reference it.
   config: {
     objectName: 'opportunity',         // render this object's full form
     mode: 'create',                    // 'create' (default) | 'edit'
-    // recordId: '{account_id}',        // required for mode: 'edit'
-    defaults: {                        // pre-filled values (interpolated)
-      account: '{account_id}',
+    // recordId: { dialect: 'cel', source: 'opportunity_id' },  // required for mode: 'edit'
+    defaults: {                        // pre-filled values: a CEL envelope or a literal each
+      account: { dialect: 'cel', source: 'account_id' },
       stage: 'prospecting',
     },
     idVariable: 'opportunity_id',      // bind the saved record's id for later steps
@@ -2027,8 +2050,8 @@ CEL, and every computed value (a field value, an assignment value) is a CEL
 value envelope. **Text** slots — a `notify` title or message, a screen title or
 description, a refusing `end` node's message — are `{{ }}` templates (see
 [text slots](#text-slots-read-double-brace-holes)). Single braces remain only on the
-value-like positions that hand a resolved value over (`recipients`,
-`sourceId`, a `subflow` input, an `http` body, …).
+value-like positions that hand a resolved value over and that the retirement
+has not reached yet (`recipients`, `sourceId`, an `http` body, …).
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
@@ -2069,7 +2092,7 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
    braces.
 3. **A `{…}` template in a value slot** — `total: '{round(x * 100) / 100}'`,
    `owner: '{record.owner}'` — is refused with the CEL spelling to write
-   instead. In a single-brace position (an `http` body, a `subflow` input), an
+   instead. In a single-brace position (an `http` body, a `notify` recipient), an
    unsupported function in braces — `'{ROUND(x, 2)}'`, `'{Math.round(x)}'`,
    `'{(x).toFixed(2)}'` — fails the node with a **named error** listing the
    supported set and, where one is close, the spelling you meant. Before #11060

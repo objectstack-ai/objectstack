@@ -336,6 +336,34 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     expect(declaredFromDescriptors().map(key)).not.toContain(key(slot!));
   });
 
+  /**
+   * [#19939, stage S2] A `screen`'s three positions that hand a value to the
+   * client — `defaults.*`, a field's `defaultValue`, `recordId` — are `value`
+   * slots declared on the spec Zod channel (`ScreenConfigSchema`, carried by
+   * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor keeps offering them
+   * as unmarked inputs, so neither channel declares one slot twice.
+   */
+  it.each([
+    ['defaults.*'],
+    ['fields[].defaultValue'],
+    ['recordId'],
+  ])('screen.%s is covered — a #19939 screen value slot, declared on the spec Zod channel', (path) => {
+    const slot = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === 'screen' && e.path === path);
+    expect(slot, 'the S2 slot: a screen prefill or record id may be a CEL envelope (#11182 ruling D)').toBeDefined();
+    expect(slot!.role).toBe('value');
+    expect(declaredFromSchemalessConfigs().map(key)).toContain(key(slot!));
+    expect(declaredFromDescriptors().map(key)).not.toContain(key(slot!));
+  });
+
+  it('screen keeps `fields[].visibleWhen` on its descriptor channel beside its value slots — one slot, one channel', () => {
+    expect(declaredFromDescriptors().filter((d) => d.nodeType === 'screen').map(key)).toEqual(['screen.fields[].visibleWhen (predicate)']);
+    expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'screen').map(key).sort()).toEqual([
+      'screen.defaults.* (value)',
+      'screen.fields[].defaultValue (value)',
+      'screen.recordId (value)',
+    ]);
+  });
+
   it('map keeps `collection` on its descriptor channel beside the new `input.*` — one slot, one channel', () => {
     expect(declaredFromDescriptors().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.collection (flow-template)']);
     expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.input.* (value)']);

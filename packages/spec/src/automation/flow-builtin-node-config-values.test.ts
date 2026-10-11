@@ -149,6 +149,9 @@ describe('one refusal per judged builtin, at each typed key', () => {
     ['screen', { waitForInput: 'yes' }, 'waitForInput'],
     ['screen', { mode: 'view' }, 'mode'],
     ['screen', { fields: [{ name: 'qty', required: 'yes' }] }, 'fields[0].required'],
+    // [#19939] `recordId` is a value slot whose literal is a string: a literal
+    // the contract refuses for its type has no other judge, so it stays here.
+    ['screen', { recordId: 42 }, 'recordId'],
     ['script', { function: '' }, 'function'],
     ['script', { inputs: 'leadId' }, 'inputs'],
     ['subflow', { flowName: '' }, 'flowName'],
@@ -250,6 +253,17 @@ describe('what stays accepted (lit controls)', () => {
     expect(flowNodeConfigRefusals('screen', { fields: [{ name: 'qty', visibleWhen: { dialect: 'cel', source: 'x' } }] })).toEqual([]);
     // A `value` ledger slot: the value-envelope pass judges it.
     expect(flowNodeConfigRefusals('create_record', { objectName: 'task', fields: { title: { dialect: 'cel', source: 1 } } })).toEqual([]);
+    // [#19939] …at a screen's value slots too, a single value and one under the
+    // `fields[]` repeater included — never re-judged, nor read as a key left out.
+    for (const config of [
+      { objectName: 'a', mode: 'edit', recordId: { dialect: 'cel' } },
+      { objectName: 'a', defaults: { k: { dialect: 'cel' } } },
+      { fields: [{ name: 'qty', defaultValue: { dialect: 'cel' } }] },
+      { fields: [{ name: 'qty', defaultValue: { dialect: 'template', source: 'x' } }] },
+    ]) {
+      expect(getBuiltinNodeConfigContracts().get('screen')!.schema.safeParse(config).success, JSON.stringify(config)).toBe(false);
+      expect(flowNodeConfigRefusals('screen', config), JSON.stringify(config)).toEqual([]);
+    }
     // A region slot: `validateControlFlow` judges a region's shape at registration.
     expect(flowNodeConfigRefusals('try_catch', { try: 5 })).toEqual([]);
     expect(flowNodeConfigRefusals('parallel', { branches: [{ name: 'a', ...REGION }] })).toEqual([]);
