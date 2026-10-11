@@ -172,9 +172,9 @@ function fixtureTables(): Record<string, any[]> {
         // what separates the arms; with one shared grant, only the organization
         // wall can be.
         sys_user_permission_set: [
-            { user_id: 'u_member', permission_set_id: 'ps_shared' },
-            { user_id: 'u_exmember', permission_set_id: 'ps_shared' },
-            { user_id: 'u_orgless', permission_set_id: 'ps_shared' },
+            { user_id: 'u_member', permission_set: 'shared_access' },
+            { user_id: 'u_exmember', permission_set: 'shared_access' },
+            { user_id: 'u_orgless', permission_set: 'shared_access' },
         ],
         sys_permission_set: [
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },

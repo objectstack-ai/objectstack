@@ -6,10 +6,9 @@
  * registered, writes ONE grant naming it, and mints no `sys_permission_set`
  * row.
  *
- * The grant still writes BOTH columns of `sys_user_permission_set` —
- * `permission_set_id` (still a required column) and `permission_set` — and the
- * two agree: the id is the boot-seeded catalog row's, READ by name, and the name
- * is that row's `name`.
+ * The grant names its set alone (`permission_set`): no `sys_permission_set`
+ * row is read or needed, and `permission_set_id` is not written (ADR-0131 D4,
+ * D10's first step).
  *
  * Driven through the SHIPPED writer over a stack double whose engine stores
  * exactly the payloads it is handed and whose catalog is bound with core's own
@@ -94,29 +93,17 @@ function stackDouble(seed: { sys_permission_set?: any[]; catalog?: SecurityCatal
 const SEEDED_ROW = { id: 'ps_seeded_probe', name: PROBE_SET };
 
 describe('[ADR-0131 D3/D4] the verify RLS persona is provisioned through the registry', () => {
-  it('grants the registered set by name, with the boot-seeded row id, and mints no set row', async () => {
-    const { stack, tables, inserted } = stackDouble({
-      sys_permission_set: [{ ...SEEDED_ROW }],
-      catalog: catalogServing([PROBE_SET]),
-    });
+  it('grants the registered set by name alone, with ZERO sys_permission_set rows, and mints no set row', async () => {
+    const { stack, tables, inserted } = stackDouble({ catalog: catalogServing([PROBE_SET]) });
     const persona = await provisionRlsProbePersona(stack, { objects: [] });
 
     expect(persona.permissionSet).toBe(PROBE_SET);
     expect(inserted).toEqual(['sys_user_permission_set']);
-    expect(tables.sys_permission_set).toEqual([SEEDED_ROW]);
+    expect(tables.sys_permission_set).toEqual([]);
     const grants = tables.sys_user_permission_set;
     expect(grants).toHaveLength(1);
-    expect(grants[0]).toMatchObject({
-      user_id: 'usr_probe',
-      permission_set: PROBE_SET,
-      permission_set_id: SEEDED_ROW.id,
-    });
-  });
-
-  it('refuses, writing nothing, when the boot seeded no row for the registered set', async () => {
-    const { stack, inserted } = stackDouble({ catalog: catalogServing([PROBE_SET]) });
-    await expect(provisionRlsProbePersona(stack, { objects: [] })).rejects.toThrow(PROBE_SET);
-    expect(inserted).toEqual([]);
+    expect(grants[0]).toMatchObject({ user_id: 'usr_probe', permission_set: PROBE_SET });
+    expect(grants[0].permission_set_id).toBeUndefined();
   });
 
   it('refuses, writing nothing, when the catalog does not serve the set — a row alone is not the probe set', async () => {

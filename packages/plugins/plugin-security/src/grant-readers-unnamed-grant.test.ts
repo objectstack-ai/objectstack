@@ -37,10 +37,6 @@ import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin } from './bootstrap-platform-admin.js';
 import { backfillOrgAdminGrants, reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { buildContextForUser } from './explain-engine.js';
-import {
-  GRANT_SET_NAME_HOOK_PACKAGE,
-  registerGrantPermissionSetNameHooks,
-} from './grant-permission-set-name.js';
 import { SysPosition } from './objects/sys-position.object.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
@@ -126,14 +122,21 @@ async function user(engine: ObjectQL, id: string, createdAt: string): Promise<vo
 const setIdOf = async (engine: ObjectQL, name: string): Promise<string> =>
   String(((await engine.find('sys_permission_set', { where: { name, organization_id: null }, context: SYS })) as any[])[0]?.id);
 
-/** The state the backfill leaves on a grant it has not named: `NULL`, written with the name hooks unbound. */
+/**
+ * The state a grant written before the name column carries, or one the
+ * backfill has not named: `NULL` name and the legacy id of the set row it
+ * names (organization-less). Grants are written by name today (ADR-0131 D4)
+ * and the engine refuses one naming nothing, so it is written beneath it.
+ */
 async function unname(engine: ObjectQL, where: Record<string, unknown>): Promise<void> {
-  (engine as any).unregisterHooksByPackage(GRANT_SET_NAME_HOOK_PACKAGE);
-  await engine.update('sys_user_permission_set', { permission_set: null }, { where, multi: true, context: SYS } as any);
-  registerGrantPermissionSetNameHooks(engine as any);
+  const knex = ((engine as any).getDriver('sys_user_permission_set') as any).knex;
+  for (const g of await knex('sys_user_permission_set').where(where)) {
+    const legacyId = g.permission_set_id ?? (g.permission_set ? await setIdOf(engine, g.permission_set) : null);
+    await knex('sys_user_permission_set').where({ id: g.id }).update({ permission_set: null, permission_set_id: legacyId });
+  }
   const rows = (await engine.find('sys_user_permission_set', { where, context: SYS })) as any[];
   expect(rows.length).toBeGreaterThan(0);
-  expect(rows.every((r) => r.permission_set == null)).toBe(true);
+  expect(rows.every((r) => r.permission_set == null && r.permission_set_id)).toBe(true);
 }
 
 const grantsOf = async (engine: ObjectQL, userId: string): Promise<any[]> =>
@@ -150,9 +153,9 @@ describe('[ADR-0131 D4] a grant that names nothing — explain', () => {
       metadata_type: 'permission', name: 'legacy_reports', package_id: 'com.objectstack.qa.grant-readers-unnamed', active: false,
     }, { context: SYS } as any);
     await engine.insert('sys_user_permission_set', [
-      { id: 'g_off', user_id: 'usr_member', permission_set_id: 'ps_off', organization_id: ORG },
+      { id: 'g_off', user_id: 'usr_member', permission_set: 'legacy_reports', organization_id: ORG },
       {
-        id: 'g_expired', user_id: 'usr_member', permission_set_id: await setIdOf(engine, 'viewer_readonly'),
+        id: 'g_expired', user_id: 'usr_member', permission_set: 'viewer_readonly',
         organization_id: ORG, valid_until: '2020-01-01T00:00:00.000Z',
       },
     ], { context: orgCtx } as any);
@@ -180,7 +183,7 @@ describe('[ADR-0131 D4] a grant that names nothing — the platform-admin bootst
     await user(engine, 'usr_admin', '2025-01-01T00:00:00.000Z');
     await engine.insert(
       'sys_user_permission_set',
-      { id: 'g_admin', user_id: 'usr_admin', permission_set_id: await setIdOf(engine, 'admin_full_access') },
+      { id: 'g_admin', user_id: 'usr_admin', permission_set: 'admin_full_access' },
       { context: SYS } as any,
     );
     expect((await grantsOf(engine, 'usr_admin'))[0]?.permission_set).toBe('admin_full_access');
@@ -249,7 +252,7 @@ describe('[ADR-0131 D4] a grant that names nothing — the organization-administ
       'sys_user_permission_set',
       {
         id: 'g_orphan', user_id: 'usr_orphan', organization_id: ORG,
-        permission_set_id: await setIdOf(engine, 'organization_admin_no_bypass'),
+        permission_set: 'organization_admin_no_bypass',
       },
       { context: orgCtx } as any,
     );

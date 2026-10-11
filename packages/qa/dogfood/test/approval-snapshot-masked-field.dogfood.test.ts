@@ -200,7 +200,7 @@ describe('[#20964] approval snapshot field served masked on the data plane', () 
         const unmask = await ql.findOne('sys_permission_set', { where: { name: unmaskSet.name }, context: { isSystem: true } });
         expect(unmask?.id, 'fixture permission set seeded').toBeTruthy();
         for (const userId of [unmaskerId, submitterId]) {
-          await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: unmask.id }, SYS);
+          await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: unmask.name }, SYS);
         }
 
         const createRes = await stack.apiAs(submitterToken, 'POST', `/data/${OBJECT}`, { name: 'Item one', [KEY]: STORED });

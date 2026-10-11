@@ -322,12 +322,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "指向 sys_user 的外键。"
       },
       permission_set_id: {
-        label: "权限集",
-        help: "指向 sys_permission_set 的外键。"
+        label: "权限集（旧版 ID）",
+        help: "[ADR-0131 D10] 指向 sys_permission_set 行的旧版 ID 引用，将在后续阶段连同数据一并删除。不再写入，也不再据此授予任何权限：授权通过 permission_set 按名称指明其权限集。"
       },
       permission_set: {
-        label: "权限集名称",
-        help: "[ADR-0131 D4] 此授权所持有的权限集的机器名（sys_permission_set.name）。由平台在每次携带 permission_set_id 的写入中根据 permission_set_id 写入；提供的值必须与该名称一致，否则写入将被拒绝。在此列存在之前写入的授权中为 NULL。"
+        label: "权限集",
+        help: "[ADR-0131 D4] 此授权所持有的权限集的机器名，以安全目录中的名称为准。安全目录中不存在的名称将被拒绝。仅在此列存在之前写入的授权中为 NULL。"
       },
       organization_id: {
         label: "组织",

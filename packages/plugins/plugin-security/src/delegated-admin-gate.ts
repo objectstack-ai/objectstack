@@ -45,7 +45,7 @@ import {
   rowOrganizationId,
   seedCtx as organizationScopedCtx,
 } from './organization-scope.js';
-import { GRANT_SET_ID_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
+import { grantSetNameOf } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 /**
@@ -1260,23 +1260,21 @@ export class DelegatedAdminGate {
    *   hold authority over, so the write is refused (`unresolved`) — fail
    *   closed; a tenant admin is not judged here at all.
    * - **The set the write points the grant AT** — an insert, or an update that
-   *   re-points `permission_set_id`: the caller's own reference. The name is
-   *   not the caller's to supply (the platform derives it from that id after
-   *   this gate), so the id is read to its row's NAME — the grant id lookup,
-   *   which goes with the `permission_set_id` column — and the body judged is
-   *   the catalog's definition of that name.
+   *   re-names the grant: the caller's own `permission_set`, judged as the
+   *   catalog's definition of that name. A name the catalog does not hold is
+   *   still judged against the allowlist (the write is then refused 400 by the
+   *   grant's own name refusal, `grant-permission-set-name.ts`); no
+   *   `sys_permission_set` row and no `permission_set_id` is read.
    */
   private async directGrantSet(
     t: { next: any | null; prev: any | null },
     row: any,
   ): Promise<{ setRow: any | null; setName: string; unresolved?: string }> {
-    const repointed = !!t.next
-      && (!t.prev || String(t.next[GRANT_SET_ID_FIELD] ?? '') !== String(t.prev[GRANT_SET_ID_FIELD] ?? ''));
+    const repointed = !!t.next && (!t.prev || grantSetNameOf(t.next) !== grantSetNameOf(t.prev));
     if (repointed) {
-      const idRow = await this.loadSetRowById(row[GRANT_SET_ID_FIELD]);
-      const idName = typeof idRow?.name === 'string' && idRow.name !== '' ? idRow.name : undefined;
-      const setRow = idName ? await this.catalogSet(idName) : null;
-      return { setRow, setName: idName ?? String(row[GRANT_SET_ID_FIELD] ?? '') };
+      const nextName = grantSetNameOf(t.next) ?? '';
+      const setRow = nextName ? await this.catalogSet(nextName) : null;
+      return { setRow, setName: nextName };
     }
     const name = grantSetNameOf(row);
     if (!name) {

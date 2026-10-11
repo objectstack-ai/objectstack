@@ -38,10 +38,6 @@ import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import {
-  registerGrantPermissionSetNameHooks,
-  unregisterGrantPermissionSetNameHooks,
-} from './grant-permission-set-name.js';
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -131,12 +127,9 @@ async function insertUser(engine: Engine, id: string): Promise<void> {
  * what a write could store before the hook judged organizations.
  */
 async function insertGrantUnhooked(engine: Engine, row: Record<string, unknown>): Promise<void> {
-  unregisterGrantPermissionSetNameHooks(engine);
-  try {
-    await engine.insert('sys_user_permission_set', row, { context: SYS } as any);
-  } finally {
-    registerGrantPermissionSetNameHooks(engine);
-  }
+  // Beneath the engine: it refuses a grant naming nothing (ADR-0131 D4).
+  const driver: any = (engine as any).getDriver('sys_user_permission_set');
+  await driver.knex('sys_user_permission_set').insert({ permission_set: null, ...row });
 }
 
 async function grant(engine: Engine, id: string): Promise<Record<string, any> | null> {
@@ -184,7 +177,7 @@ describe('[ADR-0131 D4] a grant whose id names another organization’s set conf
   it('an organization’s own grant of a set only its row carries confers nothing, even in that organization', async () => {
     const engine = await world();
     await engine.insert('sys_user_permission_set',
-      { id: 'g_own', user_id: 'usr_x', permission_set_id: 'ps_b_tools', organization_id: ORG_B },
+      { id: 'g_own', user_id: 'usr_x', permission_set: 'b_tools', organization_id: ORG_B },
       { context: SYS } as any);
     expect((await grant(engine, 'g_own'))?.permission_set).toBe('b_tools');
     expect((await resolveUserAuthzGrants(engine, 'usr_x', { tenantId: ORG_B })).systemPermissions).not.toContain('cap_b');
@@ -194,7 +187,7 @@ describe('[ADR-0131 D4] a grant whose id names another organization’s set conf
     const engine = await world();
     engine.registry.registerItem('permission', { name: 'b_tools', systemPermissions: ['cap_b'] } as any, 'name' as any, CATALOG_PACKAGE);
     await engine.insert('sys_user_permission_set',
-      { id: 'g_own', user_id: 'usr_x', permission_set_id: 'ps_b_tools', organization_id: ORG_B },
+      { id: 'g_own', user_id: 'usr_x', permission_set: 'b_tools', organization_id: ORG_B },
       { context: SYS } as any);
     expect((await resolveUserAuthzGrants(engine, 'usr_x', { tenantId: ORG_B })).systemPermissions).toContain('cap_b');
     expect((await resolveUserAuthzGrants(engine, 'usr_x', { tenantId: ORG_A })).systemPermissions).not.toContain('cap_b');
@@ -245,9 +238,7 @@ describe('[ADR-0131 D4] the upgrade boot — no request reaches the resolver bef
       { id: 'ps_up', name: 'upgrade_reviewer', label: 'Reviewer', system_permissions: '["cap_review"]', active: true },
       { context: SYS } as any);
     await insertUser(engine, 'usr_member');
-    await engine.insert('sys_user_permission_set',
-      { id: 'g_up', user_id: 'usr_member', permission_set_id: 'ps_up' },
-      { context: SYS } as any);
+    await insertGrantUnhooked(engine, { id: 'g_up', user_id: 'usr_member', permission_set_id: 'ps_up' });
     expect((await grant(engine, 'g_up'))?.permission_set).toBeNull();
 
     const seen: Record<string, string[]> = {};

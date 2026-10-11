@@ -193,7 +193,7 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
     });
     expect(setRow?.id, 'the app-declared widener set is seeded').toBeTruthy();
     await ql.insert('sys_user_permission_set',
-      { user_id: bobId, permission_set_id: setRow.id }, { context: { ...SYS } });
+      { user_id: bobId, permission_set: setRow.name }, { context: { ...SYS } });
 
     // UPDATE fixture: three rows the declaration admits (`stage: 'open'`), one
     // of them Bob's; one row it does not admit, to bound the widener.

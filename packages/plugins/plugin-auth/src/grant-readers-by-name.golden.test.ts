@@ -168,12 +168,10 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
     { id: 'm_agent', user_id: 'usr_agent', organization_id: ORG, role: 'member', created_at: '2025-04-01T00:00:00.000Z' },
   ], { context: orgCtx } as any);
   expect((await reconcileOrgAdminGrant(engine, 'usr_orgadmin', ORG, { posture })).action).toBe('granted');
-  const setId = async (name: string) =>
-    String(((await engine.find('sys_permission_set', { where: { name, organization_id: null }, context: SYS })) as any[])[0]?.id);
   await engine.insert('sys_user_permission_set', [
-    { id: 'ups_member_viewer', user_id: 'usr_member', permission_set_id: await setId('viewer_readonly'), organization_id: ORG },
+    { id: 'ups_member_viewer', user_id: 'usr_member', permission_set: 'viewer_readonly', organization_id: ORG },
     {
-      id: 'ups_agent_read', user_id: 'usr_agent', permission_set_id: await setId('mcp_agent_data_read'),
+      id: 'ups_agent_read', user_id: 'usr_agent', permission_set: 'mcp_agent_data_read',
       organization_id: ORG, valid_until: FUTURE,
     },
   ], { context: orgCtx } as any);

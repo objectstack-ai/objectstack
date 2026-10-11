@@ -115,7 +115,7 @@ describe('[#21388] an org peer is withheld the activity rows of a colleague’s 
     const [activitySet] = await plain('sys_permission_set', { name: activityReadSet.name }, 1);
     expect(activitySet, 'fixture permission set seeded').toBeTruthy();
     for (const who of ['member', 'admin']) {
-      await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set_id: activitySet.id }, { context: SYS });
+      await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: activitySet.name }, { context: SYS });
     }
 
     // The colleague signs in twice through the auth door (two sign-in stamps),

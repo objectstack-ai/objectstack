@@ -53,6 +53,10 @@
  *    from the form view's own declaration;
  *  - share links → the capability token, validated then read as SYSTEM;
  *  - a `book.audience: 'public'` read → the ADR-0046 §6.7 audience gate (#3963);
+ *  - an inbound automation hook (`POST /automation/hooks/:flowName/:hookId`) →
+ *    the HMAC signature under the hook's own secret, verified by the
+ *    trigger-api service; the allow-list's one parameterised row admits that
+ *    exact route, `POST` only, past the `/automation` floor (#22773);
  *  - MCP → an OAuth token or API key, never anonymous.
  *
  * Those run UPSTREAM of this function and set the execution context (a `userId`,
@@ -141,6 +145,10 @@ export interface AnonymousDenyInput {
    * `undefined`, which this seam DENIES — see the guard below, which is this
    * seam's own contract for the pathless case (#7898) rather than a reading of
    * what the allow-list predicate does with a falsy argument.
+   *
+   * [#22773] The allow-list reads {@link method} beside it: its one
+   * parameterised row, the inbound automation hook, is exempt for `POST` only,
+   * so a seam that passes the path for that row must pass the method too.
    */
   path?: string | null;
 }
@@ -169,7 +177,7 @@ export function shouldDenyAnonymous(input: AnonymousDenyInput): boolean {
   // `true` before #7898). The redundancy is deliberate: this seam's contract
   // must not be re-derived from what the predicate happens to do with a falsy
   // argument, which is exactly how the hole #2567 closes was reopened once.
-  if (typeof input.path === 'string' && input.path.length > 0 && isAuthGateAllowlisted(input.path)) {
+  if (typeof input.path === 'string' && input.path.length > 0 && isAuthGateAllowlisted(input.path, input.method)) {
     return false;
   }
   return true;

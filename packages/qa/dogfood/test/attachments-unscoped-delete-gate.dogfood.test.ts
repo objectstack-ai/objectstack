@@ -123,7 +123,7 @@ describe('sys_attachment delete gate under an unscoped multi-delete (#9483)', ()
     expect(managerSet?.id, 'fixture permission set seeded').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
-      { user_id: memberId, permission_set_id: managerSet.id },
+      { user_id: memberId, permission_set: managerSet.name },
       { context: { ...SYS } },
     );
 
@@ -318,7 +318,7 @@ describe('sys_attachment unscoped multi-delete is refused on its SHAPE, not on e
     expect(managerSet?.id, 'fixture permission set seeded').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
-      { user_id: memberId, permission_set_id: managerSet.id },
+      { user_id: memberId, permission_set: managerSet.name },
       { context: { ...SYS } },
     );
 

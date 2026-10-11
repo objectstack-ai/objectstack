@@ -50,7 +50,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
       expect(ps?.id, `permission set ${setName} seeded`).toBeTruthy();
       await ql.insert(
         'sys_user_permission_set',
-        { user_id: userId, permission_set_id: ps.id },
+        { user_id: userId, permission_set: ps.name },
         { context: SYS },
       );
     };
@@ -183,7 +183,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_auditor' }, context: SYS });
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_permission_set', {
       user_id: delegateId,
-      permission_set_id: ps.id,
+      permission_set: ps.name,
     });
     expect(r.status, 'granting an un-allowlisted set (to ANYONE, incl. self) is refused').not.toBeLessThan(300);
   });
@@ -230,7 +230,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   it('FLS: a contributor can edit a project but NOT its budget fields', async () => {
     const plain = await ql.findOne('sys_user', { where: { email: 'zoo-plain@verify.test' }, context: SYS });
     const contribSet = await ql.findOne('sys_permission_set', { where: { name: 'showcase_contributor' }, context: SYS });
-    await ql.insert('sys_user_permission_set', { user_id: plain.id, permission_set_id: contribSet.id }, { context: SYS })
+    await ql.insert('sys_user_permission_set', { user_id: plain.id, permission_set: contribSet.name }, { context: SYS })
       .catch(() => { /* already granted by an earlier step — idempotent */ });
 
     const projects = await ql.find('showcase_project', { limit: 1, context: SYS });

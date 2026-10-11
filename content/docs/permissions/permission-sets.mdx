@@ -219,10 +219,10 @@ A direct grant is a data row; a position's sets are declared on the position's
 definition:
 
 ```typescript
-// Grant a set to a single user (direct grant)
+// Grant a set to a single user (direct grant) — by the set's name
 await objectql.object('sys_user_permission_set').insert({
   user_id: 'user123',
-  permission_set_id: psId,
+  permission_set: 'crm_sales_user',
 });
 
 // A position names the sets it distributes (everyone holding it gets them)
