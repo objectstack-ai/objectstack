@@ -36,7 +36,7 @@ import { explainRule } from './rule-explanations.js';
 // fired, and the last case in this file holds each recorded verdict to one
 // line of at most 200 characters. Run the whole file: that case reads what the
 // cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateRlsPredicateEnforceability: typeof validateRlsPredicateEnforceabilityUnrecorded = (...args) => {
   const findings = validateRlsPredicateEnforceabilityUnrecorded(...args);
   fired.push(...findings);
@@ -122,7 +122,7 @@ describe('validateRlsPredicateEnforceability — a field compared with a json / 
               `RLS ${clause} compares \`record.${left} ${quoted} record.${right}\`, where \`${field}\` holds a list ` +
                 `or an object, ${REFUSED[clause]}`,
             );
-            expect(finding.hint).toMatch(/^A field compared with a `json` or `multiple` field has no row-filter form/);
+            expect(finding.hint).toMatch(/^Compare with a single-valued column, a literal or a `current_user` value/);
           });
         }
       }
@@ -315,6 +315,21 @@ describe('[#22161] one-line verdicts', () => {
     for (const f of fired) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line of every finding this file fired is one
+// remedy sentence; what it stopped saying is the id's `os explain` entry.
+describe('[#22161] one-line fixes', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    expect(fired.some((f) => f.message.includes('holds a list'))).toBe(true);
+    // The three ids this slice converted (the other two RLS ids keep their
+    // longer hints: a later slice's).
+    const converted = ['rls-predicate-unenforceable', 'rls-predicate-over-budget', 'rls-predicate-unknown-field'];
+    for (const f of fired.filter((x) => converted.includes(x.rule))) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }
   });
 });

@@ -1222,8 +1222,16 @@ function creditAnalyticsColumns(ledger: ConsumerLedger, stack: AnyRec): void {
   }
 }
 
-function listPaths(paths: readonly string[]): string {
-  return paths.join(', ');
+/**
+ * [#22161] The carrier sites as the `fix:` line names them: the first, then a
+ * count of the rest — the shape the verdict's `sharedClause` already uses for
+ * the other objects. A field named in every translation, seed and grant used
+ * to list them all on one line (16 sites, 629 characters, on the showcase).
+ * The finding's `carriers` list still holds every site for a caller of this
+ * function.
+ */
+function firstPathAndCount(paths: readonly string[]): string {
+  return `${paths[0]}${paths.length > 1 ? ` (and ${paths.length - 1} more)` : ''}`;
 }
 
 /**
@@ -1301,7 +1309,8 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
     // sites a removal must clean, and the other objects whose consumers of the
     // same name do not count — the first one named and the rest counted, since
     // a field name common to every object (`description`, `name`) would
-    // otherwise list them all on one line.
+    // otherwise list them all on one line. The `fix:` line names the carrier
+    // sites the same way (#22161, slice 11).
     const verdictTag =
       verdict === 'carrier-only'
         ? `carrier-only: ${carriers.length} site(s) name it without reading it`
@@ -1321,7 +1330,7 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
       hint:
         `add it to a view column or a form section, or remove the declaration` +
         (carriers.length > 0
-          ? ` together with its ${carriers.length} carrier site(s): ${listPaths(carriers)}`
+          ? ` together with its ${carriers.length} carrier site(s): ${firstPathAndCount(carriers)}`
           : ''),
       object,
       field,

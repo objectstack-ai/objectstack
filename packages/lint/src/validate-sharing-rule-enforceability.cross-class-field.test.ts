@@ -23,6 +23,7 @@ import {
   SHARING_RULE_UNLOWERABLE_CONDITION,
 } from './validate-sharing-rule-enforceability.js';
 import { runAuthoringRules } from './authoring-rules.js';
+import { CROSS_FIELD_CLASS_LISTING } from './validate-rls-predicate-enforceability.js';
 import { explainRule } from './rule-explanations.js';
 
 // [#22161] Each finding is one verdict sentence; the reasoning it used to
@@ -30,7 +31,7 @@ import { explainRule } from './rule-explanations.js';
 // fired, and the last case in this file holds each recorded verdict to one
 // line of at most 200 characters. Run the whole file: that case reads what the
 // cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateSharingRuleEnforceability: typeof validateSharingRuleEnforceabilityUnrecorded = (...args) => {
   const findings = validateSharingRuleEnforceabilityUnrecorded(...args);
   fired.push(...findings);
@@ -108,7 +109,7 @@ describe('validateSharingRuleEnforceability — a field compared with a field of
             `condition compares \`record.${left} ${quoted} record.${right}\`, which no comparison class spans ` +
               `(${why}), so its criteria query is refused (INVALID_FILTER / 400) and it grants nothing`,
           );
-          expect(finding.hint).toMatch(/^Compare a field only with a field of the same comparison class: /);
+          expect(finding.hint).toMatch(/^Compare a field only with a field of its comparison class, or with a literal/);
         });
       }
     }
@@ -181,5 +182,26 @@ describe('[#22161] one-line verdicts', () => {
     expect(text).toContain('Two columns are compared only within one comparison class');
     expect(text).toContain('so the rule IS seeded into `sys_sharing_rule`, but every criteria query it runs is refused');
     expect(text).toContain('The rule is declared and grants nothing.');
+  });
+
+  // [#22161] Slice 11: the `fix:` line, one remedy sentence; what it stopped
+  // saying is `os explain sharing-rule-unlowerable-condition`.
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    expect(fired.some((f) => f.message.includes('which no comparison class spans'))).toBe(true);
+    // The two condition ids this slice converted; the anchor ids keep their
+    // longer hints (a later slice's).
+    const converted = ['sharing-rule-unlowerable-condition', 'sharing-rule-runtime-variable-condition'];
+    for (const f of fired.filter((x) => converted.includes(x.rule))) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` lists the comparison classes the `fix:` line stopped listing, as the spec defines them', () => {
+    // The listing used to be the hint's, computed from the spec's class table;
+    // the explanation writes it out (it imports nothing), so it is held here
+    // to the rule's own computed listing.
+    const text = explainRule(SHARING_RULE_UNLOWERABLE_CONDITION)?.paragraphs.join('\n') ?? '';
+    expect(text).toContain(`Compare a field only with a field of the same comparison class: ${CROSS_FIELD_CLASS_LISTING}.`);
   });
 });
