@@ -425,6 +425,12 @@ export interface ExplainEngineDeps {
    * read door also scopes such a record by its master, a leg no other
    * dependency here answers, so the door's own answer is what the read verdict
    * takes ({@link applyRecordAttribution}).
+   *
+   * [#22792] Asked first of the ASKER, for every record-grained explanation:
+   * whether the explanation may say the record exists is decided by the read
+   * access of whoever asked for it, not by the explained principal's
+   * ({@link explainAccessForAsker}). One question, one notion of "can read":
+   * the same caller-context by-id read, asked with the asker's context.
    */
   recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
@@ -1854,7 +1860,99 @@ async function applyRecordAttribution(
   };
 }
 
+/**
+ * Explain `input.context`'s access, asked by that same principal: a
+ * self-explanation. The asker's read ({@link explainAccessForAsker}) is the
+ * explained principal's own.
+ */
 export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput): Promise<ExplainDecision> {
+  return explainAccessForAsker(deps, input, undefined);
+}
+
+/**
+ * [#22792] Explain `input.context`'s access, asked by `askerContext`: the
+ * principal that requested the explanation, which is not the principal being
+ * explained when an administrator explains another user (ADR-0090 D6/D12).
+ * `undefined` means the explained principal asks for itself.
+ *
+ * Ruling A of the explain-asker decision: whether an explanation may disclose
+ * that a record exists is decided by the ASKER's read access, never by the
+ * explained principal's. An asker who cannot read the record gets, for every
+ * operation, exactly what an id no row carries gets: the record verdict and
+ * every layer's per-record attribution. An asker who can read it learns
+ * nothing new about its existence, and gets the full record story.
+ *
+ * Module-internal on purpose: the package publishes {@link explainAccess},
+ * whose signature and self-explanation answer this leaves as they are. The
+ * security service's caller-authorized explain (`explainAccessForCaller`)
+ * is the one caller that knows a different asker.
+ */
+export async function explainAccessForAsker(
+  deps: ExplainEngineDeps,
+  input: ExplainInput,
+  askerContext: any,
+): Promise<ExplainDecision> {
+  // One explanation asks the read question of at most two principals (the
+  // asker and the explained), from up to three places (the asker gate, the
+  // by-id write guard, the master leg of a read), and the principal's READ
+  // pass below asks it again: each (principal, record) pair is read once.
+  return explainOnce({ ...deps, recordAbsentToCaller: askedOnce(deps.recordAbsentToCaller) }, input, askerContext);
+}
+
+/**
+ * The read question, memoized per (context, object, record) for the length of
+ * one explanation. The answer to a question is the same however often it is
+ * asked within one request; a rejection stays the rejection it was.
+ */
+function askedOnce(
+  question: ExplainEngineDeps['recordAbsentToCaller'],
+): ExplainEngineDeps['recordAbsentToCaller'] {
+  if (question === undefined) return undefined;
+  const asked = new Map<unknown, Map<string, Promise<boolean>>>();
+  return (object, recordId, context) => {
+    let byRecord = asked.get(context);
+    if (!byRecord) {
+      byRecord = new Map();
+      asked.set(context, byRecord);
+    }
+    const key = JSON.stringify([object, recordId]);
+    let answer = byRecord.get(key);
+    if (!answer) {
+      answer = question(object, recordId, context);
+      byRecord.set(key, answer);
+    }
+    return answer;
+  };
+}
+
+/**
+ * [#22792] The preface every per-record attribution carries when a by-id write
+ * is explained to an asker who can read a record the explained principal
+ * cannot: the write never gets past that read, so the attribution shown is the
+ * read's, and it says so.
+ */
+function principalReadPreface(operation: ExplainOperation): string {
+  return `The principal cannot read this record, so its by-id ${operation} answers 404 RECORD_NOT_FOUND, as an id ` +
+    'no row carries does. This attribution is of that read: ';
+}
+
+/**
+ * [#22792] Carry the explained principal's READ attribution onto a by-id write
+ * explanation, layer by layer: each row-scoped layer's `record` becomes the
+ * read's (prefaced), and the tenant layer's verdict, which its record decides,
+ * follows it. The object-level fields stay the write's own.
+ */
+function attributeThePrincipalsRead(layers: ExplainLayer[], read: ExplainDecision, operation: ExplainOperation): void {
+  const readLayers = new Map(read.layers.map((l) => [l.layer, l]));
+  for (const layer of layers) {
+    const readLayer = readLayers.get(layer.layer);
+    if (!layer.record || !readLayer?.record) continue;
+    layer.record = { ...readLayer.record, detail: principalReadPreface(operation) + (readLayer.record.detail ?? '') };
+    if (layer.layer === 'tenant_isolation') layer.verdict = readLayer.verdict;
+  }
+}
+
+async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, askerContext: any): Promise<ExplainDecision> {
   const { object, operation, context } = input;
   const engineOp = EXPLAIN_TO_ENGINE_OP[operation];
   // [#3544] The gate operation (`engineOp`) and the data operation may differ —
@@ -2289,6 +2387,21 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   let recordVerdict: ExplainDecision['record'] | undefined;
   let posture: AuthzPosture | undefined;
   if (input.recordId) {
+    const recordId = input.recordId;
+    const readQuestion = deps.recordAbsentToCaller;
+    // [#22792] Ruling A of the explain-asker decision: the ASKER's read decides
+    // whether this explanation may say the record exists. An asker the read
+    // door does not return the record to gets, for every operation, the whole
+    // answer an id no row carries gets: the record verdict and every layer's
+    // `record`, all from the one missing-record path below. The question is
+    // the read door's own (`recordAbsentToCaller`), asked with the asker's
+    // context, so there is one notion of "can read". A system asker reads
+    // every row, so it is never asked.
+    const asker = askerContext ?? context;
+    const askerCannotRead =
+      asker?.isSystem !== true &&
+      readQuestion !== undefined &&
+      (await readQuestion(object, recordId, asker));
     // [#21771] Ruling A on the write doors: a row the principal cannot READ is
     // a row that does not exist, so an update or delete of it answers what a
     // nonexistent id answers, wherever enforcement reaches that question: past
@@ -2308,26 +2421,44 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     // them while their grants are retired.
     //
     // [#22761] The WHOLE record story answers it, not the record verdict
-    // alone. The question is asked before the row story is written, and a row
-    // the caller cannot read is then attributed exactly as an id no row
-    // carries: the decision's `record` (the missing-record shape,
-    // `visible: false` with no decider), every row-scoped layer's `record` and
-    // the tenant layer's verdict all come from that one path, so no part of the
-    // answer is written from the stored row the door withholds.
-    const readAbsent =
+    // alone. The question is asked before the row story is written.
+    //
+    // [#22792] Who learns that the row exists is the asker's question, above.
+    // When the asker is the explained principal, its answer is this one, and
+    // a row the principal cannot read is attributed exactly as an id no row
+    // carries. When the asker is someone else who CAN read the row, the
+    // principal's write still answers what a nonexistent id answers, so the
+    // verdict stays `visible: false`; but nothing about the row's existence is
+    // withheld from that asker, so the verdict carries the decider of the
+    // principal's READ, and each row-scoped layer carries that read's
+    // attribution: the read is where the write stops, so it is the story of
+    // the write. A second, read-operation pass yields it: no write-operation
+    // pass composes the read's row-level security, read filter, read depth or
+    // view bypass.
+    const principalCannotRead =
+      !askerCannotRead &&
+      asker !== context &&
       (rlsOp === 'update' || rlsOp === 'delete') &&
       !capsDeny &&
       crudAllowed &&
       Boolean(context?.userId) &&
-      deps.recordAbsentToCaller !== undefined &&
-      (await deps.recordAbsentToCaller(object, input.recordId, context));
+      readQuestion !== undefined &&
+      (await readQuestion(object, recordId, context));
     const out = await applyRecordAttribution({
-      deps: readAbsent ? { ...deps, fetchRecord: async () => null } : deps,
-      object, recordId: input.recordId, engineOp: dataOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed,
+      deps: askerCannotRead || principalCannotRead ? { ...deps, fetchRecord: async () => null } : deps,
+      object, recordId, engineOp: dataOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed,
       vamaEffective, vamaSets, declaredColumns, depthScope: scope,
     });
     recordVerdict = out.record;
     posture = out.posture;
+    if (principalCannotRead) {
+      const read = await explainOnce(deps, { object, operation: 'read', context, recordId }, askerContext);
+      attributeThePrincipalsRead(layers, read, operation);
+      // A read story that reaches no refusal names no decider: the door's
+      // answer stands, `visible: false`, and no layer is credited with it.
+      const readDecider = read.record && read.record.visible === false ? read.record.decidedBy : undefined;
+      recordVerdict = { recordId, visible: false, ...(readDecider ? { decidedBy: readDecider } : {}) };
+    }
   }
 
   const decision: ExplainDecision = {

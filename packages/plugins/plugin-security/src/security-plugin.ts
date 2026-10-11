@@ -45,7 +45,7 @@ import { createPositionWriteThrough } from './position-write-through.js';
 import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
-  explainAccess,
+  explainAccessForAsker,
   buildContextForUser,
   resolveDelegatorContext,
   intersectFieldMasks,
@@ -5206,8 +5206,13 @@ export class SecurityPlugin implements Plugin {
    * [D12] — hold a delegated `adminScope` whose BU subtree covers the target
    * user (an access report is itself sensitive data, but an admin who can
    * already rewire a user's grants may read why they resolve as they do).
-   * The evaluation delegates to {@link explainAccess} with the SAME internals
-   * the middleware uses.
+   * The evaluation delegates to {@link explainAccessForAsker} with the SAME
+   * internals the middleware uses.
+   *
+   * [#22792] ...and with the CALLER as the asker. Whether the explanation may
+   * say a record exists is decided by the caller's read of it, never by the
+   * explained user's: a caller the read door does not return the record to is
+   * answered exactly as for an id no row carries, whoever it explains.
    */
   async explainAccessForCaller(
     request: { object: string; operation: string; userId?: string; recordId?: string },
@@ -5339,7 +5344,7 @@ export class SecurityPlugin implements Plugin {
     const readFilterWithReadScope = (o: string, c: any): Promise<unknown | null> =>
       this.resolveSharingReadFilter(o, { ...c, __readScope: undefined });
 
-    return explainAccess(
+    return explainAccessForAsker(
       {
         ql: this.ql,
         resolveSets: (c: any) => this.resolvePermissionSetsForContext(c),
@@ -5420,6 +5425,10 @@ export class SecurityPlugin implements Plugin {
           this.checkControlledByParentWrite(o, rid, c),
       },
       { object, operation, context: targetContext, recordId },
+      // The asker: the caller, whose read of the record decides whether this
+      // explanation discloses that the record exists. On a self-explanation it
+      // is the explained context itself.
+      callerContext,
     );
   }
 
