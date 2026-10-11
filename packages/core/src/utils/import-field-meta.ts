@@ -10,12 +10,19 @@
  * needs. The export renderers stay in `rest`.
  */
 
+import { referenceTargetOf } from '@objectstack/spec/data';
+
 export interface ExportFieldMeta {
   name: string;
   type?: string;
   label?: string;
   options?: Array<{ label?: string; value?: unknown; color?: string }>;
-  /** Target object for lookup / master_detail / user fields. */
+  /**
+   * Target object of a reference-typed field, as the spec's one arbiter
+   * `referenceTargetOf` answers it (a `user` field targets `sys_user` with no
+   * `reference` written). The import's reference resolution matches cells
+   * against it and asks it its exposure first (#22739).
+   */
   reference?: string;
   /** Field on the referenced record to show as its label. */
   displayField?: string;
@@ -79,7 +86,7 @@ export function buildFieldMetaMap(schema: unknown): Map<string, ExportFieldMeta>
       type: typeof f.type === 'string' ? f.type : undefined,
       label: typeof f.label === 'string' ? f.label : undefined,
       options: Array.isArray(f.options) ? f.options : undefined,
-      reference: typeof f.reference === 'string' ? f.reference : undefined,
+      reference: referenceTargetOf(f),
       displayField: typeof f.displayField === 'string' ? f.displayField : undefined,
       multiple: f.multiple === true,
     });
