@@ -124,6 +124,7 @@ import {
   PackageExportManifest,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
+  ValidateDataIssue,
 } from '@objectstack/spec/api';
 // [#17536] The element the two `/packages` READ doors are declared to serve.
 // `ListInstalledPackagesResponseSchema.packages` is
@@ -446,6 +447,14 @@ export interface CreateDataResult<T = any> {
    * mirrors this in the `X-ObjectStack-Dropped-Fields` response header.
    */
   droppedFields?: DroppedFieldsEvent[];
+  /**
+   * [#22726] The advisory validation-rule hits of this write — each
+   * `severity: 'warning'` / `'info'` rule whose verdict was "violated", with its
+   * `rule`, `severity`, `field`, `code` and author-written `message`. Advisory
+   * rules never block, so the write succeeded; this is the advisory to show the
+   * person who made it. Present only when at least one rule hit.
+   */
+  warnings?: ValidateDataIssue[];
 }
 
 /**
@@ -470,6 +479,14 @@ export interface CloneDataResult<T = any> {
    * the clone route sets no `X-ObjectStack-Dropped-Fields` header.
    */
   droppedFields?: DroppedFieldsEvent[];
+  /**
+   * [#22726] The advisory validation-rule hits of this write — each
+   * `severity: 'warning'` / `'info'` rule whose verdict was "violated", with its
+   * `rule`, `severity`, `field`, `code` and author-written `message`. Advisory
+   * rules never block, so the write succeeded; this is the advisory to show the
+   * person who made it. Present only when at least one rule hit.
+   */
+  warnings?: ValidateDataIssue[];
 }
 
 /** Spec: UpdateDataResponseSchema */
@@ -484,6 +501,14 @@ export interface UpdateDataResult<T = any> {
    * succeeded. REST also mirrors this in the `X-ObjectStack-Dropped-Fields` header.
    */
   droppedFields?: DroppedFieldsEvent[];
+  /**
+   * [#22726] The advisory validation-rule hits of this write — each
+   * `severity: 'warning'` / `'info'` rule whose verdict was "violated", with its
+   * `rule`, `severity`, `field`, `code` and author-written `message`. Advisory
+   * rules never block, so the write succeeded; this is the advisory to show the
+   * person who made it. Present only when at least one rule hit.
+   */
+  warnings?: ValidateDataIssue[];
 }
 
 /**
