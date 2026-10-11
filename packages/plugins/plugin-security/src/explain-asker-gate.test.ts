@@ -25,9 +25,11 @@
 // The real `SecurityPlugin` over a real `ObjectQL` and SQL driver
 // (better-sqlite3, in memory), the platform's grant tables, and one
 // `public_read_write` board. The explained member reads only the board named
-// `open`, through an app-authored READ row-level policy. So the member's
-// update, delete or transfer of the hidden board stops at the read: the door
-// answers what a nonexistent id answers before any write gate runs.
+// `open`, through an app-authored READ row-level policy, and its write-class
+// policies admit every board. So the member's update, delete or transfer of
+// the hidden board stops at the read alone (the door answers what a
+// nonexistent id answers), and the write composition by itself would admit
+// it: the read's decider is the only right one.
 //
 // Askers: the member itself; a `manage_users` administrator who reads every
 // board; a `manage_users` administrator held to the member's read policy; a
@@ -63,13 +65,21 @@ const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_defa
 const BOARD = 'qa_ag_board';
 const MEMBER = 'usr_ag_member';
 
-/** The member's grant: every verb on the board, and a READ policy that admits only the board named `open`. */
+/**
+ * The member's grant: every verb on the board; a READ policy that admits only
+ * the board named `open`; and write-class policies that admit every board, so
+ * the write composition alone narrows nothing the read does.
+ */
 const MEMBER_SET = PermissionSetSchema.parse({
   name: 'qa_ag_member',
   objects: {
     [BOARD]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true, allowExport: true },
   },
-  rowLevelSecurity: [{ name: 'qa_ag_reads_open_only', object: BOARD, operation: 'select', using: "name == 'open'" }],
+  rowLevelSecurity: [
+    { name: 'qa_ag_reads_open_only', object: BOARD, operation: 'select', using: "name == 'open'" },
+    { name: 'qa_ag_updates_any', object: BOARD, operation: 'update', using: "name != 'nothing'" },
+    { name: 'qa_ag_deletes_any', object: BOARD, operation: 'delete', using: "name != 'nothing'" },
+  ],
 });
 /** A user administrator who reads every board. */
 const USER_ADMIN_SET = PermissionSetSchema.parse({
@@ -284,6 +294,8 @@ describe('an asker who can read the row gets the explained principal\'s full rec
       const rls = layerRecord(explained, 'rls');
       expect(rls?.outcome).toBe('excluded');
       expect(rls?.matchesRecord).toBe(false);
+      // The READ policy's predicate, never the write composition's (which admits every board).
+      expect(rls?.rowFilter).toEqual({ name: 'open' });
       expect(rls?.detail).toContain(`The principal cannot read this record, so its by-id ${verb} answers 404 RECORD_NOT_FOUND`);
       expect(rls?.detail).toContain('The record does not satisfy the business row-level predicate.');
       for (const layer of ['tenant_isolation', 'owd_baseline', 'depth', 'sharing', 'vama_bypass', 'rls']) {
